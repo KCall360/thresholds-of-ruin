@@ -563,7 +563,7 @@ fn directions_head_for_ways_onward_and_floor_is_not_one() {
     // With no walls or hints in sight, a direction crosses open ground as far
     // as can be seen that way, and nothing seen is no way.
     assert!(
-        describe(&s).contains("To the east it fades into darkness."),
+        describe(&s).contains("To the east it continues beyond your view."),
         "{}",
         describe(&s)
     );
@@ -705,6 +705,47 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
         Interpretation::Say("The rat is to the east.".into())
     );
     assert_eq!(said("examine figure", &s), "The figure is to the east.");
+}
+
+#[test]
+fn shared_asset_nouns_preserve_authored_names_and_parser_handles() {
+    let mut s = state();
+    s.observation.visible_actors.push(ActorView {
+        name: String::new(),
+        description: String::new(),
+        id: super::actor_target(2),
+        position: Position { x: 3, y: 0, z: 0 },
+        asset: Some("creature.equine.quagga.unfamiliar".into()),
+    });
+    let mut held = Palette::default();
+    held.apply(&palette(
+        1,
+        PaletteBody::Full {
+            assets: ["creature.equine.quagga.unfamiliar".into()].into(),
+        },
+    ));
+    assert!(describe_with(&s, &held).contains("a quagga"));
+    assert_eq!(
+        meaning_with("examine quagga", &s, &held),
+        Interpretation::Say("The quagga is to the east.".into())
+    );
+    s.observation.visible_actors[0].name = "Copper King".into();
+    assert!(describe_with(&s, &held).contains("Copper King"));
+    assert_eq!(
+        meaning_with("examine copper king", &s, &held),
+        Interpretation::Say("The copper king is to the east.".into())
+    );
+    held.apply(&palette(
+        3,
+        PaletteBody::Delta {
+            base: 2,
+            added: Default::default(),
+            removed: Default::default(),
+        },
+    ));
+    assert!(describe_with(&s, &held).contains("Copper King"));
+    s.observation.visible_actors[0].name.clear();
+    assert!(describe_with(&s, &held).contains("a figure"));
 }
 
 #[test]
@@ -989,7 +1030,7 @@ fn a_closed_door_is_a_way_that_is_shut() {
 fn a_room_seen_in_part_goes_on_out_of_sight() {
     let s = walled(&["#####", "#.@..", "#...."]);
     let prose = describe(&s);
-    assert!(prose.contains("it fades into darkness."), "{prose}");
+    assert!(prose.contains("it continues beyond your view."), "{prose}");
     // Each way into the dark can be walked, toward the farthest seen floor.
     assert!(matches!(
         goals("east", &s).as_slice(),
@@ -1485,7 +1526,7 @@ fn a_place_dark_on_most_sides_names_the_sides_that_are_not() {
     let s = walled(&["#######", ".......", "...@...", "......."]);
     let prose = describe(&s);
     assert!(
-        prose.contains("It fades into darkness on every side but the north"),
+        prose.contains("It continues beyond your view on every side but the north"),
         "{prose}"
     );
 }
@@ -1790,4 +1831,32 @@ fn personal_stats_display_restorable_losses_from_disclosed_facts() {
         tor_client_text::stats(&state).contains("Restorable losses: Strength 1, maximum Health 2")
     );
     assert_eq!(state, before);
+}
+
+#[test]
+fn view_limit_referents_and_ambiguity_labels_do_not_claim_darkness() {
+    let s = walled(&[".....", ".@...", "....."]);
+    let palette = Palette::default();
+    let scene = Scene::new(&s, &palette);
+    let limits: Vec<_> = scene
+        .of(tor_client_text::engine::scene::Kind::Feature)
+        .filter(|r| r.name.starts_with("view limit to the "))
+        .collect();
+    assert!(limits.len() >= 2);
+    let choices = question("examine darkness", &s);
+    assert!(choices.len() >= 2);
+    assert!(choices
+        .iter()
+        .all(|label| label.contains("view limit to the ") && !label.contains("dark")));
+    let names: std::collections::BTreeSet<_> = limits.iter().map(|r| &r.name).collect();
+    assert_eq!(
+        names.len(),
+        limits.len(),
+        "each view limit names its direction"
+    );
+    for r in limits {
+        let prose = tor_client_text::engine::verbs::examine(r, &scene);
+        assert!(prose.contains("continues beyond your view"), "{prose}");
+        assert!(!prose.contains("dark"), "{prose}");
+    }
 }

@@ -88,6 +88,20 @@ fn asset_id(s: &str) -> bool {
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
         })
 }
+// Bounded reply context, request ID, revisions, tags and both Full/Delta body
+// wrappers fit inside this conservative reserve. Asset IDs are ASCII and a
+// delta's disjoint added/removed union is a subset of the all-theme union.
+const PALETTE_ENVELOPE_RESERVE: usize = 4096;
+
+fn check_palette_budget(assets: &BTreeSet<String>, response_bytes: usize) -> Result<(), Failure> {
+    let available = response_bytes
+        .checked_sub(PALETTE_ENVELOPE_RESERVE)
+        .ok_or_else(|| fail("Asset forecast exceeds the palette response budget"))?;
+    tor_protocol::encode_bounded_json(assets, available)
+        .map_err(|_| fail("Asset forecast exceeds the palette response budget"))?;
+    Ok(())
+}
+
 fn label(s: &str) -> bool {
     !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control)
 }
@@ -1981,7 +1995,7 @@ pub(crate) fn checked_package(root: &Path) -> Result<Package, Failure> {
         }
         package.check_region(&def)?;
         // What a region shows must be in its palette.
-        let forecast = package.palette(package.region_themes(def.id).unwrap_or(&[]));
+        let forecast = package.theme_assets(package.region_themes(def.id).unwrap_or(&[]));
         for asset in package.region_assets(&def)? {
             require(
                 forecast.contains(&asset),
@@ -2276,25 +2290,48 @@ impl Package {
             .or(self.manifest.terrain.as_ref())
     }
 
-    /// Assets clients may need for regions with these themes, and for the
-    /// run's characters, who can be anywhere.
-    pub fn palette<'a>(&self, themes: impl IntoIterator<Item = &'a String>) -> BTreeSet<String> {
+    /// Explicit regional forecast. Keep this separate from portable defaults:
+    /// globally forecast archetypes must not mask a missing local actor theme.
+    fn theme_assets<'a>(&self, themes: impl IntoIterator<Item = &'a String>) -> BTreeSet<String> {
         themes
             .into_iter()
             .flat_map(|theme| self.manifest.assets.get(theme).into_iter().flatten())
-            .chain(
-                self.manifest
-                    .characters
-                    .iter()
-                    .filter_map(|c| c.asset.as_ref()),
-            )
             .cloned()
             .collect()
     }
 
-    /// Whether the scenario names assets at all; clients get palettes only then.
+    /// Assets clients may need for nearby themes, plus every declared portable
+    /// archetype and character. Archetypes are canonically dual-use: conservatively
+    /// forecast their item appearance even if this package only spawns them as
+    /// actors. This bounded overforecast needs no region reads or live inventory.
+    /// Concealed archetypes contribute only their pool asset, never identity.
+    pub fn palette<'a>(&self, themes: impl IntoIterator<Item = &'a String>) -> BTreeSet<String> {
+        let mut assets = self.theme_assets(themes);
+        assets.extend(
+            self.manifest
+                .characters
+                .iter()
+                .filter_map(|c| c.asset.clone()),
+        );
+        assets.extend(
+            self.manifest
+                .archetypes
+                .values()
+                .filter_map(|archetype| compiler::item_asset(archetype, &self.manifest))
+                .map(str::to_owned),
+        );
+        assets
+    }
+
+    /// A palette is needed even when only portable or character assets exist.
     pub fn has_assets(&self) -> bool {
         !self.manifest.assets.is_empty()
+            || self.manifest.characters.iter().any(|c| c.asset.is_some())
+            || self
+                .manifest
+                .archetypes
+                .values()
+                .any(|a| compiler::item_asset(a, &self.manifest).is_some())
     }
 
     /// Assets a region's content may show: its terrain, and its actors' and
@@ -2595,6 +2632,11 @@ impl Package {
                 )
             })?;
         }
+        // Full palettes and disjoint added/removed deltas cannot exceed this
+        // all-theme union. Reserve room for the ordinary reply envelope rather
+        // than allowing a valid package to disconnect clients on attachment.
+        let all_assets = self.palette(self.manifest.assets.keys());
+        check_palette_budget(&all_assets, tor_protocol::MAX_RESPONSE_BYTES)?;
         let identities: BTreeSet<_> = self
             .manifest
             .archetypes
@@ -4359,6 +4401,50 @@ mod tests {
         let source = original.replacen(named, replacement, 1);
         assert!(toml::from_str::<toml::Value>(&source).is_ok());
         Package::from_parts(manifest, regions, &source)
+    }
+
+    #[test]
+    fn palette_budget_reserves_full_and_delta_envelopes_at_the_boundary() {
+        let assets = BTreeSet::from(["creature.equine.quagga".into(), "item.potion".into()]);
+        let encoded = serde_json::to_vec(&assets).unwrap().len();
+        assert!(check_palette_budget(&assets, PALETTE_ENVELOPE_RESERVE + encoded).is_ok());
+        assert!(check_palette_budget(&assets, PALETTE_ENVELOPE_RESERVE + encoded - 1).is_err());
+        assert!(check_palette_budget(&assets, PALETTE_ENVELOPE_RESERVE - 1).is_err());
+        // Exercise real envelopes too, including escaped context/request IDs
+        // and the longest numeric revisions. Delta sets partition the same
+        // package-wide union; they never double its serialized asset payload.
+        let context: tor_protocol::ReplyContext = serde_json::from_value(serde_json::json!({
+            "input": {"stream": {"stream": "\\".repeat(128), "epoch": u64::MAX.to_string()},
+                      "readiness_revision": u64::MAX.to_string()},
+            "actor": u64::MAX.to_string(), "branch": "\\".repeat(128),
+            "cursor": {"sequence": u64::MAX.to_string(), "tick": u64::MAX.to_string()},
+            "revision": u64::MAX.to_string(),
+        }))
+        .unwrap();
+        for body in [
+            tor_protocol::PaletteBody::Full {
+                assets: assets.clone(),
+            },
+            tor_protocol::PaletteBody::Delta {
+                base: u64::MAX - 1,
+                added: assets.iter().take(1).cloned().collect(),
+                removed: assets.iter().skip(1).cloned().collect(),
+            },
+        ] {
+            let message = tor_protocol::ServerMessage::Palette {
+                context: context.clone(),
+                request_id: Some("\\".repeat(128)),
+                palette: tor_protocol::PaletteUpdate {
+                    revision: u64::MAX,
+                    body,
+                },
+            };
+            assert!(tor_protocol::encode_bounded_json(
+                &message,
+                PALETTE_ENVELOPE_RESERVE + encoded
+            )
+            .is_ok());
+        }
     }
 
     #[test]

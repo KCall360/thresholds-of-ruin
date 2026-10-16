@@ -98,10 +98,10 @@ const STONE: &[Theme] = &[
         ],
     },
     Theme {
-        moods: &["gloomy", "shadowed", "dim"],
+        moods: &["hushed", "still", "somber"],
         air: &[
-            "Shadows gather thickly in the corners.",
-            "The light seems thin here, and shadows pool along the stone.",
+            "A heavy stillness settles into the corners.",
+            "The air hangs motionless around the stone.",
         ],
         smell: &[
             "The air is stale and unmoving.",
@@ -239,7 +239,7 @@ const TIMBER: &[Theme] = &[
         ],
     },
     Theme {
-        moods: &["close", "dim"],
+        moods: &["close", "still"],
         air: &[
             "The air is close and warm, and smells of resin.",
             "The wood seems to hold the warmth in, and the air is close.",
@@ -312,7 +312,7 @@ const EARTH: &[Theme] = &[
             "A dank smell of wet earth hangs in the air.",
         ],
         sound: &[
-            "Water drips somewhere in the dark.",
+            "Water drips somewhere out of sight.",
             "A slow trickle of water sounds faintly, then stops.",
         ],
     },
@@ -346,10 +346,10 @@ const UNKNOWN: &[Theme] = &[
         ],
     },
     Theme {
-        moods: &["dim", "shadowed"],
+        moods: &["still", "hushed"],
         air: &[
-            "Shadows lie heavy all around.",
-            "The light is thin and grey.",
+            "The air hangs heavy all around.",
+            "The air is still and close.",
         ],
         smell: &["The air is stale.", "The air smells flat and stale."],
         sound: &["A heavy silence hangs here.", "Nothing stirs."],
@@ -454,13 +454,32 @@ mod tests {
 
     #[test]
     fn a_theme_holds_together() {
-        // Whatever is chosen, the mood, smell and sound come from one theme.
-        for i in 0..100 {
-            let a = of(&format!("k{i}"), Fabric::Stone, Form::Chamber, false);
-            let theme = STONE.iter().find(|t| t.moods.contains(&a.mood)).unwrap();
-            assert!(theme.smell.contains(&a.smell));
-            assert!(theme.sound.contains(&a.sound));
-            assert!(theme.air.contains(&a.description[0]));
+        // A mood is ordinary vocabulary, not a unique theme identifier.
+        // Whatever is chosen, all its words must belong to one coherent theme.
+        for (fabric, themes) in [
+            (Fabric::Stone, STONE),
+            (Fabric::Marble, MARBLE),
+            (Fabric::Timber, TIMBER),
+            (Fabric::Earth, EARTH),
+            (Fabric::Unknown, UNKNOWN),
+        ] {
+            for i in 0..100 {
+                let a = of(&format!("k{i}"), fabric, Form::Chamber, false);
+                assert!(
+                    themes.iter().any(|theme| {
+                        theme.moods.contains(&a.mood)
+                            && theme.smell.contains(&a.smell)
+                            && theme.sound.contains(&a.sound)
+                            && theme.air.contains(&a.description[0])
+                            && a.description.iter().all(|text| {
+                                theme.air.contains(text)
+                                    || theme.smell.contains(text)
+                                    || theme.sound.contains(text)
+                            })
+                    }),
+                    "mixed atmosphere for {fabric:?}: {a:?}"
+                );
+            }
         }
     }
 
@@ -474,6 +493,29 @@ mod tests {
         assert_eq!(Fabric::of([], Some("packed earth")), Fabric::Earth);
         assert_eq!(Fabric::of(["oak planks"], None), Fabric::Timber);
         assert_eq!(Fabric::of([], None), Fabric::Unknown);
+    }
+
+    #[test]
+    fn cosmetic_atmosphere_never_claims_undisclosed_lighting() {
+        for themes in [STONE, MARBLE, TIMBER, EARTH, UNKNOWN] {
+            for theme in themes {
+                for text in theme
+                    .moods
+                    .iter()
+                    .chain(theme.air)
+                    .chain(theme.smell)
+                    .chain(theme.sound)
+                {
+                    let text = text.to_lowercase();
+                    for lighting in ["shadow", "dark", "dim", "light", "glow"] {
+                        assert!(
+                            !text.contains(lighting),
+                            "unsupported lighting claim: {text}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

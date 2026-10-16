@@ -276,6 +276,7 @@ fn window_loop(
                     dirty = true;
                     match event {
                         Event::Role(role) => app.role = role,
+                        Event::Palette(palette) => app.palette = palette,
                         Event::Snapshot(snapshot) => app
                             .replace_snapshot(*snapshot)
                             .map_err(|e| format!("Invalid presentation snapshot: {e:?}"))?,
@@ -524,7 +525,8 @@ fn window_loop(
                 "previous_report_encode_ms":previous_report_encode_ms,"previous_report_write_ms":previous_report_write_ms,
                 "native_ms":native_ms,"capture_ms":capture_ms,"previous_report_ms":previous_report_ms,"turn_interval_ms":turn_interval_ms},"window_open":window.is_open(),
                 "state":state.map(|s|s.state()),"branch":state.map(|s|s.branch()),"history":state.map(|s|s.history()),
-                "map_tiles":state.map(tor_client_ascii::render::map_tiles),
+                "map_tiles":state.map(|s|tor_client_ascii::render::map_tiles(s, &app.palette)),
+                "palette":{"revision":app.palette.revision(),"stale":app.palette.stale()},
                 "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
                 "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
                 "intentions":state.map(|s|s.intentions()),"action_hint":app.intention_hint(),
@@ -532,6 +534,7 @@ fn window_loop(
                 "narration":state.map(|s|s.narration()),
                 "messages":{"shown":app.messages.shown(app.role!=tor_protocol::AccessRole::Spectator),"more":app.messages.more(),"turn":app.messages.text(),"log":app.messages.log().collect::<Vec<_>>()},
                 "screen":{"inventory":app.inventory_open,"help":app.help_open,"stats":app.stats_open,"stats_scroll":app.stats_scroll,"message_log":app.message_log,"look_cursor":app.look_cursor,"running":app.running},
+                "inventory_rows":if app.inventory_open { state.map(|s|tor_client_ascii::inventory_entries(&app,&s.state().observation).iter().take(26).map(|entry|entry.long()).collect::<Vec<_>>()) } else { None },
                 "stats_rows":if app.stats_open { Some(app.stats_rows()) } else { None },
                 "advancement_open":app.advancement_open,"advancement_rows":app.advancement_rows(),"advancement_command":app.advancement_command,
                 "ability_choices":app.ability_choices,"selected_ability":app.selected_ability,

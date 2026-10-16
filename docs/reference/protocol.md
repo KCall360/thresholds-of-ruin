@@ -686,8 +686,13 @@ things then reach clients:
   everything that looks like it, never its archetype's.
 - **A palette per client:** the assets its actor may soon see. It's the
   union of the asset lists of the themes of every region within one portal
-  hop beyond the load radius around the actor, plus the run's characters'
-  assets. It comes from the package's structure alone, never from what
+  hop beyond the load radius around the actor, plus all declared characters'
+  assets and every canonical archetype's portable item appearance. Canonical
+  archetypes are dual-use, so this conservatively includes some actor assets
+  globally. Concealed archetypes contribute only their appearance pool asset.
+  This covers carried loot, starting kits and retrieval items across theme
+  boundaries without reading lazy regions or current inventory. It comes from
+  the package's structure alone, never from what
   regions hold: two games that differ only in hidden contents send identical
   palettes, and because themes belong to zones, entering a room doesn't
   signal what the next one holds.
@@ -732,26 +737,40 @@ and deltas. It asks for the whole palette itself when:
   about once per connection, so an asset the answer still lacks can't cause a
   loop. Nothing is asked before the first palette, since attaching sends one.
 
-Clients resolve assets through their own built-in `AssetTable`, falling back
+Clients resolve assets through `Palette::resolve` and a built-in `AssetTable`, falling back
 through dotted prefixes: `terrain.floor.cave`, then `terrain.floor`, then
 `terrain`, then the client's own look. An asset the palette doesn't currently
 hold always gets the client's own look, even when the table knows it.
 
 - **Text:** the adventure interface describes floors, walls and ceilings, and
-  figures that have no disclosed name, by its asset words
-  (`tor_client_text::adventure::words`), so a `terrain.floor.cave` floor is
+  figures that have no disclosed name, by the shared
+  `tor_client_common::presentation` vocabulary, so a `terrain.floor.cave` floor is
   "packed earth". Disclosed names of actors, items and doors stay as they are,
   since commands match them. The `--script` interface doesn't use assets.
 - **Headless:** every output line reports the palette held; see the
   [headless client](headless.md).
-- **ASCII:** keeps the palette but doesn't draw with it yet; its glyph table
-  belongs with the ASCII redesign.
+- **ASCII:** the network worker passes palette revision/currentness changes to
+  the UI. Map, look and inventory use the shared vocabulary; palette-only
+  changes and stale/recovered transitions redraw without an observation change.
+  Disclosed names remain unchanged. Geometry, door state, stairs and memory
+  override cosmetic terrain choices; unknown assets use safe class/figure defaults.
+
+The minimal built-in vocabulary contains semantic IDs, stable English noun-group
+message keys with singular/plural/indefinite forms, and default ASCII glyph/RGB
+values. The [registry](../../crates/client-common/src/presentation.rs) is the shared
+source, with dotted-prefix fallback: `creature.equine.quagga` uses `u`, an unknown
+equine descendant can say "horse-like beast", and an unknown creature can say
+"creature". These are common defaults, with no scenario-name matching or Rogue
+letter exceptions. Traits, scenario extensions/overrides, appearance seeds,
+player choices and locale switching remain deferred. Cosmetic text atmosphere
+and unseen extents do not infer lighting from an observation's visibility limit.
 
 `crates/client-common/tests/it/palette.rs` drives a `Connection` against a
 scripted server through a missed revision and a missing asset; real servers
 with the checked-in fixtures send neither, so the process test
 (`test_streaming_process.py`) covers the attach palette, a request, and the
-text client's words.
+text client's words. `test_asset_presentation_process.py` additionally covers
+native map/look/inventory, repeated screens and a resumed spectator attachment.
 
 ## Annotations
 

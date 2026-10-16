@@ -82,10 +82,12 @@ class RogueRestorationContent(unittest.TestCase):
         bound = re.search(r"pub const DERIVED_ATTRIBUTE: u16 = (\d+);",
             (ROOT / "crates/simulation/src/limits.rs").read_text()).group(1)
         self.assertEqual(item, {"name": "potion of restore strength", "identity": POTION,
-            "class": "potion", "stackable": True, "appearance_pool": "rogue.potions",
+            "class": "potion", "asset": "item.potion", "stackable": True,
+            "appearance_pool": "rogue.potions",
             "consumable": {"effects": [{"kind": "restore_attribute", "attribute": "strength",
                 "amount": {"kind": "fixed", "amount": int(bound)}}]}})
         self.assertEqual(catalog["appearance_pools"]["rogue.potions"], {
+            "asset": "item.potion",
             "appearances": ["amber potion", "smoky potion", "violet potion"]})
         for character in source("scenario.toml")["characters"]:
             self.assertNotIn(POTION, character["known_identities"])

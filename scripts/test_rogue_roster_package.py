@@ -17,7 +17,7 @@ class RogueRosterPackageTests(unittest.TestCase):
             'exit_anchor': 'dungeon/1/up'})
         item = source['items']['rogue.amulet_of_yendor']
         self.assertEqual(item, {'name': 'Amulet of Yendor', 'identity': 'rogue.amulet_of_yendor',
-                                'class': 'amulet', 'stackable': False})
+                                'class': 'amulet', 'asset': 'item.amulet', 'stackable': False})
         for character in source['manifest']['characters']:
             self.assertIn('rogue.amulet_of_yendor', character['known_identities'])
             self.assertNotIn('rogue.amulet_of_yendor',

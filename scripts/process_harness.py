@@ -1121,7 +1121,7 @@ class ProcessTestCase(unittest.TestCase):
             user32 = ctypes.WinDLL("user32", use_last_error=True)
             user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
             def key(name, down):
-                vk = {"o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
+                vk = {"i": 0x49, "semicolon": 0xBA, "o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
                       "n": 0x4E, "F4": 0x73, "F7": 0x76, "F8": 0x77, "F9": 0x78, "F10": 0x79, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
                       "w": 0x57, "t": 0x54, "q": 0x51, "e": 0x45, "z": 0x5A, "2": 0x32, "Return": 0x0D, "Down": 0x28,
                       "PageUp": 0x21, "PageDown": 0x22, "Tab": 0x09, "space": 0x20,

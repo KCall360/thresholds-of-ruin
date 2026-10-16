@@ -381,6 +381,53 @@ impl Package {
                 }
             }
         }
+        // Validate every possible choice, including future depth bands and
+        // zero-chance carried pools. Effective family themes are structural;
+        // actual activation outcomes must never determine a palette.
+        for (family, profile) in &plan.families {
+            let definition = &self.manifest.procedural_worlds[family];
+            let themes = definition
+                .zone
+                .as_ref()
+                .and_then(|zone| self.manifest.zones.get(zone))
+                .and_then(|zone| zone.themes.as_deref())
+                .unwrap_or(&self.manifest.themes);
+            let forecast = self.theme_assets(themes);
+            let mut assets = BTreeSet::new();
+            let item_asset = |key: &str| -> Result<Option<String>, Failure> {
+                Ok(
+                    compiler::item_asset(self.author_archetype(key)?, &self.manifest)
+                        .map(str::to_owned),
+                )
+            };
+            for stage in &plan.profiles[profile].stages {
+                match stage {
+                    PopulationStage::Items { bands, .. } => {
+                        for choice in bands.iter().flat_map(|band| &band.choices) {
+                            assets.extend(item_asset(&choice.archetype)?);
+                        }
+                    }
+                    PopulationStage::Actors { bands, .. } => {
+                        for choice in bands.iter().flat_map(|band| &band.choices) {
+                            assets.extend(self.author_archetype(&choice.archetype)?.asset.clone());
+                            if let Some(policy) = &choice.carried_loot {
+                                for item in &plan.carried_item_pools[&policy.pool].choices {
+                                    assets.extend(item_asset(&item.archetype)?);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for asset in assets {
+                require(
+                    forecast.contains(&asset),
+                    format!(
+                        "Activation family {family}: asset {asset} isn't among its themes' assets"
+                    ),
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -941,6 +988,69 @@ mod tests {
             }]);
         })
         .unwrap()
+    }
+
+    #[test]
+    fn activation_assets_require_effective_family_themes_even_without_a_spawn() {
+        let package = changed(&carried_fixture(), |value| {
+            value["themes"] = json!(["elsewhere"]);
+            value["assets"] = json!({"elsewhere":["creature.marker","item.stock"], "floor":[]});
+            value["zones"] = json!({"floor":{"themes":["floor"]}});
+            value["procedural_worlds"]["dungeon"]["zone"] = json!("floor");
+            value["archetypes"]["marker"]["asset"] = json!("creature.marker");
+            value["archetypes"]["stock"]["asset"] = json!("item.stock");
+            let stage = &mut value["floor_activation"]["profiles"]["plain"]["stages"][0];
+            stage["count"] = json!([0, 0]);
+            stage["bands"][0]["depth"]["minimum"] = json!(100);
+            stage["bands"][0]["choices"][0]["carried_loot"]["chance"]["numerator"] = json!(0);
+        })
+        .unwrap();
+        let error = package.check().unwrap_err();
+        assert!(
+            error
+                .message
+                .contains("Activation family dungeon: asset creature.marker"),
+            "{error}"
+        );
+        let only_actor = changed(&package, |value| {
+            value["assets"]["floor"] = json!(["creature.marker"]);
+        })
+        .unwrap();
+        let error = only_actor.check().unwrap_err();
+        assert!(
+            error
+                .message
+                .contains("Activation family dungeon: asset item.stock"),
+            "{error}"
+        );
+        let complete = changed(&package, |value| {
+            value["assets"]["floor"] = json!(["creature.marker", "item.stock"]);
+        })
+        .unwrap();
+        complete.check().unwrap();
+    }
+
+    #[test]
+    fn activation_items_validate_the_concealed_pool_asset_only() {
+        let package = changed(&fixture(), |value| {
+            value["themes"] = json!(["floor"]);
+            value["assets"] = json!({"floor":["item.secret"]});
+            value["archetypes"]["marker"]["asset"] = json!("item.secret");
+            value["archetypes"]["marker"]["appearance_pool"] = json!("vials");
+            value["appearance_pools"] =
+                json!({"vials":{"appearances":["cloudy vial"],"asset":"item.potion"}});
+        })
+        .unwrap();
+        let error = package.check().unwrap_err();
+        assert!(error.message.contains("asset item.potion"), "{error}");
+        let complete = changed(&package, |value| {
+            value["assets"]["floor"] = json!(["item.potion"]);
+        })
+        .unwrap();
+        complete.check().unwrap();
+        let palette = complete.palette(complete.manifest.themes.iter());
+        assert!(palette.contains("item.potion"));
+        assert!(!palette.contains("item.secret"));
     }
 
     #[test]

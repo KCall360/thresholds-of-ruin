@@ -14,7 +14,7 @@ pub enum Key {
     Actor(ActorTarget),
     Door(DoorTarget),
     Surface(Surface),
-    /// A feature of the place: a way out, the exit, the dark beyond.
+    /// A feature of the place: a way out, the exit, the limit of sight.
     Feature(u8),
     Me,
 }
@@ -581,9 +581,8 @@ fn figures(o: &Observation, palette: &Palette) -> Vec<Referent> {
                 .min_by_key(|a| (a.position.z, distance(a.position)))
                 .expect("a visible actor has a cell");
             let name = if base.name.trim().is_empty() {
-                palette
-                    .resolve(adventure::words(), base.asset.as_deref())
-                    .map_or("figure", |w| *w)
+                tor_client_common::presentation::resolve(palette, base.asset.as_deref())
+                    .map_or("figure", |entry| entry.noun.singular)
                     .to_owned()
             } else {
                 safe(&base.name).to_lowercase()
@@ -631,7 +630,7 @@ fn figures(o: &Observation, palette: &Palette) -> Vec<Referent> {
 }
 
 /// The place's own features that can be named: its ways out, the exit, and
-/// the dark it fades into.
+/// the directions in which it continues out of sight.
 fn features(state: &StateView) -> Vec<Referent> {
     use super::place::{survey, Opening};
     let place = survey(state);
@@ -717,8 +716,10 @@ fn features(state: &StateView) -> Vec<Referent> {
     }
     for d in &place.continues {
         feature(
-            "darkness",
-            &["darkness", "dark", "shadows", "gloom", "shadow"],
+            &format!("view limit to the {}", direction_name(*d)),
+            &[
+                "limit", "distance", "darkness", "dark", "shadows", "gloom", "shadow",
+            ],
             Some(*d),
             None,
         );

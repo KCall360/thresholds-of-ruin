@@ -5,11 +5,12 @@ use std::{
     time::Duration,
 };
 use tokio::{sync::mpsc as async_mpsc, time::timeout};
-use tor_client_common::Connection;
+use tor_client_common::{Connection, Palette};
 use tor_protocol::*;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 pub enum Event {
+    Palette(Palette),
     Role(AccessRole),
     Snapshot(Box<Snapshot>),
     Update(Box<StreamUpdate>),
@@ -116,6 +117,8 @@ async fn run(
     connection.use_external_advancement_presentation();
     connection.set_pace(pace);
     publish(tx, Event::Role(connection.role()))?;
+    let mut shown_palette = (None, false);
+    publish_palette_change(&mut shown_palette, &connection.palette, tx)?;
     publish(tx, Event::Snapshot(Box::new(connection.state.snapshot())))?;
     if connection.role() == AccessRole::Spectator {
         publish(
@@ -123,7 +126,13 @@ async fn run(
             Event::Status("Spectator access is read-only. F2: history; Esc: close.".into()),
         )?;
     } else if !observe {
-        transact(&mut connection, Request::AcquireControl, tx).await?;
+        transact(
+            &mut connection,
+            &mut shown_palette,
+            Request::AcquireControl,
+            tx,
+        )
+        .await?;
     } else {
         publish(
             tx,
@@ -133,7 +142,7 @@ async fn run(
     publish(tx, Event::Ready)?;
     loop {
         tokio::select! {
-            message=connection.next()=>{
+            message=next(&mut connection, &mut shown_palette, tx)=>{
                 let message = message?;
                 let reset = matches!(message, ServerMessage::Snapshot { .. });
                 present(message,tx)?;
@@ -165,7 +174,7 @@ async fn run(
                         publish(tx, Event::Ready)?;
                         continue;
                     }
-                    transact(&mut connection,*request,tx).await?;
+                    transact(&mut connection,&mut shown_palette,*request,tx).await?;
                     publish(tx,Event::Ready)?;
                 },
                 Some(Command::Skip) => connection.skip(),
@@ -175,8 +184,39 @@ async fn run(
     }
 }
 
+/// Transport owns recovery; the UI gets a copy only when the palette revision
+/// or currentness changes. In particular a missed delta redraws the fallback
+/// immediately, and a full recovery redraws without an observation update.
+async fn next(
+    connection: &mut Connection,
+    shown: &mut (Option<u64>, bool),
+    tx: &SyncSender<Event>,
+) -> Result<ServerMessage, Error> {
+    // A select branch can cancel Connection::next after it mutates the palette
+    // but before recovery I/O completes. Re-entering must publish that change
+    // before awaiting more input, using the last successful UI publication.
+    publish_palette_change(shown, &connection.palette, tx)?;
+    let message = connection.next().await?;
+    publish_palette_change(shown, &connection.palette, tx)?;
+    Ok(message)
+}
+
+fn publish_palette_change(
+    shown: &mut (Option<u64>, bool),
+    palette: &Palette,
+    tx: &SyncSender<Event>,
+) -> Result<(), Error> {
+    let current = (palette.revision(), palette.stale());
+    if *shown != current {
+        publish(tx, Event::Palette(palette.clone()))?;
+        *shown = current;
+    }
+    Ok(())
+}
+
 async fn transact(
     connection: &mut Connection,
+    shown_palette: &mut (Option<u64>, bool),
     request: Request,
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
@@ -204,7 +244,7 @@ async fn transact(
     let mut pending = tor_client_common::PendingRequest::new(id);
     timeout(Duration::from_secs(10), async {
         loop {
-            let message = connection.next().await?;
+            let message = next(connection, shown_palette, tx).await?;
             let completion = pending.observe(connection, &message);
             let complete = completion.is_some();
             let unknown = matches!(completion, Some(tor_client_common::RequestCompletion::Unknown));
@@ -276,7 +316,7 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
         }
         ServerMessage::Welcome { .. } => Err("Unexpected repeated welcome".into()),
         ServerMessage::SnapshotPart { .. } => Err("Unexpected unassembled snapshot part".into()),
-        // Palettes are drawn with once the window resolves assets.
+        // `next` already forwarded the current palette, including stale changes.
         ServerMessage::Palette { .. } => Ok(()),
         // Input permissions arrive through ordered readiness updates.
         ServerMessage::Waiting { .. } => Ok(()),
@@ -286,6 +326,78 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn palette_only_changes_reach_the_ui_once_including_stale_and_recovery() {
+        let (tx, rx) = mpsc::sync_channel(8);
+        let mut palette = Palette::default();
+        let mut shown = (None, false);
+        let mut changed = |palette: &Palette| {
+            publish_palette_change(&mut shown, palette, &tx).unwrap();
+            match rx.try_recv().unwrap() {
+                Event::Palette(shown) => assert_eq!(&shown, palette),
+                _ => panic!("expected palette event"),
+            }
+            publish_palette_change(&mut shown, palette, &tx).unwrap();
+            assert!(rx.try_recv().is_err(), "unchanged palette must not redraw");
+        };
+        palette.apply(&PaletteUpdate {
+            revision: 1,
+            body: PaletteBody::Full {
+                assets: ["creature.equine.quagga".into()].into(),
+            },
+        });
+        changed(&palette);
+        palette.apply(&PaletteUpdate {
+            revision: 3,
+            body: PaletteBody::Delta {
+                base: 2,
+                added: Default::default(),
+                removed: Default::default(),
+            },
+        });
+        changed(&palette);
+        palette.apply(&PaletteUpdate {
+            revision: 4,
+            body: PaletteBody::Full {
+                assets: ["creature.equine.quagga".into()].into(),
+            },
+        });
+        changed(&palette);
+    }
+
+    #[test]
+    fn palette_publication_survives_mutation_before_reentry_and_failed_delivery() {
+        let mut palette = Palette::default();
+        palette.apply(&PaletteUpdate {
+            revision: 1,
+            body: PaletteBody::Full {
+                assets: ["creature.equine.quagga".into()].into(),
+            },
+        });
+        let mut shown = (Some(1), false);
+        // Simulate next being cancelled while sending recovery after the
+        // palette changed. A fresh per-await baseline would miss this stale
+        // transition; the worker's last-published stamp must retain it.
+        palette.apply(&PaletteUpdate {
+            revision: 3,
+            body: PaletteBody::Delta {
+                base: 2,
+                added: Default::default(),
+                removed: Default::default(),
+            },
+        });
+        let (closed, rx) = mpsc::sync_channel(1);
+        drop(rx);
+        assert!(publish_palette_change(&mut shown, &palette, &closed).is_err());
+        assert_eq!(shown, (Some(1), false));
+        let (tx, rx) = mpsc::sync_channel(1);
+        publish_palette_change(&mut shown, &palette, &tx).unwrap();
+        assert!(matches!(rx.try_recv(), Ok(Event::Palette(p)) if p.stale()));
+        assert_eq!(shown, (Some(1), true));
+        publish_palette_change(&mut shown, &palette, &tx).unwrap();
+        assert!(rx.try_recv().is_err());
+    }
 
     #[test]
     fn creature_catalog_network_presentation_preserves_the_private_page() {
@@ -842,7 +954,7 @@ mod tests {
             let (events, received) = mpsc::sync_channel(64);
             let mut worker = tokio::spawn(async move {
                 let mut connection = connection;
-                transact(&mut connection, Request::Save, &events)
+                transact(&mut connection, &mut (None, false), Request::Save, &events)
                     .await
                     .unwrap();
                 assert!(connection.is_synchronized());

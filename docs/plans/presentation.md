@@ -3,9 +3,11 @@
 Presentation is everything that changes how things look, sound or read without
 changing how the game plays: environments, creature and item appearances,
 atmospheric text, glyphs, animation choices. This plan sets one model for it
-across the server, the scenario format and every client. It is unimplemented.
-Approving the plan doesn't start a milestone, and the steps that change the
-scenario package format or the protocol each need explicit approval.
+across the server, the scenario format and every client. The approved first
+slice implements existing asset fields in Rogue, shared minimal vocabulary,
+ASCII map/look/inventory resolution and structural forecast coverage. It does
+not change package, protocol or save schemas. The remaining design below is
+unimplemented; steps that change formats still need explicit approval.
 
 ## Goals
 
@@ -56,10 +58,12 @@ rather than a parallel mechanism:
   alone, so it can't reveal what a region holds; the validator requires every
   shown asset to be in its region's themes.
 
-Gaps today: assets are bare names with no meaning attached; the Rogue scenario
-names none; the ASCII client keeps the palette but doesn't draw with it; and
-no client yet varies an individual's look, so every creature of a kind looks
-alike.
+The first slice adds common semantic IDs with keyed English noun forms and
+ASCII defaults, and assigns them to Rogue's existing actors, presets, items and
+concealed potion pool. ASCII and Text resolve through the same palette-gated
+registry. Portable canonical archetypes are conservatively forecast globally;
+activation families also validate their own effective themes. Individual
+variation, traits, extensions and client overrides remain unimplemented.
 
 ## Layers and invariants
 
@@ -282,10 +286,10 @@ graphical clients then agree on what a thing is.
 
 ## Order of work
 
-1. Name assets in the Rogue scenario's creatures and items, and have clients
-   draw from assets instead of names. Client and content only.
-2. Write the common vocabulary v1 and trait list as a built-in registry with
-   reference documentation.
+1. Implemented: existing Rogue actor/item/player assets, shared Text/ASCII
+   resolution and complete structural forecast validation. No format change.
+2. Minimal keyed noun/glyph vocabulary implemented; the composable trait list
+   and broader vocabulary remain to be implemented.
 3. With format approval: scenario descriptions, value extensions and per-client
    overrides on the palette channel; then the Rogue ASCII letters.
 4. Appearance seeds and variation specs, with corpse inheritance.

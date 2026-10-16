@@ -29,10 +29,13 @@ fn item_classes_use_disclosed_pile_order_and_keep_their_remembered_glyph() {
     second.item.id = super::item_target(2);
     second.item.class = ItemClass::Potion;
     observation.ground_items.push(second);
-    assert_eq!(tor_client_ascii::glyph_at(observation, 1, 0), ')');
+    assert_eq!(
+        tor_client_ascii::glyph_at(observation, &Default::default(), 1, 0),
+        ')'
+    );
     let mut state = ClientState::from_snapshot(snapshot).unwrap();
     assert_eq!(
-        render::map_tiles(&state)
+        render::map_tiles(&state, &Default::default())
             .iter()
             .find(|t| t.position.x == 1)
             .unwrap()
@@ -40,7 +43,7 @@ fn item_classes_use_disclosed_pile_order_and_keep_their_remembered_glyph() {
         ')'
     );
     state.replace_snapshot(self::snapshot(true)).unwrap();
-    let tiles = render::map_tiles(&state);
+    let tiles = render::map_tiles(&state, &Default::default());
     let tile = tiles.iter().find(|t| t.position.x == 1).unwrap();
     assert_eq!(tile.glyph, ')');
     assert!(tile.remembered);
@@ -68,9 +71,12 @@ fn every_physical_class_draws_its_symbol_through_the_map_renderer() {
         let mut snapshot = snapshot(false);
         let observation = &mut Arc::make_mut(&mut snapshot.state).observation;
         observation.ground_items[0].item.class = class;
-        assert_eq!(tor_client_ascii::glyph_at(observation, 1, 0), glyph);
+        assert_eq!(
+            tor_client_ascii::glyph_at(observation, &Default::default(), 1, 0),
+            glyph
+        );
         let state = ClientState::from_snapshot(snapshot).unwrap();
-        let tiles = render::map_tiles(&state);
+        let tiles = render::map_tiles(&state, &Default::default());
         assert_eq!(
             tiles.iter().find(|t| t.position.x == 1).unwrap().glyph,
             glyph
@@ -82,7 +88,7 @@ fn every_physical_class_draws_its_symbol_through_the_map_renderer() {
 fn hidden_terrain_and_items_are_grey_actors_disappear_and_clicks_use_known_cells() {
     let mut state = ClientState::from_snapshot(snapshot(false)).unwrap();
     state.replace_snapshot(snapshot(true)).unwrap();
-    let tiles = render::map_tiles(&state);
+    let tiles = render::map_tiles(&state, &Default::default());
     for (x, glyph) in [(0, '@'), (1, '('), (2, '<'), (3, '#')] {
         let tile = tiles.iter().find(|t| t.position.x == x).unwrap();
         assert_eq!(tile.glyph, glyph);
@@ -152,7 +158,7 @@ fn remembered_heights_and_large_maps_collapse_into_the_single_map() {
     }
     let mut state = ClientState::from_snapshot(first).unwrap();
     state.replace_snapshot(snapshot(true)).unwrap();
-    let tiles = render::map_tiles(&state);
+    let tiles = render::map_tiles(&state, &Default::default());
     // Every height collapses into one map: one tile per column, all of them
     // inside the map area.
     let columns: std::collections::BTreeSet<_> =
@@ -220,7 +226,7 @@ fn a_column_known_only_at_head_height_is_drawn_but_not_travelled_to() {
         .z = 1;
     let mut state = ClientState::from_snapshot(initial).unwrap();
     state.replace_snapshot(snapshot(true)).unwrap();
-    let tile = render::map_tiles(&state)
+    let tile = render::map_tiles(&state, &Default::default())
         .into_iter()
         .find(|t| t.position.x == 1)
         .unwrap();
@@ -236,4 +242,125 @@ fn a_column_known_only_at_head_height_is_drawn_but_not_travelled_to() {
         }),
         Effect::None
     );
+}
+
+#[test]
+fn palette_tints_terrain_without_replacing_geometry_state_or_memory_cues() {
+    use tor_client_ascii::map;
+    use tor_client_common::{presentation, Palette};
+    let mut initial = snapshot(false);
+    let o = &mut Arc::make_mut(&mut initial.state).observation;
+    o.visible_actors.clear();
+    o.ground_items.clear();
+    let template = o.visible_cells[0].clone();
+    o.visible_cells.clear();
+    for x in 0..=8 {
+        for z in -1..=1 {
+            let mut cell = template.clone();
+            cell.key = format!("{x}:{z}");
+            cell.position = Position { x, y: 0, z };
+            cell.wall = z == -1 || x == 2 || (x == 5 && z == 0);
+            if x == 6 && z == -1 {
+                cell.wall = false;
+            }
+            cell.asset = Some(
+                if z == -1 {
+                    "terrain.floor.cave"
+                } else {
+                    "terrain.wall.marble"
+                }
+                .into(),
+            );
+            cell.stairs_up = x == 7 && z == 0;
+            cell.stairs_down = x == 8 && z == 0;
+            if (x == 3 || x == 4) && z == 0 {
+                cell.door = Some(
+                    serde_json::from_value(serde_json::json!({
+                        "id":tor_protocol::DoorTarget::from_digest([x as u8;32]),
+                        "name":"oak door","description":"","open":x==4,
+                        "reachable":false,"approaches":[],"asset":"terrain.wall.marble"
+                    }))
+                    .unwrap(),
+                );
+            }
+            o.visible_cells.push(cell);
+        }
+    }
+    let mut palette = Palette::default();
+    let assets = ["terrain.floor.cave".into(), "terrain.wall.marble".into()].into();
+    palette.apply(&PaletteUpdate {
+        revision: 1,
+        body: PaletteBody::Full { assets },
+    });
+    let mut state = ClientState::from_snapshot(initial).unwrap();
+    let current = render::map_tiles(&state, &palette);
+    let expected = [
+        (1, map::Kind::Floor, '.'),
+        (2, map::Kind::Wall, '#'),
+        (3, map::Kind::Door, '+'),
+        (4, map::Kind::Door, '/'),
+        (5, map::Kind::LowWall, '#'),
+        (6, map::Kind::Drop, '^'),
+        (7, map::Kind::StairsUp, '<'),
+        (8, map::Kind::StairsDown, '>'),
+    ];
+    for (x, kind, glyph) in expected {
+        let tile = current.iter().find(|tile| tile.position.x == x).unwrap();
+        assert_eq!(
+            (tile.kind, tile.glyph, tile.remembered),
+            (kind, glyph, false)
+        );
+        if x <= 4 {
+            let asset = if x == 1 {
+                "terrain.floor.cave"
+            } else {
+                "terrain.wall.marble"
+            };
+            assert_eq!(
+                tile.color,
+                presentation::resolve(&palette, Some(asset))
+                    .unwrap()
+                    .ascii
+                    .color
+            );
+        }
+    }
+    palette.apply(&PaletteUpdate {
+        revision: 3,
+        body: PaletteBody::Delta {
+            base: 2,
+            added: Default::default(),
+            removed: Default::default(),
+        },
+    });
+    let stale = render::map_tiles(&state, &palette);
+    let fallback = render::map_tiles(&state, &Palette::default());
+    assert_eq!(stale, fallback);
+    for (shown, default) in current.iter().zip(&fallback) {
+        assert_eq!((shown.kind, shown.glyph), (default.kind, default.glyph));
+        if shown.position.x >= 5 {
+            assert_eq!(shown.color, default.color);
+        }
+        if (1..=4).contains(&shown.position.x) {
+            assert_ne!(shown.color, default.color);
+        }
+    }
+    palette.apply(&PaletteUpdate {
+        revision: 4,
+        body: PaletteBody::Full {
+            assets: ["terrain.floor.cave".into(), "terrain.wall.marble".into()].into(),
+        },
+    });
+    assert_eq!(render::map_tiles(&state, &palette), current);
+    let mut hidden = snapshot(true);
+    Arc::make_mut(&mut hidden.state).observation.visible_cells[0].key = "0:0".into();
+    state.replace_snapshot(hidden).unwrap();
+    let memory = render::map_tiles(&state, &palette);
+    for (x, kind, glyph) in expected {
+        let tile = memory.iter().find(|tile| tile.position.x == x).unwrap();
+        assert_eq!(
+            (tile.kind, tile.glyph, tile.remembered, tile.color),
+            (kind, glyph, true, render::MEMORY_COLOR)
+        );
+    }
 }

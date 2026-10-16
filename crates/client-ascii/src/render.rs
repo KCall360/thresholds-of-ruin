@@ -44,7 +44,10 @@ fn display_observation(state: &tor_client_common::ClientState) -> Observation {
 }
 
 /// The map as drawn: one tile per column, current and remembered.
-pub fn map_tiles(state: &tor_client_common::ClientState) -> Vec<MapTile> {
+pub fn map_tiles(
+    state: &tor_client_common::ClientState,
+    palette: &tor_client_common::Palette,
+) -> Vec<MapTile> {
     let current: std::collections::BTreeSet<_> = state
         .state()
         .observation
@@ -52,7 +55,7 @@ pub fn map_tiles(state: &tor_client_common::ClientState) -> Vec<MapTile> {
         .iter()
         .map(|c| (c.position.x, c.position.y, c.position.z))
         .collect();
-    map::tiles(&display_observation(state), &|cell| {
+    map::tiles(&display_observation(state), palette, &|cell| {
         current.contains(&(cell.position.x, cell.position.y, cell.position.z))
     })
 }
@@ -186,7 +189,7 @@ impl Canvas {
             .attack_targets
             .get(app.selected)
             .map(|actor| (actor.position.x, actor.position.y));
-        for tile in map_tiles(state) {
+        for tile in map_tiles(state, &app.palette) {
             let column = (tile.position.x, tile.position.y);
             let selected = cursor.is_some_and(|c| (c.x, c.y) == column);
             let x = tile.center.0 - tile.step / 2;
@@ -406,6 +409,16 @@ impl Canvas {
                         },
                         2,
                         64,
+                    );
+                    // Preserve equipped/name styling while the glyph shares
+                    // its asset colour with the map.
+                    self.text(
+                        72 + 4 * 16,
+                        156 + i * 22,
+                        &entry.glyph.to_string(),
+                        entry.color,
+                        2,
+                        1,
                     );
                 }
             }

@@ -5,10 +5,12 @@ ruleset = "rules.toml"
 modules = ["catalog/creatures.toml", "catalog/actors.toml", "catalog/items.toml"]
 # Both presets keep their first advancement point for an ordinary player choice.
 default_character = 1
+themes = ["dungeon"]
 factions = { delvers = ["dungeon_foes"], dungeon_foes = ["delvers"] }
 ai_profiles = { rogue_hostile = { care = false, equipment = false, loot = false, flee_percent = 0 } }
 
 [[characters]]
+asset = "creature.humanoid.human"
 id = 1
 anchor = "dungeon/1/start"
 turn_ticks = 100
@@ -33,6 +35,7 @@ future_growth = { kind = "selected", source = { kind = "class", class = "warrior
 hit_dice = [{ source = "warrior", purchases = [] }]
 
 [[characters]]
+asset = "creature.humanoid.human"
 id = 2
 anchor = "dungeon/1/start"
 turn_ticks = 100
@@ -161,3 +164,26 @@ kind = "items"
 count = [1, 1]
 bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.restore_strength", weight = 1 }] }]
 quantity = 1
+
+# Structure-only forecast, independent of depth, spawn rolls and hidden contents.
+[assets]
+dungeon = [
+  "creature.bird.emu",
+  "creature.serpent.snake",
+  "creature.serpent.rattlesnake",
+  "creature.goblin.hobgoblin",
+  "creature.undead.zombie",
+  "creature.equine.quagga",
+  "creature.centaur",
+  "creature.ape.yeti",
+  "creature.troll",
+  "creature.equine.unicorn.black",
+  "creature.elemental.ice",
+  "creature.undead.vampire",
+  "item.weapon.mace",
+  "item.armor.mail",
+  "item.bandage",
+  "item.food.ration",
+  "item.amulet",
+  "item.potion",
+]

@@ -719,8 +719,8 @@ fn feature_text(r: &Referent) -> String {
             ),
             None => "The exit is the way out, once your task is done.".into(),
         },
-        ("darkness", Some(d)) => format!(
-            "To the {} the place fades into darkness. You can't see what lies beyond until you go closer.",
+        (name, Some(d)) if name.starts_with("view limit to the ") => format!(
+            "To the {} the place continues beyond your view. You can't see what lies beyond until you go closer.",
             direction_name(d)
         ),
         ("stairs", Some(d)) => format!("Stairs lead {}.", direction_name(d)),
@@ -736,7 +736,7 @@ fn look_toward(direction: Direction, scene: &Scene) -> String {
         Direction::Up => {
             return match scene.get(Key::Surface(Surface::Ceiling)) {
                 Some(r) => surface(r, scene),
-                None => "Above you, darkness.".into(),
+                None => "You cannot see what lies above.".into(),
             }
         }
         Direction::Down => {
@@ -776,10 +776,10 @@ fn look_toward(direction: Direction, scene: &Scene) -> String {
     }
     if scene
         .of(Kind::Feature)
-        .any(|r| r.name == "darkness" && r.way == Some(direction))
+        .any(|r| r.name.starts_with("view limit to the ") && r.way == Some(direction))
     {
         sentences.push(format!(
-            "Beyond, to the {}, the place fades into darkness.",
+            "Beyond, to the {}, the place continues beyond your view.",
             direction_name(direction)
         ));
     }

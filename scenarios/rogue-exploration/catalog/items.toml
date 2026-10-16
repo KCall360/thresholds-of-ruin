@@ -2,18 +2,21 @@
 namespace = "rogue"
 
 [items."rogue.mace"]
+asset = "item.weapon.mace"
 name = "mace"
 identity = "rogue.mace"
 class = "weapon"
 equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 1, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 4 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 4, bonus = 1 } }] } }, modifiers = [] }
 
 [items."rogue.ring_mail"]
+asset = "item.armor.mail"
 name = "ring mail"
 identity = "rogue.ring_mail"
 class = "armor"
 equipment = { slot = "body_armor", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 2 } }] }
 
 [items."rogue.clean_bandage"]
+asset = "item.bandage"
 name = "clean bandage"
 identity = "rogue.clean_bandage"
 class = "misc"
@@ -21,6 +24,7 @@ stackable = true
 supply = "bandage"
 
 [items."rogue.ration"]
+asset = "item.food.ration"
 name = "food ration"
 identity = "rogue.ration"
 class = "food"
@@ -30,6 +34,7 @@ edible = { nutrition = { kind = "rolled", dice = { count = 1, sides = 400, bonus
 
 # Bound by the retrieval objective; never ordinary population or starter stock.
 [items."rogue.amulet_of_yendor"]
+asset = "item.amulet"
 name = "Amulet of Yendor"
 identity = "rogue.amulet_of_yendor"
 class = "amulet"
@@ -39,6 +44,7 @@ stackable = false
 # 1000 operand covers limits::DERIVED_ATTRIBUTE, the canonical deficit bound;
 # actual restoration clamps to that deficit. This adds no heal or bonus Strength.
 [items."rogue.restore_strength"]
+asset = "item.potion"
 name = "potion of restore strength"
 identity = "rogue.restore_strength"
 class = "potion"
@@ -47,4 +53,5 @@ appearance_pool = "rogue.potions"
 consumable = { effects = [{ kind = "restore_attribute", attribute = "strength", amount = { kind = "fixed", amount = 1000 } }] }
 
 [appearance_pools."rogue.potions"]
+asset = "item.potion"
 appearances = ["amber potion", "smoky potion", "violet potion"]
