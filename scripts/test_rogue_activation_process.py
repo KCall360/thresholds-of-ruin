@@ -82,7 +82,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
             start_depth=depth)
         self.assertEqual(inventory["format"], "tor-rogue-activation-inputs-v2")
         self.assertEqual(inventory["source_provenance"], provenance)
-        self.assertEqual(inventory["source_population_shape"], "canonical_eleven_species")
+        self.assertEqual(inventory["source_population_shape"], "canonical_twelve_species")
         self.assertEqual(inventory["artifact_purpose"], "diagnostic_population_package")
         self.assertIs(inventory["production_mutated"], False)
         eligible = {choice["archetype"] for band in conditional_bands()
@@ -118,9 +118,9 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         self.assertEqual(receipt["entrant"], selected)
         self.assertEqual((receipt["profile"], receipt["profile_version"], receipt["cause"]),
                          ("rogue.low_depth", 1, "initial"))
-        self.assertEqual(len(receipt["decisions"]), 3)
+        self.assertEqual(len(receipt["decisions"]), 4)
         self.assertEqual([stage["id"] for stage in receipt["decisions"]],
-                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations"])
+                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength"])
         foe_result = receipt["decisions"][0]["result"]
         self.assertEqual(foe_result["kind"], "evaluated")
         self.assertEqual(foe_result["requested"], 4)
@@ -265,7 +265,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         self.assertEqual(activation["families"], {"dungeon": "rogue.low_depth"})
         stages = activation["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([row["id"] for row in stages],
-                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations"])
+                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength"])
         self.assertEqual(stages[0]["count"], [4, 4])
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         self.assertEqual(stages[0]["ai"], "rogue_hostile")

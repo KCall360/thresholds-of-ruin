@@ -1,9 +1,9 @@
 # Play the Rogue starter slice
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
-authors Warrior and Mage presets, eleven depth-selected foe species, equipped
+authors Warrior and Mage presets, twelve depth-selected foe species, equipped
 starting gear, and finite bandage/ration supplies on persistent generated floors.
-The package selects the canonical E/S/H/I/Z/C/Q/Y/T/U/V population, with focused
+The package selects the canonical E/S/H/I/R/Z/C/Q/Y/T/U/V population, with focused
 source-qualified activation coverage. Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
 the complete roster and calibrated depth curve remain unfinished. The Amulet
@@ -112,15 +112,38 @@ selected foe recipes are explicitly exempt. These values and food distribution
 are provisional; see
 [nutrition](../reference/creature-rules.md#authored-empty-depletion-conditions).
 
+## Strength loss and ordinary restoration
+
+Rattlesnake owns Venomous Bite on its first of two racial HD; the second point
+remains unspent. Its mean acquisition and 1d6 natural bite use the ordinary
+combat rules. Only a successful contact attempts the separate Physical-checked
+poison rider, which records at most one actual Strength loss. Poison immunity
+suppresses that rider alone. Body, attributes and timing initially reuse snake
+values as provisional tuning.
+
+An unidentified potion has a neutral appearance. Pick it up and drink through
+ordinary Drink/Quaff/Q controls. A potion of restore strength removes only recorded
+Strength deficit, using a fixed 1000 operand equal to the canonical deficit bound.
+It never adds bonus Strength or heals injury. Restored Strength may increase derived
+maximum Health and therefore displayed current Health while injury stays unchanged;
+ordinary paid time can separately allow natural recovery. Resource balances are not
+refilled by the effect. Waiting, food, healing and respec do not erase the deficit.
+A dose spends one unit. Positive actual restoration teaches its identity; drinking
+at zero deficit consumes it without learning. Character-owned knowledge persists
+after the last unit and through save/replay. See [item knowledge](../reference/items.md).
+
 ## Floors keep their history
 
-Each first entry by the selected character evaluates three ordered stages:
+Each first entry by the selected character evaluates four ordered stages:
 `rogue.eight_species_foes` makes four weighted actor attempts, then the unchanged
 `rogue.bandages` and `rogue.rations` stages each attempt one stack, containing two
-bandages and one ration respectively. The actor stage's authored depth bands
-select emu (E), snake (S), hobgoblin (H), ice monster (I), zombie (Z), centaur (C),
+bandages and one ration respectively. The appended `rogue.restore_strength` stage
+attempts one ordinary potion unit on every floor from depth 1 onward. This is
+provisional TOR availability, not Rogue's 13% subtype probability; legal placement
+can still fail, so it does not guarantee a cure. The actor stage's authored depth bands
+select emu (E), snake (S), hobgoblin (H), ice monster (I), rattlesnake (R), zombie (Z), centaur (C),
 quagga (Q), yeti (Y), troll (T), black unicorn (U) and vampire (V). Centaur is eligible at
-depths 7–16, yeti at 11–20 and troll at 13–22, inclusive. Depth 1 selects E/S/H equally; depth 27 onward
+depths 7–16, rattlesnake at 3–12, yeti at 11–20 and troll at 13–22, inclusive. Depth 1 selects E/S/H equally; depth 27 onward
 selects only V. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
 owns the full band/weight table. The historical `rogue.eight_species_foes`
 and `rogue.vampire_supplies` IDs stay unchanged to preserve unrelated deterministic
@@ -210,6 +233,11 @@ Focused actual-process contracts include:
   complete natural sequences, ordinary same-identity death drops and source-free recovery in
   [`test_rogue_carrier_process.py`](../../scripts/test_rogue_carrier_process.py). Its
   stronger authored HD16 player is a mechanism fixture, not earned-route or starter-kit evidence.
+- Production R loss, reachable ordinary potion pickup/timed drink, finite stock,
+  identification, injury preservation and source-free recovery in
+  [`test_rogue_restoration_process.py`](../../scripts/test_rogue_restoration_process.py).
+  This bounded controlled encounter retains the actual Warrior kit; it is not a
+  generated-route or balance sample.
 - Production-origin depth-27 activation, actual V growth and carried stock through
   source-deleted recovery in
   [`test_rogue_activation_process.py`](../../scripts/test_rogue_activation_process.py).
@@ -217,7 +245,7 @@ Focused actual-process contracts include:
 The selected population has focused source-qualified coverage of these changed
 contracts; historical E/S walkthroughs remain separate evidence.
 The [earned-route pilot](../development/rogue-earned-route.md) retains its frozen
-eight-species inputs and adverse or censored outcomes; it is not eleven-species
+eight-species inputs and adverse or censored outcomes; it is not twelve-species
 acceptance. Reaching depth 27 records arrival, not
 Vampire combat survival. Broad integrated/native verification and final
 Windows/Linux CI remain required gates. These bounded cases do not close HD 1–6
@@ -226,7 +254,7 @@ play, pressured escape or numerical calibration. See [status](../status.md) and 
 
 ## Reconstructed roster and depth source checkpoint
 
-The selected E/S/H/I/Z/C/Q/Y/T/U/V recipes use the shared compiler and character-sheet
+The selected E/S/H/I/R/Z/C/Q/Y/T/U/V recipes use the shared compiler and character-sheet
 pipeline. Centaur owns four actual Warrior HD, with Second Strike purchased on
 HD 2 and Third Strike on HD 4; its natural sequence is 1d2/1d5/1d5. Yeti owns four
 actual racial HD, purchases Second Strike on HD 2 and uses 1d6/1d6; its cold

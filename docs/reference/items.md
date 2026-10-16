@@ -193,7 +193,10 @@ The privileged `wizard identify <actor> <item>` command exercises knowledge
 updates through the ordinary journal and rewind path. It requires existing wizard
 authorization and marks the lineage through the existing wizard rules. Drinking
 can teach identity through an observable effect; standalone ordinary
-identification actions remain deferred.
+identification actions remain deferred. Rogue's concealed restore-strength potion
+uses this same path: positive actual deficit removal teaches identity; a no-deficit
+dose is consumed without learning. Its sole effect is bounded Strength restoration,
+with no extra healing or resource refill; see [Rogue restoration](../play/rogue.md#strength-loss-and-ordinary-restoration).
 
 An item view discloses its opaque `id`, `name`, `description`, physical `class`,
 `quantity`, `appearance`, `identified` status and optional `asset`. Ground views

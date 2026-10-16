@@ -48,8 +48,8 @@ class RogueActivationCandidateTests(unittest.TestCase):
         # Independent exact enumeration of the pinned ten-way selector and its
         # five-way boundary redistribution, not the helper's embedded table.
         ladder = "KEBSHIROZLCQANYFTWPXUMVGJD"
-        names = dict(zip("ESHIZCQYTUV", ("emu", "snake", "hobgoblin", "ice_monster",
-                                       "zombie", "centaur", "quagga", "yeti", "troll",
+        names = dict(zip("ESHIRZCQYTUV", ("emu", "snake", "hobgoblin", "ice_monster",
+                                       "rattlesnake", "zombie", "centaur", "quagga", "yeti", "troll",
                                        "black_unicorn", "vampire"), strict=True))
         self.assertEqual(set(names.values()), set(PLAYABLE_SPECIES))
         self.assertTrue(all(math.gcd(*(choice["weight"] for choice in band["choices"])) == 1
@@ -211,7 +211,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         self.assertEqual(stages[0]["ai"], "rogue_hostile")
         self.assertTrue(stages[0]["avoid_protagonist_sight"])
-        self.assertEqual(stages[1:], original["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][2:])
+        self.assertEqual(stages[1:3], original["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][2:])
         self.assertEqual(sum(stage["count"][1] for stage in stages if stage["kind"] == "actors"), 4)
         self.assertEqual(original, before)
 
@@ -324,7 +324,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertFalse(result["production_mutated"])
             self.assertEqual(result["battle_evidence"], "not_run")
             self.assertEqual(result["calibration"], "not_assessed")
-            self.assertEqual(result["population_scope"], "conditional_eleven_species_with_open_vampire_tail")
+            self.assertEqual(result["population_scope"], "conditional_twelve_species_with_open_vampire_tail")
             self.assertEqual(result["depth_growth"], {"kind": "racial_after", "depth": 26})
             self.assertIn("provisional", " ".join(result["limitations"]))
             self.assertIn("capacity", " ".join(result["limitations"]))

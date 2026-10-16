@@ -34,3 +34,17 @@ name = "Amulet of Yendor"
 identity = "rogue.amulet_of_yendor"
 class = "amulet"
 stackable = false
+
+# Ordinary restoration removes only the recorded Strength deficit. The fixed
+# 1000 operand covers limits::DERIVED_ATTRIBUTE, the canonical deficit bound;
+# actual restoration clamps to that deficit. This adds no heal or bonus Strength.
+[items."rogue.restore_strength"]
+name = "potion of restore strength"
+identity = "rogue.restore_strength"
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { effects = [{ kind = "restore_attribute", attribute = "strength", amount = { kind = "fixed", amount = 1000 } }] }
+
+[appearance_pools."rogue.potions"]
+appearances = ["amber potion", "smoky potion", "violet potion"]

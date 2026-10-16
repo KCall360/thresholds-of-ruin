@@ -31,8 +31,8 @@ class RoguePlayableStudyProcesses(ProcessTestCase):
         inventory = json.loads((inputs / "study.json").read_text())
         self.assertEqual(inventory["compiler_sha256"], digest(compiler))
         self.assertEqual(inventory["validated_packages"], 4)
-        self.assertEqual(inventory["required_cases"], 11)
-        self.assertEqual(inventory["missing_cases"], ["snake-hd1", "hobgoblin-hd1", "zombie-hd1",
+        self.assertEqual(inventory["required_cases"], 12)
+        self.assertEqual(inventory["missing_cases"], ["snake-hd1", "rattlesnake-hd1", "hobgoblin-hd1", "zombie-hd1",
                                                        "quagga-hd1", "centaur-hd1", "yeti-hd1", "troll-hd1", "black_unicorn-hd1", "ice_monster-hd1",
                                                        "vampire-hd1"])
         self.assertEqual(inventory["battle_evidence"], "not_run")

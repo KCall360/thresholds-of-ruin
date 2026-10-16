@@ -271,8 +271,11 @@ permanent build epoch.
 
 Personal stats and authorized inspection disclose the bounded restorable values;
 ordinary opponent observations disclose no deficit or causer. Text and ASCII use
-the same summary. The process fixture supplies an ordinary restoration consumable
-for these shared mechanics; production restoration loot remains separate work.
+the same summary. Rogue supplies an ordinary concealed restore-strength potion
+using only `restore_attribute(strength, fixed 1000)`: the operand equals the
+canonical attribute-deficit bound and clamps to actual loss. It adds no healing,
+maximum-Health restoration or bonus Strength. Its finite availability is described
+in the [Rogue guide](../play/rogue.md#strength-loss-and-ordinary-restoration).
 
 
 ### Latest-Hit-Die drain and restoration

@@ -1,4 +1,4 @@
-"""Materialize an explicitly sourced eleven-species diagnostic package.
+"""Materialize an explicitly sourced twelve-species diagnostic package.
 
 Never edits production. Bands condition the pinned Rogue source distribution on
 the eligible recipes, with Vampire alone in the explicit depth-27+ tail. Checked
@@ -22,22 +22,22 @@ from ruleset_sources import resolve_with_dependencies
 
 REFERENCE = "c7c119f893bd2f8255f2ad78d58a32664ddb9a97"
 NAMES = {"E": "emu", "S": "snake", "H": "hobgoblin", "I": "ice_monster",
-         "Z": "zombie", "C": "centaur", "Q": "quagga", "Y": "yeti", "T": "troll",
+         "R": "rattlesnake", "Z": "zombie", "C": "centaur", "Q": "quagga", "Y": "yeti", "T": "troll",
          "U": "black_unicorn", "V": "vampire"}
 # Integer proportions of unconditional source mass. Low-boundary redistribution
 # matters at depths 2..5; unsupported choices are explicitly conditioned away.
 BANDS = (
     (1, 1, (("E", 1), ("S", 1), ("H", 1))),
     (2, 2, (("E", 9), ("S", 9), ("H", 9), ("I", 5))),
-    (3, 3, (("E", 8), ("S", 8), ("H", 8), ("I", 5))),
-    (4, 4, (("E", 7), ("S", 7), ("H", 7), ("I", 5))),
-    (5, 5, (("E", 6), ("S", 6), ("H", 6), ("I", 5), ("Z", 5))),
-    (6, 6, (("E", 1), ("S", 1), ("H", 1), ("I", 1), ("Z", 1))),
-    (7, 7, (("E", 1), ("S", 1), ("H", 1), ("I", 1), ("Z", 1), ("C", 1))),
-    (8, 9, (("S", 1), ("H", 1), ("I", 1), ("Z", 1), ("C", 1), ("Q", 1))),
-    (10, 10, (("H", 1), ("I", 1), ("Z", 1), ("C", 1), ("Q", 1))),
-    (11, 11, (("I", 1), ("Z", 1), ("C", 1), ("Q", 1), ("Y", 1))),
-    (12, 12, (("Z", 1), ("C", 1), ("Q", 1), ("Y", 1))),
+    (3, 3, (("E", 8), ("S", 8), ("H", 8), ("I", 5), ("R", 5))),
+    (4, 4, (("E", 7), ("S", 7), ("H", 7), ("I", 5), ("R", 5))),
+    (5, 5, (("E", 6), ("S", 6), ("H", 6), ("I", 5), ("R", 5), ("Z", 5))),
+    (6, 6, (("E", 1), ("S", 1), ("H", 1), ("I", 1), ("R", 1), ("Z", 1))),
+    (7, 7, (("E", 1), ("S", 1), ("H", 1), ("I", 1), ("R", 1), ("Z", 1), ("C", 1))),
+    (8, 9, (("S", 1), ("H", 1), ("I", 1), ("R", 1), ("Z", 1), ("C", 1), ("Q", 1))),
+    (10, 10, (("H", 1), ("I", 1), ("R", 1), ("Z", 1), ("C", 1), ("Q", 1))),
+    (11, 11, (("I", 1), ("R", 1), ("Z", 1), ("C", 1), ("Q", 1), ("Y", 1))),
+    (12, 12, (("R", 1), ("Z", 1), ("C", 1), ("Q", 1), ("Y", 1))),
     (13, 14, (("Z", 1), ("C", 1), ("Q", 1), ("Y", 1), ("T", 1))),
     (15, 16, (("C", 1), ("Q", 1), ("Y", 1), ("T", 1))),
     (17, 17, (("Q", 1), ("Y", 1), ("T", 1), ("U", 1))),
@@ -103,7 +103,8 @@ def supply_stages():
              "bands": singleton_band(archetype), "quantity": quantity}
             for identity, archetype, quantity in (
                 ("rogue.bandages", "rogue.clean_bandage", 2),
-                ("rogue.rations", "rogue.ration", 1))]
+                ("rogue.rations", "rogue.ration", 1),
+                ("rogue.restore_strength", "rogue.restore_strength", 1))]
 
 
 def canonical_actor_stage():
@@ -121,7 +122,7 @@ def population_shape(source):
               for identity, archetype in (("rogue.emus", "rogue.emu"), ("rogue.snakes", "rogue.snake"))]
     expected = {"version": 1, "protagonist": "selected_character",
                 "families": {"dungeon": "rogue.low_depth"},
-                "profiles": {"rogue.low_depth": {"version": 1, "stages": [*legacy, *supply_stages()]}}}
+                "profiles": {"rogue.low_depth": {"version": 1, "stages": [*legacy, *supply_stages()[:2]]}}}
     # JSON comparison is type-sensitive: Python dictionary equality alone
     # would silently accept True where the reviewed version/weight is 1.
     exact = lambda value: json.dumps(value, sort_keys=True, allow_nan=False)
@@ -130,7 +131,7 @@ def population_shape(source):
     expected["profiles"]["rogue.low_depth"]["stages"] = [canonical_actor_stage(), *supply_stages()]
     expected["carried_item_pools"] = {VAMPIRE_STOCK["pool"]: VAMPIRE_POOL}
     if exact(activation) == exact(expected):
-        return "canonical_eleven_species"
+        return "canonical_twelve_species"
     raise ValueError("Review changed population profile or carried-item pool before generating a candidate")
 
 
@@ -207,7 +208,7 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
                  "artifact_purpose": "diagnostic_population_package", "production_mutated": False,
                  "start_depth": start_depth,
                  "growth_evidence": "authored_hd_one_not_earned_route",
-                 "population_scope": "conditional_eleven_species_with_open_vampire_tail",
+                 "population_scope": "conditional_twelve_species_with_open_vampire_tail",
                  "depth_growth": copy.deepcopy(DEPTH_GROWTH),
                  "carried_stock": {"policies": {NAMES[glyph]: copy.deepcopy(policy)
                                                 for glyph, policy in CARRIER_STOCK.items()},

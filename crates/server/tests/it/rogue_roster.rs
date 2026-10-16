@@ -28,6 +28,7 @@ fn rogue_roster_actual_hd_seeds_choices_and_natural_rows_round_trip_without_sour
     for (name, hd, strikes) in [
         ("emu", 1, 1),
         ("snake", 1, 1),
+        ("rattlesnake", 2, 1),
         ("hobgoblin", 1, 1),
         ("zombie", 2, 1),
         ("quagga", 3, 2),
@@ -367,4 +368,129 @@ fn rogue_vampire_recovery_and_restorable_injury_survive_owned_grant_rebuild() {
     restored.advance_active(u64::MAX);
     assert_eq!(restored.restore_maximum_health(1).unwrap().applied, 0);
     assert_eq!(restored, dead);
+}
+
+#[test]
+fn rogue_rattlesnake_owned_venom_and_canonical_strength_restoration_bind_existing_mechanics() {
+    use tor_simulation::{
+        attributes::Attribute,
+        creatures::{record::CreatureRecord, CreatureState, RestorationPolicy},
+        progression::{HdLedger, HdSource},
+        resources::Resource,
+    };
+    let (catalog, manifest) = catalog();
+    let spec = manifest.archetypes["rogue.rattlesnake"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let seed = actor_health_seed(42, 3);
+    let build = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
+    assert_eq!(
+        build.ledger(),
+        &HdLedger::seeded(vec![HdSource::Racial; 2], seed).unwrap()
+    );
+    assert_eq!(build.unspent_points(), 1);
+    assert_eq!(
+        build.choices()[0]
+            .talents()
+            .map(|id| id.as_str())
+            .collect::<Vec<_>>(),
+        ["rogue.venomous_bite"]
+    );
+    assert_eq!(build.choices()[1].talents().count(), 0);
+    let RestorationPolicy::Authored(plan) = build.restoration_policy() else {
+        panic!("authored R restoration")
+    };
+    assert_eq!(plan.len(), 2);
+    let venom = AbilityId::new("rogue.venomous_bite").unwrap();
+    assert!(build.derive().unwrap().abilities.contains(&venom));
+    let mut untrained = spec.clone();
+    untrained.hit_dice[0].purchases.clear();
+    let untrained = catalog
+        .prepare(&untrained)
+        .unwrap()
+        .instantiate(seed)
+        .unwrap();
+    assert_eq!(untrained.ledger(), build.ledger());
+    assert_eq!(untrained.unspent_points(), 2);
+    assert!(!untrained.derive().unwrap().abilities.contains(&venom));
+    let mut ineligible = spec.clone();
+    ineligible.species = "rogue.snake".into();
+    assert!(catalog.prepare(&ineligible).is_err());
+
+    let species =
+        &catalog.content().catalog().species[&SpeciesId::new("rogue.rattlesnake").unwrap()];
+    let natural = serde_json::to_value(species.melee.strikes()).unwrap();
+    assert_eq!(natural.as_array().unwrap().len(), 1);
+    assert_eq!(natural[0]["descriptors"], serde_json::json!([]));
+    assert_eq!(natural[0]["riders"], serde_json::json!([]));
+    assert_eq!(
+        natural[0]["on_success"][0]["damage"]["components"][0]["amount"],
+        serde_json::json!({"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}})
+    );
+    let signature =
+        serde_json::to_value(catalog.content().rules().ability(&venom).unwrap()).unwrap();
+    assert_eq!(
+        signature["strikes"],
+        serde_json::json!({"kind":"natural_melee", "additional_riders":[{
+        "trigger":"success", "check":{"skill":{"kind":"natural_attack"},"defense":"physical"},
+        "effects":[{"kind":"lose_attribute","attribute":"strength","amount":{"kind":"fixed","amount":1}}],
+        "descriptors":["poison"]}]})
+    );
+    // Generic resolver owners prove primary/rider misses and descriptor immunity;
+    // this compiled binding proves R uses that exact existing two-check mechanism.
+    let potion = &manifest.archetypes["rogue.restore_strength"];
+    let dose = u32::from(tor_simulation::limits::DERIVED_ATTRIBUTE);
+    assert_eq!(
+        serde_json::to_value(potion.consumable.as_ref().unwrap()).unwrap(),
+        serde_json::json!({"effects":[{"kind":"restore_attribute","attribute":"strength",
+            "amount":{"kind":"fixed","amount":dose}}]})
+    );
+    let player = manifest.characters[0].creature.as_ref().unwrap();
+    let mut state =
+        CreatureState::new(catalog.prepare(player).unwrap().instantiate(42).unwrap()).unwrap();
+    state.damage(1);
+    let initial_strength = state.derived().attributes.get(Attribute::Strength);
+    assert_eq!(
+        state
+            .lose_attribute(Attribute::Strength, 1)
+            .unwrap()
+            .applied,
+        1
+    );
+    let injury = state.health().injury();
+    let balances = Resource::ALL.map(|resource| state.costs().resources().balance(resource));
+    let quiet = state.received_health_loss_remaining();
+    assert_eq!(
+        state
+            .restore_attribute(Attribute::Strength, dose)
+            .unwrap()
+            .applied,
+        1
+    );
+    assert_eq!(
+        state.derived().attributes.get(Attribute::Strength),
+        initial_strength
+    );
+    assert_eq!(state.health().injury(), injury);
+    assert_eq!(state.received_health_loss_remaining(), quiet);
+    assert_eq!(
+        Resource::ALL.map(|resource| state.costs().resources().balance(resource)),
+        balances
+    );
+    let restored = state.clone();
+    assert_eq!(
+        state
+            .restore_attribute(Attribute::Strength, dose)
+            .unwrap()
+            .applied,
+        0
+    );
+    assert_eq!(state, restored);
+    let encoded = serde_json::to_vec(&CreatureRecord::capture(&state)).unwrap();
+    let record: CreatureRecord = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(
+        record.restore(catalog.content().clone(), vec![]).unwrap(),
+        state
+    );
 }

@@ -71,7 +71,7 @@ per-group, graph-query, validation and preparation budgets still apply.
 Room lighting is depth-dependent and corridors are dark; the graph may include
 extra connections. The [starter slice](../play/rogue.md) adds explicit Warrior/Mage
 presets, an equipped mace and ring mail, finite bandages/rations, and ordinary
-E/S/H/I/Z/C/Q/Y/T/U/V builds selected by the eleven-species population policy. The
+E/S/H/I/R/Z/C/Q/Y/T/U/V builds selected by the twelve-species population policy. The
 initial HD point remains unspent and future growth explicitly
 selects the matching class. Floor profiles are separate from geometry preparation:
 first successful selected-character entry evaluates each finite stage once, and
@@ -130,7 +130,7 @@ source-granted defenses, stacking and active-time recovery across freeze/replay.
 
 The shared foundation covers nutrition, eating, starvation and authored stochastic
 condition triggers through the shared status gate. The Rogue package now explicitly
-enrolls Warrior/Mage, keeps all eleven selected foe recipes exempt, and makes its
+enrolls Warrior/Mage, keeps all twelve selected foe recipes exempt, and makes its
 existing ration edible.
 Its layered acceptance contracts do not establish complete-run survival,
 production balance or final Rogue configuration. A creature requiring nutrition must use an authored shared rules
@@ -188,7 +188,10 @@ population pressure and complete-run balance remain separate acceptance work.
 ### Items and ranged actions
 
 Extend the finite entry-time supply stages as more item categories become usable.
-Existing rations share finite stock between ordinary eating and respec.
+Existing rations share finite stock between ordinary eating and respec. The
+appended ordinary restore-strength stage supplies one finite placement attempt per
+floor from depth 1; this provisional rate is not a guaranteed cure or the complete
+potion catalog. Effective observed restoration identifies the concealed potion.
 Complete curses/enchantment/rust/charges, type/instance knowledge and the catalog's
 specials. Add throw/launch/zap with configurable bouncing and resource/timing
 rules. PCs and AI use the same ordinary actions with knowledge-limited decisions.
@@ -200,14 +203,17 @@ safeguards and treasure-room population only when prerequisites exist.
 
 ### Species, traps and pressure
 
-Extend the selected E/S/H/I/Z/C/Q/Y/T/U/V population to all 26 species, each with its
+Extend the selected E/S/H/I/R/Z/C/Q/Y/T/U/V population to all 26 species, each with its
 normal-play ability/behavior case. Complete earned-survival qualification and
 calibrate the depth/spawn tables.
 Centaur and yeti are selected at depths 7–16 and 11–20 respectively, with
 ordinary finite birth stock, passive provocation and their purchased natural
 strike sequences. Troll is selected at depths 13–22 with six racial HD,
 RG1(1), NA1(2), NA2(4), mean acquisition, separate 1d8/1d8/2d6 strikes and 50%
-finite birth stock from the same provisional pool. The remaining 15 species are unfinished. Complete trapdoor, arrow,
+finite birth stock from the same provisional pool. Rattlesnake is selected at depths 3–12, with two racial HD, VN1(1),
+one unspent point, a 1d6 bite and a separate Physical-checked poison Strength−1
+rider; ordinary restoration removes recorded Strength deficit. The remaining 14
+species are unfinished. Complete trapdoor, arrow,
 sleeping gas, bear trap, teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
 must respect destination generation/loading and geometry. Add seeded wandering
 population while floors are active.

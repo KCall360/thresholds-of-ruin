@@ -668,6 +668,7 @@ class RogueChecks:
             ("rogue.eight_species_foes", eligible, "actor", 4),
             ("rogue.bandages", {"rogue.clean_bandage"}, "item", 1),
             ("rogue.rations", {"rogue.ration"}, "item", 1),
+            ("rogue.restore_strength", {"rogue.restore_strength"}, "item", 1),
         )
         self.assertEqual([stage["id"] for stage in receipt["decisions"]],
                          [stage for stage, _, _, _ in expected])
