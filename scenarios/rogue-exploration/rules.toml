@@ -82,3 +82,16 @@ value = { id = "rogue.venomous_bite", name = "Venomous Bite", interaction = "hos
 op = "add"
 path = ["talents", "rogue.venomous_bite"]
 value = { id = "rogue.venomous_bite", name = "Venomous Bite", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "flag", flag = "venomous", present = true }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rogue.venomous_bite" } }] }
+
+# DR2 imports one natural contact and adds the independent Spiritual HD check.
+# HD1 and undead are the only gates: DR1 is not a parent. Timing remains provisional.
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.energy_drain"]
+value = { id = "rogue.energy_drain", name = "Energy Drain", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "spiritual" }, effects = [{ kind = "drain_latest_hit_die" }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["talents", "rogue.energy_drain"]
+value = { id = "rogue.energy_drain", name = "Energy Drain", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "type_in", types = ["undead"] }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rogue.energy_drain" } }] }
+

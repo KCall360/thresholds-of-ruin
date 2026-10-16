@@ -29,7 +29,7 @@ stay in Git history and the stopped pilot's immutable evidence. New
 campaigns have distinct source fingerprints and cannot resume that pilot with
 changed inputs. This is experimental input, not a
 historical save reader. The arm name remains unchanged when the bundled package
-selects twelve species: it always names this historical comparator, never the
+selects thirteen species: it always names this historical comparator, never the
 current production manifest. Its independent gameplay fixture is unchanged and lacks the
 complete Vampire catalog/rule closure needed as an eight-species generator source.
 The retained pilot candidate is a separately frozen eight-species E/S/H/I/Z/Q/U/V
@@ -296,11 +296,11 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 The corresponding create API requires `source_package` and `source_provenance`;
 provenance must be a nonempty JSON object with a nonempty string `reference`.
 The new diagnostic inventory records observed `source_population_shape`
-(`preactivation_es` or `canonical_twelve_species`), package provenance and separate
+(`preactivation_es` or `canonical_thirteen_species`), package provenance and separate
 package/tool/compiler-dependency hashes. Its `production_mutated = false` and
 diagnostic artifact purpose replace the obsolete global `production_activation`
 claim. See [generator contract](arena.md#rogue-roster-study-and-bounded-candidate-inputs).
-Newly generated candidates now use the twelve-species population. The retained
+Newly generated candidates now use the thirteen-species population. The retained
 eight-species pilot remains old-source evidence, not acceptance of Centaur/Yeti/Troll/Rattlesnake or ordinary restoration stock.
 These new results do not rewrite historical inventories, report schemas, cohort
 order or source identities. Resume an existing campaign from its retained sources

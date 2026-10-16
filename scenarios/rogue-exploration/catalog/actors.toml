@@ -198,3 +198,25 @@ hit_dice = [
   { source = "racial", purchases = [] },
   { source = "racial", purchases = [] },
 ]
+
+# Five actual racial rows; DR2 spends one point at HD1, four remain unspent.
+[actors."rogue.wraith"]
+asset = "creature.undead.wraith"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 70 }
+[actors."rogue.wraith".creature]
+species = "rogue.wraith"
+name = "wraith"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "discipline"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.energy_drain" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]

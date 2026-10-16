@@ -64,7 +64,7 @@ flows remain unavailable. See [measurement limits](development/performance.md#pr
 | Region lifecycle | Lazy authored/generated content, active/frozen/detached regions, deterministic preparation, independent persistence and asset palettes | [Streaming](architecture/streaming.md) |
 | Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |
 | Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, bounded declared-depth character starts, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
-| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, twelve-species depth-selected population, finite care and Centaur/Yeti/Troll/Vampire birth stock, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
+| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, thirteen-species depth-selected population, finite care and Centaur/Yeti/Troll/Vampire birth stock, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
 | Tools | JSON-lines headless client with opt-in omission of diagnostic map memory, privileged inspection/setup/rewind, bounded context-bound strike detail pages, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
 
 Development supports [fast local Rust feedback](development/testing.md#fast-local-rust-feedback)
@@ -99,7 +99,7 @@ prerequisite does not establish support for more than 256 actual HD.
 
 Rogue roster study tools prepare exact-kit Warrior/Mage observations with explicit
 per-arm actor identities, pinned inputs and a disclosed generic AI proxy. The
-bundled package selects the canonical E/S/H/I/R/Z/C/Q/Y/T/U/V policy:
+bundled package selects the canonical E/S/H/I/R/Z/C/Q/Y/T/W/U/V policy:
 one four-attempt actor stage with authored depth bands, exact `racial_after`
 depth-26 growth, unchanged finite bandage/ration stages and an appended ordinary
 restore-strength potion stage. Focused
@@ -111,6 +111,20 @@ Rattlesnake is eligible at depths 3–12 with two actual racial HD, owned VN1 on
 HD 1 and one unspent point. Its 1d6 natural bite adds a separately Physical-checked
 poison Strength−1 rider. Ordinary concealed restore-strength potions remove only
 recorded Strength loss; one finite placement attempt per floor is provisional.
+Wraith is eligible at depths 14–23 with five actual undead racial rows and zero
+carry chance. Parentless DR2 is paid at HD1; four points remain unspent. Its
+passive 1d6 contact adds a separate Spiritual-checked latest-HD drain. Ordinary
+kill-earned regrowth preserves the ordinal Health seed and leaves a ChooseAgain
+purchase slot empty. The controlled authored-HD2 Service composition requires
+ordinary attributed kills earning 160→195→215 XP, real W drain followed by
+external-controller Wait, one 200 debit/15 held, source-free journal reopen and
+ordinary Lore repurchase. The autonomous process owner instead ends at the first
+survived 160-XP/HD1 drain and requires source-free checkpoint reopen. Both cases
+have passed, as has the production depth-14 W birth/owned-row/zero-stock receipt
+and source-free checkpoint case. Autonomous full recovery, starter survival and
+an earned route remain open.
+No recovery potion or new engine mechanic is introduced. Fatal loss and preserved
+injury remain governed by the shared HD rules.
 Troll is eligible at depths 13–22 with six actual racial HD: RG1 on HD 1,
 Second Strike on HD 2 and Third Strike on HD 4, other points unspent. Its mean
 acquisition and separate 1d8/1d8/2d6 strikes reuse shared behavior/combat; its 50%
@@ -224,7 +238,7 @@ Required nutrition keeps its exact policy through runtime-preserving rebuilds;
 standalone cross-policy replacements reject atomically.
 The current format tuple includes these nutrition operands and the shared status
 clock/protection records. The shared bundled policy remains disabled, while
-Rogue explicitly enrolls Warrior/Mage, keeps its twelve selected foe recipes
+Rogue explicitly enrolls Warrior/Mage, keeps its thirteen selected foe recipes
 exempt and shares its finite ration between eating and respec. Authored bounded empty-depletion triggers
 now use ordinary shared status effects and indexed actor deadlines; personal
 condition facts and events reach ordinary Text/ASCII views. Status restrictions,
@@ -294,7 +308,7 @@ Rogue roster or establish balance; see
 - The 3d6 kernel keeps the existing initial defense/bonus values; this is not
   a claim of balanced Rogue builds. The point economy, Health recovery and the
   initial authored talent values still require content calibration.
-- The Rogue starter slice selects twelve-species depth-selected population,
+- The Rogue starter slice selects thirteen-species depth-selected population,
   finite starting/floor supplies and Centaur/Yeti/Troll/Vampire birth stock, alongside
   authored hunger/fainting/starvation and ration eating. The full 26-species roster,
   calibrated food pressure, complete item catalog, traps, wandering population,
@@ -368,7 +382,7 @@ recreate them. Its
 ongoing performance acceptance, including persistence tails, is distinct from
 whether floor generation exists. Add omitted rooms, mazes, secrets and traps as
 shared support arrives. Extend shared survival, items, ranged/perception and
-species behavior; extend the selected twelve-species roster to all 26 species and
+species behavior; extend the selected thirteen-species roster to all 26 species and
 qualify complete pressured runs. Work beyond the accepted 256-HD guard, including
 exact-row deep storage and disclosure paging, is deferred rather than a
 prerequisite for functional Rogue.

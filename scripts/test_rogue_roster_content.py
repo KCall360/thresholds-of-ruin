@@ -15,6 +15,7 @@ ORDINARY = {"emu": (1, [(1, 2)]), "snake": (1, [(1, 3)]), "rattlesnake": (2, [(1
             "yeti": (4, [(1, 6), (1, 6)]),
             "troll": (6, [(1, 8), (1, 8), (2, 6)]),
             "black_unicorn": (7, [(1, 9), (1, 9), (2, 9)]),
+            "wraith": (5, [(1, 6)]),
             "vampire": (8, [(1, 10)])}
 
 
@@ -49,7 +50,7 @@ class RogueRosterContent(unittest.TestCase):
     def test_every_rogue_species_owns_explicit_reference_disposition(self):
         species = source("catalog/creatures.toml")["creatures"]["species"]
         mean = {"emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire"}
-        passive = {"human", "ice_monster", "centaur", "yeti"}
+        passive = {"human", "ice_monster", "centaur", "yeti", "wraith"}
         self.assertEqual(set(species), {"rogue." + name for name in mean | passive})
         for name in mean | passive:
             with self.subTest(species=name):
@@ -129,6 +130,151 @@ class RogueRosterContent(unittest.TestCase):
         # RG1's unchanged flag gate and -50 ordinary-period modifier are owned
         # by RogueVampireContent; no second recovery implementation is introduced.
 
+    def test_wraith_owns_five_undead_rows_and_only_hd_one_energy_drain(self):
+        actors = source("catalog/actors.toml")["actors"]
+        self.assertIn("rogue.wraith", actors, "Approved W recipe is missing")
+        actor, vampire = actors["rogue.wraith"], actors["rogue.vampire"]
+        self.assertEqual(actor["body"], vampire["body"])
+        self.assertEqual(actor["turn_ticks"], 100)
+        self.assertEqual(actor.get("asset"), "creature.undead.wraith")
+        manifest = source("scenario.toml")
+        self.assertIn(actor["asset"], {asset for theme in manifest["themes"]
+                                     for asset in manifest["assets"][theme]})
+        self.assertEqual(actor["creature"], {
+            "species": "rogue.wraith", "name": "wraith", "faction": "dungeon_foes",
+            "binding": "awareness", "starting_skills": ["heavy_weaponry", "discipline"],
+            "restoration": "authored", "nutrition": {"kind": "exempt"},
+            "future_growth": {"kind": "disabled"}, "hit_dice": [
+                {"source": "racial", "purchases": [{"pool": "advancement", "selection": {
+                    "kind": "talent", "talent": "rogue.energy_drain"}}]}]
+                + [{"source": "racial", "purchases": []} for _ in range(4)]})
+        catalog = source("catalog/creatures.toml")["creatures"]["species"]
+        wraith = catalog["rogue.wraith"]
+        self.assertEqual(wraith["kind"], "undead")
+        self.assertNotIn("subtypes", wraith)
+        self.assertEqual(wraith["attributes"], catalog["rogue.vampire"]["attributes"])
+        self.assertEqual(wraith["anatomy"], catalog["rogue.vampire"]["anatomy"])
+        self.assertEqual(wraith["displacement"], {"size": "medium", "anchored": False})
+        self.assertEqual(wraith["behavior"], {
+            "disposition": "passive", "idle": "wait", "memory_ticks": 1000})
+        self.assertEqual(wraith["modifiers"], [{"scope": "always", "op": {
+            "kind": "add", "stat": {"kind": "defense", "defense": "physical"}, "value": 3}}])
+        self.assertEqual(wraith["melee"], {
+            "skill": "heavy_weaponry", "bonus": 0, "wind_up": 100, "recovery": 100,
+            "strikes": [{"offset": 0, "check": {"actor": "user", "skill": {"kind": "natural_attack"},
+                "against": {"kind": "defense", "defense": "physical"}}, "on_success": [
+                {"kind": "damage", "damage": {"kind": "components", "components": [
+                    {"category": "keen", "amount": {"kind": "rolled", "dice": {
+                        "count": 1, "sides": 6, "bonus": 0}}}]}}],
+                "on_failure": [], "descriptors": [], "riders": []}]})
+
+    def test_energy_drain_is_parentless_hd_one_undead_purchase_with_separate_spiritual_rider(self):
+        rows = {tuple(row["path"]): row for row in source("rules.toml")["overrides"]}
+        identity = "rogue.energy_drain"
+        self.assertIn(("talents", identity), rows, "Approved DR2 purchase is missing")
+        self.assertEqual(rows[("talents", identity)], {"op": "add", "path": ["talents", identity], "value": {
+            "id": identity, "name": "Energy Drain", "prerequisites": [],
+            "requirement": {"kind": "all", "requirements": [
+                {"kind": "total_hd", "minimum": 1}, {"kind": "type_in", "types": ["undead"]}]},
+            "form_choices": [], "modifiers": [{"scope": "always", "op": {
+                "kind": "grant_ability", "ability": identity}}]}})
+        self.assertEqual(rows[("abilities", identity)], {"op": "add", "path": ["abilities", identity], "value": {
+            "id": identity, "name": "Energy Drain", "interaction": "hostile_to_target", "tags": ["attack"],
+            "basic_attack": False, "invocation": "actor_target", "timing": {
+                "source": {"kind": "fixed", "prepare": 100, "recover": 100}, "scaled_by": "speed"},
+            "reach": {"kind": "melee"}, "strikes": {"kind": "natural_melee", "additional_riders": [{
+                "trigger": "success", "check": {"skill": {"kind": "natural_attack"}, "defense": "spiritual"},
+                "effects": [{"kind": "drain_latest_hit_die"}], "descriptors": []}]},
+            "ai": {"priority": 20, "hostile": True, "minimum_resource_percent": 0, "range_preference": "any"}}})
+
+    def test_wraith_recovery_fixture_changes_only_geometry_placement_and_one_empty_warrior_row(self):
+        import copy
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from rogue_wraith_package import recovery_package, recovery_sources
+        manifest, region, path = recovery_sources()
+        production = source("scenario.toml")
+        warrior = copy.deepcopy(production["characters"][0])
+        warrior["anchor"] = "1/start"
+        warrior["creature"]["hit_dice"].append({"source": "warrior", "purchases": []})
+        expected = {key: production[key] for key in
+                    ("format", "version", "ruleset", "modules", "factions", "ai_profiles", "themes", "assets")}
+        expected.update(id="rogue-wraith-earned-recovery", default_character=1, characters=[warrior])
+        self.assertEqual(manifest, expected)
+        self.assertEqual(region["actors"], [{"id": 3 + bay, "at": [*path[10 + 8 * bay], 0],
+            "archetype": "rogue.wraith" if bay == 8 else "rogue.emu",
+            "controller": "ai", "ai": "rogue_hostile"} for bay in range(10)])
+        self.assertNotIn("items", region)
+        self.assertEqual(len(set(path)), len(path))
+        self.assertTrue(all(abs(x - nx) + abs(y - ny) == 1
+                            for (x, y), (nx, ny) in zip(path, path[1:])))
+        width, height, depth = region["size"]
+        self.assertLessEqual(max(width, height), 32)
+        self.assertEqual(set(map(tuple, region["walls"])), {
+            (x, y, z) for x in range(width) for y in range(height) for z in range(depth)
+            if (x, y) not in path})
+        with tempfile.TemporaryDirectory() as directory:
+            fake = SimpleNamespace(directory=Path(directory), bin=Path("compiler-bin"), suffix="",
+                assertEqual=self.assertEqual, check_disk=lambda: None,
+                work_budget=SimpleNamespace(output=SimpleNamespace(paths=())))
+            with patch("rogue_wraith_package.subprocess.run", return_value=SimpleNamespace(returncode=0)) as run:
+                package = recovery_package(fake)
+            for relative in [*manifest["modules"], manifest["ruleset"]]:
+                self.assertEqual((package / relative).read_bytes(), (PACKAGE / relative).read_bytes())
+            self.assertEqual(tomllib.loads((package / "scenario.toml").read_text()), manifest)
+            self.assertEqual(tomllib.loads((package / "regions/1.toml").read_text()), region)
+            self.assertEqual(run.call_args.args[0], [fake.bin / "tor-scenario", "validate", package])
+            self.assertEqual(run.call_args.kwargs["timeout"], 30)
+
+    def test_wraith_recovery_expected_kill_credit_uses_unchanged_shared_threat_and_threshold(self):
+        rules = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text())
+        growth = rules["growth"]
+        self.assertEqual(growth, {"threshold_base": 100, "threshold_per_tier": 100,
+            "reward_base": 25, "reward_per_relative_tier": 5, "minimum_reward": 1,
+            "maximum_reward": 1000, "recovery": 0, "threat": {"points_per_tier": 100,
+                "hit_die": 70, "trained_rank": 5, "species": 10, "creature_type": 10,
+                "subtype": 5, "class": 10, "template": 20, "talent": 10, "overrides": []}})
+        self.assertFalse(any(row["path"][0] == "growth" for row in source("rules.toml")["overrides"]))
+        # E: 70 HD + 10 two ranks + 10 species + 10 type = tier 1.
+        # W: 350 HD + 10 ranks + 10 species + 10 type + 10 DR2 = tier 4.
+        # Retained highest-earned HD2: E awards20, W awards35; regrowth costs200.
+        self.assertEqual((8 * 20, 8 * 20 + 35, 9 * 20 + 35 - 200), (160, 195, 15))
+
+    def test_wraith_corridor_choices_use_only_disclosed_forward_and_remembered_edges(self):
+        from rogue_wraith_package import disclosed_corridor_step
+        def cell(key, x, y):
+            return {"key": key, "position": {"x": x, "y": y, "z": 0}, "wall": False}
+        previous, current, forward = cell("prior", -1, 0), cell("here", 0, 0), cell("next", 1, 0)
+        frame = {"state": {"observation": {"visible_cells": [forward, previous, current]}}}
+        self.assertEqual(disclosed_corridor_step(frame, {"prior", "here"}), (forward, "east"))
+        self.assertEqual(disclosed_corridor_step(frame, {"prior", "here", "next"}, "prior"),
+                         (previous, "west"))
+        with self.assertRaisesRegex(AssertionError, "disclosed corridor"):
+            disclosed_corridor_step(frame, {"here"})
+        with self.assertRaisesRegex(AssertionError, "disclosed corridor"):
+            disclosed_corridor_step(frame, {"prior", "here"}, "undisclosed")
+
+    def test_wraith_drain_interval_requires_separate_survived160_and_real_contact(self):
+        from rogue_wraith_package import drain_interval
+        contact = {"type": "ability", "caster": "w", "target": "p", "ability": {
+            "id": "rogue.energy_drain", "name": "Energy Drain"}, "outcome": "applied", "strike": 0}
+        death = {"type": "died", "actor": "w"}
+        arguments = {"wraith": "w", "victim": "p", "prior_earned": 160, "prior_hd": 2, "hd": 1}
+        self.assertEqual(drain_interval([contact], earned=160, **arguments), "separate_160_checkpoint")
+        # Positive160 control executes before the former195 acceptance is rejected.
+        with self.assertRaisesRegex(AssertionError, "separate160"):
+            drain_interval([contact, death], earned=195, **arguments)
+        for events in ([], [dict(contact, outcome="miss")], [dict(contact, caster="other")],
+                       [dict(contact, target="other")], [dict(contact, strike=1)],
+                       [dict(contact, ability={"id": "basic_melee", "name": "Melee"})],
+                       [death], [death, contact], [contact, death]):
+            with self.subTest(events=events), self.assertRaises(AssertionError):
+                drain_interval(events, earned=160, **arguments)
+        for key, value in (("prior_earned", 140), ("prior_hd", 1), ("hd", 2)):
+            with self.subTest(field=key), self.assertRaisesRegex(AssertionError, "first survived drain"):
+                drain_interval([contact], earned=160, **dict(arguments, **{key: value}))
+
     def test_generated_carrier_fixture_preserves_production_policies_and_recipes(self):
         from rogue_vampire_package import generated_carrier_manifest
         manifest = source("scenario.toml")
@@ -153,7 +299,7 @@ class RogueRosterContent(unittest.TestCase):
                 self.assertEqual(len(fixture["characters"][0]["creature"]["hit_dice"]), 16)
                 self.assertEqual(fixture["characters"][0]["loadout"], manifest["characters"][0]["loadout"])
 
-    def test_production_population_selects_twelve_species_and_preserves_stock_order(self):
+    def test_production_population_selects_thirteen_species_and_preserves_stock_order(self):
         manifest = source("scenario.toml")
         activation = manifest["floor_activation"]
         profile = activation["profiles"]["rogue.low_depth"]
@@ -172,7 +318,7 @@ class RogueRosterContent(unittest.TestCase):
         # independent pinned-selector oracle in test_rogue_activation_candidate.
         self.assertEqual({row["archetype"] for band in actor["bands"] for row in band["choices"]},
                          {"rogue." + name for name in (
-                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "black_unicorn", "vampire")})
+                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "wraith", "black_unicorn", "vampire")})
         chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5)}
         for band in actor["bands"]:
             for row in band["choices"]:

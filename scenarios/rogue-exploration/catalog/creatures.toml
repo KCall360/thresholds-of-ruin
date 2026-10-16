@@ -302,3 +302,27 @@ on_success = [{ kind = "damage", damage = { kind = "components", components = [{
 on_failure = []
 descriptors = []
 riders = []
+
+# W: five undead HD; DR2 is paid at HD1 with no prerequisite parent.
+# Body/attributes/defense/timing are provisional TOR inputs, not AC/XP conversion.
+[creatures.species."rogue.wraith"]
+behavior = { disposition = "passive", idle = "wait", memory_ticks = 1000 }
+kind = "undead"
+attributes = { strength = 2, speed = 2, intellect = 1, willpower = 2, awareness = 1, presence = 1 }
+anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
+displacement = { size = "medium", anchored = false }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 3 } }]
+
+[creatures.species."rogue.wraith".melee]
+skill = "heavy_weaponry"
+bonus = 0
+wind_up = 100
+recovery = 100
+
+[[creatures.species."rogue.wraith".melee.strikes]]
+offset = 0
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }]
+on_failure = []
+descriptors = []
+riders = []
