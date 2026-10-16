@@ -69,7 +69,49 @@ class RogueRosterContent(unittest.TestCase):
             self.assertIn({"kind": "species_flag", "flag": "natural_sequence", "present": True}, predicates)
         self.assertEqual(talents["third_strike"]["prerequisites"], ["second_strike"])
 
-    def test_production_population_selects_eight_species_and_preserves_stock_order(self):
+    def test_centaur_yeti_keep_exact_owned_hd_purchases_and_cold_immunity(self):
+        actors = source("catalog/actors.toml")["actors"]
+        species = source("catalog/creatures.toml")["creatures"]["species"]
+        for name, owner, unlocks in (("centaur", "warrior", {2: "second_strike", 4: "third_strike"}),
+                                     ("yeti", "racial", {2: "second_strike"})):
+            with self.subTest(species=name):
+                build = actors["rogue." + name]["creature"]
+                self.assertEqual(build["restoration"], "authored")
+                self.assertEqual(build["hit_dice"], [{"source": owner, "purchases": [
+                    {"pool": "advancement", "selection": {"kind": "talent", "talent": unlocks[ordinal]}}
+                ] if ordinal in unlocks else []} for ordinal in range(1, 5)])
+        self.assertEqual(species["rogue.yeti"]["subtypes"], ["cold"])
+        rules = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text())
+        cold = next(row for row in rules["subtypes"] if row["id"] == "cold")
+        self.assertFalse(cold["mechanics_deferred"])
+        self.assertEqual(cold["modifiers"], [{"scope": "always", "op": {
+            "kind": "immunity", "selector": {"kind": "descriptor", "descriptor": "cold"}}}])
+
+    def test_generated_carrier_fixture_preserves_production_policies_and_recipes(self):
+        from rogue_vampire_package import generated_carrier_manifest
+        manifest = source("scenario.toml")
+        canonical = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]
+        for name, depth in (("centaur", 7), ("yeti", 11), ("vampire", 27)):
+            with self.subTest(species=name):
+                fixture = generated_carrier_manifest(name)
+                self.assertEqual(fixture["modules"], manifest["modules"])
+                self.assertEqual(fixture["ai_profiles"], manifest["ai_profiles"])
+                self.assertEqual(fixture["floor_activation"]["carried_item_pools"],
+                                 manifest["floor_activation"]["carried_item_pools"])
+                stage = fixture["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]
+                self.assertEqual(stage["id"], canonical["id"])
+                self.assertEqual(stage["ai"], canonical["ai"])
+                self.assertEqual(stage["depth_growth"], canonical["depth_growth"])
+                self.assertEqual(stage["count"], [1, 1])
+                choice = stage["bands"][0]["choices"][0]
+                expected = next(row for band in canonical["bands"] for row in band["choices"]
+                                if row["archetype"] == "rogue." + name)
+                self.assertEqual(choice["carried_loot"], expected["carried_loot"])
+                self.assertEqual(fixture["characters"][0]["anchor"], f"dungeon/{depth}/up")
+                self.assertEqual(len(fixture["characters"][0]["creature"]["hit_dice"]), 16)
+                self.assertEqual(fixture["characters"][0]["loadout"], manifest["characters"][0]["loadout"])
+
+    def test_production_population_selects_ten_species_and_preserves_stock_order(self):
         manifest = source("scenario.toml")
         activation = manifest["floor_activation"]
         profile = activation["profiles"]["rogue.low_depth"]
@@ -84,16 +126,18 @@ class RogueRosterContent(unittest.TestCase):
         self.assertEqual(actor["ai"], "rogue_hostile")
         self.assertTrue(actor["avoid_protagonist_sight"])
         self.assertEqual(actor["depth_growth"], {"kind": "racial_after", "depth": 26})
-        self.assertEqual(len(actor["bands"]), 19)
+        self.assertEqual(len(actor["bands"]), 21)
         self.assertEqual({row["archetype"] for band in actor["bands"] for row in band["choices"]},
                          {"rogue." + name for name in (
-                             "emu", "snake", "hobgoblin", "ice_monster", "zombie", "quagga", "black_unicorn", "vampire")})
-        policy = {"version": 1, "pool": "rogue.vampire_supplies",
-                  "chance": {"numerator": 1, "denominator": 5}}
+                             "emu", "snake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "black_unicorn", "vampire")})
+        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.vampire": (1, 5)}
         for band in actor["bands"]:
             for row in band["choices"]:
-                if row["archetype"] == "rogue.vampire":
-                    self.assertEqual(row["carried_loot"], policy)
+                if row["archetype"] in chances:
+                    numerator, denominator = chances[row["archetype"]]
+                    self.assertEqual(row["carried_loot"], {"version": 1,
+                        "pool": "rogue.vampire_supplies",
+                        "chance": {"numerator": numerator, "denominator": denominator}})
                 else:
                     self.assertNotIn("carried_loot", row)
         self.assertEqual(activation["carried_item_pools"], {"rogue.vampire_supplies": {

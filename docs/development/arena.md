@@ -471,7 +471,6 @@ Three explicit modes keep their scope separate:
 - `arena-diagnostic` uses the synthetic mixed Warrior/Mage allocation references
   at HD 1, 6 and 11 against ten authored foes. The reference natural
   weapon and no-flee policy are diagnostic controls, not selected-character kits.
-  C/Y remain diagnostic-only because their carry behavior is incomplete.
 - `playable-unspent` copies the actual Warrior (actor 1) or Mage (actor 2) at HD 1,
   including species, attributes, starting ranks, binding, future growth,
   restoration policy, equipped mace/ring mail, three bandages, one ration,
@@ -481,7 +480,7 @@ Three explicit modes keep their scope separate:
   There is no default Mage spell. Authoring this purchase does not replace
   ordinary player-purchase acceptance or establish earned progression.
 
-Playable modes are limited to E/S/H/Z/Q/U/I/V at player HD 1. They never synthesize HD 6/11
+Playable modes cover all ten selected E/S/H/Z/C/Q/Y/U/I/V recipes at player HD 1. They never synthesize HD 6/11
 or treat dungeon depth as character HD. Both retain foe actor 3 and declare exact
 per-arm `participant_rosters`; Warrior and Mage remain actors 1 and 2 through
 run, finish, load, resume and replay. Faction multisets match without identity
@@ -517,9 +516,9 @@ python scripts/arena_evaluation.py --binary TOR_ARENA run CASE_INPUT/plan.json N
 python scripts/arena_evaluation.py --binary TOR_ARENA replay NEW_BATCH
 ```
 
-The unspent subset plans 24 runs and the purchased subset 64: 88 initial runs
-plus 88 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
-and a 30-second timeout, so each pass has a maximum 44-minute timeout budget
+The unspent subset plans 24 runs and the purchased set 80: 104 initial runs
+plus 104 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
+and a 30-second timeout, so each pass has a maximum 52-minute timeout budget
 before preparation overhead. These are smoke inputs, not a balance result.
 Shared seeds and mirrored/class arms are not independent observations. Net
 resources do not establish gross spending, recovery or stock flow.
@@ -537,13 +536,13 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 The API likewise requires
 `create_candidate(output, compiler, source_package=package, source_provenance={"reference": reference})`.
 It accepts only the exact known preactivation E/S profile or canonical activated
-eight-species profile, including stage identities/order, counts, bands, growth,
+ten-species profile, including stage identities/order, counts, bands, growth,
 supplies and carried-stock policy. A partially promoted or modified profile
 rejects. Both accepted shapes materialize the same diagnostic policy without
-duplicating V's pool. Existing output directories are never reused.
+duplicating the shared C/Y/V pool. Existing output directories are never reused.
 
 New `tor-rogue-activation-inputs-v2` inventories record `source_population_shape`
-as `preactivation_es` or `canonical_eight_species`, explicit package provenance,
+as `preactivation_es` or `canonical_ten_species`, explicit package provenance,
 and separate `source_package_inputs`, `tool_inputs` and `compiler_dependency_inputs`
 hashes. `artifact_purpose = "diagnostic_population_package"` and
 `production_mutated = false` describe this tool's action; the former global
@@ -551,13 +550,13 @@ hashes. `artifact_purpose = "diagnostic_population_package"` and
 The pinned external Rogue selector reference is separate from the supplied TOR
 package reference. Prior inventories and retained campaign sources stay unchanged.
 
-The 19 bands condition the pinned Rogue selector on the eight eligible
-species E/S/H/I/Z/Q/U/V. Through depth 17 the earlier seven-species conditional
-bands are retained; 18 selects U; 19–22 uses U:V 1:1; 23–26 uses 5:6, 5:7, 5:8
+The 21 bands condition the pinned Rogue selector on ten eligible species
+E/S/H/I/Z/C/Q/Y/U/V. Centaur enters at depth 7 and leaves after 16; Yeti enters at
+11 and leaves after 20. Depths 21–22 select U:V 1:1; 23–26 use 5:6, 5:7, 5:8
 and 5:9 respectively; 27 onward selects V. Four-U and four-V draws are possible.
 These weights remain provisional, without a numerical balance qualification.
-The foe-stage identity changes its streams; unchanged item stages retain their
-streams, subject to occupancy.
+Historical foe-stage and carried-pool IDs stay stable; unchanged item stages
+retain their streams, subject to changed occupancy.
 The bundled package selects this exact policy, with focused source-qualified
 coverage of its changed production contracts. The frozen earned-route
 arm named `production` remains the historical E/S comparator, not the current
