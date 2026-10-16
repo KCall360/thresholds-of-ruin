@@ -569,6 +569,9 @@ in bounded chunks, without another raw copy on disk. Saves, sidecars and other
 files retain their bytes and metadata. The original remains available until the
 complete staged directory is published; a failed transfer removes its staging
 directory and leaves the source evidence in place.
+Repeated earned-route attempt snapshots use lossless compact JSON. Every full
+snapshot, checkpoint, byte limit, flush/fsync and atomic replacement remains;
+only whitespace changes, not report fields or qualification evidence.
 During verification, these artifacts belong under that run's log directory so CI
 uploads them with the logs (`TOR_TEST_ARTIFACTS` supplies the destination). Direct
 runs print their retained directory. Ordinary process waits retain their default

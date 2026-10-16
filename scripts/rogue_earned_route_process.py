@@ -674,7 +674,7 @@ class RouteExecution:
         if self.started is not None:
             self.report['wall_seconds'] = time.monotonic() - self.started
             self.report['logical_elapsed_seconds'] = self.logical_elapsed + self.report['wall_seconds']
-        write_json(self.output / 'attempt.json', self.report)
+        write_json(self.output / 'attempt.json', self.report, compact=True)
 
     def start_transport(self):
         self.chunk_process_index = len(self.harness.processes)
@@ -960,7 +960,7 @@ class RouteExecution:
             self.report['last_stopped_unix'] = time.time()
             if self.harness.save.exists():
                 self.report['retained_segment'] = retain_segment(self.output, self.harness.save, self.report)
-                write_json(self.output / 'attempt.json', self.report)
+                write_json(self.output / 'attempt.json', self.report, compact=True)
         except Exception as error:
             self.report.update(evidence_status='failed', ordinary_evidence_status='incomplete',
                 failure_classification=classify_failure(error),
