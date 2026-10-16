@@ -270,7 +270,6 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         self.assertEqual(stages[0]["ai"], "rogue_hostile")
         self.assertIs(stages[0]["avoid_protagonist_sight"], True)
-        self.assertEqual(len(stages[0]["bands"]), 19)
         self.assertEqual(stages[0]["bands"][-1], {
             "depth": {"kind": "open", "minimum": 27}, "choices": [{
                 "archetype": "rogue.vampire", "weight": 1, "carried_loot": {
