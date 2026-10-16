@@ -20,24 +20,31 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
 
 ## Test output
 
-- **Add tests with every change.** Each feature gets tests at every layer it
-  touches, including an actual-process acceptance test. Each bug fix gets a
-  regression test that fails first. Write them in the same change, following
-  the [testing policy](docs/development/testing.md). Tiers only choose which existing tests
-  run; a green tier doesn't count if the tests for the change are missing.
+- **Cover every changed behavior contract.** Add or extend its tests in the same
+  change, following [contract ownership](docs/development/testing.md#contract-ownership).
+  Preserve feature acceptance and unique boundary witnesses; existing coverage
+  needs an explicit source/assertion mapping. Each bug fix gets a regression that
+  fails at the intended behavior before the fix. A green tier cannot compensate
+  for missing coverage.
 - Follow the [development loop](docs/development/testing.md#development-loop):
   preflight compilation/lint before expensive links, establish the intended
   first-red failure, and consolidate known fixes into coherent build checkpoints.
-  Setup failures are not behavioral regression evidence. Run affected unit tests
-  during edits, then integration and actual-process tests at completed behavior
-  checkpoints; repeat affected checks after later edits. At a stable checkpoint,
+  Setup failures are not behavioral regression evidence. Use
+  [`scripts/feedback.py`](docs/development/testing.md#fast-local-rust-feedback)
+  for repeated single-target Rust edits; it does not qualify quick, push, full or CI.
+  Run affected unit tests during edits, then integration, Service contracts and
+  actual-process tests at completed behavior checkpoints; repeat affected checks
+  after later edits. At a stable checkpoint,
   run `scripts/verify.py quick`, unless a required higher tier covers it.
 - Give each Cargo target directory one owner and hand it off explicitly. Keep
   checked inputs unchanged during builds/tests; prepare other edits separately.
   Reuse only qualified evidence and binaries, never duplicate full target builds
   across workers. Use owned sessions and exit receipts to establish run status;
   see [verification evidence](docs/development/testing.md#verification-evidence-and-reuse).
-- Before every push, pass the default `push` tier or `full`. A successful full
+- Before every push, pass the default `push` tier or `full`, except for the
+  [verified prose-only documentation path](docs/development/testing.md#prose-only-documentation-changes).
+  That path requires documentation/link and tooling checks locally and in CI.
+  A successful full
   run satisfies the push gate for the same unchanged inputs, toolchain and test
   configuration. The push tier is `quick` plus workspace-wide clippy and API
   docs: it tests what the change can reach. CI runs the complete debug and
@@ -45,7 +52,8 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   and persistence changes. Run
   targeted local release checks for performance or release-specific behavior.
   Local full is required when CI cannot run or on request. Both-platform
-  debug/release CI on the final commit remains required before merging. Record
+  debug/release CI on the final commit remains required before merging for every
+  change outside that narrow prose-only path. Record
   the tested state, commands and logs; report failures and checks not run.
   See [verification evidence](docs/development/testing.md#verification-evidence-and-reuse).
 - `verify.py` logs each step under `.local/verify/`, checks exit codes, and

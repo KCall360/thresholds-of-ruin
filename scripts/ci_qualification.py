@@ -24,9 +24,9 @@ SOURCE_NAME = re.compile(r"Qualification source \(([0-9a-f]{40})\)\Z")
 MATRIX = [(os, profile, part) for os in ("windows-latest", "ubuntu-latest")
           for profile in ("debug", "release") for part in ("rust", "python")]
 OTHER_JOBS = {"Repository tooling lint", "Dependencies (advisories)", "Dependencies (bans licenses sources)",
-              "Rust (windows-latest)", "Rust (ubuntu-latest)"}
+              "Rust (windows-latest)", "Rust (ubuntu-latest)", "Change scope and documentation"}
 REQUIRED_CONTROLS = {".github/workflows/ci.yml", "scripts/verify.py", "scripts/test_runner.py",
-                     "scripts/parallel_tests.py", "scripts/ci_qualification.py"}
+                     "scripts/parallel_tests.py", "scripts/ci_qualification.py", "scripts/ci_scope.py"}
 CONTROLS = REQUIRED_CONTROLS | {"scripts/service_contract_ci.py", "scripts/graphical_waiver.py",
                                "scripts/ci_policy.py", "scripts/ci_observation.py"}
 
@@ -134,7 +134,7 @@ def inspect(api, target_sha, target_run, now):
               "target_sha": target_sha,
               "limitations": ["Metadata comparison only; never permission to skip a job.",
                               "Clean inputs, individual test completeness and resolved environment equivalence are not certified.",
-                              "Existing full matrix, fresh dependency checks and weekly exhaustive schedule remain unchanged."]}
+                              "This reporter cannot change gates; prose-only runs are not full-run evidence."]}
     try:
         require(type(target_run) is int and target_run > 0, "invalid target run identity")
         target = api.get(f"{PREFIX}/actions/runs/{target_run}")

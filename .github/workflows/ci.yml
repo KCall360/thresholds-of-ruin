@@ -23,6 +23,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: Change scope and documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+    steps:
+      - name: Checkout exact source and complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check documentation and local links
+        run: python3 -m unittest discover -s scripts -p test_documentation.py -v
+      - name: Classify complete change scope
+        id: scope
+        run: python3 scripts/ci_scope.py
+
   tooling:
     name: Repository tooling lint
     runs-on: ubuntu-latest
@@ -45,6 +64,8 @@ jobs:
 
   dependencies:
     name: Dependencies (${{ matrix.checks }})
+    needs: scope
+    if: always() && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -66,6 +87,8 @@ jobs:
 
   profiles:
     name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})
+    needs: scope
+    if: always() && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true')
     runs-on: ${{ matrix.os }}
     # Expose the effective verifier build flags before rust-cache computes its key.
     env:
@@ -172,11 +195,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # Preserve the existing required platform check names. A failed, cancelled or
-  # skipped profile/partition must make these checks fail rather than appear as skipped.
+  # Preserve required platform names. Only the proved prose-only path may skip
+  # the matrix; missing scope, cancellation and unexpected skips cannot pass.
   check:
     name: Rust (${{ matrix.os }})
-    needs: profiles
+    needs: [scope, tooling, profiles, dependencies]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -184,10 +207,24 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest]
     steps:
-      - name: Require every partition and profile on both platforms
+      - name: Require the complete selected CI gate
         env:
+          DOCS_ONLY: ${{ needs.scope.outputs.docs_only }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          TOOLING_RESULT: ${{ needs.tooling.result }}
           PROFILES_RESULT: ${{ needs.profiles.result }}
-        run: test "$PROFILES_RESULT" = success
+          DEPENDENCIES_RESULT: ${{ needs.dependencies.result }}
+        run: |
+          python - <<'PY'
+          import os
+          mode = os.environ['DOCS_ONLY']
+          shared = os.environ['SCOPE_RESULT'] == os.environ['TOOLING_RESULT'] == 'success'
+          profiles, dependencies = os.environ['PROFILES_RESULT'], os.environ['DEPENDENCIES_RESULT']
+          docs = mode == 'true' and profiles == dependencies == 'skipped'
+          full = mode == 'false' and profiles == dependencies == 'success'
+          # Advisory-only PR jobs retain their existing nonblocking policy.
+          raise SystemExit(0 if shared and (docs or full) else 'Required CI gate did not pass')
+          PY
 
   # Reporting only: GitHub evaluates the source SHA in this job name. PR jobs
   # execute no repository code here. No gate consumes this job or its report.
@@ -204,7 +241,7 @@ jobs:
       - name: Record GitHub source identity
         env:
           TESTED_SHA: ${{ github.sha }}
-        run: printf 'GitHub source identity %s; full CI remains required.\n' "$TESTED_SHA"
+        run: printf 'GitHub source identity %s; the selected CI gate remains required.\n' "$TESTED_SHA"
       - name: Checkout exact source
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -218,7 +255,7 @@ jobs:
         run: |
           mkdir -p .local/ci-qualification
           python scripts/ci_qualification.py --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" > .local/ci-qualification/report.json
-          echo 'Reporting only; every existing full CI check remains required.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Reporting only; this report cannot waive the selected CI gate.' >> "$GITHUB_STEP_SUMMARY"
           cat .local/ci-qualification/report.json >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve qualification report
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'

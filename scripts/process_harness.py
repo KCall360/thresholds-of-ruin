@@ -222,6 +222,19 @@ def ascii_stats_viewport_text(frame):
     return " ".join(frame["stats_rows"][start:start + 24])
 
 
+def headless_fight_completion(frame):
+    """Wait for completed ordinary combat work before the next fixture action."""
+    view = frame["state"]["observation"]
+    readiness = frame["readiness"]
+    # Observation and lifecycle arrive before their ordered permission update.
+    # Even admission=True is stale while cancel still names resolved work.
+    # A paused paid intention is not completed work to replace with a new attack.
+    return view["combat"]["dead"] or (view["ready"]
+        and not view["combat"]["preparation_active"]
+        and not frame["intentions"] and readiness["admission"]
+        and not readiness["resume"] and not readiness["cancel"])
+
+
 def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=False):
     """Track acknowledgement, optionally through ordinary actor readiness.
 

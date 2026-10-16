@@ -1,10 +1,14 @@
 # Testing and verification policy
 
 Testing is a core part of every change in this repository. A feature, fix, or
-refactor is not complete until it has been tested at every layer it touches, on
-both supported platforms, in debug and release builds. This page is the
+refactor is not complete until its changed contracts and affected boundaries are
+covered and the full Windows/Linux debug/release CI matrix passes. This page is the
 authoritative statement of that policy. [Development practices](../../CONTRIBUTING.md)
 cover the rest of the contribution workflow.
+
+The narrow [prose-only documentation path](#prose-only-documentation-changes)
+uses documentation/link and tooling checks instead of application builds/tests.
+All other changes retain the full gates below; uncertain scope selects full.
 
 Start with [development setup](setup.md): Rust components, the pinned
 Python environment, a graphical desktop and a local Git comparison base are
@@ -28,11 +32,12 @@ pre-push gate. The tier does not substitute for the test-writing obligations bel
    then refactor with the tests passing.
 2. **Test outcomes, not implementation details.** Assert what a player, client,
    or save file can observe. Don't copy the implementation into the test.
-3. **Every layer that changes gets tests.** A feature needs unit tests where
-   logic changes, integration tests across crate boundaries, and an end-to-end
-   acceptance test that launches the real applications.
+3. **Every changed contract gets coverage.** Follow
+   [contract ownership](#contract-ownership), preserving feature acceptance and
+   every unique boundary guarantee.
 4. **Every bug gets a regression test.** The test must fail before the fix and
-   pass after it. Keep it permanently.
+   pass after it. Keep its coverage permanently; a replacement must satisfy the
+   [contract ownership](#contract-ownership) requirements.
 5. **Windows and Linux are both first-class.** Windows is the primary platform;
    Linux is tested continuously. A change isn't done until CI passes on both.
 6. **Debug and release both run.** Optimized builds can expose timing and
@@ -69,12 +74,38 @@ pre-push gate. The tier does not substitute for the test-writing obligations bel
 | Performance tooling | Comparison logic, workload report validators, and the performance ledger's format (never timing thresholds) | `scripts/test_perf_compare.py`, `scripts/test_workload_reports.py`, `scripts/test_perf_ledger.py` |
 | Dependency boundaries | Crates only depend on permitted crates | `scripts/check_architecture.py`, `scripts/test_check_architecture.py` |
 
+### Contract ownership
+
+Add or extend tests for each changed behavior contract at the narrowest production
+boundary that proves it. Every user-visible feature needs evidence of its
+externally observable acceptance behavior, with real transport, persistence,
+process and client witnesses for the guarantees it touches. Existing witnesses
+may satisfy unchanged boundaries only with an explicit mapping of the relevant
+source paths, assertions and test IDs. New unique guarantees and interactions
+need new evidence; a generic invariant does not prove states it never reaches.
+
+Choose owners by the production boundary, not the test language. Python-authored
+Service contracts exercise the production Service and encoder. The current host
+does not prove socket behavior, authentication setup, durable-store recovery or
+actual client behavior. Retain those independent witnesses. See the bounded
+[catalog assertion mapping](service-contracts.md#catalog-assertion-ownership).
+
+Keep regression coverage permanently, rather than requiring duplicate assertions
+at every layer. Moving or removing a test requires reviewed assertion parity,
+demonstrated bug detection and preservation of every unique boundary witness.
+Matching names, passing counts or a faster run do not establish equivalence.
+This policy does not authorize skipping tests, deferring detection, or reducing
+the full CI matrix.
+
 ### Acceptance tests with real applications
 
-Every user-visible feature needs an **actual-process acceptance test**: a Python
-test in `scripts/` that builds and launches the real `tor-server` and the
-affected clients (text, native ASCII, and/or headless), drives the feature, and
-asserts both the server's authoritative result and what the client shows.
+**Actual-process acceptance** launches the real `tor-server` and affected clients
+(text, native ASCII, and/or headless), drives the behavior, and asserts both the
+server's authoritative result and what the client shows. Add or extend Python
+tests in `scripts/` for new application-boundary guarantees; existing witnesses
+may cover unchanged boundaries only under [contract ownership](#contract-ownership).
+Do not repeat every backend scenario permutation at this layer when qualified
+lower-level tests own it.
 
 - Frontend features must launch the actual application. Parser,
   input-model, and presentation-model tests are required too, but they don't
@@ -224,8 +255,10 @@ When you find or fix a bug:
    a first-red reproduction of later behavior. Keep the failing output locally
    as evidence.
 2. Fix the bug and confirm the test passes.
-3. Add the test at the lowest layer that reliably reproduces the bug. If the
-   bug was user-visible, also extend the relevant process test.
+3. Add the test at the lowest layer that reliably reproduces the bug. For a
+   user-visible bug, verify the affected acceptance path and extend its process
+   witness whenever the regression or changed boundary is not already covered
+   by an explicitly mapped witness. Follow [contract ownership](#contract-ownership).
 4. If a performance investigation exposes a correctness bug, fix it with a
    regression test in the same way (for example, an invalid checkpoint encoding
    found during long-history profiling gets a forced-checkpoint restart test).
@@ -258,13 +291,11 @@ When you find or fix a bug:
 
 ## Running the checks
 
-**The tiers change when checks run, never what gets tested.** Every rule above
-still applies to every change. That includes TDD, tests at every layer that
-changes, an actual-process acceptance test for every user-visible feature, and
-a regression test for every bug. A tier can only run tests that exist, so a
-change that adds a feature or fixes a bug without adding its tests is
-incomplete, however green the tiers look. Tiered runs only save time
-because the suite is complete and CI runs all of it.
+**The tiers change when checks run, never the coverage obligations.** TDD,
+[contract ownership](#contract-ownership), feature acceptance and regression
+coverage still apply. A tier can only run tests that exist; missing coverage
+leaves a change incomplete, however green the tiers look. Tiered runs save time
+while the complete suite remains required in CI.
 
 [`scripts/verify.py`](../../scripts/verify.py) runs these checks in tiers. It
 writes each step's log to the gitignored local directory, checks exit codes, and prints a compact
@@ -275,20 +306,62 @@ without a duplicate run on unchanged inputs:
 
 | Tier | Required | What it runs | Why it matters |
 | --- | --- | --- | --- |
-| Focused checks | During edits and at completed behavior checkpoints | Failing behavior/regression and affected unit tests during edits; affected integration and actual-process scenarios when the behavior is complete, repeated after changes affecting it | Establish a failing reproduction first and give fast feedback while retaining complete coverage before merge |
+| Focused checks | During edits and at completed behavior checkpoints | Failing behavior/regression and affected unit tests during edits; affected integration, Service contracts and actual-process scenarios when the behavior is complete, repeated after changes affecting it | Establish a failing reproduction first and give fast feedback while retaining complete coverage before merge |
 | `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the process tests the change touches, plus the smoke set when the change can reach every process test | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
 | `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Everything in `quick`, plus workspace-wide clippy and warning-free API docs | Catches regressions in what the change can reach, and the lint and doc failures CI would reject, in minutes rather than an hour. CI runs the complete suites before merge |
 | `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; both-platform CI is still required before merging |
-| CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
+| CI | **Required before every merge** | The full matrix on Windows and Linux, plus tooling/dependency checks; verified prose-only changes use the documentation path below | Full CI proves both platforms and profiles; a documentation-only result makes no such claim |
+
+### Prose-only documentation changes
+
+The shared predicate in [`scripts/ci_scope.py`](../../scripts/ci_scope.py) allows
+only root `README.md`, `AGENTS.md`, `CONTRIBUTING.md` and Markdown below `docs/`.
+It excludes `docs/reference/protocol.md`: its wire examples are inputs to real
+Rust decoder tests. Code, tests, scripts, workflows, configuration, dependencies,
+assets, executable files, symlinks and unknown paths require the normal full path.
+Windows-reserved or ambiguous names also select full: prose paths use simple
+lowercase components without spaces or trailing dots, except exact `README.md` files.
+Add any new executable documentation input to the shared exclusion map when introduced.
+The classifier itself and workflow changes therefore run full CI.
+
+Before a local documentation-only push, inspect the entire proposed change,
+including staged, unstaged and untracked files and both sides of renames, against
+that predicate. If every change is ordinary prose, run these checks instead of
+the Rust-building quick/push/full tiers:
+
+```sh
+python -m unittest discover -s scripts -p test_documentation.py -v
+ruff check scripts
+actionlint
+```
+
+CI checks the exact checkout and complete Git history. PR classification covers
+both the whole branch from its merge base and the actual synthetic merge delta;
+push classification covers the complete before/after range. Renames are compared
+as deletion plus addition, so renaming code into Markdown cannot hide it. Empty,
+missing, shallow, malformed, oversized or ambiguous evidence selects full CI.
+Manual and weekly scheduled runs always remain full.
+
+The documentation/link suite and tooling lint still gate prose-only CI. Only a
+successful scope/documentation job may intentionally skip dependency and full
+matrix jobs. The existing required `Rust (windows-latest)` and
+`Rust (ubuntu-latest)` aggregates validate the selected path: they require those
+intentional skips plus successful documentation/tooling checks, or the full
+matrix for every other change. Unexpected skips, cancellation and failures do
+not become a successful documentation gate. Dependency jobs retain their existing
+full-run advisory/policy rules. A prose-only pass is not full-matrix evidence and
+cannot qualify later application changes or exact-tree full-run reuse.
+
+### Full CI partitions
 
 CI runs four independent jobs on each platform, selected with
 `full --ci-profile debug|release --ci-partition rust|python`:
 
 | Profile | Partition | Complete coverage |
 | --- | --- | --- |
-| Debug | Rust | Formatting, workspace all-target Clippy, the isolated simulation fixture gate, architecture checks, warning-free rustdoc, and workspace Rust tests including doctests |
+| Debug | Rust | Formatting, workspace all-target Clippy, the isolated simulation fixture gate, architecture checks, warning-free rustdoc, workspace Rust tests including doctests, and production Service contracts via `service_contract_ci.py` |
 | Debug | Python/native | Every `test_*.py` suite, including tooling and actual-process/native acceptance |
-| Release | Rust | Release workspace Rust tests including doctests |
+| Release | Rust | Release workspace Rust tests including doctests, and production Service contracts via `service_contract_ci.py` |
 | Release | Python/native | Every `test_*process.py` suite, including native acceptance |
 
 `--ci-partition` requires both `full` and an explicit `--ci-profile`. Each
@@ -301,6 +374,11 @@ before discovery. The debug partition retains the dedicated scenario-compiler
 build. These prerequisite builds intentionally overlap the process harness's
 own build check; no test command is replaced or skipped.
 
+Service contracts belong to the Rust partitions: their wrapper uses the exact
+host executable emitted by the successful Cargo test command. Python partitions'
+`test_*.py` discovery does not select this suite. Local quick/push runs use the
+same wrapper when their selected packages include `tor-server`.
+
 Without `--ci-partition`, each `--ci-profile` selects its complete profile. The
 ordered debug/release union is the local `full` plan. A CI run
 does not certify a local run, and one partition never satisfies the full or
@@ -310,7 +388,8 @@ but retain the Linux libraries required to compile and link the ASCII crate.
 Profile caches remain separate. Artifacts and verification log directories
 identify their profile and partition. The required `Rust (windows-latest)` and
 `Rust (ubuntu-latest)` checks fail unless every profile/partition on both
-platforms succeeds, including when any constituent is cancelled or skipped.
+platforms succeeds, including when any constituent is cancelled or skipped,
+except for the explicit prose-only path above.
 
 Whole-job budgets are 60 minutes for Rust and 40 minutes for Python/native.
 With parallel workers and the optimized debug profile,
@@ -375,6 +454,11 @@ across worktrees. Retain the tested checkout: receipts contain hashes, not a
 standalone copy of untracked files. These focused receipts do not widen test coverage or replace
 an optimized/release/platform gate.
 
+For Python-only Service fixture/assertion edits, use a qualified unchanged host
+as described in [Service iteration](service-contracts.md#iterate-against-a-qualified-host).
+Rust implementation, protocol, host or feature changes require fresh affected
+build evidence.
+
 A bounded Linux pilot on `dc28b060` (Rust 1.99.0, two jobs, workspace opt1,
 dependencies opt2, debug information off) compared the same simulation `it`
 health selection with incremental off/on. A production edit changed the living
@@ -404,8 +488,8 @@ regression against the failing implementation first, apply the fix, then run
 its affected unit tests. Consolidate already-known source fixes before the next
 build, then build each required target/profile/configuration once per coherent
 checkpoint and reuse those qualified binaries for the selected checks. Run affected
-integration and process scenarios when the behavior is complete; repeat them when
-later changes affect it. Expand the focused set
+integration, Service contract and process scenarios when the behavior is complete;
+repeat them when later changes affect it. Expand the focused set
 when a failure or changed boundary warrants it. Do not run quick, push and full
 back to back merely because all three commands exist. Run one `push` gate per
 stable PR checkpoint; a successful unchanged full run also covers that gate.
@@ -446,7 +530,8 @@ and scope. Record the exact tested, waived and CI-only checks and the authorizat
 never generalize it into a new default tier or waiver. Use the existing
 [local graphical waiver mechanism](#focused-iteration-and-local-mouse-exception)
 when applicable. Otherwise the documented push/full gates remain unchanged, and
-complete exact-head Windows/Linux debug/release CI is always required before merge.
+complete exact-head Windows/Linux debug/release CI is required before merge
+outside the prose-only documentation path.
 
 ### Failure diagnostics and timing evidence
 
@@ -573,16 +658,19 @@ results; it must identify every required target and explicitly retain any local
 waiver. It is not a claim that the original gate passed. Failed checks, newly added
 tests, uncertain dependency boundaries and missing targets cannot be covered by
 reuse. Broaden verification whenever the changed boundary requires it. Full
-exact-head Windows/Linux debug and release CI remains mandatory before merge.
+exact-head Windows/Linux debug and release CI remains mandatory before merge
+outside the prose-only documentation path.
 
 This permits rapid focused iteration without automatically rerunning a broad
 local gate after each narrow commit. Run the broad gate at meaningful integration
 checkpoints, then close any corrections with the smallest complete evidence set.
 
-The final commit must still pass the complete Windows/Linux CI matrix, in debug
-and release. No tests are removed, ignored or permanently excluded by this
-workflow. Changes to harness parallelism, timing or test selection need their
-own reviewed implementation and tests (`test_parallel_tests.py`,
+Outside the prose-only documentation path, the final commit must still pass the
+complete Windows/Linux CI matrix, in debug and release. Evidence reuse does not
+remove, ignore or permanently exclude tests.
+Separate test replacements require the reviewed parity evidence described in
+[contract ownership](#contract-ownership). Changes to harness parallelism, timing
+or test selection need their own reviewed implementation and tests (`test_parallel_tests.py`,
 `test_verify.py`); this policy does not silently change the runner or CI.
 
 When a feature is implemented or a bug is fixed, add its tests to the suite
@@ -590,13 +678,12 @@ in the same change, at the layers described in
 [required test layers](#required-test-layers) and
 [bugs and regressions](#bugs-and-regressions):
 
-- **New feature:** unit tests for new rules, integration tests where it crosses
-  crate boundaries, protocol, persistence, and client-model tests where those
-  change, and an actual-process acceptance test (`scripts/test_*_process.py`)
-  that launches the real server and clients.
+- **New feature:** add or extend tests at the owning production boundaries,
+  preserving externally observable acceptance behavior and unique real-application
+  guarantees under [contract ownership](#contract-ownership).
 - **Bug fix:** a regression test at the lowest layer that reproduces it,
-  confirmed to fail before the fix. Extend the relevant process test too if the
-  bug was user-visible.
+  confirmed to fail before the fix, plus the affected acceptance evidence
+  required by [bugs and regressions](#bugs-and-regressions).
 - **Latency-sensitive behavior:** extend the performance workloads and
   contracts (see [performance testing](#performance-testing)).
 
@@ -649,7 +736,7 @@ A change that can reach every process test (a runtime crate, scenarios, shared
 script data or the test infrastructure) runs those plus the smoke set,
 `SMOKE_PROCESS_TESTS` in `verify.py`: fast suites that start every client and
 cover movement, items, doors, intentions, checkpoints and package loading.
-`push` selects process tests the same way; `full` and CI always run every
+`push` selects process tests the same way; `full` and full CI always run every
 process test. The local tiers are fast filters, not the complete gate: CI on
 both platforms is, and nothing merges without it.
 
@@ -710,16 +797,16 @@ the summary says whether the rerun passed, so an intermittent failure is
 visible instead of hidden.
 
 A lower tier never replaces a higher one when that one is required, and no tier
-replaces CI. The full Windows and Linux matrix below must pass on the final
+replaces CI. Outside the prose-only path, the full Windows and Linux matrix below must pass on the final
 commit before merging. The following individual commands are a diagnostic reference, not a replacement
 for the verifier: rustdoc and release-process checks below are also required.
 The `full` tier includes:
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-cargo test --workspace --release --locked
+cargo clippy --workspace --all-targets --locked --features tor-server/service-contract-host -- -D warnings
+python scripts/service_contract_ci.py --profile debug --workspace
+python scripts/service_contract_ci.py --profile release --workspace
 python -m unittest discover -s scripts -p "test_*.py" -v
 python scripts/check_architecture.py
 ```
@@ -727,7 +814,7 @@ python scripts/check_architecture.py
 Also build the API documentation with warnings denied, as CI does:
 
 ```sh
-cargo doc --workspace --no-deps --document-private-items --locked
+cargo doc --workspace --no-deps --document-private-items --locked --features tor-server/service-contract-host
 ```
 
 Set `RUSTDOCFLAGS=-D warnings` first (`$env:RUSTDOCFLAGS = '-D warnings'` in
@@ -746,21 +833,21 @@ ruff check scripts
 cargo deny check
 ```
 
-What CI runs on both platforms:
+What full CI runs on both platforms:
 
 | Step | Command |
 | --- | --- |
 | Formatting | `cargo fmt --all --check` |
-| Lint | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
+| Lint | `cargo clippy --workspace --all-targets --locked --features tor-server/service-contract-host -- -D warnings` |
 | Python checks and debug process tests | `python scripts/test_runner.py discover -s scripts -p "test_*.py" -v` |
 | Dependency boundaries | `python scripts/check_architecture.py` |
-| API docs | `cargo doc --workspace --no-deps --document-private-items --locked` with `RUSTDOCFLAGS=-D warnings` |
+| API docs | `cargo doc --workspace --no-deps --document-private-items --locked --features tor-server/service-contract-host` with `RUSTDOCFLAGS=-D warnings` |
 | Isolated simulation fixture | `cargo test -p tor-simulation --test it --locked fixture_contract::` |
-| Rust tests (debug) | `cargo test --workspace --locked` |
-| Rust tests (release) | `cargo test --workspace --release --locked` |
+| Rust tests and Service contracts (debug) | `python scripts/service_contract_ci.py --profile debug --workspace` |
+| Rust tests and Service contracts (release) | `python scripts/service_contract_ci.py --profile release --workspace` |
 | Release process tests | `TOR_TEST_PROFILE=release`, `scripts/test_runner.py` with `test_*process.py` discovery |
 
-What CI runs once, on Linux:
+What full CI runs once, on Linux:
 
 | Step | Command |
 | --- | --- |
@@ -903,11 +990,12 @@ Profiling never replaces the correctness tests above.
 ## Focused iteration and local mouse exception
 
 During individual edits, run failing behavior/regression tests and affected unit
-tests. Run integration and real-process acceptance tests at completed behavior
-checkpoints, repeating them after changes to the covered behavior. Run quick at
-cohesive subsystem checkpoints, rather than after every small edit. Coverage at
-every changed layer remains required before merge; push and final-commit
-Windows/Linux debug/release CI gates remain mandatory.
+tests. Run integration, Service contracts and real-process acceptance tests at
+completed behavior checkpoints, repeating them after changes to the covered
+behavior. Run quick at cohesive subsystem checkpoints, rather than after every
+small edit. Coverage of [every changed contract](#contract-ownership) remains
+required before merge; push and final-commit Windows/Linux debug/release CI gates
+remain mandatory.
 
 The standing local waiver is
 `test_travel_process.TravelProcesses.test_native_underscore_and_mouse_click`. `python scripts/verify.py push --waive-local-mouse` records that
@@ -1001,9 +1089,10 @@ run, attempt, job, PR and Git-object APIs and reports whether a recent completed
 premerge full run is a possible same-tree qualification candidate.
 
 This is reporting only. Every result sets `full_required: true`; neither the
-matrix nor the required platform aggregates consume the report. All existing
-checks, fresh main dependency/advisory checks and the weekly exhaustive schedule
-remain unchanged. The report job is non-blocking and introduces no builds or
+matrix nor the required platform aggregates consume the report. Full-run checks,
+fresh main dependency/advisory checks for non-prose changes and the weekly exhaustive schedule
+remain unchanged by this reporter. Prose-only runs are ineligible as full-run
+qualification evidence. The report job is non-blocking and introduces no builds or
 test reruns. Its API/error handling cannot turn a skipped required job green.
 
 The bounded comparison supports only this repository's ordinary two-parent
