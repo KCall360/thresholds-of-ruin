@@ -1,4 +1,5 @@
 """New helper contracts preserve catalog/kit facts and isolate diagnostics."""
+import copy
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -55,6 +56,26 @@ class RogueRosterPackageTests(unittest.TestCase):
                     self.assertNotIn("arena", manifest)
                     self.assertNotIn("objective", manifest)
                     self.assertNotIn("unique_retrieval", manifest)
+
+    def test_encounters_preserve_structural_asset_forecasts_without_sharing_source_lists(self):
+        source = encounter_sources()
+        original = copy.deepcopy(source)
+        with mock.patch("rogue_roster_package.encounter_sources", return_value=source):
+            for species in SPECIES:
+                for character in (1, 2):
+                    for autonomous in (False, True):
+                        with self.subTest(species=species, character=character, autonomous=autonomous):
+                            manifest, region = encounter(species, character=character,
+                                                         autonomous=autonomous)
+                            self.assertEqual(manifest.get("themes"), source["manifest"]["themes"])
+                            self.assertEqual(manifest.get("assets"), source["manifest"]["assets"])
+                            forecast = {asset for theme in manifest["themes"]
+                                        for asset in manifest["assets"][theme]}
+                            self.assertIn(source["actors"][region["actors"][0]["archetype"]]["asset"],
+                                          forecast)
+                            manifest["assets"][manifest["themes"][0]].clear()
+                            manifest["themes"].clear()
+                            self.assertEqual(source, original)
 
     def test_helpers_do_not_reuse_mutable_source_or_enable_unrequested_ai(self):
         first, _ = encounter("ice_monster")

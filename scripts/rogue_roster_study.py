@@ -189,6 +189,9 @@ def study_encounter(case, arm, orientation, source, *, reference="arena-diagnost
         manifest["arena"].update(ticks=20000, actions=2000)
         region["name"] = "Diagnostic reference against fixed Rogue content"
         region["actors"][0].update(archetype=case["species"], ai="rogue_hostile")
+    # These copied recipes retain their source's declared presentation forecast.
+    manifest["themes"] = copy.deepcopy(source["manifest"]["themes"])
+    manifest["assets"] = copy.deepcopy(source["manifest"]["assets"])
     return manifest, region
 
 
