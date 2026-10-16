@@ -194,6 +194,7 @@ jobs:
         id: verification
         if: success() && !cancelled() && steps.adoption.outputs.adopted != 'true'
         timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}
+        shell: bash
         run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}
       - name: Require fresh verification or explicit matched adoption
         if: always()

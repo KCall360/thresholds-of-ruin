@@ -23,6 +23,16 @@ def workflow_step(name):
 
 
 class WorkflowAdoption(unittest.TestCase):
+    def test_observers_helper_and_verifier_share_explicit_shell_environment(self):
+        # The validator compares inherited PATH, not just explicit overrides.
+        # Windows' default PowerShell differs from the Bash observation/helper.
+        for name in ('Record checkout and resolved input observations before verification',
+                     'Adopt independently matched premerge cell when available',
+                     'Verify complete profile partition',
+                     'Record checkout and resolved input observations after verification'):
+            with self.subTest(step=name):
+                self.assertEqual(re.findall(r'^        shell: (.+)$', workflow_step(name), re.M), ['bash'])
+
     def test_raw_cell_outcomes_only_accept_fresh_success_or_explicit_adoption(self):
         block = workflow_step('Require fresh verification or explicit matched adoption')
         self.assertIn('if: always()', block)
