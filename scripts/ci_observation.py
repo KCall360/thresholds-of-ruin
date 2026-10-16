@@ -9,7 +9,11 @@ PR-controlled code, environment and tools can forge this entire document. It is
 not authenticated provenance, a complete input manifest, or a compatibility
 identity. Git tracked_dirty/untracked_present are observations, not clean-input
 proof: ignored build output is expected and is not inspected. Collection is not
-an atomic snapshot. Python's executable path is diagnostic only. This producer
+an atomic snapshot, even for reviewed code. Python's executable path is diagnostic
+only. Allowlisted environment digests describe this observer process, not the
+verifier's per-stage overrides or environment equivalence. Installed distribution
+versions describe metadata, not imported code, package bytes or provenance. Native
+libraries/display state and non-allowlisted configuration remain unobserved. This producer
 never reads event payloads, credentials, arbitrary environment/configuration or
 network services, and never installs tools. External validation would be needed
 before any evidence-reuse proposal; this module implements no reuse decision.
@@ -18,6 +22,7 @@ before any evidence-reuse proposal; this module implements no reuse decision.
 import argparse
 from datetime import datetime, timezone
 import hashlib
+from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -31,6 +36,17 @@ import threading
 MAX_OUTPUT_BYTES = 64 * 1024
 MAX_FILE_BYTES = 2 * 1024 * 1024
 PROBE_TIMEOUT = 5
+MAX_DISTRIBUTIONS = 256
+# Fixed names only: never discover arbitrary environment keys or expose their values.
+BUILD_TEST_ENVIRONMENT = (
+    "CARGO_BUILD_TARGET", "CARGO_BUILD_JOBS", "CARGO_PROFILE_DEV_DEBUG", "CARGO_PROFILE_RELEASE_DEBUG",
+    "CARGO_INCREMENTAL", "CARGO_TARGET_DIR", "CARGO_HOME", "RUSTUP_TOOLCHAIN", "RUSTUP_HOME",
+    "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "RUSTDOCFLAGS", "CARGO_ENCODED_RUSTDOCFLAGS",
+    "RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "RUSTDOC", "CC", "CXX", "AR",
+    "CFLAGS", "CXXFLAGS", "LDFLAGS", "PATH", "PYTHONPATH", "PYTHONHOME", "PYTHONHASHSEED",
+    "PYTHONUTF8", "PYTHONIOENCODING", "VIRTUAL_ENV",
+    "TOR_TEST_PROFILE", "TOR_SCENARIO_COMPILER", "TOR_TEST_BINARIES", "TOR_LOCAL_MOUSE_WAIVER", "TOR_TEST_PRIORITY",
+)
 # Bounded explicit inputs, not recursive discovery or a claim of completeness.
 CONFIG_FILES = (
     ".github/workflows/ci.yml", ".github/requirements-arena-search.txt", ".github/requirements-lint.txt",
@@ -38,6 +54,8 @@ CONFIG_FILES = (
     "deny.toml", "ruff.toml", "AGENTS.md", "CONTRIBUTING.md", "docs/development/testing.md",
     "scripts/verify.py", "scripts/test_runner.py", "scripts/parallel_tests.py",
     "scripts/graphical_waiver.py", "scripts/ci_observation.py",
+    "scripts/ci_scope.py", "scripts/ci_build_key.py", "scripts/service_contract_ci.py",
+    "scripts/service_contract_host.py", "scripts/process_harness.py", "scripts/ruleset_sources.py",
     "scripts/ci_policy.py", "scripts/ci_coverage_manifest.json", "scripts/ci_shadow.py",
 )
 OPTIONAL_FILES = frozenset((".cargo/config", ".cargo/config.toml", "scripts/ci_policy.py",
@@ -216,7 +234,46 @@ def tool_versions(root, issues):
     cargo = validated(cargo, "cargo" + version, issues, "tools.cargo")
     return {"rustc": resolved, "cargo": cargo,
             "python": {"implementation": platform.python_implementation(), "version": platform.python_version(),
-                       "executable_diagnostic": sys.executable}}
+                       "executable_diagnostic": sys.executable, "distributions": python_distributions(issues)}}
+
+
+def build_test_environment(environment, issues):
+    values = {}
+    for name in BUILD_TEST_ENVIRONMENT:
+        if name not in environment:
+            values[name] = {"status": "absent"}
+            continue
+        try:
+            value = environment[name]
+            if not isinstance(value, str) or len(value) > MAX_OUTPUT_BYTES: raise ValueError("Unbounded value")
+            encoded = value.encode("utf-8")
+            if len(encoded) > MAX_OUTPUT_BYTES: raise ValueError("Unbounded bytes")
+            values[name] = {"status": "present", "sha256": hashlib.sha256(encoded).hexdigest()}
+        except ValueError:
+            values[name] = {"status": "unavailable"}
+            issue(issues, f"environment.{name}", "invalid_or_oversized")
+    digest = None if any(value["status"] == "unavailable" for value in values.values()) else hashlib.sha256(
+        json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {"scope": "observer_process", "variables": values, "sha256": digest}
+
+
+def python_distributions(issues):
+    versions = {}
+    try:
+        for number, distribution in enumerate(metadata.distributions()):
+            if number >= MAX_DISTRIBUTIONS: raise ValueError("Unbounded inventory")
+            name, version = distribution.metadata.get("Name"), distribution.version
+            if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?", name)
+                    or not isinstance(version, str) or not re.fullmatch(r"[0-9][A-Za-z0-9_.+!-]{0,127}", version)):
+                raise ValueError("Invalid distribution metadata")
+            name = re.sub(r"[-_.]+", "-", name).lower()
+            if name in versions: raise ValueError("Ambiguous distribution identity")
+            versions[name] = version
+        return {"status": "present", "versions": versions, "sha256": hashlib.sha256(
+            json.dumps(versions, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+    except Exception:  # Installed metadata finders may fail with arbitrary exceptions; omit their messages.
+        issue(issues, "tools.python.distributions", "invalid_or_unavailable_inventory")
+        return {"status": "unavailable"}
 
 
 def collect(root, phase, *, environment=None, profile=None, partition=None):
@@ -239,6 +296,9 @@ def collect(root, phase, *, environment=None, profile=None, partition=None):
     report["checkout"] = checkout(root, issues)
     report["file_hashes"] = {name: hash_file(root, name, issues) for name in CONFIG_FILES}
     report["tools"] = tool_versions(root, issues)
+    report["build_test_environment"] = build_test_environment(environment, issues)
+    report["omissions"] = ["non_allowlisted_environment_and_configuration", "verifier_stage_overrides",
+                           "native_libraries_and_display", "package_contents_and_provenance"]
     report.update(complete=not issues, issues=issues)
     return report
 

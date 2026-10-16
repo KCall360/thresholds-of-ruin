@@ -24,6 +24,7 @@ changes arrive without any.
 import argparse
 import ast
 import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,7 @@ import sys
 import time
 
 import graphical_waiver
+import ci_observation
 import parallel_tests
 from ci_scope import RUST_DOCUMENTATION_INPUTS
 
@@ -458,10 +460,15 @@ def slowest_tests(timing_files, count=5):
     rows = []
     for path in timing_files:
         try:
-            lines = Path(path).read_text(encoding="utf-8").splitlines()
-        except OSError:
+            with Path(path).open("rb") as handle:
+                raw = handle.read(16 * 1024 * 1024 + 1)
+            if len(raw) > 16 * 1024 * 1024: continue
+            candidates = [json.loads(line) for line in raw.splitlines()]
+        except (OSError, ValueError, RecursionError):
             continue
-        rows += [row for row in map(json.loads, lines) if row.get("kind") == "test"]
+        rows += [row for row in candidates if isinstance(row, dict) and row.get("kind") == "test"
+                 and isinstance(row.get("test_id"), str) and len(row["test_id"]) <= 1024
+                 and type(row.get("seconds")) in (int, float) and 0 <= row["seconds"] <= sys.float_info.max]
     return sorted(rows, key=lambda row: -row.get("seconds", 0))[:count]
 
 
@@ -477,12 +484,114 @@ def verification_environment(jobs, overrides):
             "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", **overrides}
 
 
+def receipt_completeness(steps, results, logs, jobs):
+    """Bounded reporting under the existing reviewed-runner trust model; never a gate."""
+    issues, stages = [], []
+    names = [name for name, _, _ in steps]
+    if not names or len(names) != len(set(names)) or names != [row.get("step") for row in results]:
+        issues.append("planned/executed stage mismatch")
+
+    def require(condition):
+        if not condition: raise ValueError("incomplete record")
+
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            require(key not in value)
+            value[key] = item
+        return value
+
+    def decode(line):
+        value = json.loads(line, object_pairs_hook=unique, parse_constant=lambda _: require(False))
+        require(isinstance(value, dict))
+        return value
+
+    def zero(row, keys):
+        return all(type(row.get(key)) is int and row[key] == 0 for key in keys)
+
+    for (name, command, overrides), result in zip(steps, results):
+        stage = {"step": name, "complete": False}
+        stages.append(stage)
+        try:
+            require(type(result.get("code")) is int and result["code"] == 0
+                    and not result["note"].startswith("WAIVED") and result["waived_tests"] == [])
+            require(result.get("command") == command and result.get("cwd") == Path(overrides.get("_cwd", ".")).as_posix())
+            environment = result["environment"]
+            require(environment.get("scope") == "verifier_stage" and result["environment_issues"] == [])
+            values = environment["variables"]
+            require(set(values) == set(ci_observation.BUILD_TEST_ENVIRONMENT)
+                    and all(value == {"status": "absent"} or (set(value) == {"status", "sha256"}
+                            and value["status"] == "present" and re.fullmatch(r"[0-9a-f]{64}", value["sha256"])) for value in values.values()))
+            require(environment["sha256"] == hashlib.sha256(
+                json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
+            explicit = verification_environment(jobs, {key: value for key, value in overrides.items() if not key.startswith("_")})
+            expected = ci_observation.build_test_environment(explicit, [])
+            require(all(key in values and values[key] == expected["variables"][key] for key in explicit))
+            python = python_test_prefix(command) is not None
+            service = any(Path(arg).name == "service_contract_ci.py" for arg in command)
+            path = Path(logs) / f"{name}-tests.jsonl" if python else Path(result["log"])
+            with path.open("rb") as handle:
+                raw = handle.read(16 * 1024 * 1024 + 1)
+            require(0 < len(raw) <= 16 * 1024 * 1024)
+            stage["record"] = {"file": path.name, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+            lines = raw.decode("utf-8").splitlines()
+            if python:
+                rows = [decode(line) for line in lines]
+                require(all(type(row.get("schema_version")) is int and row["schema_version"] == 1 for row in rows))
+                profile = values["TOR_TEST_PROFILE"]
+                require(all(row.get("profile") in ("debug", "release") and (
+                    row["profile"] == "debug" if profile["status"] == "absent" else
+                    hashlib.sha256(row["profile"].encode()).hexdigest() == profile["sha256"]) for row in rows))
+                require(rows[0].get("kind") == "selection" and rows[-1].get("kind") == "suite")
+                require(all(row.get("kind") == "test" for row in rows[1:-1]))
+                selected = rows[0].get("test_ids")
+                require(isinstance(selected, list) and 0 < len(selected) <= 10000)
+                require(all(isinstance(item, str) and len(item) <= 1024
+                            and re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*){2,}", item) for item in selected))
+                require(len(selected) == len(set(selected)))
+                tests, terminal = rows[1:-1], rows[-1]
+                require(sorted(row["test_id"] for row in tests) == sorted(selected))
+                require(all(row.get("outcome") == "passed"
+                            and zero(row, ("failures", "errors", "subtests_failed", "subtests_skipped")) for row in tests))
+                require(terminal.get("successful") is True and type(terminal.get("tests_run")) is int
+                        and terminal["tests_run"] == len(selected)
+                        and zero(terminal, ("failures", "errors", "skipped", "waived", "expected_failures", "unexpected_successes"))
+                        and not terminal.get("waived_tests") and not terminal.get("not_started") and not terminal.get("batch_errors"))
+                stage["selected_tests"] = len(selected)
+            elif service:
+                tagged = [[decode(line[len(prefix):]) for line in lines if line.startswith(prefix)]
+                          for prefix in ("SERVICE_CONTRACT_ARTIFACT ", "SERVICE_CONTRACT_RESULT ")]
+                require(all(len(records) == 1 for records in tagged))
+                artifact, outcome = tagged[0][0], tagged[1][0]
+                require(set(artifact) == {"executable", "sha256", "profile", "features"}
+                        and set(outcome) == {"selected", "run", "failures", "errors", "skipped"})
+                profile = command[command.index("--profile") + 1]
+                require(artifact.get("profile") == profile and profile in ("debug", "release")
+                        and isinstance(artifact.get("sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"])
+                        and isinstance(artifact.get("executable"), str) and 0 < len(artifact["executable"]) <= 4096
+                        and isinstance(artifact.get("features"), list) and 0 < len(artifact["features"]) <= 64
+                        and all(isinstance(feature, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", feature) for feature in artifact["features"])
+                        and len(artifact["features"]) == len(set(artifact["features"])) and "service-contract-host" in artifact["features"])
+                require(type(outcome.get("selected")) is int and 0 < outcome["selected"] <= 10000
+                        and type(outcome.get("run")) is int and outcome["run"] == outcome["selected"]
+                        and zero(outcome, ("failures", "errors", "skipped")))
+                stage.update(service_artifact=artifact, service_result=outcome)
+            stage["complete"] = True
+        except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, RecursionError):
+            issues.append(f"{name}: missing, malformed or incomplete evidence")
+    return {"schema_version": 1, "reporting_only": True, "complete": not issues, "issues": issues, "stages": stages}
+
+
 def run_step(name, command, env, logs, jobs, rerun):
     cwd = ROOT / env.pop("_cwd", ".")
     graphical = env.pop("_graphical_waiver", None)
     environment = {**os.environ, **verification_environment(jobs, env)}
     environment["TOR_TEST_TIMINGS"] = str(logs / f"{name}-tests.jsonl")
     environment["TOR_TEST_ARTIFACTS"] = str(logs / f"{name}-process-failures")
+    environment_issues = []
+    observed_environment = ci_observation.build_test_environment(environment, environment_issues)
+    observed_environment["scope"] = "verifier_stage"
+    executed_command = list(command)
     log = logs / f"{name}.log"
     started = time.monotonic()
     with open(log, "w", encoding="utf-8") as handle:
@@ -490,7 +599,9 @@ def run_step(name, command, env, logs, jobs, rerun):
         handle.flush()
         code = subprocess.run(command, cwd=cwd, env=environment, stdout=handle, stderr=subprocess.STDOUT).returncode
     result = {"step": name, "code": code, "seconds": time.monotonic() - started,
-              "log": log, "note": "", "waived_tests": []}
+              "log": log, "note": "", "waived_tests": [], "command": executed_command,
+              "cwd": cwd.relative_to(ROOT).as_posix() if cwd.is_relative_to(ROOT) else None,
+              "environment": observed_environment, "environment_issues": environment_issues}
     notes = []
     if graphical is not None:
         try:
@@ -691,13 +802,15 @@ def main(argv=None):
     evidence = {"schema_version": 1, "tier": args.tier, "ci_profile": args.ci_profile,
                 "ci_partition": args.ci_partition,
                 "scope": "ci-partition" if args.ci_profile else "local", "jobs": jobs,
+                "test_workers": workers, "planned_steps": [name for name, _, _ in steps],
+                "receipt_completeness": receipt_completeness(steps, results, logs, jobs),
                 "gate_passed": not failed, "clean_passed": not failed and not waived and not not_run,
                 "waived_steps": waived, "not_run_steps": not_run, "total_seconds": total,
                 "graphical_waiver": graphical_manifest,
                 "steps": [{**result, "log": str(result["log"].relative_to(ROOT)) if result["log"] else None,
                            "status": "waived" if result["step"] in waived else "not_run" if result["code"] is None
                                      else "passed" if result["code"] == 0 else "failed",
-                           "command": command} for result, (_, command, _) in zip(results, steps)]}
+                           "command": result.get("command", command)} for result, (_, command, _) in zip(results, steps)]}
     (logs / "summary.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
     print(summary)
     return 1 if failed else 0

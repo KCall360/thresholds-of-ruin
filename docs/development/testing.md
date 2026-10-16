@@ -1125,6 +1125,26 @@ of resolved hosted images/toolchains. It must not be promoted to a skip decision
 without reviewing those remaining obligations and measuring independent full
 premerge/postmerge runs. No saving is established by a matching report.
 
+### Reporting verifier receipt completeness
+
+The verifier's existing summary now includes reporting-only receipt completeness
+for its own invocation. It reconciles the planned/executed stages, actual command,
+working directory and allowlisted environment fingerprints. Python's original
+selected IDs are recorded once in the existing timing JSONL and reconciled with
+one passing outcome each and a terminal count; the summary references that file's
+digest instead of copying the records. Missing, malformed, duplicate, interrupted,
+skipped or waived evidence is incomplete and never overrides command exits.
+Rust retains the normal successful Cargo invocation as its trusted boundary;
+the summary also preserves the precise Service host artifact/result, without a
+second Rust runner or test inventory. Existing before/after observations identify
+the source tree, configuration, tools and installed Python distribution metadata.
+Parent and per-stage environment observations are distinct; native libraries,
+display state, package contents and unlisted inputs remain outside this evidence.
+This uses the same trust in reviewed CI/test code as a normal full run, not stronger
+attestation. Completeness is not full-matrix qualification or permission to reuse
+or skip work, and prose-only results never become full-run evidence. No artifact
+download, adoption consumer, gate, test selection or execution cadence changes.
+
 ### Source-aware dependency cache trial
 
 The pinned Rust cache action does not include this virtual workspace's root

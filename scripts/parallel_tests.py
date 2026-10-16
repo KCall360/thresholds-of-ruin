@@ -310,7 +310,7 @@ class Scheduler:
             self.failfast_skipped += skipped_by_failfast
             self.counts.append(batch_counts)
             for row in kept:
-                if row["kind"] == "suite":
+                if row["kind"] in ("suite", "selection"):
                     continue
                 if row["kind"] == "local_graphical_waiver":
                     continue

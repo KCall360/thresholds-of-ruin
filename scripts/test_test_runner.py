@@ -82,6 +82,22 @@ class ImmediateFailureDiagnostics(unittest.TestCase):
 
 
 class TimedRunnerContract(unittest.TestCase):
+    def test_serial_and_parallel_receipts_record_only_the_original_selection(self):
+        source = '''import unittest
+class Sample(unittest.TestCase):
+ def test_a(self): pass
+ def test_b(self): pass
+'''
+        for workers in (1, 2):
+            with self.subTest(workers=workers):
+                result, records = self.run_fixture(source, '--workers', str(workers), 'discover', '-s', '.')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                selections = [row for row in records if row['kind'] == 'selection']
+                self.assertEqual(len(selections), 1)
+                self.assertEqual(selections[0]['test_ids'], ['test_sample.Sample.test_a', 'test_sample.Sample.test_b'])
+                self.assertEqual(records[0]['kind'], 'selection')
+                self.assertEqual(records[-1]['kind'], 'suite')
+
     def test_interruption_preserves_prior_subtest_failure_and_error_counts(self):
         for statement, field in [("self.fail('failure sentinel')", 'failures'),
                                  ("raise ValueError('error sentinel')", 'errors')]:
@@ -129,8 +145,9 @@ class Sample(unittest.TestCase):
                 result, records = self.run_fixture(source, f'test_sample.Sample.{method}')
                 interrupted = method == 'test_interrupt'
                 self.assertEqual(result.returncode == 0, not interrupted, result.stderr)
-                self.assertEqual(records[0]['outcome'], 'interrupted' if interrupted else 'passed')
-                self.assertEqual(records[0]['subtests_skipped'], 1)
+                outcome = next(row for row in records if row['kind'] == 'test')
+                self.assertEqual(outcome['outcome'], 'interrupted' if interrupted else 'passed')
+                self.assertEqual(outcome['subtests_skipped'], 1)
                 self.assertEqual(any(row['kind'] == 'suite' for row in records), not interrupted)
 
     def test_interrupted_method_is_never_recorded_as_passed(self):
