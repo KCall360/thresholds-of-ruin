@@ -144,19 +144,14 @@ def document(raw):
     return value
 
 
-def validate_cell(records, identity, job, target, *, profile, partition, jobs, workers):
-    """Pure comparison under reviewed CI trust; caller owns API/cache eligibility."""
+def validate_observations(records, target, *, profile, partition, jobs, workers):
+    """Shared resolved-context checks; each consumer retains its identity proof."""
     require(profile in ("debug", "release") and partition in ("rust", "python")
             and type(jobs) is int and 1 <= jobs <= 4 and type(workers) is int and 1 <= workers <= 6, "unsupported cell sizing")
     require(target["execution_limits"] == {"jobs": jobs, "test_workers": workers}
             and all(type(value) is int for value in target["execution_limits"].values()), "target sizing mismatch")
-    source = identity["source"]
     before, after = (document(records[f"observations/{phase}.json"]) for phase in ("before", "after"))
     platform = {"Linux": "ubuntu-latest", "Windows": "windows-latest"}[target["runner"]["os"]]
-    require(identity["candidate"] is True and source["attempt"] == 1
-            and job["name"] == f"Rust ({platform}, {profile}, {partition})"
-            and job["run_id"] == source["run_id"] and job["run_attempt"] == 1
-            and job["status"] == "completed" and job["conclusion"] == "success", "source cell identity mismatch")
     for observation, phase in ((before, "before"), (after, "after"), (target, "before")):
         require(type(observation["schema_version"]) is int and observation["schema_version"] == 1
                 and observation["status"] == "untrusted_observation" and observation["complete"] is True
@@ -167,6 +162,28 @@ def validate_cell(records, identity, job, target, *, profile, partition, jobs, w
     stable = ("checkout", "github", "runner", "tools", "file_hashes", "build_test_environment", "native_packages", "graphical")
     require(all(before[key] == after[key] for key in stable), "source inputs changed during verification")
     require(all(before[key] == target[key] for key in stable if key not in ("checkout", "github")), "resolved inputs differ")
+    require(set(target["file_hashes"]) == set(ci_observation.CONFIG_FILES)
+            and target["build_test_environment"] == ci_observation.build_test_environment(os.environ, []), "current configuration mismatch")
+    require(all(target["build_test_environment"]["variables"][name] == {"status": "absent"}
+                for name in ("TOR_TEST_BINARIES", "TOR_SCENARIO_COMPILER", "TOR_LOCAL_MOUSE_WAIVER")), "unsupported external runtime or waiver")
+    native = target["native_packages"]
+    require((platform == "windows-latest" and native == {"status": "not_observed"}) or
+            (platform == "ubuntu-latest" and native["status"] == "present" and type(native["count"]) is int
+             and 0 < native["count"] <= ci_observation.MAX_NATIVE_PACKAGES and re.fullmatch(r"[0-9a-f]{64}", native["sha256"])), "native context unavailable")
+    graphical_issues = []
+    require(target["graphical"] == ci_observation.graphical_mode(target["runner"]["os"], partition, os.environ, graphical_issues)
+            and not graphical_issues, "unsupported graphical context")
+    return before, after, platform
+
+
+def validate_cell(records, identity, job, target, *, profile, partition, jobs, workers):
+    """Exact-tree adoption; cross-head callers cannot bypass this binding."""
+    before, after, platform = validate_observations(records, target, profile=profile, partition=partition, jobs=jobs, workers=workers)
+    source = identity["source"]
+    require(identity["candidate"] is True and source["attempt"] == 1
+            and job["name"] == f"Rust ({platform}, {profile}, {partition})"
+            and job["run_id"] == source["run_id"] and job["run_attempt"] == 1
+            and job["status"] == "completed" and job["conclusion"] == "success", "source cell identity mismatch")
     require(before["checkout"]["sha"] == source["checkout_sha"] and before["checkout"]["tree"] == source["tree"]
             and target["checkout"]["sha"] == identity["target_sha"] and target["checkout"]["tree"] == source["tree"]
             and before["checkout"]["parents"] == target["checkout"]["parents"]
@@ -183,20 +200,15 @@ def validate_cell(records, identity, job, target, *, profile, partition, jobs, w
             and target["github"]["run_id"] != source["run_id"], "run observation mismatch")
     require(timestamp(job["started_at"]) <= timestamp(before["recorded_at"]) <= timestamp(after["recorded_at"])
             <= timestamp(job["completed_at"]), "observations outside source job")
-    require(set(target["file_hashes"]) == set(ci_observation.CONFIG_FILES)
-            and target["build_test_environment"] == ci_observation.build_test_environment(os.environ, []), "current configuration mismatch")
-    require(all(target["build_test_environment"]["variables"][name] == {"status": "absent"}
-                for name in ("TOR_TEST_BINARIES", "TOR_SCENARIO_COMPILER", "TOR_LOCAL_MOUSE_WAIVER")), "unsupported external runtime or waiver")
-    native = target["native_packages"]
-    require((platform == "windows-latest" and native == {"status": "not_observed"}) or
-            (platform == "ubuntu-latest" and native["status"] == "present" and type(native["count"]) is int
-             and 0 < native["count"] <= ci_observation.MAX_NATIVE_PACKAGES and re.fullmatch(r"[0-9a-f]{64}", native["sha256"])), "native context unavailable")
-    graphical_issues = []
-    require(target["graphical"] == ci_observation.graphical_mode(target["runner"]["os"], partition, os.environ, graphical_issues)
-            and not graphical_issues, "unsupported graphical context")
+    validate_receipts(records, target, profile=profile, partition=partition, jobs=jobs, workers=workers)
+
+
+def validate_receipts(records, target, *, profile, partition, jobs, workers):
+    """Fresh successful full-cell accounting, independent of the identity proof."""
     names = [name for name in records if name.endswith("/summary.json")]
     require(len(names) == 1 and re.fullmatch(rf"[^/]+-full-ci-{profile}-{partition}/summary.json", names[0]), "ambiguous full cell summary")
     summary, prefix = document(records[names[0]]), names[0].rsplit("/", 1)[0]
+    require(summary.get("evidence_origin") == "fresh" and "cross_head" not in summary, "composite evidence cannot be adopted")
     require(type(summary["schema_version"]) is int and summary["schema_version"] == 1 and summary["tier"] == "full" and summary["scope"] == "ci-partition"
             and summary["ci_profile"] == profile and summary["ci_partition"] == partition
             and summary["clean_passed"] is True and summary["gate_passed"] is True and summary["graphical_waiver"] is None

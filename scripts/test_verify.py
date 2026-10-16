@@ -578,6 +578,50 @@ class CiPartitions(unittest.TestCase):
             self.assertEqual(len(list((root / ".local/verify").glob("*/summary.json"))), 4)
 
 
+class CrossHeadExecution(unittest.TestCase):
+    def execute(self, *, malformed=False, failed=False, union_complete=True):
+        import ci_head_reuse
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            proof = root / 'proof.json'
+            proof.write_text('{' if malformed else '{"source":{},"target":{},"artifact":{}}')
+            result = {'step': 'fixture', 'code': int(failed), 'seconds': 0, 'log': None, 'note': ''}
+            plan = [('fixture', ['python', 'fixture.py'], {})]
+            with patch.object(verify, 'ROOT', root), patch.object(verify.subprocess, 'run') as command, \
+                    patch.object(verify, 'running_builds', return_value=[]), \
+                    patch.object(verify, 'plan', return_value=plan), \
+                    patch.object(verify, 'free_memory_gb', return_value=8), \
+                    patch.object(verify, 'run_step', return_value=result) as run, \
+                    patch.object(ci_head_reuse, 'selected_plan', return_value=plan) as select, \
+                    patch.object(ci_head_reuse, 'union', return_value={'complete': union_complete}) as union, \
+                    redirect_stdout(StringIO()):
+                command.return_value.stdout = json.dumps(metadata())
+                code = verify.main(['full', '--ci-profile', 'debug', '--ci-partition', 'python',
+                                    '--jobs', '1', '--test-workers', '1', '--cross-head-proof', str(proof)])
+                evidence = json.loads(next(root.glob('.local/verify/*/summary.json')).read_text())
+                return code, evidence, run.call_count, select.call_count, union.call_count
+
+    def test_invalid_optional_proof_falls_back_to_ordinary_full_execution(self):
+        code, summary, ran, selected, union = self.execute(malformed=True)
+        self.assertEqual((code, ran, selected, union), (0, 1, 0, 0))
+        self.assertEqual(summary['evidence_origin'], 'fresh')
+
+    def test_composite_is_explicit_and_requires_final_union(self):
+        code, summary, ran, selected, union = self.execute()
+        self.assertEqual((code, ran, selected, union), (0, 1, 1, 1))
+        self.assertEqual(summary['evidence_origin'], 'cross_head_composite')
+        self.assertTrue(summary['cross_head']['union']['complete'])
+        code, summary, *_ = self.execute(union_complete=False)
+        self.assertEqual(code, 1)
+        self.assertFalse(summary['gate_passed'])
+
+    def test_failing_fresh_checks_cannot_be_rescued_by_prior_evidence(self):
+        code, summary, _, _, union = self.execute(failed=True)
+        self.assertEqual((code, union), (1, 0))
+        self.assertFalse(summary['gate_passed'])
+        self.assertEqual(summary['evidence_origin'], 'cross_head_composite')
+
+
 class LocalMouseWaiver(unittest.TestCase):
     def test_exact_failure_is_waivable_only_with_local_opt_in(self):
         name = verify.LOCAL_MOUSE_TEST
@@ -861,11 +905,24 @@ class CiWorkflowContract(unittest.TestCase):
         self.assertRegex(profiles, r"(?m)^        profile: \[debug, release\]$")
         self.assertRegex(profiles, r"(?m)^        partition: \[rust, python\]$")
         self.assertRegex(profiles, r"(?m)^      fail-fast: false$")
-        self.assertRegex(profiles, r"(?m)^        run: python scripts/verify\.py full --ci-profile \$\{\{ matrix\.profile \}\} --ci-partition \$\{\{ matrix\.partition \}\}$")
+        self.assertRegex(profiles, r"(?m)^        run: python scripts/verify\.py full --ci-profile \$\{\{ matrix\.profile \}\} --ci-partition \$\{\{ matrix\.partition \}\} --cross-head-proof \.local/verify/cross-head\.json$")
         self.assertNotIn("--waive-local-mouse", profiles)
         self.assertNotIn("--waive-local-graphical", profiles)
         self.assertNotIn("continue-on-error", profiles)
         self.assertNotRegex(profiles, r"(?m)^        (?:exclude|include):")
+
+    def test_cross_head_probe_is_optional_pr_only_and_final_authority_has_read_token(self):
+        profiles = self.job("profiles")
+        probe = re.search(r"(?ms)^      - name: Prepare bounded prior-head evidence\n(.*?)(?=^      - |\Z)", profiles)
+        self.assertIsNotNone(probe)
+        self.assertIn("if: github.event_name == 'pull_request'", probe[1])
+        self.assertIn('if python scripts/ci_head_reuse.py', probe[1])
+        self.assertIn('"$status" == 130 || "$status" == 143', probe[1])
+        verification = re.search(r"(?ms)^      - name: Verify complete profile partition\n(.*?)(?=^      - |\Z)", profiles)
+        self.assertIn('GH_TOKEN: ${{ github.token }}', verification[1])
+        self.assertIn('--cross-head-proof .local/verify/cross-head.json', verification[1])
+        self.assertNotIn('steps.head_reuse', verification[1])
+        self.assertIn('pull-requests: read', profiles)
 
     def test_every_job_and_artifact_has_platform_profile_and_partition_identity(self):
         profiles = self.job("profiles")

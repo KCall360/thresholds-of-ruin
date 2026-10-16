@@ -91,6 +91,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     if: ${{ !cancelled() && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}
     runs-on: ${{ matrix.os }}
     # Expose the effective verifier build flags before rust-cache computes its key.
@@ -190,12 +191,28 @@ jobs:
             if [[ "$status" == 130 || "$status" == 143 ]]; then exit "$status"; fi
             echo 'adopted=false' >> "$GITHUB_OUTPUT"
           fi
+      - name: Prepare bounded prior-head evidence
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Ordinary failure means full fresh verification; cancellation stops.
+          if python scripts/ci_head_reuse.py --platform ${{ matrix.os }} --profile ${{ matrix.profile }} --partition ${{ matrix.partition }}; then
+            echo 'Prior-head candidate prepared; fresh coverage and final live proof are still required.'
+          else
+            status=$?
+            if [[ "$status" == 130 || "$status" == 143 ]]; then exit "$status"; fi
+            echo 'Prior-head evidence unavailable; running the full partition.'
+          fi
       - name: Verify complete profile partition
         id: verification
         if: success() && !cancelled() && steps.adoption.outputs.adopted != 'true'
         timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}
         shell: bash
-        run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }} --cross-head-proof .local/verify/cross-head.json
       - name: Require fresh verification or explicit matched adoption
         if: always()
         shell: bash

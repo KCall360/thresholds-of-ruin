@@ -68,7 +68,7 @@ class CellValidation(unittest.TestCase):
             local = {**row, 'log': str(path)}
             complete = verify.receipt_completeness(self.plan, [local], directory, 4)
         self.assertTrue(complete['complete'])
-        self.summary = {'schema_version': 1, 'tier': 'full', 'scope': 'ci-partition', 'ci_profile': 'release',
+        self.summary = {'evidence_origin': 'fresh', 'schema_version': 1, 'tier': 'full', 'scope': 'ci-partition', 'ci_profile': 'release',
                         'ci_partition': 'rust', 'jobs': 4, 'test_workers': 2, 'clean_passed': True, 'gate_passed': True,
                         'graphical_waiver': None, 'waived_steps': [], 'not_run_steps': [], 'planned_steps': [name],
                         'steps': [row], 'receipt_completeness': complete}
@@ -117,6 +117,17 @@ class CellValidation(unittest.TestCase):
         self.assertTrue(complete['complete'])
         self.summary.update(ci_profile='debug', ci_partition='python', planned_steps=[name for name, _, _ in self.plan],
                             steps=stages, receipt_completeness=complete)
+
+    def test_composite_cannot_masquerade_as_fresh_postmerge_source(self):
+        self.summary['evidence_origin'] = 'cross_head_composite'
+        with self.assertRaisesRegex(adoption.EvidenceError, 'composite'):
+            self.validate()
+
+    def test_missing_origin_or_relabelled_composite_cannot_become_source(self):
+        del self.summary['evidence_origin']
+        with self.assertRaises(adoption.EvidenceError): self.validate()
+        self.summary.update(evidence_origin='fresh', cross_head={'union': {'complete': True}})
+        with self.assertRaises(adoption.EvidenceError): self.validate()
 
     def test_python_plan_records_include_selection_build_and_terminal_accounting(self):
         self.configure_python()

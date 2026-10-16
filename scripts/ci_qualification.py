@@ -28,7 +28,8 @@ OTHER_JOBS = {"Repository tooling lint", "Dependencies (advisories)", "Dependenc
               "Rust (windows-latest)", "Rust (ubuntu-latest)", "Change scope and documentation"}
 REQUIRED_CONTROLS = {".github/workflows/ci.yml", "scripts/verify.py", "scripts/test_runner.py",
                      "scripts/parallel_tests.py", "scripts/ci_qualification.py", "scripts/ci_scope.py",
-                     "scripts/ci_observation.py", "scripts/ci_adoption.py"}
+                     "scripts/ci_observation.py", "scripts/ci_adoption.py",
+                     "scripts/ci_head_reuse.py", "scripts/ci_reuse_policy.py", "scripts/ci_reuse_registry.json"}
 CONTROLS = REQUIRED_CONTROLS | {"scripts/service_contract_ci.py", "scripts/graphical_waiver.py",
                                "scripts/ci_policy.py", "scripts/ci_build_key.py", "scripts/service_contract_host.py",
                                "scripts/process_harness.py", "scripts/ruleset_sources.py"}

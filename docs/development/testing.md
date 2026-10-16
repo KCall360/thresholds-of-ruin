@@ -1166,8 +1166,8 @@ or skip work, and prose-only results never become full-run evidence.
 
 On main pushes, [`scripts/ci_adoption.py`](../../scripts/ci_adoption.py) may adopt
 one of the eight fully tested premerge cells after setup and before verification.
-Premerge, manual and weekly full runs still execute every selected cell. The
-prose-only path, matrix and required aggregate names are unchanged. An adopted
+Ordinary premerge, manual and weekly full runs execute every selected cell; the
+bounded corrective-head exception below is separate. The prose-only path, matrix and required aggregate names are unchanged. An adopted
 run cannot become a source: sources must be successful first-attempt PR runs
 whose actual full verification steps passed. There is no adoption chain.
 
@@ -1208,6 +1208,58 @@ failures. Package metadata is not package-byte provenance, and neither path
 certifies every volatile machine input. Keep the existing weekly exhaustive
 run. The control-changing rollout itself requires full CI; measure savings only
 after a real subsequent adoption and a deliberate fallback have been observed.
+
+### Reusing unchanged results after an expectation-only PR correction
+
+[`scripts/ci_head_reuse.py`](../../scripts/ci_head_reuse.py) is a separate optional
+PR-only proof, not a relaxation of exact-tree postmerge adoption. Initially it
+supports modifications to existing study, roster and chill process-test leaves
+listed in [`scripts/ci_reuse_registry.json`](../../scripts/ci_reuse_registry.json).
+Every other tracked path, file mode and inventory must remain identical between
+the old and new synthetic trees. Unknown paths, additions, deletions, renames,
+shared helpers, controls, fixtures and action changes select full verification.
+
+The reviewed leaf skeleton permits only bounded, side-effect-free expected-value
+edits at acceptance assertions, including primitive containers, safe `len`, and
+simple comprehensions over declared immutable values. Actual operands, setup
+guards, control flow and actions stay fixed. Optional immutable imports and
+expectation-only local bindings have explicit rules. Source must be UTF-8.
+The registry pins broad consumer owners and the import-time closure; immutable
+species tuple data can evolve without approving new provider code. Maintaining
+that audit when introducing outside consumers is a code-review obligation.
+Literal-reference guards add protection; they do not infer arbitrary dynamic
+Python/Rust dependencies. Consumer-owner drift needs explicit review and a fresh
+baseline, not an automatic pin refresh.
+
+Source and target must be first attempts of the same open, same-repository PR,
+with unchanged current main base and a direct parent corrective head. The proof
+binds exact API synthetic commits/trees, unchanged controls, unique digest-checked
+artifacts, complete terminal cells, strict resolved environments and sizing, and
+source age within 24 hours. A superseded globally cancelled run may contribute
+already completed cells; interrupted/cancelled cells never qualify. Old receipts
+without the new failure-phase and explicit fresh-origin evidence are ineligible.
+
+Successful whole Rust cells can be borrowed. Python requires exact exhaustive
+selection and terminal accounting; every failed ID must be an ordinary method
+AssertionError at an eligible old-source assertion in a changed leaf. Setup,
+teardown, cleanup, worker errors, failed subtests, skips, waivers, duplicates and
+missing/not-started IDs reject. Every changed module method and applicable cheap
+tooling test runs freshly, with the ordinary application/compiler builds intact.
+A successful final verifier proves the disjoint source/fresh coverage union and
+rechecks clean checkout, live PR/head/base and source/target attempts. Probe failure
+selects full verification; failed or partial fresh execution cannot become a pass.
+
+Completed earned-route results retain their original whole-source fingerprints;
+this reviewed provenance exception never rebases reports or permits cross-head
+resume. Existing fingerprint/resume guards remain unchanged. Hashing overhead and
+ordinary setup/build time remain, so reuse is not an exact runtime prediction.
+Composite summaries identify both sources and cannot be borrowed again, including
+by postmerge adoption: main conservatively runs fresh after a composite PR cell.
+This can reduce correction-to-merge latency without reducing total worker compute
+by the same amount. The control-changing rollout runs full, and requires a future
+fresh baseline before any reuse. Measure a real qualifying correction and deliberate
+fallback before claiming an end-to-end speedup; local synthetic fixtures prove the
+selection/accounting contract, not hosted CI performance.
 
 ### Source-aware dependency cache trial
 

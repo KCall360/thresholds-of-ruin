@@ -21,6 +21,33 @@ import graphical_waiver
 import parallel_tests
 
 
+PHASE_CODES = tuple((getattr(unittest.TestCase, name).__code__, phase) for name, phase in (
+    ('_callTestMethod', 'method'), ('_callSetUp', 'setup'),
+    ('_callTearDown', 'teardown'), ('_callCleanup', 'cleanup')))
+
+
+def failure_context(error):
+    """Fixed interpreter identities; diagnostic failure never masks a test failure."""
+    try:
+        phases, source = set(), None
+        root = Path(__file__).resolve().parent.parent
+        trace = error[2]
+        while trace is not None:
+            code = trace.tb_frame.f_code
+            phases.update(phase for marker, phase in PHASE_CODES if code is marker)
+            try:
+                path = Path(code.co_filename).resolve().relative_to(root)
+            except ValueError:
+                pass
+            else:
+                source = {'path': path.as_posix(), 'line': trace.tb_lineno,
+                          'function': code.co_qualname}
+            trace = trace.tb_next
+        return {'phase': next(iter(phases)) if len(phases) == 1 else 'unknown', 'source': source}
+    except Exception:
+        return {'phase': 'unknown', 'source': None}
+
+
 class ParallelResult:
     """The outcome unittest.main needs from a parallel run."""
     def __init__(self, successful):
@@ -58,19 +85,21 @@ class TimedResult(unittest.TextTestResult):
 
     def addFailure(self, test, err):
         self.outcome('failed')
+        context = failure_context(err)
         super().addFailure(test, err)
-        self.diagnostic(test, err, self.failures[-1][1])
+        self.diagnostic(test, err, self.failures[-1][1], context=context)
 
     def addError(self, test, err):
         self.outcome('error')
+        context = failure_context(err)
         super().addError(test, err)
-        self.diagnostic(test, err, self.errors[-1][1])
+        self.diagnostic(test, err, self.errors[-1][1], context=context)
 
-    def diagnostic(self, test, err, traceback, *, subtest=None):
+    def diagnostic(self, test, err, traceback, *, subtest=None, context=None):
         if self.sink:
             self.sink({'kind': 'diagnostic', 'test_id': test.id(),
                        'seconds': time.monotonic() - self.result_started,
-                       'exception_type': err[0].__name__,
+                       'exception_type': err[0].__name__, 'failure_context': context if context is not None else failure_context(err),
                        'traceback': traceback[-65536:],
                        'traceback_truncated': len(traceback) > 65536,
                        **({'subtest_id': subtest.id()} if subtest is not None else {})})
@@ -97,13 +126,14 @@ class TimedResult(unittest.TextTestResult):
         super().addUnexpectedSuccess(test)
 
     def addSubTest(self, test, subtest, err):
+        context = failure_context(err) if err is not None else None
         if err is not None and self.current is not None:
             self.current['subtests_failed'] += 1
             self.outcome('failed' if issubclass(err[0], test.failureException) else 'error')
         super().addSubTest(test, subtest, err)
         if err is not None:
             reports = self.failures if issubclass(err[0], test.failureException) else self.errors
-            self.diagnostic(test, err, reports[-1][1], subtest=subtest)
+            self.diagnostic(test, err, reports[-1][1], subtest=subtest, context=context)
 
     def stopTest(self, test):
         try:
