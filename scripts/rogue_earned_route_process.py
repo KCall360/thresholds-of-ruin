@@ -5,9 +5,10 @@ save/flow audit runs after decisions, never as navigation or combat input. This
 revision does not certify a complete measurement until all replay/flow gates pass.
 """
 import argparse
-from collections import Counter
-from contextlib import closing
+from collections import Counter, OrderedDict
+from contextlib import closing, contextmanager, nullcontext
 import copy
+from functools import wraps
 import gzip
 import hashlib
 import json
@@ -270,19 +271,164 @@ def _retained_path(output, relative):
     return candidate
 
 
-def _verify_compressed(output, row):
+class RouteMeasurements:
+    """Opt-in fixed-size counters; nested inclusive times must not be summed."""
+    NAMES = ('archive_hash', 'archive_decode', 'archive_cache_hit', 'archive_cache_miss',
+             'archive_cache_evict', 'compress_logs', 'execute', 'resume', 'persist',
+             'start_server', 'connect_player', 'owner_overview', 'barrier',
+             'stop_processes', 'finalize_segment', 'input_fingerprint')
+    SEGMENT_LIMIT = 128
+
+    def __init__(self, *, enabled=False):
+        self.enabled = enabled
+        self.started = time.perf_counter_ns() if enabled else None
+        self.stats = {name: {'calls': 0, 'elapsed_ns': 0, 'bytes': 0} for name in self.NAMES}
+        self.segments, self.omitted_segments = [], 0
+        self.write_failures, self.last_write_error = 0, None
+
+    @contextmanager
+    def span(self, name):
+        if not self.enabled:
+            yield
+            return
+        row = self.stats[name]
+        began = time.perf_counter_ns()
+        try:
+            yield
+        finally:
+            row['calls'] += 1
+            row['elapsed_ns'] += time.perf_counter_ns() - began
+
+    def add(self, name, *, calls=0, size=0):
+        if self.enabled:
+            self.stats[name]['calls'] += calls
+            self.stats[name]['bytes'] += size
+
+    def segment(self, execution):
+        if not self.enabled:
+            return
+        if len(self.segments) == self.SEGMENT_LIMIT:
+            self.omitted_segments += 1
+            return
+        report = execution.report
+        boundary = report.get('transport_boundary', {}) if report.get('outcome') == 'acceptance_prefix_saved' else {}
+        self.segments.append({'commands': report.get('controller', {}).get('commands'),
+            'outcome': report.get('outcome'),
+            'raw_output_bytes': execution.output_budget.total_bytes if execution.output_budget else None,
+            'boundary_reason': ('output_soft_limit' if boundary.get('output_bytes', 0) >= CHUNK_SOFT_BYTES
+                                else 'command_prefix') if boundary else None})
+
+    def write(self, output):
+        if not self.enabled:
+            return
+        try:
+            write_json(Path(output) / 'timing.json', {'format': 'tor-earned-route-timing-v1',
+                'timing_semantics': 'Inclusive nested spans overlap; do not sum. Observational only; not qualification evidence.',
+                'observer_elapsed_ns': time.perf_counter_ns() - self.started,
+                'stats': self.stats, 'segments': self.segments, 'omitted_segments': self.omitted_segments,
+                'write_failures': self.write_failures, 'last_write_error': self.last_write_error})
+        except Exception as error:
+            # Optional diagnostics must not replace the original route exception.
+            self.write_failures += 1
+            self.last_write_error = f'{type(error).__name__}: {error}'[:500]
+            try:
+                print(f'Earned-route timing sidecar unavailable: {self.last_write_error}', file=sys.stderr)
+            except (OSError, ValueError):
+                pass  # A later successful sidecar still reports the failure count.
+
+
+def _timed_route(method):
+    @wraps(method)
+    def measured(self, *args, **kwargs):
+        metrics = getattr(self, 'measurements', None)
+        if metrics is None or not metrics.enabled:
+            return method(self, *args, **kwargs)
+        if method.__name__ in ('execute', 'resume'):
+            self._measurement_admitted = False
+        try:
+            with metrics.span(method.__name__):
+                return method(self, *args, **kwargs)
+        finally:
+            if method.__name__ == 'finalize_segment':
+                metrics.segment(self)
+            if method.__name__ in ('execute', 'resume', 'compress_logs') and self._measurement_admitted:
+                metrics.write(self.output)
+    return measured
+
+
+class ArchiveVerificationCache:
+    """Attempt-local, bounded verified content relationships; never persisted."""
+    def __init__(self, *, max_entries=256, measurements=None):
+        if type(max_entries) is not int or not 1 <= max_entries <= 256:
+            raise ValueError('Archive cache capacity must be between 1 and 256')
+        self.max_entries = max_entries
+        self._verified = OrderedDict()
+        self.measurements = measurements
+
+
+class _HashingReader:
+    """Hash exactly the compressed stream decoded on a cache miss."""
+    def __init__(self, stream):
+        self.stream, self.hash = stream, hashlib.sha256()
+        self.size = 0
+
+    def read(self, size=-1):
+        block = self.stream.read(size)
+        self.hash.update(block)
+        self.size += len(block)
+        return block
+
+
+def _hash_compressed(stream):
+    reader = _HashingReader(stream)
+    while reader.read(1024 * 1024):
+        pass
+    return reader.hash.hexdigest(), reader.size
+
+
+def _verify_compressed(output, row, *, cache=None):
     path = _retained_path(output, row['retained'])
-    if digest(path) != row['compressed_sha256']:
-        raise EvidenceError('Retained compressed log changed')
-    verified, length = hashlib.sha256(), 0
-    with gzip.open(path, 'rb') as source:
-        while block := source.read(1024 * 1024):
-            verified.update(block); length += len(block)
-    if verified.hexdigest() != row['uncompressed_sha256'] or length != row['uncompressed_bytes']:
-        raise EvidenceError('Compressed raw log did not preserve exact bytes')
+    metrics = cache.measurements if cache is not None else None
+    if metrics is not None and not metrics.enabled:
+        metrics = None
+    # Keep one owned handle through hashing, decoding and accepting the binding.
+    with path.open('rb') as compressed:
+        with metrics.span('archive_hash') if metrics else nullcontext():
+            compressed_hash, size = _hash_compressed(compressed)
+            if compressed_hash != row['compressed_sha256']:
+                raise EvidenceError('Retained compressed log changed')
+            if metrics:
+                metrics.add('archive_hash', size=size)
+        key = (compressed_hash, row['uncompressed_sha256'], row['uncompressed_bytes'])
+        if cache is not None and key in cache._verified:
+            cache._verified.move_to_end(key)
+            if metrics:
+                metrics.add('archive_cache_hit', calls=1)
+            return
+        if metrics:
+            metrics.add('archive_cache_miss', calls=1)
+        verified, length = hashlib.sha256(), 0
+        with metrics.span('archive_decode') if metrics else nullcontext():
+            compressed.seek(0)
+            reader = _HashingReader(compressed)
+            with gzip.open(reader, 'rb') as source:
+                while block := source.read(1024 * 1024):
+                    verified.update(block); length += len(block)
+                    if metrics:
+                        metrics.add('archive_decode', size=len(block))
+            if reader.hash.hexdigest() != compressed_hash:
+                raise EvidenceError('Retained compressed bytes changed during verification')
+        if verified.hexdigest() != row['uncompressed_sha256'] or length != row['uncompressed_bytes']:
+            raise EvidenceError('Compressed raw log did not preserve exact bytes')
+        if cache is not None:
+            cache._verified[key] = None
+            if len(cache._verified) > cache.max_entries:
+                cache._verified.popitem(last=False)
+                if metrics:
+                    metrics.add('archive_cache_evict', calls=1)
 
 
-def compress_completed_logs(output):
+def compress_completed_logs(output, *, cache=None):
     """Merge verified lossless retention only after the owning processes stop."""
     output = Path(output)
     index = output / 'retained-raw-logs.json'
@@ -291,7 +437,7 @@ def compress_completed_logs(output):
     for row in manifest:
         if row['original'] in existing:
             raise EvidenceError('Duplicate retained log identity')
-        _verify_compressed(output, row)
+        _verify_compressed(output, row, cache=cache)
         existing[row['original']] = row
     for path in sorted(output.glob('process-*/*.log')):
         relative = str(path.relative_to(output))
@@ -310,7 +456,7 @@ def compress_completed_logs(output):
         row = {'original': relative, 'retained': str(destination.relative_to(output)),
                'uncompressed_sha256': before, 'uncompressed_bytes': size,
                'compressed_sha256': digest(destination)}
-        _verify_compressed(output, row)
+        _verify_compressed(output, row, cache=cache)
         manifest.append(row)
         # Publish retention before reclaiming raw bytes. A retry can verify both.
         write_json(index, manifest)
@@ -410,7 +556,7 @@ def retain_segment(output, save, report, *, milestone=None):
     return retained
 
 
-def verify_retained_segment(output, report):
+def verify_retained_segment(output, report, *, cache=None):
     retained = report['retained_segment']
     for field in ('boundary', *(('report', 'save') if retained['kind'] == 'milestone' else ())):
         if digest(_retained_path(output, retained[field])) != retained[field + '_sha256']:
@@ -435,7 +581,7 @@ def verify_retained_segment(output, report):
             if (row is None or row['uncompressed_bytes'] != expected['bytes']
                     or row['uncompressed_sha256'] != expected['sha256']):
                 raise EvidenceError('Missing lossless retained process trace: ' + name)
-            _verify_compressed(output, row)
+            _verify_compressed(output, row, cache=cache)
 
 
 COMPARISON_SURFACES = {
@@ -494,7 +640,11 @@ class RouteExecution:
         self.output_budget = None
         self.chunk_process_index = 0
         self.phase = 'first_purchase'
-        self.inputs = frozen_inputs(harness.bin)
+        self.measurements = RouteMeasurements(enabled=os.environ.get('TOR_EARNED_ROUTE_TIMING') == '1')
+        self._measurement_admitted = False
+        self.archive_cache = ArchiveVerificationCache(measurements=self.measurements)
+        with self.measurements.span('input_fingerprint'):
+            self.inputs = frozen_inputs(harness.bin)
         self.package_inputs = files(self.package) if self.package.exists() else None
         self.report = {'format': FORMAT, 'arm': arm, 'seed': seed, 'actor': actor,
             'sample_role': 'acceptance_fixture' if seed == 42 else 'original_cohort',
@@ -510,6 +660,11 @@ class RouteExecution:
             'flows': None, 'stock_transfer_flows': {'status': 'unavailable',
                 'reason': 'Adapter does not expose arbitrary acquisition/drop/transfer flows.'}}
 
+    @_timed_route
+    def compress_logs(self):
+        return compress_completed_logs(self.output, cache=self.archive_cache)
+
+    @_timed_route
     def persist(self):
         self.report.update(controller=self.controller.dump(), commands=self.commands,
                            acquisitions=self.acquisitions, phase_commands=dict(self.counts),
@@ -548,6 +703,11 @@ class RouteExecution:
         self.check_time()
         return frame
 
+    @_timed_route
+    def start_server(self, *args, **kwargs):
+        return self.harness.server(*args, **kwargs)
+
+    @_timed_route
     def connect_player(self):
         # Same ordinary arguments as ProcessTestCase.client, with per-frame
         # output/deadline checks already active during the initial disclosure.
@@ -574,6 +734,7 @@ class RouteExecution:
             raise ValueError(f'Ordinary command refused: {value}: {response["error"]}')
         return response
 
+    @_timed_route
     def owner_overview(self):
         frame = self.issue({'type': 'advancement', 'command': 'overview'})
         self.overview = frame['advancement_page']['entries'][0]['value']
@@ -638,6 +799,7 @@ class RouteExecution:
         if identity not in abilities or (self.actor == 2 and 'spark_lance_fire' in abilities):
             raise EvidenceError('Requested ordinary first purchase was not applied')
 
+    @_timed_route
     def barrier(self):
         self.issue({'type': 'request', 'request': {'type': 'save'}})
         private = read_authoritative_evidence(self.harness.save, self.actor)
@@ -650,7 +812,8 @@ class RouteExecution:
         private = self.barrier()
         if self.report['outcome'] == 'earned_hd2':
             self.report['earned_hit_dice_history'] = verify_earned_history(private, self.actor, self.overview)
-        verify_fingerprint(self.inputs)
+        with self.measurements.span('input_fingerprint'):
+            verify_fingerprint(self.inputs)
         if self.package.exists():
             if files(self.package) != self.package_inputs:
                 raise EvidenceError('Frozen package changed during execution')
@@ -730,6 +893,7 @@ class RouteExecution:
             self.report['outcome'] = 'censored_action_budget'
         self.finish_evidence()
 
+    @_timed_route
     def stop_processes(self):
         # Freeze authority before disconnecting the controller can suspend work.
         for process in self.harness.processes[self.chunk_process_index:]:
@@ -749,8 +913,10 @@ class RouteExecution:
         self.report['initial_boundary'] = {'file': initial.name, 'sha256': digest(initial), 'anchor': anchor,
             'state': copy.deepcopy(self.current['state']), 'history': copy.deepcopy(self.current['history'])}
 
+    @_timed_route
     def execute(self, *, prefix_commands=None, initial_save=None):
         self.output.mkdir(parents=True, exist_ok=False)
+        self._measurement_admitted = True
         self.started = time.monotonic()
         self.logical_elapsed = 0.0
         self.report['evidence_status'] = 'running'
@@ -758,16 +924,17 @@ class RouteExecution:
         self.harness.directory, self.harness.save = self.output, self.output / 'game.db'
         self.start_transport()
         try:
-            verify_fingerprint(self.inputs)
+            with self.measurements.span('input_fingerprint'):
+                verify_fingerprint(self.inputs)
             environment = {'TOR_SURVIVAL_DIAGNOSTICS_LOG': str(self.output / 'survival.jsonl')}
             if initial_save is None:
-                self.server = self.harness.server('--checkpoint-interval', 1, scenario=self.package,
+                self.server = self.start_server('--checkpoint-interval', 1, scenario=self.package,
                     character=self.actor, seed=self.seed, save_actor=self.actor, extra_env=environment)
             else:
                 _backup_save(initial_save, self.harness.save)
                 self.report['sample_role'] = 'saved_initial_execution_comparison'
                 self.report['replayed_initial_save_sha256'] = digest(Path(initial_save))
-                self.server = self.harness.server('--checkpoint-interval', 1, '--regions', 2,
+                self.server = self.start_server('--checkpoint-interval', 1, '--regions', 2,
                     seed=None, save_actor=self.actor, extra_env=environment)
             self.connect_player()
             self.retain_initial_boundary()
@@ -782,6 +949,7 @@ class RouteExecution:
             self.finalize_segment()
         return self.report
 
+    @_timed_route
     def finalize_segment(self):
         self.stop_processes()
         try:
@@ -806,13 +974,15 @@ class RouteExecution:
                 'ordinary_evidence_status': 'incomplete',
                 'failure_classification': classify_failure(error), 'failure': self.report['failure']})
 
+    @_timed_route
     def resume(self, *, continuation=False, prefix_commands=None, delete_source=False):
         """Resume one immutable prefix, retaining the logical segment's wall budget."""
         retained = json.loads((self.output / 'attempt.json').read_text(encoding='utf-8'))
         if (self.output / 'retention-failure.json').exists():
             raise EvidenceError('Failed retention cannot be resumed')
-        verify_retained_segment(self.output, retained)
-        controller = validate_resume_binding(retained, self.report, self.package)
+        verify_retained_segment(self.output, retained, cache=self.archive_cache)
+        with self.measurements.span('input_fingerprint'):
+            controller = validate_resume_binding(retained, self.report, self.package)
         if retained['evidence_status'] == 'failed' or retained.get('ordinary_evidence_status') != 'complete':
             raise EvidenceError('A failed attempt is retained, not silently resumed')
         if continuation and retained['outcome'] != 'earned_hd2':
@@ -824,6 +994,7 @@ class RouteExecution:
         gap = time.time() - retained['last_stopped_unix']
         if gap < 0:
             raise EvidenceError('Wall clock moved backwards across saved-prefix transport')
+        self._measurement_admitted = True
         self.logical_elapsed = 0.0 if continuation else retained['logical_elapsed_seconds'] + gap
         self.controller, self.report = controller, retained
         self.inputs, self.package_inputs = retained['frozen_inputs'], retained['package_inputs']
@@ -843,7 +1014,7 @@ class RouteExecution:
                     raise EvidenceError('Source deletion must target this acceptance output only')
                 shutil.rmtree(self.package)
                 self.report['generated_source_deleted'] = True
-            self.server = self.harness.server('--checkpoint-interval', 1, '--regions', 2,
+            self.server = self.start_server('--checkpoint-interval', 1, '--regions', 2,
                 seed=None, save_actor=self.actor,
                 extra_env={'TOR_SURVIVAL_DIAGNOSTICS_LOG': str(self.output / 'survival.jsonl')})
             self.connect_player()
@@ -892,9 +1063,9 @@ def main(argv=None):
                          require_diagnostics=not args.without_diagnostics)
     result = run.execute(prefix_commands=CHUNK_COMMANDS)
     while result.get('outcome') == 'acceptance_prefix_saved' and result.get('ordinary_evidence_status') == 'complete' and result.get('evidence_status') != 'failed':
-        compress_completed_logs(run.output)
+        run.compress_logs()
         result = run.resume(prefix_commands=result['controller']['commands'] + CHUNK_COMMANDS)
-    compress_completed_logs(run.output)
+    run.compress_logs()
     print(json.dumps({key: result.get(key) for key in ('outcome', 'evidence_status', 'ordinary_evidence_status', 'failure')}))
     harness.doCleanups()
     return 0 if (result.get('ordinary_evidence_status') == 'complete'

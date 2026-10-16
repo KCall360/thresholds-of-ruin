@@ -41,9 +41,9 @@ class RogueRouteBudgetProcesses(ProcessTestCase):
         while (report['outcome'] == 'acceptance_prefix_saved'
                 and report.get('ordinary_evidence_status') == 'complete'
                 and report['evidence_status'] != 'failed'):
-            compress_completed_logs(route.output)
+            route.compress_logs()
             report = route.resume(prefix_commands=report['controller']['commands'] + 128)
-        compress_completed_logs(route.output)
+        route.compress_logs()
         self.assertEqual(report['outcome'], 'censored_action_budget', report.get('failure'))
         self.assertEqual(report.get('ordinary_evidence_status'), 'complete', report.get('failure'))
         self.assertEqual(report['controller']['commands'], 269)
