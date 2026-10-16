@@ -109,6 +109,19 @@ def run_snapshot(run):
                                      "path", "head_sha", "run_started_at", "updated_at", "pull_requests")}
 
 
+def run_lifecycle(run):
+    # Attempt and current-run endpoints can retain different update timestamps.
+    # Compare those independently; same-endpoint rechecks retain full snapshots.
+    return {key: value for key, value in run_snapshot(run).items() if key != "updated_at"}
+
+
+def source_interval(run, merged_at, target_created_at, now):
+    started, finished = timestamp(run["run_started_at"]), timestamp(run["updated_at"])
+    require(started <= finished <= merged_at <= target_created_at <= now
+            and now - started <= timedelta(hours=24), "source evidence is stale or outside the merge interval")
+    return started, finished
+
+
 def commit(api, sha):
     require(isinstance(sha, str) and SHA.fullmatch(sha), "invalid commit identity")
     value = api.get(f"{PREFIX}/git/commits/{sha}")
@@ -171,7 +184,7 @@ def inspect(api, target_sha, target_run, now):
         source = api.get(f"{PREFIX}/actions/runs/{source_id}/attempts/1")
         run_identity(source, source_id, "pull_request")
         run_identity(runs[0], source_id, "pull_request")
-        require(run_snapshot(source) == run_snapshot(runs[0]), "source run changed during inspection")
+        require(run_lifecycle(source) == run_lifecycle(runs[0]), "source run changed during inspection")
         require(source["status"] == "completed" and source["conclusion"] == "success" and source["head_sha"] == head,
                 "source run did not pass")
         references = source["pull_requests"]
@@ -183,9 +196,8 @@ def inspect(api, target_sha, target_run, now):
                 and references[0]["base"]["ref"] == "main"
                 and references[0]["base"]["repo"]["id"] == references[0]["head"]["repo"]["id"] == REPOSITORY_ID)),
                 "source run has a conflicting PR association")
-        started, finished = timestamp(source["run_started_at"]), timestamp(source["updated_at"])
-        require(started <= finished <= timestamp(pull["merged_at"]) <= timestamp(target["created_at"]) <= now
-                and now - started <= timedelta(hours=24), "source evidence is stale or outside the merge interval")
+        merged_at, target_created_at = timestamp(pull["merged_at"]), timestamp(target["created_at"])
+        intervals = [source_interval(run, merged_at, target_created_at, now) for run in (source, runs[0])]
         jobs = pages(api, f"{PREFIX}/actions/runs/{source_id}/attempts/1/jobs", "jobs")
         identities = [SOURCE_NAME.fullmatch(job["name"]) for job in jobs if SOURCE_NAME.fullmatch(job["name"])]
         require(len(identities) == 1, "missing or ambiguous GitHub-evaluated source identity")
@@ -197,10 +209,13 @@ def inspect(api, target_sha, target_run, now):
         expected.add(f"Qualification source ({synthetic})")
         require(len(jobs) == len(expected) and {job["name"] for job in jobs} == expected
                 and len({job["id"] for job in jobs}) == len(jobs), "incomplete or duplicate source job inventory")
+        job_intervals = []
         for job in jobs:
             require(job["run_id"] == source_id and job["run_attempt"] == 1 and job["head_sha"] == head
                     and job["status"] == "completed" and job["conclusion"] == "success", "source job did not pass")
-            require(started <= timestamp(job["started_at"]) <= timestamp(job["completed_at"]) <= finished,
+            job_started, job_finished = timestamp(job["started_at"]), timestamp(job["completed_at"])
+            job_intervals.append((job_started, job_finished))
+            require(all(started <= job_started <= job_finished <= finished for started, finished in intervals),
                     "job outside source run interval")
             if job["name"].count(",") == 2:
                 platform = "windows-latest" if job["name"].startswith("Rust (windows-latest,") else "ubuntu-latest"
@@ -212,10 +227,19 @@ def inspect(api, target_sha, target_run, now):
         # Recheck mutable API relationships; artifacts or supplied local claims cannot satisfy these checks.
         latest = api.get(f"{PREFIX}/actions/runs/{source_id}")
         run_identity(latest, source_id, "pull_request")
+        attempt = api.get(f"{PREFIX}/actions/runs/{source_id}/attempts/1")
+        run_identity(attempt, source_id, "pull_request")
         current_runs = pages(api, source_query, "workflow_runs")
-        require(len(current_runs) == 1 and run_snapshot(current_runs[0]) == run_snapshot(source)
-                and run_snapshot(latest) == run_snapshot(source)
+        require(len(current_runs) == 1, "API state changed during inspection")
+        run_identity(current_runs[0], source_id, "pull_request")
+        require(run_snapshot(current_runs[0]) == run_snapshot(runs[0])
+                and run_snapshot(attempt) == run_snapshot(source)
+                and run_lifecycle(latest) == run_lifecycle(source)
                 and api.get(f"{PREFIX}/git/ref/heads/main")["object"]["sha"] == target_sha, "API state changed during inspection")
+        intervals = [source_interval(run, merged_at, target_created_at, now) for run in (latest, attempt, current_runs[0])]
+        require(all(started <= job_started <= job_finished <= finished
+                    for started, finished in intervals for job_started, job_finished in job_intervals),
+                "job outside source run interval")
         report.update(candidate=True, reason="same-tree first-attempt full-run metadata matched",
                       source={"run_id": source_id, "attempt": 1, "checkout_sha": synthetic, "tree": tested["tree"]["sha"],
                               "url": f"https://github.com/{REPOSITORY}/actions/runs/{source_id}/attempts/1"})
