@@ -12,6 +12,7 @@ import unittest
 
 from arena_evaluation import digest, load_complete
 from process_harness import ProcessTestCase, ROOT
+from rogue_roster_package import PLAYABLE_SPECIES
 
 
 class RoguePlayableStudyProcesses(ProcessTestCase):
@@ -31,10 +32,12 @@ class RoguePlayableStudyProcesses(ProcessTestCase):
         inventory = json.loads((inputs / "study.json").read_text())
         self.assertEqual(inventory["compiler_sha256"], digest(compiler))
         self.assertEqual(inventory["validated_packages"], 4)
-        self.assertEqual(inventory["required_cases"], 12)
-        self.assertEqual(inventory["missing_cases"], ["snake-hd1", "rattlesnake-hd1", "hobgoblin-hd1", "zombie-hd1",
-                                                       "quagga-hd1", "centaur-hd1", "yeti-hd1", "troll-hd1", "black_unicorn-hd1", "ice_monster-hd1",
-                                                       "vampire-hd1"])
+        # Pure roster tests own the independent species list; this CLI boundary
+        # must account for every declared case omitted by the single-case run.
+        expected_cases = [f"{species}-hd1" for species in PLAYABLE_SPECIES]
+        self.assertEqual(inventory["required_cases"], len(expected_cases))
+        self.assertEqual(inventory["missing_cases"],
+                         [case for case in expected_cases if case != "emu-hd1"])
         self.assertEqual(inventory["battle_evidence"], "not_run")
         plan_path = inputs / "emu-hd1/plan.json"
         plan = json.loads(plan_path.read_text())
