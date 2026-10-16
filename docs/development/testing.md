@@ -1122,6 +1122,11 @@ that case, but do not independently identify the run's originating PR. A nonempt
 conflicting association rejects the candidate. Source discovery includes
 failed and pending runs, so an old green run cannot hide another result; the
 report rechecks the current run, matching run inventory and main tip at the end.
+Attempt and current-run endpoints can retain different update timestamps. The
+report compares their identity and lifecycle fields, independently requires every
+response's interval to contain all source jobs and finish before merge, and
+rechecks each attempt/list snapshot against the same endpoint. A changed timestamp
+within an endpoint still rejects the candidate; no tolerance or retry is applied.
 
 The report does not trust uploaded observations or cached build products. Even
 a positive comparison is metadata evidence only: it does not independently

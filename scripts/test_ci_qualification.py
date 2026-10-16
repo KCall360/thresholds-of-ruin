@@ -90,6 +90,13 @@ class ApiFixture:
     def jobs(self):
         return self.data[f"{PREFIX}/actions/runs/101/attempts/1/jobs?per_page=100&page=1"]
 
+    def independent_source_responses(self):
+        listing = self.data[f"{PREFIX}/actions/workflows/360984778/runs?event=pull_request&head_sha={HEAD}&per_page=100&page=1"]
+        listing["workflow_runs"] = copy.deepcopy(listing["workflow_runs"])
+        self.data[f"{PREFIX}/actions/runs/101"] = copy.deepcopy(self.source())
+        return {"attempt": self.source(), "list": listing["workflow_runs"][0],
+                "current": self.data[f"{PREFIX}/actions/runs/101"]}
+
 
 class QualificationDecisions(unittest.TestCase):
     def setUp(self):
@@ -260,6 +267,94 @@ class QualificationDecisions(unittest.TestCase):
     def test_endpoint_specific_incidental_fields_do_not_create_false_mismatches(self):
         self.api.data[f"{PREFIX}/actions/runs/101/attempts/1"] = {**self.api.source(), "incidental": "attempt only"}
         self.assertTrue(self.report()["candidate"])
+
+    def test_recorded_endpoint_completion_times_qualify_without_relaxing_snapshots(self):
+        # Captured twice on 2026-10-16, 09:27-09:29 UTC, from run 38876716724:
+        # https://github.com/KCall360/thresholds-of-ruin/actions/runs/38876716724
+        # These are the subsequent attempt/current/repository-list observations,
+        # not the original reporter's unsaved workflow-list response pair.
+        responses = self.api.independent_source_responses()
+        for endpoint, response in responses.items():
+            response.update(run_started_at="2026-10-16T08:53:30Z", pull_requests=[],
+                            updated_at="2026-10-16T09:20:37Z" if endpoint == "attempt" else "2026-10-16T09:20:36Z")
+        self.api.data[f"{PREFIX}/pulls/9"]["merged_at"] = "2026-10-16T09:22:24Z"
+        self.api.data[f"{PREFIX}/actions/runs/102"]["created_at"] = "2026-10-16T09:22:27Z"
+        for job in self.api.jobs()["jobs"]:
+            job.update(started_at="2026-10-16T08:53:33Z", completed_at="2026-10-16T09:20:36Z")
+        self.assertNotEqual(qualification.run_snapshot(responses["attempt"]),
+                            qualification.run_snapshot(responses["list"]))
+        result = self.report()
+        self.assertTrue(result["candidate"], result)
+        self.assertEqual(self.api.calls.count(f"{PREFIX}/actions/runs/101/attempts/1"), 2)
+
+    def test_each_endpoint_completion_time_must_fit_merge_and_job_intervals(self):
+        for endpoint in ("attempt", "list", "current"):
+            for finished in (None, "invalid", "2026-10-16T11:40:00+00:00", "2026-10-16T10:59:59Z",
+                             "2026-10-16T11:38:59Z", "2026-10-16T11:50:01Z", "2026-10-16T12:00:01Z"):
+                with self.subTest(endpoint=endpoint, finished=finished):
+                    self.api = ApiFixture()
+                    responses = self.api.independent_source_responses()
+                    responses[endpoint]["updated_at"] = finished
+                    self.rejects()
+
+    def test_each_endpoint_start_time_must_be_valid_and_unchanged(self):
+        for endpoint in ("attempt", "list", "current"):
+            for started in (None, "invalid", "2026-10-14T11:00:00Z", "2026-10-16T11:01:01Z",
+                            "2026-10-16T11:40:01Z", "2026-10-16T12:00:01Z"):
+                with self.subTest(endpoint=endpoint, started=started):
+                    self.api = ApiFixture()
+                    responses = self.api.independent_source_responses()
+                    responses[endpoint]["run_started_at"] = started
+                    self.rejects()
+
+    def test_each_reread_endpoint_rejects_even_valid_timestamp_mutation(self):
+        paths = (f"{PREFIX}/actions/runs/101/attempts/1",
+                 f"{PREFIX}/actions/workflows/360984778/runs?event=pull_request&head_sha={HEAD}&per_page=100&page=1")
+        for endpoint in paths:
+            with self.subTest(endpoint=endpoint):
+                self.api = ApiFixture()
+                self.api.independent_source_responses()
+                get, reads = self.api.get, 0
+                def racing_get(path):
+                    nonlocal reads
+                    value = get(path)
+                    if path == endpoint:
+                        reads += 1
+                        if reads == 2:
+                            response = value["workflow_runs"][0] if "workflow_runs" in value else value
+                            response["updated_at"] = "2026-10-16T11:40:01Z"
+                    return value
+                self.api.get = racing_get
+                self.rejects()
+
+    def test_each_endpoint_retains_semantic_identity_and_pr_association_checks(self):
+        changes = (("id", 103), ("run_attempt", 2), ("status", "in_progress"), ("conclusion", "failure"),
+                   ("head_sha", "2" * 40), ("workflow_id", 99), ("path", ".github/workflows/other.yml"),
+                   ("event", "push"), ("pull_requests", []), ("head_repository", {"id": 7}))
+        for endpoint in ("attempt", "list", "current"):
+            for key, value in changes:
+                with self.subTest(endpoint=endpoint, key=key):
+                    self.api = ApiFixture()
+                    responses = self.api.independent_source_responses()
+                    responses[endpoint][key] = value
+                    self.rejects()
+
+    def test_reread_attempt_cannot_change_lifecycle_or_pr_association(self):
+        for key, changed in (("run_attempt", 2), ("status", "in_progress"), ("conclusion", "failure"),
+                             ("head_sha", "2" * 40), ("pull_requests", []), ("head_repository", {"id": 7})):
+            with self.subTest(key=key):
+                self.api = ApiFixture()
+                get, reads = self.api.get, 0
+                def racing_get(path):
+                    nonlocal reads
+                    value = get(path)
+                    if path == f"{PREFIX}/actions/runs/101/attempts/1":
+                        reads += 1
+                        if reads == 2:
+                            value[key] = changed
+                    return value
+                self.api.get = racing_get
+                self.rejects()
 
     def test_untrusted_api_error_text_is_not_reported(self):
         self.api.data[f"{PREFIX}/actions/runs/102"] = ValueError("secret diagnostic sentinel")
