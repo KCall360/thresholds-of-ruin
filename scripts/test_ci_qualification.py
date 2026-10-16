@@ -52,8 +52,7 @@ class ApiFixture:
                          "status": "completed", "conclusion": "success", "name": name, "steps": steps,
                          "labels": ["windows-latest" if "windows-latest," in name else "ubuntu-latest"],
                          "started_at": "2026-10-16T11:01:00Z", "completed_at": "2026-10-16T11:39:00Z"})
-        paths = (".github/workflows/ci.yml", "scripts/verify.py", "scripts/test_runner.py",
-                 "scripts/parallel_tests.py", "scripts/ci_qualification.py", "scripts/ci_scope.py", "scripts/ci_observation.py", "scripts/ci_adoption.py")
+        paths = sorted(qualification.REQUIRED_CONTROLS)
         tree = {"sha": TREE, "truncated": False,
                 "tree": [{"path": path, "type": "blob", "mode": "100644", "sha": "1" * 40} for path in paths]}
         self.data = {

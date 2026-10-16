@@ -50,6 +50,8 @@ BUILD_TEST_ENVIRONMENT = (
     "PYTHONUTF8", "PYTHONIOENCODING", "VIRTUAL_ENV",
     "TOR_TEST_PROFILE", "TOR_SCENARIO_COMPILER", "TOR_TEST_BINARIES", "TOR_LOCAL_MOUSE_WAIVER", "TOR_TEST_PRIORITY",
     "TOR_ARENA_MATRIX", "TOR_SAVED_EXPLORATION_REGIONS", "TOR_PERFORMANCE_REGIONS", "TOR_PERFORMANCE_CYCLES",
+    "TOR_EARNED_ROUTE_ARTIFACTS", "TOR_EARNED_ROUTE_TIMING",
+    "TOR_EARNED_ROUTE_PRODUCTION_SOURCE", "TOR_EARNED_ROUTE_CANDIDATE_SOURCE",
 )
 # Bounded explicit inputs, not recursive discovery or a claim of completeness.
 CONFIG_FILES = (
@@ -58,6 +60,7 @@ CONFIG_FILES = (
     "deny.toml", "ruff.toml", "AGENTS.md", "CONTRIBUTING.md", "docs/development/testing.md",
     "scripts/verify.py", "scripts/test_runner.py", "scripts/parallel_tests.py",
     "scripts/graphical_waiver.py", "scripts/ci_observation.py",
+    "scripts/ci_head_reuse.py", "scripts/ci_reuse_policy.py", "scripts/ci_reuse_registry.json",
     "scripts/ci_scope.py", "scripts/ci_build_key.py", "scripts/ci_adoption.py", "scripts/service_contract_ci.py",
     "scripts/service_contract_host.py", "scripts/process_harness.py", "scripts/ruleset_sources.py",
     "scripts/ci_policy.py", "scripts/ci_coverage_manifest.json", "scripts/ci_shadow.py",

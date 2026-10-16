@@ -657,6 +657,7 @@ def main(argv=None):
                         help="CI-only profile of full; both profiles remain required")
     parser.add_argument("--ci-partition", choices=CI_PARTITIONS,
                         help="CI-only Rust or Python/native stages; requires full and --ci-profile; all partitions are required")
+    parser.add_argument("--cross-head-proof", type=Path, help="CI-only optional current-target reuse proof; invalid proof runs full")
     parser.add_argument("--base", default="origin/main", help="Compare against this ref to find changes")
     parser.add_argument("--jobs", type=int, help="CARGO_BUILD_JOBS; chosen from free memory by default")
     parser.add_argument("--rerun-failed", action="store_true", help="Rerun failed Python tests once to show whether they are intermittent")
@@ -678,6 +679,8 @@ def main(argv=None):
         parser.error("--ci-profile requires the full tier")
     if args.ci_partition and (args.tier != "full" or args.ci_profile is None):
         parser.error("--ci-partition requires full and --ci-profile")
+    if args.cross_head_proof and (args.tier != "full" or not args.ci_partition or args.fail_fast or args.rerun_failed):
+        parser.error("--cross-head-proof requires an ordinary full CI partition")
     if args.waive_local_mouse and (args.ci_profile or os.environ.get("CI")):
         parser.error("--waive-local-mouse is local only")
     graphical_manifest = None
@@ -762,6 +765,18 @@ def main(argv=None):
                 env = {**env, "_graphical_waiver": graphical_manifest}
             updated.append((name, command, env))
         steps = updated
+    cross_head = None
+    if args.cross_head_proof:
+        import ci_head_reuse
+        try:
+            raw = args.cross_head_proof.read_bytes()
+            if len(raw) > 2 * 1024 * 1024: raise ValueError("proof budget")
+            candidate = ci_head_reuse.adoption.document(raw)
+            selected = ci_head_reuse.selected_plan(candidate, steps, profile=args.ci_profile,
+                partition=args.ci_partition, jobs=jobs, workers=workers, directory=logs)
+            steps, cross_head = selected, candidate
+        except Exception:
+            print("Optional cross-head evidence unavailable or ineligible; running full partition.")
     results, failed = [], False
     with Lock(ROOT / ".local" / "verify.lock"):
         for name, command, env in steps:
@@ -772,6 +787,15 @@ def main(argv=None):
             failed |= result["code"] != 0
             results.append(result)
             print(f"  {name}: {'WAIVED' if result['note'].startswith('WAIVED') else 'ok' if result['code'] == 0 else 'FAILED'} ({result['seconds']:.0f}s)", flush=True)
+
+    cross_union = None
+    if cross_head is not None and not failed:
+        try:
+            cross_union = ci_head_reuse.union(cross_head, steps, results, logs, jobs)
+            if cross_union.get("complete") is not True: raise ValueError("incomplete union")
+        except Exception:
+            failed = True
+            cross_union = {"complete": False, "reason": "fresh and borrowed coverage did not qualify"}
 
     lines = [f"{'step':16} {'result':8} {'time':>7}  note"]
     for r in results:
@@ -817,6 +841,9 @@ def main(argv=None):
                            "status": "waived" if result["step"] in waived else "not_run" if result["code"] is None
                                      else "passed" if result["code"] == 0 else "failed",
                            "command": result.get("command", command)} for result, (_, command, _) in zip(results, steps)]}
+    evidence["evidence_origin"] = "cross_head_composite" if cross_head is not None else "fresh"
+    if cross_head is not None:
+        evidence["cross_head"] = {**cross_head, "union": cross_union}
     (logs / "summary.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
     print(summary)
     return 1 if failed else 0

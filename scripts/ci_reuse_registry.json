@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "review_basis": "Reviewed expectation-only leaves; new outside consumers require code-review maintenance. Completed route result reuse never authorizes cross-head resume.",
+  "leaves": {
+    "scripts/test_rogue_playable_study_process.py": {
+      "methods": [
+        "RoguePlayableStudyProcesses.test_actual_first_purchases_preserve_identity_through_cli_and_source_free_replay",
+        "RoguePlayableStudyProcesses.test_actual_unspent_starters_preserve_identity_through_cli_and_source_free_replay"
+      ],
+      "acceptance_functions": [
+        "RoguePlayableStudyProcesses.study_round_trip",
+        "RoguePlayableStudyProcesses.test_actual_unspent_starters_preserve_identity_through_cli_and_source_free_replay",
+        "RoguePlayableStudyProcesses.test_actual_first_purchases_preserve_identity_through_cli_and_source_free_replay"
+      ],
+      "optional_imports": {
+        "PLAYABLE_SPECIES": "rogue_roster_package"
+      },
+      "immutable_names": [
+        "PLAYABLE_SPECIES"
+      ],
+      "skeleton": "09b6e559f06edb2c1730c34a2db1f1eef04b9c72e743ce151a81254870d079cb"
+    },
+    "scripts/test_rogue_roster_process.py": {
+      "methods": [
+        "RogueRosterProcesses.test_all_catalog_recipes_compile_and_disclose_their_real_owned_hd",
+        "RogueRosterProcesses.test_ordinary_quagga_sequence_and_text_disclosure_survive_source_free_restart"
+      ],
+      "acceptance_functions": [
+        "RogueRosterProcesses.test_all_catalog_recipes_compile_and_disclose_their_real_owned_hd",
+        "RogueRosterProcesses.test_ordinary_quagga_sequence_and_text_disclosure_survive_source_free_restart"
+      ],
+      "optional_imports": {},
+      "immutable_names": [
+        "SPECIES"
+      ],
+      "skeleton": "4815d5f5d787304a2166c82fd513e1d7856a76723d15314e2f23b95dc7b032c5"
+    },
+    "scripts/test_rogue_chill_process.py": {
+      "methods": [
+        "RogueChillProcesses.test_actual_checked_chill_preserves_care_holds_through_restart_and_explicit_thaw_resume"
+      ],
+      "acceptance_functions": [
+        "RogueChillProcesses.test_actual_checked_chill_preserves_care_holds_through_restart_and_explicit_thaw_resume"
+      ],
+      "optional_imports": {},
+      "immutable_names": [],
+      "skeleton": "8bed5113bee26cbe57d6c6b2ecd01fe3f7a518c8717dcbdaca7130e2728ce5fd"
+    }
+  },
+  "owner_blobs": {
+    "scripts/rogue_earned_route_process.py": "724fa797f15d8167243e27fc0b46472d8c804eef",
+    "scripts/test_rogue_earned_route_process.py": "05b008d3006a1ba0f1fc3e1ad88c344e990c6ae0",
+    "scripts/test_rogue_route_budget_process.py": "f463cad0a8b5054da6c61ad979863b86554948e0",
+    "scripts/process_work_budget.py": "d53bdeb14499ab68913882f76e79095173f925af",
+    "scripts/arena_evaluation.py": "56c5e931afae031c4f9d9be4f229e6905bc3e2a5",
+    "scripts/process_harness.py": "cc22563cb7893477126b3572a900ff65f0e4c61c",
+    "scripts/service_contract_ci.py": "d8fbe7f5e801e20bd41f3cf41a931353e75ab5f9",
+    "scripts/service_contract_host.py": "709a15985f76e24773131c7852084e893bcc1feb",
+    "scripts/service_contract_tests.py": "5cba27bcdeb04ca52c30a3465077205c16ceb10f",
+    "crates/server/test_support/packages.rs": "855cace6f63151c82871130298b33f1d58f90ea4",
+    "crates/simulation/tests/it/creature_state.rs": "f4c6b3b82e224809c4023a27b88642247c49dc70",
+    "crates/server/src/storage.rs": "1563b8f092770401d1ede94cb17369470ae992dd",
+    "crates/server/tests/it/region_horizon.rs": "9c7956dc2e0779c3eaf070b30e7a4b4c0af28f6a",
+    "crates/server/tests/it/process.rs": "1d444c9f207ce6fb24dedfed6c2e85ffd593665b",
+    "crates/server/examples/latency_bench.rs": "349e19745576f7f769db64e4b4961f2c209a0f34"
+  },
+  "import_blobs": {
+    "scripts/arena_matrix.py": "6ea9861ff1bc14c885a03f02be1f65f7342eba59",
+    "scripts/ruleset_sources.py": "a092039ce09b15e0cc398a2bb6b31921f217d4db",
+    "scripts/process_harness.py": "cc22563cb7893477126b3572a900ff65f0e4c61c",
+    "scripts/arena_evaluation.py": "56c5e931afae031c4f9d9be4f229e6905bc3e2a5",
+    "scripts/scalar_wire.py": "0238e7122f7c7a90f46c923d89ecc464f835e69f",
+    "scripts/process_rule_fixtures.py": "4e8534a0f337ae28ccaa1d3956d12805c423b183",
+    "scripts/arena_recipes.json": "18815b7614c59051114360d909c04808384649e8"
+  },
+  "provider_skeleton": "b31f7fc1a2592d0c7392c8ee3db833c5d777f1c479a15d4d614a24910c8fc0ab"
+}

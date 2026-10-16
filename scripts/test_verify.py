@@ -578,6 +578,50 @@ class CiPartitions(unittest.TestCase):
             self.assertEqual(len(list((root / ".local/verify").glob("*/summary.json"))), 4)
 
 
+class CrossHeadExecution(unittest.TestCase):
+    def execute(self, *, malformed=False, failed=False, union_complete=True):
+        import ci_head_reuse
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            proof = root / 'proof.json'
+            proof.write_text('{' if malformed else '{"source":{},"target":{},"artifact":{}}')
+            result = {'step': 'fixture', 'code': int(failed), 'seconds': 0, 'log': None, 'note': ''}
+            plan = [('fixture', ['python', 'fixture.py'], {})]
+            with patch.object(verify, 'ROOT', root), patch.object(verify.subprocess, 'run') as command, \
+                    patch.object(verify, 'running_builds', return_value=[]), \
+                    patch.object(verify, 'plan', return_value=plan), \
+                    patch.object(verify, 'free_memory_gb', return_value=8), \
+                    patch.object(verify, 'run_step', return_value=result) as run, \
+                    patch.object(ci_head_reuse, 'selected_plan', return_value=plan) as select, \
+                    patch.object(ci_head_reuse, 'union', return_value={'complete': union_complete}) as union, \
+                    redirect_stdout(StringIO()):
+                command.return_value.stdout = json.dumps(metadata())
+                code = verify.main(['full', '--ci-profile', 'debug', '--ci-partition', 'python',
+                                    '--jobs', '1', '--test-workers', '1', '--cross-head-proof', str(proof)])
+                evidence = json.loads(next(root.glob('.local/verify/*/summary.json')).read_text())
+                return code, evidence, run.call_count, select.call_count, union.call_count
+
+    def test_invalid_optional_proof_falls_back_to_ordinary_full_execution(self):
+        code, summary, ran, selected, union = self.execute(malformed=True)
+        self.assertEqual((code, ran, selected, union), (0, 1, 0, 0))
+        self.assertEqual(summary['evidence_origin'], 'fresh')
+
+    def test_composite_is_explicit_and_requires_final_union(self):
+        code, summary, ran, selected, union = self.execute()
+        self.assertEqual((code, ran, selected, union), (0, 1, 1, 1))
+        self.assertEqual(summary['evidence_origin'], 'cross_head_composite')
+        self.assertTrue(summary['cross_head']['union']['complete'])
+        code, summary, *_ = self.execute(union_complete=False)
+        self.assertEqual(code, 1)
+        self.assertFalse(summary['gate_passed'])
+
+    def test_failing_fresh_checks_cannot_be_rescued_by_prior_evidence(self):
+        code, summary, _, _, union = self.execute(failed=True)
+        self.assertEqual((code, union), (1, 0))
+        self.assertFalse(summary['gate_passed'])
+        self.assertEqual(summary['evidence_origin'], 'cross_head_composite')
+
+
 class LocalMouseWaiver(unittest.TestCase):
     def test_exact_failure_is_waivable_only_with_local_opt_in(self):
         name = verify.LOCAL_MOUSE_TEST
