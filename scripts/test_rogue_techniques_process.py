@@ -75,6 +75,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
             ("rogue.eight_species_foes", {"rogue.emu", "rogue.snake", "rogue.hobgoblin"}, "actor", 4),
             ("rogue.bandages", {"rogue.clean_bandage"}, "item", 1),
             ("rogue.rations", {"rogue.ration"}, "item", 1),
+            ("rogue.restore_strength", {"rogue.restore_strength"}, "item", 1),
         )
         self.assertEqual([row["id"] for row in receipt["decisions"]], [row[0] for row in expected])
         identities = []

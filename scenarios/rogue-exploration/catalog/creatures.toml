@@ -25,6 +25,18 @@ anatomy = { slots = [] }
 displacement = { size = "small", anchored = false }
 melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 
+# Venomous is eligibility only. VN1 owns the separate checked poison rider;
+# the unmodified natural bite has no poison descriptor. Other snake values are provisional.
+[creatures.species."rogue.rattlesnake"]
+behavior = { disposition = "mean", idle = "wait", memory_ticks = 1000 }
+kind = "animal"
+subtypes = ["reptilian"]
+attributes = { strength = 0, speed = 2, intellect = 0, willpower = 0, awareness = 1, presence = 0 }
+anatomy = { slots = [] }
+displacement = { size = "small", anchored = false }
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "venomous" } }]
+melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
+
 # Ordinary combat templates explicitly own acquisition disposition; population
 # admission remains separate. Wait behavior and memory duration are provisional.
 # Damage dice and purchase ordinals follow the accepted roster. Other numbers

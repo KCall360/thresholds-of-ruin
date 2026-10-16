@@ -59,3 +59,26 @@ value = { id = "rogue.regeneration", name = "Regeneration", prerequisites = [], 
 op = "add"
 path = ["flags", "regenerative"]
 value = { id = "regenerative", name = "Regenerative", modifiers = [] }
+
+# VN1 adds only the accepted Physical-checked Strength loss to natural contact.
+# No poison descriptor on the bite: immunity suppresses the rider, not damage.
+# Snake-derived timing and signature priority remain provisional TOR tuning.
+[[overrides]]
+op = "add"
+path = ["flags", "venomous"]
+value = { id = "venomous", name = "Venomous", modifiers = [] }
+
+[[overrides]]
+op = "add"
+path = ["descriptors", "poison"]
+value = { id = "poison", name = "Poison" }
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.venomous_bite"]
+value = { id = "rogue.venomous_bite", name = "Venomous Bite", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "physical" }, effects = [{ kind = "lose_attribute", attribute = "strength", amount = { kind = "fixed", amount = 1 } }], descriptors = ["poison"] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["talents", "rogue.venomous_bite"]
+value = { id = "rogue.venomous_bite", name = "Venomous Bite", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "flag", flag = "venomous", present = true }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rogue.venomous_bite" } }] }

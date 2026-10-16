@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "scenarios/rogue-exploration"
-ORDINARY = {"emu": (1, [(1, 2)]), "snake": (1, [(1, 3)]),
+ORDINARY = {"emu": (1, [(1, 2)]), "snake": (1, [(1, 3)]), "rattlesnake": (2, [(1, 6)]),
             "hobgoblin": (1, [(1, 8)]), "zombie": (2, [(1, 8)]),
             "quagga": (3, [(1, 5), (1, 5)]),
             "centaur": (4, [(1, 2), (1, 5), (1, 5)]),
@@ -48,7 +48,7 @@ class RogueRosterContent(unittest.TestCase):
 
     def test_every_rogue_species_owns_explicit_reference_disposition(self):
         species = source("catalog/creatures.toml")["creatures"]["species"]
-        mean = {"emu", "snake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire"}
+        mean = {"emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire"}
         passive = {"human", "ice_monster", "centaur", "yeti"}
         self.assertEqual(set(species), {"rogue." + name for name in mean | passive})
         for name in mean | passive:
@@ -153,15 +153,15 @@ class RogueRosterContent(unittest.TestCase):
                 self.assertEqual(len(fixture["characters"][0]["creature"]["hit_dice"]), 16)
                 self.assertEqual(fixture["characters"][0]["loadout"], manifest["characters"][0]["loadout"])
 
-    def test_production_population_selects_eleven_species_and_preserves_stock_order(self):
+    def test_production_population_selects_twelve_species_and_preserves_stock_order(self):
         manifest = source("scenario.toml")
         activation = manifest["floor_activation"]
         profile = activation["profiles"]["rogue.low_depth"]
         self.assertEqual(profile["version"], 1)
         stages = profile["stages"]
         self.assertEqual([row["id"] for row in stages],
-                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations"])
-        self.assertEqual([row["count"] for row in stages], [[4, 4], [1, 1], [1, 1]])
+                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength"])
+        self.assertEqual([row["count"] for row in stages], [[4, 4], [1, 1], [1, 1], [1, 1]])
         actor = stages[0]
         self.assertEqual(actor["kind"], "actors")
         self.assertEqual(actor["version"], 1)
@@ -172,7 +172,7 @@ class RogueRosterContent(unittest.TestCase):
         # independent pinned-selector oracle in test_rogue_activation_candidate.
         self.assertEqual({row["archetype"] for band in actor["bands"] for row in band["choices"]},
                          {"rogue." + name for name in (
-                             "emu", "snake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "black_unicorn", "vampire")})
+                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "black_unicorn", "vampire")})
         chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5)}
         for band in actor["bands"]:
             for row in band["choices"]:
@@ -187,7 +187,7 @@ class RogueRosterContent(unittest.TestCase):
             "version": 1, "choices": [
                 {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
                 {"archetype": "rogue.clean_bandage", "weight": 1, "quantity": 1}]}})
-        for stage, identity, quantity in zip(stages[1:], ("clean_bandage", "ration"), (2, 1), strict=True):
+        for stage, identity, quantity in zip(stages[1:], ("clean_bandage", "ration", "restore_strength"), (2, 1, 1), strict=True):
             self.assertEqual(stage["kind"], "items")
             self.assertEqual(stage["bands"], [{"depth": {"kind": "open", "minimum": 1},
                               "choices": [{"archetype": "rogue." + identity, "weight": 1}]}])

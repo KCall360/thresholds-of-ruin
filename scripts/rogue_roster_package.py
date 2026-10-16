@@ -12,7 +12,7 @@ from arena_matrix import toml_source
 from process_harness import ROOT
 
 PRODUCTION = ROOT / "scenarios/rogue-exploration"
-SPECIES = ("emu", "snake", "hobgoblin", "zombie", "quagga", "centaur", "yeti", "troll",
+SPECIES = ("emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "centaur", "yeti", "troll",
            "black_unicorn", "ice_monster", "vampire")
 # Every currently authored foe is selected by production population.
 PLAYABLE_SPECIES = SPECIES

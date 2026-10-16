@@ -16,12 +16,12 @@ from rogue_roster_study import (
 
 
 class RoguePlayableStudyTests(unittest.TestCase):
-    def test_playable_modes_bound_the_eleven_recipe_candidates_to_real_hd_one(self):
+    def test_playable_modes_bound_the_twelve_recipe_candidates_to_real_hd_one(self):
         for reference in ("playable-unspent", "playable-first-purchase"):
             inventory = run_manifest(case_ids=["hobgoblin-hd1", "zombie-hd1", "quagga-hd1"],
                                      reference=reference)
             self.assertEqual(inventory["reference"], reference)
-            self.assertEqual(inventory["required_cases"], 11)
+            self.assertEqual(inventory["required_cases"], 12)
             self.assertEqual(inventory["required_reference_hd"], [1])
             self.assertEqual(inventory["expected_runs"], 24)
             self.assertEqual(inventory["seeds"], ["0", "1"])
@@ -31,7 +31,7 @@ class RoguePlayableStudyTests(unittest.TestCase):
             self.assertEqual(inventory["arms"], {"baseline": "warrior", "candidate": "mage"})
             self.assertEqual(set(row["species"] for row in
                                  source_cases(encounter_sources(), reference)), {
-                "rogue.emu", "rogue.snake", "rogue.hobgoblin", "rogue.zombie",
+                "rogue.emu", "rogue.snake", "rogue.rattlesnake", "rogue.hobgoblin", "rogue.zombie",
                 "rogue.quagga", "rogue.centaur", "rogue.yeti", "rogue.troll", "rogue.ice_monster", "rogue.black_unicorn", "rogue.vampire"})
         for reference, cases in (("unknown", None), ("playable-unspent", ["dragon-hd1"]),
                                  ("playable-first-purchase", ["quagga-hd6"])):

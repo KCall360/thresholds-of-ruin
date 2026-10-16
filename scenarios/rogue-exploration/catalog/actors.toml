@@ -11,6 +11,13 @@ turn_ticks = 100
 body = { cells = [[0,0,0]], eye = [0,0,0], mass = 3 }
 creature = { species = "rogue.snake", name = "snake", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "stealth"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
 
+# R owns VN1 at HD1; its second racial point is unspent. Snake body/timing
+# defaults are provisional TOR inputs, not a new species-balance claim.
+[actors."rogue.rattlesnake"]
+turn_ticks = 100
+body = { cells = [[0,0,0]], eye = [0,0,0], mass = 3 }
+creature = { species = "rogue.rattlesnake", name = "rattlesnake", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "stealth"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.venomous_bite" } }] }, { source = "racial", purchases = [] }] }
+
 # Complete accepted combat purchases; scenario selection controls population eligibility.
 # Species dispositions live in creatures.toml; C/Y/V birth stock belongs to population choices.
 [actors."rogue.hobgoblin"]
