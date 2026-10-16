@@ -128,8 +128,10 @@ def bounded_worker(command, *, timeout=90):
                                     timeout=timeout, check=False)
         except (OSError, subprocess.TimeoutExpired):
             return False
-        if result.returncode in (-2, 130, -15, 143):
-            raise SystemExit(130 if result.returncode in (-2, 130) else 143)
+        if result.returncode in (-2, 130, 0xC000013A, -1073741510):  # Windows STATUS_CONTROL_C_EXIT, signed or unsigned.
+            raise SystemExit(130)
+        if result.returncode in (-15, 143):
+            raise SystemExit(143)
         output.seek(0)
         return result.returncode == 0 and output.read(9) == b"adopted\n"
 

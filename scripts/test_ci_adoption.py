@@ -217,11 +217,32 @@ class BoundedWorker(unittest.TestCase):
                     adoption.bounded_worker([sys.executable, '-c', f'raise SystemExit({code})'])
                 self.assertEqual(result.exception.code, code)
 
-    @unittest.skipIf(os.name == 'nt', 'POSIX signal status; explicit exit codes are covered everywhere')
+    def test_signal_fixture_has_no_platform_skip(self):
+        namespace = {'__name__': 'platform_probe', '__file__': __file__}
+        source = Path(__file__).read_text(encoding='utf-8')
+        with patch.object(os, 'name', 'nt'):
+            exec(compile(source, __file__, 'exec'), namespace)
+        method = namespace['BoundedWorker'].test_actual_signal_termination_is_preserved
+        self.assertFalse(getattr(method, '__unittest_skip__', False), 'Windows must execute its applicable interrupt witness')
+
+    def test_windows_control_c_status_is_preserved(self):
+        for code in (0xC000013A, -1073741510):
+            with self.subTest(code=code), patch.object(adoption.subprocess, 'run', return_value=SimpleNamespace(returncode=code)):
+                with self.assertRaises(SystemExit) as result:
+                    adoption.bounded_worker(['fixture-worker'])
+                self.assertEqual(result.exception.code, 130)
+
     def test_actual_signal_termination_is_preserved(self):
-        with self.assertRaises(SystemExit) as result:
-            adoption.bounded_worker([sys.executable, '-c', 'import os, signal; os.kill(os.getpid(), signal.SIGTERM)'])
-        self.assertEqual(result.exception.code, 143)
+        # raise_signal(SIGINT) exercises a real Python interrupt on Windows too;
+        # Windows os.kill(SIGTERM) instead calls TerminateProcess with exit code 15.
+        cases = [('import signal; signal.raise_signal(signal.SIGINT)', 130)]
+        if os.name != 'nt':
+            cases.append(('import os, signal; os.kill(os.getpid(), signal.SIGTERM)', 143))
+        for code, expected in cases:
+            with self.subTest(code=code):
+                with self.assertRaises(SystemExit) as result:
+                    adoption.bounded_worker([sys.executable, '-c', code])
+                self.assertEqual(result.exception.code, expected)
 
     def test_cancellation_is_never_converted_to_adoption_or_fallback(self):
         with patch.object(adoption.subprocess, 'run', side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):

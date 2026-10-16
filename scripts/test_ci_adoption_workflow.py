@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from test_verify import workflow_bash
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -37,7 +39,13 @@ class WorkflowAdoption(unittest.TestCase):
                     exec(compile(program, '<workflow cell gate>', 'exec'), {})
                 self.assertEqual(result.exception.code == 0, expected)
 
-    @unittest.skipUnless(shutil.which('bash'), 'The workflow shell fixture needs bash')
+    def test_shell_fixture_requires_native_shell_instead_of_skipping(self):
+        namespace = {'__name__': 'shell_probe', '__file__': __file__}
+        with patch.object(shutil, 'which', return_value=None):
+            exec(compile(Path(__file__).read_text(encoding='utf-8'), __file__, 'exec'), namespace)
+        method = namespace['WorkflowAdoption'].test_optional_helper_failures_fall_through_but_interrupts_stop
+        self.assertFalse(getattr(method, '__unittest_skip__', False))
+
     def test_optional_helper_failures_fall_through_but_interrupts_stop(self):
         block = workflow_step('Adopt independently matched premerge cell when available')
         self.assertIn('shell: bash', block)
@@ -50,7 +58,7 @@ class WorkflowAdoption(unittest.TestCase):
                 script = program.replace(command, f"printf '%s\\n' '{token}'; exit {status}")
                 output.write_text('')
                 with self.subTest(status=status, token=token):
-                    result = subprocess.run(['bash', '--noprofile', '--norc', '-eo', 'pipefail', '-c', script],
+                    result = subprocess.run([workflow_bash(), '--noprofile', '--norc', '-eo', 'pipefail', '-c', script],
                                             env={**os.environ, 'GITHUB_OUTPUT': str(output)}, capture_output=True, timeout=5)
                     self.assertEqual(result.returncode, status if status in (130, 143) else 0, result.stderr)
                     expected = '' if status in (130, 143) else f'adopted={str(status == 0 and token == "adopted").lower()}\n'
