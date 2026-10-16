@@ -34,7 +34,7 @@ def encounter(species, *, character=1, autonomous=False):
     selected = copy.deepcopy(next(row for row in source["manifest"]["characters"] if row["id"] == character))
     selected["anchor"] = "1/start"
     manifest = {key: copy.deepcopy(source["manifest"][key]) for key in
-                ("format", "version", "ruleset", "modules", "factions", "ai_profiles")}
+                ("format", "version", "ruleset", "modules", "factions", "ai_profiles", "themes", "assets")}
     manifest.update(id="rogue-roster-" + species, default_character=character, characters=[selected])
     foe = {"id": 3, "at": [2, 2, 0], "archetype": "rogue." + species,
            "controller": "ai" if autonomous else "external"}

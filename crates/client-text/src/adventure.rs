@@ -1,7 +1,7 @@
 //! Scene descriptions and ways onward, using only the disclosed observer scene.
 use std::collections::{BTreeMap, BTreeSet};
 
-use tor_client_common::{surfaces, AssetTable, Palette};
+use tor_client_common::{presentation, surfaces, Palette};
 use tor_protocol::*;
 
 use crate::{
@@ -277,31 +277,10 @@ pub(crate) fn sights(state: &StateView) -> Vec<(String, String, String)> {
     seen
 }
 
-/// Words for the assets this client knows. A lookup falls back through dotted
-/// prefixes, so `terrain.floor.stone`, which has no entry, reads as
-/// `terrain.floor`. A thing whose asset has no word, or isn't in the palette,
-/// keeps its disclosed material or name.
-pub fn words() -> &'static AssetTable<&'static str> {
-    static WORDS: std::sync::OnceLock<AssetTable<&'static str>> = std::sync::OnceLock::new();
-    WORDS.get_or_init(|| {
-        AssetTable::new([
-            ("terrain.floor", "flagstone"),
-            ("terrain.floor.cave", "packed earth"),
-            ("terrain.floor.marble", "polished marble"),
-            ("terrain.wall", "dressed stone"),
-            ("terrain.wall.cave", "rough cave rock"),
-            ("terrain.wall.marble", "polished marble"),
-            ("creature", "creature"),
-            ("creature.rat", "rat"),
-        ])
-    })
-}
-
 /// A solid cell's word: its asset's, or its material.
 pub(crate) fn surface<'a>(palette: &Palette, cell: &'a CellView) -> &'a str {
-    palette
-        .resolve(words(), cell.asset.as_deref())
-        .copied()
+    presentation::resolve(palette, cell.asset.as_deref())
+        .map(|entry| entry.noun.singular)
         .unwrap_or_else(|| surfaces::material(cell))
 }
 
@@ -311,9 +290,8 @@ pub(crate) fn open_surface<'a>(palette: &Palette, cell: &'a CellView) -> Option<
     if cell.wall {
         return None;
     }
-    palette
-        .resolve(words(), cell.asset.as_deref())
-        .copied()
+    presentation::resolve(palette, cell.asset.as_deref())
+        .map(|entry| entry.noun.singular)
         .or_else(|| (!cell.material.is_empty()).then_some(cell.material.as_str()))
 }
 
@@ -392,9 +370,8 @@ fn unified_actors<'a>(actors: &'a [ActorView]) -> Vec<UnifiedActor<'a>> {
 /// "towering giant", "massive beast".
 fn figure_name(actor: &UnifiedActor, palette: &Palette) -> String {
     let base_name = if actor.name.is_empty() {
-        palette
-            .resolve(words(), actor.asset)
-            .copied()
+        presentation::resolve(palette, actor.asset)
+            .map(|entry| entry.noun.singular)
             .unwrap_or("figure")
     } else {
         actor.name
@@ -810,7 +787,7 @@ fn contents(state: &StateView, palette: &Palette, place: &Place) -> Option<Strin
 pub fn describe_place_with(state: &StateView, palette: &Palette, places: &Places) -> String {
     let place = crate::engine::place::survey(state);
     let mut lines = Vec::new();
-    // A place with no name is titled by what it is: "Large, dim hall".
+    // A place with no name is titled by what it is: "Large, hushed hall".
     lines.push(crate::narrative::place_title(state).unwrap_or_else(|| {
         let noun = crate::narrative::place_noun(state, palette, &place, places, false);
         let bare = ["a ", "an "]

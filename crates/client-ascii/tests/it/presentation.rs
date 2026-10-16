@@ -1037,17 +1037,17 @@ fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
 fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
     let state = state();
     let o = &state.state().observation;
-    assert_eq!(glyph_at(o, 1, 1), '@');
-    assert_eq!(glyph_at(o, 4, 1), '.');
-    assert_eq!(glyph_at(o, 2, 1), '.');
-    assert_eq!(glyph_at(o, 99, 1), ' ');
+    assert_eq!(glyph_at(o, &Default::default(), 1, 1), '@');
+    assert_eq!(glyph_at(o, &Default::default(), 4, 1), '.');
+    assert_eq!(glyph_at(o, &Default::default(), 2, 1), '.');
+    assert_eq!(glyph_at(o, &Default::default(), 99, 1), ' ');
     let mut other_level = o.clone();
     other_level.ground_items[0].position = Position { x: 2, y: 1, z: 1 };
-    assert_eq!(glyph_at(&other_level, 2, 1), '.');
+    assert_eq!(glyph_at(&other_level, &Default::default(), 2, 1), '.');
     other_level
         .visible_cells
         .retain(|cell| cell.position.x != 2);
-    assert_eq!(glyph_at(&other_level, 2, 1), ' ');
+    assert_eq!(glyph_at(&other_level, &Default::default(), 2, 1), ' ');
     other_level.visible_cells.push(CellView {
         asset: None,
         door: None,
@@ -1059,9 +1059,9 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
         wall: true,
         place_hint: false,
     });
-    assert_eq!(glyph_at(&other_level, 2, 1), '#');
+    assert_eq!(glyph_at(&other_level, &Default::default(), 2, 1), '#');
     other_level.ground_items[0].position = Position { x: 3, y: 1, z: 0 };
-    assert_eq!(glyph_at(&other_level, 3, 1), '(');
+    assert_eq!(glyph_at(&other_level, &Default::default(), 3, 1), '(');
 }
 
 #[test]
@@ -1320,11 +1320,12 @@ fn resized_clicks_use_the_rendered_cell_layout_and_ignore_far_heights() {
     view.visible_cells.push(landing.clone());
     let mut snapshot = state().snapshot();
     Arc::make_mut(&mut snapshot.state).observation = view.clone();
-    assert!(
-        !tor_client_ascii::render::map_tiles(&ClientState::from_snapshot(snapshot).unwrap())
-            .iter()
-            .any(|t| t.position.z == -17)
-    );
+    assert!(!tor_client_ascii::render::map_tiles(
+        &ClientState::from_snapshot(snapshot).unwrap(),
+        &Default::default()
+    )
+    .iter()
+    .any(|t| t.position.z == -17));
     for position in [view.position, Position { x: 3, y: 1, z: 0 }] {
         let (x, y) = cell_center(&view, position).unwrap();
         assert_eq!(cell_at(&view, x, y), Some(position));
@@ -1436,7 +1437,10 @@ fn door_glyphs_and_explicit_selection_submit_actions_without_movement() {
         cells[index]["door"] = serde_json::json!({"id":super::door_target(id),"name":"wooden door","description":"wood", "open":false,"reachable":true,"approaches":[]});
     }
     let state = ClientState::from_snapshot(serde_json::from_value(snapshot).unwrap()).unwrap();
-    assert_eq!(glyph_at(&state.state().observation, 2, 1), '+');
+    assert_eq!(
+        glyph_at(&state.state().observation, &Default::default(), 2, 1),
+        '+'
+    );
     let mut app = App::new();
     app.role = AccessRole::Player;
     app.set_state(state);

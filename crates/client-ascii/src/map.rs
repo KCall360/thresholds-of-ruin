@@ -3,7 +3,8 @@
 //! floor, a drop, a door, stairs, an item or a creature. Heights well above
 //! or below the player (a stair's far landing, a distant ceiling) are left out.
 use std::collections::BTreeMap;
-use tor_protocol::{CellView, Observation, Position};
+use tor_client_common::{presentation, presentation::AsciiAppearance, Palette};
+use tor_protocol::{CellView, ItemView, Observation, Position};
 
 /// Map cells shown across and down; odd, so the player is centred.
 pub const COLS: i32 = 63;
@@ -24,8 +25,7 @@ const STAIRS: u32 = 0x8cbafa;
 const DOOR: u32 = 0xc9a46a;
 const ITEM: u32 = 0xedc579;
 const SELF: u32 = 0x67d8bd;
-/// Creature colours, chosen by name so one kind always looks the same.
-const CREATURES: [u32; 6] = [0xef958c, 0xf2c14e, 0xd98cf0, 0x7fd4f0, 0xa6e07a, 0xf08c4e];
+const CREATURE: u32 = 0xef958c;
 
 /// What a column shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -57,21 +57,27 @@ pub struct MapTile {
     pub step: usize,
 }
 
-/// A creature's letter: the first letter of the last word of its name, as in
-/// "ruin scout" -> s. Unnamed figures are &.
-pub fn creature_glyph(name: &str) -> char {
-    name.split_whitespace()
-        .last()
-        .and_then(|word| word.chars().find(char::is_ascii_alphabetic))
-        .map_or('&', |c| c.to_ascii_lowercase())
+/// A disclosed creature's visual, independent of its authored name.
+pub fn creature(palette: &Palette, asset: Option<&str>) -> AsciiAppearance {
+    presentation::resolve(palette, asset).map_or(
+        AsciiAppearance {
+            glyph: '&',
+            color: CREATURE,
+        },
+        |entry| entry.ascii,
+    )
 }
 
-/// A creature's colour, the same for every creature with that name.
-pub fn creature_color(name: &str) -> u32 {
-    let hash = name
-        .bytes()
-        .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
-    CREATURES[hash as usize % CREATURES.len()]
+/// Map, look and inventory use the same disclosed item asset. Its disclosed
+/// class is the safe fallback, including for a concealed appearance pool.
+pub fn item(palette: &Palette, item: &ItemView) -> AsciiAppearance {
+    presentation::resolve(palette, item.asset.as_deref()).map_or(
+        AsciiAppearance {
+            glyph: crate::item_glyph(item.class),
+            color: ITEM,
+        },
+        |entry| entry.ascii,
+    )
 }
 
 /// The pixel centre of a column relative to the player.
@@ -150,7 +156,11 @@ impl Column<'_> {
 }
 
 /// Every drawn column of a view, merged across heights.
-pub fn tiles(o: &Observation, current: &dyn Fn(&CellView) -> bool) -> Vec<MapTile> {
+pub fn tiles(
+    o: &Observation,
+    palette: &Palette,
+    current: &dyn Fn(&CellView) -> bool,
+) -> Vec<MapTile> {
     let feet = o.position;
     let mut columns: BTreeMap<(i32, i32), Column> = BTreeMap::new();
     for cell in &o.visible_cells {
@@ -193,27 +203,55 @@ pub fn tiles(o: &Observation, current: &dyn Fn(&CellView) -> bool) -> Vec<MapTil
         };
         let remembered = !column.cells.values().any(|c| current(c));
         let (kind, glyph, color) = if (*x, *y) == (feet.x, feet.y) {
-            (Kind::Player, '@', SELF)
+            let color = o
+                .visible_actors
+                .iter()
+                .find(|actor| actor.id == o.self_target)
+                .and_then(|actor| presentation::resolve(palette, actor.asset.as_deref()))
+                .map_or(SELF, |entry| entry.ascii.color);
+            (Kind::Player, '@', color)
         } else if let Some(actor) = creatures.get(&(*x, *y)).filter(|_| !remembered) {
-            (
-                Kind::Creature,
-                creature_glyph(&actor.name),
-                creature_color(&actor.name),
-            )
+            let look = creature(palette, actor.asset.as_deref());
+            (Kind::Creature, look.glyph, look.color)
         } else if let Some(item) = items.get(&(*x, *y)) {
-            (Kind::Item, crate::item_glyph(item.item.class), ITEM)
+            let look = self::item(palette, &item.item);
+            (Kind::Item, look.glyph, look.color)
         } else {
+            // Geometry and open/closed state remain authoritative. Cosmetic
+            // assets may tint terrain but cannot turn a drop into floor or hide
+            // stairs. Low walls and drops keep their existing state cues.
+            let tint = |asset: Option<&str>, fallback| {
+                presentation::resolve(palette, asset).map_or(fallback, |entry| entry.ascii.color)
+            };
             match terrain {
                 Kind::Door => {
                     let open = cell.door.as_ref().is_some_and(|d| d.open);
-                    (Kind::Door, if open { '/' } else { '+' }, DOOR)
+                    (
+                        Kind::Door,
+                        if open { '/' } else { '+' },
+                        tint(
+                            cell.door.as_ref().and_then(|door| door.asset.as_deref()),
+                            DOOR,
+                        ),
+                    )
                 }
-                Kind::Wall => (Kind::Wall, '#', TERRAIN),
+                Kind::Wall => (Kind::Wall, '#', tint(cell.asset.as_deref(), TERRAIN)),
                 Kind::LowWall => (Kind::LowWall, '#', LOW_WALL),
                 Kind::Drop => (Kind::Drop, '^', DROP),
                 Kind::StairsUp => (Kind::StairsUp, '<', STAIRS),
                 Kind::StairsDown => (Kind::StairsDown, '>', STAIRS),
-                other => (other, '.', TERRAIN),
+                other => (
+                    other,
+                    '.',
+                    tint(
+                        column
+                            .at(-1)
+                            .filter(|floor| floor.wall)
+                            .and_then(|floor| floor.asset.as_deref())
+                            .or(cell.asset.as_deref()),
+                        TERRAIN,
+                    ),
+                ),
             }
         };
         let Some(center) = center(x - feet.x, y - feet.y) else {

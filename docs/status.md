@@ -313,7 +313,12 @@ Rogue roster or establish balance; see
   capacity, curses, enchantment, rust, identification, ranged projectile/ray,
   secret-search or hallucination gameplay. See the current references and
   [remaining requirements](plans/requirements.md) for their boundaries.
-- Asset palettes do not yet drive the ASCII glyph table. There is no 3D frontend.
+- Rogue actor/player/item appearances use existing asset fields and structural
+  palette forecasts. Text and ASCII share a minimal keyed English vocabulary;
+  ASCII map/look/inventory redraw on palette changes and recover safely.
+  Scenario overrides (including Rogue letters), trait variation, appearance
+  seeds, player choices and 3D rendering remain deferred. See the
+  [presentation plan](plans/presentation.md).
 - Saves can still require matching compiled bundles for unvisited authored inputs.
   Portable saved-game export/import and historical migration are not implemented.
 

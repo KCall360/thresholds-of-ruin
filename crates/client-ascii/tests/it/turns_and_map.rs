@@ -320,7 +320,7 @@ fn the_single_map_merges_heights_and_never_draws_the_player_as_a_creature() {
     landing.position.y = 0;
     o.visible_cells.push(landing);
     let state = ClientState::from_snapshot(snapshot).unwrap();
-    let tiles = render::map_tiles(&state);
+    let tiles = render::map_tiles(&state, &Default::default());
     let at = |x: i32, y: i32| {
         tiles
             .iter()
@@ -330,8 +330,11 @@ fn the_single_map_merges_heights_and_never_draws_the_player_as_a_creature() {
     assert_eq!((at(0, 0).glyph, at(0, 0).kind), ('@', map::Kind::Player));
     assert_eq!(tiles.iter().filter(|t| t.glyph == '@').count(), 1);
     assert!(!tiles.iter().any(|t| t.position.z == -17));
-    assert_eq!((at(2, 0).glyph, at(2, 0).kind), ('s', map::Kind::Creature));
-    assert_eq!(at(2, 0).color, map::creature_color("ruin scout"));
+    assert_eq!((at(2, 0).glyph, at(2, 0).kind), ('&', map::Kind::Creature));
+    assert_eq!(
+        at(2, 0).color,
+        map::creature(&Default::default(), None).color
+    );
     assert_eq!((at(-1, 0).glyph, at(-1, 0).kind), (')', map::Kind::Item));
     assert_eq!(
         (at(-3, 0).glyph, at(-3, 0).kind),
@@ -346,8 +349,6 @@ fn the_single_map_merges_heights_and_never_draws_the_player_as_a_creature() {
     let columns: std::collections::BTreeSet<_> =
         tiles.iter().map(|t| (t.position.x, t.position.y)).collect();
     assert_eq!(columns.len(), tiles.len());
-    assert_eq!(map::creature_glyph("stone guardian"), 'g');
-    assert_eq!(map::creature_glyph(""), '&');
 }
 
 #[test]
@@ -397,7 +398,7 @@ fn look_names_a_creature_and_travel_jumps_to_stairs_without_time() {
     app.input(Input::Key { key: Key::Right });
     app.input(Input::Key { key: Key::Right });
     assert_eq!(app.input(Input::Key { key: Key::Look }), Effect::None);
-    assert_eq!(app.messages.text(), "s - a ruin scout (hostile, wounded).");
+    assert_eq!(app.messages.text(), "& - a ruin scout (hostile, wounded).");
     assert_eq!(app.input(Input::Key { key: Key::Travel }), Effect::None);
     assert_eq!(app.input(Input::Key { key: Key::Descend }), Effect::None);
     assert_eq!(app.travel_cursor.map(|c| (c.x, c.y)), Some((-3, 0)));
@@ -492,4 +493,142 @@ fn refusals_status_lines_and_the_end_screen_use_plain_words() {
     assert!(app.end_dismissed);
     assert_eq!(app.input(Input::Key { key: Key::Left }), Effect::None);
     assert_eq!(app.status, "This run has ended.");
+}
+
+#[test]
+fn map_look_and_inventory_share_assets_without_renaming_disclosed_things() {
+    let mut snapshot = snapshot();
+    let o = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
+    o.visible_actors[1].asset = Some("creature.equine.quagga.unfamiliar".into());
+    // A deliberate name/class mismatch proves presentation does not infer an
+    // identity from either the name or a hidden item archetype.
+    o.ground_items[0].item.asset = Some("item.amulet".into());
+    o.inventory[0].asset = Some("item.amulet".into());
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.palette.apply(&PaletteUpdate {
+        revision: 1,
+        body: PaletteBody::Full {
+            assets: [
+                "creature.equine.quagga.unfamiliar".into(),
+                "item.amulet".into(),
+            ]
+            .into(),
+        },
+    });
+    let state = app.state.as_ref().unwrap();
+    let unchanged = state.snapshot();
+    let tiles = render::map_tiles(state, &app.palette);
+    let actor = tiles
+        .iter()
+        .find(|tile| tile.kind == map::Kind::Creature)
+        .unwrap();
+    assert_eq!(actor.glyph, 'u');
+    assert_eq!(
+        tor_client_ascii::describe(state, &app.palette, 2, 0),
+        "u - a ruin scout (hostile, wounded)."
+    );
+    let item = tiles
+        .iter()
+        .find(|tile| tile.kind == map::Kind::Item)
+        .unwrap();
+    let carried = tor_client_ascii::inventory_entries(&app, &state.state().observation);
+    assert_eq!(
+        (item.glyph, item.color),
+        (carried[0].glyph, carried[0].color)
+    );
+    assert_eq!(carried[0].glyph, '"');
+    assert_eq!(carried[0].name, "red potion");
+    assert_eq!(
+        tor_client_ascii::describe(state, &app.palette, -1, 0),
+        "\" - a sword."
+    );
+    assert_eq!(state.snapshot(), unchanged);
+
+    // A palette-only loss and recovery changes appearance without changing
+    // observation, inventory handles, commands, memory or authored names.
+    app.palette.apply(&PaletteUpdate {
+        revision: 3,
+        body: PaletteBody::Delta {
+            base: 2,
+            added: Default::default(),
+            removed: Default::default(),
+        },
+    });
+    assert_eq!(
+        render::map_tiles(state, &app.palette)
+            .iter()
+            .find(|tile| tile.kind == map::Kind::Creature)
+            .unwrap()
+            .glyph,
+        '&'
+    );
+    assert_eq!(
+        tor_client_ascii::inventory_entries(&app, &state.state().observation)[0].glyph,
+        '!'
+    );
+    app.palette.apply(&PaletteUpdate {
+        revision: 4,
+        body: PaletteBody::Full {
+            assets: [
+                "creature.equine.quagga.unfamiliar".into(),
+                "item.amulet".into(),
+            ]
+            .into(),
+        },
+    });
+    assert_eq!(render::map_tiles(state, &app.palette), tiles);
+    assert_eq!(state.snapshot(), unchanged);
+}
+
+#[test]
+fn unknown_missing_and_unforecast_assets_have_name_independent_safe_fallbacks() {
+    let mut snapshot = snapshot();
+    let o = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
+    o.visible_actors[1].asset = Some("unknown.actor".into());
+    let mut palette = tor_client_common::Palette::default();
+    palette.apply(&PaletteUpdate {
+        revision: 1,
+        body: PaletteBody::Full {
+            assets: ["unknown.actor".into()].into(),
+        },
+    });
+    let before = ClientState::from_snapshot(snapshot.clone()).unwrap();
+    let o = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
+    o.visible_actors[1].name = "an entirely different proper name".into();
+    let after = ClientState::from_snapshot(snapshot).unwrap();
+    assert_eq!(
+        render::map_tiles(&before, &palette),
+        render::map_tiles(&after, &palette)
+    );
+    for asset in [None, Some("unknown.actor"), Some("creature.equine.quagga")] {
+        assert_eq!(map::creature(&palette, asset).glyph, '&');
+    }
+}
+
+#[test]
+fn unnamed_actor_look_uses_the_shared_english_indefinite_form() {
+    for (asset, phrase) in [
+        ("creature.equine.unicorn", "u - a unicorn"),
+        ("creature.bird.emu", "B - an emu"),
+    ] {
+        let mut snapshot = snapshot();
+        let actor = &mut Arc::make_mut(&mut snapshot.state)
+            .observation
+            .visible_actors[1];
+        actor.name.clear();
+        actor.asset = Some(asset.into());
+        let state = ClientState::from_snapshot(snapshot).unwrap();
+        let mut palette = tor_client_common::Palette::default();
+        palette.apply(&PaletteUpdate {
+            revision: 1,
+            body: PaletteBody::Full {
+                assets: [asset.into()].into(),
+            },
+        });
+        assert_eq!(
+            tor_client_ascii::describe(&state, &palette, 2, 0),
+            format!("{phrase} (hostile, wounded).")
+        );
+    }
 }

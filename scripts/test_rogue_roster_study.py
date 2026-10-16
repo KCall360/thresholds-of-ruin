@@ -43,6 +43,27 @@ class RogueRosterStudyTests(unittest.TestCase):
                 self.assertEqual(tomllib.loads(toml_source(manifest)), manifest)
         self.assertEqual(source, before)
 
+    def test_every_study_variant_preserves_independent_source_asset_forecasts(self):
+        source = encounter_sources()
+        original = copy.deepcopy(source)
+        for reference in REFERENCES:
+            for case in source_cases(source, reference):
+                for arm in ("baseline", "candidate"):
+                    for orientation in ("forward", "mirrored"):
+                        with self.subTest(reference=reference, case=case["id"], arm=arm,
+                                          orientation=orientation):
+                            manifest, region = study_encounter(case, arm, orientation, source,
+                                                               reference=reference)
+                            self.assertEqual(manifest.get("themes"), source["manifest"]["themes"])
+                            self.assertEqual(manifest.get("assets"), source["manifest"]["assets"])
+                            forecast = {asset for theme in manifest["themes"]
+                                        for asset in manifest["assets"][theme]}
+                            self.assertIn(source["actors"][region["actors"][0]["archetype"]]["asset"],
+                                          forecast)
+                            manifest["assets"][manifest["themes"][0]].clear()
+                            manifest["themes"].clear()
+                            self.assertEqual(source, original)
+
     def test_proxy_values_match_existing_authoritative_general_policy_not_default(self):
         self.assertEqual(PLAYABLE_AI, {"care": True, "equipment": True, "loot": True, "flee_percent": 25})
         for relative in AI_SOURCES:

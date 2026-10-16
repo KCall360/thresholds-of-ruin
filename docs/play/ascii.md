@@ -58,15 +58,21 @@ Each column of cells is drawn as what stands at your own height there:
 | Glyph | Meaning |
 | --- | --- |
 | `@` | You (your whole body, however tall) |
-| `a`-`z` | A creature: the first letter of the last word of its name (`s` for ruin scout, `g` for stone guardian), in a colour fixed by its name; `&` if it has no name |
+| common asset glyph | A creature, using the shared asset vocabulary (for example `u` for an equine); `&` when its asset is absent, unknown or unavailable |
 | `#` (blue-grey) | Wall |
 | `#` (tan) | Low wall, ledge or step: solid at your feet, open above |
 | `^` | A drop or pit: open at your feet and below |
 | `.` | Floor |
 | `<` `>` | Stairs up / down |
 | `+` `/` | Closed / open door, at foot or head height |
-| `)` `[` `!` `%` `(` `=` `"` `?` `/` `$` `*` | Items, by class, at your level or down in a drop |
+| `)` `[` `!` `%` `(` `=` `"` `?` `/` `$` `*` | Items, by disclosed asset with class fallback, at your level or down in a drop |
 | grey | Remembered, not in sight now |
+
+Map, look and inventory share the same current [asset palette](../reference/protocol.md#palettes-in-the-clients).
+Authored names still identify things and commands. A palette-only update redraws
+without waiting for a turn; a missed revision uses safe fallbacks until recovery.
+Terrain assets tint floors, walls and doors without changing geometric symbols,
+open/closed doors, stair directions or remembered-cell greying.
 
 Heights more than two cells below or three above your feet aren't drawn: a
 stair's far landing, a distant ceiling. Cells are a fixed size, so the map
@@ -166,9 +172,9 @@ aren't implemented:
 - **Depth.** Observations don't say which floor you're on, so the status line
   can't show NetHack's `Dlvl`.
 - **Turns.** Time is shown in ticks; a character's ticks per turn isn't disclosed.
-- **Creature appearance.** Letters and colours come from names. Authored
-  glyph and colour assets for actors (like the terrain palettes) would let
-  scenarios choose them.
+- **Scenario appearance overrides.** The common asset vocabulary supplies
+  glyphs and colours. Scenario-specific glyph/colour overrides, including
+  Rogue's letter assignments, need the later palette-extension design.
 - **Objective item.** The client has no disclosed marker identifying which
   carried or visible item the objective requires.
 - **Travel nearby.** Travel to a visible cell without a known route is

@@ -2,11 +2,13 @@
 namespace = "rogue"
 
 [actors."rogue.emu"]
+asset = "creature.bird.emu"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 35 }
 creature = { species = "rogue.emu", name = "emu", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
 
 [actors."rogue.snake"]
+asset = "creature.serpent.snake"
 turn_ticks = 100
 body = { cells = [[0,0,0]], eye = [0,0,0], mass = 3 }
 creature = { species = "rogue.snake", name = "snake", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "stealth"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
@@ -14,6 +16,7 @@ creature = { species = "rogue.snake", name = "snake", faction = "dungeon_foes", 
 # R owns VN1 at HD1; its second racial point is unspent. Snake body/timing
 # defaults are provisional TOR inputs, not a new species-balance claim.
 [actors."rogue.rattlesnake"]
+asset = "creature.serpent.rattlesnake"
 turn_ticks = 100
 body = { cells = [[0,0,0]], eye = [0,0,0], mass = 3 }
 creature = { species = "rogue.rattlesnake", name = "rattlesnake", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "stealth"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.venomous_bite" } }] }, { source = "racial", purchases = [] }] }
@@ -21,6 +24,7 @@ creature = { species = "rogue.rattlesnake", name = "rattlesnake", faction = "dun
 # Complete accepted combat purchases; scenario selection controls population eligibility.
 # Species dispositions live in creatures.toml; C/Y/V birth stock belongs to population choices.
 [actors."rogue.hobgoblin"]
+asset = "creature.goblin.hobgoblin"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 70 }
 [actors."rogue.hobgoblin".creature]
@@ -37,6 +41,7 @@ hit_dice = [
 ]
 
 [actors."rogue.zombie"]
+asset = "creature.undead.zombie"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
 [actors."rogue.zombie".creature]
@@ -54,6 +59,7 @@ hit_dice = [
 ]
 
 [actors."rogue.quagga"]
+asset = "creature.equine.quagga"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 250 }
 [actors."rogue.quagga".creature]
@@ -72,6 +78,7 @@ hit_dice = [
 ]
 
 [actors."rogue.centaur"]
+asset = "creature.centaur"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 400 }
 [actors."rogue.centaur".creature]
@@ -91,6 +98,7 @@ hit_dice = [
 ]
 
 [actors."rogue.yeti"]
+asset = "creature.ape.yeti"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 250 }
 [actors."rogue.yeti".creature]
@@ -112,6 +120,7 @@ hit_dice = [
 # Six actual racial rows. RG1(1), NA1(2), NA2(4) spend three points;
 # authored restoration preserves every purchase ordinal and individual HD seed.
 [actors."rogue.troll"]
+asset = "creature.troll"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 250 }
 [actors."rogue.troll".creature]
@@ -133,6 +142,7 @@ hit_dice = [
 ]
 
 [actors."rogue.black_unicorn"]
+asset = "creature.equine.unicorn.black"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 350 }
 [actors."rogue.black_unicorn".creature]
@@ -158,6 +168,7 @@ hit_dice = [
 # CH1 is owned by the first racial HD, not a free species grant. Body/mass and
 # action timings are provisional; this authored minion is not in floor pools.
 [actors."rogue.ice_monster"]
+asset = "creature.elemental.ice"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 40 }
 creature = { species = "rogue.ice_monster", name = "ice monster", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.freezing_touch" } }] }] }
@@ -165,6 +176,7 @@ creature = { species = "rogue.ice_monster", name = "ice monster", faction = "dun
 # Eight actual racial rows. Only the accepted DR1(1), RG1(2) purchases are spent;
 # ordinary authored restoration retains their exact ordinals and seeded Health.
 [actors."rogue.vampire"]
+asset = "creature.undead.vampire"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 70 }
 [actors."rogue.vampire".creature]

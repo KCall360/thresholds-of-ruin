@@ -515,8 +515,8 @@ class AdventureProcesses(ProcessTestCase):
     def test_directions_cross_open_ground_without_walls(self):
         self.server(scenario="streaming-corridor")
         player, welcome = self.adventure()
-        self.assertIn("Open ground stretches away into darkness on every side.", welcome)
-        # The walk goes on through the dark until something comes into view.
+        self.assertIn("Open ground stretches beyond your view on every side.", welcome)
+        # The walk continues beyond the current view until something comes into sight.
         self.assertEqual(
             "You set off east. A warden comes into view to the east, and you stop warily.\n> ",
             self.say(player, "east"),

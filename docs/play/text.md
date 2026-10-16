@@ -233,7 +233,7 @@ hostile, and where it is. Atmosphere is deterministic cosmetic prose with no rul
 effects.
 
 A place title is its authored or player-assigned name; a place without one is
-titled by what it is ("Large, dim hall"). Unnamed anchors are listed as unnamed in
+titled by what it is ("Large, hushed hall"). Unnamed anchors are listed as unnamed in
 text even though the backend retains a personal mnemonic. A learned
 anchor represents a point, not a discovered room boundary. `places` distinguishes
 `in sight` from `remembered`; the latter is no promise that a route is clear.

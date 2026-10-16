@@ -159,6 +159,84 @@ fn a_palette_forecasts_nearby_themes_never_what_regions_hold() {
 }
 
 #[test]
+fn portable_assets_are_forecast_without_region_reads_or_selected_inventory() {
+    let scenario = caves();
+    let mut package = Arc::unwrap_or_clone(scenario.package.unwrap());
+    let reads = package.sources.files_read();
+    // The empty local-theme set still forecasts every portable archetype.
+    // Canonical archetypes are dual-use, so rat is a conservative extra.
+    assert_eq!(
+        package.palette(std::iter::empty()),
+        set(&["creature.delver", "creature.rat", "item.coin"])
+    );
+    assert_eq!(package.sources.files_read(), reads);
+    let mut preset = package.manifest.characters[0].clone();
+    preset.id = 99;
+    preset.asset = Some("creature.humanoid.human".into());
+    preset.loadout.push(scenario_package::CharacterLoadout {
+        archetype: "coin".into(),
+        quantity: 1,
+        equipped_slot: None,
+    });
+    package.manifest.characters.push(preset);
+    let first = package.palette(std::iter::empty());
+    package.selected = 99;
+    assert_eq!(package.palette(std::iter::empty()), first);
+    assert!(first.contains("creature.humanoid.human"));
+    assert!(first.contains("item.coin"));
+    assert_eq!(package.sources.files_read(), reads);
+}
+
+#[test]
+fn global_portable_forecasts_never_include_a_concealed_identity_asset() {
+    let mut package = Arc::unwrap_or_clone(caves().package.unwrap());
+    let mut concealed = package.manifest.archetypes["coin"].clone();
+    concealed.asset = Some("item.secret".into());
+    concealed.appearance_pool = Some("shared".into());
+    package
+        .manifest
+        .archetypes
+        .insert("concealed".into(), concealed);
+    package.manifest.appearance_pools.insert(
+        "shared".into(),
+        scenario_package::AppearancePool {
+            appearances: vec!["cloudy vial".into()],
+            confounding: false,
+            asset: Some("item.potion".into()),
+        },
+    );
+    let forecast = package.palette(std::iter::empty());
+    assert!(forecast.contains("item.potion"));
+    assert!(!forecast.contains("item.secret"));
+    package
+        .manifest
+        .appearance_pools
+        .get_mut("shared")
+        .unwrap()
+        .asset = None;
+    assert!(!package.palette(std::iter::empty()).contains("item.secret"));
+}
+
+#[test]
+fn character_or_portable_assets_alone_enable_the_palette() {
+    let mut package = Arc::unwrap_or_clone(caves().package.unwrap());
+    package.manifest.assets.clear();
+    assert!(package.has_assets());
+    package
+        .manifest
+        .characters
+        .iter_mut()
+        .for_each(|character| character.asset = None);
+    assert!(package.has_assets());
+    package
+        .manifest
+        .archetypes
+        .values_mut()
+        .for_each(|archetype| archetype.asset = None);
+    assert!(!package.has_assets());
+}
+
+#[test]
 fn a_game_that_doesnt_stream_gets_the_whole_packages_palette() {
     let mut scenario = caves();
     scenario.streaming = None;
@@ -506,4 +584,36 @@ async fn clients_get_a_full_palette_then_deltas_and_can_ask_for_it_again() {
     assert_eq!(*full(fresh), union(&[cave(), vault()]));
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
+}
+
+#[test]
+fn rogue_recipes_and_both_presets_forecast_disclosed_assets_including_the_potion_pool() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+    let manifest = scenario_package::resolve_source(&root).unwrap().manifest;
+    let forecast: BTreeSet<_> = manifest
+        .themes
+        .iter()
+        .flat_map(|theme| manifest.assets[theme].iter().map(String::as_str))
+        .collect();
+    assert_eq!(manifest.characters.len(), 2);
+    for character in &manifest.characters {
+        assert_eq!(character.asset.as_deref(), Some("creature.humanoid.human"));
+    }
+    for (key, archetype) in &manifest.archetypes {
+        let asset = if let Some(pool) = &archetype.appearance_pool {
+            manifest.appearance_pools[pool].asset.as_deref()
+        } else {
+            archetype.asset.as_deref()
+        }
+        .unwrap_or_else(|| panic!("missing disclosed asset for {key}"));
+        assert!(
+            forecast.contains(asset),
+            "missing theme forecast for {key}: {asset}"
+        );
+    }
+    assert_eq!(
+        manifest.appearance_pools["rogue.potions"].asset.as_deref(),
+        Some("item.potion")
+    );
+    assert!(serde_json::to_vec(&forecast).unwrap().len() + 4096 < MAX_RESPONSE_BYTES);
 }

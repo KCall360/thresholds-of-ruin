@@ -348,13 +348,15 @@ pub fn describe_surveyed(
             sentences.push("The ceiling is high above you.".into());
         }
     }
-    // What isn't seen fades into darkness, and each such way can be walked.
+    // What isn't seen continues beyond your view, and each such way can be walked.
     match place.continues.as_slice() {
         [] => {}
         all if all.len() == 8 && place.form == Form::Open => {
-            sentences.push("Open ground stretches away into darkness on every side.".into())
+            sentences.push("Open ground stretches beyond your view on every side.".into())
         }
-        all if all.len() == 8 => sentences.push("It fades into darkness on every side.".into()),
+        all if all.len() == 8 => {
+            sentences.push("It continues beyond your view on every side.".into())
+        }
         // Most sides: name the ones that don't.
         dark if dark.len() >= 5 => {
             let lit: Vec<String> = [
@@ -372,9 +374,9 @@ pub fn describe_surveyed(
             .map(|d| direction_name(d).to_owned())
             .collect();
             let what = if place.form == Form::Open {
-                "Open ground stretches away into darkness"
+                "Open ground stretches beyond your view"
             } else {
-                "It fades into darkness"
+                "It continues beyond your view"
             };
             sentences.push(format!(
                 "{what} on every side but the {}.",
@@ -384,7 +386,7 @@ pub fn describe_surveyed(
         ways => {
             let ways: Vec<String> = ways.iter().map(|d| direction_name(*d).to_owned()).collect();
             sentences.push(format!(
-                "To the {} it fades into darkness.",
+                "To the {} it continues beyond your view.",
                 prose::and_list(&ways)
             ));
         }

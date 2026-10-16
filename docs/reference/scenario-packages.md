@@ -626,7 +626,21 @@ Assets are optional. A manifest may give:
 
 The validator requires everything a region shows (its terrain, and its
 actors' and items' assets, including a generated region's pools) to be among
-the assets of that region's themes, so a palette always forecasts them. See
+the assets of that region's effective themes. Activation families likewise
+forecast every actor/item depth-band choice and every referenced carried-loot
+pool through the family's zone themes (or world themes), including zero-chance
+and currently unreachable choices. Concealed item checks use only the pool asset.
+
+Every declared character and canonical archetype's item appearance is also
+forecast globally, covering starting kits, picked-up objects, carried stock and
+retrieval artifacts across theme boundaries. Canonical archetypes can be used
+for actors or items, so this intentionally overforecasts some actor assets; it
+never examines generated contents, selected character, live inventory or lazy
+region files. Global coverage does not excuse missing local theme declarations.
+The all-theme union must fit the existing response budget with a conservative
+4096-byte reserve for reply context, request ID, revisions and Full/Delta body
+serialization overhead. A delta's disjoint added/removed sets cannot exceed the
+same union. Unknown runtime/wizard assets still use client fallbacks. See
 [asset palettes](protocol.md#asset-palettes).
 
 ## Generated regions

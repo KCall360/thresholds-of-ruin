@@ -119,6 +119,8 @@ pub struct SupplyDraft {
 }
 
 pub struct App {
+    /// Current connection palette, including stale state during recovery.
+    pub palette: tor_client_common::Palette,
     pub advancement_open: bool,
     pub advancement_command: String,
     pub advancement_scroll: usize,
@@ -185,6 +187,7 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         Self {
+            palette: Default::default(),
             advancement_open: false,
             advancement_command: String::new(),
             advancement_scroll: 0,
@@ -442,16 +445,18 @@ impl App {
             Direction::NorthWest => (-1, -1),
             Direction::Up | Direction::Down => return false,
         };
-        crate::render::map_tiles(state).into_iter().any(|t| {
-            (t.position.x, t.position.y) == (o.position.x + dx, o.position.y + dy)
-                && matches!(
-                    t.kind,
-                    crate::map::Kind::Floor
-                        | crate::map::Kind::StairsUp
-                        | crate::map::Kind::StairsDown
-                        | crate::map::Kind::Item
-                )
-        })
+        crate::render::map_tiles(state, &self.palette)
+            .into_iter()
+            .any(|t| {
+                (t.position.x, t.position.y) == (o.position.x + dx, o.position.y + dy)
+                    && matches!(
+                        t.kind,
+                        crate::map::Kind::Floor
+                            | crate::map::Kind::StairsUp
+                            | crate::map::Kind::StairsDown
+                            | crate::map::Kind::Item
+                    )
+            })
     }
 
     /// A menu row's letter: an item's inventory letter when choosing from
@@ -1758,7 +1763,7 @@ impl App {
                         crate::map::Kind::StairsDown
                     };
                     let found = self.state.as_ref().and_then(|s| {
-                        crate::render::map_tiles(s)
+                        crate::render::map_tiles(s, &self.palette)
                             .into_iter()
                             .filter(|t| t.kind == wanted)
                             .min_by_key(|t| {
@@ -1823,7 +1828,7 @@ impl App {
                     self.look_cursor = None;
                     self.status.clear();
                     if let Some(state) = &self.state {
-                        let text = crate::describe(state, cursor.x, cursor.y);
+                        let text = crate::describe(state, &self.palette, cursor.x, cursor.y);
                         self.messages.push(text);
                     }
                     return Effect::None;
@@ -2377,8 +2382,8 @@ pub enum BumpAttacks {
 
 /// The glyph the map draws for a column of the observer's scene, or a space
 /// when nothing there is disclosed.
-pub fn glyph_at(o: &Observation, x: i32, y: i32) -> char {
-    crate::map::tiles(o, &|_| true)
+pub fn glyph_at(o: &Observation, palette: &tor_client_common::Palette, x: i32, y: i32) -> char {
+    crate::map::tiles(o, palette, &|_| true)
         .into_iter()
         .find(|t| (t.position.x, t.position.y) == (x, y))
         .map_or(' ', |t| t.glyph)
@@ -2507,6 +2512,7 @@ pub fn travel_stop(phase: TravelPhase) -> Option<&'static str> {
 pub struct InventoryEntry {
     pub letter: char,
     pub glyph: char,
+    pub color: u32,
     pub name: String,
     pub quantity: u64,
     /// The slot it's worn or held in, when equipped.
@@ -2568,9 +2574,11 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
                     parts.join(", ")
                 })
                 .filter(|text| !text.is_empty());
+            let appearance = crate::map::item(&app.palette, item);
             InventoryEntry {
                 letter: app.letters.get(&item.id).copied().unwrap_or('?'),
-                glyph: item_glyph(item.class),
+                glyph: appearance.glyph,
+                color: appearance.color,
                 name: item.name.clone(),
                 quantity: item.quantity,
                 equipped,
@@ -2581,7 +2589,12 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
 }
 
 /// What the look command says about a column.
-pub fn describe(state: &ClientState, x: i32, y: i32) -> String {
+pub fn describe(
+    state: &ClientState,
+    palette: &tor_client_common::Palette,
+    x: i32,
+    y: i32,
+) -> String {
     let o = &state.state().observation;
     if (x, y) == (o.position.x, o.position.y) {
         return "That's you.".into();
@@ -2591,15 +2604,17 @@ pub fn describe(state: &ClientState, x: i32, y: i32) -> String {
         .iter()
         .find(|a| a.id != o.self_target && (a.position.x, a.position.y) == (x, y))
     {
-        let name = if actor.name.trim().is_empty() {
-            "figure"
+        let phrase = if actor.name.trim().is_empty() {
+            tor_client_common::presentation::resolve(palette, actor.asset.as_deref())
+                .map_or("a figure", |entry| entry.noun.indefinite)
+                .to_owned()
         } else {
-            actor.name.as_str()
+            item_phrase(&actor.name, 1)
         };
         let mut text = format!(
             "{} - {}",
-            crate::map::creature_glyph(name),
-            item_phrase(name, 1)
+            crate::map::creature(palette, actor.asset.as_deref()).glyph,
+            phrase
         );
         if let Some(combat) = o
             .combat
@@ -2621,7 +2636,7 @@ pub fn describe(state: &ClientState, x: i32, y: i32) -> String {
         }
         return text + ".";
     }
-    let tiles = crate::render::map_tiles(state);
+    let tiles = crate::render::map_tiles(state, palette);
     let Some(tile) = tiles
         .iter()
         .find(|t| (t.position.x, t.position.y) == (x, y))

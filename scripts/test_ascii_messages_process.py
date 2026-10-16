@@ -124,7 +124,7 @@ class AsciiMessageProcesses(ProcessTestCase):
         self.assertEqual([t["glyph"] for t in tiles].count("@"), 1)
         self.assertEqual(len({(t["position"]["x"], t["position"]["y"]) for t in tiles}), len(tiles))
         scout = next(t for t in tiles if t["kind"] == "creature")
-        self.assertEqual(scout["glyph"], "s")
+        self.assertEqual(scout["glyph"], "&")
         health = initial["state"]["observation"]["combat"]
         self.assertEqual(u64(health["own_stats"]["hit_dice"]["total"]), 4)
         self.assertEqual(initial["status_lines"][1].split()[0],

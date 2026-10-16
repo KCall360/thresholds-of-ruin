@@ -10,6 +10,7 @@ mod map_memory;
 pub mod narration;
 mod palette;
 mod pending_request;
+pub mod presentation;
 pub mod public_plan;
 mod state;
 pub mod stats;
