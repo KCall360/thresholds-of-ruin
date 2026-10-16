@@ -10,7 +10,9 @@ import tomllib
 import unittest
 
 from arena_matrix import toml_source
-from process_harness import ProcessTestCase, ROOT, ascii_input_completion, non_graphical
+from process_harness import (
+    ProcessTestCase, ROOT, ascii_input_completion, headless_fight_completion, non_graphical,
+)
 
 
 class AsciiMessageProcesses(ProcessTestCase):
@@ -59,13 +61,6 @@ class AsciiMessageProcesses(ProcessTestCase):
         death = None
         deadline = time.monotonic() + 30
 
-        def completed(frame):
-            view = frame["state"]["observation"]
-            phases = {entry["phase"] for entry in frame["intentions"]}
-            return view["combat"]["dead"] or (view["ready"]
-                and not view["combat"]["preparation_active"]
-                and not phases.intersection({"queued", "started"}))
-
         for _ in range(32):
             view = current["state"]["observation"]
             before_tick = int(view["tick"])
@@ -86,8 +81,8 @@ class AsciiMessageProcesses(ProcessTestCase):
             start = len(player.transcript)
             current = self.act(player, action)
             self.assertIsNone(current["error"])
-            if not completed(current):
-                current = self.frame(player, completed, seconds=remaining)
+            if not headless_fight_completion(current):
+                current = self.frame(player, headless_fight_completion, seconds=remaining)
             view = current["state"]["observation"]
             self.assertGreater(int(view["tick"]), before_tick, trace)
             trace.append({"direction": direction, "tick": view["tick"],

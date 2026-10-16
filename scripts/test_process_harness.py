@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 
 from process_harness import (
     OutputQueue, Process, ProcessTestCase, ProcessTestDirectory, Transcript, binaries, inspect_save, save_at,
-    ascii_stats_viewport_text, settle_rogue_action, hit_die_counts, non_graphical,
+    ascii_stats_viewport_text, headless_fight_completion, settle_rogue_action, hit_die_counts, non_graphical,
 )
 
 
@@ -293,6 +293,56 @@ class DisclosedExploration(unittest.TestCase):
 
 
 class ActionCompletion(unittest.TestCase):
+    def test_headless_fight_waits_for_permissions_after_resolved_intention(self):
+        # Windows release published the ready observation, then removed the
+        # resolved intention, before updating its still-present cancel grant.
+        # admission=True alone cannot authorize input at that stream boundary.
+        started = {"intentions": [{"intention": "paid-1", "phase": "started"}],
+                   "readiness": {"revision": "12", "admission": True,
+                                 "resume": [], "cancel": ["paid-1"]},
+                   "state": {"revision": "10", "observation": {
+                       "tick": "348", "ready": False,
+                       "combat": {"dead": False, "preparation_active": True}}}}
+        observation = {**started, "state": {"revision": "11", "observation": {
+            "tick": "388", "ready": True,
+            "combat": {"dead": False, "preparation_active": False}}}}
+        resolved = {**observation, "intentions": []}
+        permitted = {**resolved, "readiness": {"revision": "13", "admission": True,
+                                               "resume": [], "cancel": []}}
+        self.assertFalse(headless_fight_completion(started))
+        self.assertFalse(headless_fight_completion(observation))
+        self.assertFalse(headless_fight_completion(resolved),
+                         "Resolved work still has stale cancel permission; input is not ready")
+        self.assertTrue(headless_fight_completion(permitted))
+
+    def test_headless_fight_requires_completed_work_and_current_admission(self):
+        settled = {"intentions": [],
+                   "readiness": {"admission": True, "resume": [], "cancel": []},
+                   "state": {"observation": {"ready": True,
+                       "combat": {"dead": False, "preparation_active": False}}}}
+        self.assertTrue(headless_fight_completion(settled))
+        for phase in ("queued", "started", "paused", "suspended"):
+            with self.subTest(phase=phase):
+                self.assertFalse(headless_fight_completion({**settled,
+                    "intentions": [{"intention": "paid-1", "phase": phase}]}))
+        for permission in ({"admission": False}, {"resume": ["paid-1"]},
+                           {"cancel": ["paid-1"]}):
+            with self.subTest(permission=permission):
+                self.assertFalse(headless_fight_completion({**settled,
+                    "readiness": {**settled["readiness"], **permission}}))
+        for ready, active in ((False, False), (True, True)):
+            with self.subTest(ready=ready, active=active):
+                self.assertFalse(headless_fight_completion({**settled,
+                    "state": {"observation": {"ready": ready,
+                        "combat": {"dead": False, "preparation_active": active}}}}))
+
+    def test_headless_fight_death_is_observable_without_action_permission(self):
+        dead = {"intentions": [{"intention": "paid-1", "phase": "started"}],
+                "readiness": {"admission": False, "resume": [], "cancel": ["paid-1"]},
+                "state": {"observation": {"ready": False,
+                    "combat": {"dead": True, "preparation_active": False}}}}
+        self.assertTrue(headless_fight_completion(dead))
+
     def test_headless_queued_attack_can_publish_paused_before_started(self):
         harness = ProcessTestCase()
         player = object()
