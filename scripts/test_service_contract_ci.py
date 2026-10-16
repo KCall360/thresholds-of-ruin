@@ -3,6 +3,7 @@ from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -125,6 +126,32 @@ class ServiceContractCargoTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn('"selected": 2', output)
         self.assertIn('"run": 2', output)
+
+    def test_nested_discovery_does_not_inherit_outer_loader_root(self):
+        outer = Path(self.directory.name) / "outer"
+        package = outer / "contract_package"
+        package.mkdir(parents=True)
+        inner = Path(self.directory.name) / "inner"
+        inner.mkdir()
+        (inner / "nested_contract_case.py").write_text(
+            "import unittest\nclass Cases(unittest.TestCase):\n"
+            " def test_first(self): pass\n def test_second(self): pass\n", encoding="utf-8")
+        (package / "__init__.py").write_text(
+            "import service_contract_ci as runner\n"
+            "def load_tests(loader, tests, pattern):\n"
+            f" status = runner.run_suite({str(self.binary)!r}, 'identity', "
+            f"directory={str(inner)!r}, pattern='nested_contract_case.py')\n"
+            " if status != 0: raise AssertionError('nested contract suite failed')\n"
+            " return tests\n", encoding="utf-8")
+        loader = unittest.TestLoader()
+        with patch.dict(sys.modules), patch.object(sys, "path", sys.path.copy()), \
+                patch.object(unittest, "defaultTestLoader", loader), \
+                redirect_stdout(StringIO()) as output, redirect_stderr(StringIO()):
+            suite = loader.discover(str(outer))
+        self.assertEqual(loader.errors, [])
+        self.assertEqual(suite.countTestCases(), 0)
+        self.assertIn('"selected": 2', output.getvalue())
+        self.assertIn('"run": 2', output.getvalue())
 
     def test_assertion_failure_is_not_a_successful_gate(self):
         status, output, _ = self.suite("import unittest\nclass Cases(unittest.TestCase):\n"

@@ -48,7 +48,8 @@ def select_artifact(rows):
 def run_suite(executable, digest, *, directory=None, pattern="service_contract_tests.py"):
     """A missing, empty, skipped or partially executed suite cannot qualify a gate."""
     directory = ROOT / "scripts" if directory is None else Path(directory)
-    suite = unittest.defaultTestLoader.discover(str(directory), pattern=pattern)
+    # Independent discovery must not inherit an outer suite's retained root.
+    suite = unittest.TestLoader().discover(str(directory), pattern=pattern)
     expected = suite.countTestCases()
     if expected == 0:
         print("Service contract suite is empty; no behavior was verified", file=sys.stderr)
