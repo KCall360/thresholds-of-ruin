@@ -905,11 +905,24 @@ class CiWorkflowContract(unittest.TestCase):
         self.assertRegex(profiles, r"(?m)^        profile: \[debug, release\]$")
         self.assertRegex(profiles, r"(?m)^        partition: \[rust, python\]$")
         self.assertRegex(profiles, r"(?m)^      fail-fast: false$")
-        self.assertRegex(profiles, r"(?m)^        run: python scripts/verify\.py full --ci-profile \$\{\{ matrix\.profile \}\} --ci-partition \$\{\{ matrix\.partition \}\}$")
+        self.assertRegex(profiles, r"(?m)^        run: python scripts/verify\.py full --ci-profile \$\{\{ matrix\.profile \}\} --ci-partition \$\{\{ matrix\.partition \}\} --cross-head-proof \.local/verify/cross-head\.json$")
         self.assertNotIn("--waive-local-mouse", profiles)
         self.assertNotIn("--waive-local-graphical", profiles)
         self.assertNotIn("continue-on-error", profiles)
         self.assertNotRegex(profiles, r"(?m)^        (?:exclude|include):")
+
+    def test_cross_head_probe_is_optional_pr_only_and_final_authority_has_read_token(self):
+        profiles = self.job("profiles")
+        probe = re.search(r"(?ms)^      - name: Prepare bounded prior-head evidence\n(.*?)(?=^      - |\Z)", profiles)
+        self.assertIsNotNone(probe)
+        self.assertIn("if: github.event_name == 'pull_request'", probe[1])
+        self.assertIn('if python scripts/ci_head_reuse.py', probe[1])
+        self.assertIn('"$status" == 130 || "$status" == 143', probe[1])
+        verification = re.search(r"(?ms)^      - name: Verify complete profile partition\n(.*?)(?=^      - |\Z)", profiles)
+        self.assertIn('GH_TOKEN: ${{ github.token }}', verification[1])
+        self.assertIn('--cross-head-proof .local/verify/cross-head.json', verification[1])
+        self.assertNotIn('steps.head_reuse', verification[1])
+        self.assertIn('pull-requests: read', profiles)
 
     def test_every_job_and_artifact_has_platform_profile_and_partition_identity(self):
         profiles = self.job("profiles")

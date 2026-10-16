@@ -47,13 +47,15 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   A successful full
   run satisfies the push gate for the same unchanged inputs, toolchain and test
   configuration. The push tier is `quick` plus workspace-wide clippy and API
-  docs: it tests what the change can reach. CI runs the complete debug and
-  release suites on both platforms before merge, including for compatibility
+  docs: it tests what the change can reach. CI requires complete debug and
+  release coverage on both platforms before merge, including for compatibility
   and persistence changes. Run
   targeted local release checks for performance or release-specific behavior.
   Local full is required when CI cannot run or on request. Both-platform
   debug/release CI on the final commit remains required before merging for every
-  change outside that narrow prose-only path. Record
+  change outside that narrow prose-only path. The final matrix may use
+  [validated corrective-head coverage](docs/development/testing.md#reusing-unchanged-results-after-an-expectation-only-pr-correction)
+  under the testing policy. Record
   the tested state, commands and logs; report failures and checks not run.
   See [verification evidence](docs/development/testing.md#verification-evidence-and-reuse).
 - `verify.py` logs each step under `.local/verify/`, checks exit codes, and

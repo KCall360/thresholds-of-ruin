@@ -381,3 +381,47 @@ class VerifierReplay(unittest.TestCase):
                 self.assertEqual(authority.call_count, int(mode == 'valid'))
                 self.assertEqual(summary['evidence_origin'], 'fresh' if mode == 'rejected' else 'cross_head_composite')
                 if mode == 'valid': self.assertTrue(summary['cross_head']['union']['complete'])
+
+
+class RustWholeCellReuse(unittest.TestCase):
+    def test_real_retained_rust_cell_is_required_before_empty_fresh_selection(self):
+        CrossHeadIdentity.setUp(self)
+        identity, jobs, _ = reuse.inspect(self.api, self.target, now=NOW)
+        self.artifact['name'] = 'verification-ubuntu-latest-release-rust'
+        job, _ = reuse.source_cell(self.api, identity, jobs, 'ubuntu-latest', 'release', 'rust', now=NOW)
+        fixtures.CellValidation.setUp(self)
+        source, target = identity['source'], identity['target']
+        self.before['checkout'].update(sha=source['checkout_sha'], tree=source['tree'], parents=[BASE, HEAD])
+        self.before['github'].update(reported_sha=source['checkout_sha'], workflow_sha=source['checkout_sha'],
+            ref='refs/pull/9/merge', workflow_ref=qualification.REPOSITORY + '/.github/workflows/ci.yml@refs/pull/9/merge')
+        self.before['recorded_at'] = '2026-10-16T11:02:00Z'
+        self.after = copy.deepcopy(self.before)
+        self.after.update(phase='after', recorded_at='2026-10-16T11:38:00Z')
+        current = copy.deepcopy(self.before)
+        current['checkout'].update(sha=target['checkout_sha'], tree=target['tree'], parents=[BASE, target['head']])
+        current['github'].update(run_id=102, reported_sha=target['checkout_sha'], workflow_sha=target['checkout_sha'])
+        current['recorded_at'] = '2026-10-16T11:51:00Z'
+        records = {**self.records, 'observations/before.json': encoded(self.before), 'observations/after.json': encoded(self.after),
+                   'fixture-full-ci-release-rust/summary.json': encoded(self.summary)}
+        validate = lambda evidence: reuse.validate_cell(evidence, identity, job, current,
+            profile='release', partition='rust', jobs=4, workers=2, rows=[])
+        coverage = validate(records)  # Actual full Service receipt/completeness reader, not a mocked pass.
+        proof = {**identity, 'cell': ['ubuntu-latest', 'release', 'rust'],
+                 'limits': {'jobs': 4, 'test_workers': 2}, 'coverage': coverage}
+        proof['source']['snapshot'] = qualification.run_snapshot(source['current'])
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+                'GITHUB_SHA': MERGE, 'GITHUB_RUN_ID': '102', 'GITHUB_EVENT_NAME': 'pull_request'}), \
+                patch.object(reuse.observation, 'checkout', return_value=current['checkout']), \
+                patch.object(reuse, 'final_authority', side_effect=lambda candidate, _: reuse.recheck(self.api, candidate, now=NOW)):
+            selected = reuse.selected_plan(proof, self.plan, profile='release', partition='rust', jobs=4, workers=2, directory=directory)
+            self.assertEqual(selected, [])
+            self.assertTrue(reuse.union(proof, selected, [], directory, 4)['borrowed_cell'])
+            broken = copy.deepcopy(proof); broken['coverage']['fresh'] = [OTHER]
+            with self.assertRaisesRegex(ValueError, 'whole-cell coverage'):
+                reuse.union(broken, selected, [], directory, 4)
+        malformed = {**records, 'fixture-full-ci-release-rust/rust-release.log': b'no complete Service result\n'}
+        with self.assertRaises(ValueError): validate(malformed)
+        for conclusion in ('failure', 'cancelled'):
+            job['conclusion'] = conclusion
+            with self.subTest(conclusion=conclusion), self.assertRaises(ValueError):
+                reuse.source_cell(self.api, identity, jobs, 'ubuntu-latest', 'release', 'rust', now=NOW)

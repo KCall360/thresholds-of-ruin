@@ -25,10 +25,13 @@ for repeated single-target Rust edits; it does not qualify a verification gate),
 `push` tier (or `full`) before every push, except for
 [verified prose-only documentation changes](docs/development/testing.md#prose-only-documentation-changes),
 which require documentation/link and tooling checks locally and in CI.
-`push` tests what the change can reach; full CI runs everything. Run targeted release checks for
+`push` tests what the change can reach; full CI requires complete coverage. Run targeted release checks for
 performance/release-specific behavior; local full is required when CI cannot run
 or on request. Full Windows/Linux debug/release CI on the final commit remains
 required before merge outside that narrow prose-only path, including separate tooling/dependency jobs.
+The final matrix may use
+[validated corrective-head coverage](docs/development/testing.md#reusing-unchanged-results-after-an-expectation-only-pr-correction)
+under the testing policy.
 
 A full run covers the local push gate for unchanged inputs, toolchain and test
 configuration. Record the tested state, failures and checks not run; stale,
