@@ -9,6 +9,7 @@ test times include that test's setup, body, teardown and cleanup. Their differen
 is overhead, not an inferred compilation measurement.
 """
 import argparse
+from itertools import islice
 import json
 import os
 from pathlib import Path
@@ -192,6 +193,14 @@ def main(argv=None):
                 super().__init__(sink=record if handle else None, **kwargs)
 
             def run(self, suite):
+                if handle is not None:
+                    try:
+                        ids = [test.id() for test in islice(parallel_tests.flatten(suite), 10001)]
+                        if len(ids) > 10000 or any(not isinstance(name, str) or not 0 < len(name) <= 1024 for name in ids):
+                            ids = None
+                    except Exception:
+                        ids = None  # Reporting cannot replace the existing runner's result.
+                    record({'kind': 'selection', 'seconds': 0.0, 'test_ids': ids})
                 if local.workers > 1:
                     successful = parallel_tests.run(suite, workers=local.workers, stream=self.stream,
                                                     sink=record if handle else None, failfast=self.failfast,

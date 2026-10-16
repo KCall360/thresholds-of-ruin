@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -34,6 +35,8 @@ class Observation(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"fixture\n")
         self.status = b""
+        self.distributions = self.enterContext(patch("importlib.metadata.distributions", return_value=[
+            SimpleNamespace(metadata={"Name": "NumPy"}, version="1.2.3")]))
 
     def probe(self, command, root, issues, scope):
         if "--show-toplevel" in command: return str(root).encode() + b"\n"
@@ -88,6 +91,121 @@ class Observation(unittest.TestCase):
         self.assertEqual(result["status"], "untrusted_observation")
         self.assertIsNone(result["runner"]["image_version"])
         self.assertEqual(result["checkout"]["sha"], SHA)
+
+    def test_build_test_environment_is_allowlisted_hashed_and_scoped(self):
+        environment = {**GITHUB, "RUSTFLAGS": "--remap-path-prefix=/private/build=.",
+                       "CARGO_TARGET_DIR": "/private/target", "PYTHONHASHSEED": "",
+                       "TOR_SCENARIO_COMPILER": "/private/scenario", "TOR_TEST_PROFILE": "release",
+                       "TOR_LOCAL_MOUSE_WAIVER": "1", "TOR_TEST_PRIORITY": "below_normal",
+                       "GITHUB_TOKEN": "private-token", "UNRECOGNIZED_OPTION": "private-option"}
+        with patch.object(ci_observation, "probe", side_effect=self.probe):
+            result = ci_observation.collect(self.root, "before", environment=environment)
+        self.assertIn("build_test_environment", result)
+        observed = result["build_test_environment"]
+        self.assertEqual(observed["scope"], "observer_process")
+        values = observed["variables"]
+        self.assertEqual(set(values), set(ci_observation.BUILD_TEST_ENVIRONMENT))
+        for name in ("RUSTFLAGS", "CARGO_TARGET_DIR", "PYTHONHASHSEED", "TOR_SCENARIO_COMPILER",
+                     "TOR_TEST_PROFILE", "TOR_LOCAL_MOUSE_WAIVER", "TOR_TEST_PRIORITY"):
+            self.assertEqual(values[name], {"status": "present", "sha256": hashlib.sha256(environment[name].encode()).hexdigest()})
+        self.assertEqual(values["CARGO_BUILD_TARGET"], {"status": "absent"})
+        expected = hashlib.sha256(json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertEqual(observed["sha256"], expected)
+        self.assertTrue(result["complete"], result["issues"])
+        for private in ("/private", "private-token", "private-option", "GITHUB_TOKEN", "UNRECOGNIZED_OPTION"):
+            self.assertNotIn(private, json.dumps(result))
+        self.assertIn("native_libraries_and_display", result["omissions"])
+        self.assertIn("verifier_stage_overrides", result["omissions"])
+        self.assertIn("package_contents_and_provenance", result["omissions"])
+
+    def test_environment_fingerprint_changes_for_value_and_presence_not_mapping_order(self):
+        fingerprints = []
+        for environment in (GITHUB, {**GITHUB, "RUSTFLAGS": ""}, {**GITHUB, "RUSTFLAGS": "-Copt-level=1"}):
+            with patch.object(ci_observation, "probe", side_effect=self.probe):
+                result = ci_observation.collect(self.root, "before", environment=environment)
+                reordered = ci_observation.collect(self.root, "after", environment=dict(reversed(list(environment.items()))))
+            self.assertIn("build_test_environment", result)
+            self.assertEqual(result["build_test_environment"], reordered["build_test_environment"])
+            fingerprints.append(result["build_test_environment"]["sha256"])
+        self.assertEqual(len(set(fingerprints)), 3)
+
+    def test_external_runtime_binary_override_is_present_and_value_sensitive_without_paths(self):
+        observed = [ci_observation.build_test_environment(environment, []) for environment in (
+            {}, {"TOR_TEST_BINARIES": "/private/first"}, {"TOR_TEST_BINARIES": "/private/second"})]
+        self.assertEqual(len({row["sha256"] for row in observed}), 3)
+        self.assertEqual(observed[0]["variables"]["TOR_TEST_BINARIES"], {"status": "absent"})
+        self.assertEqual(observed[1]["variables"]["TOR_TEST_BINARIES"]["status"], "present")
+        self.assertNotIn("/private", json.dumps(observed))
+
+    def test_unavailable_environment_values_invalidate_the_fingerprint_without_echoing(self):
+        for value in ("secret" * ci_observation.MAX_OUTPUT_BYTES, "é" * ci_observation.MAX_OUTPUT_BYTES, 123, "\ud800"):
+            with self.subTest(value_type=type(value).__name__):
+                with patch.object(ci_observation, "probe", side_effect=self.probe):
+                    result = ci_observation.collect(self.root, "before", environment={**GITHUB, "RUSTFLAGS": value})
+                self.assertIn("build_test_environment", result)
+                self.assertEqual(result["build_test_environment"]["variables"]["RUSTFLAGS"], {"status": "unavailable"})
+                self.assertIsNone(result["build_test_environment"]["sha256"])
+                self.assertFalse(result["complete"])
+                self.assertIn({"scope": "environment.RUSTFLAGS", "code": "invalid_or_oversized"}, result["issues"])
+                self.assertNotIn("secret", json.dumps(result))
+
+    def test_installed_distribution_identity_is_normalized_sorted_metadata_only(self):
+        self.distributions.return_value = [SimpleNamespace(metadata={"Name": "NumPy", "Location": "/private"}, version="1.2.3rc1+fixture"),
+                                           SimpleNamespace(metadata={"Name": "other_package"}, version="2.0")]
+        result = self.collect()
+        self.assertIn("distributions", result["tools"]["python"])
+        distributions = result["tools"]["python"]["distributions"]
+        versions = {"numpy": "1.2.3rc1+fixture", "other-package": "2.0"}
+        self.assertEqual(distributions, {"status": "present", "versions": versions,
+                                        "sha256": hashlib.sha256(json.dumps(versions, sort_keys=True, separators=(",", ":")).encode()).hexdigest()})
+        self.assertTrue(result["complete"], result["issues"])
+        self.assertNotIn("/private", json.dumps(result))
+        self.distributions.return_value.reverse()
+        self.assertEqual(distributions, self.collect()["tools"]["python"]["distributions"])
+        self.distributions.return_value[0].version = "2.1"
+        self.assertNotEqual(distributions["sha256"], self.collect()["tools"]["python"]["distributions"]["sha256"])
+
+    def test_invalid_or_unreadable_distribution_metadata_is_incomplete_and_not_echoed(self):
+        for name, version in (("/private/package", "1"), (None, "1"), ("p" * 129, "1"),
+                              ("package", "/private/version"), ("package", "1" * 129), ("package", None)):
+            with self.subTest(name_type=type(name).__name__, version_type=type(version).__name__):
+                self.distributions.return_value = [SimpleNamespace(metadata={"Name": name}, version=version)]
+                result = self.collect()
+                self.assertIn("distributions", result["tools"]["python"])
+                self.assertEqual(result["tools"]["python"]["distributions"], {"status": "unavailable"})
+                self.assertFalse(result["complete"])
+                self.assertNotIn("private", json.dumps(result))
+        for error in (OSError("private-metadata"), RuntimeError("private-finder")):
+            with self.subTest(error=type(error).__name__):
+                self.distributions.side_effect = error
+                result = self.collect()
+                self.assertFalse(result["complete"])
+                self.assertEqual(result["tools"]["python"]["distributions"], {"status": "unavailable"})
+                self.assertNotIn("private", json.dumps(result))
+
+    def test_duplicate_and_oversized_distribution_inventories_have_no_partial_identity(self):
+        self.distributions.return_value = [SimpleNamespace(metadata={"Name": name}, version="1")
+                                           for name in ("some_package", "some.package")]
+        result = self.collect()
+        self.assertIn("distributions", result["tools"]["python"])
+        self.assertEqual(result["tools"]["python"]["distributions"], {"status": "unavailable"})
+        self.assertFalse(result["complete"])
+        self.distributions.return_value = [SimpleNamespace(metadata={"Name": f"package{number}"}, version="1")
+                                           for number in range(ci_observation.MAX_DISTRIBUTIONS)]
+        result = self.collect()
+        self.assertTrue(result["complete"], result["issues"])
+        self.assertEqual(len(result["tools"]["python"]["distributions"]["versions"]), ci_observation.MAX_DISTRIBUTIONS)
+        yielded = []
+        def distributions():
+            for number in range(ci_observation.MAX_DISTRIBUTIONS + 1):
+                yielded.append(number)
+                yield SimpleNamespace(metadata={"Name": f"package{number}"}, version="1")
+            self.fail("Inventory enumeration exceeded its bound")
+        self.distributions.side_effect = distributions
+        result = self.collect()
+        self.assertEqual(len(yielded), ci_observation.MAX_DISTRIBUTIONS + 1)
+        self.assertEqual(result["tools"]["python"]["distributions"], {"status": "unavailable"})
+        self.assertFalse(result["complete"])
 
     def test_stage_policy_inputs_are_hashed_when_installed_and_optional_when_absent(self):
         names = ("scripts/ci_policy.py", "scripts/ci_coverage_manifest.json", "scripts/ci_shadow.py")
