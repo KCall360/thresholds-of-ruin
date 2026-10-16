@@ -18,4 +18,4 @@ tor-client-common.workspace = true
 tor-simulation.workspace = true
 
 [dev-dependencies]
-tor-simulation = { workspace = true, features = ["test-support"] }
+toml = "1.1.6"

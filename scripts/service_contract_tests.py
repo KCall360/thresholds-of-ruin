@@ -29,6 +29,28 @@ def catalog_fixture(extras=40):
         "client_bytes": 65536, "total_bytes": 262144}
 
 
+def assert_catalog_page(test, page, after):
+    """Scenario assertions, not a replacement for the production wire decoder."""
+    selectors = [row["selector"] for row in page["entries"]]
+    test.assertTrue(selectors)
+    test.assertLessEqual(len(selectors), 32)
+    test.assertEqual(selectors, sorted(set(selectors)), "page selectors must be strictly ordered")
+    if after is not None:
+        test.assertGreater(selectors[0], after, "continuation must advance beyond its cursor")
+    if page["next"] is not None:
+        test.assertEqual(page["next"], selectors[-1], "continuation must name the final row")
+    return selectors
+
+
+def expected_catalog_selectors():
+    # Independent authored identities, not values inferred from server output.
+    return ["archetype:rat", *[f"archetype:rat_{index:02}" for index in range(40)]]
+
+
+def assert_catalog_complete(test, selectors):
+    test.assertEqual(selectors, expected_catalog_selectors(), "complete ordered authored catalog")
+
+
 class CatalogServiceContracts(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -42,6 +64,7 @@ class CatalogServiceContracts(unittest.TestCase):
         cls.addClassCleanup(cls.host.close)
 
     def setUp(self):
+        self.frame_bytes = 4096
         self.case = self.host.call("create", **catalog_fixture())["case"]
         self.addCleanup(self.close_case)
 
@@ -50,14 +73,14 @@ class CatalogServiceContracts(unittest.TestCase):
             self.host.call("close", case=self.case)
             self.case = None
 
-    def drain(self, connection, *, live=True):
+    def drain(self, connection, *, live=True, raw=False):
         result = self.host.call("drain", case=self.case, connection=connection)
         self.assertEqual(result["live"], live, "catalog must paginate, never disconnect")
         if live:
             self.assertIsNone(result["closing"])
         for frame in result["frames"]:
-            self.assertLessEqual(len(frame.encode("utf-8")), 4096)
-        return [json.loads(frame) for frame in result["frames"]]
+            self.assertLessEqual(len(frame.encode("utf-8")), self.frame_bytes)
+        return result["frames"] if raw else [json.loads(frame) for frame in result["frames"]]
 
     def connect(self, role="wizard"):
         connection = self.host.call("connect", case=self.case, role=role,
@@ -70,36 +93,48 @@ class CatalogServiceContracts(unittest.TestCase):
         self.assertEqual(len(snapshots), 1, "positive fixture control: successful bounded attach")
         return connection, snapshots[0]
 
-    def query(self, connection, snapshot, operation, request_id="query"):
+    def query(self, connection, snapshot, operation, request_id="query", *, raw=False):
         self.host.request(case=self.case, connection=connection, request_id=request_id,
             request={"type": "command", "context": {"stream": snapshot["context"],
                 "readiness_revision": snapshot["readiness"]["revision"]},
                 "branch": snapshot["branch"], "command": {"type": "wizard",
                     "expected_revision": snapshot["state"]["revision"], "operation": operation}})
-        return self.drain(connection)
+        return self.drain(connection, raw=raw)
+
+    def test_generous_budget_proves_catalog_requires_trimming(self):
+        self.close_case()
+        fixture = catalog_fixture()
+        self.frame_bytes = fixture["frame_bytes"] = 16384
+        self.case = self.host.call("create", **fixture)["case"]
+        connection, snapshot = self.connect()
+        frames = self.query(connection, snapshot, "creature list", request_id="\\" * 128, raw=True)
+        catalogs = [(frame, json.loads(frame)) for frame in frames
+                    if json.loads(frame)["type"] == "creature_catalog"]
+        self.assertEqual(len(catalogs), 1)
+        raw, response = catalogs[0]
+        page = response["page"]
+        self.assertEqual(assert_catalog_page(self, page, None), expected_catalog_selectors()[:32])
+        self.assertEqual(page["next"], expected_catalog_selectors()[31])
+        self.assertGreater(len(raw.encode("utf-8")), 4096, "fixture must exercise whole-response trimming")
 
     def test_complete_encoded_catalog_pages_preserve_state_and_history(self):
         connection, snapshot = self.connect()
         before = self.host.call("audit", case=self.case, actor=1, user="wizard")
         after = None
-        selectors = set()
+        selectors = []
         for _ in range(42):
-            command = "creature list" + (f" after {after}" if after else "")
+            command = "creature list" + (f" after {after}" if after is not None else "")
             messages = self.query(connection, snapshot, command, request_id="\\" * 128)
             pages = [row["page"] for row in messages if row["type"] == "creature_catalog"]
             self.assertEqual(len(pages), 1, "positive fixture control: bounded catalog reply")
             page = pages[0]
-            self.assertTrue(page["entries"])
-            self.assertLessEqual(len(page["entries"]), 32)
-            for entry in page["entries"]:
-                self.assertNotIn(entry["selector"], selectors)
-                selectors.add(entry["selector"])
+            selectors.extend(assert_catalog_page(self, page, after))
             self.assertEqual(self.host.call("audit", case=self.case, actor=1, user="wizard"), before)
             after = page["next"]
             if after is None:
                 break
         self.assertIsNone(after)
-        self.assertEqual(len(selectors), 41)
+        assert_catalog_complete(self, selectors)
 
     def test_catalog_reply_is_private_and_spectator_cannot_query(self):
         wizard, snapshot = self.connect()
@@ -201,3 +236,29 @@ class CatalogServiceContracts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CatalogAssertionTests(unittest.TestCase):
+    def check(self, selectors, cursor=None, after=None):
+        return assert_catalog_page(self, {"entries": [{"selector": value} for value in selectors],
+                                          "next": cursor}, after)
+
+    def test_order_and_cursor_progression_reject_plausible_wrong_pages(self):
+        for selectors, cursor, after in [(["b", "a"], None, None),
+                                          (["a", "a"], None, None),
+                                          (["a", "b"], "a", None),
+                                          (["a", "b"], "b", "a")]:
+            with self.subTest(selectors=selectors, cursor=cursor, after=after):
+                with self.assertRaises(AssertionError):
+                    self.check(selectors, cursor, after)
+        self.assertEqual(self.check(["b", "c"], "c", "a"), ["b", "c"])
+
+    def test_expected_identities_are_independent_and_complete(self):
+        expected = expected_catalog_selectors()
+        self.assertEqual(len(expected), 41)
+        self.assertEqual(expected[0], "archetype:rat")
+        self.assertEqual(expected[-1], "archetype:rat_39")
+        assert_catalog_complete(self, expected)
+        for wrong in (["wrong:" + value for value in expected], expected[:-1], list(reversed(expected))):
+            with self.assertRaises(AssertionError):
+                assert_catalog_complete(self, wrong)

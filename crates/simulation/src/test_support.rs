@@ -1,4 +1,4 @@
-//! Explicit fixture support, excluded from production builds by default.
+//! Private fixture support for this crate’s unit tests.
 use crate::rules::{Ruleset, RulesetDocument, DEFAULT_RULESET_TOML};
 use std::sync::Arc;
 

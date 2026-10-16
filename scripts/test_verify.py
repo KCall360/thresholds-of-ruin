@@ -904,7 +904,8 @@ class CiWorkflowContract(unittest.TestCase):
 
     def test_cache_identity_includes_virtual_root_commands_partition_and_effective_flags(self):
         profiles = self.job("profiles")
-        self.assertIn("shared-key: ${{ matrix.profile }}-${{ matrix.partition }}-${{ hashFiles('Cargo.toml', 'scripts/verify.py', '.github/workflows/ci.yml') }}", profiles)
+        self.assertIn("shared-key: ${{ matrix.profile }}-${{ matrix.partition }}-${{ steps.build_key.outputs.key }}", profiles)
+        self.assertIn("if: steps.build_key.outcome == 'success' && steps.build_key.outputs.key != ''", profiles)
         self.assertIn('      CARGO_PROFILE_DEV_DEBUG: "0"', profiles)
         self.assertIn('      CARGO_INCREMENTAL: "0"', profiles)
         self.assertIn("save-if: ${{ github.ref == 'refs/heads/main' }}", profiles)
