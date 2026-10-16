@@ -71,15 +71,15 @@ per-group, graph-query, validation and preparation budgets still apply.
 Room lighting is depth-dependent and corridors are dark; the graph may include
 extra connections. The [starter slice](../play/rogue.md) adds explicit Warrior/Mage
 presets, an equipped mace and ring mail, finite bandages/rations, and ordinary
-E/S/H/I/Z/C/Q/Y/U/V builds selected by the ten-species population policy. The
+E/S/H/I/Z/C/Q/Y/T/U/V builds selected by the eleven-species population policy. The
 initial HD point remains unspent and future growth explicitly
 selects the matching class. Floor profiles are separate from geometry preparation:
 first successful selected-character entry evaluates each finite stage once, and
 returns retain entities, spent stock and recorded skips. NPC abstract-stair
 traversal is disabled by typed scenario capability. Ordinary purchases expose
 the starter talents and exact Mage forms; foes and Bind Wounds use shared combat,
-finite supplies and cooldowns. Four weighted actor attempts use 21 depth bands,
-exact racial rows after depth 26 and finite C/Y/V birth stock at 15%/30%/20%.
+finite supplies and cooldowns. Four weighted actor attempts use authored depth bands,
+exact racial rows after depth 26 and finite C/Y/T/V birth stock at 15%/30%/50%/20%.
 The equal ration/bandage pool is provisional TOR scenario tuning, not original
 loot equivalence. The population has focused source-qualified activation coverage; its
 equipment/stat values and weights remain provisional.
@@ -130,7 +130,7 @@ source-granted defenses, stacking and active-time recovery across freeze/replay.
 
 The shared foundation covers nutrition, eating, starvation and authored stochastic
 condition triggers through the shared status gate. The Rogue package now explicitly
-enrolls Warrior/Mage, keeps all ten selected foe recipes exempt, and makes its
+enrolls Warrior/Mage, keeps all eleven selected foe recipes exempt, and makes its
 existing ration edible.
 Its layered acceptance contracts do not establish complete-run survival,
 production balance or final Rogue configuration. A creature requiring nutrition must use an authored shared rules
@@ -200,12 +200,14 @@ safeguards and treasure-room population only when prerequisites exist.
 
 ### Species, traps and pressure
 
-Extend the selected E/S/H/I/Z/C/Q/Y/U/V population to all 26 species, each with its
+Extend the selected E/S/H/I/Z/C/Q/Y/T/U/V population to all 26 species, each with its
 normal-play ability/behavior case. Complete earned-survival qualification and
 calibrate the depth/spawn tables.
 Centaur and yeti are selected at depths 7–16 and 11–20 respectively, with
 ordinary finite birth stock, passive provocation and their purchased natural
-strike sequences. The remaining 16 species are unfinished. Complete trapdoor, arrow,
+strike sequences. Troll is selected at depths 13–22 with six racial HD,
+RG1(1), NA1(2), NA2(4), mean acquisition, separate 1d8/1d8/2d6 strikes and 50%
+finite birth stock from the same provisional pool. The remaining 15 species are unfinished. Complete trapdoor, arrow,
 sleeping gas, bear trap, teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
 must respect destination generation/loading and geometry. Add seeded wandering
 population while floors are active.

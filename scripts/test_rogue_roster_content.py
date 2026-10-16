@@ -13,6 +13,7 @@ ORDINARY = {"emu": (1, [(1, 2)]), "snake": (1, [(1, 3)]),
             "quagga": (3, [(1, 5), (1, 5)]),
             "centaur": (4, [(1, 2), (1, 5), (1, 5)]),
             "yeti": (4, [(1, 6), (1, 6)]),
+            "troll": (6, [(1, 8), (1, 8), (2, 6)]),
             "black_unicorn": (7, [(1, 9), (1, 9), (2, 9)]),
             "vampire": (8, [(1, 10)])}
 
@@ -47,7 +48,7 @@ class RogueRosterContent(unittest.TestCase):
 
     def test_every_rogue_species_owns_explicit_reference_disposition(self):
         species = source("catalog/creatures.toml")["creatures"]["species"]
-        mean = {"emu", "snake", "hobgoblin", "zombie", "quagga", "black_unicorn", "vampire"}
+        mean = {"emu", "snake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire"}
         passive = {"human", "ice_monster", "centaur", "yeti"}
         self.assertEqual(set(species), {"rogue." + name for name in mean | passive})
         for name in mean | passive:
@@ -87,11 +88,52 @@ class RogueRosterContent(unittest.TestCase):
         self.assertEqual(cold["modifiers"], [{"scope": "always", "op": {
             "kind": "immunity", "selector": {"kind": "descriptor", "descriptor": "cold"}}}])
 
+    def test_troll_owns_six_exact_racial_rows_and_only_rg1_na1_na2_purchases(self):
+        actors = source("catalog/actors.toml")["actors"]
+        self.assertIn("rogue.troll", actors, "Approved T recipe is missing")
+        build = actors["rogue.troll"]["creature"]
+        purchases = {1: "rogue.regeneration", 2: "second_strike", 4: "third_strike"}
+        self.assertEqual(build["hit_dice"], [{"source": "racial", "purchases": [
+            {"pool": "advancement", "selection": {"kind": "talent", "talent": purchases[ordinal]}}
+        ] if ordinal in purchases else []} for ordinal in range(1, 7)])
+        self.assertEqual(build["restoration"], "authored")
+        self.assertEqual(build["nutrition"], {"kind": "exempt"})
+        self.assertEqual(build["future_growth"], {"kind": "disabled"})
+
+    def test_troll_giant_flags_are_eligibility_and_strikes_are_separate_rolled_checks(self):
+        catalog = source("catalog/creatures.toml")["creatures"]["species"]
+        self.assertIn("rogue.troll", catalog, "Approved T species is missing")
+        troll = catalog["rogue.troll"]
+        self.assertEqual(troll["kind"], "giant")
+        self.assertEqual(troll["behavior"], {
+            "disposition": "mean", "idle": "wait", "memory_ticks": 1000})
+        ops = [row["op"] for row in troll["modifiers"]]
+        self.assertEqual({op["flag"] for op in ops if op["kind"] == "flag"},
+                         {"regenerative", "natural_sequence"})
+        self.assertFalse(any(op["kind"] == "grant_ability" for op in ops))
+        self.assertFalse(any(op.get("stat", {}).get("kind") ==
+                             "health_recovery_period_percent" for op in ops))
+        strikes = troll["melee"]["strikes"]
+        self.assertEqual(len(strikes), 3)
+        for strike, unlock, count, sides in zip(strikes, (None, "second_strike", "third_strike"),
+                                               (1, 1, 2), (8, 8, 6), strict=True):
+            self.assertEqual(strike.get("unlock"), unlock)
+            self.assertEqual(strike["check"], {"actor": "user", "skill": {"kind": "natural_attack"},
+                             "against": {"kind": "defense", "defense": "physical"}})
+            self.assertEqual(strike["on_failure"], [])
+            self.assertEqual(strike["riders"], [])
+            effect, = strike["on_success"]
+            component, = effect["damage"]["components"]
+            self.assertEqual(component["amount"], {"kind": "rolled", "dice": {
+                "count": count, "sides": sides, "bonus": 0}})
+        # RG1's unchanged flag gate and -50 ordinary-period modifier are owned
+        # by RogueVampireContent; no second recovery implementation is introduced.
+
     def test_generated_carrier_fixture_preserves_production_policies_and_recipes(self):
         from rogue_vampire_package import generated_carrier_manifest
         manifest = source("scenario.toml")
         canonical = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]
-        for name, depth in (("centaur", 7), ("yeti", 11), ("vampire", 27)):
+        for name, depth in (("centaur", 7), ("yeti", 11), ("troll", 13), ("vampire", 27)):
             with self.subTest(species=name):
                 fixture = generated_carrier_manifest(name)
                 self.assertEqual(fixture["modules"], manifest["modules"])
@@ -111,7 +153,7 @@ class RogueRosterContent(unittest.TestCase):
                 self.assertEqual(len(fixture["characters"][0]["creature"]["hit_dice"]), 16)
                 self.assertEqual(fixture["characters"][0]["loadout"], manifest["characters"][0]["loadout"])
 
-    def test_production_population_selects_ten_species_and_preserves_stock_order(self):
+    def test_production_population_selects_eleven_species_and_preserves_stock_order(self):
         manifest = source("scenario.toml")
         activation = manifest["floor_activation"]
         profile = activation["profiles"]["rogue.low_depth"]
@@ -126,11 +168,12 @@ class RogueRosterContent(unittest.TestCase):
         self.assertEqual(actor["ai"], "rogue_hostile")
         self.assertTrue(actor["avoid_protagonist_sight"])
         self.assertEqual(actor["depth_growth"], {"kind": "racial_after", "depth": 26})
-        self.assertEqual(len(actor["bands"]), 21)
+        # Exact band coverage, normalized weights and endpoints belong to the
+        # independent pinned-selector oracle in test_rogue_activation_candidate.
         self.assertEqual({row["archetype"] for band in actor["bands"] for row in band["choices"]},
                          {"rogue." + name for name in (
-                             "emu", "snake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "black_unicorn", "vampire")})
-        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.vampire": (1, 5)}
+                             "emu", "snake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "black_unicorn", "vampire")})
+        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5)}
         for band in actor["bands"]:
             for row in band["choices"]:
                 if row["archetype"] in chances:

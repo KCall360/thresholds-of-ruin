@@ -149,7 +149,7 @@ def run_manifest(seeds=DEFAULT_SEEDS, timeout=30, case_ids=None, *, reference="a
                "authored first purchases require separate ordinary purchase acceptance"]),
             "reference HD is not dungeon depth",
             "isolated authored foes have no population birth stock; candidate stock requires entry-process evidence",
-            "centaur and yeti carry loot remains incomplete; wake cadence and finite memory are TOR adaptations",
+            "birth stock is absent from isolated duels; wake cadence and finite memory are TOR adaptations",
             "unchanged passive player and passive foe may never acquire each other; no contact is not combat survival",
             "net resources are not gross spending or recovery",
             "earned progression and coupled explore/fight/rest nutrition and stock flows remain unmeasured"],
