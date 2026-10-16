@@ -10,7 +10,7 @@ from arena_matrix import FAMILIES, HD_LEVELS, create_matrix, encounter, recipe, 
 class ArenaMatrixTests(unittest.TestCase):
     def test_generated_encounter_uses_current_scenario_format(self):
         manifest, _ = encounter("warrior_rank_heavy", 1, False, False, "current-test-ruleset")
-        self.assertEqual(manifest["format"], 15)
+        self.assertEqual(manifest["format"], 16)
 
     def test_named_starter_allocations_cover_one_six_and_eleven_with_exact_paid_forms(self):
         names = {"warrior_rank_heavy", "warrior_talent_heavy", "warrior_mixed",
@@ -142,7 +142,7 @@ class BundledRulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "import.toml"
-            source.write_text('import = "interactions-v38"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
+            source.write_text('import = "interactions-v39"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
             expected = load_rules(source)
             result = create_matrix(root / "matrix", DEFAULT_COMPILER, str(source), ["42"],
                                    families=["strength_heavy"], levels=[1])
@@ -150,7 +150,7 @@ class BundledRulesTests(unittest.TestCase):
                 actual = tomllib.loads(path.read_text())
                 self.assertEqual(actual, expected)
                 self.assertNotIn("import", actual)
-            self.assertEqual(set(result["rules_dependencies"]), {"interactions-v38"})
+            self.assertEqual(set(result["rules_dependencies"]), {"interactions-v39"})
 
     def test_generated_packages_bundle_the_explicit_rules_source(self):
         from ruleset_sources import DEFAULT_COMPILER, DEFAULT_RULESET

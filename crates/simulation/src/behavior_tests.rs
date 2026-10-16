@@ -113,8 +113,17 @@ fn commit_strike(game: &mut Game, actor: ActorId, target: ActorId) -> crate::abi
     let plan = game
         .ability_plan(actor, &AbilityId::new("basic_melee").unwrap(), target)
         .unwrap();
-    game.resolve_strike(plan.as_ability().unwrap(), 0, None)
-        .unwrap()
+    game.resolve_strike(
+        plan.as_ability().unwrap(),
+        0,
+        None,
+        &mut crate::combat::PreparationProgress::Ability {
+            next_strike: 1,
+            successful_primaries: 0,
+            attempted_riders: [0; 2],
+        },
+    )
+    .unwrap()
 }
 fn restore(game: &Game) -> Game {
     let mut shared = crate::checkpoint::SharedState::default();
@@ -341,6 +350,7 @@ fn non_hostile_rejects_direct_harm_in_primary_failure_rider_and_flag_condition()
             "on_success" => strikes[0].on_success = damage,
             "on_failure" => strikes[0].on_failure = damage,
             "rider" => strikes[0].riders.push(crate::rules::RiderDef {
+                condition: None,
                 trigger: crate::rules::RiderTrigger::Success,
                 check: None,
                 effects: damage,
@@ -457,6 +467,7 @@ fn an_attempted_target_rider_provokes_once_through_the_parent_strike() {
                 on_failure: vec![],
                 descriptors: vec![],
                 riders: vec![crate::rules::RiderDef {
+                    condition: None,
                     trigger: crate::rules::RiderTrigger::Success,
                     check: Some(crate::rules::RiderCheckDef {
                         skill: crate::rules::SkillSelector::Named {
@@ -513,7 +524,16 @@ fn a_cancelled_preparation_and_unavailable_strike_do_not_provoke() {
     )
     .unwrap();
     let outcome = game
-        .resolve_strike(plan.as_ability().unwrap(), 0, None)
+        .resolve_strike(
+            plan.as_ability().unwrap(),
+            0,
+            None,
+            &mut crate::combat::PreparationProgress::Ability {
+                next_strike: 1,
+                successful_primaries: 0,
+                attempted_riders: [0; 2],
+            },
+        )
         .unwrap();
     assert_eq!(outcome.result, crate::abilities::OutcomeStatus::Miss);
     assert!(!outcome.target_participated());

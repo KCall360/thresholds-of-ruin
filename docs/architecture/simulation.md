@@ -69,7 +69,8 @@ See [actions.rs](../../crates/simulation/src/actions.rs).
 Saved timed preparations are a different kind of state. `Plan` distinguishes
 abilities from equip, unequip and drink work. An ability owns one immutable,
 value-serialized shared `AbilityPlan`: up to 16 ordered strikes, each with up to
-8 nonrecursive riders. The mutable `PreparationProgress` cursor is outside it.
+8 nonrecursive riders. Mutable `PreparationProgress` owns the cursor, a bounded
+successful-primary mask and once-attempt receipts outside that immutable plan.
 Execution captures selected sources, check operands, independent shared edge,
 costs, scaled timing, reach, effects and token sites once. Cursor advancement,
 suspension, revalidation and replay never rebuild these operands.
@@ -93,6 +94,18 @@ each affected actor resets Health quiet at its first positive applied damage onl
 The first-damage policy wins, self-damage deduplicates, and later strikes reset anew.
 Per-strike `Resolved` events carry actual ordinals; only `SequenceEnded` is terminal
 ability evidence. Item completion remains separate.
+
+The optional `sequence_successful_hits` rider condition requires 2–16 successful
+initiating primary checks involving the same captured target. The current primary
+must qualify; misses, checkless effects, personal difficulty checks, defending saves
+and rider checks cannot satisfy it. Protection reducing damage to zero still counts.
+The first eligible ordinary rider attempt consumes its preparation-local receipt,
+including failed checks and immune payloads. Lethal earlier payloads skip the attempt.
+Appended natural-melee riders share their source occurrence across rows; row-local
+riders remain distinct even when natural rider counts differ. Scheduler publication
+updates only matching live preparation history, preserving suspension and never
+recreating a tail discarded by lifecycle effects. Frozen check defenses and live
+damage protection retain their existing boundaries.
 
 Life and reach are checked at each strike. Before any strike has resolved, lost
 validity retains the existing early-discard behavior. After a prefix, an unavailable

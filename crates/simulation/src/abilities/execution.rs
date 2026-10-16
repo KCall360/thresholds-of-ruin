@@ -76,6 +76,7 @@ impl Game {
         ability: &AbilityPlan,
         index: usize,
         intention: Option<crate::IntentionId>,
+        progress: &mut crate::combat::PreparationProgress,
     ) -> Result<Outcome, GameError> {
         let strike = ability
             .strikes
@@ -138,6 +139,15 @@ impl Game {
             },
             contact.as_ref(),
         )?;
+        if strike.qualifying_primary_check()
+            && primary.selected_branch == Some(crate::rules::RiderTrigger::Success)
+            && primary
+                .outcome
+                .check
+                .is_some_and(|check| check.actor == crate::rules::CheckActor::User && check.success)
+        {
+            progress.record_successful_primary(index);
+        }
         if let Some(branch) = primary.selected_branch {
             for (ordinal, rider) in strike.riders.iter().enumerate() {
                 if rider.trigger != branch {
@@ -150,6 +160,9 @@ impl Game {
                     .is_some_and(|target| !target.health().dead())
                 {
                     break;
+                }
+                if !progress.attempt_conditional_rider(ability, index, ordinal) {
+                    continue;
                 }
                 crate::diagnostics::rider_resolution();
                 let (_, rider_receipt) = self.resolve_batch_in_transaction(

@@ -199,7 +199,7 @@ fn ordered_strikes_decode_one_immutable_plan_without_a_cursor() {
 fn ordered_strikes_decode_bounded_zero_offset_strikes_and_riders() {
     let mut first = frozen_strike(0, 0);
     first["riders"] = json!([{
-        "trigger": "success", "check": {
+        "trigger": "success", "condition": null, "check": {
             "actor": "user", "target_participates": true, "bonus": 0,
             "threshold": {"kind": "fixed", "value": 10}, "edge": -1
         },
@@ -225,7 +225,7 @@ fn ordered_strikes_reject_unbounded_or_missing_frozen_lists_on_decode() {
     let mut too_many_riders = frozen_strike(0, 0);
     too_many_riders["riders"] = json!((0..9)
         .map(|_| json!({
-            "trigger": "success", "check": null, "effects": [], "descriptors": []
+            "trigger": "success", "condition": null, "check": null, "effects": [], "descriptors": []
         }))
         .collect::<Vec<_>>());
     assert!(serde_json::from_value::<AbilityPlan>(frozen_plan(vec![too_many_riders])).is_err());
@@ -380,7 +380,7 @@ fn ordered_strikes_schedule_keeps_frozen_prefix_and_starts_recovery_after_last()
         );
         assert_eq!(
             serde_json::to_value(preparation).unwrap()["progress"],
-            json!({"kind":"ability","next_strike":completed})
+            json!({"kind":"ability","next_strike":completed,"successful_primaries":0,"attempted_riders":[0,0]})
         );
     }
     game.tick = 30;
@@ -442,7 +442,7 @@ fn ordered_strikes_reserve_later_check_owner_before_primary_damage_even_when_let
     let mut strike = frozen_strike(0, 0);
     strike["edge"] = json!(5);
     strike["shared_check"] = json!({"phase":"rider","ordinal":0});
-    strike["riders"] = json!([{"trigger": "success", "check":{"actor":"user","target_participates":true,"bonus":0,"threshold":{"kind":"fixed","value":0},"edge":-1},"effects":[],"descriptors":[]}]);
+    strike["riders"] = json!([{"trigger": "success", "condition": null, "check":{"actor":"user","target_participates":true,"bonus":0,"threshold":{"kind":"fixed","value":0},"edge":-1},"effects":[],"descriptors":[]}]);
     strike["on_success"] = serde_json::to_value(vec![super::PlannedEffect::Damage {
         damage: DamageSpec::new(
             vec![DamageComponent::rolled(
@@ -574,12 +574,14 @@ fn ordered_strikes_checkless_zero_damage_primary_runs_ordered_riders_but_death_s
             strikes[0].on_success = vec![damage(if lethal { 100 } else { 0 })];
             strikes[0].riders = vec![
                 RiderDef {
+                    condition: None,
                     trigger: crate::rules::RiderTrigger::Success,
                     check: None,
                     effects: vec![damage(4)],
                     descriptors: vec![],
                 },
                 RiderDef {
+                    condition: None,
                     trigger: crate::rules::RiderTrigger::Success,
                     check: None,
                     effects: vec![damage(5)],
@@ -638,6 +640,7 @@ fn ordered_strikes_tokens_bind_only_first_qualifying_site_of_strike_zero() {
             if first_rider {
                 strikes[0].riders = vec![
                     RiderDef {
+                        condition: None,
                         trigger: crate::rules::RiderTrigger::Success,
                         check: Some(RiderCheckDef {
                             skill: SkillSelector::SelectedWeapon,
@@ -771,7 +774,10 @@ fn ordered_strikes_checkpoint_tail_roundtrips_and_rejects_impossible_cursor_or_h
     }
     assert_eq!(restored, game);
     for (field, value) in [
-        ("progress", json!({"kind":"ability","next_strike":3})),
+        (
+            "progress",
+            json!({"kind":"ability","next_strike":3,"successful_primaries":0,"attempted_riders":[0,0]}),
+        ),
         ("progress", json!({"kind":"item"})),
         ("hold", json!(1)),
         ("remaining", json!(11)),
@@ -806,6 +812,7 @@ fn ordered_strikes_health_quiet_resets_once_across_riders_and_again_on_later_str
                 for strike in strikes {
                     strike.riders = vec![
                         RiderDef {
+                            condition: None,
                             trigger: crate::rules::RiderTrigger::Success,
                             check: None,
                             effects: strike.on_success.clone(),
@@ -844,7 +851,17 @@ fn ordered_strikes_health_quiet_resets_once_across_riders_and_again_on_later_str
             plan.target = plan.actor;
             plan.reach = Reach::SelfOnly;
         }
-        game.resolve_strike(&plan, 0, None).unwrap();
+        game.resolve_strike(
+            &plan,
+            0,
+            None,
+            &mut crate::combat::PreparationProgress::Ability {
+                next_strike: 1,
+                successful_primaries: 0,
+                attempted_riders: [0; 2],
+            },
+        )
+        .unwrap();
         for actor in [plan.actor, plan.target] {
             assert_eq!(
                 game.creature(actor).unwrap().health_recovery().elapsed(),
@@ -852,7 +869,17 @@ fn ordered_strikes_health_quiet_resets_once_across_riders_and_again_on_later_str
                 "one 50% reset spans primary and every rider, including self-damage"
             );
         }
-        game.resolve_strike(&plan, 1, None).unwrap();
+        game.resolve_strike(
+            &plan,
+            1,
+            None,
+            &mut crate::combat::PreparationProgress::Ability {
+                next_strike: 2,
+                successful_primaries: 0,
+                attempted_riders: [0; 2],
+            },
+        )
+        .unwrap();
         for actor in [plan.actor, plan.target] {
             assert_eq!(
                 game.creature(actor).unwrap().health_recovery().elapsed(),
@@ -878,6 +905,7 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
                 }
                 strikes[0].riders = vec![
                     RiderDef {
+                        condition: None,
                         trigger: crate::rules::RiderTrigger::Success,
                         check: None,
                         effects: vec![Effect::ApplyCondition {
@@ -887,6 +915,7 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
                         descriptors: vec![],
                     },
                     RiderDef {
+                        condition: None,
                         trigger: crate::rules::RiderTrigger::Success,
                         check: None,
                         effects: damage,
@@ -935,7 +964,17 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
             .as_ability()
             .unwrap()
             .clone();
-        game.resolve_strike(&plan, 0, None).unwrap();
+        game.resolve_strike(
+            &plan,
+            0,
+            None,
+            &mut crate::combat::PreparationProgress::Ability {
+                next_strike: 1,
+                successful_primaries: 0,
+                attempted_riders: [0; 2],
+            },
+        )
+        .unwrap();
         assert_eq!(
             game.creature(ActorId(2))
                 .unwrap()
@@ -975,6 +1014,7 @@ fn ordered_strikes_maximum_plan_reuses_capture_and_never_clones_actor_tables_per
             strike.on_success.clear();
             strike.riders = vec![
                 RiderDef {
+                    condition: None,
                     trigger: crate::rules::RiderTrigger::Success,
                     check: None,
                     effects: vec![],
@@ -1231,6 +1271,7 @@ fn ordered_strikes_fixed_actor_work_counts_do_not_scale_with_uninvolved_regions(
                     for strike in strikes {
                         strike.riders = vec![
                             RiderDef {
+                                condition: None,
                                 trigger: crate::rules::RiderTrigger::Success,
                                 check: Some(RiderCheckDef {
                                     skill: SkillSelector::SelectedWeapon,
@@ -1325,6 +1366,7 @@ fn ordered_strikes_compiler_scopes_shared_sources_before_later_check_caps() {
                 for strike in strikes {
                     strike.riders = vec![
                         RiderDef {
+                            condition: None,
                             trigger: crate::rules::RiderTrigger::Success,
                             check: Some(RiderCheckDef {
                                 skill: SkillSelector::NaturalAttack,
@@ -1663,6 +1705,7 @@ fn ordered_strikes_scheduler_counts_sparse_work_at_two_and_256_actor_density() {
                     for strike in strikes {
                         strike.riders = vec![
                             RiderDef {
+                                condition: None,
                                 trigger: crate::rules::RiderTrigger::Success,
                                 check: Some(RiderCheckDef {
                                     skill: SkillSelector::SelectedWeapon,
@@ -1978,7 +2021,8 @@ fn ordered_strikes_checkpoint_keeps_captured_timing_after_a_real_speed_change() 
 #[test]
 fn ordered_strikes_frozen_rider_trigger_roundtrips_without_an_implicit_default() {
     for trigger in ["success", "failure"] {
-        let value = json!({"trigger":trigger,"check":null,"effects":[],"descriptors":[]});
+        let value =
+            json!({"trigger":trigger,"condition":null,"check":null,"effects":[],"descriptors":[]});
         let decoded: super::FrozenRider = serde_json::from_value(value.clone())
             .expect("frozen rider has an explicit primary branch trigger");
         assert_eq!(serde_json::to_value(decoded).unwrap(), value);
@@ -2027,8 +2071,10 @@ fn ordered_strikes_rider_trigger_selects_the_declared_branch_for_either_primary_
                     strike.riders = [("success", 5), ("failure", 7)]
                         .into_iter()
                         .map(|(trigger, amount)| {
-                            serde_json::from_value(json!({"trigger":trigger,"check":null,
-                            "effects":[damage(amount)],"descriptors":[]}))
+                            serde_json::from_value(
+                                json!({"trigger":trigger,"condition":null,"check":null,
+                            "effects":[damage(amount)],"descriptors":[]}),
+                            )
                             .unwrap()
                         })
                         .collect();
@@ -2215,6 +2261,7 @@ fn ordered_strikes_unchosen_rider_branch_keeps_structural_shared_debit_and_token
             strike.riders = [RiderTrigger::Failure, RiderTrigger::Success]
                 .into_iter()
                 .map(|trigger| RiderDef {
+                    condition: None,
                     trigger,
                     check: Some(RiderCheckDef {
                         skill: SkillSelector::NaturalAttack,
@@ -2391,6 +2438,7 @@ fn ordered_strikes_natural_damage_modifiers_capture_each_primary_branch_without_
                 on_failure: vec![primary, other.clone()],
                 descriptors: vec![],
                 riders: vec![RiderDef {
+                    condition: None,
                     trigger: RiderTrigger::Failure,
                     check: None,
                     effects: vec![other],
@@ -2723,6 +2771,7 @@ fn ordered_strikes_selected_damage_uses_only_first_natural_success_primary() {
                     on_failure: vec![damage(30)],
                     descriptors: vec![],
                     riders: vec![RiderDef {
+                        condition: None,
                         trigger: RiderTrigger::Failure,
                         check: None,
                         effects: vec![damage(40)],
@@ -2963,6 +3012,7 @@ fn public_plan_recipient_alternating_riders_do_not_resurrect_retired_cross_actor
                 strikes[0].on_success = vec![Effect::ObservePublicPlan];
                 strikes[0].riders = vec![
                     RiderDef {
+                        condition: None,
                         trigger: RiderTrigger::Success,
                         check: None,
                         descriptors: vec![],
@@ -2979,6 +3029,7 @@ fn public_plan_recipient_alternating_riders_do_not_resurrect_retired_cross_actor
                         }],
                     },
                     RiderDef {
+                        condition: None,
                         trigger: RiderTrigger::Success,
                         check: None,
                         descriptors: vec![],
@@ -3282,6 +3333,7 @@ fn public_plan_review_frozen_check_authenticates_both_directions_and_rider_roles
             };
             if rider {
                 strikes[0].riders.push(RiderDef {
+                    condition: None,
                     trigger: RiderTrigger::Success,
                     check: Some(RiderCheckDef {
                         skill: SkillSelector::NaturalAttack,
@@ -3379,6 +3431,7 @@ fn public_plan_rider_review_dead_participants_skip_rider_summary() {
                     },
                 }];
                 strikes[0].riders = vec![RiderDef {
+                    condition: None,
                     trigger: RiderTrigger::Success,
                     check: None,
                     effects: vec![Effect::Heal {
@@ -3398,7 +3451,16 @@ fn public_plan_rider_review_dead_participants_skip_rider_summary() {
         let target = if self_target { ActorId(1) } else { ActorId(2) };
         let captured = game.ability_plan(ActorId(1), &ability_id, target).unwrap();
         let outcome = game
-            .resolve_strike(captured.as_ability().unwrap(), 0, None)
+            .resolve_strike(
+                captured.as_ability().unwrap(),
+                0,
+                None,
+                &mut crate::combat::PreparationProgress::Ability {
+                    next_strike: 1,
+                    successful_primaries: 0,
+                    attempted_riders: [0; 2],
+                },
+            )
             .unwrap();
         assert_eq!(game.health(target).unwrap().0, 0);
         assert!(
@@ -3431,6 +3493,7 @@ fn public_plan_rider_review_unattempted_later_strike_and_unavailable_target_do_n
             }];
         }
         strikes[1].riders = vec![RiderDef {
+            condition: None,
             trigger: RiderTrigger::Success,
             check: None,
             effects: vec![Effect::Heal {
@@ -3687,7 +3750,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
                 resolution: 1,
             });
         },
-        |rules, _| {
+        |rules, species| {
             rules.growth.reward_base = 100;
             rules.growth.reward_per_relative_tier = 0;
             rules.growth.minimum_reward = 100;
@@ -3700,6 +3763,34 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
                 .clone();
             ability.id = ability_id.clone();
             ability.basic_attack = false;
+            let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                unreachable!()
+            };
+            for strike in strikes {
+                strike.check = Some(CheckDef {
+                    actor: CheckActor::User,
+                    skill: SkillSelector::SelectedWeapon,
+                    against: Against::Defense {
+                        defense: DefenseKind::Physical,
+                    },
+                });
+                strike.riders.push(RiderDef {
+                    trigger: RiderTrigger::Success,
+                    condition: Some(RiderCondition::SequenceSuccessfulHits { minimum: 2 }),
+                    check: None,
+                    effects: vec![],
+                    descriptors: vec![],
+                });
+            }
+            let natural = &species.melee;
+            species.melee = crate::attacks::NaturalAttack::new(
+                natural.skill(),
+                100,
+                natural.wind_up(),
+                natural.recovery(),
+                natural.strikes().to_vec(),
+            )
+            .unwrap();
             rules.abilities.push(ability);
             rules.talents.push(TalentDef {
                 id: talent_id.clone(),
@@ -3781,6 +3872,11 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
     .unwrap();
     game.tick = 10;
     game.resolve_preparations().unwrap();
+    assert!(game.combat_events().iter().any(|event| matches!(event,
+        crate::combat::CombatEvent::Resolved { outcome, strike: Some(0) }
+        if outcome.actor == ActorId(1) && outcome.ability.as_ref() == Some(&ability_id)
+            && outcome.check.is_some_and(|check| check.actor == CheckActor::User && check.success)
+    )), "the hit history update must not recreate the growth-discarded preparation");
     assert!(!game.alive(ActorId(2)));
     let owner = game.creature(ActorId(1)).unwrap();
     assert_eq!(owner.build().ledger().total_hd().get(), 2);

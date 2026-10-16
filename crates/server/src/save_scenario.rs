@@ -981,6 +981,8 @@ struct Rider {
     #[serde(with = "RiderTrigger")]
     trigger: crate::creature_authoring::RiderTrigger,
     #[serde(with = "mapped")]
+    condition: Option<crate::creature_authoring::RiderCondition>,
+    #[serde(with = "mapped")]
     check: Option<crate::creature_authoring::RiderCheck>,
     #[serde(
         serialize_with = "mapped::serialize",
@@ -1000,6 +1002,28 @@ struct Rider {
 enum RiderTrigger {
     Success,
     Failure,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::RiderCondition",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum RiderCondition {
+    SequenceSuccessfulHits {
+        #[serde(deserialize_with = "sequence_minimum")]
+        minimum: u16,
+    },
+}
+fn sequence_minimum<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
+    let minimum = u16::deserialize(d)?;
+    if !(2..=tor_simulation::limits::STRIKES as u16).contains(&minimum) {
+        return Err(serde::de::Error::custom(
+            "invalid stored sequence hit minimum",
+        ));
+    }
+    Ok(minimum)
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::Check", deny_unknown_fields)]
@@ -2229,8 +2253,125 @@ struct AbilityDefinition {
     timing: tor_simulation::rules::Timing,
     #[serde(with = "AbilityReach")]
     reach: tor_simulation::rules::Reach,
+    #[serde(with = "mapped")]
     strikes: tor_simulation::rules::StrikeSource,
     ai: tor_simulation::rules::AiHints,
+}
+
+// The current stored rider requires an explicit condition even when authoring
+// omits it. These bounded adapters do not accept an earlier source vocabulary.
+#[derive(Serialize)]
+#[serde(
+    remote = "tor_simulation::rules::StrikeSource",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum RulesStrikeSource {
+    Authored {
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::STRIKES }>"
+        )]
+        strikes: Vec<tor_simulation::rules::StrikeDef>,
+    },
+    SelectedMelee,
+    NaturalMelee {
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::RIDERS_PER_STRIKE }>"
+        )]
+        additional_riders: Vec<tor_simulation::rules::RiderDef>,
+    },
+}
+impl RulesStrikeSource {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<tor_simulation::rules::StrikeSource, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Authored {
+                #[serde(
+                    deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::STRIKES }>"
+                )]
+                strikes: Vec<tor_simulation::rules::StrikeDef>,
+            },
+            SelectedMelee {},
+            NaturalMelee {
+                #[serde(
+                    deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::RIDERS_PER_STRIKE }>"
+                )]
+                additional_riders: Vec<tor_simulation::rules::RiderDef>,
+            },
+        }
+        Ok(match Fields::deserialize(d)? {
+            Fields::Authored { strikes } => {
+                tor_simulation::rules::validate_strike_shapes(&strikes)
+                    .map_err(serde::de::Error::custom)?;
+                tor_simulation::rules::StrikeSource::Authored { strikes }
+            }
+            Fields::SelectedMelee {} => tor_simulation::rules::StrikeSource::SelectedMelee,
+            Fields::NaturalMelee { additional_riders } => {
+                tor_simulation::rules::validate_rider_shapes(&additional_riders)
+                    .map_err(serde::de::Error::custom)?;
+                tor_simulation::rules::StrikeSource::NaturalMelee { additional_riders }
+            }
+        })
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_simulation::rules::StrikeDef", deny_unknown_fields)]
+struct RulesStrike {
+    offset: u64,
+    unlock: Option<tor_simulation::content_ids::TalentId>,
+    check: Option<tor_simulation::rules::CheckDef>,
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::EFFECTS_PER_BRANCH }>"
+    )]
+    on_success: Vec<tor_simulation::rules::Effect>,
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::EFFECTS_PER_BRANCH }>"
+    )]
+    on_failure: Vec<tor_simulation::rules::Effect>,
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::DESCRIPTORS_PER_EFFECT }>"
+    )]
+    descriptors: Vec<tor_simulation::content_ids::DescriptorId>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::RIDERS_PER_STRIKE }>"
+    )]
+    riders: Vec<tor_simulation::rules::RiderDef>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_simulation::rules::RiderDef", deny_unknown_fields)]
+struct RulesRider {
+    trigger: tor_simulation::rules::RiderTrigger,
+    #[serde(with = "mapped")]
+    condition: Option<tor_simulation::rules::RiderCondition>,
+    check: Option<tor_simulation::rules::RiderCheckDef>,
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::EFFECTS_PER_BRANCH }>"
+    )]
+    effects: Vec<tor_simulation::rules::Effect>,
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::DESCRIPTORS_PER_EFFECT }>"
+    )]
+    descriptors: Vec<tor_simulation::content_ids::DescriptorId>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::RiderCondition",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum RulesRiderCondition {
+    SequenceSuccessfulHits {
+        #[serde(deserialize_with = "sequence_minimum")]
+        minimum: u16,
+    },
 }
 
 #[derive(Serialize)]
@@ -2481,6 +2622,12 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    Rider => crate::creature_authoring::Rider,
+    RiderCondition => crate::creature_authoring::RiderCondition,
+    RulesStrikeSource => tor_simulation::rules::StrikeSource,
+    RulesStrike => tor_simulation::rules::StrikeDef,
+    RulesRider => tor_simulation::rules::RiderDef,
+    RulesRiderCondition => tor_simulation::rules::RiderCondition,
     UniqueRetrieval => source::UniqueRetrieval,
     BehaviorPolicy => crate::creature_authoring::BehaviorPolicy,
     AiProfile => source::AiProfile,
@@ -2598,7 +2745,6 @@ remote!(
     Template => crate::creature_authoring::Template,
     Melee => crate::creature_authoring::Melee,
     Strike => crate::creature_authoring::Strike,
-    Rider => crate::creature_authoring::Rider,
     StrikeCheck => crate::creature_authoring::Check,
     RiderCheck => crate::creature_authoring::RiderCheck,
     CheckActor => crate::creature_authoring::CheckActor,
@@ -2682,7 +2828,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 11;
+const RULES_INPUT_FORMAT: u32 = 12;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -2782,7 +2928,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 12;
+const CONTENT_PACKAGE_FORMAT: u32 = 13;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -2861,7 +3007,86 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 #[cfg(test)]
 mod tests {
     #[test]
-    fn natural_melee_format_revisions_match_independent_payload_boundaries() {
+    fn sequence_rider_stored_source_and_rules_require_independent_bounded_conditions() {
+        use super::{Borrowed, Owned};
+        use serde_json::json;
+        let good = json!({"trigger":"success",
+            "condition":{"kind":"sequence_successful_hits","minimum":2},
+            "check":null,"effects":[],"descriptors":[]});
+        for value in [good.clone(), {
+            let mut ordinary = good.clone();
+            ordinary["condition"] = json!(null);
+            ordinary
+        }] {
+            let source: Owned<crate::creature_authoring::Rider> =
+                serde_json::from_value(value.clone()).unwrap();
+            let rules: Owned<tor_simulation::rules::RiderDef> =
+                serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&source.0)).unwrap(), value);
+            assert_eq!(serde_json::to_value(Borrowed(&rules.0)).unwrap(), value);
+        }
+        let mut malformed = Vec::new();
+        let mut omitted = good.clone();
+        omitted.as_object_mut().unwrap().remove("condition");
+        malformed.push(omitted);
+        for condition in [
+            json!({"kind":"sequence_successful_hits"}),
+            json!({"kind":"sequence_successful_hits","minimum":2,"group":"arbitrary"}),
+            json!({"kind":"any_effect","minimum":2}),
+            json!(["sequence_successful_hits", 2]),
+        ]
+        .into_iter()
+        .chain(
+            [0, 1, 17, 65536]
+                .map(|minimum| json!({"kind":"sequence_successful_hits","minimum":minimum})),
+        ) {
+            let mut bad = good.clone();
+            bad["condition"] = condition;
+            malformed.push(bad);
+        }
+        for bad in malformed {
+            assert!(
+                serde_json::from_value::<Owned<crate::creature_authoring::Rider>>(bad.clone())
+                    .is_err()
+            );
+            assert!(serde_json::from_value::<Owned<tor_simulation::rules::RiderDef>>(bad).is_err());
+        }
+        let mut failed_gate = good;
+        failed_gate["trigger"] = json!("failure");
+        let source = json!({"kind":"natural_melee","additional_riders":[failed_gate]});
+        assert!(
+            serde_json::from_value::<Owned<tor_simulation::rules::StrikeSource>>(source).is_err()
+        );
+    }
+
+    #[test]
+    fn sequence_rider_stored_conditions_reject_duplicate_and_positional_records() {
+        use super::Owned;
+        let good = r#"{"trigger":"success","condition":{"kind":"sequence_successful_hits","minimum":2},"check":null,"effects":[],"descriptors":[]}"#;
+        let duplicates = [
+            good.replacen("\"condition\":", "\"condition\":null,\"condition\":", 1),
+            good.replace("\"minimum\":2", "\"minimum\":2,\"minimum\":3"),
+            good.replace(
+                "\"kind\":\"sequence_successful_hits\"",
+                "\"kind\":\"sequence_successful_hits\",\"kind\":\"sequence_successful_hits\"",
+            ),
+        ];
+        for bad in duplicates {
+            assert!(serde_json::from_str::<Owned<crate::creature_authoring::Rider>>(&bad).is_err());
+            assert!(serde_json::from_str::<Owned<tor_simulation::rules::RiderDef>>(&bad).is_err());
+        }
+        let positional =
+            r#"["success",{"kind":"sequence_successful_hits","minimum":2},null,[],[]]"#;
+        assert!(
+            serde_json::from_str::<Owned<crate::creature_authoring::Rider>>(positional).is_err()
+        );
+        assert!(
+            serde_json::from_str::<Owned<tor_simulation::rules::RiderDef>>(positional).is_err()
+        );
+    }
+
+    #[test]
+    fn sequence_rider_format_revisions_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -2872,16 +3097,16 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (40, 15, "interactions-v38", 11, 5, 12, "tor-arena-run-v5")
+            (41, 16, "interactions-v39", 12, 5, 13, "tor-arena-run-v5")
         );
     }
 
     #[test]
-    fn natural_melee_format_preserves_journal_and_compression_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 44);
+    fn sequence_rider_format_preserves_journal_and_compression_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 45);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
-        // Physical framing is unchanged. Nutrition, conditions and personal
-        // status use the new independent payload identities.
+        // Physical framing and region placement are unchanged. Conditional riders
+        // and preparation progress use the new independent payload identities.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&base[..6], b"TORB\x06\x00");
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
@@ -2911,6 +3136,7 @@ mod tests {
             .unwrap();
         ability.strikes = tor_simulation::rules::StrikeSource::NaturalMelee {
             additional_riders: vec![tor_simulation::rules::RiderDef {
+                condition: None,
                 trigger: tor_simulation::rules::RiderTrigger::Success,
                 check: None,
                 effects: vec![tor_simulation::rules::Effect::ApplyCondition {
@@ -2944,10 +3170,12 @@ mod tests {
             .iter_mut()
             .find(|ability| ability["basic_attack"] == true)
             .unwrap();
-        source["strikes"]["additional_riders"][0] = serde_json::json!(["success", null, [], []]);
+        source["strikes"]["additional_riders"][0] =
+            serde_json::json!(["success", null, null, [], []]);
         assert!(decode_rules_document(&serde_json::to_string(&value).unwrap()).is_err());
-        let obsolete = encoded.replacen("\"format\":11", "\"format\":10", 1);
-        assert!(decode_rules_document(&obsolete).is_err());
+        let mut obsolete: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        obsolete["format"] = serde_json::json!(11);
+        assert!(decode_rules_document(&serde_json::to_string(&obsolete).unwrap()).is_err());
     }
 
     #[test]
@@ -3689,7 +3917,17 @@ mod tests {
     fn current_scenarios() -> BTreeMap<String, Value> {
         // Captured from the current writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v40.json")).unwrap()
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "fixtures/saved-scenarios-v{}.json",
+            crate::engine::ARCHIVE_VERSION
+        ));
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!(
+                "{}: {error}; record the current writer with TOR_RECORD_SCENARIO_FIXTURES",
+                path.display()
+            )
+        });
+        serde_json::from_str(&text).unwrap()
     }
 
     #[test]
@@ -4180,7 +4418,7 @@ mod ordered_strike_save_tests {
     #[test]
     fn ordered_strikes_stored_rider_trigger_has_an_independent_required_current_shape() {
         for trigger in ["success", "failure"] {
-            let value = json!({"trigger":trigger,"check":null,"effects":[],"descriptors":[]});
+            let value = json!({"trigger":trigger,"condition":null,"check":null,"effects":[],"descriptors":[]});
             let decoded: Owned<crate::creature_authoring::Rider> =
                 crate::storage::codec::strict(&serde_json::to_vec(&value).unwrap())
                     .expect("save-owned rider trigger must decode");
@@ -4195,8 +4433,7 @@ mod ordered_strike_save_tests {
             );
         }
         let mut value = source();
-        value["melee"]["strikes"][0]["riders"] =
-            json!([{"trigger":"failure","check":null,"effects":[],"descriptors":[]}]);
+        value["melee"]["strikes"][0]["riders"] = json!([{"trigger":"failure","condition":null,"check":null,"effects":[],"descriptors":[]}]);
         assert!(
             crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(
                 &serde_json::to_vec(&value).unwrap()

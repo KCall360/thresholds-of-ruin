@@ -469,7 +469,7 @@ Preparing inputs is separate from running encounters or establishing balance.
 Three explicit modes keep their scope separate:
 
 - `arena-diagnostic` uses the synthetic mixed Warrior/Mage allocation references
-  at HD 1, 6 and 11 against thirteen authored foes. The reference natural
+  at HD 1, 6 and 11 against fourteen authored foes. The reference natural
   weapon and no-flee policy are diagnostic controls, not selected-character kits.
 - `playable-unspent` copies the actual Warrior (actor 1) or Mage (actor 2) at HD 1,
   including species, attributes, starting ranks, binding, future growth,
@@ -480,7 +480,7 @@ Three explicit modes keep their scope separate:
   There is no default Mage spell. Authoring this purchase does not replace
   ordinary player-purchase acceptance or establish earned progression.
 
-Playable modes cover all thirteen selected E/S/H/R/Z/C/Q/Y/T/W/U/I/V recipes at player HD 1. They never synthesize HD 6/11
+Playable modes cover all fourteen selected E/S/H/R/Z/C/Q/Y/T/W/U/I/V/J recipes at player HD 1. They never synthesize HD 6/11
 or treat dungeon depth as character HD. Both retain foe actor 3 and declare exact
 per-arm `participant_rosters`; Warrior and Mage remain actors 1 and 2 through
 run, finish, load, resume and replay. Faction multisets match without identity
@@ -516,9 +516,9 @@ python scripts/arena_evaluation.py --binary TOR_ARENA run CASE_INPUT/plan.json N
 python scripts/arena_evaluation.py --binary TOR_ARENA replay NEW_BATCH
 ```
 
-The unspent subset plans 24 runs and the thirteen-species purchased set 104:
-128 initial runs plus 128 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
-and a 30-second timeout, so each pass has a maximum 64-minute timeout budget
+The unspent subset plans 24 runs and the fourteen-species purchased set 112:
+136 initial runs plus 136 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
+and a 30-second timeout, so each pass has a maximum 68-minute timeout budget
 before preparation overhead. These are smoke inputs, not a balance result.
 Shared seeds and mirrored/class arms are not independent observations. Net
 resources do not establish gross spending, recovery or stock flow.
@@ -536,13 +536,13 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 The API likewise requires
 `create_candidate(output, compiler, source_package=package, source_provenance={"reference": reference})`.
 It accepts only the exact known preactivation E/S profile or canonical activated
-thirteen-species profile, including stage identities/order, counts, bands, growth,
+fourteen-species profile, including stage identities/order, counts, bands, growth,
 supplies and carried-stock policy. A partially promoted or modified profile
 rejects. Both accepted shapes materialize the same diagnostic policy without
-duplicating the shared C/Y/T/V pool. Existing output directories are never reused.
+duplicating the shared C/Y/T/V/J pool. Existing output directories are never reused.
 
 New `tor-rogue-activation-inputs-v2` inventories record `source_population_shape`
-as `preactivation_es` or `canonical_thirteen_species`, explicit package provenance,
+as `preactivation_es` or `canonical_fourteen_species`, explicit package provenance,
 and separate `source_package_inputs`, `tool_inputs` and `compiler_dependency_inputs`
 hashes. `artifact_purpose = "diagnostic_population_package"` and
 `production_mutated = false` describe this tool's action; the former global
@@ -550,13 +550,15 @@ hashes. `artifact_purpose = "diagnostic_population_package"` and
 The pinned external Rogue selector reference is separate from the supplied TOR
 package reference. Prior inventories and retained campaign sources stay unchanged.
 
-The bands condition the pinned Rogue selector on thirteen eligible species
-E/S/H/I/R/Z/C/Q/Y/T/W/U/V. Centaur enters at depth 7 and leaves after 16; Yeti enters at
+The bands condition the pinned Rogue selector on fourteen eligible species
+E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J. Centaur enters at depth 7 and leaves after 16; Yeti enters at
 11 and leaves after 20. Rattlesnake enters at 3 and leaves after 12, with zero
 carry chance. Troll enters at 13 and leaves after 22; Wraith enters at 14 and
-leaves after 23, with zero carry. Depths 21–22 select T:W:U:V 1:1:1:1;
-depth 23 selects W:U:V 5:5:6; 24–26 use U:V 5:7, 5:8 and 5:9 respectively;
-27 onward selects V. Four-U and four-V draws are possible.
+leaves after 23, with zero carry. Jabberwock enters at depth 21. Depths 21–22
+select T:W:U:V:J 1:1:1:1:1; depth 23 selects W:U:V:J 5:5:6:6; 24–26 use
+U:V:J 5:7:7, 5:8:8 and 5:9:9 respectively. Depths 27–28 select V:J 1:1;
+29 uses 7:12 and 30 uses 8:13. The open 31+ band returns to V:J 1:1.
+Four-U, four-V and four-J draws are possible.
 These weights remain provisional, without a numerical balance qualification.
 Historical foe-stage and carried-pool IDs stay stable; unchanged item stages
 retain their streams, subject to changed occupancy. The appended restore-strength
@@ -569,14 +571,17 @@ bundled package. No objective or terminal floor is added.
 
 The policy uses `racial_after` depth 26 with complete seeded per-HD rows and
 Health rolls, retained base purchases and ordinary unspent grants on appended
-rows. V has 8 HD at 26, 9 at 27 and reaches the current 256-HD capacity
-at depth 274; depth 275 requests 257 and must refuse the whole entry atomically.
+rows. J has 15 HD at 26 and reaches 256 at 267; a sampled J at 268 requests
+257 and must refuse the whole entry atomically. All-V draws can remain valid
+through 274, where V reaches 256. At 275 both tail recipes exceed capacity.
+Selection is never clamped or rerolled to avoid the sampled recipe's refusal.
 This open policy has an operational capacity boundary, not a designed plateau or
 full unlimited-depth execution. Wide counts, lossless chunked persistence,
 long-journal-only startup and depth-conditioned haste remain unfinished.
 
-Only V receives a 1/5 birth-stock chance: one ordinary ration or clean bandage
-with equal provisional weights. E/S/H/I/R/Z/Q/W/U have no carry policy. Stock does
+C/Y/T/V/J receive 15%/30%/50%/20%/70% birth-stock chances: one ordinary ration
+or clean bandage with equal provisional weights. E/S/H/I/R/Z/Q/W/U have no
+carry policy. Stock does
 not enable care, equipment or loot tactics, and revisit/restart never restock.
 Isolated roster-study actors have no population stage and therefore no birth
 stock; their inventory records that limitation. Full Rogue item-pool parity is
@@ -584,7 +589,7 @@ not claimed.
 
 `--start-depth N` follows the authored open domain for receipt diagnostics with
 the unchanged unspent HD-one starter, subject to checked construction refusal.
-Later-floor starts, including the 26/27 and 274/275 boundaries, are not earned
+Later-floor starts, including the 26/27, 267/268 and 274/275 boundaries, are not earned
 builds or evidence of ordinary-play survival.
 Receipt audits use a selected-actor save barrier and chronological `UNION ALL`
 over journal and compacted history, preserving duplicate logical receipts as
@@ -622,6 +627,57 @@ qualification requirements. A route reaching depth 27 establishes arrival and
 activation, not Vampire combat survival. The [earned-route guide](rogue-earned-route.md)
 records pilot evidence separately; production activation does not establish
 earned deep survival.
+
+#### Jabberwock acceptance ownership
+
+The J composition extends existing witnesses rather than introducing a route
+runner. The exact source oracle remains independent of process helpers:
+
+- [`test_rogue_roster_content.py`](../../scripts/test_rogue_roster_content.py)
+  owns J's exact fifteen racial rows, HD2/HD8 purchases, provisional sheet/body,
+  passive disposition, natural keen dice and absence of Troll regeneration or
+  immunity. `RogueActivationCandidateTests.assert_pinned_source_mass` in the
+  [selector tests](../../scripts/test_rogue_activation_candidate.py) independently
+  enumerates the pinned selector, including depth21 and mixed-tail weights.
+- [`rogue_roster.rs`](../../crates/server/tests/it/rogue_roster.rs), specifically
+  `rogue_jabberwock_owns_exact_seeded_rows_gates_and_restorable_rending_grant`,
+  owns compiled HD seeds, purchase gates, drain/restoration and grant recovery.
+  `rogue_jabberwock_signature_imports_natural_rows_and_one_shared_conditional_rider`
+  owns the compiled signature source; the focused growth case owns exact J256
+  at depth267 and recipe refusal at268.
+- The shared [sequence rider tests](../../crates/simulation/src/abilities/sequence_rider_tests.rs),
+  [contact tests](../../crates/simulation/src/abilities/sequence_rider_contact_tests.rs)
+  and [lifecycle tests](../../crates/simulation/src/abilities/sequence_rider_lifecycle_tests.rs)
+  own two qualifying primaries, once-only attempts, exclusions, residual Edge,
+  lethal resolution and restored prefix/RNG. Raw rider effects do not have an
+  ability identity in disclosed combat events; seeing two signature primaries
+  alone is not proof that the conditional rider fired.
+- [`RogueCarrierProcesses`](../../scripts/test_rogue_carrier_process.py)
+  extends the existing authored-HD16 mechanism with one fixed-seed J birth.
+  It requires passive approach, ordinary provocation, autonomous `rending_pair`
+  primaries 0 and 1, an ordinary kill, exact owned rows and one ration identity,
+  and identical dead actor/dropped stock after source-deleted restart. C/Y/T
+  continue to require exactly `basic_melee`. This controlled advanced build
+  cannot establish actual-starter survival, earned progression or balance.
+- [`RogueActivationCandidateProcesses`](../../scripts/test_rogue_activation_process.py)
+  changes only the actual Warrior's production entry anchor for depth21/seed1.
+  It requires a placed J, fifteen owned rows and their Health seeds, one finite
+  ration, unchanged HD1 kit, stable receipts and source-free checkpoint reopen.
+  The unchanged depth14 W witness retains its zero-stock assertion. The
+  depth267/seed42 case requires an actual J256 birth; it no longer treats all
+  mixed draws at274 as constructible. These entry diagnostics do not demonstrate
+  an earned route to either floor.
+- [`floor_population_growth_tests.rs`](../../crates/server/src/floor_population_growth_tests.rs)
+  cases `rogue_mixed_tail_all_vampire_entry_at_274_publishes_exact_256_hd_and_replays`
+  and `rogue_mixed_tail_sampled_jabberwock_at_268_refuses_whole_entry_and_replays`
+  own actual all-V274 activation and sampled over-cap J268 whole-entry refusal.
+  The same-seed positive control changes only the fixture's growth cutoff to
+  prove that the selected J really has an eligible placement; refusal must roll
+  back the earlier V births and stock, leaving IDs, RNG, pending admission,
+  region authority and receipts unchanged, including retry after checkpoint.
+
+Source checks and static seed predictions are not application qualification.
+The [status page](../status.md) records remaining acceptance work.
 
 ### First 3d6 foundation baseline
 

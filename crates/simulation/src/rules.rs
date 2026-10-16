@@ -13,8 +13,8 @@ pub use interaction::Interaction;
 #[cfg(test)]
 mod supply_tests;
 pub use strikes::{
-    append_natural_riders, validate_strike_horizon, validate_strike_shapes, RiderCheckDef,
-    RiderDef, RiderTrigger, StrikeDef, StrikeSource,
+    append_natural_riders, validate_rider_shapes, validate_strike_horizon, validate_strike_shapes,
+    RiderCheckDef, RiderCondition, RiderDef, RiderTrigger, StrikeDef, StrikeSource,
 };
 
 use crate::content_ids::Interner;
@@ -2871,8 +2871,7 @@ mod tests {
     #[test]
     fn default_content_validates_and_round_trips() {
         let rules = ruleset();
-        assert_eq!(rules.document.talents.len(), 14);
-        for id in ["second_strike", "third_strike"] {
+        for id in ["second_strike", "third_strike", "rending_pair"] {
             assert!(rules.talent(&TalentId::new(id).unwrap()).is_some());
         }
         assert_eq!(rules.document.forms.len(), 6);
@@ -2988,8 +2987,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v38\"",
-                "id = \"interactions-v38\"\nunknown = true"
+                "id = \"interactions-v39\"",
+                "id = \"interactions-v39\"\nunknown = true"
             ))
             .is_err()
         );

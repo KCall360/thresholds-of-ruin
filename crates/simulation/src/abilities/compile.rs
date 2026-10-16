@@ -291,6 +291,7 @@ impl<'a> Compiler<'a> {
                 .transpose()?;
             riders.push(FrozenRider {
                 trigger: rider.trigger,
+                condition: rider.condition,
                 check,
                 effects: self.game.compile_effects_from_source(
                     self.actor,

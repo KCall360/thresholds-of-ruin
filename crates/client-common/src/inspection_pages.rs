@@ -41,10 +41,11 @@ struct Active {
     rendered: VecDeque<Rendered>,
     structure: Structure,
 }
-/// Only typed cursors and compact list lengths survive eviction of a rendered page.
+/// Only typed cursors and compact source shapes survive eviction of a rendered page.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RiderShape {
     trigger: RiderTrigger,
+    condition: Option<InspectionRiderCondition>,
     lengths: [u16; 2],
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -478,6 +479,7 @@ impl Structure {
                     strike,
                     rider,
                     ref trigger,
+                    condition,
                     effect_count,
                     descriptor_count,
                     ..
@@ -494,6 +496,7 @@ impl Structure {
                     }
                     let shape = RiderShape {
                         trigger: *trigger,
+                        condition,
                         lengths: [effect_count, descriptor_count],
                     };
                     if self
@@ -951,6 +954,7 @@ mod ordered_strikes_detail_state_tests {
                     strike,
                     rider,
                     trigger: RiderTrigger::Success,
+                    condition: None,
                     check: None,
                     effect_count: 2,
                     descriptor_count: 0,
@@ -1060,6 +1064,7 @@ mod ordered_strikes_detail_state_tests {
             strike: 0,
             rider: 0,
             trigger: RiderTrigger::Failure,
+            condition: None,
             check: None,
             effect_count: 0,
             descriptor_count: 0,
@@ -1071,5 +1076,87 @@ mod ordered_strikes_detail_state_tests {
             "a previous-page unchecked primary cannot have a failure-triggered rider"
         );
         assert_eq!(state.retained_pages(), 0);
+    }
+
+    #[test]
+    fn sequence_rider_condition_is_pinned_after_rendered_page_eviction() {
+        for changed in [
+            None,
+            Some(InspectionRiderCondition::SequenceSuccessfulHits { minimum: 3 }),
+        ] {
+            let mut state = inspector();
+            state
+                .select(StrikeSourceSelector::Natural {}, &context())
+                .unwrap();
+            let mut pages = pages();
+            if let StrikePageEntry::StrikeHeader { rider_count, .. } = &mut pages[0].entries[0] {
+                *rider_count = 1;
+            }
+            pages[2].entries.push(StrikePageEntry::RiderHeader {
+                strike: 0,
+                rider: 0,
+                trigger: RiderTrigger::Success,
+                condition: Some(InspectionRiderCondition::SequenceSuccessfulHits { minimum: 2 }),
+                check: None,
+                effect_count: 48,
+                descriptor_count: 0,
+            });
+            let effects: Vec<_> = (0..48)
+                .map(|index| StrikePageEntry::RiderEffect {
+                    strike: 0,
+                    rider: 0,
+                    index,
+                    row: CombatTraceStep {
+                        id: "heal".into(),
+                        name: "Heal".into(),
+                        fields: vec![],
+                    },
+                })
+                .collect();
+            pages[2].next = Some(StrikePageCursor {
+                inspection: pages[2].inspection.clone(),
+                position: effects[0].position(),
+            });
+            for (number, chunk) in effects.chunks(16).enumerate() {
+                let mut page = pages[0].clone();
+                page.start = chunk[0].position();
+                page.entries = chunk.to_vec();
+                page.next = effects
+                    .get((number + 1) * 16)
+                    .map(|entry| StrikePageCursor {
+                        inspection: page.inspection.clone(),
+                        position: entry.position(),
+                    });
+                pages.push(page);
+            }
+            for (number, page) in pages.iter().enumerate() {
+                if number > 0 {
+                    state.next(&context()).unwrap();
+                }
+                state.accept(&context(), "page", page).unwrap();
+            }
+            assert_eq!(state.retained_pages(), 2);
+            // The header's rendered page has been evicted, but its source shape remains.
+            for index in (2..5).rev() {
+                state.previous(&context()).unwrap();
+                state
+                    .accept(&context(), "unchanged", &pages[index])
+                    .unwrap();
+            }
+            assert!(state
+                .lines()
+                .unwrap()
+                .join("\n")
+                .contains("Condition: at least 2"));
+            state.next(&context()).unwrap();
+            state.accept(&context(), "page", &pages[3]).unwrap();
+            state.previous(&context()).unwrap();
+            let mut page = pages[2].clone();
+            if let Some(StrikePageEntry::RiderHeader { condition, .. }) = page.entries.last_mut() {
+                *condition = changed;
+            }
+            assert!(state.accept(&context(), "changed", &page).is_err());
+            assert_eq!(state.retained_pages(), 0);
+        }
     }
 }

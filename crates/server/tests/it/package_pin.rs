@@ -83,7 +83,10 @@ fn obsolete_scenario_packages_are_refused() {
     ] {
         std::fs::write(
             &manifest,
-            text.replace("format = 15", &format!("format = {obsolete}")),
+            text.replace(
+                &format!("format = {}", scenario_package::FORMAT),
+                &format!("format = {obsolete}"),
+            ),
         )
         .unwrap();
         let error = scenario_package::load(temp.path(), 42, None, true).unwrap_err();

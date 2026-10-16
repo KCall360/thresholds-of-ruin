@@ -1,8 +1,9 @@
-"""Generated C/Y/T composition, not an actual-kit, earned-route or balance study.
+"""Generated C/Y/T/J composition, not an actual-kit, earned-route or balance study.
 
-A labeled authored HD16 player provokes C/Y or waits for unprovoked mean T
-acquisition, witnesses the natural sequence, then kills the foe ordinarily. Fixed birth seeds avoid process
-searches; exact chance boundaries and pool permutations have lower-level owners.
+A labeled authored HD16 player provokes C/Y/J or waits for unprovoked mean T
+acquisition, witnesses the natural sequence, then kills the foe ordinarily.
+Fixed birth seeds avoid process searches; exact chance boundaries, pool
+permutations and conditional rider outcomes have lower-level owners.
 """
 import json
 import shutil
@@ -62,19 +63,20 @@ class RogueCarrierProcesses(ProcessTestCase):
         return next((row for row in disclosed_actor_candidates(observation(current)["visible_actors"])
                      if row["name"] == species), None)
 
-    def observed_sequence(self, player, start, target, strikes):
+    def observed_sequence(self, player, start, target, strikes, *, ability="basic_melee"):
         for raw in player.transcript[start:]:
             frame = json.loads(raw)
             view = (frame.get("state") or {}).get("observation")
             if view is None:
                 continue
             events = [row for row in view["combat"]["events"] if row["type"] == "ability"
-                      and row["caster"] == target and row["ability"]["id"] == "basic_melee"]
+                      and row["caster"] == target and row["ability"]["id"] == ability]
             if [row["strike"] for row in events] == list(range(strikes)):
                 return True
         return False
 
-    def generated_carrier(self, species, seed, depth, strikes, stock_content, *, passive=True):
+    def generated_carrier(self, species, seed, depth, strikes, stock_content, *, passive=True,
+                          ability="basic_melee"):
         package = generated_carrier_package(self, species)
         server = self.server("--checkpoint-interval", 1, scenario=package, seed=seed)
         player, current = self.client()
@@ -133,12 +135,15 @@ class RogueCarrierProcesses(ProcessTestCase):
             {"purchases": row["purchases"], "attribute": row.get("attribute")} for row in recipe["hit_dice"]])
         self.assertEqual(before["items"][item_id]["location"], {"Carried": actor_id})
         self.assertEqual(before["items"][item_id]["quantity"], 1)
+        self.assertEqual({identity for identity, item in before["items"].items()
+                          if item["location"] == {"Carried": actor_id}}, {item_id},
+                         "A carrier owns exactly its single finite birth-stock stack")
         if passive:
             start = len(player.transcript)
             current = self.execute(player, {"type": "use_ability", "id": "basic_melee",
                 "invocation": {"kind": "actor_target", "target": target_id}})
         for _ in range(8):
-            if self.observed_sequence(player, start, target_id, strikes):
+            if self.observed_sequence(player, start, target_id, strikes, ability=ability):
                 break
             current = self.execute(player, {"type": "wait"})
         else:
@@ -184,6 +189,51 @@ class RogueCarrierProcesses(ProcessTestCase):
 
     def test_generated_troll_acquires_unprovoked_and_retains_stock_through_death_and_restart(self):
         self.generated_carrier("troll", 1, 13, 3, "rogue.ration", passive=False)
+
+    def test_generated_jabberwock_retaliates_with_rending_pair_and_retains_stock_after_restart(self):
+        # This is the existing authored HD16 mechanism, not a depth21 starter
+        # survival claim. Visible signature primaries do not disclose the raw
+        # rider; the shared sequence/Service owners assert its threshold/once.
+        self.generated_carrier("jabberwock", 0, 21, 2, "rogue.ration", ability="rending_pair")
+
+
+class RogueCarrierObserverTests(unittest.TestCase):
+    def test_carrier_cases_keep_fixed_seeds_ordinary_basics_and_explicit_j_signature(self):
+        from unittest.mock import patch
+        driver = RogueCarrierProcesses()
+        for method, expected, options in (
+            ("test_generated_centaur_retaliates_and_retains_birth_stock_through_death_and_restart",
+             ("centaur", 2, 7, 3, "rogue.ration"), {}),
+            ("test_generated_yeti_retaliates_and_retains_birth_stock_through_death_and_restart",
+             ("yeti", 0, 11, 2, "rogue.clean_bandage"), {}),
+            ("test_generated_troll_acquires_unprovoked_and_retains_stock_through_death_and_restart",
+             ("troll", 1, 13, 3, "rogue.ration"), {"passive": False}),
+            ("test_generated_jabberwock_retaliates_with_rending_pair_and_retains_stock_after_restart",
+             ("jabberwock", 0, 21, 2, "rogue.ration"), {"ability": "rending_pair"}),
+        ):
+            with self.subTest(method=method), patch.object(driver, "generated_carrier") as witness:
+                getattr(driver, method)()
+                witness.assert_called_once_with(*expected, **options)
+
+    def test_expected_signature_is_exact_and_cannot_weaken_basic_melee_witnesses(self):
+        from types import SimpleNamespace
+        driver = RogueCarrierProcesses()
+
+        def player(ability, ordinals=(0, 1), caster="foe"):
+            events = [{"type": "ability", "caster": caster, "strike": ordinal,
+                       "ability": {"id": ability}} for ordinal in ordinals]
+            return SimpleNamespace(transcript=[json.dumps({"state": {"observation": {
+                "combat": {"events": events}}}})])
+
+        basic, signature = player("basic_melee"), player("rending_pair")
+        self.assertTrue(driver.observed_sequence(basic, 0, "foe", 2))
+        self.assertFalse(driver.observed_sequence(signature, 0, "foe", 2))
+        self.assertTrue(driver.observed_sequence(signature, 0, "foe", 2, ability="rending_pair"))
+        self.assertFalse(driver.observed_sequence(basic, 0, "foe", 2, ability="rending_pair"))
+        for invalid in (player("rending_pair", (0,)), player("rending_pair", (1, 0)),
+                        player("rending_pair", (0, 1, 1)), player("rending_pair", caster="other")):
+            self.assertFalse(driver.observed_sequence(invalid, 0, "foe", 2, ability="rending_pair"))
+        self.assertFalse(driver.observed_sequence(signature, 1, "foe", 2, ability="rending_pair"))
 
 
 if __name__ == "__main__":

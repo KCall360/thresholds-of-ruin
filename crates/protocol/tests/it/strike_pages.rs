@@ -292,7 +292,7 @@ fn ordered_strikes_detail_fragment_preserves_unlock_primary_branches_and_rider_b
     middle["unlock"] = json!({"id":"second_claw","name":"Second Claw"});
     middle["rider_count"] = json!(1);
     value["page"]["entries"] = json!([header(0,"0"),middle,
-        {"kind":"rider_header","strike":1,"rider":0,"trigger":"success","check":null,"effect_count":0,"descriptor_count":1},
+        {"kind":"rider_header","strike":1,"rider":0,"trigger":"success","condition":null,"check":null,"effect_count":0,"descriptor_count":1},
         {"kind":"rider_descriptor","strike":1,"rider":0,"index":0,"descriptor":{"id":"energy","name":"Energy"}},
         header(2,"20")]);
     value["page"]["next"] = Value::Null;
@@ -335,7 +335,7 @@ fn ordered_strikes_detail_rider_trigger_is_required_typed_primary_branch_evidenc
         .as_array_mut()
         .unwrap()
         .push(json!({
-            "kind":"rider_header","strike":0,"rider":0,"trigger":"success",
+            "kind":"rider_header","strike":0,"rider":0,"trigger":"success","condition":null,
             "check":null,"effect_count":0,"descriptor_count":0
         }));
     value["page"]["next"] = Value::Null;
@@ -783,11 +783,149 @@ fn natural_melee_page_preserves_bounded_species_and_ability_rider_provenance() {
         assert!(decode_response(&bad.to_string()).is_err(), "case {case}");
     }
     good["page"]["entries"] = json!([{"kind":"rider_header","strike":0,"rider":1,
-        "trigger":"success","check":null,"effect_count":0,"descriptor_count":0}]);
+        "trigger":"success","condition":null,"check":null,"effect_count":0,"descriptor_count":0}]);
     good["page"]["start"] = json!({"kind":"rider_header","strike":0,"rider":1});
     good["page"]["next"] = Value::Null;
     assert!(
         decode_response(&good.to_string()).is_ok(),
         "a fragment retains its rider provenance"
+    );
+}
+
+fn conditional_rider_page() -> Value {
+    let mut value = response();
+    value["page"]["start"] = json!({"kind":"rider_header","strike":0,"rider":0});
+    value["page"]["entries"] = json!([{
+        "kind":"rider_header","strike":0,"rider":0,"trigger":"success",
+        "condition":{"kind":"sequence_successful_hits","minimum":2},
+        "check":null,"effect_count":0,"descriptor_count":0
+    }]);
+    value["page"]["next"] = Value::Null;
+    value
+}
+
+#[test]
+fn sequence_rider_inspection_condition_roundtrips_explicit_null_and_bounded_predicate() {
+    for condition in [
+        Value::Null,
+        json!({"kind":"sequence_successful_hits","minimum":2}),
+        json!({"kind":"sequence_successful_hits","minimum":16}),
+    ] {
+        let mut value = conditional_rider_page();
+        value["page"]["entries"][0]["condition"] = condition;
+        let decoded = decode_response(&value.to_string()).expect("disclosed condition must decode");
+        let encoded = encode_response(&decoded, None, MAX_STRIKE_PAGE_BYTES).unwrap();
+        assert_eq!(decode_response(&encoded.text).unwrap(), decoded);
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+    }
+}
+
+#[test]
+fn sequence_rider_inspection_rejects_missing_unknown_malformed_and_failure_conditions() {
+    let good = conditional_rider_page();
+    for condition in [
+        json!({"kind":"sequence_successful_hits","minimum":0}),
+        json!({"kind":"sequence_successful_hits","minimum":1}),
+        json!({"kind":"sequence_successful_hits","minimum":17}),
+        json!({"kind":"sequence_successful_hits","minimum":65536}),
+        json!({"kind":"sequence_successful_hits","minimum":-1}),
+        json!({"kind":"sequence_successful_hits","minimum":2.5}),
+        json!({"kind":"sequence_successful_hits","minimum":"2"}),
+        json!({"kind":"sequence_successful_hits","minimum":true}),
+        json!({"kind":"sequence_successful_hits","minimum":null}),
+        json!({"kind":"sequence_successful_hits"}),
+        json!({"minimum":2}),
+        json!({"kind":"sequence_successful_hits","minimum":2,"eligible":true}),
+        json!({"kind":"sequence_successful_hits","minimum":2,"history":[true,true]}),
+        json!({"kind":"sequence_hits","minimum":2}),
+        json!([]),
+        json!("sequence_successful_hits"),
+    ] {
+        let mut invalid = good.clone();
+        invalid["page"]["entries"][0]["condition"] = condition.clone();
+        assert!(
+            decode_response(&invalid.to_string()).is_err(),
+            "{condition}"
+        );
+    }
+    let mut missing = good.clone();
+    missing["page"]["entries"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("condition");
+    assert!(
+        decode_response(&missing.to_string()).is_err(),
+        "omission is not null"
+    );
+    let mut failure = good;
+    failure["page"]["entries"][0]["trigger"] = json!("failure");
+    assert!(
+        decode_response(&failure.to_string()).is_err(),
+        "fragment rejects failure gate"
+    );
+}
+
+#[test]
+fn sequence_rider_inspection_rejects_duplicate_condition_fields_from_bytes() {
+    let good = conditional_rider_page().to_string();
+    assert!(decode_response(&good).is_ok());
+    for bad in [
+        good.replacen("\"condition\":", "\"condition\":null,\"condition\":", 1),
+        good.replace("\"minimum\":2", "\"minimum\":2,\"minimum\":3"),
+        good.replace(
+            "\"kind\":\"sequence_successful_hits\"",
+            "\"kind\":\"sequence_successful_hits\",\"kind\":\"sequence_successful_hits\"",
+        ),
+    ] {
+        assert_ne!(bad, good);
+        assert!(decode_response(&bad).is_err());
+    }
+    let mut ordinary_failure = conditional_rider_page();
+    ordinary_failure["page"]["entries"][0]["condition"] = Value::Null;
+    ordinary_failure["page"]["entries"][0]["trigger"] = json!("failure");
+    assert!(
+        decode_response(&ordinary_failure.to_string()).is_ok(),
+        "null retains ordinary branch semantics"
+    );
+}
+
+#[test]
+fn sequence_rider_inspection_constructor_validation_retains_page_budgets() {
+    let page: CreatureStrikePage =
+        serde_json::from_value(conditional_rider_page()["page"].clone()).unwrap();
+    assert_eq!(
+        page.entries[0].fields(),
+        0,
+        "condition is fixed metadata, not a diagnostic field"
+    );
+    for minimum in [0, 1, 17, u16::MAX] {
+        let mut invalid = page.clone();
+        let StrikePageEntry::RiderHeader { condition, .. } = &mut invalid.entries[0] else {
+            unreachable!()
+        };
+        *condition = Some(InspectionRiderCondition::SequenceSuccessfulHits { minimum });
+        assert!(invalid.validate().is_err(), "constructed minimum {minimum}");
+    }
+    let mut invalid = page.clone();
+    let StrikePageEntry::RiderHeader { trigger, .. } = &mut invalid.entries[0] else {
+        unreachable!()
+    };
+    *trigger = RiderTrigger::Failure;
+    assert!(invalid.validate().is_err());
+    let mut too_many = page;
+    too_many.strike_count = 16;
+    too_many.entries = (0..17)
+        .map(|index| {
+            let mut entry = too_many.entries[0].clone();
+            if let StrikePageEntry::RiderHeader { strike, rider, .. } = &mut entry {
+                *strike = index / 8;
+                *rider = index % 8;
+            }
+            entry
+        })
+        .collect();
+    assert!(
+        too_many.validate().is_err(),
+        "condition does not relax the 16-entry page bound"
     );
 }

@@ -1164,6 +1164,25 @@ trigger/check/effect operands. Checked riders are
 attacker rolls against a captured defense and have no independent timing, cost,
 retargeting or recursive riders.
 
+A success rider may author `condition = { kind = "sequence_successful_hits", minimum = 2 }`,
+with a minimum from 2 through 16. It counts only executed, successful user-rolled
+primary checks that structurally involve this preparation's target. Component
+protection reducing damage to zero still qualifies; misses, unavailable targets,
+whole-primary immunity, checkless/personal-difficulty checks, target saves and
+rider checks do not. The current primary must qualify. A later miss cannot trigger
+a condition merely because earlier hits met its threshold.
+
+Each conditional source occurrence attempts once per preparation, immediately in
+ordinary rider order when eligible. An appended `natural_melee` rider shares that
+occurrence across all imported rows; a row-local rider retains its own occurrence.
+The receipt is consumed before its own check/effects, including a failed check or
+immune/zero-damage payload. A lethal primary or earlier rider can prevent the
+attempt. Pause, resume and region freezing preserve the bounded hit history and
+receipts; cancellation and a new preparation start fresh. Clients show only the
+authored condition, never hidden progress or eligibility. Ordinary source TOML
+may omit the condition. Current frozen, compiled and wire records require its
+field explicitly, including null. See [preparation records](../architecture/persistence.md#ordered-ability-preparation-records).
+
 Primary, riders, items and environmental effects share one pure check/effect
 pipeline and one effect-state application kernel. A strike's primary and riders
 share one residual damage-edge budget. Fixed effects preserve unused edge.

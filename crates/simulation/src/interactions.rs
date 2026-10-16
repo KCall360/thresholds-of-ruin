@@ -752,7 +752,7 @@ impl Game {
                 ),
                 |p| (p.remaining_at(self.tick), p.hold, p.origin, p.progress),
             );
-        let paid = matches!(progress, crate::combat::PreparationProgress::Ability { next_strike } if next_strike > 0);
+        let paid = matches!(progress, crate::combat::PreparationProgress::Ability { next_strike, .. } if next_strike > 0);
         if let Some(cost) = plan.cost().filter(|_| !paid) {
             let owner = hold.ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
             let started = candidate
@@ -957,6 +957,14 @@ impl Game {
                 a.alive()
                     && p.plan.valid(&self.content.rules)
                     && self.plan_source_valid(&p.plan)
+                    // Use committed state, not projected recovery, for this historical
+                    // proof. A dead or detached target may have skipped a lethal rider.
+                    && p.plan.as_ability().is_none_or(|plan| {
+                        !self.actors.get(&plan.target)
+                            .and_then(|target| target.combat.as_ref())
+                            .is_some_and(|target| !target.creature().health().dead())
+                            || p.progress.conditional_receipts_complete(plan)
+                    })
                     && p.plan.actor() == actor
                     && match p.plan.work() {
                         Work::Eat { item } => self

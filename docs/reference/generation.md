@@ -316,10 +316,11 @@ authored descent pairs. Initial entry and stair owners/cells vary with the seed;
 descent continues beyond depth 26. The operational limit of 1,000,000 floors is
 an execution budget, not a terminal floor or a victory condition. No unvisited
 floor geometry is generated to establish that limit. This open geometry domain
-does not bypass actor construction capacity: the selected population's V-only
-tail has 256 actual HD at depth 274, and depth 275 refuses the entire entry
-atomically when it requires 257 HD. No truncated build or partial population is
-published; widening deep builds and storage remains unfinished.
+does not bypass actor construction capacity: in the selected V/J tail, J reaches
+256 actual HD at depth 267 and a sampled J requires 257 at 268, atomically
+refusing the entire entry. All-V draws can remain valid through depth 274; both
+recipes exceed capacity at 275. No truncated build, replacement draw or partial
+population is published; widening deep builds and storage remains unfinished.
 
 These choices are scenario data, not requirements of the generic family API.
 The [accepted adaptation](../plans/rogue.md#adaptation-decisions) deliberately

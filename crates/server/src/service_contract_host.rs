@@ -36,6 +36,10 @@ enum Operation {
         connection: u64,
         message: String,
     },
+    /// Exactly one production scheduler turn; never an implicit run loop.
+    Step {
+        case: u64,
+    },
     Drain {
         case: u64,
         connection: u64,
@@ -182,6 +186,14 @@ impl Host {
                 case.service.handle(connection, request_id, *request);
                 Ok(json!({}))
             }
+            Operation::Step { case } => {
+                let status = match self.case(case)?.service.step() {
+                    Step::Progress => "progress",
+                    Step::Blocked => "blocked",
+                    Step::Full(_) => "full",
+                };
+                Ok(json!({"status": status}))
+            }
             Operation::Drain { case, connection } => {
                 let case = self.case(case)?;
                 let connection = case
@@ -297,6 +309,137 @@ fn validated_frame(text: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn step_operation_is_one_strict_case_scoped_request() {
+        assert!(matches!(
+            serde_json::from_value::<Operation>(json!({"op":"step","case":1})).unwrap(),
+            Operation::Step { case: 1 }
+        ));
+        for value in [
+            json!({"op":"step"}),
+            json!({"op":"step","case":"1"}),
+            json!({"op":"step","case":1,"count":2}),
+            json!({"op":"step","case":1,"actor":1}),
+        ] {
+            assert!(serde_json::from_value::<Operation>(value).is_err());
+        }
+        let mut host = Host::default();
+        assert_eq!(
+            host.handle(Operation::Step { case: 1 }).unwrap_err(),
+            "No matching active case"
+        );
+    }
+
+    #[test]
+    fn step_reports_outbound_full_without_draining_or_advancing_the_case() {
+        let service = Service::with_outbound_limits(
+            Engine::memory(crate::Scenario::two_room(42)).unwrap(),
+            crate::OutboundLimits {
+                frame_bytes: 16_384,
+                client_bytes: 262_144,
+                total_bytes: 524_288,
+            },
+        )
+        .unwrap();
+        let mut host = Host {
+            next_case: 1,
+            active: Some(Case {
+                id: 1,
+                service,
+                connections: BTreeMap::new(),
+            }),
+        };
+        let connected = host
+            .handle(Operation::Connect {
+                case: 1,
+                role: AccessRole::Player,
+                user: "player".into(),
+                actors: vec![1],
+            })
+            .unwrap();
+        let connection = connected["connection"].as_u64().unwrap();
+        host.handle(Operation::Request {
+            case: 1,
+            connection,
+            message: json!({"type":"request","request_id":"attach",
+                "request":{"type":"attach","actor":"1"}})
+            .to_string(),
+        })
+        .unwrap();
+        host.handle(Operation::Drain {
+            case: 1,
+            connection,
+        })
+        .unwrap();
+        let before = host
+            .handle(Operation::Audit {
+                case: 1,
+                actor: 1,
+                user: "player".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            host.handle(Operation::Step { case: 2 }).unwrap_err(),
+            "No matching active case"
+        );
+        // Small read-only replies reach mailbox headroom without exhausting the
+        // independently bounded byte budget or disconnecting this client.
+        for index in 0..QUEUE - HEADROOM + 1 {
+            host.handle(Operation::Request {
+                case: 1,
+                connection,
+                message: json!({"type":"request","request_id":format!("fill-{index}"),
+                    "request":{"type":"history","before":null,"limit":1}})
+                .to_string(),
+            })
+            .unwrap();
+        }
+        for _ in 0..2 {
+            assert_eq!(
+                host.handle(Operation::Step { case: 1 }).unwrap(),
+                json!({"status":"full"})
+            );
+            assert_eq!(
+                host.handle(Operation::Audit {
+                    case: 1,
+                    actor: 1,
+                    user: "player".into()
+                })
+                .unwrap(),
+                before
+            );
+        }
+        let drained = host
+            .handle(Operation::Drain {
+                case: 1,
+                connection,
+            })
+            .unwrap();
+        assert_eq!(drained["live"], true);
+        assert!(drained["closing"].is_null());
+        assert_eq!(
+            drained["frames"].as_array().unwrap().len(),
+            QUEUE - HEADROOM + 1
+        );
+        for frame in drained["frames"].as_array().unwrap() {
+            let response: Value = serde_json::from_str(frame.as_str().unwrap()).unwrap();
+            assert_eq!(response["type"], "history");
+        }
+        assert_eq!(
+            host.handle(Operation::Step { case: 1 }).unwrap(),
+            json!({"status":"blocked"})
+        );
+        assert_eq!(
+            host.handle(Operation::Audit {
+                case: 1,
+                actor: 1,
+                user: "player".into()
+            })
+            .unwrap(),
+            before
+        );
+    }
 
     fn catalog() -> Value {
         json!({"type":"creature_catalog", "request_id":"query",

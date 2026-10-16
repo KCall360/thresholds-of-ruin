@@ -1,5 +1,5 @@
 //! Ordered scheduling uses frozen plans and actor-local lifecycle publication.
-use crate::combat::{CombatEvent, PreparationProgress, SequenceEnd};
+use crate::combat::{CombatEvent, SequenceEnd};
 use crate::{Game, GameError, ScheduleError, Work};
 
 impl Game {
@@ -118,12 +118,10 @@ impl Game {
                             .map(|strike| (index + 1, strike.offset - plan.strikes[index].offset))
                     })
                 });
-                if let Some((next, gap)) = next {
+                if let Some((_, gap)) = next {
                     let mut pending = resolved.clone();
                     pending.hold = None;
-                    pending.progress = PreparationProgress::Ability {
-                        next_strike: next as u16,
-                    };
+                    pending.progress = resolved.progress.advanced();
                     pending.remaining = gap;
                     pending.started = due;
                     completion.state.pending = Some(pending);
@@ -147,7 +145,24 @@ impl Game {
                         let index = resolved
                             .next_strike()
                             .ok_or(GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
-                        let outcome = self.resolve_strike(plan, index, resolved.intention)?;
+                        let expected = resolved.progress.advanced();
+                        let mut progress = expected;
+                        let outcome =
+                            self.resolve_strike(plan, index, resolved.intention, &mut progress)?;
+                        if next.is_some() && progress != expected {
+                            let mut update = self.actor_outcome(id)?;
+                            if let Some(pending) = update.state.pending.as_mut().filter(|pending| {
+                                pending.plan == resolved.plan
+                                    && pending.intention == resolved.intention
+                                    && pending.origin == resolved.origin
+                                    && pending.progress == expected
+                            }) {
+                                // Publish only history. Effects may have suspended or retired
+                                // the paid tail; never reinstall a stale preparation clone.
+                                pending.progress = progress;
+                                self.apply_outcome(update)?;
+                            }
+                        }
                         self.finish_combat_diagnostic(diagnostic, outcome);
                         if next.is_none() {
                             self.event_log.push(CombatEvent::SequenceEnded {

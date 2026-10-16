@@ -326,3 +326,36 @@ on_success = [{ kind = "damage", damage = { kind = "components", components = [{
 on_failure = []
 descriptors = []
 riders = []
+
+# J: fifteen aberration racial HD with purchased NA1/NA3. Damage dice follow
+# the pinned roster; keen category, attributes, defense, body and timing are
+# provisional TOR tuning, not an original Rogue AC/XP or damage-type conversion.
+[creatures.species."rogue.jabberwock"]
+behavior = { disposition = "passive", idle = "wait", memory_ticks = 1000 }
+kind = "aberration"
+attributes = { strength = 2, speed = 1, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
+displacement = { size = "large", anchored = false }
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "natural_sequence" } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 3 } }]
+
+[creatures.species."rogue.jabberwock".melee]
+skill = "heavy_weaponry"
+bonus = 0
+wind_up = 100
+recovery = 100
+
+[[creatures.species."rogue.jabberwock".melee.strikes]]
+offset = 0
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 2, sides = 12, bonus = 0 } } }] } }]
+on_failure = []
+descriptors = []
+riders = []
+
+[[creatures.species."rogue.jabberwock".melee.strikes]]
+offset = 0
+unlock = "second_strike"
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 2, sides = 4, bonus = 0 } } }] } }]
+on_failure = []
+descriptors = []
+riders = []

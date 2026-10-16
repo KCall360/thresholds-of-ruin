@@ -194,7 +194,7 @@ fn public_plan_review_participation_plan_bytes_are_named_required_closed() {
     strict::<super::PlannedCheck>(check.clone());
     strict::<super::CheckThreshold>(json!({"kind":"fixed","value":10}));
     strict::<super::CheckThreshold>(json!({"kind":"opposed","bonus":0,"edge":0}));
-    let rider = json!({"trigger":"success","check":check.clone(),"effects":[],"descriptors":[]});
+    let rider = json!({"trigger":"success","condition":null,"check":check.clone(),"effects":[],"descriptors":[]});
     strict::<super::FrozenRider>(rider.clone());
     strict::<super::FrozenStrike>(
         json!({"offset":0,"origin":{"kind":"ability","ordinal":0},"check":check.clone(),"on_success":[],"on_failure":[],"descriptors":[],"riders":[rider],"edge":0,"shared_check":{"phase":"primary","side":"initiating"}}),

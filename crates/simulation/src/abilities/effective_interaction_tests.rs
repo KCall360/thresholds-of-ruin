@@ -223,6 +223,7 @@ fn effective_interaction_natural_riders_keep_their_unmodified_rolled_amount() {
             ability.interaction = Interaction::NonHostile;
             ability.strikes = StrikeSource::NaturalMelee {
                 additional_riders: vec![RiderDef {
+                    condition: None,
                     trigger: RiderTrigger::Success,
                     check: None,
                     effects: vec![damage(rolled())],

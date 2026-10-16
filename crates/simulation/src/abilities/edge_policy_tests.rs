@@ -60,6 +60,7 @@ fn outgoing_edge_policy_filters_before_independent_check_and_shared_budgets() {
                 };
                 for strike in strikes {
                     strike.riders.push(RiderDef {
+                        condition: None,
                         trigger: RiderTrigger::Success,
                         check: Some(RiderCheckDef {
                             skill: SkillSelector::NaturalAttack,

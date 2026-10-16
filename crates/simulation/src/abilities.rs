@@ -32,6 +32,12 @@ mod edge_policy_tests;
 #[cfg(test)]
 mod movement_tests;
 #[cfg(test)]
+mod sequence_rider_contact_tests;
+#[cfg(test)]
+mod sequence_rider_lifecycle_tests;
+#[cfg(test)]
+mod sequence_rider_tests;
+#[cfg(test)]
 mod status_condition_tests;
 #[cfg(test)]
 mod strike_tests;

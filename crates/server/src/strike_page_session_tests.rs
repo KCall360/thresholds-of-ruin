@@ -776,5 +776,26 @@ fn natural_melee_pages_keep_species_rows_and_added_riders_distinct_across_fragme
         })
         .collect();
     assert_eq!(effects, [(0, 0, "1"), (0, 1, "2"), (1, 0, "2")]);
+    let conditions: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry["kind"] == "rider_header")
+        .map(|entry| {
+            assert!(entry.as_object().unwrap().contains_key("condition"));
+            (
+                entry["strike"].clone(),
+                entry["rider"].clone(),
+                entry["condition"].clone(),
+            )
+        })
+        .collect();
+    let gate = json!({"kind":"sequence_successful_hits","minimum":2});
+    assert_eq!(
+        conditions,
+        [
+            (json!(0), json!(0), Value::Null),
+            (json!(0), json!(1), gate.clone()),
+            (json!(1), json!(0), gate)
+        ]
+    );
     assert_eq!(service.engine.state(ActorId(1)).unwrap(), before);
 }

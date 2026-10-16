@@ -50,7 +50,7 @@ pub(crate) fn scenario(abilities: usize, maximum_source: bool) -> crate::Scenari
             row["check"] = json!({"actor":"user","skill":{"kind":"named","skill":"heavy_weaponry"},
                 "against":{"kind":"difficulty","formula":{"base":5,"skill":{"kind":"named","skill":"athletics"},"attribute":"strength"}}});
             row["descriptors"] = json!((0..16).map(descriptor_id).collect::<Vec<_>>());
-            row["riders"] = json!((0..8).map(|_| json!({"trigger":"success","check":{"skill":{"kind":"named","skill":"heavy_weaponry"},
+            row["riders"] = json!((0..8).map(|_| json!({"trigger":"success","condition":null,"check":{"skill":{"kind":"named","skill":"heavy_weaponry"},
                 "defense":"physical"},"effects":[effect.clone(),effect.clone()],"descriptors":[]})).collect::<Vec<_>>());
             row
         }).collect::<Vec<_>>()
@@ -400,8 +400,8 @@ pub(crate) fn mixed_trigger_scenario() -> crate::Scenario {
     first.on_failure = serde_json::from_value(json!([{"kind":"damage","damage":{"kind":"components",
         "components":[{"category":"impact","descriptor":null,"amount":{"kind":"fixed","amount":33}}]}}])).unwrap();
     first.riders = serde_json::from_value(json!([
-        {"trigger":"success","check":null,"effects":(1..=14).map(|amount| json!({"kind":"heal","amount":{"kind":"fixed","amount":amount}})).collect::<Vec<_>>(),"descriptors":[]},
-        {"trigger":"failure","check":null,"effects":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"fixed","amount":77}}]}}],"descriptors":[]}
+        {"trigger":"success","condition":null,"check":null,"effects":(1..=14).map(|amount| json!({"kind":"heal","amount":{"kind":"fixed","amount":amount}})).collect::<Vec<_>>(),"descriptors":[]},
+        {"trigger":"failure","condition":null,"check":null,"effects":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"fixed","amount":77}}]}}],"descriptors":[]}
     ])).unwrap();
     scenario.package = Some(Arc::new(
         crate::scenario_package::Package::from_parts(
@@ -427,7 +427,7 @@ pub(crate) fn natural_melee_scenario() -> crate::Scenario {
         .unwrap(),
     );
     let rider = |amount| {
-        json!({"trigger":"success","check":null,
+        json!({"trigger":"success","condition":null,"check":null,
         "effects":[{"kind":"heal","amount":{"kind":"fixed","amount":amount}}],"descriptors":[]})
     };
     let ability = rules
@@ -436,8 +436,10 @@ pub(crate) fn natural_melee_scenario() -> crate::Scenario {
         .find(|a| a.id.as_str() == "page_ability_000")
         .unwrap();
     ability.name = "Natural technique".into();
+    let mut added = rider(2);
+    added["condition"] = json!({"kind":"sequence_successful_hits","minimum":2});
     ability.strikes = serde_json::from_value(json!({"kind":"natural_melee",
-        "additional_riders":[rider(2)]}))
+        "additional_riders":[added]}))
     .unwrap();
     let mut manifest = serde_json::to_value(&package.manifest).unwrap();
     manifest["creatures"]["species"]["page_subject"]["melee"]["strikes"] = json!([

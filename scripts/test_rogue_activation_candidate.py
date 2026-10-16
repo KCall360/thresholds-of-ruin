@@ -48,13 +48,13 @@ class RogueActivationCandidateTests(unittest.TestCase):
         # Independent exact enumeration of the pinned ten-way selector and its
         # five-way boundary redistribution, not the helper's embedded table.
         ladder = "KEBSHIROZLCQANYFTWPXUMVGJD"
-        names = dict(zip("ESHIRZCQYTWUV", ("emu", "snake", "hobgoblin", "ice_monster",
+        names = dict(zip("ESHIRZCQYTWUVJ", ("emu", "snake", "hobgoblin", "ice_monster",
                                        "rattlesnake", "zombie", "centaur", "quagga", "yeti", "troll",
-                                       "wraith", "black_unicorn", "vampire"), strict=True))
+                                       "wraith", "black_unicorn", "vampire", "jabberwock"), strict=True))
         self.assertEqual(set(names.values()), set(PLAYABLE_SPECIES))
         self.assertTrue(all(math.gcd(*(choice["weight"] for choice in band["choices"])) == 1
                             for band in bands))
-        for depth in (*range(1, 36), 274, 275, 1_000_000):
+        for depth in (*range(1, 36), 267, 268, 274, 275, 1_000_000):
             mass = {"rogue." + name: Fraction() for name in names.values()}
             for offset in range(10):
                 index = depth + offset - 6
@@ -72,8 +72,8 @@ class RogueActivationCandidateTests(unittest.TestCase):
             total_mass, total_weight = sum(eligible.values()), sum(authored.values())
             self.assertEqual({key: value / total_mass for key, value in eligible.items()},
                              {key: Fraction(value, total_weight) for key, value in authored.items()}, depth)
-        self.assertEqual(bands[-1]["depth"], {"kind": "open", "minimum": 27})
-        self.assertEqual([row["archetype"] for row in bands[-1]["choices"]], ["rogue.vampire"])
+        self.assertEqual(bands[-1]["depth"], {"kind": "open", "minimum": 31})
+        self.assertEqual([row["archetype"] for row in bands[-1]["choices"]], ["rogue.vampire", "rogue.jabberwock"])
         self.assertTrue(all(row["depth"]["kind"] == "finite" for row in bands[:-1]))
         self.assertEqual([row["depth"]["maximum"] + 1 for row in bands[:-1]],
                          [row["depth"]["minimum"] for row in bands[1:]])
@@ -121,6 +121,24 @@ class RogueActivationCandidateTests(unittest.TestCase):
                     self.assertEqual(len(wraith), int(eligible))
                     if eligible:
                         self.assertEqual(wraith[0], {"archetype": "rogue.wraith", "weight": 5 if depth == 23 else 1})
+
+    def test_jabberwock_starts_at_21_and_mixed_tail_retains_boundary_redistribution(self):
+        production = encounter_sources()["manifest"]["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]["bands"]
+        for origin, bands in (("helper", conditional_bands()), ("production", production)):
+            for depth in (20, 21, 26, 27, 28, 29, 30, 31, 267, 268, 274, 275):
+                with self.subTest(origin=origin, depth=depth):
+                    band = next(row for row in bands if row["depth"]["minimum"] <= depth
+                                and (row["depth"]["kind"] == "open" or depth <= row["depth"]["maximum"]))
+                    choices = {row["archetype"]: row for row in band["choices"]}
+                    self.assertEqual("rogue.jabberwock" in choices, depth >= 21)
+                    if depth >= 21:
+                        self.assertEqual(choices["rogue.jabberwock"]["carried_loot"], {
+                            "version": 1, "pool": "rogue.vampire_supplies",
+                            "chance": {"numerator": 7, "denominator": 10}})
+                    if depth >= 27:
+                        expected = (7, 12) if depth == 29 else (8, 13) if depth == 30 else (1, 1)
+                        self.assertEqual({key: value["weight"] for key, value in choices.items()},
+                                         dict(zip(("rogue.vampire", "rogue.jabberwock"), expected, strict=True)))
 
     def test_explicit_source_is_independent_of_live_production(self):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
@@ -231,7 +249,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
         original = encounter_sources()["manifest"]
         candidate = candidate_manifest(original)
         activation = candidate["floor_activation"]
-        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5)}
+        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.jabberwock": (7, 10)}
         self.assertEqual(activation["carried_item_pools"]["rogue.vampire_supplies"], {
             "version": 1, "choices": [
                 {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
@@ -260,7 +278,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
                 candidate_manifest(source)
 
     def test_each_carrier_choice_and_generation_owns_its_stock_policy_copy(self):
-        for name, numerator in (("centaur", 3), ("yeti", 3), ("troll", 1), ("vampire", 1)):
+        for name, numerator in (("centaur", 3), ("yeti", 3), ("troll", 1), ("vampire", 1), ("jabberwock", 7)):
             with self.subTest(species=name):
                 bands = conditional_bands()
                 choices = [choice for band in bands for choice in band["choices"]
@@ -336,7 +354,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertFalse(result["production_mutated"])
             self.assertEqual(result["battle_evidence"], "not_run")
             self.assertEqual(result["calibration"], "not_assessed")
-            self.assertEqual(result["population_scope"], "conditional_thirteen_species_with_open_vampire_tail")
+            self.assertEqual(result["population_scope"], "conditional_fourteen_species_with_open_vampire_jabberwock_tail")
             self.assertEqual(result["depth_growth"], {"kind": "racial_after", "depth": 26})
             self.assertIn("provisional", " ".join(result["limitations"]))
             self.assertIn("capacity", " ".join(result["limitations"]))

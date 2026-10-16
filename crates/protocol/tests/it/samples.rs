@@ -273,6 +273,39 @@ fn every_required_server_message_kind_matches_its_recorded_golden_json() {
 }
 
 #[test]
+fn recorded_sequence_rider_inspection_contains_explicit_null_and_typed_gate() {
+    let mut ordinary = false;
+    let mut conditional = false;
+    for sample in samples()["server"].as_array().unwrap() {
+        let ServerMessage::CreatureStrikePage { page, .. } = round_trip::<ServerMessage>(sample)
+        else {
+            continue;
+        };
+        page.validate().unwrap();
+        for entry in &page.entries {
+            if let StrikePageEntry::RiderHeader {
+                trigger, condition, ..
+            } = entry
+            {
+                match condition {
+                    None => ordinary = true,
+                    Some(InspectionRiderCondition::SequenceSuccessfulHits { minimum: 2 }) => {
+                        assert_eq!(*trigger, RiderTrigger::Success);
+                        conditional = true;
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+    }
+    assert!(ordinary, "record an ordinary explicit-null rider");
+    assert!(
+        conditional,
+        "record the actual server's non-null sequence gate with scripts/record_wire_samples.py"
+    );
+}
+
+#[test]
 fn recorded_complete_views_validate_and_keep_projection_identity_separate() {
     let mut checked = 0;
     for sample in samples()["server"].as_array().unwrap() {

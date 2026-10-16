@@ -33,6 +33,48 @@ fn decode(value: Value) -> Result<Arc<Ruleset>, String> {
     Ruleset::validate(document).map_err(|error| error.to_string())
 }
 #[test]
+fn sequence_rider_condition_is_closed_bounded_and_success_only() {
+    let mut row = strike(0);
+    row["riders"] = json!([{
+        "trigger":"success", "condition":{"kind":"sequence_successful_hits","minimum":2},
+        "check":null, "effects":[], "descriptors":[]
+    }]);
+    let valid = document_with(vec![row]);
+    assert!(decode(valid.clone()).is_ok());
+    for minimum in [0, 1, 17, u16::MAX] {
+        let mut bad = valid.clone();
+        bad["abilities"][0]["strikes"]["strikes"][0]["riders"][0]["condition"]["minimum"] =
+            json!(minimum);
+        assert!(decode(bad).is_err(), "minimum {minimum} must reject");
+    }
+    for mutation in ["failure", "unknown", "missing", "extra"] {
+        let mut bad = valid.clone();
+        let rider = &mut bad["abilities"][0]["strikes"]["strikes"][0]["riders"][0];
+        match mutation {
+            "failure" => rider["trigger"] = json!("failure"),
+            "unknown" => rider["condition"]["kind"] = json!("any_effect"),
+            "missing" => {
+                rider["condition"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("minimum");
+            }
+            "extra" => rider["condition"]["target"] = json!("any"),
+            _ => unreachable!(),
+        }
+        assert!(decode(bad).is_err(), "{mutation} must reject");
+    }
+    let mut ordinary = valid;
+    ordinary["abilities"][0]["strikes"]["strikes"][0]["riders"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("condition");
+    assert!(
+        decode(ordinary).is_ok(),
+        "current authoring may omit the optional gate"
+    );
+}
+#[test]
 fn ordered_strike_content_decodes_authored_and_selected_melee_sources() {
     let mut value = document_with(vec![strike(0)]);
     assert!(
@@ -281,6 +323,7 @@ fn natural_melee_source_composition_bounds_dormant_rows_and_branch_triggers() {
     .is_err());
     assert!(append_natural_riders(&[row], &[]).is_ok());
     let failure = RiderDef {
+        condition: None,
         trigger: RiderTrigger::Failure,
         ..extra
     };
@@ -308,6 +351,7 @@ fn natural_melee_source_strike_and_rider_records_require_names() {
 fn natural_melee_source_repeated_riders_share_the_full_sequence_budget() {
     let row: StrikeDef = serde_json::from_value(strike(0)).unwrap();
     let extra = RiderDef {
+        condition: None,
         trigger: RiderTrigger::Success,
         check: None,
         descriptors: vec![],

@@ -27,8 +27,8 @@ class RogueRouteBudgetProcesses(ProcessTestCase):
             source_provenance={'reference': 'repository:scenarios/rogue-exploration',
                                'kind': 'current_production_package'}, start_depth=1)
         snapshot = source_snapshot(candidate / 'package', self.directory / 'candidate-snapshot',
-            compiler, reference='Generated thirteen-species source: ' + digest(candidate / 'inputs.json'))
-        arm_sources = {'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v6',
+            compiler, reference='Generated fourteen-species source: ' + digest(candidate / 'inputs.json'))
+        arm_sources = {'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v7',
                        'candidate': snapshot}
         prepare_campaign(directory, self.bin, arm_sources=arm_sources)
         # Revision3 seed42 ordinarily pauses command269; its first resume would

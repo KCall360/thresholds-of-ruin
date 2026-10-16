@@ -1,5 +1,5 @@
 # Canonical rules content; initial starter values remain provisional until paired evaluation.
-id = "interactions-v38"
+id = "interactions-v39"
 
 constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_point_grants = [{ pool = "advancement", points = 1 }], duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee", "bind_wounds"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
 
@@ -341,6 +341,20 @@ reach = { kind = "self_only" }
 strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "apply_condition", condition = "shell_energy", duration = 400 }], on_failure = [], descriptors = [], riders = [] }] }
 ai = { priority = 30, hostile = false, minimum_resource_percent = 100, range_preference = "any" }
 
+# NA3 is a purchased signature; species keep ownership of all natural rows/timing.
+# Keen damage without a descriptor is provisional shared physical-rending tuning.
+[[abilities]]
+interaction = "hostile_to_target"
+id = "rending_pair"
+name = "Rending Pair"
+tags = ["attack"]
+basic_attack = false
+invocation = "actor_target"
+timing = { source = { kind = "selected_weapon" }, scaled_by = "speed" }
+reach = { kind = "melee" }
+strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", condition = { kind = "sequence_successful_hits", minimum = 2 }, effects = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], descriptors = [] }] }
+ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
+
 [[talents]]
 id = "brace_for_impact"
 name = "Brace for Impact"
@@ -453,6 +467,14 @@ prerequisites = ["second_strike"]
 requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 4 }, { kind = "species_flag", flag = "natural_sequence", present = true }] }
 form_choices = []
 modifiers = []
+
+[[talents]]
+id = "rending_pair"
+name = "Rending Pair"
+prerequisites = ["second_strike"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 8 }, { kind = "species_flag", flag = "natural_sequence", present = true }] }
+form_choices = []
+modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rending_pair" } }]
 
 [[creature_types]]
 id = "aberration"
