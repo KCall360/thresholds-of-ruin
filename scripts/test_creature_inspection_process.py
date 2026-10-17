@@ -143,6 +143,18 @@ def damage_total(record):
 
 
 class CreatureInspectionProcesses(ProcessTestCase):
+    def _outgoing_policy_peer_wait(self, peer, owner_frame):
+        # The owner's preparation does not synchronize the peer's socket.
+        # Its unpaid turn holds time while this read-only snapshot catches up.
+        current = self.request(peer, {"type": "snapshot"})
+        self.assertIsNone(current["error"])
+        self.assertTrue(current["state"]["observation"]["ready"])
+        self.assertEqual(current["state"]["observation"]["tick"],
+                         owner_frame["state"]["observation"]["tick"])
+        waited = self.act(peer, {"type": "wait"})
+        self.assertIsNone(waited["error"])
+        return waited
+
     def test_owner_outgoing_policy_preserves_kernel_and_pinned_sequence_on_restart(self):
         fallback = creature_package(self, "outgoing-policy-fallback")
         for policy, expected_check, expected_damage in (("ordinary", -4, 0), ("ignore_negative", 4, 2)):
@@ -156,8 +168,10 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                               if actor["name"] == "Sequence sentinel")
                 self._private_report(wizard, "combat capture on")
-                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"kind": "actor_target", "target": target}})["error"])
-                self.act(peer, {"type": "wait"})
+                preparing = self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"kind": "actor_target", "target": target}})
+                self.assertIsNone(preparing["error"])
+                self.assertTrue(preparing["state"]["observation"]["combat"]["preparation_active"])
+                self._outgoing_policy_peer_wait(peer, preparing)
                 prefix = self.frame(player, lambda frame: (frame["state"]["observation"]["combat"]["sequence"] or {}).get("completed") == 1)
                 first = self._private_report(wizard, "combat inspect")["records"]
                 first = [record for record in first if record["ability"]["id"] == "triple_strike"]
@@ -173,10 +187,12 @@ class CreatureInspectionProcesses(ProcessTestCase):
                                  prefix["state"]["observation"]["combat"]["sequence"])
                 self._private_report(wizard, "combat capture on")
                 self.assertIsNone(self.command(player, {"type": "resume_intention"})["error"])
-                self.act(peer, {"type": "wait"})
-                self.frame(player, lambda frame: any(event["type"] == "ability" and event["strike"] == 1
+                preparing = self.frame(player, lambda frame: frame.get("state") is not None
+                                       and frame["state"]["observation"]["combat"]["preparation_active"])
+                self._outgoing_policy_peer_wait(peer, preparing)
+                second = self.frame(player, lambda frame: any(event["type"] == "ability" and event["strike"] == 1
                     for event in frame["state"]["observation"]["combat"]["events"]))
-                self.act(peer, {"type": "wait"})
+                self._outgoing_policy_peer_wait(peer, second)
                 self.frame(player, lambda frame: frame["state"]["observation"]["combat"]["sequence"] is None
                            and not frame["intentions"])
                 resumed = self._private_report(wizard, "combat inspect")["records"]
@@ -573,11 +589,25 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.assertEqual(self._private_report(wizard, "creature inspect 1", "creature_inspection")["conditions"], [])
                 resumed = self.command(player, {"type": "resume_intention"})
                 self.assertIsNone(resumed["error"])
-                self.frame(player, lambda frame: frame.get("state") is not None
-                           and frame["state"]["observation"]["combat"]["preparation_active"])
+                preparing = self.frame(player, lambda frame: frame.get("state") is not None
+                                       and frame["state"]["observation"]["combat"]["preparation_active"])
+                # The owner's socket cannot synchronize the peer's observation.
+                # Refresh before acting, while its unpaid turn still holds time.
+                peer_ready = self.request(peer, {"type": "snapshot"})
+                self.assertIsNone(peer_ready["error"])
+                self.assertTrue(peer_ready["state"]["observation"]["ready"])
+                self.assertEqual(peer_ready["state"]["observation"]["tick"],
+                                 preparing["state"]["observation"]["tick"])
                 self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
                 self.frame(player, completed)
-                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})["error"])
+                preparing = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
+                self.assertIsNone(preparing["error"])
+                self.assertTrue(preparing["state"]["observation"]["combat"]["preparation_active"])
+                peer_ready = self.request(peer, {"type": "snapshot"})
+                self.assertIsNone(peer_ready["error"])
+                self.assertTrue(peer_ready["state"]["observation"]["ready"])
+                self.assertEqual(peer_ready["state"]["observation"]["tick"],
+                                 preparing["state"]["observation"]["tick"])
                 self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
                 self.frame(player, completed)
                 records = self._private_report(wizard, "combat inspect")["records"]

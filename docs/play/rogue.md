@@ -10,6 +10,15 @@ the complete roster and calibrated depth curve remain unfinished. The Amulet
 and intentional surface escape provide the retrieval/ascent objective. The default launch still selects the separate
 [first dungeon](gameplay.md).
 
+Hobgoblins roam before noticing a foe, using their own visible surroundings and
+preferring less-visited cells. They can open reachable doors, but cannot use
+Rogue's stairs. Once they personally perceive a hostile, the existing seeded
+wake check can replace roaming with pursuit or combat. Other species retain
+their current waiting behavior. Roaming does not enable healing, equipment
+changes or loot collection; those remain separate explicit AI policies.
+Only active creatures take turns, and waiting for player input still pauses the
+adventure. Frozen floors do not accumulate missed roaming turns.
+
 ## Choose a new-save preset
 
 Complete [source setup and authentication](../../README.md#play-from-source).
@@ -214,6 +223,21 @@ they do not establish a complete survival loop or useful builds throughout HD 1�
 
 The authored content contracts live in
 [`test_rogue_playable_content.py`](../../scripts/test_rogue_playable_content.py).
+The bounded [hobgoblin roaming tests](../../crates/server/src/hobgoblin_roaming_tests.rs)
+compile the production recipe and policies into small rooms, checking committed
+idle movement, hidden-player independence, doors, stair restrictions and personal
+hostile acquisition, plus least-visited choice in a three-cell corridor. The
+stair witness also enables traversal as a counterfactual, proving that the
+production restriction is what prevents descent.
+
+Roaming grows each actor’s visit history. Decision previews copy the acting
+actor’s history; ordinary committed actions also clone every loaded AI history,
+including when the player acts. A bounded four-hobgoblin witness records 0, 62
+and 236 copied visit entries per player wait after 0, 16 and 64 rounds, with one
+game clone and no route searches. These structural counts do not establish
+world-independent costs, acceptable large-world latency or calibrated encounter
+pressure. Residency and population bounds matter; this slice does not redesign
+that existing cloning path.
 Focused actual-process contracts include:
 
 - Exact selected-Mage form and future-source choices retained after source-deleted

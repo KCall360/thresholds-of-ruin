@@ -2,13 +2,12 @@
 import json
 import os
 import subprocess
-import shutil
 import sqlite3
 from pathlib import Path
 import time
 import unittest
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, non_graphical
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, non_graphical, read_capture
 
 
 class TravelJournalProcesses(ProcessTestCase):
@@ -239,7 +238,7 @@ class TravelProcesses(ProcessTestCase):
         underscore()
         selected = self.ascii_frame(client, lambda f: f.get("travel_cursor") is not None)
         self.assertEqual(selected["state"]["observation"]["tick"], '0')
-        shutil.copyfile(capture, capture.with_name(capture.stem + "-selection.ppm"))
+        capture.with_name(capture.stem + "-selection.ppm").write_bytes(read_capture(capture))
         key("Right", True)
         self.ascii_frame(client, lambda f: f.get("travel_cursor") == {"x":1,"y":0,"z":0})
         key("Right", False)
@@ -254,7 +253,7 @@ class TravelProcesses(ProcessTestCase):
         returned = self.ascii_frame(client, lambda f: f.get("travel") and f["travel"]["id"] != arrived["travel"]["id"] and f["travel"]["phase"] == "arrived")
         mouse(False)
         self.assertEqual(returned["state"]["observation"]["tick"],'200')
-        self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
+        self.assertTrue(read_capture(capture).startswith(b"P6\n1200 800\n255\n"))
 
     def travel_scenario(self, package):
         self.server(scenario=package)

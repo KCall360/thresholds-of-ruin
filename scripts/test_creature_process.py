@@ -1,6 +1,6 @@
 """Creature abilities through authored packages and real client processes."""
 from scalar_wire import u64
-from process_harness import content_ids, hit_die_counts
+from process_harness import content_ids, hit_die_counts, read_capture
 import shutil
 import subprocess
 
@@ -726,7 +726,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         def press(name, reported):
             return self.native_press(window, native, name, reported)
         def title_pixels():
-            pixels = capture.read_bytes().split(b"\n", 3)[3]
+            pixels = read_capture(capture).split(b"\n", 3)[3]
             return b"".join(pixels[(y * 1200 + 72) * 3:(y * 1200 + 420) * 3]
                             for y in range(96, 112))
         normal_title = title_pixels()

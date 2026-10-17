@@ -1,10 +1,10 @@
 """Native ASCII remembered map, using only server-disclosed appearances."""
 import json
 import os
-import shutil
+from pathlib import Path
 import unittest
 
-from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN
+from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN, read_capture
 
 
 class AsciiMemoryProcesses(ProcessTestCase):
@@ -49,13 +49,13 @@ class AsciiMemoryProcesses(ProcessTestCase):
         self.assertTrue(remembered["remembered"])
         self.assertEqual(remembered["color"],0x626262)
         # Verify the actual presented pixels, not only the diagnostic model.
-        pixels = self.capture.read_bytes().split(b"\n",3)[3]
+        pixels = read_capture(self.capture).split(b"\n",3)[3]
         cx,cy = remembered["center"]
         colors = [pixels[(y*1200+x)*3:(y*1200+x)*3+3]
                   for y in range(cy-4,cy+4) for x in range(cx-4,cx+4)]
         self.assertIn(bytes([98,98,98]),colors)
         if os.environ.get("TOR_MEMORY_CAPTURE"):
-            shutil.copyfile(self.capture, os.environ["TOR_MEMORY_CAPTURE"])
+            Path(os.environ["TOR_MEMORY_CAPTURE"]).write_bytes(read_capture(self.capture))
         self.assertNotIn("stone tablet",json.dumps(closed["state"]))
         self.assertEqual(self.request(observer,{"type":"snapshot"})["state"],closed["state"])
         shifted = self.key(window,"left")
@@ -90,7 +90,7 @@ class AsciiMemoryProcesses(ProcessTestCase):
         self.assertNotIn(restored_position, [
             cell["position"] for cell in resumed["state"]["observation"]["visible_cells"]
         ])
-        pixels = self.capture.read_bytes().split(b"\n", 3)[3]
+        pixels = read_capture(self.capture).split(b"\n", 3)[3]
         cx, cy = restored["center"]
         colors = [pixels[(y * 1200 + x) * 3:(y * 1200 + x) * 3 + 3]
                   for y in range(cy - 4, cy + 4) for x in range(cx - 4, cx + 4)]

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import unittest
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, inspect_save, load_fixture, non_graphical
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, inspect_save, load_fixture, non_graphical, read_capture
 
 
 class MaterialProcesses(ProcessTestCase):
@@ -61,8 +61,7 @@ class MaterialProcesses(ProcessTestCase):
             watched = self.request(observer, {"type": "snapshot"})
             self.assertEqual(watched["state"], native["state"])
             if os.environ.get("TOR_RIM_CAPTURE_DIR"):
-                import shutil
-                shutil.copyfile(capture, Path(os.environ["TOR_RIM_CAPTURE_DIR"]) / ("rim-" + name + ".ppm"))
+                (Path(os.environ["TOR_RIM_CAPTURE_DIR"]) / ("rim-" + name + ".ppm")).write_bytes(read_capture(capture))
             if name != "east":
                 native = self.key(window, "right")
         self.key(window, "close_door")

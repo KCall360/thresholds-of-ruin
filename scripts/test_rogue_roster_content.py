@@ -56,7 +56,7 @@ class RogueRosterContent(unittest.TestCase):
             with self.subTest(species=name):
                 self.assertEqual(species["rogue." + name].get("behavior"), {
                     "disposition": "mean" if name in mean else "passive",
-                    "idle": "wait", "memory_ticks": 1000,
+                    "idle": "explore" if name == "hobgoblin" else "wait", "memory_ticks": 1000,
                 })
 
     def test_natural_unlocks_are_explicit_eligible_purchases_not_free_attacks(self):

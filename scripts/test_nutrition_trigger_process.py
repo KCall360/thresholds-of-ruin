@@ -8,7 +8,7 @@ import subprocess
 import unittest
 
 from nutrition_package import ZERO_WORD_SEED, observed_meal_complete, prepare_trigger as trigger_package
-from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, settle_rogue_action
+from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, read_capture, settle_rogue_action
 from status_condition_package import actor_creature, checkpoint, combat, observation
 
 
@@ -181,7 +181,7 @@ class NutritionTriggerNativeProcesses(ProcessTestCase):
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--observe",
                              "--report-frames", "--capture", capture])
         self.ascii_frame(window, lambda frame: frame["state"] is not None and not frame["busy"])
-        before = capture.read_bytes()
+        before = read_capture(capture)
         native = self.native_keys(window)
         native("Shift_L", True)
         try:
@@ -193,7 +193,7 @@ class NutritionTriggerNativeProcesses(ProcessTestCase):
         self.assertIn("Fixture Faint: 1100 active ticks remaining", rows)
         self.assertNotIn("Protection against Fixture Faint", rows)
         self.assertNotIn("from actor", rows)
-        self.assertNotEqual(capture.read_bytes(), before)
+        self.assertNotEqual(read_capture(capture), before)
         self.assertEqual(checkpoint(self, player), saved)
 
     def test_native_real_mage_eats_the_authored_ration_and_shows_its_reserve(self):

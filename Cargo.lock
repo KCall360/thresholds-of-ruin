@@ -910,6 +910,7 @@ dependencies = [
  "minifb",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-tungstenite",
  "tor-client-common",

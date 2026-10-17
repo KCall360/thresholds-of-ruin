@@ -287,6 +287,11 @@ for native desktop prerequisites and the maintained test commands.
 `{"type":"key","key":"right"}`. It reports frames only after successful native
 presentation. `--report-frames` emits diagnostics with ordinary keyboard input;
 `--capture file.ppm` alongside either writes the last presented framebuffer.
+Each capture is published by replacing the destination only after the complete
+PPM is written, so concurrent readers see one complete frame. On Windows, live
+readers must share delete access to permit replacement; the test harness's
+`read_capture` helper does this. A capture write or replacement failure is
+reported as an error, rather than as a successfully captured frame.
 Frames include raw observation `narration`, displayed `messages`, `map_tiles`,
 `status_lines` and the modal `screen`. These options expose only the connected
 actor’s disclosed state/history, potentially including the user’s private notes.

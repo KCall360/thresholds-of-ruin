@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 from process_harness import (
     OutputQueue, Process, ProcessTestCase, ProcessTestDirectory, Transcript, binaries, inspect_save, save_at,
     ascii_stats_viewport_text, headless_fight_completion, settle_rogue_action, hit_die_counts, non_graphical,
+    read_capture,
 )
 
 
@@ -59,6 +60,134 @@ class NativeDisplayRequirement(unittest.TestCase):
         self.assertIn("require DISPLAY", result.errors[0][1])
         self.assertEqual(result.failures, [])
         spawn.assert_not_called()
+
+
+class CaptureReads(unittest.TestCase):
+    @contextmanager
+    def windows_reader(self, source_fd):
+        import ctypes
+        kernel32 = Mock()
+        kernel32.CreateFileW.return_value = 123
+        runtime = Mock()
+        descriptors = []
+
+        def transfer(handle, flags):
+            descriptor = os.dup(source_fd)
+            descriptors.append(descriptor)
+            return descriptor
+
+        runtime.open_osfhandle.side_effect = transfer
+        error = PermissionError("capture sharing denied")
+        with patch("process_harness.os", wraps=os) as platform, \
+                patch.dict(sys.modules, {"msvcrt": runtime}), \
+                patch.object(ctypes, "WinDLL", return_value=kernel32, create=True), \
+                patch.object(ctypes, "get_last_error", return_value=5, create=True), \
+                patch.object(ctypes, "WinError", return_value=error, create=True):
+            platform.name = "nt"
+            platform.O_RDONLY = os.O_RDONLY
+            platform.O_BINARY = 0x8000
+            try:
+                yield kernel32, runtime, descriptors, error
+            finally:
+                # Avoid a descriptor leak if a regression fails before checking
+                # that the reader transferred and closed its ownership.
+                for descriptor in descriptors:
+                    try:
+                        os.close(descriptor)
+                    except OSError:
+                        pass
+
+    def assert_closed(self, descriptors):
+        self.assertEqual(len(descriptors), 1)
+        with self.assertRaises(OSError):
+            os.fstat(descriptors[0])
+
+    def test_capture_bytes_are_exact_and_missing_files_are_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.ppm"
+            with self.assertRaises(FileNotFoundError):
+                read_capture(path)
+            data = b"P6\n1 1\n255\n\x12\x34\x56"
+            path.write_bytes(data)
+            self.assertEqual(read_capture(path), data)
+
+    def test_windows_read_shares_delete_and_closes_the_transferred_descriptor(self):
+        import ctypes
+        from ctypes import wintypes
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.ppm"
+            data = b"P6\n1 1\n255\n\x12\x34\x56"
+            path.write_bytes(data)
+            with open(path, "rb") as original, self.windows_reader(original.fileno()) as state:
+                kernel32, runtime, descriptors, _ = state
+                self.assertEqual(read_capture(path), data)
+                kernel32.CreateFileW.assert_called_once_with(
+                    str(path), 0x80000000, 0x00000001 | 0x00000002 | 0x00000004,
+                    None, 3, 0x00000080, None)
+                self.assertIs(kernel32.CreateFileW.restype, wintypes.HANDLE)
+                self.assertEqual(kernel32.CreateFileW.argtypes,
+                                 [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE])
+                runtime.open_osfhandle.assert_called_once_with(123, os.O_RDONLY | 0x8000)
+                kernel32.CloseHandle.assert_not_called()
+                self.assert_closed(descriptors)
+
+    def test_windows_open_error_propagates_without_fallback_or_invalid_handle_close(self):
+        import ctypes
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.ppm"
+            path.write_bytes(b"previous capture")
+            with open(path, "rb") as original, self.windows_reader(original.fileno()) as state:
+                kernel32, runtime, descriptors, error = state
+                kernel32.CreateFileW.return_value = ctypes.c_void_p(-1).value
+                with self.assertRaises(PermissionError) as raised:
+                    read_capture(path)
+                self.assertIs(raised.exception, error)
+                kernel32.CreateFileW.assert_called_once()
+                runtime.open_osfhandle.assert_not_called()
+                kernel32.CloseHandle.assert_not_called()
+                self.assertEqual(descriptors, [])
+
+    def test_windows_descriptor_transfer_failure_closes_the_unowned_handle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.ppm"
+            path.write_bytes(b"previous capture")
+            with open(path, "rb") as original, self.windows_reader(original.fileno()) as state:
+                kernel32, runtime, descriptors, _ = state
+                error = OSError("descriptor transfer failed")
+                runtime.open_osfhandle.side_effect = error
+                with self.assertRaises(OSError) as raised:
+                    read_capture(path)
+                self.assertIs(raised.exception, error)
+                kernel32.CreateFileW.assert_called_once()
+                runtime.open_osfhandle.assert_called_once()
+                kernel32.CloseHandle.assert_called_once_with(123)
+                self.assertEqual(descriptors, [])
+
+    def test_windows_read_failure_propagates_and_closes_the_transferred_descriptor(self):
+        real_open = open
+        error = OSError("capture read failed")
+
+        @contextmanager
+        def failing_read(*args, **kwargs):
+            with real_open(*args, **kwargs) as source:
+                reader = Mock(wraps=source)
+                reader.read.side_effect = error
+                yield reader
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.ppm"
+            path.write_bytes(b"previous capture")
+            with open(path, "rb") as original, self.windows_reader(original.fileno()) as state, \
+                    patch("process_harness.open", side_effect=failing_read, create=True) as opened:
+                kernel32, _, descriptors, _ = state
+                with self.assertRaises(OSError) as raised:
+                    read_capture(path)
+                self.assertIs(raised.exception, error)
+                opened.assert_called_once()
+                kernel32.CreateFileW.assert_called_once()
+                kernel32.CloseHandle.assert_not_called()
+                self.assert_closed(descriptors)
 
 
 class HeadlessDiagnostics(unittest.TestCase):
@@ -466,6 +595,67 @@ class ActionCompletion(unittest.TestCase):
                         patch.object(harness, "frame", side_effect=frame):
                     self.assertIs(harness.act(object(), {"type": "wait"}), newer)
                 self.assertEqual(batches, [])
+
+
+class OwnerPolicyPeerCoordination(unittest.TestCase):
+    def setUp(self):
+        from test_creature_inspection_process import CreatureInspectionProcesses
+        self.coordinate = CreatureInspectionProcesses._outgoing_policy_peer_wait
+        self.harness = unittest.TestCase()
+        self.peer = object()
+        self.owner = {"error": None, "state": {"observation": {"tick": "150"}}}
+        self.snapshot = {"error": None, "state": {"observation": {"tick": "150", "ready": True}}}
+        self.refreshed = False
+        self.wait_error = None
+        self.operations = []
+        self.harness.request = Mock(side_effect=self.request)
+        self.harness.act = Mock(side_effect=self.act)
+
+    def request(self, peer, request):
+        self.assertIs(peer, self.peer)
+        self.assertEqual(request, {"type": "snapshot"})
+        self.operations.append("snapshot")
+        self.refreshed = True
+        return self.snapshot
+
+    def act(self, peer, action):
+        self.assertIs(peer, self.peer)
+        self.assertEqual(action, {"type": "wait"})
+        self.operations.append("wait")
+        # Retained CI ordering: the owner has started, but the peer has not
+        # observed that revision and its ordinary wait must be rejected.
+        return {"error": self.wait_error if self.refreshed else
+                "StaleRevision: Refresh the observation before acting"}
+
+    def wait(self):
+        return self.coordinate(self.harness, self.peer, self.owner)
+
+    def test_owner_observation_requires_peer_snapshot_before_one_wait(self):
+        self.assertIsNone(self.wait()["error"])
+        self.assertEqual(self.operations, ["snapshot", "wait"])
+        self.harness.request.assert_called_once()
+        self.harness.act.assert_called_once()
+
+    def test_snapshot_error_prevents_peer_wait(self):
+        self.snapshot["error"] = "Connection refused"
+        with self.assertRaisesRegex(AssertionError, "Connection refused"):
+            self.wait()
+        self.harness.act.assert_not_called()
+
+    def test_snapshot_must_be_ready_at_the_owner_tick(self):
+        for ready, tick in ((False, "150"), (True, "151")):
+            with self.subTest(ready=ready, tick=tick):
+                self.snapshot["state"]["observation"] = {"ready": ready, "tick": tick}
+                with self.assertRaises(AssertionError):
+                    self.wait()
+                self.harness.act.assert_not_called()
+
+    def test_peer_refusal_is_reported_without_retry(self):
+        self.wait_error = "StaleRevision: Refresh the observation before acting"
+        with self.assertRaisesRegex(AssertionError, "StaleRevision"):
+            self.wait()
+        self.assertEqual(self.operations, ["snapshot", "wait"])
+        self.harness.act.assert_called_once()
 
 
 class RogueActionSettlement(unittest.TestCase):

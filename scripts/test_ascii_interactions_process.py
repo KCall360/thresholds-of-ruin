@@ -2,7 +2,7 @@
 import json
 import unittest
 
-from process_harness import ProcessTestCase
+from process_harness import ProcessTestCase, read_capture
 
 
 class AsciiInteractionProcesses(ProcessTestCase):
@@ -53,7 +53,7 @@ class AsciiInteractionProcesses(ProcessTestCase):
         final_unit = press("Return", "enter")
         self.assertFalse(any(item["id"] == first_potion for item in view(final_unit)["inventory"]))
         self.assertIn("You finish drinking the red potion.", final_unit["narration"])
-        pixels = capture.read_bytes().split(b"\n", 3)[3]
+        pixels = read_capture(capture).split(b"\n", 3)[3]
         self.assertEqual(len(pixels), 1200 * 800 * 3)
         self.assertGreater(len(set(pixels)), 8)
 

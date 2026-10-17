@@ -1,3 +1,4 @@
+mod capture;
 mod native_report;
 mod network;
 
@@ -522,7 +523,7 @@ fn window_loop(
             let state = app.state.as_ref();
             let capture_started = Instant::now();
             if let Some(path) = &capture {
-                save_frame(path, &canvas)?;
+                capture::save_frame(path, &canvas)?;
             }
             let capture_ms = capture_started.elapsed().as_secs_f64() * 1000.;
             let encode_started = Instant::now();
@@ -579,15 +580,6 @@ fn window_loop(
     } else {
         Ok(())
     }
-}
-
-fn save_frame(path: &std::path::Path, canvas: &Canvas) -> io::Result<()> {
-    let mut output = io::BufWriter::new(std::fs::File::create(path)?);
-    write!(output, "P6\n{WIDTH} {HEIGHT}\n255\n")?;
-    for pixel in &canvas.pixels {
-        output.write_all(&[(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8])?;
-    }
-    output.flush()
 }
 
 #[cfg(test)]

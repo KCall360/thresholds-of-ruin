@@ -22,6 +22,9 @@ mod carried_stock;
 #[path = "floor_population_growth_tests.rs"]
 mod growth;
 
+#[path = "hobgoblin_roaming_tests.rs"]
+mod hobgoblin_roaming;
+
 #[path = "deep_population_atomicity_tests.rs"]
 mod deep_atomicity;
 
