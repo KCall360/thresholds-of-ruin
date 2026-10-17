@@ -573,11 +573,25 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.assertEqual(self._private_report(wizard, "creature inspect 1", "creature_inspection")["conditions"], [])
                 resumed = self.command(player, {"type": "resume_intention"})
                 self.assertIsNone(resumed["error"])
-                self.frame(player, lambda frame: frame.get("state") is not None
-                           and frame["state"]["observation"]["combat"]["preparation_active"])
+                preparing = self.frame(player, lambda frame: frame.get("state") is not None
+                                       and frame["state"]["observation"]["combat"]["preparation_active"])
+                # The owner's socket cannot synchronize the peer's observation.
+                # Refresh before acting, while its unpaid turn still holds time.
+                peer_ready = self.request(peer, {"type": "snapshot"})
+                self.assertIsNone(peer_ready["error"])
+                self.assertTrue(peer_ready["state"]["observation"]["ready"])
+                self.assertEqual(peer_ready["state"]["observation"]["tick"],
+                                 preparing["state"]["observation"]["tick"])
                 self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
                 self.frame(player, completed)
-                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})["error"])
+                preparing = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
+                self.assertIsNone(preparing["error"])
+                self.assertTrue(preparing["state"]["observation"]["combat"]["preparation_active"])
+                peer_ready = self.request(peer, {"type": "snapshot"})
+                self.assertIsNone(peer_ready["error"])
+                self.assertTrue(peer_ready["state"]["observation"]["ready"])
+                self.assertEqual(peer_ready["state"]["observation"]["tick"],
+                                 preparing["state"]["observation"]["tick"])
                 self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
                 self.frame(player, completed)
                 records = self._private_report(wizard, "combat inspect")["records"]
