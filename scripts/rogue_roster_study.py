@@ -27,11 +27,16 @@ REFERENCES = ("arena-diagnostic", "playable-unspent", "playable-first-purchase")
 ARMS = {"baseline": "warrior_mixed", "candidate": "mage_mixed"}
 ORIENTATIONS = ("forward", "mirrored")
 DEFAULT_SEEDS = ("0", "1")
-# Exactly AiProfile::general(), not AiProfile::default() or a production profile.
+# Concrete tor_simulation::ai::AiProfile::general() policy. Authoring's partial
+# general() inherits species idle behavior, so the study specifies every field.
 # The reconstructed production package has no explicit "normal" profile.
 PLAYABLE_AI_NAME = "study_general"
-PLAYABLE_AI = {"care": True, "equipment": True, "loot": True, "flee_percent": 25}
-AI_SOURCES = ("crates/server/src/scenario_authoring.rs", "crates/simulation/src/ai.rs")
+PLAYABLE_AI = {"idle": "explore", "doors": True, "care": True, "equipment": True,
+               "loot": True, "flee_percent": 25}
+AUTHORING_AI_SOURCE = "crates/server/src/scenario_authoring.rs"
+RUNTIME_AI_SOURCE = "crates/simulation/src/ai.rs"
+# Pin authoring's resolution semantics as well as the concrete runtime policy.
+AI_SOURCES = (AUTHORING_AI_SOURCE, RUNTIME_AI_SOURCE)
 INPUTS = (
     PRODUCTION + "scenario.toml", PRODUCTION + "rules.toml",
     PRODUCTION + "catalog/creatures.toml", PRODUCTION + "catalog/actors.toml",
@@ -134,7 +139,8 @@ def run_manifest(seeds=DEFAULT_SEEDS, timeout=30, case_ids=None, *, reference="a
         "sampling_unit": "seed within species and reference mode; class arms are separate observations",
         "nonindependent": ["forward and mirrored orientations", "class arms share seeds"],
         "controller_policy": ({"profile": PLAYABLE_AI_NAME, "values": copy.deepcopy(PLAYABLE_AI),
-            "provenance": "AiProfile::general()", "source_files": list(AI_SOURCES),
+            "provenance": "tor_simulation::ai::AiProfile::general()",
+            "source_files": [RUNTIME_AI_SOURCE],
             "adaptation": "explicit study AI control; production starters are externally controlled",
             "foe_profile": "rogue_hostile", "human_route_evidence": False,
             "opening_action": "none", "species_disposition": "unchanged"} if playable else

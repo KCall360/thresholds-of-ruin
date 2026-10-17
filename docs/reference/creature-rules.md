@@ -919,10 +919,14 @@ identifies its caster and a matching visible-body occurrence supplies a licensed
 last-seen location. A partial body with an undisclosed caster grants no identity.
 No new preparation cue or public provocation field bypasses paid plan inspection.
 
-Species explicitly choose `passive` or `mean` acquisition, `wait` or `explore`
-idle behavior, and `memory_ticks` from zero through 1000000, inclusive. Authored
-species and behavior policies require named records; the independent saved
-policy enforces the same memory bound without using the authoring reader.
+Species own `passive` or `mean` acquisition, `wait` or `explore` idle behavior,
+`memory_ticks` from zero through 1000000 inclusive, and defaults for door use,
+care, equipment, useful loot and fleeing. Omitted behavior resolves to passive
+exploration without tool use and a 25% Health flee threshold. Named behavior
+records and the independent concrete saved policy enforce the same bounds;
+restoration does not use authoring fallbacks. Tactical profiles partially override
+supplied fields without replacing acquisition or memory; see
+[behavior authoring](scenario-packages.md#behavior-defaults-and-ai-overrides).
 Mean acquisition adapts the pinned
 Rogue reference's two-in-three chance to one committed eligible TOR AI decision,
 using that actor's current perception. This is a TOR cadence adaptation, not an
@@ -943,8 +947,12 @@ trigger. Source/controller changes cannot manufacture catch-up recovery.
 
 Allied targeting uses authored faction relationships and the requester's own
 engagement, never the other actor's private grudge. Directed faction edges still
-retain their authored meaning. AI profiles separately opt into generic care,
-equipment and loot tactics; carrying stock does not opt a Rogue creature in.
+retain their authored meaning. Species defaults and partial AI profiles select
+generic door, care, equipment and useful-loot tactics; inventory ownership alone
+grants neither permission nor identity knowledge. Explicit Wait prevents idle
+movement and loot detours, but permits enabled useful underfoot actions. It does
+not change hostile acquisition, remembered pursuit or combat. Exploration and
+loot goals use only the actor's own senses and known routes/items.
 These reusable mechanisms do not activate the full Rogue roster or establish
 numerical balance. Owner-disposition inspection is a separate presentation pass.
 

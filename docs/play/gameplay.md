@@ -64,15 +64,30 @@ Space continues the scheduler instead of inventing a second action.
 
 The backend schedules by readiness and stable identity, with an explicit human
 input boundary taking priority over autonomous actors at the same tick. AI uses
-its own perception and actor-owned remembered targets. Each species explicitly
-chooses passive or mean acquisition, waiting or exploring while idle, and its
-actor-active memory interval. Mean acquisition tries a two-in-three wake chance
-once per committed eligible decision. Passive creatures react to an attributed
-committed hostile strike, including a miss or harmless contact. A visible body
-and a disclosed event caster are both required; unseen preparations reveal
-nothing. The dungeon's generic tactical profile explicitly opts into care,
-equipment and looting and uses a 25% HP flee threshold. Faction hostility remains
-directed scenario data; one actor's private grudge cannot change another's menus.
+its own perception and actor-owned remembered targets. Species defaults choose
+passive or mean acquisition, waiting or exploring while idle, useful tool use,
+and an actor-active memory interval. Named profiles override only their supplied
+settings. Mean acquisition tries a two-in-three wake chance once per committed
+eligible decision. Passive creatures react to an attributed committed hostile
+strike, including a miss or harmless contact. A visible body and a disclosed event
+caster are both required; unseen preparations reveal nothing. Faction hostility
+remains directed scenario data; one actor's private grudge cannot change another's
+menus.
+
+The dungeon's humans and ruin scavengers can explore, open reachable doors, care
+for themselves, improve known equipment and collect useful supplies. The stone
+construct waits without those tools; the fire wisp explores without them. The
+shared tactical profile sets only the 25% Health flee threshold, preserving those
+species distinctions. Waiting forbids idle movement, including loot detours, but
+can still allow useful actions underfoot. It does not stop ordinary acquisition,
+pursuit or combat.
+
+Loot decisions use the creature's own knowledge and bounded needs: useful gear,
+one healing reserve and enough supplies for one use of a safe owned healing
+ability, plus one food reserve only for a creature that requires nutrition.
+Excess stock, unknown effects and unusable items are not collection goals. These
+are provisional policies using existing items and actions, not an added economy.
+See [behavior defaults and overrides](../reference/scenario-packages.md#behavior-defaults-and-ai-overrides).
 
 ## What you can know
 

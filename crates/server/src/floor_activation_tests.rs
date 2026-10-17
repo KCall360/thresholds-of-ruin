@@ -22,6 +22,9 @@ mod carried_stock;
 #[path = "floor_population_growth_tests.rs"]
 mod growth;
 
+#[path = "idle_autonomy_tests.rs"]
+mod idle_autonomy;
+
 #[path = "hobgoblin_roaming_tests.rs"]
 mod hobgoblin_roaming;
 

@@ -42,7 +42,8 @@ class RogueRestorationContent(unittest.TestCase):
         self.assertEqual(definition["kind"], "animal")
         self.assertEqual(definition["subtypes"], ["reptilian"])
         self.assertEqual(definition["behavior"], {
-            "disposition": "mean", "idle": "wait", "memory_ticks": 1000})
+            "disposition": "mean", "idle": "explore", "memory_ticks": 1000,
+            "doors": False, "care": False, "equipment": False, "loot": False, "flee_percent": 25})
         self.assertEqual(definition["attributes"], species["rogue.snake"]["attributes"])
         self.assertEqual(definition["modifiers"], [{"scope": "always", "op": {
             "kind": "flag", "flag": "venomous"}}])

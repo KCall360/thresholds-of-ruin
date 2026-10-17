@@ -508,6 +508,7 @@ fn living_carrier_game(chance: [u32; 2], healing_stock: bool) -> Game {
         disposition: crate::behavior::Disposition::Passive,
         idle: crate::behavior::IdleBehavior::Wait,
         memory_ticks: 1000,
+            ..Default::default()
     };
     let content = crate::test_creatures::content_with(species.clone(), vec![]);
     let build = crate::test_creatures::build(species);
@@ -528,7 +529,9 @@ fn living_carrier_game(chance: [u32; 2], healing_stock: bool) -> Game {
         equipment: false,
         loot: false,
         flee_percent: 0,
-    });
+        idle: crate::behavior::IdleBehavior::Wait,
+        doors: false,
+});
     if healing_stock {
         let spec = &mut plan.carried_item_pools.get_mut("supplies").unwrap().choices[0].spec;
         spec.class = crate::ItemClass::Potion;

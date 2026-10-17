@@ -1,0 +1,23 @@
+{
+  "current_ruleset": "interactions-v39",
+  "current_scenario_format": 17,
+  "current_snapshot": "rogue-earned-baseline-v8",
+  "format": 1,
+  "only_transformation": "Change only package/scenario.toml format 16 to 17. All other authored package input bytes, including the interactions-v39 rules import, and the bundled rules dependency hash remain unchanged. Species-owned idle and tool policies, partial actor overrides and idle action selection now use the current AI execution behavior; this is a new experiment input, not identical outcomes or a requalified pilot. This receipt records source bytes only; current compiler validation, certificates and route qualification remain separate requirements.",
+  "previous_package_inputs": {
+    "catalog/actors.toml": "9aa3f2ae65a5b5370ca624a89a0ba2fad02aa94b244655c2c9314fcb57132abd",
+    "catalog/creatures.toml": "78381188c7c320f0744db68a440febe3444f96776eda7e45a4496efa958f835c",
+    "catalog/items.toml": "f3c2bf4a9e6ef56725dfaf6da486db0095f70eede4eb8d7e28ee84b152c6ec7c",
+    "rules.toml": "a74b845ed77ab6e9bc6d7d1d773e6f7b93efe1258fea720dafc381917ca7be9a",
+    "scenario.toml": "9bc009df3e38b2cfd1eac5b7565b9a48b97ab68df187d3227a66ff881dbe870a"
+  },
+  "previous_reference": "8d09063840c51aa4189b146c287829102856b279:scenarios/rogue-exploration (current-format preactivation E/S source; certificates regenerated); current scenario 15 format-only adaptation; transition-sha256:24eb0c424f1e33d370bcb758560f950556f71671234da145327ecf829317da4c; current wide-scalar rules identity adaptation; transition-sha256:ca89c547beda7a895b46937516700d4871f017ae00cce2ad4e51cba9770f82d9; source-only sequence-rider format-forward adaptation (compiler and route qualification pending); transition-sha256:c2b887c926e4821307cf95e0ddadb9156ac36959a891623672b5187ce2750f4c",
+  "previous_rules_dependencies": {
+    "interactions-v39": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
+  },
+  "previous_ruleset": "interactions-v39",
+  "previous_scenario_format": 16,
+  "previous_snapshot": "rogue-earned-baseline-v7",
+  "previous_source_sha256": "abf02735b74262e9804c0ddc57a6f55b18fc3971132d5ef7e4ba7030b4083024",
+  "retained_fixture_reference": "2bac3211f5052abb236e6eddc7c8b9293ccd9bd4:scripts/fixtures/rogue-earned-baseline-v7"
+}

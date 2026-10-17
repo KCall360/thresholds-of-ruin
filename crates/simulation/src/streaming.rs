@@ -2479,6 +2479,8 @@ mod tests {
             equipment: true,
             loot: true,
             flee_percent: 25,
+            idle: crate::behavior::IdleBehavior::Wait,
+            doors: false,
         };
         game.configure_ai(watcher, profile).unwrap();
         game.configure_run(player, BTreeSet::from([player]), None, BTreeMap::new())

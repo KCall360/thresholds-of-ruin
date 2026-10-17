@@ -51,12 +51,17 @@ class RogueRosterContent(unittest.TestCase):
         species = source("catalog/creatures.toml")["creatures"]["species"]
         mean = {"emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire"}
         passive = {"human", "ice_monster", "centaur", "yeti", "wraith", "jabberwock"}
+        tool_users = {"human", "hobgoblin", "centaur", "troll", "vampire"}
+        care_and_loot = tool_users | {"yeti"}
         self.assertEqual(set(species), {"rogue." + name for name in mean | passive})
         for name in mean | passive:
             with self.subTest(species=name):
                 self.assertEqual(species["rogue." + name].get("behavior"), {
                     "disposition": "mean" if name in mean else "passive",
-                    "idle": "explore" if name == "hobgoblin" else "wait", "memory_ticks": 1000,
+                    "idle": "wait" if name == "ice_monster" else "explore", "memory_ticks": 1000,
+                    "doors": name in tool_users, "care": name in care_and_loot,
+                    "equipment": name in tool_users, "loot": name in care_and_loot,
+                    "flee_percent": 25,
                 })
 
     def test_natural_unlocks_are_explicit_eligible_purchases_not_free_attacks(self):
@@ -107,7 +112,8 @@ class RogueRosterContent(unittest.TestCase):
         troll = catalog["rogue.troll"]
         self.assertEqual(troll["kind"], "giant")
         self.assertEqual(troll["behavior"], {
-            "disposition": "mean", "idle": "wait", "memory_ticks": 1000})
+            "disposition": "mean", "idle": "explore", "memory_ticks": 1000,
+            "doors": True, "care": True, "equipment": True, "loot": True, "flee_percent": 25})
         ops = [row["op"] for row in troll["modifiers"]]
         self.assertEqual({op["flag"] for op in ops if op["kind"] == "flag"},
                          {"regenerative", "natural_sequence"})
@@ -197,7 +203,8 @@ class RogueRosterContent(unittest.TestCase):
         self.assertEqual(wraith["anatomy"], catalog["rogue.vampire"]["anatomy"])
         self.assertEqual(wraith["displacement"], {"size": "medium", "anchored": False})
         self.assertEqual(wraith["behavior"], {
-            "disposition": "passive", "idle": "wait", "memory_ticks": 1000})
+            "disposition": "passive", "idle": "explore", "memory_ticks": 1000,
+            "doors": False, "care": False, "equipment": False, "loot": False, "flee_percent": 25})
         self.assertEqual(wraith["modifiers"], [{"scope": "always", "op": {
             "kind": "add", "stat": {"kind": "defense", "defense": "physical"}, "value": 3}}])
         self.assertEqual(wraith["melee"], {

@@ -2,13 +2,40 @@
 from scalar_wire import u64
 import shutil
 import subprocess
+import tomllib
 import unittest
 
+from arena_matrix import toml_source
 from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
 from process_harness import creature_package
 
 
 class AiInteractionProcesses(ProcessTestCase):
+    def idle_item_package(self, name):
+        package = self.directory / name
+        shutil.copytree(ROOT / "scenarios/tests/ai-interactions", package)
+        path = package / "regions/1.toml"
+        region = tomllib.loads(path.read_text(encoding="utf-8"))
+        # Repair the idle precondition without changing hostility, memory, or
+        # item policy. The mean guard has never seen the hostile player. Both
+        # sides remain in one active region, and NPC/item cells stay unchanged.
+        region["size"] = [9, 3, 2]
+        region["anchors"]["start"] = [7, 1, 0]
+        region["walls"] = [[5, y, z] for y in range(3) for z in range(2)]
+        path.write_text(toml_source(region), encoding="utf-8", newline="\n")
+        return package
+
+    def validate_item_package(self, package):
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+
+    def idle_item_observation(self, frame):
+        view = frame["state"]["observation"]
+        self.assertEqual(view["visible_actors"], [],
+                         "idle item fixture must keep the hostile player completely unseen")
+        return view
+
     def test_creature_ai_chooses_a_weapon_using_a_purchased_rank(self):
         package = creature_package(self, "weapon-training", abilities=("fixture_stamina_strike",))
         manifest = package / "scenario.toml"
@@ -53,20 +80,21 @@ class AiInteractionProcesses(ProcessTestCase):
         self.assertEqual(chosen["known_equipment"]["attack"]["skill"]["id"], "heavy_weaponry")
 
     def test_ai_takes_one_ground_healing_unit_and_keeps_the_remaining_stack(self):
-        package = self.save.parent / "ground-healing"
-        shutil.copytree(ROOT / "scenarios/tests/ai-interactions", package)
-        region = package / "regions/1.toml"
-        region.write_text(region.read_text().replace(
-            'archetype = "healing", quantity = 2, carried_by = 2',
-            'archetype = "healing", quantity = 3'))
-        subprocess.run([self.bin / "tor-scenario", "validate", package], check=True, capture_output=True, text=True)
+        package = self.idle_item_package("ground-healing")
+        path = package / "regions/1.toml"
+        region = tomllib.loads(path.read_text(encoding="utf-8"))
+        healing = next(item for item in region["items"] if item["id"] == 20)
+        del healing["carried_by"]
+        healing["quantity"] = 3
+        path.write_text(toml_source(region), encoding="utf-8", newline="\n")
+        self.validate_item_package(package)
         self.server(scenario=package, wizard=True)
-        observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
+        observer, initial = self.client(WIZARD_TOKEN, observe=True, actor=2)
+        self.idle_item_observation(initial)
         player, _ = self.client()
-        self.wizard_command(self.wizard(), "teleport 1 1 4 1 0")
         for _ in range(12):
             self.act(player, {"type": "wait"})
-            view = self.request(observer, {"type": "snapshot"})["state"]["observation"]
+            view = self.idle_item_observation(self.request(observer, {"type": "snapshot"}))
             carried = [item for item in view["inventory"] if item["class"] == "potion"]
             if carried:
                 break
@@ -74,23 +102,23 @@ class AiInteractionProcesses(ProcessTestCase):
         self.assertEqual([item["item"]["quantity"] for item in view["ground_items"] if item["item"]["class"] == "potion"], ["2"])
 
     def test_ai_walks_to_safe_known_ground_armor_then_replaces_old_gear(self):
-        package = self.save.parent / "ground-armor"
-        shutil.copytree(ROOT / "scenarios/tests/ai-interactions", package)
-        region = package / "regions/1.toml"
-        region.write_text(region.read_text().replace(
-            '{ id = 11, at = [2, 1, 0], archetype = "mail", carried_by = 2 }',
-            '{ id = 11, at = [3, 1, 0], archetype = "mail" }').replace(
-            'archetype = "ring", carried_by = 2 }',
-            'archetype = "ring", carried_by = 2, equipped_slot = 2 }'))
-        subprocess.run([self.bin / "tor-scenario", "validate", package], check=True, capture_output=True, text=True)
+        package = self.idle_item_package("ground-armor")
+        path = package / "regions/1.toml"
+        region = tomllib.loads(path.read_text(encoding="utf-8"))
+        mail = next(item for item in region["items"] if item["id"] == 11)
+        del mail["carried_by"]
+        mail["at"] = [3, 1, 0]
+        next(item for item in region["items"] if item["id"] == 14)["equipped_slot"] = 2
+        path.write_text(toml_source(region), encoding="utf-8", newline="\n")
+        self.validate_item_package(package)
         self.server(scenario=package, wizard=True)
-        observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
+        observer, initial = self.client(WIZARD_TOKEN, observe=True, actor=2)
+        self.idle_item_observation(initial)
         player, _ = self.client()
-        self.wizard_command(self.wizard(), "teleport 1 1 5 1 0")
         equipped = None
         for _ in range(18):
             self.act(player, {"type": "wait"})
-            view = self.request(observer, {"type": "snapshot"})["state"]["observation"]
+            view = self.idle_item_observation(self.request(observer, {"type": "snapshot"}))
             mail = next((item for item in view["inventory"] if item["name"] == "mail"), None)
             if mail:
                 equipped = next(item["equipped_slot"] for item in view["interactions"]["inventory"] if item["item"] == mail["id"])
@@ -99,12 +127,13 @@ class AiInteractionProcesses(ProcessTestCase):
         self.assertEqual(equipped, 0, "AI must travel, pick up known armor and complete replacement")
 
     def test_ai_replaces_armor_fills_duplicate_ring_and_restores_equipment(self):
-        server = self.server(scenario="ai-interactions", wizard=True)
+        package = self.idle_item_package("idle-equipment")
+        self.validate_item_package(package)
+        server = self.server(scenario=package, wizard=True)
         observer, initial = self.client(WIZARD_TOKEN, observe=True, actor=2)
+        initial_view = self.idle_item_observation(initial)
         player, _ = self.client()
-        wizard = self.wizard()
-        self.wizard_command(wizard, "teleport 1 1 4 1 0")
-        items = {item["name"]: item["id"] for item in initial["state"]["observation"]["inventory"]}
+        items = {item["name"]: item["id"] for item in initial_view["inventory"]}
 
         def equipment(view):
             return {item["item"]: item["equipped_slot"] for item in view["interactions"]["inventory"]}
@@ -114,7 +143,7 @@ class AiInteractionProcesses(ProcessTestCase):
         finished = None
         for _ in range(14):
             self.act(player, {"type": "wait"})
-            view = self.request(observer, {"type": "snapshot"})["state"]["observation"]
+            view = self.idle_item_observation(self.request(observer, {"type": "snapshot"}))
             actual = equipment(view)
             if all(actual[item] == slot for item, slot in expected.items()):
                 finished = view
@@ -123,13 +152,13 @@ class AiInteractionProcesses(ProcessTestCase):
         hidden = next(item for item in finished["interactions"]["inventory"] if item["item"] == items["silver ring"])
         self.assertIsNone(hidden["known_equipment"])
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
-        wizard.stop()
         observer.stop()
         player.stop()
         server.stop()
-        self.server(scenario="ai-interactions", wizard=True, seed=None)
-        restored, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
-        view = self.request(restored, {"type": "snapshot"})["state"]["observation"]
+        self.server(scenario=package, wizard=True, seed=None)
+        restored, reopened = self.client(WIZARD_TOKEN, observe=True, actor=2)
+        self.idle_item_observation(reopened)
+        view = self.idle_item_observation(self.request(restored, {"type": "snapshot"}))
         self.assertEqual({item: equipment(view)[item] for item in expected}, expected)
 
     def test_human_knowledge_does_not_make_an_unknown_ai_potion_usable(self):

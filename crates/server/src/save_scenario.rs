@@ -704,10 +704,18 @@ struct Objective {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::AiProfile", deny_unknown_fields)]
 struct AiProfile {
-    care: bool,
-    equipment: bool,
-    loot: bool,
-    flee_percent: u32,
+    #[serde(with = "mapped")]
+    idle: Option<crate::creature_authoring::IdleBehavior>,
+    #[serde(deserialize_with = "required_option")]
+    doors: Option<bool>,
+    #[serde(deserialize_with = "required_option")]
+    care: Option<bool>,
+    #[serde(deserialize_with = "required_option")]
+    equipment: Option<bool>,
+    #[serde(deserialize_with = "required_option")]
+    loot: Option<bool>,
+    #[serde(deserialize_with = "stored_optional_flee")]
+    flee_percent: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -891,6 +899,31 @@ struct BehaviorPolicy {
     idle: crate::creature_authoring::IdleBehavior,
     #[serde(deserialize_with = "stored_behavior_memory")]
     memory_ticks: u64,
+    doors: bool,
+    care: bool,
+    equipment: bool,
+    loot: bool,
+    #[serde(deserialize_with = "stored_flee")]
+    flee_percent: u32,
+}
+
+fn stored_flee<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    let value = u32::deserialize(d)?;
+    if value > 100 {
+        return Err(serde::de::Error::custom(
+            "stored flee threshold exceeds 100",
+        ));
+    }
+    Ok(value)
+}
+fn stored_optional_flee<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error> {
+    let value: Option<u32> = required_option(d)?;
+    if value.is_some_and(|value| value > 100) {
+        return Err(serde::de::Error::custom(
+            "stored flee threshold exceeds 100",
+        ));
+    }
+    Ok(value)
 }
 
 fn stored_behavior_memory<'de, D: serde::Deserializer<'de>>(
@@ -2928,7 +2961,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 13;
+const CONTENT_PACKAGE_FORMAT: u32 = 14;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -3086,7 +3119,7 @@ mod tests {
     }
 
     #[test]
-    fn sequence_rider_format_revisions_match_independent_payload_boundaries() {
+    fn idle_ai_format_revisions_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -3097,16 +3130,18 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (42, 16, "interactions-v39", 12, 5, 13, "tor-arena-run-v5")
+            (43, 17, "interactions-v39", 12, 5, 14, "tor-arena-run-v5")
         );
     }
 
     #[test]
-    fn sequence_rider_format_preserves_journal_and_compression_envelopes() {
+    fn idle_ai_format_preserves_protocol_rules_and_physical_envelopes() {
         assert_eq!(tor_protocol::PROTOCOL_VERSION, 46);
+        assert_eq!(super::RULES_INPUT_FORMAT, 12);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
-        // Physical framing and region placement are unchanged. Conditional riders
-        // and preparation progress use the new independent payload identities.
+        // Private AI profiles and species policies change saved and compiled
+        // content payloads. Region actors still reference profile/species names;
+        // public messages, the rules vocabulary and physical framing are unchanged.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&base[..6], b"TORB\x06\x00");
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
@@ -3216,15 +3251,28 @@ mod tests {
 
     #[test]
     fn stored_behavior_and_interaction_have_independent_required_shapes() {
-        let behavior =
-            serde_json::json!({"disposition":"passive","idle":"wait","memory_ticks":1000});
+        let behavior = serde_json::json!({"disposition":"passive","idle":"wait","memory_ticks":1000,"doors":false,"care":false,"equipment":false,"loot":false,"flee_percent":25});
         let decode = |value: &serde_json::Value| {
             serde_json::from_slice::<super::Owned<crate::creature_authoring::BehaviorPolicy>>(
                 &serde_json::to_vec(value).unwrap(),
             )
         };
         assert!(decode(&behavior).is_ok());
-        for field in ["disposition", "idle", "memory_ticks"] {
+        for percent in [0, 100, 101, u32::MAX] {
+            let mut threshold = behavior.clone();
+            threshold["flee_percent"] = serde_json::json!(percent);
+            assert_eq!(decode(&threshold).is_ok(), percent <= 100);
+        }
+        for field in [
+            "disposition",
+            "idle",
+            "memory_ticks",
+            "doors",
+            "care",
+            "equipment",
+            "loot",
+            "flee_percent",
+        ] {
             let mut missing = behavior.clone();
             missing.as_object_mut().unwrap().remove(field);
             assert!(decode(&missing).is_err());
@@ -3260,6 +3308,37 @@ mod tests {
             serde_json::from_value::<super::Owned<tor_simulation::rules::AbilityDef>>(stored)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn stored_partial_ai_profiles_require_nullable_fields_and_bounded_values() {
+        let empty = serde_json::json!({"idle":null,"doors":null,"care":null,"equipment":null,"loot":null,"flee_percent":null});
+        let decode = |value: &serde_json::Value| {
+            crate::storage::codec::strict::<super::Owned<crate::scenario_package::AiProfile>>(
+                &serde_json::to_vec(value).unwrap(),
+            )
+        };
+        assert!(decode(&empty).is_ok());
+        for field in ["idle", "doors", "care", "equipment", "loot", "flee_percent"] {
+            let mut missing = empty.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                decode(&missing).is_err(),
+                "stored {field} must not use source defaults"
+            );
+        }
+        let explicit = serde_json::json!({"idle":"wait","doors":false,"care":false,"equipment":false,"loot":false,"flee_percent":0});
+        let profile = decode(&explicit).unwrap().0;
+        assert_eq!(
+            serde_json::to_value(super::Borrowed(&profile)).unwrap(),
+            explicit
+        );
+        let mut invalid = explicit;
+        invalid["flee_percent"] = serde_json::json!(101);
+        assert!(decode(&invalid).is_err());
+        let mut invalid = empty;
+        invalid["extra"] = serde_json::json!(false);
+        assert!(decode(&invalid).is_err());
     }
 
     #[test]
@@ -4402,8 +4481,7 @@ mod ordered_strike_save_tests {
             tor_simulation::limits::NUMERIC as u64 + 1,
             u64::MAX,
         ] {
-            let value =
-                json!({"disposition":"passive", "idle":"wait", "memory_ticks":memory_ticks});
+            let value = json!({"disposition":"passive", "idle":"wait", "memory_ticks":memory_ticks, "doors":false, "care":false, "equipment":false, "loot":false, "flee_percent":25});
             assert_eq!(
                 crate::storage::codec::strict::<Owned<crate::creature_authoring::BehaviorPolicy>>(
                     &serde_json::to_vec(&value).unwrap()
@@ -4432,7 +4510,14 @@ mod ordered_strike_save_tests {
                 .is_err()
             );
         }
-        let mut value = source();
+        let author: crate::creature_authoring::Species = serde_json::from_value(source()).unwrap();
+        let mut value = serde_json::to_value(Borrowed(&author)).unwrap();
+        assert!(
+            crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(
+                &serde_json::to_vec(&value).unwrap()
+            )
+            .is_ok()
+        );
         value["melee"]["strikes"][0]["riders"] = json!([{"trigger":"failure","condition":null,"check":null,"effects":[],"descriptors":[]}]);
         assert!(
             crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(

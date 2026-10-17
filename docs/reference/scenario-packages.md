@@ -317,9 +317,11 @@ and retired content produce a saved `no_eligible_content` stage skip. Every band
 has 1–64 distinct archetypes with positive integer weights whose sum fits u32.
 A profile has at most 32 stages and 256 total maximum attempts; the package
 supports at most 32 profiles. No implicit terminal depth or HD clamp is added.
-Actor stages reference ordinary actor archetypes and an AI profile; item stages
-reference ordinary item archetypes and a stack quantity. The tagged forms are
-strict: `quantity` belongs only to item stages, while `ai`,
+Actor stages reference ordinary actor archetypes and may select an AI profile;
+omitting `ai` leaves population actors externally controlled. Supplying a profile
+enrolls them in AI with that species' defaults plus the profile's partial
+overrides. Item stages reference ordinary item archetypes and a stack quantity.
+The tagged forms are strict: `quantity` belongs only to item stages, while `ai`,
 `avoid_protagonist_sight` and `depth_growth` belong only to actor stages. Archetypes
 referenced by these stages do not create entities merely by existing in a catalog.
 
@@ -409,7 +411,8 @@ ID. Audits recompute this result from pinned inputs and include nested births in
 identity reservations, all-branch uniqueness and bounded decision counts. Birth
 receipts describe historical provenance, not current ownership: ordinary taking,
 splitting, merging, consumption and death drops remain authoritative. Carrying
-stock does not equip it, identify it or enable care/equipment/loot AI tactics.
+stock does not equip it, identify it or change the actor's resolved
+care/equipment/loot policy.
 No death roll, replacement stock, species switch or extra inventory ledger exists.
 Initial and later entries both discard the whole candidate on construction,
 identity, decision-capacity or Store failure; legal-cell exhaustion alone remains
@@ -527,8 +530,12 @@ regardless of the depth number. `family/1/start` remains the first-floor room en
 Unselected characters default to omission, including their inventory. Region
 actors specify `id`, `at`, optional archetype/duration, and `controller`.
 `external` supports the existing actor-control/test-driver interface. Optional
-AI assignments use `controller = "ai"`, or character `unselected = "ai"`, plus
-an `ai` identifier. AI identifiers resolve to manifest `ai_profiles`; see [dungeon gameplay](../play/gameplay.md).
+AI assignments use `controller = "ai"`, or character `unselected = "ai"`.
+An optional `ai` identifier resolves to manifest `ai_profiles` and overrides only
+its supplied fields. Without a named profile, an explicitly enrolled actor uses
+its species' defaults. A profile does not silently enroll an external actor;
+population-stage enrollment is the separate `ai` rule described above. See
+[behavior defaults and AI overrides](#behavior-defaults-and-ai-overrides).
 
 Region gravity vectors/sparse overrides, body declarations, initial velocity,
 and full portal rotations are implemented; see [physics](../architecture/geometry.md).
@@ -789,13 +796,9 @@ defenses, protection and phases derive through the same creature rules used by
 the arena. These actors have no separate flat combat path.
 
 
-The manifest declares `factions` as faction names mapped to hostile faction names,
-and `ai_profiles` as names mapped to required `flee_percent`, `care`, `equipment`
-and `loot` settings. Tactics are explicit booleans; inventory alone never enables
-them. Every species requires `behavior = { disposition = "passive" | "mean",
-idle = "wait" | "explore", memory_ticks = ... }`. This species-owned memory policy
-is independent of the current controller. See
-[creature behavior](creature-rules.md#creature-behavior-and-provocation).
+The manifest declares `factions` as faction names mapped to hostile faction names.
+[Behavior defaults and AI overrides](#behavior-defaults-and-ai-overrides) select
+autonomous policy independently of those relationships.
 Characters and actors declare combat through owned `creature` builds; an actor
 archetype can provide the recipe, and an instance recipe replaces it as a whole.
 A flat `combat` field is rejected at all three authoring boundaries.
@@ -803,15 +806,68 @@ Species, advancement and templates provide health, defenses, natural attacks and
 protection; equipped weapons supply their independent attack definitions.
 The default dungeon and bundled combat fixtures use these shared definitions.
 
-AI actors require an owned creature build and a known AI profile. Unselected AI
-starting characters retain their authored inventory. The selected character
-begins at an explicit input boundary even when its numeric ID follows an AI
+AI actors require an owned creature build; a named profile, when supplied, must
+exist. Unselected AI starting characters retain their authored inventory. The
+selected character begins at an explicit input boundary even when its numeric ID follows an AI
 actor. Ordinary actor decisions otherwise retain stable time/identity ordering.
 
 An objective does not create a creature build or infer combat attributes.
 Packages with an objective require declared builds for every starting character,
 so outcome and combat status remain observable. Exploration actors in packages
 without objectives may omit a build.
+
+## Behavior defaults and AI overrides
+
+A species may author a `behavior` record. Its resolved policy contains
+`disposition`, `idle`, `memory_ticks`, `doors`, `care`, `equipment`, `loot` and
+`flee_percent`. Omitting behavior gives conservative passive acquisition with
+exploration, a 1,000-tick memory, no door use, care, equipment or looting, and a
+25% Health flee threshold. Disposition and the actor-active memory bound remain species-owned
+through controller changes; see
+[behavior and provocation](creature-rules.md#creature-behavior-and-provocation).
+
+Manifest `ai_profiles` are partial overrides. They may supply any subset of
+`idle`, `doors`, `care`, `equipment`, `loot` and `flee_percent`; omitted fields
+inherit the species' resolved defaults. Compilation resolves that combination
+once to a concrete runtime policy. For example,
+`rogue_hostile = { flee_percent = 0 }` disables low-Health fleeing without replacing any
+species' idle or tool choices. A profile cannot replace disposition or memory.
+Unknown names and invalid values are rejected.
+
+| Field | Meaning |
+| --- | --- |
+| `disposition` | `passive` requires ordinary hostile provocation; `mean` uses the existing seeded acquisition check |
+| `idle` | `explore` permits autonomous exploration and useful-item detours; `wait` forbids all idle movement |
+| `memory_ticks` | Actor-active engagement memory, from 0 through 1000000 inclusive |
+| `doors` | Permit opening reachable known doors; anatomy or creature kind never infers this permission |
+| `care` | Permit useful ordinary self-care with owned abilities and known finite consumables |
+| `equipment` | Permit useful known equipment changes through ordinary equipment actions |
+| `loot` | Permit bounded pickup of personally known, useful equipment and supplies |
+| `flee_percent` | Low-Health flee threshold from 0 through 100 inclusive; 0 disables that threshold |
+
+`wait` still permits useful care, equipment changes, pickup underfoot and
+opening reachable doors when the corresponding policies allow them. It does not suppress hostile acquisition,
+remembered pursuit or combat. Exploration uses the actor's own current senses,
+known routes and deterministic visit history; unseen players, terrain and item
+identities cannot supply goals. Door and stair permissions still constrain routes.
+
+Loot is need-based rather than indiscriminate. An actor may seek known useful
+equipment, one healing consumable reserve, and known supplies sufficient for one
+payable use of a safe owned healing ability. An actor with required nutrition may
+also keep one food reserve. Already held stock counts toward these limits;
+unidentified effects, unusable gear and excess supplies do not become loot goals.
+Eating requires known food and current personal hunger; visible danger or an
+active engagement takes priority over opportunistic eating. Existing food and
+ordinary consumption rules apply. This policy adds no item
+identification, food economy, currency collecting or gold hoard.
+
+The [Rogue policy matrix](../play/rogue.md#species-idle-policy) owns that package's
+provisional species choices. The first dungeon enables all four tool policies for
+humans and ruin scavengers, leaves the stone construct waiting without tools, and
+lets the fire wisp explore without tools. Its shared `tactical` profile overrides
+only the 25% flee threshold. Arena humans also have explicit tool-using defaults;
+`sparring` keeps its explicit tool permissions and zero flee threshold. The
+build-free `two-room` exploration package has no species policy to author.
 
 ## Cell illumination
 

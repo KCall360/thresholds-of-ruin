@@ -1,6 +1,7 @@
 """Expectation syntax is a closed class, never a dynamic dependency guess."""
 import ast
 import copy
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -169,13 +170,39 @@ class LeafPolicy(unittest.TestCase):
         self.assertNotEqual(shape, policy.immutable_provider(raw.replace(b'import copy', b'import copy\nimport random'))[1])
 
     def test_exact_tree_and_audit_pins_reject_drift_even_on_both_sides(self):
-        output = subprocess.check_output(['git', 'ls-tree', '-rz', 'HEAD'], cwd=self.root)
-        source = {}
-        for row in output.split(b'\0'):
+        # This synthetic unit fixture represents the checked working tree,
+        # including dirty/source-overlay checkouts, rather than an unrelated
+        # HEAD. Production tree identity remains independently API-bound.
+        names = subprocess.check_output(
+            ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+            cwd=self.root).decode().split('\0')
+        # Git supplies portable tracked modes, including Windows checkouts;
+        # blob hashes below are independently computed from checked bytes.
+        indexed = subprocess.check_output(['git', 'ls-files', '--stage', '-z'], cwd=self.root)
+        modes = {}
+        for row in indexed.decode().split('\0'):
             if row:
-                metadata, path = row.split(b'\t'); mode, kind, digest = metadata.decode().split()
-                self.assertEqual(kind, 'blob')
-                source[path.decode()] = [mode, digest]
+                metadata, name = row.split('\t', 1)
+                mode, _, stage = metadata.split()
+                self.assertEqual(stage, '0', 'unmerged fixture input')
+                modes[name] = mode
+        pinned = set(self.registry['owner_blobs']) | set(self.registry['import_blobs'])
+        source = {}
+        for name in sorted(set(names) - {''}):
+            path = self.root / name
+            self.assertFalse(path.is_symlink(), 'fixture requires ordinary tracked files')
+            if not path.exists():
+                self.assertNotIn(name, pinned, 'missing reviewed input')
+                continue
+            raw = path.read_bytes()
+            # .gitattributes requires LF; never normalize a drifted pinned file
+            # into an apparently valid owner before testing the production gate.
+            if name in pinned:
+                self.assertNotIn(b'\r\n', raw)
+            digest = hashlib.sha1(
+                b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+            source[name] = [modes.get(name, '100755' if path.stat().st_mode & 0o111 else '100644'), digest]
+        self.assertTrue(pinned <= source.keys(), 'missing reviewed input')
         target = copy.deepcopy(source); target[self.path][1] = 'f' * 40
         read = lambda path: (self.root / path).read_bytes()
         corrected = lambda path: self.corrected().encode() if path == self.path else read(path)

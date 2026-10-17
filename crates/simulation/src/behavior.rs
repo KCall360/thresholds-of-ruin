@@ -42,6 +42,11 @@ pub struct BehaviorPolicy {
     pub disposition: Disposition,
     pub idle: IdleBehavior,
     pub memory_ticks: u64,
+    pub doors: bool,
+    pub care: bool,
+    pub equipment: bool,
+    pub loot: bool,
+    pub flee_percent: u32,
 }
 impl<'de> Deserialize<'de> for BehaviorPolicy {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -51,12 +56,22 @@ impl<'de> Deserialize<'de> for BehaviorPolicy {
             disposition: Disposition,
             idle: IdleBehavior,
             memory_ticks: u64,
+            doors: bool,
+            care: bool,
+            equipment: bool,
+            loot: bool,
+            flee_percent: u32,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
         let policy = Self {
             disposition: fields.disposition,
             idle: fields.idle,
             memory_ticks: fields.memory_ticks,
+            doors: fields.doors,
+            care: fields.care,
+            equipment: fields.equipment,
+            loot: fields.loot,
+            flee_percent: fields.flee_percent,
         };
         if !policy.valid() {
             return Err(serde::de::Error::custom("invalid behavior policy"));
@@ -64,9 +79,23 @@ impl<'de> Deserialize<'de> for BehaviorPolicy {
         Ok(policy)
     }
 }
+impl Default for BehaviorPolicy {
+    fn default() -> Self {
+        Self {
+            disposition: Disposition::Passive,
+            idle: IdleBehavior::Explore,
+            memory_ticks: 1000,
+            doors: false,
+            care: false,
+            equipment: false,
+            loot: false,
+            flee_percent: 25,
+        }
+    }
+}
 impl BehaviorPolicy {
     pub fn valid(self) -> bool {
-        self.memory_ticks <= crate::limits::NUMERIC as u64
+        self.memory_ticks <= crate::limits::NUMERIC as u64 && self.flee_percent <= 100
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

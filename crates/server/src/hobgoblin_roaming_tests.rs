@@ -255,11 +255,12 @@ fn roaming_decision_work_records_growing_personal_history_without_extra_route_se
             let after = tor_simulation::diagnostics::work_counts();
             assert_eq!(after.route_searches - before.route_searches, 0);
             assert_eq!(after.scenes - before.scenes, 1);
-            // choose_ai clones this owned visit table. Report its actual size;
-            // the ten-neighbor candidate bound does not make cloning constant.
-            println!(
-                "roaming decisions={decisions} cloned_visit_entries={history} route_searches=0 scenes=1"
-            );
+            // This fixture stays in one region: the chosen visit update copies
+            // that region's bucket, not every loaded actor's history. Structural
+            // cross-region sharing is covered by simulation ai::idle_tests.
+            let copied = after.ai_visit_entries_copied - before.ai_visit_entries_copied;
+            assert_eq!(copied, history);
+            println!("roaming decisions={decisions} copied_current_region_entries={copied} route_searches=0 scenes=1");
         }
         if decisions < 16 {
             assert!(matches!(commit_ai(&mut game), SimAction::Move(_)));
@@ -268,7 +269,7 @@ fn roaming_decision_work_records_growing_personal_history_without_extra_route_se
 }
 
 #[test]
-fn player_actions_copy_all_loaded_ai_histories_after_bounded_mature_roaming() {
+fn player_actions_share_loaded_ai_histories_after_bounded_mature_roaming() {
     let mut game = fixture_with(false, 4);
     for rounds in 0..=64 {
         assert_eq!(game.next_actor(), Some(Actor(1)));
@@ -296,9 +297,13 @@ fn player_actions_copy_all_loaded_ai_histories_after_bounded_mature_roaming() {
             let clones = after.game_clones - before.game_clones;
             assert!(clones > 0);
             assert_eq!(after.route_searches - before.route_searches, 0);
-            // Game::clone deep-copies CombatWorld.ai, including every loaded
-            // visit table. Count real-action clone work, not just AI previews.
-            println!("player_wait rounds={rounds} loaded_actors=5 ai_histories={histories:?} game_clones={clones} cloned_visit_entries={}", clones * entries);
+            assert_eq!(
+                after.ai_visit_entries_copied - before.ai_visit_entries_copied,
+                0
+            );
+            // The actor/region directory is cloned, but immutable visit buckets
+            // remain shared. No visit entry is mutated by the player's Wait.
+            println!("player_wait rounds={rounds} loaded_actors=5 ai_histories={histories:?} game_clones={clones} copied_visit_entries=0");
         }
         if rounds < 64 {
             game.act(Actor(1), SimAction::Wait).unwrap();

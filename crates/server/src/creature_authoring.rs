@@ -324,29 +324,80 @@ pub struct BehaviorPolicy {
     pub disposition: Disposition,
     pub idle: IdleBehavior,
     pub memory_ticks: u64,
+    pub doors: bool,
+    pub care: bool,
+    pub equipment: bool,
+    pub loot: bool,
+    pub flee_percent: u32,
 }
 impl<'de> Deserialize<'de> for BehaviorPolicy {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default = "default_disposition")]
             disposition: Disposition,
+            #[serde(default = "default_idle")]
             idle: IdleBehavior,
+            #[serde(default = "default_memory")]
             memory_ticks: u64,
+            #[serde(default)]
+            doors: bool,
+            #[serde(default)]
+            care: bool,
+            #[serde(default)]
+            equipment: bool,
+            #[serde(default)]
+            loot: bool,
+            #[serde(default = "default_flee")]
+            flee_percent: u32,
         }
         let fields: Fields = named_map(d)?;
-        if fields.memory_ticks > s::limits::NUMERIC as u64 {
-            return Err(serde::de::Error::custom("behavior memory exceeds limit"));
+        if fields.memory_ticks > s::limits::NUMERIC as u64 || fields.flee_percent > 100 {
+            return Err(serde::de::Error::custom(
+                "invalid behavior memory or flee threshold",
+            ));
         }
         Ok(Self {
             disposition: fields.disposition,
             idle: fields.idle,
             memory_ticks: fields.memory_ticks,
+            doors: fields.doors,
+            care: fields.care,
+            equipment: fields.equipment,
+            loot: fields.loot,
+            flee_percent: fields.flee_percent,
         })
     }
 }
+fn default_disposition() -> Disposition {
+    Disposition::Passive
+}
+fn default_idle() -> IdleBehavior {
+    IdleBehavior::Explore
+}
+fn default_memory() -> u64 {
+    1000
+}
+fn default_flee() -> u32 {
+    25
+}
+impl Default for BehaviorPolicy {
+    fn default() -> Self {
+        Self {
+            disposition: default_disposition(),
+            idle: default_idle(),
+            memory_ticks: default_memory(),
+            doors: false,
+            care: false,
+            equipment: false,
+            loot: false,
+            flee_percent: default_flee(),
+        }
+    }
+}
 impl BehaviorPolicy {
-    fn compile(self) -> s::behavior::BehaviorPolicy {
+    pub(crate) fn compile(self) -> s::behavior::BehaviorPolicy {
         s::behavior::BehaviorPolicy {
             disposition: match self.disposition {
                 Disposition::Passive => s::behavior::Disposition::Passive,
@@ -357,6 +408,11 @@ impl BehaviorPolicy {
                 IdleBehavior::Explore => s::behavior::IdleBehavior::Explore,
             },
             memory_ticks: self.memory_ticks,
+            doors: self.doors,
+            care: self.care,
+            equipment: self.equipment,
+            loot: self.loot,
+            flee_percent: self.flee_percent,
         }
     }
 }
@@ -381,6 +437,7 @@ impl<'de> Deserialize<'de> for Species {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
             behavior: BehaviorPolicy,
             #[serde(default)]
             displacement: Option<DisplacementProfile>,
@@ -852,6 +909,9 @@ impl CompiledCatalog {
     }
 }
 impl Recipe {
+    pub fn behavior(&self) -> s::behavior::BehaviorPolicy {
+        self.prototype.species().behavior
+    }
     pub fn nutrition(&self) -> s::nutrition::NutritionRequirement {
         self.nutrition
     }

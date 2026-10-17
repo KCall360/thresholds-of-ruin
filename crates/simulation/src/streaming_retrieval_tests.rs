@@ -82,7 +82,9 @@ fn retrieval_residency_fixture_with_destination_member(
                 equipment: true,
                 loot: true,
                 flee_percent: 25,
-            },
+                idle: crate::behavior::IdleBehavior::Wait,
+        doors: false,
+},
         )
         .unwrap();
         actor

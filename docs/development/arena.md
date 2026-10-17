@@ -488,9 +488,12 @@ renumbering. Mirroring changes positions only.
 
 Production starters are externally controlled and omitted when
 unselected. The study explicitly changes their control to AI and gives them
-`study_general`, matching the existing `AiProfile::general()` in the authoring
-and simulation sources: care/equipment/loot enabled, flee threshold 25%. This is
-not the separate `AiProfile::default()` and is not a production profile named
+`study_general`, explicitly matching the concrete
+`tor_simulation::ai::AiProfile::general()`: Explore idle movement,
+doors/care/equipment/loot enabled, and a flee threshold of 25%. The authoring
+constructor is a partial override that inherits species idle behavior, so the
+study supplies all six fields instead. Both sources remain pinned inputs. This
+is not the separate `AiProfile::default()` or a production profile named
 `normal`. The inventory records this adaptation, policy values and source hashes.
 Foes retain their authored `rogue_hostile` profile. Autonomous choices are a
 proxy, not human route decisions, and do not inspect hidden target immunity.

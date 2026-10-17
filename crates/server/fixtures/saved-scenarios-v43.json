@@ -3,29 +3,31 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "97711e2e97424f0ddb9c5fa8036cad0d1e76ceae2c77f3a4ee1792e6dd616122",
+        "content_hash": "a488a31d13875d897194fd901d900772df0dea01beea1653367c013bbe382e71",
         "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof",
         "files": {
           "index.json": "c6276f543b9200e7ce9c5b076194cc9a105fe89dc926eceed1cacb532ceb689b",
           "rules.toml": "99c782133966437970dd40980aa50dba57bf416dbab20282a49fe772c497dd97",
-          "scenario.toml": "6fa47e03945cd62776dbc47c1f7f297cb71227b60bbca3d54be1adb49269a1c7"
+          "scenario.toml": "42fbc4e04872f829c4530f02b3cc57c98298cc277d44771906346116c6ae78a6"
         },
-        "model_hash": "0c4582dc0107dbd02e35684c156c95dcdcadc00bb0e7da3ce6f6fabab39fe32c",
+        "model_hash": "f23923ab5d8803688a9696a13bb979742d8538b1d32555b44c3259e4bf90b1c3",
         "regions": 1,
         "ruleset": "interactions-v39",
         "ruleset_dependencies": {
           "interactions-v39": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
         },
         "ruleset_hash": "20c312b7800c9513638cdc185f13eccd395dc2a336089f14d2f1d8b71c643b05",
-        "validator": "tor-scenario-28"
+        "validator": "tor-scenario-29"
       },
       "directory": null,
       "manifest": {
         "ai_profiles": {
           "tactical": {
             "care": true,
+            "doors": null,
             "equipment": true,
             "flee_percent": 25,
+            "idle": null,
             "loot": true
           }
         },
@@ -289,8 +291,13 @@
                 "willpower": 0
               },
               "behavior": {
+                "care": false,
                 "disposition": "mean",
+                "doors": false,
+                "equipment": false,
+                "flee_percent": 25,
                 "idle": "explore",
+                "loot": false,
                 "memory_ticks": 1000
               },
               "displacement": null,
@@ -370,8 +377,13 @@
                 "willpower": 0
               },
               "behavior": {
+                "care": false,
                 "disposition": "mean",
+                "doors": false,
+                "equipment": false,
+                "flee_percent": 25,
                 "idle": "explore",
+                "loot": false,
                 "memory_ticks": 1000
               },
               "displacement": null,
@@ -446,7 +458,7 @@
           ]
         },
         "floor_activation": null,
-        "format": 16,
+        "format": 17,
         "id": "ai-interactions",
         "objective": null,
         "ruleset": "rules.toml",
@@ -499,32 +511,34 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "a2c686a020139c98184666a0e772e755091c47e548deed20979fca5d3adcbfe8",
+        "content_hash": "ee7b90533c992fa1f2cc73686307222efcb8c19b5da4f6b7787fec409f419ec1",
         "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof",
         "files": {
           "catalog/actors.toml": "4e11a101245b5e01d77b25899731137d7ae2058e83e4015af1b47c731fdef183",
           "catalog/items.toml": "fdb4a17c05ca27dd9b30f177ab2cb4076dc5ffe9ebfbed603b91e09b0cfafe89",
           "index.json": "8a8daab8fdf9fa7df7a708516264a68edfc2e5c464a80a8077fd6c438a5d98eb",
           "rules.toml": "99c782133966437970dd40980aa50dba57bf416dbab20282a49fe772c497dd97",
-          "scenario.toml": "86a348c62c07078f1cb49b260c3d426ef9c5b904a0b9fef04b0e7508a1d985ae"
+          "scenario.toml": "a211ba862371b10459c72b6baefd97d26c6d28913563e8f5db30c081a5d87f74"
         },
-        "model_hash": "e7226ac7add150eb085a3fd37d2e9a8304c962dda1c40eb27344a66a0a618508",
+        "model_hash": "23ff1aa8d3d888cf8c15cf0a0299ba8fa21f6c536addf5f0fb1251c632b52f67",
         "regions": 5,
         "ruleset": "interactions-v39",
         "ruleset_dependencies": {
           "interactions-v39": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
         },
         "ruleset_hash": "20c312b7800c9513638cdc185f13eccd395dc2a336089f14d2f1d8b71c643b05",
-        "validator": "tor-scenario-28"
+        "validator": "tor-scenario-29"
       },
       "directory": null,
       "manifest": {
         "ai_profiles": {
           "tactical": {
-            "care": true,
-            "equipment": true,
+            "care": null,
+            "doors": null,
+            "equipment": null,
             "flee_percent": 25,
-            "loot": true
+            "idle": null,
+            "loot": null
           }
         },
         "appearance_pools": {},
@@ -883,8 +897,13 @@
                 "willpower": 1
               },
               "behavior": {
+                "care": false,
                 "disposition": "mean",
+                "doors": false,
+                "equipment": false,
+                "flee_percent": 25,
                 "idle": "explore",
+                "loot": false,
                 "memory_ticks": 1000
               },
               "displacement": {
@@ -963,8 +982,13 @@
                 "willpower": 2
               },
               "behavior": {
+                "care": true,
                 "disposition": "mean",
+                "doors": true,
+                "equipment": true,
+                "flee_percent": 25,
                 "idle": "explore",
+                "loot": true,
                 "memory_ticks": 1000
               },
               "displacement": {
@@ -1033,8 +1057,13 @@
                 "willpower": 1
               },
               "behavior": {
+                "care": true,
                 "disposition": "mean",
+                "doors": true,
+                "equipment": true,
+                "flee_percent": 25,
                 "idle": "explore",
+                "loot": true,
                 "memory_ticks": 1000
               },
               "displacement": {
@@ -1105,8 +1134,13 @@
                 "willpower": 0
               },
               "behavior": {
+                "care": false,
                 "disposition": "mean",
-                "idle": "explore",
+                "doors": false,
+                "equipment": false,
+                "flee_percent": 25,
+                "idle": "wait",
+                "loot": false,
                 "memory_ticks": 1000
               },
               "displacement": {
@@ -1190,7 +1224,7 @@
           ]
         },
         "floor_activation": null,
-        "format": 16,
+        "format": 17,
         "id": "first-dungeon",
         "objective": {
           "anchor": "1/exit",
@@ -1224,21 +1258,21 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "f7f323d2872b69b39008c11d6070911afa0df1c5c4b576f1a10593f105c0e971",
+        "content_hash": "263e0a5d45336836c0426bb5d09703d9de9281b6fb17d8908dee636408f115ee",
         "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof",
         "files": {
           "index.json": "f3145a492206454e256c3c7f4df0f2f33b4eda037a61a7d06e36f0b36bb0e709",
           "rules.toml": "99c782133966437970dd40980aa50dba57bf416dbab20282a49fe772c497dd97",
-          "scenario.toml": "2d4293ca3141bf33fcc75a78a1af955f18bd1be23a3ab69566f351d74c1007ac"
+          "scenario.toml": "e8a927a421432fbd951df39d265fffc67affcbd7ffbd73f8c184ed8cd13680e0"
         },
-        "model_hash": "478427c1900e9b8879a095287a3cb51fe5963cf0812a78c2d0477dd1d233d471",
+        "model_hash": "a94d8573a73b00cc5a9027344bca1e7a40daa2c67d6d5b47205566bcff97c9da",
         "regions": 1,
         "ruleset": "interactions-v39",
         "ruleset_dependencies": {
           "interactions-v39": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
         },
         "ruleset_hash": "20c312b7800c9513638cdc185f13eccd395dc2a336089f14d2f1d8b71c643b05",
-        "validator": "tor-scenario-28"
+        "validator": "tor-scenario-29"
       },
       "directory": null,
       "manifest": {
@@ -1502,8 +1536,13 @@
                 "willpower": 0
               },
               "behavior": {
+                "care": false,
                 "disposition": "mean",
+                "doors": false,
+                "equipment": false,
+                "flee_percent": 25,
                 "idle": "explore",
+                "loot": false,
                 "memory_ticks": 1000
               },
               "displacement": null,
@@ -1571,7 +1610,7 @@
         "default_character": 1,
         "factions": {},
         "floor_activation": null,
-        "format": 16,
+        "format": 17,
         "id": "interactions",
         "objective": null,
         "ruleset": "rules.toml",
@@ -1597,12 +1636,12 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "7148623b525337757c1e286cf4cff5c12ebb24fcb659f46fa8b57788d5a9aa70",
+        "content_hash": "708dd0d4286c95ae84139c72e0d9dfb8c84fb49ecb56a4e18c198bc0f50666ba",
         "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof",
         "files": {
           "index.json": "06cd492c64660944d924945aabdef638f6b10ba5d85940d8d6bfa497be49c3d1",
           "rules.toml": "99c782133966437970dd40980aa50dba57bf416dbab20282a49fe772c497dd97",
-          "scenario.toml": "20182458beb304c2139e3600d17a8c369d28ef7984cbe671fc5bb20a4754c25c"
+          "scenario.toml": "5a3e774407348af5cf6a893816fd2148dd0207561eeabe74fa7c296939348f38"
         },
         "model_hash": "5bd710d68c912c8a2ab9b9ffc27129bd7b6914d74026e6ff2af5ba74c952cc11",
         "regions": 1,
@@ -1611,7 +1650,7 @@
           "interactions-v39": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
         },
         "ruleset_hash": "20c312b7800c9513638cdc185f13eccd395dc2a336089f14d2f1d8b71c643b05",
-        "validator": "tor-scenario-28"
+        "validator": "tor-scenario-29"
       },
       "directory": null,
       "manifest": {
@@ -1710,7 +1749,7 @@
         "default_character": 1,
         "factions": {},
         "floor_activation": null,
-        "format": 16,
+        "format": 17,
         "id": "items",
         "objective": null,
         "ruleset": "rules.toml",
@@ -1736,12 +1775,12 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "375fa12b62dfcfc554c254fff8b4d7850c4a81d8bda17de3dc014ca097a2695d",
+        "content_hash": "f50e6036905b583cbe0e14c6c2d45065ce0cbb844f8edb3f62d0666dcadac5d4",
         "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof",
         "files": {
           "index.json": "06fde0d8fe4fbdf9fb2dead82f2a8e56d0cee40b1bfecd74151b2806ff7b6ecd",
           "rules.toml": "99c782133966437970dd40980aa50dba57bf416dbab20282a49fe772c497dd97",
-          "scenario.toml": "d22bdce6eba34a19d2bfa582af5bae8127717cf6e8eda04078139041cd9e8fe6"
+          "scenario.toml": "e4e9c8a165d2ee79f8c9b147b08b5696f1392d121f78c3ec432c77e665489b2b"
         },
         "model_hash": "3be4cab655bd4cfcd9b3e9ead25876478973aefca7f159ffce7d0ee1367f318a",
         "regions": 2,
@@ -1750,7 +1789,7 @@
           "interactions-v39": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
         },
         "ruleset_hash": "20c312b7800c9513638cdc185f13eccd395dc2a336089f14d2f1d8b71c643b05",
-        "validator": "tor-scenario-28"
+        "validator": "tor-scenario-29"
       },
       "directory": null,
       "manifest": {
@@ -1829,7 +1868,7 @@
         "default_character": 1,
         "factions": {},
         "floor_activation": null,
-        "format": 16,
+        "format": 17,
         "id": "two-room",
         "objective": null,
         "ruleset": "rules.toml",
