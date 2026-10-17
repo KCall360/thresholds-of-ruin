@@ -165,6 +165,7 @@ impl Bodies {
 pub(crate) struct ActorStore {
     entries: Shared<BTreeMap<ActorId, Actor>>,
     regions: Members,
+    held_owners: Members,
     timer_deadlines: Shared<BTreeSet<(u64, ActorId)>>,
     suspended_timers: Shared<BTreeSet<ActorId>>,
     contextual_recovery: Shared<BTreeSet<ActorId>>,
@@ -178,6 +179,7 @@ impl Clone for ActorStore {
         Self {
             entries: self.entries.clone(),
             regions: self.regions.clone(),
+            held_owners: self.held_owners.clone(),
             timer_deadlines: self.timer_deadlines.clone(),
             suspended_timers: self.suspended_timers.clone(),
             contextual_recovery: self.contextual_recovery.clone(),
@@ -218,9 +220,11 @@ impl Deref for ActorStore {
 impl ActorStore {
     pub fn from_entries(entries: BTreeMap<ActorId, Actor>) -> Self {
         let mut regions = Members::default();
+        let mut held_owners = Members::default();
         let mut timer_deadlines = BTreeSet::new();
         for (&id, actor) in &entries {
             add_member(&mut regions, actor.location.region, id);
+            if actor.holds.has_links() { add_member(&mut held_owners, actor.location.region, id); }
             if let Some(interval) = next_timer(actor) {
                 timer_deadlines.insert((interval, id));
             }
@@ -236,6 +240,7 @@ impl ActorStore {
         Self {
             entries: Shared::new(entries),
             regions,
+            held_owners,
             timer_deadlines: Shared::new(timer_deadlines),
             suspended_timers: Shared::default(),
             contextual_recovery: Shared::new(contextual_recovery),
@@ -300,6 +305,11 @@ impl ActorStore {
             .get(&region)
             .into_iter()
             .flat_map(|members| members.iter().copied())
+    }
+
+    /// Sparse source index excludes protection-only books.
+    pub(crate) fn held_owners_in(&self, region: RegionId) -> impl Iterator<Item = ActorId> + '_ {
+        self.held_owners.get(&region).into_iter().flat_map(|owners| owners.iter().copied())
     }
 
     /// Includes every loaded actor's body, including corpses. Callers apply their
@@ -386,17 +396,20 @@ impl ActorStore {
         let deadline = (!self.suspended_timers.contains(&id))
             .then(|| next_timer(&actor))
             .flatten();
+        let held = actor.holds.has_links();
         let old = self.entries.insert(id, actor);
         if let Some(old) = &old {
             if let Some(interval) = next_timer(old) {
                 self.timer_deadlines.remove(&(interval, id));
             }
             remove_member(&mut self.regions, old.location.region, id);
+            if old.holds.has_links() { remove_member(&mut self.held_owners, old.location.region, id); }
         }
         if let Some(interval) = deadline {
             self.timer_deadlines.insert((interval, id));
         }
         add_member(&mut self.regions, region, id);
+        if held { add_member(&mut self.held_owners, region, id); }
         self.bodies
             .get_mut()
             .unwrap_or_else(|e| e.into_inner())
@@ -417,6 +430,7 @@ impl ActorStore {
             self.timer_deadlines.remove(&(interval, *id));
         }
         remove_member(&mut self.regions, old.location.region, *id);
+        if old.holds.has_links() { remove_member(&mut self.held_owners, old.location.region, *id); }
         self.bodies
             .get_mut()
             .unwrap_or_else(|e| e.into_inner())
@@ -448,6 +462,7 @@ impl ActorStore {
         Some(ActorEdit {
             id: *id,
             before: actor.location.region,
+            before_held: actor.holds.has_links(),
             before_deadline,
             before_perception: (!self.contextual_recovery.is_empty())
                 .then(|| PerceptionInputs::capture(actor)),
@@ -455,6 +470,7 @@ impl ActorStore {
             timer_active,
             actor,
             regions: &mut self.regions,
+            held_owners: &mut self.held_owners,
             timer_deadlines: &mut self.timer_deadlines,
             contextual_recovery: &mut self.contextual_recovery,
             active_falls: &mut self.active_falls,
@@ -465,12 +481,14 @@ impl ActorStore {
 pub(crate) struct ActorEdit<'a> {
     id: ActorId,
     before: RegionId,
+    before_held: bool,
     before_deadline: Option<u64>,
     before_perception: Option<PerceptionInputs>,
     perception_revision: &'a mut u64,
     timer_active: bool,
     actor: &'a mut Actor,
     regions: &'a mut Members,
+    held_owners: &'a mut Members,
     timer_deadlines: &'a mut Shared<BTreeSet<(u64, ActorId)>>,
     contextual_recovery: &'a mut Shared<BTreeSet<ActorId>>,
     active_falls: &'a mut Shared<BTreeSet<ActorId>>,
@@ -514,6 +532,11 @@ impl Drop for ActorEdit<'_> {
                 self.timer_deadlines.insert((interval, self.id));
             }
         }
+        let held = self.actor.holds.has_links();
+        if self.before != self.actor.location.region || self.before_held != held {
+            if self.before_held { remove_member(self.held_owners, self.before, self.id); }
+            if held { add_member(self.held_owners, self.actor.location.region, self.id); }
+        }
         if self.before != self.actor.location.region {
             remove_member(self.regions, self.before, self.id);
             add_member(self.regions, self.actor.location.region, self.id);
@@ -543,6 +566,7 @@ fn next_timer(actor: &Actor) -> Option<u64> {
         .and_then(|interval| actor.active_since.checked_add(interval));
     creature
         .into_iter()
+        .chain(actor.holds.next_change_in().and_then(|interval| actor.active_since.checked_add(interval)))
         .chain(
             actor
                 .engagement_deadline()

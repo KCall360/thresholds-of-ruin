@@ -732,9 +732,10 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
                             }
                         )
                     }) => {}
-            Beat::ItemFinished(text) | Beat::AbilityBegan(text) | Beat::Escaped(text) => {
-                teller.say(text.trim_end_matches('.'))
-            }
+            Beat::ItemFinished(text)
+            | Beat::AbilityBegan(text)
+            | Beat::Escaped(text)
+            | Beat::EscapeHold(text) => teller.say(text.trim_end_matches('.')),
             Beat::AbilityResolved {
                 ability,
                 attacker,

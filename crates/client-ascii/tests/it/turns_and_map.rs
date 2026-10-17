@@ -30,7 +30,7 @@ fn snapshot() -> Snapshot {
     serde_json::from_value(serde_json::json!({
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"turns","cursor":{"sequence":"0","tick":"100"},"has_control":true,"intentions":[],
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"5","observation":{
+        "state":{"wizard_game":false,"revision":"5","observation":{"linked_holds":[],
             "actor":"1","self_target":super::actor_target(1),"tick":"100","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells,
             "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"weapon","appearance":"sword","identified":true,"id":super::item_target(7),"name":"sword"},"position":{"x":-1,"y":0,"z":0}}],

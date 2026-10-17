@@ -3,6 +3,9 @@
 //! the simulation and is checked against those facts during recovery.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    Escape {
+        hold: tor_simulation::HoldId,
+    },
     ChooseGrowthSource {
         basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
         source: tor_simulation::earned_growth::GrowthSource,
@@ -82,6 +85,7 @@ impl Action {
         matches!(
             self,
             Self::Respec { .. }
+                | Self::Escape { .. }
                 | Self::UseAbility { .. }
                 | Self::Equip { .. }
                 | Self::Unequip { .. }

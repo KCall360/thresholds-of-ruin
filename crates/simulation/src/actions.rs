@@ -424,13 +424,15 @@ impl Game {
                     self.content.rules.document().advancement.purchase_recovery,
                 )
             }
-            Action::Respec { .. }
+            Action::Escape { .. }
+            | Action::Respec { .. }
             | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
             | Action::Drink { .. }
             | Action::Eat { .. } => {
                 let work = match action.clone() {
+                    Action::Escape { hold } => crate::Work::Escape { hold },
                     Action::Respec {
                         basis,
                         replacement,
@@ -487,6 +489,7 @@ impl Game {
                     .checked_add(commitment)
                     .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
                 let kind = match &work {
+                    crate::Work::Escape { hold } => OutcomeKind::EscapeStarted { hold: *hold },
                     crate::Work::Respec {
                         basis, replacement, ..
                     } => OutcomeKind::RespecStarted {
@@ -632,6 +635,7 @@ impl Game {
                 | OutcomeKind::AbilityStarted { .. }
                 | OutcomeKind::ItemStarted { .. }
                 | OutcomeKind::RespecStarted { .. }
+                | OutcomeKind::EscapeStarted { .. }
         ) {
             actor.cancel_preparation();
         }
@@ -648,6 +652,7 @@ impl Game {
             OutcomeKind::Purchased { .. } => unreachable!("purchase uses one actor publication"),
             OutcomeKind::AbilityStarted { .. }
             | OutcomeKind::ItemStarted { .. }
+            | OutcomeKind::EscapeStarted { .. }
             | OutcomeKind::RespecStarted { .. } => {
                 let plan = prepared
                     .plan
@@ -660,7 +665,9 @@ impl Game {
                     .world
                     .door_location(door)
                     .ok_or(GameError::DoorUnavailable)?;
+                let affected = self.hold_geometry_candidates(self.world.door_cells(location));
                 self.world.set_door(location, open);
+                self.reconcile_holds_for_actors(affected)?;
             }
             OutcomeKind::Moved { .. } => {}
             OutcomeKind::Escaped { item } => self.commit_terminal_escape(id, item)?,

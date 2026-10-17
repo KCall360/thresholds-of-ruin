@@ -267,7 +267,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":46,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":48,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -399,6 +399,30 @@ resume/cancel permission is present. Escape-aware directional controls instead
 select the exact active or paused preparation identity, never unrelated queued work.
 They require disclosed own sequence progress with `completed > 0` and cancellation
 permission; the server remains authoritative for the requested movement.
+
+### Linked holds and Escape
+
+Every current observation and delta requires `linked_holds`, an ordered list of
+at most 128 own incoming live offers. Deltas replace that list in full. An offer
+contains exactly `target` (an opaque `h_` hold token) and `holder` (a required
+nullable actor target). `holder` is non-null only when the actor is already in
+the ordinary visible-actor list. This list is separate from timed personal
+conditions; it exposes neither protection records nor a hidden holder's location.
+
+The action `{"type":"escape","hold":"<opaque hold token>"}` selects exactly one
+current own offer under the ordinary action context, branch and revision gates.
+A hold token cannot inspect an actor, reveal an endpoint or authorize another
+observer. It remains stable when its holder enters or leaves ordinary sight.
+Pending Escape discloses only that action and ordinary preparation progress;
+its internal opposed check is not a public ability plan. History uses
+`escape_started` with `hold`; completion uses `escape_resolved` with `hold` and
+`success`. Neither record adds a holder name, actor target or check statistics.
+
+Accepted exact receipt retries are resolved before current offer availability,
+including after the chosen hold is released. Durable actions store the internal
+hold identity, not a wire token. A stale or foreign token never selects a new
+link. The separate directional cancellation described above retains its existing
+meaning; it is not this Escape action.
 
 Requests require unique IDs per authenticated user for accepted actions and
 annotations. Retry the exact same command and ID to recover its original receipt,

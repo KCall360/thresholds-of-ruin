@@ -192,6 +192,7 @@ impl ConsumableSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Work {
+    Escape { hold: crate::linked_hold::HoldId },
     Respec {
         basis: crate::player_advancement::AdvancementBasis,
         replacement: crate::player_respec::ReplacementOperation,
@@ -221,6 +222,7 @@ impl<'de> serde::Deserialize<'de> for Work {
         #[derive(serde::Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Escape { hold: crate::linked_hold::HoldId },
             Respec {
                 basis: crate::player_advancement::AdvancementBasis,
                 replacement: crate::player_respec::ReplacementOperation,
@@ -246,6 +248,7 @@ impl<'de> serde::Deserialize<'de> for Work {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Escape { hold } => Self::Escape { hold },
             Fields::Respec {
                 basis,
                 replacement,
@@ -275,6 +278,7 @@ impl<'de> serde::Deserialize<'de> for Work {
 impl Work {
     pub fn action(&self) -> Action {
         match self {
+            Self::Escape { hold } => Action::Escape { hold: *hold },
             Self::Respec {
                 basis,
                 replacement,
@@ -312,6 +316,7 @@ impl Work {
                 invocation: crate::abilities::AbilityInvocation::SelfStep { .. },
                 ..
             }
+            | Self::Escape { .. }
             | Self::Respec { .. }
             | Self::Equip { .. }
             | Self::Unequip { .. }
@@ -321,7 +326,7 @@ impl Work {
     }
     pub fn item(&self) -> Option<ItemId> {
         match self {
-            Self::UseAbility { .. } | Self::Respec { .. } => None,
+            Self::Escape { .. } | Self::UseAbility { .. } | Self::Respec { .. } => None,
             Self::Equip { item, .. }
             | Self::Unequip { item }
             | Self::Drink { item }
@@ -330,6 +335,7 @@ impl Work {
     }
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Escape { .. } => "escape",
             Self::UseAbility { .. } => "use ability",
             Self::Respec { .. } => "replace advancement",
             Self::Equip { .. } => "equip",
@@ -340,6 +346,7 @@ impl Work {
     }
     pub(crate) fn structural_valid(&self, actor: ActorId) -> bool {
         match self {
+            Self::Escape { hold } => hold.0 > 0 && hold.0 < u64::MAX,
             Self::Respec {
                 basis, supplies, ..
             } => basis.valid() && basis.actor == actor && supplies.valid(1),
@@ -480,7 +487,7 @@ impl Game {
             }
             Work::Drink { .. } => i.spec.consumable.is_some() && a.combat.is_some(),
             Work::Eat { .. } => i.spec.edible.is_some() && a.combat.is_some(),
-            Work::UseAbility { .. } | Work::Respec { .. } => false,
+            Work::Escape { .. } | Work::UseAbility { .. } | Work::Respec { .. } => false,
         }
     }
     fn item_work_duration(&self, actor: ActorId, work: Work) -> Result<u64, GameError> {
@@ -549,7 +556,7 @@ impl Game {
                 }
                 timing.consume_turns
             }
-            Work::UseAbility { .. } | Work::Respec { .. } => {
+            Work::Escape { .. } | Work::UseAbility { .. } | Work::Respec { .. } => {
                 return Err(GameError::ItemUnavailable);
             }
         };
@@ -569,6 +576,9 @@ impl Game {
                 return Ok(preparation.plan.clone());
             }
             return Err(GameError::Rule(crate::abilities::RuleError::OutOfReach));
+        }
+        if let Work::Escape { hold } = &work {
+            return self.escape_plan(actor, *hold);
         }
         if let Work::UseAbility {
             id,
@@ -590,7 +600,7 @@ impl Game {
         }
         let preparation = self.item_work_duration(actor, work.clone())?;
         let plan = match work {
-            Work::Respec { .. } => unreachable!("respec has a distinct frozen plan"),
+            Work::Escape { .. } | Work::Respec { .. } => unreachable!("distinct frozen plan"),
             Work::Equip { item, slot } => crate::abilities::Plan::Equip {
                 actor,
                 item,
@@ -677,6 +687,12 @@ impl Game {
         }
         let actor = plan.actor();
         self.settle_actor_time(actor)?;
+        if let crate::abilities::Plan::Escape(escape) = &plan {
+            self.settle_actor_time(escape.holder)?;
+            if !self.escape_plan_available(escape) {
+                return Err(GameError::Rule(crate::abilities::RuleError::OutOfReach));
+            }
+        }
         if matches!(plan, crate::abilities::Plan::Respec(_)) && !self.respec_environment_safe(actor)
         {
             return Err(GameError::ActorBusy);
@@ -888,7 +904,7 @@ impl Game {
                 }
                 ItemChange::Consumed { actor: outcome }
             }
-            Work::UseAbility { .. } | Work::Respec { .. } => {
+            Work::Escape { .. } | Work::UseAbility { .. } | Work::Respec { .. } => {
                 return Err(GameError::ItemUnavailable);
             }
         };

@@ -107,3 +107,8 @@ target!(
     b'd',
     "Observer-scoped reference to a disclosed door."
 );
+target!(
+    HoldTarget,
+    b'h',
+    "Observer-scoped reference to one own incoming hold; no actor authority."
+);

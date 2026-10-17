@@ -1,9 +1,9 @@
 {
-  "validator": "tor-scenario-29",
-  "ruleset": "interactions-v39",
+  "validator": "tor-scenario-30",
+  "ruleset": "interactions-v40",
   "ruleset_hash": "20c312b7800c9513638cdc185f13eccd395dc2a336089f14d2f1d8b71c643b05",
   "ruleset_dependencies": {
-    "interactions-v39": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
+    "interactions-v40": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
   },
   "content_hash": "575ce2d5c66af4c15473ba208355b20105fcde4cb758e2d94867e1346d707f8e",
   "files": {

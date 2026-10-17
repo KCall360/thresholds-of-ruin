@@ -873,6 +873,39 @@ history, unbounded pin set or deferred-death ledger. Damaging condition content
 and its causal adapter remain future work; the typed condition origin alone
 does not implement poison credit.
 
+## Locomotion capabilities
+
+The shared `locomotion` modifier carries one typed value: `stationary` or
+`flying` with an explicit `enabled` boolean, or `erratic` with a required
+nullable `chance`. A probability has unsigned 16-bit numerator/denominator,
+nonzero denominator and numerator no greater than denominator. Effective
+capabilities derive from ordinary active sources, never species identity.
+TOML creature/item authoring omits `chance` for suppression because TOML has no
+null; lowering emits the explicit nullable field required by canonical saves.
+
+Positive stationary/flying grants combine by OR. Any explicit false suppresses
+that capability across all sources. Erratic grants choose the greatest exact
+rational probability, normalized to lowest terms; any null suppresses erratic
+movement. Scoped modifiers do not silently change these actor-wide capabilities.
+Removing a suppressing source exposes remaining grants through the normal fold.
+
+Stationary denies every voluntary translation, including ordinary movement,
+AI pursuit/retreat and self-step abilities. It does not anchor a body against
+forced movement. Flying permits paid unsupported and open-vertical translation
+with ordinary body clearance, portal rotation and scenario stair policy.
+It gives the creature zero effective gravity without erasing drift. Capability
+changes reset only acceleration remainder when the actor publishes; they do not
+teleport, brake or create fall credit. Items never inherit the grant.
+
+An erratic choice can replace a fresh attack, pursuit, retreat or idle decision,
+after ordinary self-care and without replacing retained paid preparation.
+It chooses only legal movement disclosed to that actor, then submits an ordinary
+paid Move. Zero chance, stationary/restricted movement and an empty candidate set
+draw no randomness. Preview uses a copied actor-owned behavior RNG; only a
+committed candidate publishes the draw, so rejection and reopen do not reroll.
+This is the TOR action-priority adaptation, not a claim of exact Rogue turn parity.
+See [movement](movement.md) and [physics](../architecture/geometry.md).
+
 ## Abilities and effects
 
 An ability defines cost, timing, reach, check, success/failure effects, descriptors,

@@ -129,6 +129,7 @@ fn commit_strike(game: &mut Game, actor: ActorId, target: ActorId) -> crate::abi
             next_strike: 1,
             successful_primaries: 0,
             attempted_riders: [0; 2],
+            linked_hold: None,
         },
     )
     .unwrap()
@@ -540,6 +541,7 @@ fn a_cancelled_preparation_and_unavailable_strike_do_not_provoke() {
                 next_strike: 1,
                 successful_primaries: 0,
                 attempted_riders: [0; 2],
+                linked_hold: None,
             },
         )
         .unwrap();

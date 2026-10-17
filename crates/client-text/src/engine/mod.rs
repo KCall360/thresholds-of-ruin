@@ -490,9 +490,44 @@ impl Engine {
                 }
             }
         }
+        // Freeze the selected offer before either the flee idiom or a later
+        // repeated command can reinterpret a number against a refreshed list.
+        if sentences(&line).len() == 1 {
+            if let Some(input) = crate::hold_input(&line, link.client().state()) {
+                self.pending = None;
+                match input {
+                    Ok(Input::Command(Command::Act {
+                        action: Action::Escape { hold },
+                        ..
+                    })) => {
+                        let canonical = format!("escape hold #{hold}");
+                        self.last_line = Some(canonical.clone());
+                        self.last_sentence = Some(canonical);
+                        let start = self.place_key(link);
+                        self.carry_out(
+                            link,
+                            &mut record,
+                            Interpretation::Goals(vec![verbs::Goal::Escape { hold }]),
+                            &mut VecDeque::new(),
+                        )
+                        .await?;
+                        self.finish(link, &mut record, start.as_deref());
+                    }
+                    Err(error) => record.say(error),
+                    _ => unreachable!("hold input produces only an Escape action"),
+                }
+                return Ok(Outcome::Passage(narrate::compose(&record)));
+            }
+        }
         if let Some(input) = crate::advancement_input(&line)
             .or_else(|| crate::strike_input(&line))
-            .or_else(|| crate::intention_input(&line))
+            .or_else(|| {
+                if sentences(&line).len() == 1 {
+                    crate::intention_input(&line)
+                } else {
+                    None
+                }
+            })
         {
             self.pending = None;
             match input {
@@ -612,6 +647,46 @@ impl Engine {
                     } else {
                         text
                     };
+                    if let Some(input) = crate::hold_input(&text, link.client().state()) {
+                        match input {
+                            Ok(Input::Command(Command::Act {
+                                action: Action::Escape { hold },
+                                ..
+                            })) => {
+                                let canonical = format!("escape hold #{hold}");
+                                self.last_sentence = Some(canonical.clone());
+                                if let Some(last) = &mut self.last_line {
+                                    let mut parts = sentences(last);
+                                    if let Some(part) = parts
+                                        .iter_mut()
+                                        .find(|part| idiom::normalize(part).0 == text)
+                                    {
+                                        *part = canonical;
+                                        *last = parts.join(". ");
+                                    }
+                                }
+                                chain.push_front(Ok(Interpretation::Goals(vec![
+                                    verbs::Goal::Escape { hold },
+                                ])));
+                            }
+                            Err(error) => {
+                                record.say(error);
+                                break;
+                            }
+                            _ => unreachable!("hold input produces only an Escape action"),
+                        }
+                        continue;
+                    }
+                    if let Some(input) = crate::intention_input(&text) {
+                        match input {
+                            Ok(input) => chain.push_front(Ok(Interpretation::Tool(input))),
+                            Err(error) => {
+                                record.say(error);
+                                break;
+                            }
+                        }
+                        continue;
+                    }
                     let tokens = parser::tokenize(&text);
                     match parser::match_disclosed_sentence(
                         &tokens,

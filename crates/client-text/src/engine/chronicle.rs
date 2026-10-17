@@ -49,6 +49,8 @@ pub enum Beat {
     ItemBegan(String),
     ItemFinished(String),
     AbilityBegan(String),
+    /// Generic linked-hold progress never carries the holder identity.
+    EscapeHold(String),
     AbilityResolved {
         ability: ContentRef,
         attacker: Who,
@@ -170,6 +172,9 @@ impl Chronicler {
         }) = event
         {
             match event {
+                Event::EscapeStarted { .. } => beats.push(Beat::EscapeHold(
+                    tor_client_common::narration::action(event, a),
+                )),
                 Event::Moved { direction } => beats.push(Beat::Stepped(*direction)),
                 Event::Escaped { .. } => beats.push(Beat::Escaped(
                     tor_client_common::narration::action(event, a),
@@ -251,6 +256,9 @@ impl Chronicler {
                                 basic,
                                 variant: self.blows,
                             }
+                        }
+                        CombatEventView::EscapeResolved { .. } => {
+                            Beat::EscapeHold(tor_client_common::narration::combat_event(e, b, a))
                         }
                         CombatEventView::Condition { ref condition } => {
                             Beat::Condition(condition.name.clone())
@@ -410,7 +418,7 @@ mod tests {
                 "door":{"id":tor_protocol::DoorTarget::from_digest([7; 32]),"name":"Oak Door","description":"","open":false,
                     "reachable":true,"approaches":[]}}],
             "ground_items":[],"inventory":[],
-            "visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"name":"ruin scout","description":"",
+            "linked_holds":[],"visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"name":"ruin scout","description":"",
                 "position":{"x":2,"y":0,"z":0}}],
             "combat":{"public_plan":null,"hp":"50","max_hp":"50","sequence":null,"preparation_remaining":null,
                 "preparation_active":false,"recovery_remaining":"0","actors":[],

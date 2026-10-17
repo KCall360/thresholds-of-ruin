@@ -2,7 +2,7 @@
 //! It never consults live world state, so receipts survive target removal.
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
-use tor_protocol::{ActorTarget, DoorTarget, ItemTarget};
+use tor_protocol::{ActorTarget, DoorTarget, HoldTarget, ItemTarget};
 use tor_simulation::{ActorId, ItemId};
 use uuid::Uuid;
 
@@ -39,6 +39,10 @@ impl TargetScope {
         ActorTarget::from_digest(self.digest(b'a', identity.0))
     }
 
+    pub fn hold(&self, identity: tor_simulation::HoldId) -> HoldTarget {
+        HoldTarget::from_digest(self.digest(b'h', identity.0))
+    }
+
     pub fn item(&self, identity: ItemId) -> ItemTarget {
         ItemTarget::from_digest(self.digest(b'i', identity.0))
     }
@@ -51,6 +55,26 @@ impl TargetScope {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hold_identity_is_stable_and_separate_from_actor_and_observer_authority() {
+        let scope = TargetScope::new(Uuid::from_u128(1), ActorId(1));
+        let restored = TargetScope::new(Uuid::from_u128(1), ActorId(1));
+        let hold = tor_simulation::HoldId(7);
+        assert_eq!(scope.hold(hold), restored.hold(hold));
+        assert_ne!(
+            scope.hold(hold),
+            TargetScope::new(Uuid::from_u128(1), ActorId(2)).hold(hold)
+        );
+        assert_ne!(
+            scope.hold(hold),
+            TargetScope::new(Uuid::from_u128(2), ActorId(1)).hold(hold)
+        );
+        assert_ne!(
+            &scope.hold(hold).to_string()[2..],
+            &scope.actor(ActorId(7)).to_string()[2..]
+        );
+        assert!(scope.hold(hold).to_string().parse::<ActorTarget>().is_err());
+    }
     // Independent Python stdlib hmac/SHA-256 calculation of the declared byte layout.
     const VECTOR: &str = "a_7a23df737ca869f84c95d05f4f08f2bbc00d21675a207b468be8d127ebf821f8";
 

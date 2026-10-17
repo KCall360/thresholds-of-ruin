@@ -88,6 +88,7 @@ fn progress(next_strike: u16, successful_primaries: u16, receipt: u64) -> Prepar
         next_strike,
         successful_primaries,
         attempted_riders: [receipt, 0],
+        linked_hold: None,
     }
 }
 

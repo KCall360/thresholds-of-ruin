@@ -209,6 +209,13 @@ pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Obser
                 AbilityOutcome::Miss => format!("{subject} used {name} on {object}, but missed."),
             }
         }
+        CombatEventView::EscapeResolved { success, .. } => {
+            if *success {
+                "You escape one hold.".into()
+            } else {
+                "You fail to escape the hold.".into()
+            }
+        }
         CombatEventView::Condition { condition } => {
             format!("You are affected by {}.", condition.name)
         }
@@ -386,6 +393,7 @@ fn describe_changes(
 /// Ordinary action narration resolves names only from the resulting disclosed view.
 pub fn action(event: &Event, view: &Observation) -> String {
     match event {
+        Event::EscapeStarted { .. } => "You begin trying to escape a hold.".into(),
         Event::Escaped { item } => {
             let name = view
                 .inventory
@@ -484,6 +492,7 @@ mod tests {
             visible_cells: Vec::new(),
             ground_items: Vec::new(),
             inventory: Vec::new(),
+            linked_holds: Vec::new(),
             visible_actors: Vec::new(),
             ready: true,
         }

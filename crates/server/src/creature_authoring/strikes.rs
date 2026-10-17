@@ -285,6 +285,22 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
         .iter()
         .map(|value| {
             Ok(match value {
+                Effect::ApplyLinkedHold { policy } => s::rules::Effect::ApplyLinkedHold {
+                    policy: s::linked_hold::HoldPolicy {
+                        sustaining: FlagId::new(&policy.sustaining)
+                            .map_err(|_| invalid("Invalid sustaining flag"))?,
+                        preparation: policy.preparation,
+                        recovery: policy.recovery,
+                        protection: policy.protection,
+                    },
+                },
+                Effect::HoldDamage {
+                    category,
+                    descriptor: value,
+                } => s::rules::Effect::HoldDamage {
+                    category: (*category).into(),
+                    descriptor: descriptor(value, rules)?,
+                },
                 Effect::Damage { damage } => s::rules::Effect::Damage {
                     damage: match damage {
                         DamageExpr::SelectedWeapon { impact_bonus } => {

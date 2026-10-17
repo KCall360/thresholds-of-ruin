@@ -82,6 +82,13 @@ impl<'de> Deserialize<'de> for PlannedCheck {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PlannedEffect {
+    ApplyLinkedHold {
+        policy: crate::linked_hold::HoldPolicy,
+    },
+    HoldDamage {
+        category: crate::combat::DamageType,
+        descriptor: Option<crate::content_ids::DescriptorId>,
+    },
     DrainLatestHitDie,
     RestoreHitDie,
     StepSelfOneCell,
@@ -185,6 +192,7 @@ impl PlannedAmount {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Plan {
+    Escape(tor_world::Shared<crate::escape::EscapePlan>),
     Ability(tor_world::Shared<AbilityPlan>),
     Respec(tor_world::Shared<crate::player_respec::RespecPlan>),
     Equip {
@@ -220,6 +228,9 @@ pub struct AbilityPlan {
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub step: Option<super::StepCommitment>,
     pub target: ActorId,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub initial_hold: Option<crate::linked_hold::HoldId>,
+    pub hold_damage_increment: u32,
     pub public_aim: crate::public_plan::PublicAim,
     pub ability: AbilityId,
     pub preparation: u64,
@@ -246,6 +257,9 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
             #[serde(deserialize_with = "crate::bounded::required_option")]
             step: Option<super::StepCommitment>,
             target: ActorId,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            initial_hold: Option<crate::linked_hold::HoldId>,
+            hold_damage_increment: u32,
             public_aim: crate::public_plan::PublicAim,
             ability: AbilityId,
             preparation: u64,
@@ -268,6 +282,8 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
             invocation: fields.invocation,
             step: fields.step,
             target: fields.target,
+            initial_hold: fields.initial_hold,
+            hold_damage_increment: fields.hold_damage_increment,
             public_aim: fields.public_aim,
             ability: fields.ability,
             preparation: fields.preparation,
@@ -287,13 +303,17 @@ impl Plan {
     pub fn tokens(
         &self,
     ) -> impl ExactSizeIterator<Item = &crate::conditions::TokenReservation> + Clone {
-        self.as_ability()
-            .map_or(&[][..], |plan| plan.tokens.as_slice())
+        match self {
+            Self::Ability(plan) => plan.tokens.as_slice(),
+            Self::Escape(plan) => plan.tokens.as_slice(),
+            _ => &[],
+        }
             .iter()
             .map(|claim| &claim.reservation)
     }
     pub fn actor(&self) -> ActorId {
         match self {
+            Self::Escape(plan) => plan.actor,
             Self::Ability(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
@@ -304,6 +324,7 @@ impl Plan {
     }
     pub fn target(&self) -> ActorId {
         match self {
+            Self::Escape(plan) => plan.holder,
             Self::Ability(plan) => plan.target,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
@@ -314,6 +335,7 @@ impl Plan {
     }
     pub fn work(&self) -> Work {
         match self {
+            Self::Escape(plan) => Work::Escape { hold: plan.hold },
             Self::Respec(plan) => Work::Respec {
                 basis: plan.basis.clone(),
                 replacement: plan.replacement.clone(),
@@ -335,6 +357,7 @@ impl Plan {
     }
     pub fn preparation(&self) -> u64 {
         match self {
+            Self::Escape(plan) => plan.preparation,
             Self::Ability(plan) => plan.preparation,
             Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
@@ -345,6 +368,7 @@ impl Plan {
     }
     pub fn recovery(&self) -> u64 {
         match self {
+            Self::Escape(plan) => plan.recovery,
             Self::Ability(plan) => plan.recovery + plan.step.map_or(0, |step| step.duration),
             Self::Respec(plan) => plan.recovery,
             Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => 0,
@@ -353,7 +377,7 @@ impl Plan {
     pub fn cost(&self) -> Option<ResourceCost> {
         match self {
             Self::Ability(plan) => plan.cost,
-            Self::Respec(_) => None,
+            Self::Escape(_) | Self::Respec(_) => None,
             Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => {
                 None
             }
@@ -366,13 +390,13 @@ impl Plan {
                 .first()
                 .map_or(&[], |strike| strike.on_success.as_slice()),
             Self::Drink { effects, .. } | Self::Eat { effects, .. } => effects,
-            Self::Respec(_) | Self::Equip { .. } | Self::Unequip { .. } => &[],
+            Self::Escape(_) | Self::Respec(_) | Self::Equip { .. } | Self::Unequip { .. } => &[],
         }
     }
     pub fn as_ability(&self) -> Option<&AbilityPlan> {
         match self {
             Self::Ability(plan) => Some(plan),
-            Self::Respec(_) => None,
+            Self::Escape(_) | Self::Respec(_) => None,
             Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => {
                 None
             }
@@ -389,13 +413,14 @@ impl Plan {
                     effects,
                 })
             }
-            Self::Respec(_) | Self::Equip { .. } | Self::Unequip { .. } => None,
+            Self::Escape(_) | Self::Respec(_) | Self::Equip { .. } | Self::Unequip { .. } => None,
         }
     }
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
         valid_actor(self.actor())
             && (1..=crate::limits::NUMERIC as u64).contains(&self.preparation())
             && match self {
+                Self::Escape(plan) => plan.valid(rules),
                 Self::Ability(plan) => plan.valid(rules),
                 Self::Respec(plan) => plan.valid(rules),
                 Self::Equip { item, slot, .. } => {
@@ -433,6 +458,8 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             | PlannedEffect::PushTargetOneCell { .. }
             | PlannedEffect::DrainLatestHitDie
             | PlannedEffect::RestoreHitDie => true,
+            PlannedEffect::ApplyLinkedHold { policy } => policy.valid() && rules.flag(&policy.sustaining).is_some(),
+            PlannedEffect::HoldDamage { descriptor, .. } => descriptor.as_ref().is_none_or(|id| rules.descriptor(id).is_some()),
             PlannedEffect::Damage { damage } => rules.validate_damage(damage).is_ok(),
             PlannedEffect::Heal { amount }
             | PlannedEffect::Nourish { amount }
@@ -528,6 +555,8 @@ pub(super) fn effects_match_definition_scoped(
             .zip(actual)
             .enumerate()
             .all(|(index, (expected, actual))| match (expected, actual) {
+                (Effect::ApplyLinkedHold { policy: expected }, PlannedEffect::ApplyLinkedHold { policy: actual }) => expected == actual,
+                (Effect::HoldDamage { category: a, descriptor: d }, PlannedEffect::HoldDamage { category: b, descriptor: e }) => a == b && d == e,
                 (Effect::StepSelfOneCell, PlannedEffect::StepSelfOneCell)
                 | (Effect::DrainLatestHitDie, PlannedEffect::DrainLatestHitDie)
                 | (Effect::RestoreHitDie, PlannedEffect::RestoreHitDie) => true,
@@ -869,6 +898,8 @@ impl Game {
         effects
             .iter()
             .map(|effect| match effect {
+                Effect::ApplyLinkedHold { policy } => Ok(PlannedEffect::ApplyLinkedHold { policy: policy.clone() }),
+                Effect::HoldDamage { category, descriptor } => Ok(PlannedEffect::HoldDamage { category: *category, descriptor: descriptor.clone() }),
                 Effect::DrainLatestHitDie => Ok(PlannedEffect::DrainLatestHitDie),
                 Effect::RestoreHitDie => Ok(PlannedEffect::RestoreHitDie),
                 Effect::StepSelfOneCell => Ok(PlannedEffect::StepSelfOneCell),
@@ -999,6 +1030,14 @@ impl<'de> Deserialize<'de> for PlannedEffect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            ApplyLinkedHold {
+        policy: crate::linked_hold::HoldPolicy,
+    },
+    HoldDamage {
+        category: crate::combat::DamageType,
+        #[serde(deserialize_with = "crate::bounded::required_option")]
+        descriptor: Option<crate::content_ids::DescriptorId>,
+    },
             DrainLatestHitDie {},
             RestoreHitDie {},
             StepSelfOneCell {},
@@ -1044,6 +1083,8 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
+            Fields::HoldDamage { category, descriptor } => Self::HoldDamage { category, descriptor },
             Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,

@@ -306,6 +306,7 @@ pub enum DefenseKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AbilityStat {
+    HoldDamageIncrement,
     Dice,
     FlatBonus,
     CheckBonus,
@@ -409,6 +410,7 @@ pub enum Selector {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModifierOp {
+    Locomotion { value: crate::locomotion::LocomotionValue },
     Add {
         stat: Stat,
         value: i64,
@@ -443,6 +445,7 @@ impl<'de> Deserialize<'de> for ModifierOp {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Locomotion { value: crate::locomotion::LocomotionValue },
             Add {
                 stat: Stat,
                 value: i64,
@@ -471,6 +474,7 @@ impl<'de> Deserialize<'de> for ModifierOp {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Locomotion { value } => Self::Locomotion { value },
             Fields::Add { stat, value } => Self::Add { stat, value },
             Fields::Set { stat, value } => Self::Set { stat, value },
             Fields::Flag { flag } => Self::Flag { flag },
@@ -873,6 +877,13 @@ pub enum EffectRecipient {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    ApplyLinkedHold {
+        policy: crate::linked_hold::HoldPolicy,
+    },
+    HoldDamage {
+        category: crate::combat::DamageType,
+        descriptor: Option<crate::content_ids::DescriptorId>,
+    },
     DrainLatestHitDie,
     RestoreHitDie,
     StepSelfOneCell,
@@ -932,6 +943,13 @@ impl<'de> Deserialize<'de> for Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            ApplyLinkedHold {
+        policy: crate::linked_hold::HoldPolicy,
+    },
+    HoldDamage {
+        category: crate::combat::DamageType,
+        descriptor: Option<crate::content_ids::DescriptorId>,
+    },
             DrainLatestHitDie {},
             RestoreHitDie {},
             StepSelfOneCell {},
@@ -977,6 +995,8 @@ impl<'de> Deserialize<'de> for Effect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
+            Fields::HoldDamage { category, descriptor } => Self::HoldDamage { category, descriptor },
             Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
@@ -1688,6 +1708,10 @@ impl Ruleset {
         )?;
         for d in &mut document.abilities {
             bound(d.spatial_shape_valid(), "ability_spatial_shape")?;
+            if let StrikeSource::Authored { strikes } = &d.strikes {
+                bound(!strikes.iter().any(|strike| strike.on_success.iter().any(|effect| matches!(effect, Effect::HoldDamage { .. })))
+                    || (d.reach == Reach::Melee && d.interaction == Interaction::HostileToTarget), "hold_damage_melee")?;
+            }
             if let TimingSource::SelectedWeaponAdjusted {
                 preparation,
                 recovery,
@@ -1806,7 +1830,8 @@ impl Ruleset {
                             | ModifierOp::Immunity { .. }
                             | ModifierOp::Reduction { .. }
                             | ModifierOp::TalentReduction { .. }
-                            | ModifierOp::GrantAbility { .. } => None,
+                            | ModifierOp::GrantAbility { .. }
+                            | ModifierOp::Locomotion { .. } => None,
                         })
                         .collect(),
                 )
@@ -2041,7 +2066,7 @@ impl References<'_> {
                 }
                 ModifierOp::Immunity { selector } => self.selector(selector, pool)?,
                 ModifierOp::Reduction { selector, .. } => self.selector(selector, pool)?,
-                ModifierOp::TalentReduction { .. } => {}
+                ModifierOp::TalentReduction { .. } | ModifierOp::Locomotion { .. } => {}
                 ModifierOp::GrantAbility { ability } => {
                     reference(self.abilities, ability, "ability")?;
                     ability.intern(pool);
@@ -2132,6 +2157,17 @@ impl References<'_> {
         )?;
         for value in values {
             match value {
+                Effect::ApplyLinkedHold { policy } => {
+                    bound(policy.valid(), "hold_policy")?;
+                    reference(self.flags, &policy.sustaining, "flag")?;
+                    policy.sustaining.intern(pool);
+                }
+                Effect::HoldDamage { descriptor, .. } => {
+                    if let Some(id) = descriptor {
+                        reference(self.descriptors, id, "descriptor")?;
+                        id.intern(pool);
+                    }
+                }
                 Effect::StepSelfOneCell | Effect::PushTargetOneCell { .. } => {}
                 Effect::Damage {
                     damage: DamageExpr::SelectedWeapon { impact_bonus },
@@ -2266,7 +2302,9 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
             ModifierOp::Reduction { amount, .. } | ModifierOp::TalentReduction { amount, .. } => {
                 bound(i64::from(*amount) <= crate::limits::NUMERIC, "reduction")?
             }
-            ModifierOp::Flag { .. }
+            ModifierOp::Locomotion { value: crate::locomotion::LocomotionValue::Erratic { chance: Some(chance) } } => bound(chance.valid(), "movement_chance")?,
+            ModifierOp::Locomotion { .. }
+            | ModifierOp::Flag { .. }
             | ModifierOp::Immunity { .. }
             | ModifierOp::GrantAbility { .. } => {}
         }
@@ -2290,7 +2328,7 @@ fn valid_modifier_value(stat: &Stat, value: i64) -> Result<(), RulesetError> {
         Stat::HealthRecoveryResetPercent => (-100, 100),
         Stat::Ability { stat, .. } | Stat::AbilityTag { stat, .. } => match stat {
             AbilityStat::Dice => (0, i64::from(crate::limits::DICE - 1)),
-            AbilityStat::Duration => (0, crate::limits::NUMERIC),
+            AbilityStat::Duration | AbilityStat::HoldDamageIncrement => (0, crate::limits::NUMERIC),
             AbilityStat::FlatBonus
             | AbilityStat::CheckBonus
             | AbilityStat::CheckEdge
@@ -2659,6 +2697,8 @@ impl Effect {
             }
         };
         match self {
+            Self::ApplyLinkedHold { policy } => policy.valid(),
+            Self::HoldDamage { .. } => true,
             Self::StepSelfOneCell
             | Self::PushTargetOneCell { .. }
             | Self::DrainLatestHitDie
@@ -2987,8 +3027,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v39\"",
-                "id = \"interactions-v39\"\nunknown = true"
+                "id = \"interactions-v40\"",
+                "id = \"interactions-v40\"\nunknown = true"
             ))
             .is_err()
         );

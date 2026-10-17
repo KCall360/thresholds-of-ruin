@@ -95,6 +95,9 @@ pub struct PinWork {
     pub actors: usize,
     /// Active actors whose reach and view were looked up.
     pub reaches: usize,
+    pub hold_owners: usize,
+    pub hold_references: usize,
+    pub hold_regions: usize,
 }
 
 impl TransitionReport {
@@ -441,7 +444,7 @@ impl RegionRecord {
             && self
                 .actors
                 .values()
-                .all(|a| a.location.region == region && a.body.valid() && a.motion.valid())
+                .all(|a| a.location.region == region && a.body.valid() && a.motion.valid() && a.holds.valid_shape())
             && self.stamps.keys().eq(self.actors.keys())
             && self.actors.iter().all(|(id, actor)| {
                 self.stamps
@@ -558,6 +561,8 @@ struct PinCache {
     /// An active actor's reach and the regions its view reads.
     reach: BTreeMap<ActorId, (BTreeSet<RegionId>, Vec<RegionId>)>,
     linked: BTreeMap<RegionId, BTreeSet<RegionId>>,
+    hold_owners: BTreeMap<ActorId, Vec<ActorId>>,
+    hold_regions: BTreeMap<RegionId, Vec<ActorId>>,
 }
 
 /// Axis steps covering movement (a diagonal is two), melee (up to three)
@@ -757,6 +762,9 @@ impl Game {
     fn thaw_actor(&mut self, id: ActorId) -> Result<(), GameError> {
         self.settle_actor_time(id)?;
         self.resolve_frozen_recovery_context(id)?;
+        if let Some(horizon) = self.actors.get(&id).and_then(|actor| actor.holds.horizon()) {
+            self.tick.checked_add(horizon).ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+        }
         if let Some(horizon) = self
             .actors
             .get(&id)
@@ -1130,13 +1138,29 @@ impl Game {
         // artifact source. Feeding the combined set back through floor closure
         // would prepare every source/dependency floor on the next iteration.
         let mut t = self.settle_pins(proposed, cache, can_prepare, true);
-        let Some(source) = self.retrieval_source_region() else {
-            return t;
-        };
-        if !t.loaded.insert(source) {
-            return t;
+        if let Some(source) = self.retrieval_source_region() {
+            t.loaded.insert(source);
         }
-        self.settle_pins(&t, cache, can_prepare, false)
+        loop {
+            let before = (t.active.len(), t.loaded.len());
+            let regions: Vec<_> = t.loaded.iter().copied().collect();
+            for region in regions {
+                let owners = cache.hold_regions.entry(region).or_insert_with(|| {
+                    self.actors.held_owners_in(region).collect()
+                }).clone();
+                for owner in owners {
+                    let peers = cache.hold_owners.entry(owner).or_insert_with(|| {
+                        self.actors[&owner].holds.peers().collect()
+                    });
+                    for peer in peers.iter().filter_map(|peer| self.actor_region(*peer)) {
+                        if t.active.contains(&region) { t.active.insert(peer); }
+                        t.loaded.insert(peer);
+                    }
+                }
+            }
+            t = self.settle_pins(&t, cache, can_prepare, false);
+            if before == (t.active.len(), t.loaded.len()) { return t; }
+        }
     }
 
     fn settle_pins(
@@ -1200,6 +1224,9 @@ impl Game {
         let work = PinWork {
             actors: cache.live.len(),
             reaches: cache.reach.len(),
+            hold_owners: cache.hold_owners.len(),
+            hold_references: cache.hold_owners.values().map(Vec::len).sum(),
+            hold_regions: cache.hold_regions.values().filter(|owners| !owners.is_empty()).count(),
         };
         (t, work)
     }
@@ -1262,6 +1289,9 @@ impl Game {
         let work = PinWork {
             actors: cache.live.len(),
             reaches: cache.reach.len(),
+            hold_owners: cache.hold_owners.len(),
+            hold_references: cache.hold_owners.values().map(Vec::len).sum(),
+            hold_regions: cache.hold_regions.values().filter(|owners| !owners.is_empty()).count(),
         };
         // Settling proved every pin holds for these sets in this state, so
         // if they're the current sets there's nothing to apply or check.
@@ -1768,6 +1798,7 @@ impl Game {
             // thaw/reconciliation could normalize a malformed saved queue.
             || !self.intentions_valid()
             || !self.physics_valid()
+            || !self.loaded_holds_valid()
         {
             return Err(TransitionError::InvalidRecord(first));
         }
@@ -1807,7 +1838,8 @@ impl Game {
             self.map_validation
                 .detached_matches(id, &record.explored_maps)
         });
-        if !record.valid_contents_with_map_trust(region, self.tick, trusted_maps)
+        if record.actors.iter().any(|(id, actor)| !self.hold_actor_shape_valid(*id, actor))
+            || !record.valid_contents_with_map_trust(region, self.tick, trusted_maps)
             || !record.matches_directory(region, &self.lifecycle.directory)
         {
             return Err(invalid);
@@ -1885,24 +1917,26 @@ impl Game {
             .active_fall_owners()
             .filter_map(|id| self.actors[&id].motion.active_fall.map(|fall| fall.episode))
             .collect();
-        l.detached.iter().all(|(region, id)| {
-            let Some(record) = records.get(*id) else {
-                return false;
-            };
+        let mut retained = Vec::new();
+        for (region, id) in l.detached.iter() {
+            let Some(record) = records.get(*id) else { return false; };
             expected.insert(*region, record.identities());
-            record.valid_contents(*region, self.tick)
-                && record
-                    .explored_maps
-                    .values()
-                    .all(|map| map.checkpoint_valid(&self.world))
-                && record.actors.values().all(|actor| {
-                    actor.motion.active_fall.is_none_or(|fall| {
-                        fall.owner.0 < self.next_actor_id
-                            && fall.episode < self.physics.next_fall_episode
-                            && episodes.insert(fall.episode)
-                    })
-                })
-        }) && {
+            if !record.valid_contents(*region, self.tick)
+                || !record.explored_maps.values().all(|map| map.checkpoint_valid(&self.world))
+                || !record.actors.values().all(|actor| actor.motion.active_fall.is_none_or(|fall| {
+                    fall.owner.0 < self.next_actor_id
+                        && fall.episode < self.physics.next_fall_episode
+                        && episodes.insert(fall.episode)
+                })) { return false; }
+            retained.push(record);
+        }
+        let mut actors: BTreeMap<_, _> = self.actors.iter().map(|(id, actor)| (*id, actor)).collect();
+        for record in &retained {
+            for (id, actor) in &record.actors {
+                if actors.insert(*id, actor).is_some() { return false; }
+            }
+        }
+        self.all_hold_records_valid(&actors) && {
             // Unbuilt regions' identities are declared, not recorded.
             let mut directory = (*l.directory).clone();
             for region in l.unbuilt.iter() {

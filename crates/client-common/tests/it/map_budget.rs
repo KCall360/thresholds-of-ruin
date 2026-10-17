@@ -28,7 +28,7 @@ fn snapshot(revision: u64, shift: i32) -> Snapshot {
             "actor":"1","self_target":ActorTarget::from_digest([1;32]),"tick":revision.to_string(),
             "position":{"x":0,"y":0,"z":0},"places":[],
             "visible_cells":visible_cells,
-            "ground_items":[],"inventory":[],"visible_actors":[],"ready":true
+            "ground_items":[],"inventory":[],"linked_holds":[],"visible_actors":[],"ready":true
         }}
     }))
     .unwrap()

@@ -621,6 +621,7 @@ fn ordered_strikes_legitimate_large_snapshot_keeps_its_independent_32_mib_assemb
         observation: Observation {
             actor: ActorId(1),
             self_target: ActorTarget::from_digest([1; 32]),
+            linked_holds: vec![],
             tick: 1,
             position: Position { x: 0, y: 0, z: 0 },
             ready: true,

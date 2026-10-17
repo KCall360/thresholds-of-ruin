@@ -359,7 +359,7 @@ fn state() -> StateView {
         "ground_items":[
             {"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
             {"supply_reachable":false,"reachable":false,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
-        ],"inventory":[],"visible_actors":[],
+        ],"inventory":[],"linked_holds":[],"visible_actors":[],
         "combat":{"own_stats":tor_client_common::test_support::stats(),"public_plan":null,"hp":"50","max_hp":"50","sequence":null,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
             "victory":false,"dead":false,"terminal":false}}})).unwrap()
@@ -3426,4 +3426,136 @@ fn a_cold_hydrated_doorway_is_descriptive_and_current_sight_wins() {
         .iter()
         .any(|way| matches!(way.kind, place::Opening::RememberedDoor { .. })));
     assert!(!tor_client_text::adventure::describe(&seen).contains("oak door"));
+}
+
+#[tokio::test]
+async fn adventure_escape_chooses_exact_hold_before_the_flee_idiom() {
+    let first = HoldTarget::from_digest([1; 32]);
+    let second = HoldTarget::from_digest([2; 32]);
+    let mut initial = state();
+    initial.observation.linked_holds = vec![
+        LinkedHold {
+            target: first,
+            holder: None,
+        },
+        LinkedHold {
+            target: second,
+            holder: None,
+        },
+        LinkedHold {
+            target: HoldTarget::from_digest([3; 32]),
+            holder: None,
+        },
+    ];
+    let mut link = Scripted::new(initial, move |request, now| {
+        assert!(is_act(request, &Action::Escape { hold: second }));
+        let mut next = now.clone();
+        next.observation.tick += 1;
+        next.observation
+            .linked_holds
+            .retain(|offer| offer.target != second);
+        next.observation.combat.as_mut().unwrap().events = vec![CombatEventView::EscapeResolved {
+            hold: second,
+            success: true,
+        }];
+        vec![
+            Frame::Ack,
+            Frame::View(next, Some(Event::EscapeStarted { hold: second })),
+        ]
+    });
+    let mut engine = Engine::default();
+    let ambiguous = play(&mut link, &mut engine, "escape").await;
+    assert!(ambiguous.contains("Choose a hold"), "{ambiguous}");
+    assert!(link.sent.is_empty());
+    let done = play(&mut link, &mut engine, "escape hold 2").await;
+    assert!(
+        done.contains("You begin trying to escape a hold."),
+        "{done}"
+    );
+    assert!(done.contains("You escape one hold."), "{done}");
+    assert_eq!(link.sent.len(), 1);
+    let again = play(&mut link, &mut engine, "again").await;
+    assert!(again.contains("no longer available"), "{again}");
+    assert_eq!(
+        link.sent.len(),
+        1,
+        "again must not rebind index 2 or select the remaining hold"
+    );
+}
+
+#[tokio::test]
+async fn adventure_bare_escape_uses_the_sole_hold_and_respects_control() {
+    let hold = HoldTarget::from_digest([1; 32]);
+    let mut initial = state();
+    initial.observation.linked_holds = vec![LinkedHold {
+        target: hold,
+        holder: None,
+    }];
+    let mut link = Scripted::new(initial, move |request, now| {
+        assert!(is_act(request, &Action::Escape { hold }));
+        let mut next = now.clone();
+        next.observation.tick += 1;
+        next.observation.combat.as_mut().unwrap().events = vec![CombatEventView::EscapeResolved {
+            hold,
+            success: false,
+        }];
+        vec![
+            Frame::Ack,
+            Frame::View(next, Some(Event::EscapeStarted { hold })),
+        ]
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "escape").await;
+    assert!(text.contains("You fail to escape the hold."), "{text}");
+    assert_eq!(link.sent.len(), 1);
+    let mut snapshot = link.client.snapshot();
+    snapshot.has_control = false;
+    link.client = ClientState::from_snapshot(snapshot).unwrap();
+    let text = play(&mut link, &mut engine, "escape").await;
+    assert!(text.contains("observing"), "{text}");
+    assert_eq!(link.sent.len(), 1);
+}
+
+#[tokio::test]
+async fn adventure_chained_escape_repetition_keeps_the_original_hold_token() {
+    let first = HoldTarget::from_digest([1; 32]);
+    let second = HoldTarget::from_digest([2; 32]);
+    let mut initial = state();
+    initial.observation.linked_holds = vec![
+        LinkedHold {
+            target: first,
+            holder: None,
+        },
+        LinkedHold {
+            target: second,
+            holder: None,
+        },
+    ];
+    let mut link = Scripted::new(initial, move |request, now| {
+        assert!(is_act(request, &Action::Escape { hold: first }));
+        let mut next = now.clone();
+        next.observation.tick += 1;
+        next.observation
+            .linked_holds
+            .retain(|offer| offer.target != first);
+        next.observation.combat.as_mut().unwrap().events = vec![CombatEventView::EscapeResolved {
+            hold: first,
+            success: true,
+        }];
+        vec![
+            Frame::Ack,
+            Frame::View(next, Some(Event::EscapeStarted { hold: first })),
+        ]
+    });
+    let mut engine = Engine::default();
+    let done = play(&mut link, &mut engine, "escape hold 1 then look").await;
+    assert!(done.contains("You escape one hold."), "{done}");
+    assert_eq!(link.sent.len(), 1);
+    let again = play(&mut link, &mut engine, "again").await;
+    assert!(again.contains("no longer available"), "{again}");
+    assert_eq!(
+        link.sent.len(),
+        1,
+        "the remaining hold moved to row 1 but was never selected"
+    );
 }

@@ -3,6 +3,48 @@ use crate::combat::{Preparation, SequenceView};
 use crate::{abilities::Plan, GameError, ScheduleError};
 use serde::{Deserialize, Serialize};
 
+/// Historical identity of the relationship owned by one paid sequence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct HoldBinding {
+    pub id: crate::linked_hold::HoldId,
+    pub created_at: Option<HoldCreationSite>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct HoldCreationSite {
+    pub strike: u16,
+    pub rider: Option<u16>,
+    pub primary_success: bool,
+}
+impl<'de> Deserialize<'de> for HoldCreationSite {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            strike: u16,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            rider: Option<u16>,
+            primary_success: bool,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        if usize::from(f.strike) >= crate::limits::STRIKES || f.rider.is_some_and(|v| usize::from(v) >= crate::limits::RIDERS_PER_STRIKE) {
+            return Err(serde::de::Error::custom("invalid hold creation site"));
+        }
+        Ok(Self { strike: f.strike, rider: f.rider, primary_success: f.primary_success })
+    }
+}
+impl<'de> Deserialize<'de> for HoldBinding {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            id: crate::linked_hold::HoldId,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            created_at: Option<HoldCreationSite>,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        Ok(Self { id: f.id, created_at: f.created_at })
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PreparationProgress {
@@ -10,7 +52,10 @@ pub enum PreparationProgress {
         next_strike: u16,
         successful_primaries: u16,
         attempted_riders: [u64; 2],
+        #[serde(deserialize_with = "crate::bounded::required_option")]
+        linked_hold: Option<HoldBinding>,
     },
+    Escape {},
     Item {},
     Respec {},
 }
@@ -23,7 +68,10 @@ impl<'de> Deserialize<'de> for PreparationProgress {
                 next_strike: u16,
                 successful_primaries: u16,
                 attempted_riders: [u64; 2],
+        #[serde(deserialize_with = "crate::bounded::required_option")]
+        linked_hold: Option<HoldBinding>,
             },
+            Escape {},
             Item {},
             Respec {},
         }
@@ -32,6 +80,7 @@ impl<'de> Deserialize<'de> for PreparationProgress {
                 next_strike,
                 successful_primaries,
                 attempted_riders,
+                linked_hold,
             } => {
                 if usize::from(next_strike) > crate::limits::STRIKES
                     || u32::from(successful_primaries) >> next_strike != 0
@@ -42,22 +91,57 @@ impl<'de> Deserialize<'de> for PreparationProgress {
                     next_strike,
                     successful_primaries,
                     attempted_riders,
+                    linked_hold,
                 }
             }
+            Fields::Escape {} => Self::Escape {},
             Fields::Item {} => Self::Item {},
             Fields::Respec {} => Self::Respec {},
         })
     }
 }
 impl PreparationProgress {
+    pub(crate) fn hold_binding(self) -> Option<HoldBinding> {
+        match self { Self::Ability { linked_hold, .. } => linked_hold, _ => None }
+    }
+    pub(crate) fn record_created_hold(&mut self, id: Option<crate::linked_hold::HoldId>, site: HoldCreationSite) {
+        if let (Self::Ability { linked_hold, .. }, Some(id)) = (self, id) {
+            if linked_hold.is_none() { *linked_hold = Some(HoldBinding { id, created_at: Some(site) }); }
+        }
+    }
+    fn hold_binding_valid(self, plan: &crate::abilities::AbilityPlan) -> bool {
+        let Self::Ability { next_strike, successful_primaries, attempted_riders, linked_hold, .. } = self else { return false; };
+        if let Some(initial) = plan.initial_hold {
+            return linked_hold == Some(HoldBinding { id: initial, created_at: None });
+        }
+        let Some(binding) = linked_hold else { return true; };
+        let Some(site) = binding.created_at else { return false; };
+        if site.strike >= next_strike { return false; }
+        let Some(strike) = plan.strikes.get(usize::from(site.strike)) else { return false; };
+        if strike.check.is_none() && !site.primary_success { return false; }
+        if strike.qualifying_primary_check() && ((successful_primaries & (1 << site.strike) != 0) != site.primary_success) { return false; }
+        let effects = if let Some(ordinal) = site.rider {
+            let Some(rider) = strike.riders.get(usize::from(ordinal)) else { return false; };
+            if (rider.trigger == crate::rules::RiderTrigger::Success) != site.primary_success { return false; }
+            if rider.condition.is_some() {
+                let Some(slot) = plan.conditional_rider_slot(usize::from(site.strike), usize::from(ordinal)) else { return false; };
+                if attempted_riders[slot / 64] & (1 << (slot % 64)) == 0 { return false; }
+            }
+            &rider.effects
+        } else if site.primary_success { &strike.on_success } else { &strike.on_failure };
+        effects.iter().any(|effect| matches!(effect, crate::abilities::PlannedEffect::ApplyLinkedHold { .. }))
+    }
     pub(crate) fn new(plan: &Plan) -> Self {
-        if matches!(plan, Plan::Respec(_)) {
+        if matches!(plan, Plan::Escape(_)) {
+            Self::Escape {}
+        } else if matches!(plan, Plan::Respec(_)) {
             Self::Respec {}
         } else if plan.as_ability().is_some() {
             Self::Ability {
                 next_strike: 0,
                 successful_primaries: 0,
                 attempted_riders: [0; 2],
+                linked_hold: plan.as_ability().and_then(|plan| plan.initial_hold).map(|id| HoldBinding { id, created_at: None }),
             }
         } else {
             Self::Item {}
@@ -70,10 +154,12 @@ impl PreparationProgress {
                 next_strike,
                 successful_primaries,
                 attempted_riders,
+                linked_hold,
             } => Self::Ability {
                 next_strike: next_strike + 1,
                 successful_primaries,
                 attempted_riders,
+                linked_hold,
             },
             other => other,
         }
@@ -174,7 +260,7 @@ impl PreparationProgress {
         let Some(eligible) = self.eligible_riders(plan) else {
             return false;
         };
-        eligible.iter().enumerate().all(|(slot, site)| {
+        self.hold_binding_valid(plan) && eligible.iter().enumerate().all(|(slot, site)| {
             let attempted = attempted_riders[slot / 64] & (1 << (slot % 64)) != 0;
             match site {
                 None => !attempted,
@@ -206,7 +292,7 @@ impl Preparation {
     pub(crate) fn next_strike(&self) -> Option<usize> {
         match self.progress {
             PreparationProgress::Ability { next_strike, .. } => Some(usize::from(next_strike)),
-            PreparationProgress::Item {} | PreparationProgress::Respec {} => None,
+            PreparationProgress::Escape {} | PreparationProgress::Item {} | PreparationProgress::Respec {} => None,
         }
     }
     pub(crate) fn has_prefix(&self) -> bool {
@@ -258,7 +344,8 @@ impl Preparation {
         };
         matches!(
             (&self.plan, self.progress),
-            (Plan::Respec(_), PreparationProgress::Respec {})
+            (Plan::Escape(_), PreparationProgress::Escape {})
+                | (Plan::Respec(_), PreparationProgress::Respec {})
                 | (Plan::Ability(_), PreparationProgress::Ability { .. })
                 | (
                     Plan::Equip { .. }

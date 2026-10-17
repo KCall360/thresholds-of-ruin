@@ -986,7 +986,7 @@ fn state() -> ClientState {
     ClientState::from_snapshot(serde_json::from_value(serde_json::json!({
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"test","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"3","observation":{
+        "state":{"wizard_game":false,"revision":"3","observation":{"linked_holds":[],
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),

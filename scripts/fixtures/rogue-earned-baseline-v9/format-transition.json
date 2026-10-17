@@ -1,0 +1,26 @@
+{
+  "current_rules_dependencies": {
+    "interactions-v40": "d162e6f2bd267b2f1fe65135a28f45d0f1b6048cae34abcaed3226fe8937c96c"
+  },
+  "current_ruleset": "interactions-v40",
+  "current_scenario_format": 18,
+  "current_snapshot": "rogue-earned-baseline-v9",
+  "format": 1,
+  "only_transformation": "Change only package/scenario.toml format 17 to 18 and package/rules.toml bundled import interactions-v39 to interactions-v40. All other authored package input bytes remain unchanged. The shared rules add locomotion, linked holds and Clutch/Tightening Hold with an attack-tag increment limited to dedicated HoldDamage primaries; this is a new experiment input, not identical outcomes or a requalified pilot. This receipt records source bytes only; current compiler validation, certificates and route qualification remain separate requirements.",
+  "previous_package_inputs": {
+    "catalog/actors.toml": "9aa3f2ae65a5b5370ca624a89a0ba2fad02aa94b244655c2c9314fcb57132abd",
+    "catalog/creatures.toml": "78381188c7c320f0744db68a440febe3444f96776eda7e45a4496efa958f835c",
+    "catalog/items.toml": "f3c2bf4a9e6ef56725dfaf6da486db0095f70eede4eb8d7e28ee84b152c6ec7c",
+    "rules.toml": "a74b845ed77ab6e9bc6d7d1d773e6f7b93efe1258fea720dafc381917ca7be9a",
+    "scenario.toml": "8e2849698b11c22fff31a39e5210273d9ed75b89af1b7c1758f53efb295d4744"
+  },
+  "previous_reference": "8d09063840c51aa4189b146c287829102856b279:scenarios/rogue-exploration (current-format preactivation E/S source; certificates regenerated); current scenario 15 format-only adaptation; transition-sha256:24eb0c424f1e33d370bcb758560f950556f71671234da145327ecf829317da4c; current wide-scalar rules identity adaptation; transition-sha256:ca89c547beda7a895b46937516700d4871f017ae00cce2ad4e51cba9770f82d9; source-only sequence-rider format-forward adaptation (compiler and route qualification pending); transition-sha256:c2b887c926e4821307cf95e0ddadb9156ac36959a891623672b5187ce2750f4c; source-only complete-idle AI scenario-format adaptation (compiler and route qualification pending); transition-sha256:57338c27cdc8f70f2f0c889f19696e97011a83c29ee56eb8844d22de9cd12119",
+  "previous_rules_dependencies": {
+    "interactions-v39": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
+  },
+  "previous_ruleset": "interactions-v39",
+  "previous_scenario_format": 17,
+  "previous_snapshot": "rogue-earned-baseline-v8",
+  "previous_source_sha256": "0bebeed84321c6b44ea020aed72c4724da38d4302f3a882cb294110d9101b33a",
+  "retained_fixture_reference": "af8ed58c0c0e82b7271a20a08c10537ec8d91ad2:scripts/fixtures/rogue-earned-baseline-v8"
+}

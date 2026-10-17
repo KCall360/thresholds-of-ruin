@@ -42,7 +42,7 @@ fn state() -> StateView {
         "inventory":[
             {"known_supply":null,"quantity":"1","class":"weapon","appearance":"item","identified":true,"id":super::item_target(4),"name":"iron greatsword","description":""}
         ],
-        "visible_actors":[
+        "linked_holds":[],"visible_actors":[
             {"id":super::actor_target(2),"name":"goblin","description":"","position":{"x":3,"y":0,"z":0}}
         ],
         "combat":{"own_stats":stats,"public_plan":null,"hp":"20","max_hp":"20","sequence":null,"preparation_remaining":null,"preparation_active":false,

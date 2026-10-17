@@ -1,5 +1,5 @@
 //! Newly reconstructed source-qualified roster compilation and record coverage.
-use std::path::Path;
+use std::{num::NonZeroU64, path::Path};
 use tor_server::{
     creature_authoring::actor_health_seed,
     scenario_package::{resolve_rules_source, resolve_source},
@@ -8,7 +8,10 @@ use tor_simulation::{
     content_ids::{AbilityId, SpeciesId, TalentId},
     creatures::record::BuildRecord,
     rules::Ruleset,
+    combat::CombatEvent,
+    Action, ActorId, CreatureIdentity, Game,
 };
+use tor_world::{Extent, Location, Position, Region, RegionId, World};
 
 pub(super) fn catalog() -> (
     tor_server::creature_authoring::CompiledCatalog,
@@ -26,6 +29,10 @@ pub(super) fn catalog() -> (
 fn rogue_roster_actual_hd_seeds_choices_and_natural_rows_round_trip_without_source() {
     let (catalog, manifest) = catalog();
     for (name, hd, strikes) in [
+        ("bat", 1, 1),
+        ("kestrel", 1, 1),
+        ("venus_flytrap", 8, 1),
+        ("griffin", 13, 2),
         ("emu", 1, 1),
         ("snake", 1, 1),
         ("rattlesnake", 2, 1),
@@ -733,19 +740,28 @@ fn rogue_jabberwock_signature_imports_natural_rows_and_one_shared_conditional_ri
 
 #[test]
 fn rogue_jabberwock_growth_preserves_15_owned_rows_and_refuses_257_hd_at_268() {
+    assert_roster_growth("jabberwock", 15, 267);
+}
+
+#[test]
+fn rogue_griffin_growth_preserves_13_owned_rows_and_refuses_257_hd_at_270() {
+    assert_roster_growth("griffin", 13, 269);
+}
+
+fn assert_roster_growth(name: &str, owned: usize, last_depth: u32) {
     use tor_simulation::{
         creatures::RestorationPolicy,
         prepared_spawn::{PopulationCapacity, PreparedSpawnError},
         progression::{HdLedger, HdSource},
     };
     let (catalog, manifest) = catalog();
-    let spec = manifest.archetypes["rogue.jabberwock"]
+    let spec = manifest.archetypes[&format!("rogue.{name}")]
         .creature
         .as_ref()
         .unwrap();
     let seed = actor_health_seed(42, 3);
     let base = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
-    for (depth, expected) in [(26u32, 15), (27, 16), (267, 256)] {
+    for (depth, expected) in [(26u32, owned), (27, owned + 1), (last_depth, 256)] {
         let grown = base
             .instantiate_seeded_racial(seed, u64::from(depth.saturating_sub(26)))
             .unwrap();
@@ -753,13 +769,13 @@ fn rogue_jabberwock_growth_preserves_15_owned_rows_and_refuses_257_hd_at_268() {
             grown.ledger(),
             &HdLedger::seeded(vec![HdSource::Racial; expected], seed).unwrap()
         );
-        assert_eq!(&grown.ledger().entries()[..15], base.ledger().entries());
-        assert_eq!(&grown.choices()[..15], base.choices());
-        assert!(grown.choices()[15..]
+        assert_eq!(&grown.ledger().entries()[..owned], base.ledger().entries());
+        assert_eq!(&grown.choices()[..owned], base.choices());
+        assert!(grown.choices()[owned..]
             .iter()
             .all(|choice| *choice == Default::default()));
         let RestorationPolicy::Authored(plan) = grown.restoration_policy() else {
-            panic!("authored J growth restoration")
+            panic!("authored {name} growth restoration")
         };
         assert_eq!(plan.len(), expected);
         for (ordinal, row) in plan.iter().enumerate() {
@@ -771,10 +787,308 @@ fn rogue_jabberwock_growth_preserves_15_owned_rows_and_refuses_257_hd_at_268() {
         assert_eq!(restored.restore(catalog.content().clone()).unwrap(), grown);
     }
     assert_eq!(
-        base.instantiate_seeded_racial(seed, 242),
+        base.instantiate_seeded_racial(seed, 257 - owned as u64),
         Err(PreparedSpawnError::Capacity(PopulationCapacity::HitDice {
             requested: 257,
             maximum: 256
         }))
     );
+}
+
+fn completed(game: &mut Game, actor: ActorId, action: Action) -> Vec<CombatEvent> {
+    let mut events = Vec::new();
+    for _ in 0..32 {
+        if game.next_actor() == Some(actor) {
+            break;
+        }
+        game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
+        events.extend_from_slice(game.combat_events());
+    }
+    assert_eq!(game.next_actor(), Some(actor));
+    game.act(actor, action).unwrap();
+    events.extend_from_slice(game.combat_events());
+    for _ in 0..32 {
+        if game.preparation(actor).is_none() && game.next_actor() == Some(actor) {
+            return events;
+        }
+        game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
+        events.extend_from_slice(game.combat_events());
+    }
+    panic!("ordinary fixture action must settle within its bounded turn budget");
+}
+
+fn production_combat_fixture(name: &str) -> (Game, ActorId, ActorId) {
+    let (original, manifest) = catalog();
+    let mut authored = manifest.creatures.clone();
+    // Only the diagnostic victim is adjusted: bounded contact defense, enough
+    // health, and a guaranteed single opposed Escape. The attacking production
+    // recipe, racial rows, purchases, body, natural checks, and rules stay intact.
+    authored.species.get_mut("rogue.human").unwrap().modifiers.extend(
+        serde_json::from_value::<Vec<tor_server::creature_authoring::Modifier>>(serde_json::json!([
+            {"scope":"always","op":{"kind":"add","stat":{"kind":"attribute","attribute":"strength"},"value":100}},
+            {"scope":"always","op":{"kind":"set","stat":{"kind":"defense","defense":"physical"},"value":0}},
+            {"scope":"always","op":{"kind":"add","stat":{"kind":"health"},"value":200}}
+        ])).unwrap(),
+    );
+    let catalog = authored
+        .compile(original.content().rules().clone())
+        .unwrap();
+    let species_id = SpeciesId::new(format!("rogue.{name}")).unwrap();
+    assert_eq!(
+        catalog.content().catalog().species[&species_id],
+        original.content().catalog().species[&species_id]
+    );
+    let recipe = &manifest.archetypes[&format!("rogue.{name}")];
+    let spec = recipe.creature.as_ref().unwrap();
+    let mut game = Game::new(
+        World::new(
+            vec![Region {
+                id: RegionId(1),
+                name: "Production combat witness".into(),
+                bounds: Extent::new(7, 5, 3).unwrap(),
+            }],
+            vec![],
+        )
+        .unwrap(),
+        42,
+        catalog.content().clone(),
+    );
+    let at = |x| Location {
+        region: RegionId(1),
+        position: Position { x, y: 2, z: 0 },
+    };
+    let holder = game
+        .spawn_actor(at(2), NonZeroU64::new(recipe.turn_ticks.unwrap()).unwrap())
+        .unwrap();
+    game.configure_creature(
+        holder,
+        CreatureIdentity {
+            name: spec.name.clone(),
+            faction: spec.faction.clone(),
+        },
+        catalog
+            .prepare(spec)
+            .unwrap()
+            .instantiate(actor_health_seed(42, holder.0))
+            .unwrap(),
+    )
+    .unwrap();
+    game.set_body(holder, recipe.body.clone().unwrap().into())
+        .unwrap();
+    let subject_spec = manifest.characters[0].creature.as_ref().unwrap();
+    let subject = game
+        .spawn_actor(at(3), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    game.configure_creature(
+        subject,
+        CreatureIdentity {
+            name: "Combat subject".into(),
+            faction: "delvers".into(),
+        },
+        catalog
+            .prepare(subject_spec)
+            .unwrap()
+            .instantiate(actor_health_seed(42, subject.0))
+            .unwrap(),
+    )
+    .unwrap();
+    game.set_body(subject, manifest.characters[0].body.clone().unwrap().into())
+        .unwrap();
+    (game, holder, subject)
+}
+
+#[test]
+fn production_flytrap_uses_ordinary_clutch_tightening_and_single_escape() {
+    use tor_simulation::abilities::{AbilityInvocation, ResolvedEffect};
+    use tor_world::Direction;
+    let (mut game, holder, subject) = production_combat_fixture("venus_flytrap");
+    let at = |x| Location { region: RegionId(1), position: Position { x, y: 2, z: 0 } };
+    let before = game.clone();
+    assert!(game.act(holder, Action::Move(Direction::North)).is_err());
+    assert_eq!(game, before, "the real F recipe stays stationary without charging a turn");
+    let clutch = || Action::UseAbility {
+        id: AbilityId::new("clutch").unwrap(),
+        invocation: AbilityInvocation::ActorTarget { target: subject },
+        supplies: Default::default(),
+    };
+    for _ in 0..12 {
+        completed(&mut game, holder, clutch());
+        if !game.linked_holds(subject).is_empty() { break; }
+    }
+    let links = game.linked_holds(subject);
+    assert_eq!(links.len(), 1, "an ordinary production Clutch hit establishes exactly one hold");
+    assert_eq!(links[0].holder, holder);
+    assert_eq!(game.creature(subject).unwrap().health().injury(), 0, "the creating F contact has zero damage");
+    // Later qualifying attacks use the same live relationship regardless of ability ID.
+    let basic_melee = || Action::UseAbility {
+        id: AbilityId::new("basic_melee").unwrap(),
+        invocation: AbilityInvocation::ActorTarget { target: subject },
+        supplies: Default::default(),
+    };
+    let mut tightened = false;
+    for attempt in 1..=12u32 {
+        let events = completed(&mut game, holder, basic_melee());
+        assert_eq!(game.linked_holds(subject), links, "later hits preserve the exact relationship");
+        let damage: u32 = events.iter().filter_map(|event| match event {
+            CombatEvent::Resolved { outcome, .. } if outcome.actor == holder && outcome.target == subject =>
+                Some(outcome.effects.iter().filter_map(|effect| match effect {
+                    ResolvedEffect::Damage { amount } => Some(*amount), _ => None,
+                }).sum::<u32>()),
+            _ => None,
+        }).sum();
+        if damage > 0 {
+            assert_eq!(damage, attempt, "GR2 increments each later primary, including any miss");
+            tightened = true;
+            break;
+        }
+    }
+    assert!(tightened, "the real F natural HoldDamage channel must deal its later GR2 damage");
+    let events = completed(&mut game, subject, Action::Escape { hold: links[0].id });
+    assert_eq!(events.iter().filter(|event| matches!(event,
+        CombatEvent::EscapeResolved { actor, hold, success: true, .. }
+            if *actor == subject && *hold == links[0].id)).count(), 1);
+    assert!(game.linked_holds(subject).is_empty());
+    completed(&mut game, subject, Action::Move(Direction::East));
+    assert_eq!(game.observe(subject).unwrap().location, at(4));
+    assert_eq!(game.observe(holder).unwrap().location, at(2), "attacking and tightening never move F");
+}
+
+#[test]
+fn production_flying_roster_executes_authored_basic_melee_primaries_and_damage() {
+    use tor_simulation::abilities::{AbilityInvocation, ResolvedEffect};
+
+    for (name, primary_count) in [("bat", 1_u16), ("kestrel", 1), ("griffin", 2)] {
+        let (mut game, attacker, subject) = production_combat_fixture(name);
+        let basic = AbilityId::new("basic_melee").unwrap();
+        let expected: Vec<_> = (0..primary_count).collect();
+        let mut damaged = vec![false; usize::from(primary_count)];
+        for _ in 0..12 {
+            let events = completed(
+                &mut game,
+                attacker,
+                Action::UseAbility {
+                    id: basic.clone(),
+                    invocation: AbilityInvocation::ActorTarget { target: subject },
+                    supplies: Default::default(),
+                },
+            );
+            let primaries: Vec<_> = events
+                .iter()
+                .filter_map(|event| match event {
+                    CombatEvent::Resolved { outcome, strike: Some(ordinal) }
+                        if outcome.actor == attacker
+                            && outcome.target == subject
+                            && outcome.ability.as_ref() == Some(&basic) =>
+                    {
+                        Some((*ordinal, outcome))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                primaries.iter().map(|(ordinal, _)| *ordinal).collect::<Vec<_>>(),
+                expected,
+                "{name}: ordinary basic melee executes every authored primary once, in order"
+            );
+            for (ordinal, outcome) in primaries {
+                damaged[usize::from(ordinal)] |= outcome.effects.iter().any(|effect| {
+                    matches!(effect, ResolvedEffect::Damage { amount } if *amount > 0)
+                });
+            }
+            if damaged.iter().all(|damage| *damage) {
+                break;
+            }
+        }
+        assert!(
+            damaged.iter().all(|damage| *damage),
+            "{name}: every authored natural primary eventually deals positive damage"
+        );
+        assert!(game.creature(subject).unwrap().health().injury() > 0, "{name}");
+    }
+}
+
+#[test]
+fn rogue_flytrap_clutch_has_shared_policy_and_tightening_is_owned_at_hd_six() {
+    use tor_simulation::creatures::CreatureState;
+    let (catalog, manifest) = catalog();
+    let spec = manifest.archetypes["rogue.venus_flytrap"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let build = catalog.prepare(spec).unwrap().instantiate(42).unwrap();
+    let clutch = AbilityId::new("clutch").unwrap();
+    let basic = AbilityId::new("basic_melee").unwrap();
+    for ability in [&clutch, &basic] {
+        assert_eq!(
+            build.derive().unwrap().ability_values(ability).hold_damage_increment,
+            1,
+            "{ability}"
+        );
+    }
+    let source =
+        &catalog.content().catalog().species[&SpeciesId::new("rogue.venus_flytrap").unwrap()];
+    let natural = serde_json::to_value(source.melee.strikes()).unwrap();
+    assert_eq!(
+        natural[0]["on_success"],
+        serde_json::json!([{
+            "kind":"hold_damage", "category":"impact", "descriptor":null
+        }])
+    );
+    let ability =
+        serde_json::to_value(catalog.content().rules().ability(&clutch).unwrap()).unwrap();
+    assert_eq!(
+        ability["strikes"],
+        serde_json::json!({
+            "kind":"natural_melee", "additional_riders":[{
+                "trigger":"success", "condition":null, "check":null, "descriptors":[],
+                "effects":[{"kind":"apply_linked_hold", "policy":{
+                    "sustaining":"clutch", "preparation":100, "recovery":100, "protection":400
+                }}]
+            }]
+        })
+    );
+    let mut without_gr2 = spec.clone();
+    without_gr2.hit_dice[5].purchases.clear();
+    let without_gr2 = catalog
+        .prepare(&without_gr2)
+        .unwrap()
+        .instantiate(42)
+        .unwrap();
+    assert!(without_gr2.derive().unwrap().abilities.contains(&clutch));
+    for ability in [&clutch, &basic] {
+        assert_eq!(
+            without_gr2.derive().unwrap().ability_values(ability).hold_damage_increment,
+            0,
+            "{ability}"
+        );
+    }
+    let mut missing_parent = spec.clone();
+    missing_parent.hit_dice[0].purchases.clear();
+    assert!(catalog.prepare(&missing_parent).is_err());
+    let mut ineligible = spec.clone();
+    ineligible.species = "rogue.griffin".into();
+    assert!(catalog.prepare(&ineligible).is_err());
+    let mut state = CreatureState::new(build.clone()).unwrap();
+    for _ in 0..3 {
+        assert_eq!(state.drain_latest_hit_die().unwrap().applied, 1);
+    }
+    assert_eq!(state.build().ledger().total_hd().get(), 5);
+    assert!(state.derived().abilities.contains(&clutch));
+    for ability in [&clutch, &basic] {
+        assert_eq!(
+            state.derived().ability_values(ability).hold_damage_increment,
+            0,
+            "{ability}"
+        );
+    }
+    assert!(state.derived().locomotion.stationary);
+    assert_eq!(state.restore_hit_die().unwrap().applied, 1);
+    assert_eq!(state.build().choices()[5], build.choices()[5]);
+    for ability in [&clutch, &basic] {
+        assert_eq!(
+            state.derived().ability_values(ability).hold_damage_increment,
+            1,
+            "{ability}"
+        );
+    }
 }

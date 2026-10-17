@@ -331,6 +331,22 @@ impl Game {
                 ));
             }
         }
+        // Care and retained work take precedence. Random movement uses only
+        // disclosed legal candidates and the copied actor-owned decision RNG.
+        if retained.is_none() && !self.condition_blocks_action(id, &Action::Move(Direction::North)) {
+            if let Some(chance) = actor.locomotion().erratic.filter(|p| p.numerator > 0) {
+                let candidates: Vec<_> = Direction::HORIZONTAL.into_iter().chain([Direction::Up, Direction::Down]).filter(|direction| {
+                    self.actor_translation(id, *direction).is_some_and(|(at, _)| view.visible_cells.iter().any(|cell| cell.location == at && !cell.wall))
+                }).collect();
+                if !candidates.is_empty() {
+                    let draw = crate::dice::random_word(&mut behavior.rng);
+                    if draw % u64::from(chance.denominator) < u64::from(chance.numerator) {
+                        let choice = crate::dice::random_word(&mut behavior.rng) as usize % candidates.len();
+                        return Some(AiDecision::action(Action::Move(candidates[choice]), ai, behavior));
+                    }
+                }
+            }
+        }
         if ai.state == State::Flee {
             let threat = threat.expect("flee has a disclosed or remembered threat");
             let current = route(threat).map_or(0, |r| r.len());
@@ -468,8 +484,7 @@ impl Game {
             && ai.profile.idle == crate::behavior::IdleBehavior::Explore
             && self.condition_allows_voluntary_input(id)
         {
-            let can_move =
-                !self.condition_restricts(id, crate::rules::ConditionRestriction::OrdinaryMovement);
+            let can_move = !self.condition_blocks_action(id, &Action::Move(Direction::North));
             if retained.is_none() && can_move {
                 let count = ai
                     .visits
@@ -1731,6 +1746,30 @@ mod tests {
             matches!(idle_choice.action, Action::UseAbility { ref id, invocation: crate::abilities::AbilityInvocation::ActorTarget { target }, .. } if id.as_str() == "read_the_rhythm" && target == hero)
         );
     }
+    #[test]
+    fn erratic_move_can_replace_a_fresh_adjacent_attack_but_preview_does_not_draw() {
+        use crate::locomotion::{LocomotionValue, MovementChance};
+        use crate::rules::{Modifier, ModifierOp, Scope};
+        let mut foe = test_creatures::species();
+        let ordinary = foe.clone();
+        foe.modifiers.push(Modifier { scope: Scope::Always, op: ModifierOp::Locomotion { value: LocomotionValue::Erratic { chance: Some(MovementChance { numerator: 1, denominator: 1 }) } } });
+        let mut game = configured_game(test_creatures::species(), foe, paid_probe_rules());
+        game.configure_ai(ActorId(2), AiProfile { idle: crate::behavior::IdleBehavior::Wait, flee_percent: 0, ..Default::default() }).unwrap();
+        let engagement = Some(crate::behavior::Engagement { target: ActorId(1), location: at(1, 1, 1), last_seen: game.actor_clock(ActorId(2)) });
+        game.actors.get_mut(&ActorId(2)).unwrap().behavior.engagement = engagement;
+        let before = game.clone();
+        let chosen = game.choose_ai(ActorId(2)).unwrap();
+        assert!(matches!(chosen.action, Action::Move(_)));
+        assert!(chosen.plan.is_none());
+        assert_ne!(chosen.behavior.rng, before.actors[&ActorId(2)].behavior.rng);
+        assert_eq!(game.choose_ai(ActorId(2)).unwrap().action, chosen.action);
+        assert_eq!(game, before);
+        // The same fixture without the modifier chooses its ordinary adjacent attack.
+        let mut ordinary = configured_game(test_creatures::species(), ordinary, paid_probe_rules());
+        ordinary.configure_ai(ActorId(2), AiProfile { idle: crate::behavior::IdleBehavior::Wait, flee_percent: 0, ..Default::default() }).unwrap();
+        ordinary.actors.get_mut(&ActorId(2)).unwrap().behavior.engagement = engagement;
+        assert!(matches!(ordinary.choose_ai(ActorId(2)).unwrap().action, Action::UseAbility { .. }));
+    }
 }
 
 #[cfg(test)]
@@ -1753,6 +1792,8 @@ mod wide_scalar_ratio_tests {
             }
         }
     }
+
+
 }
 
 #[cfg(test)]

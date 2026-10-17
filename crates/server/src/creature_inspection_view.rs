@@ -106,6 +106,30 @@ fn amount_text(value: &s::rules::AmountExpr) -> String {
 }
 fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep {
     let (id, fields) = match value {
+        s::rules::Effect::ApplyLinkedHold { policy } => (
+            "apply_linked_hold",
+            vec![
+                text("sustaining", policy.sustaining.to_string()),
+                unsigned("preparation", policy.preparation),
+                unsigned("recovery", policy.recovery),
+                unsigned("protection", policy.protection),
+            ],
+        ),
+        s::rules::Effect::HoldDamage {
+            category,
+            descriptor,
+        } => (
+            "hold_damage",
+            vec![
+                content("category", super::primitive(*category)),
+                text(
+                    "descriptor",
+                    descriptor
+                        .as_ref()
+                        .map_or_else(|| "None".into(), ToString::to_string),
+                ),
+            ],
+        ),
         s::rules::Effect::Damage { damage } => {
             let fields = match damage {
                 s::rules::DamageExpr::SelectedWeapon { impact_bonus } => vec![
@@ -257,6 +281,9 @@ fn content(id: &str, value: p::ContentRef) -> p::DiagnosticField {
 fn signed(id: &str, value: i64) -> p::DiagnosticField {
     field(id, p::DiagnosticValue::Signed { value })
 }
+fn unsigned(id: &str, value: u64) -> p::DiagnosticField {
+    field(id, p::DiagnosticValue::Unsigned { value })
+}
 fn selector(value: &Selector, rules: &Ruleset) -> p::DiagnosticField {
     match value {
         Selector::Category { category: value } => content("category", super::primitive(*value)),
@@ -322,6 +349,32 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
         },
     )];
     let id = match &value.op {
+        ModifierOp::Locomotion { value } => {
+            use s::locomotion::LocomotionValue;
+            match value {
+                LocomotionValue::Stationary { enabled } | LocomotionValue::Flying { enabled } => {
+                    fields.push(text(
+                        "capability",
+                        if matches!(value, LocomotionValue::Stationary { .. }) {
+                            "stationary"
+                        } else {
+                            "flying"
+                        },
+                    ));
+                    fields.push(text("enabled", if *enabled { "true" } else { "false" }));
+                }
+                LocomotionValue::Erratic { chance } => {
+                    fields.push(text("capability", "erratic"));
+                    if let Some(chance) = chance {
+                        fields.push(signed("numerator", i64::from(chance.numerator)));
+                        fields.push(signed("denominator", i64::from(chance.denominator)));
+                    } else {
+                        fields.push(text("enabled", "false"));
+                    }
+                }
+            }
+            "locomotion"
+        }
         ModifierOp::Add {
             stat: value_stat,
             value,

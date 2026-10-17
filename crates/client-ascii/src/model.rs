@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tor_client_common::holds::{hold_choices, render_holds, HoldChoice};
 use tor_client_common::items::{item_action, item_choices, ItemOperation};
 use tor_client_common::ClientState;
 use tor_protocol::*;
@@ -39,6 +40,8 @@ pub enum Key {
     Wizard,
     Enter,
     Escape,
+    /// Try to escape one exact disclosed incoming hold.
+    EscapeHold,
     Backspace,
     Tab,
     History,
@@ -130,6 +133,8 @@ pub struct App {
     pub pace_ms: u64,
     pub attack_targets: Vec<ActorView>,
     pub ability_choices: Vec<AbilityView>,
+    /// Frozen exact offers for the explicit hold picker, never rebound by index.
+    pub hold_choices: Vec<HoldChoice>,
     pub selected_ability: Option<AbilityView>,
     pub supply_selection: Option<SupplyDraft>,
     /// The look cursor, while choosing a cell to describe.
@@ -197,6 +202,7 @@ impl App {
             pace_ms: DEFAULT_PACE_MS,
             attack_targets: Vec::new(),
             ability_choices: Vec::new(),
+            hold_choices: Vec::new(),
             selected_ability: None,
             supply_selection: None,
             look_cursor: None,
@@ -244,6 +250,7 @@ impl App {
             .as_ref()
             .map(|s| (s.branch().clone(), s.state().revision));
         self.state = Some(state);
+        self.hold_choices.clear();
         self.state_changed(old);
     }
 
@@ -257,6 +264,7 @@ impl App {
             update.body,
             UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
         );
+        let control_changed = matches!(update.body, UpdateBody::Control { .. });
         let travel = match &update.body {
             UpdateBody::Travel { status, .. } => Some(status.phase),
             _ => None,
@@ -267,6 +275,9 @@ impl App {
             .ok_or(tor_client_common::StreamError::InconsistentState)?;
         let old = Some((state.branch().clone(), state.state().revision));
         state.apply(update)?;
+        if observed || control_changed {
+            self.hold_choices.clear();
+        }
         if observed {
             let lines = state.narration_lines();
             // A spectator never sends commands; the followed actor's next
@@ -309,6 +320,7 @@ impl App {
         } else {
             self.state = Some(ClientState::from_snapshot(snapshot)?);
         }
+        self.hold_choices.clear();
         self.inspection = None;
         self.strike_pages.clear();
         self.strike_sources_open = false;
@@ -341,6 +353,7 @@ impl App {
             self.item_operation = None;
             self.attack_targets.clear();
             self.ability_choices.clear();
+            self.hold_choices.clear();
             self.selected_ability = None;
             self.supply_selection = None;
             self.door_direction = None;
@@ -365,6 +378,7 @@ impl App {
             self.item_operation = None;
             self.attack_targets.clear();
             self.ability_choices.clear();
+            self.hold_choices.clear();
             self.selected_ability = None;
             self.supply_selection = None;
             self.door_direction = None;
@@ -375,6 +389,7 @@ impl App {
             self.item_operation = None;
             self.attack_targets.clear();
             self.ability_choices.clear();
+            self.hold_choices.clear();
             self.selected_ability = None;
             self.supply_selection = None;
             self.place_name = None;
@@ -556,6 +571,7 @@ impl App {
         self.item_operation = None;
         self.attack_targets.clear();
         self.ability_choices.clear();
+        self.hold_choices.clear();
         self.selected_ability = None;
         self.supply_selection = None;
         self.door_direction = None;
@@ -718,9 +734,111 @@ impl App {
         std::borrow::Cow::Owned(
             tor_client_common::stats::lines(combat)
                 .into_iter()
+                .chain(self.hold_rows())
                 .flat_map(|line| crate::messages::word_wrap(&line, STATS_WIDTH))
                 .collect(),
         )
+    }
+
+    /// Read-only hold rows use only the current observation's disclosed names.
+    pub fn hold_rows(&self) -> Vec<String> {
+        self.state
+            .as_ref()
+            .map(|state| render_holds(&state.state().observation))
+            .unwrap_or_default()
+    }
+
+    /// Native reports retain the wire offer shape and the modal's exact order.
+    pub fn hold_choice_offers(&self) -> Vec<LinkedHold> {
+        let Some(state) = &self.state else {
+            return Vec::new();
+        };
+        self.hold_choices
+            .iter()
+            .filter_map(|choice| {
+                state
+                    .state()
+                    .observation
+                    .linked_holds
+                    .iter()
+                    .find(|offer| offer.target == choice.target)
+                    .cloned()
+            })
+            .collect()
+    }
+
+    fn escape_hold(&mut self) -> Effect {
+        let Some(state) = &self.state else {
+            return Effect::None;
+        };
+        if self.role == AccessRole::Spectator || !state.has_control() {
+            self.status = "Escaping a hold requires control of your character.".into();
+            return Effect::None;
+        }
+        if !state.can_admit_intention() {
+            self.status = "You can't act right now.".into();
+            return Effect::None;
+        }
+        let choices = hold_choices(&state.state().observation);
+        match choices.as_slice() {
+            [] => {
+                self.status = "You are not held.".into();
+                Effect::None
+            }
+            [only] => self.act(Action::Escape { hold: only.target }),
+            _ => {
+                self.hold_choices = choices;
+                self.selected = 0;
+                self.status =
+                    "Choose a hold. Up/Down select, Enter confirms, Esc or F11 cancels.".into();
+                Effect::None
+            }
+        }
+    }
+
+    fn hold_input(&mut self, input: Input) -> Effect {
+        match input {
+            Input::Key {
+                key: Key::Escape | Key::EscapeHold,
+            } => {
+                self.hold_choices.clear();
+                self.status = "Never mind.".into();
+            }
+            Input::Key { key: Key::Up } => self.selected = self.selected.saturating_sub(1),
+            Input::Key { key: Key::Down } => {
+                self.selected = self
+                    .selected
+                    .saturating_add(1)
+                    .min(self.hold_choices.len() - 1);
+            }
+            Input::Key { key: Key::Enter } if self.connected && !self.busy => {
+                let hold = self
+                    .hold_choices
+                    .get(self.selected)
+                    .map(|choice| choice.target);
+                self.hold_choices.clear();
+                let Some(hold) = hold else {
+                    return Effect::None;
+                };
+                if self.role == AccessRole::Spectator {
+                    self.status = "Spectator access is read-only.".into();
+                    return Effect::None;
+                }
+                if self.state.as_ref().is_some_and(|state| {
+                    state
+                        .state()
+                        .observation
+                        .linked_holds
+                        .iter()
+                        .any(|offer| offer.target == hold)
+                }) {
+                    return self.act(Action::Escape { hold });
+                }
+                self.status = "That hold is no longer available.".into();
+            }
+            _ => {}
+        }
+        Effect::None
     }
 
     fn select_targets(&mut self, ability: Option<AbilityView>) {
@@ -1118,6 +1236,9 @@ impl App {
     }
 
     pub fn input(&mut self, input: Input) -> Effect {
+        if !self.hold_choices.is_empty() {
+            return self.hold_input(input);
+        }
         if self.supply_selection.is_some() {
             return self.supply_input(input);
         }
@@ -1842,6 +1963,7 @@ impl App {
             return Effect::None;
         }
         match key {
+            Key::EscapeHold => self.escape_hold(),
             Key::Advancement => {
                 let Some(state) = &self.state else {
                     return Effect::None;
@@ -2423,6 +2545,7 @@ pub fn history_text(entry: &HistoryEntry) -> String {
             Event::Waited => "Waited.".into(),
             Event::PreparationPaused => "Preparation paused.".into(),
             Event::AbilityStarted { ability, .. } => format!("Prepared {}.", ability.name),
+            Event::EscapeStarted { .. } => "Began trying to escape a hold.".into(),
             Event::ItemStarted { action } => match action {
                 tor_protocol::Action::Equip { .. } => "Began equipping an item.".into(),
                 tor_protocol::Action::Unequip { .. } => "Began removing an item.".into(),
@@ -2751,6 +2874,9 @@ pub fn status_lines(app: &App, state: &ClientState) -> [String; 2] {
         }
     }
     second.push(format!("T:{}", o.tick));
+    if !o.linked_holds.is_empty() {
+        second.push(format!("Held:{}", o.linked_holds.len()));
+    }
     if let Some(combat) = &o.combat {
         if combat.dead {
             second.push("Dead".into());
@@ -2845,7 +2971,7 @@ pub const HELP: &[&str] = &[
     "g , d   pick up / drop          ^P     earlier messages",
     "w t q e equip/remove/drink/eat F2     game history",
     "o c     open / close a door     F5     remembered places",
-    "                                F4     write a note",
+    "F11     escape a hold           F4     write a note",
     "                                F7     wizard command editor",
     "                                F10    advancement / respec",
     "F3 R    take / release control  [ ]    slower / faster journeys",

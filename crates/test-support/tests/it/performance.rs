@@ -5,7 +5,7 @@ use tor_test_support::performance::{Step, Trace, TraceAction};
 fn view() -> StateView {
     serde_json::from_value(serde_json::json!({
         "wizard_game":false,"revision":"4","observation":{
-            "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1;32]),
+            "linked_holds":[],"actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1;32]),
             "tick":"5","position":{"x":0,"y":0,"z":0},"places":[],
             "visible_cells":[
                 {"key":"origin","position":{"x":0,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false},

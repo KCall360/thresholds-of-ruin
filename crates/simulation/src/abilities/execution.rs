@@ -25,6 +25,7 @@ impl Game {
     fn plan_available(&self, plan: &Plan, sight: Option<&[tor_world::SightCell]>) -> bool {
         self.plan_actor_available(plan)
             && match plan {
+                Plan::Escape(plan) => self.escape_plan_available(plan),
                 Plan::Respec(plan) => self.respec_environment_safe(plan.basis.actor),
                 Plan::Ability(ability) => self.target_in_reach_snapshot(
                     ability.actor,
@@ -127,6 +128,20 @@ impl Game {
             });
             return Ok(outcome);
         }
+        let hold_damage = progress.hold_binding().and_then(|binding| {
+            (ability.hold_damage_increment > 0
+                && strike.on_success.iter().any(|effect| matches!(effect, PlannedEffect::HoldDamage { .. }))
+                && self.valid_linked_hold(ability.actor, ability.target, binding.id))
+                .then(|| self.linked_hold(ability.target, binding.id))
+                .flatten()
+                .and_then(|link| link.escalation.checked_add(ability.hold_damage_increment))
+                .filter(|bonus| *bonus <= crate::linked_hold::HOLD_ESCALATION_MAX)
+                .map(|bonus| super::HoldDamageExecution { id: binding.id, bonus })
+        });
+        if progress.hold_binding().is_some_and(|binding| self.valid_linked_hold(ability.actor, ability.target, binding.id))
+            && ability.hold_damage_increment > 0
+            && strike.on_success.iter().any(|effect| matches!(effect, PlannedEffect::HoldDamage { .. }))
+            && hold_damage.is_none() { return Err(GameError::Rule(RuleError::InvalidPlan)); }
         let mut budget = resolve::StrikeBudget::new(strike);
         let mut activity = crate::lifecycle::DamageActivityGuard::default();
         let (mut primary, primary_receipt) = self.resolve_batch_in_transaction(
@@ -138,6 +153,7 @@ impl Game {
                 strike: index as u16,
             },
             contact.as_ref(),
+            hold_damage,
         )?;
         if strike.qualifying_primary_check()
             && primary.selected_branch == Some(crate::rules::RiderTrigger::Success)
@@ -149,6 +165,13 @@ impl Game {
             progress.record_successful_primary(index);
         }
         if let Some(branch) = primary.selected_branch {
+            if let Some(execution) = hold_damage {
+                self.advance_linked_hold(ability.actor, ability.target, execution.id, ability.hold_damage_increment)?;
+            }
+            let primary_success = branch == crate::rules::RiderTrigger::Success;
+            progress.record_created_hold(primary_receipt.created_hold(), crate::sequence::HoldCreationSite {
+                strike: index as u16, rider: None, primary_success,
+            });
             for (ordinal, rider) in strike.riders.iter().enumerate() {
                 if rider.trigger != branch {
                     continue;
@@ -180,7 +203,11 @@ impl Game {
                         ordinal: ordinal as u16,
                     },
                     contact.as_ref(),
+                    None,
                 )?;
+                progress.record_created_hold(rider_receipt.created_hold(), crate::sequence::HoldCreationSite {
+                    strike: index as u16, rider: Some(ordinal as u16), primary_success,
+                });
                 primary.outcome.target_rider_participated =
                     self.merge_committed_rider_participation(primary_receipt, rider_receipt)?;
             }
@@ -196,6 +223,7 @@ impl Game {
         intention: Option<crate::IntentionId>,
         site: crate::lifecycle::ResolutionPublication,
         contact: Option<&crate::combat::contact::MeleeContact>,
+        hold_damage: Option<super::HoldDamageExecution>,
     ) -> Result<
         (
             resolve::BatchResolution,
@@ -212,6 +240,7 @@ impl Game {
         let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
         let mut context = self.resolution_context(plan, actor, target)?;
         context.spatial = self.spatial_resolution_input(plan, contact);
+        context.hold_damage = hold_damage;
         if plan.contextual_conditions(EffectRecipient::Target, &self.content.rules) {
             let placement = context
                 .spatial
@@ -247,6 +276,7 @@ impl Game {
         target: crate::ActorId,
     ) -> Result<ResolutionContext, GameError> {
         Ok(ResolutionContext {
+            hold_damage: None,
             spatial: None,
             target_recovery_context: if plan
                 .contextual_conditions(EffectRecipient::Target, &self.content.rules)

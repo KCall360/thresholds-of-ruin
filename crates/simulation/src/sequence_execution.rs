@@ -58,6 +58,10 @@ impl Game {
                 if !completion_due {
                     break;
                 }
+                if matches!(preparation.plan, crate::abilities::Plan::Escape(_)) {
+                    self.complete_escape(preparation, due)?;
+                    break;
+                }
                 if matches!(preparation.plan, crate::abilities::Plan::Respec(_)) {
                     self.complete_respec(preparation, due)?;
                     break;
@@ -136,6 +140,7 @@ impl Game {
                 resolved.hold = None;
                 self.apply_outcome(completion)?;
                 match resolved.plan.work() {
+                    Work::Escape { .. } => unreachable!("Escape has a distinct atomic completion"),
                     Work::Respec { .. } => unreachable!("respec has a distinct atomic completion"),
                     Work::UseAbility { .. } => {
                         let plan = resolved

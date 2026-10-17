@@ -42,6 +42,8 @@ fn check_fields(check: &s::rules::CheckDef) -> usize {
 }
 fn effect_fields(effect: &s::rules::Effect) -> usize {
     match effect {
+        s::rules::Effect::ApplyLinkedHold { .. } => 4,
+        s::rules::Effect::HoldDamage { .. } => 2,
         s::rules::Effect::Damage {
             damage: s::rules::DamageExpr::Components { components },
         } => components.len(),
@@ -56,6 +58,40 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
         s::rules::Effect::PushTargetOneCell { .. } => 1,
         s::rules::Effect::ApplyQualifiedConditionToSource { .. } => 3,
         _ => 2,
+    }
+}
+
+#[cfg(test)]
+mod linked_hold_effect_tests {
+    use super::*;
+    #[test]
+    fn linked_hold_source_fields_match_bounded_inspection_reservations() {
+        let rules =
+            s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
+                .unwrap();
+        for (effect, count) in [
+            (
+                s::rules::Effect::ApplyLinkedHold {
+                    policy: s::linked_hold::HoldPolicy {
+                        sustaining: s::content_ids::FlagId::new("clutch").unwrap(),
+                        preparation: 100,
+                        recovery: 100,
+                        protection: 400,
+                    },
+                },
+                4,
+            ),
+            (
+                s::rules::Effect::HoldDamage {
+                    category: s::combat::DamageType::Impact,
+                    descriptor: None,
+                },
+                2,
+            ),
+        ] {
+            assert_eq!(effect_fields(&effect), count);
+            assert_eq!(effect_view(&effect, &rules).fields.len(), count);
+        }
     }
 }
 fn reference_valid(id: &str, name: &str) -> bool {

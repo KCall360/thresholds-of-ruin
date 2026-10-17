@@ -28,6 +28,7 @@ pub(super) fn fold_count() -> usize {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AbilityValues {
+    pub hold_damage_increment: u32,
     pub dice: u16,
     pub flat: i32,
     pub check_bonus: i32,
@@ -57,7 +58,7 @@ pub struct SelectedAttack {
 
 /// Both participants in one check share the family and talent edge limits.
 pub struct CheckContext<'a> {
-    pub ability: &'a AbilityId,
+    pub ability: Option<&'a AbilityId>,
     /// Authored dice role, independent of source/target identity aliasing.
     pub roller_role: crate::rules::CheckActor,
     pub roller: crate::ActorId,
@@ -120,6 +121,7 @@ pub struct HitDiceSummary {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DerivedCreature {
+    pub locomotion: crate::locomotion::LocomotionCapabilities,
     pub kind: TypeId,
     pub subtypes: BTreeSet<SubtypeId>,
     pub attributes: Attributes,
@@ -276,7 +278,7 @@ impl DerivedCreature {
                     sources: &self.sources,
                     role: Some(context.roller_role),
                     opponent: context.opponent,
-                    ability: Some(context.ability),
+                    ability: context.ability,
                     incoming: None,
                     tokens: None,
                     policy: crate::rules::OutgoingEdgePolicy::Ordinary,
@@ -316,7 +318,7 @@ impl DerivedCreature {
                     sources: &self.sources,
                     role: Some(context.roller_role),
                     opponent: context.opponent,
-                    ability: Some(context.ability),
+                    ability: context.ability,
                     incoming: None,
                     tokens: Some((context.roller, selected)),
                     policy,
@@ -714,6 +716,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
             .ok_or(BuildError::Arithmetic)
     })?;
     let mut derived = DerivedCreature {
+        locomotion: Default::default(),
         kind,
         subtypes,
         attributes,
@@ -1007,7 +1010,8 @@ fn collect_stats(
             | ModifierOp::Immunity { .. }
             | ModifierOp::Reduction { .. }
             | ModifierOp::TalentReduction { .. }
-            | ModifierOp::GrantAbility { .. } => {}
+            | ModifierOp::GrantAbility { .. }
+            | ModifierOp::Locomotion { .. } => {}
         }
     }
     Ok(values)
@@ -1293,6 +1297,7 @@ fn fold(
 
     derived.attributes = attribute_values(derived.attributes, &values, rules)?;
     derived.flags = flags(&derived.sources);
+    derived.locomotion = crate::locomotion::LocomotionCapabilities::from_modifiers(derived.sources.values().flatten());
     fold_attribute_dependents(derived, build, &values)?;
     derived.health_recovery_period = recovery_period(derived.base_health_recovery_period, &values)?;
     let mut quiet_values = values.clone();
@@ -1348,7 +1353,7 @@ fn fold(
                         .apply(&modifier.op)
                         .map_err(|_| BuildError::DerivedLimit)?;
                 }
-                ModifierOp::Add { .. } | ModifierOp::Set { .. } | ModifierOp::Flag { .. } => {}
+                ModifierOp::Add { .. } | ModifierOp::Set { .. } | ModifierOp::Flag { .. } | ModifierOp::Locomotion { .. } => {}
             }
         }
     }
@@ -1412,6 +1417,7 @@ fn fold(
         derived.ability_values.insert(
             ability.clone(),
             AbilityValues {
+                hold_damage_increment: u32::try_from(stat(AbilityStat::HoldDamageIncrement)?).map_err(|_| BuildError::DerivedLimit)?,
                 dice: dice as u16,
                 flat: stat(AbilityStat::FlatBonus)? as i32,
                 check_bonus: stat(AbilityStat::CheckBonus)? as i32,
@@ -1816,7 +1822,7 @@ mod edge_tests {
                         &opponent,
                         build.ruleset(),
                         CheckContext {
-                            ability: &ability,
+                            ability: Some(&ability),
                             roller_role: crate::rules::CheckActor::User,
                             roller: actor,
                             opponent: target,
@@ -2187,7 +2193,7 @@ mod edge_tests {
                     &defender,
                     build.ruleset(),
                     CheckContext {
-                        ability: &ability,
+                        ability: Some(&ability),
                         roller_role: crate::rules::CheckActor::User,
                         roller: crate::ActorId(1),
                         opponent: crate::ActorId(2),
@@ -2237,7 +2243,7 @@ mod edge_tests {
                     &defender,
                     build.ruleset(),
                     CheckContext {
-                        ability: &AbilityId::new("basic_melee").unwrap(),
+                        ability: Some(&AbilityId::new("basic_melee").unwrap()),
                         roller_role: crate::rules::CheckActor::User,
                         roller: crate::ActorId(1),
                         opponent: crate::ActorId(2),

@@ -1,5 +1,5 @@
 # Canonical rules content; initial starter values remain provisional until paired evaluation.
-id = "interactions-v39"
+id = "interactions-v40"
 
 constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_point_grants = [{ pool = "advancement", points = 1 }], duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee", "bind_wounds"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
 
@@ -876,3 +876,44 @@ capacity = { base = 2, attribute = { kind = "named", attribute = "willpower" } }
 resource = "mana"
 recovery_period = 800
 capacity = { base = 2, attribute = { kind = "binding" }, required_flag = "magical" }
+
+# Shared linked-contact capability; no species-specific runtime rule.
+# timing/protection contract; acquisition and stationary anatomy remain separate.
+[[abilities]]
+interaction = "hostile_to_target"
+id = "clutch"
+name = "Clutch"
+tags = ["attack"]
+basic_attack = false
+invocation = "actor_target"
+timing = { source = { kind = "selected_weapon" }, scaled_by = "speed" }
+reach = { kind = "melee" }
+strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", effects = [{ kind = "apply_linked_hold", policy = { sustaining = "clutch", preparation = 100, recovery = 100, protection = 400 } }], descriptors = [] }] }
+ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
+
+# GR2 modifies one frozen channel; it grants no free HD or second attack.
+[[talents]]
+id = "clutch"
+name = "Clutch"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "species_flag", flag = "grasping", present = true }] }
+form_choices = []
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "clutch" } }, { scope = "always", op = { kind = "grant_ability", ability = "clutch" } }]
+
+[[talents]]
+id = "tightening_hold"
+name = "Tightening Hold"
+prerequisites = ["clutch"]
+requirement = { kind = "total_hd", minimum = 6 }
+form_choices = []
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability_tag", tag = "attack", stat = "hold_damage_increment" }, value = 1 } }]
+
+[[flags]]
+id = "grasping"
+name = "Grasping anatomy"
+modifiers = []
+
+[[flags]]
+id = "clutch"
+name = "Clutch sustaining capability"
+modifiers = []

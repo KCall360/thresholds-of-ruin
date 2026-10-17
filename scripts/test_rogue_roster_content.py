@@ -49,8 +49,8 @@ class RogueRosterContent(unittest.TestCase):
 
     def test_every_rogue_species_owns_explicit_reference_disposition(self):
         species = source("catalog/creatures.toml")["creatures"]["species"]
-        mean = {"emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire"}
-        passive = {"human", "ice_monster", "centaur", "yeti", "wraith", "jabberwock"}
+        mean = {"kestrel", "venus_flytrap", "griffin", "emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire"}
+        passive = {"bat", "human", "ice_monster", "centaur", "yeti", "wraith", "jabberwock"}
         tool_users = {"human", "hobgoblin", "centaur", "troll", "vampire"}
         care_and_loot = tool_users | {"yeti"}
         self.assertEqual(set(species), {"rogue." + name for name in mean | passive})
@@ -58,7 +58,7 @@ class RogueRosterContent(unittest.TestCase):
             with self.subTest(species=name):
                 self.assertEqual(species["rogue." + name].get("behavior"), {
                     "disposition": "mean" if name in mean else "passive",
-                    "idle": "wait" if name == "ice_monster" else "explore", "memory_ticks": 1000,
+                    "idle": "wait" if name in ("ice_monster", "venus_flytrap") else "explore", "memory_ticks": 1000,
                     "doors": name in tool_users, "care": name in care_and_loot,
                     "equipment": name in tool_users, "loot": name in care_and_loot,
                     "flee_percent": 25,
@@ -350,7 +350,7 @@ class RogueRosterContent(unittest.TestCase):
                 self.assertEqual(len(fixture["characters"][0]["creature"]["hit_dice"]), 16)
                 self.assertEqual(fixture["characters"][0]["loadout"], manifest["characters"][0]["loadout"])
 
-    def test_production_population_selects_fourteen_species_and_preserves_stock_order(self):
+    def test_production_population_selects_eighteen_species_and_preserves_stock_order(self):
         manifest = source("scenario.toml")
         activation = manifest["floor_activation"]
         profile = activation["profiles"]["rogue.low_depth"]
@@ -369,8 +369,8 @@ class RogueRosterContent(unittest.TestCase):
         # independent pinned-selector oracle in test_rogue_activation_candidate.
         self.assertEqual({row["archetype"] for band in actor["bands"] for row in band["choices"]},
                          {"rogue." + name for name in (
-                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "wraith", "black_unicorn", "vampire", "jabberwock")})
-        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.jabberwock": (7, 10)}
+                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "wraith", "black_unicorn", "vampire", "jabberwock", "bat", "kestrel", "venus_flytrap", "griffin")})
+        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.griffin": (1, 5), "rogue.jabberwock": (7, 10)}
         for band in actor["bands"]:
             for row in band["choices"]:
                 if row["archetype"] in chances:

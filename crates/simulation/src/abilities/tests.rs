@@ -35,6 +35,8 @@ fn snapshot() -> Snapshot {
 }
 fn plan(effects: Vec<PlannedEffect>) -> AbilityPlan {
     AbilityPlan {
+        initial_hold: None,
+        hold_damage_increment: 0,
         actor: ActorId(1),
         invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
         step: None,
@@ -1696,4 +1698,21 @@ fn item_qualified_condition_duration_is_exact_after_record_round_trip() {
             "consumables have no derived duration modifiers: {duration}"
         );
     }
+}
+
+#[test]
+fn hold_damage_without_exact_context_cannot_manufacture_damage_from_positive_edge() {
+    let mut prepared = plan(vec![PlannedEffect::HoldDamage {
+        category: crate::combat::DamageType::Impact,
+        descriptor: None,
+    }]);
+    prepared.strikes[0].edge = 5;
+    let mut seed = 42;
+    let outcome = resolve(&prepared, &snapshot(), &mut seed, &mut ()).unwrap();
+    assert!(outcome.effects.is_empty());
+    assert_eq!(seed, 42);
+    let mut value = serde_json::to_value(&prepared.strikes[0].on_success[0]).unwrap();
+    assert!(serde_json::from_value::<PlannedEffect>(value.clone()).is_ok());
+    value.as_object_mut().unwrap().remove("descriptor");
+    assert!(serde_json::from_value::<PlannedEffect>(value).is_err());
 }

@@ -69,6 +69,7 @@ fn effect_descriptors(effects: &[PlannedEffect]) -> usize {
     effects
         .iter()
         .map(|effect| match effect {
+            PlannedEffect::HoldDamage { descriptor, .. } => usize::from(descriptor.is_some()),
             PlannedEffect::Damage { damage } => damage
                 .components()
                 .iter()
@@ -100,6 +101,9 @@ impl AbilityPlan {
                 }
                 _ => true,
             }
+            || self.hold_damage_increment > crate::limits::NUMERIC as u32
+            || (self.strikes.iter().any(|strike| strike.on_success.iter().any(|effect| matches!(effect, PlannedEffect::HoldDamage { .. })))
+                && (self.reach != Reach::Melee || definition.interaction != crate::rules::Interaction::HostileToTarget))
             || !plan::valid_actor(self.actor)
             || !plan::valid_actor(self.target)
             || !(1..=crate::limits::NUMERIC as u64).contains(&self.preparation)
@@ -311,6 +315,9 @@ impl AbilityPlan {
 }
 impl Game {
     pub(crate) fn plan_source_valid(&self, plan: &Plan) -> bool {
+        if let Plan::Escape(plan) = plan {
+            return self.escape_plan_source_valid(plan);
+        }
         if let Plan::Respec(plan) = plan {
             return match &plan.supplies {
                 crate::supplies::SupplySelection::Carried => true,
@@ -322,6 +329,7 @@ impl Game {
         let Some(ability) = plan.as_ability() else {
             return true;
         };
+        if ability.initial_hold.is_some_and(|hold| hold.0 >= self.next_hold_id) { return false; }
         if let crate::public_plan::PublicAim::Cell { location } = ability.public_aim {
             if !self.world.knows(location) {
                 return false;

@@ -2,7 +2,7 @@
  "client": [
   {
    "frontend": "headless",
-   "protocol": 46,
+   "protocol": 48,
    "token": "a-sample-credential",
    "type": "hello"
   },
@@ -804,7 +804,8 @@
     "branch": "branch-1",
     "command": {
      "action": {
-      "type": "wait"
+      "hold": "h_0909090909090909090909090909090909090909090909090909090909090909",
+      "type": "escape"
      },
      "expected_revision": "3",
      "type": "act"
@@ -819,6 +820,28 @@
     "type": "command"
    },
    "request_id": "sample-36",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "action": {
+      "type": "wait"
+     },
+     "expected_revision": "3",
+     "type": "act"
+    },
+    "context": {
+     "readiness_revision": "3",
+     "stream": {
+      "epoch": "1",
+      "stream": "sample-attachment"
+     }
+    },
+    "type": "command"
+   },
+   "request_id": "sample-37",
    "type": "request"
   },
   {
@@ -844,7 +867,7 @@
     },
     "type": "command"
    },
-   "request_id": "sample-37",
+   "request_id": "sample-38",
    "type": "request"
   },
   {
@@ -870,11 +893,11 @@
     },
     "type": "command"
    },
-   "request_id": "sample-38",
+   "request_id": "sample-39",
    "type": "request"
   }
  ],
- "protocol": 46,
+ "protocol": 48,
  "server": [
   {
    "context": {
@@ -4309,6 +4332,7 @@
        ]
       },
       "inventory": [],
+      "linked_holds": [],
       "places": [],
       "position": {
        "x": 0,
@@ -6379,6 +6403,7 @@
        ]
       },
       "inventory": [],
+      "linked_holds": [],
       "places": [],
       "position": {
        "x": 0,
@@ -6484,7 +6509,7 @@
     "max_retained_state_bytes": 16777216,
     "max_snapshot_bytes": 33554432
    },
-   "protocol": 46,
+   "protocol": 48,
    "role": "player",
    "type": "welcome",
    "user": "sample-user"
@@ -9468,6 +9493,7 @@
         "quantity": "1"
        }
       ],
+      "linked_holds": [],
       "motion": {
        "displaced": false,
        "impacted": false,
@@ -11377,6 +11403,7 @@
        ]
       },
       "inventory": [],
+      "linked_holds": [],
       "motion": {
        "displaced": false,
        "impacted": false,
@@ -13817,6 +13844,7 @@
        ]
       },
       "inventory": [],
+      "linked_holds": [],
       "motion": {
        "displaced": false,
        "impacted": false,
@@ -16279,6 +16307,7 @@
         "quantity": "1"
        }
       ],
+      "linked_holds": [],
       "motion": {
        "displaced": false,
        "impacted": false,
@@ -18676,6 +18705,7 @@
        ]
       },
       "inventory": [],
+      "linked_holds": [],
       "motion": {
        "displaced": false,
        "impacted": false,
@@ -19181,6 +19211,7 @@
         "quantity": "1"
        }
       ],
+      "linked_holds": [],
       "motion": {
        "displaced": false,
        "impacted": false,
@@ -21855,6 +21886,7 @@
         "quantity": "2"
        }
       ],
+      "linked_holds": [],
       "places": [],
       "position": {
        "x": 0,
@@ -24843,6 +24875,7 @@
         "quantity": "1"
        }
       ],
+      "linked_holds": [],
       "motion": {
        "displaced": false,
        "impacted": false,
@@ -27268,6 +27301,7 @@
         "start": 0
        }
       ],
+      "linked_holds": [],
       "motion": {
        "displaced": false,
        "impacted": false,
@@ -27792,6 +27826,7 @@
        ]
       },
       "inventory": [],
+      "linked_holds": [],
       "motion": {
        "displaced": false,
        "impacted": false,
@@ -30288,6 +30323,7 @@
         "quantity": "1"
        }
       ],
+      "linked_holds": [],
       "motion": {
        "displaced": false,
        "impacted": false,

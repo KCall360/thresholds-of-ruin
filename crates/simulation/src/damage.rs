@@ -539,7 +539,8 @@ impl Protection {
             ModifierOp::Add { .. }
             | ModifierOp::Set { .. }
             | ModifierOp::Flag { .. }
-            | ModifierOp::GrantAbility { .. } => {}
+            | ModifierOp::GrantAbility { .. }
+            | ModifierOp::Locomotion { .. } => {}
         }
         Ok(())
     }

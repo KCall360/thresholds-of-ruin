@@ -157,6 +157,66 @@ pub fn vocabulary() -> &'static AssetTable<Presentation> {
                 },
             ),
             (
+                "creature.bat",
+                Presentation {
+                    noun: NounForms {
+                        message_key: "presentation.creature.bat.noun",
+                        singular: "bat",
+                        plural: "bats",
+                        indefinite: "a bat",
+                    },
+                    ascii: AsciiAppearance {
+                        glyph: 'B',
+                        color: 0xa58f6c,
+                    },
+                },
+            ),
+            (
+                "creature.bird.kestrel",
+                Presentation {
+                    noun: NounForms {
+                        message_key: "presentation.creature.bird.kestrel.noun",
+                        singular: "kestrel",
+                        plural: "kestrels",
+                        indefinite: "a kestrel",
+                    },
+                    ascii: AsciiAppearance {
+                        glyph: 'K',
+                        color: 0xc9a46a,
+                    },
+                },
+            ),
+            (
+                "creature.plant.venus.flytrap",
+                Presentation {
+                    noun: NounForms {
+                        message_key: "presentation.creature.plant.venus.flytrap.noun",
+                        singular: "venus flytrap",
+                        plural: "venus flytraps",
+                        indefinite: "a venus flytrap",
+                    },
+                    ascii: AsciiAppearance {
+                        glyph: 'F',
+                        color: 0x67d8bd,
+                    },
+                },
+            ),
+            (
+                "creature.griffin",
+                Presentation {
+                    noun: NounForms {
+                        message_key: "presentation.creature.griffin.noun",
+                        singular: "griffin",
+                        plural: "griffins",
+                        indefinite: "a griffin",
+                    },
+                    ascii: AsciiAppearance {
+                        glyph: 'G',
+                        color: 0xd9c77a,
+                    },
+                },
+            ),
+            (
                 "creature.rat",
                 Presentation {
                     noun: NounForms {

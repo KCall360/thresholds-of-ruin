@@ -15,6 +15,7 @@ pub enum InvalidState {
     InvalidCombat,
     InvalidMotion,
     InvalidInteraction,
+    InvalidLinkedHold,
 }
 
 // Canonically ordered collections need no allocation. Unordered full views
@@ -57,6 +58,18 @@ impl StateView {
     /// portal graph, or hidden state are needed to check these invariants.
     pub fn validate(&self) -> Result<(), InvalidState> {
         let o = &self.observation;
+        if o.linked_holds.len() > crate::MAX_LINKED_HOLDS
+            || !unique(o.linked_holds.iter().map(|hold| hold.target))
+            || o.linked_holds.iter().any(|hold| {
+                hold.holder.is_some_and(|holder| {
+                    holder == o.self_target
+                        || !o.visible_actors.iter().any(|actor| actor.id == holder)
+                })
+            })
+            || (o.combat.as_ref().is_some_and(|combat| combat.dead) && !o.linked_holds.is_empty())
+        {
+            return Err(InvalidState::InvalidLinkedHold);
+        }
         if !unique(o.visible_cells.iter().map(|cell| cell.position)) {
             return Err(InvalidState::DuplicateCell);
         }
@@ -139,6 +152,7 @@ impl StateView {
                     }
                     crate::CombatEventView::Condition { condition } => !condition.valid(),
                     crate::CombatEventView::Interrupted { .. }
+                    | crate::CombatEventView::EscapeResolved { .. }
                     | crate::CombatEventView::Died { .. } => false,
                 })
         }) {
@@ -203,6 +217,7 @@ impl StateView {
                 })
                 || interactions.preparation.as_ref().is_some_and(|progress| {
                     match &progress.action {
+                        crate::Action::Escape { .. } => false,
                         crate::Action::UseAbility { id, supplies, .. } => {
                             !crate::valid_content_id(id) || !supplies.valid()
                         }

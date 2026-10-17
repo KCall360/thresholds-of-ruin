@@ -116,6 +116,7 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::F8 => Key::ResumeIntention,
         NativeKey::F9 => Key::CancelIntention,
         NativeKey::F10 => Key::Advancement,
+        NativeKey::F11 => Key::EscapeHold,
         NativeKey::R => Key::Release,
         NativeKey::F4 => Key::Note,
         NativeKey::F7 => Key::Wizard,
@@ -546,6 +547,7 @@ fn window_loop(
                 "stats_rows":if app.stats_open { Some(app.stats_rows()) } else { None },
                 "advancement_open":app.advancement_open,"advancement_rows":app.advancement_rows(),"advancement_command":app.advancement_command,
                 "ability_choices":app.ability_choices,"selected_ability":app.selected_ability,
+                "hold_choices":app.hold_choice_offers(),"hold_rows":app.hold_rows(),
                 "supply_selection":app.supply_selection,"supply_rows":app.supply_rows(),
                 "status_lines":state.map(|s|tor_client_ascii::status_lines(&app,s)),
                 "status":app.status,"input_done":done,"native_input_sequence":native_input_sequence,
@@ -594,6 +596,7 @@ mod tests {
         assert_eq!(native_key(NativeKey::F3), Some(Key::Control));
         assert_eq!(native_key(NativeKey::F8), Some(Key::ResumeIntention));
         assert_eq!(native_key(NativeKey::F10), Some(Key::Advancement));
+        assert_eq!(native_key(NativeKey::F11), Some(Key::EscapeHold));
         assert_eq!(native_key(NativeKey::F9), Some(Key::CancelIntention));
         assert_eq!(native_key(NativeKey::P), None);
         assert_eq!(native_key(NativeKey::F6), None);

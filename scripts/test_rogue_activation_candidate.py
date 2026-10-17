@@ -51,6 +51,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
         names = dict(zip("ESHIRZCQYTWUVJ", ("emu", "snake", "hobgoblin", "ice_monster",
                                        "rattlesnake", "zombie", "centaur", "quagga", "yeti", "troll",
                                        "wraith", "black_unicorn", "vampire", "jabberwock"), strict=True))
+        names.update(K="kestrel", B="bat", F="venus_flytrap", G="griffin")
         self.assertEqual(set(names.values()), set(PLAYABLE_SPECIES))
         self.assertTrue(all(math.gcd(*(choice["weight"] for choice in band["choices"])) == 1
                             for band in bands))
@@ -73,7 +74,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertEqual({key: value / total_mass for key, value in eligible.items()},
                              {key: Fraction(value, total_weight) for key, value in authored.items()}, depth)
         self.assertEqual(bands[-1]["depth"], {"kind": "open", "minimum": 31})
-        self.assertEqual([row["archetype"] for row in bands[-1]["choices"]], ["rogue.vampire", "rogue.jabberwock"])
+        self.assertEqual([row["archetype"] for row in bands[-1]["choices"]], ["rogue.vampire", "rogue.griffin", "rogue.jabberwock"])
         self.assertTrue(all(row["depth"]["kind"] == "finite" for row in bands[:-1]))
         self.assertEqual([row["depth"]["maximum"] + 1 for row in bands[:-1]],
                          [row["depth"]["minimum"] for row in bands[1:]])
@@ -136,9 +137,9 @@ class RogueActivationCandidateTests(unittest.TestCase):
                             "version": 1, "pool": "rogue.vampire_supplies",
                             "chance": {"numerator": 7, "denominator": 10}})
                     if depth >= 27:
-                        expected = (7, 12) if depth == 29 else (8, 13) if depth == 30 else (1, 1)
+                        expected = (7, 12, 12) if depth == 29 else (8, 8, 13) if depth == 30 else (1, 1, 1)
                         self.assertEqual({key: value["weight"] for key, value in choices.items()},
-                                         dict(zip(("rogue.vampire", "rogue.jabberwock"), expected, strict=True)))
+                                         dict(zip(("rogue.vampire", "rogue.griffin", "rogue.jabberwock"), expected, strict=True)))
 
     def test_explicit_source_is_independent_of_live_production(self):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
@@ -249,7 +250,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
         original = encounter_sources()["manifest"]
         candidate = candidate_manifest(original)
         activation = candidate["floor_activation"]
-        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.jabberwock": (7, 10)}
+        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.griffin": (1, 5), "rogue.jabberwock": (7, 10)}
         self.assertEqual(activation["carried_item_pools"]["rogue.vampire_supplies"], {
             "version": 1, "choices": [
                 {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
@@ -354,7 +355,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertFalse(result["production_mutated"])
             self.assertEqual(result["battle_evidence"], "not_run")
             self.assertEqual(result["calibration"], "not_assessed")
-            self.assertEqual(result["population_scope"], "conditional_fourteen_species_with_open_vampire_jabberwock_tail")
+            self.assertEqual(result["population_scope"], "conditional_eighteen_species_with_open_vampire_griffin_jabberwock_tail")
             self.assertEqual(result["depth_growth"], {"kind": "racial_after", "depth": 26})
             self.assertIn("provisional", " ".join(result["limitations"]))
             self.assertIn("capacity", " ".join(result["limitations"]))

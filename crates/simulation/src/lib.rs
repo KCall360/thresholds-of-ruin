@@ -13,6 +13,9 @@ pub mod content_ids;
 mod creature_melee;
 mod creature_time;
 mod lifecycle;
+pub mod linked_hold;
+pub use linked_hold::HoldId;
+pub mod escape;
 pub mod limits;
 mod recovery_context;
 pub mod rules;
@@ -53,6 +56,7 @@ pub use intention::{
     IntentionOrigin, IntentionState, IntentionWork, MovementContext, QueuedIntention,
     TerminalExitContext,
 };
+pub mod locomotion;
 mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
 mod item_store;
@@ -118,6 +122,7 @@ pub struct ItemId(pub u64);
     deny_unknown_fields
 )]
 pub enum Action {
+    Escape { hold: linked_hold::HoldId },
     ChooseGrowthSource {
         basis: player_advancement::AdvancementBasis,
         source: earned_growth::GrowthSource,
@@ -176,6 +181,8 @@ impl<'de> serde::Deserialize<'de> for Action {
             deny_unknown_fields
         )]
         enum Fields {
+            #[serde(deserialize_with = "crate::escape::read_action")]
+            Escape { hold: linked_hold::HoldId },
             ChooseGrowthSource {
                 basis: player_advancement::AdvancementBasis,
                 source: earned_growth::GrowthSource,
@@ -223,6 +230,7 @@ impl<'de> serde::Deserialize<'de> for Action {
             Wait,
         }
         Ok(match bounded::named_map(deserializer)? {
+            Fields::Escape { hold } => Self::Escape { hold },
             Fields::ChooseGrowthSource { basis, source } => {
                 Self::ChooseGrowthSource { basis, source }
             }
@@ -291,6 +299,7 @@ pub enum GameError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    EscapeStarted { hold: linked_hold::HoldId },
     GrowthSourceChosen {
         basis: player_advancement::AdvancementBasis,
         source: earned_growth::GrowthSource,
@@ -353,6 +362,7 @@ pub struct ActionOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Actor {
+    holds: linked_hold::HoldBook,
     behavior: behavior::Behavior,
     active_since: u64,
     anatomy: Shared<AnatomySpec>,
@@ -440,6 +450,7 @@ pub struct Game {
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
+    next_hold_id: u64,
     intentions: Shared<intention::IntentionQueue>,
     /// Region streaming state; empty unless regions were frozen or detached.
     lifecycle: streaming::Lifecycle,
@@ -473,6 +484,7 @@ impl Clone for Game {
             next_actor_id: self.next_actor_id,
             next_item_id: self.next_item_id,
             next_door_id: self.next_door_id,
+            next_hold_id: self.next_hold_id,
             intentions: self.intentions.clone(),
             lifecycle: self.lifecycle.clone(),
             scenario_policy: self.scenario_policy.clone(),
@@ -511,6 +523,7 @@ impl Game {
     /// entities and work must not reuse identities from the abandoned branch.
     pub fn continue_identities(&mut self, later: &Game) {
         self.reserve_identities(later.next_actor_id, later.next_item_id, later.next_door_id);
+        self.next_hold_id = self.next_hold_id.max(later.next_hold_id);
         self.continue_record_ids(later);
         self.continue_intention_ids(later);
     }
@@ -617,6 +630,7 @@ impl Game {
             next_actor_id: 1,
             next_item_id: 1,
             next_door_id: 1,
+            next_hold_id: 1,
             intentions: Shared::default(),
             lifecycle: streaming::Lifecycle::default(),
             scenario_policy: floor_activation::ScenarioPolicy::default(),
@@ -648,6 +662,7 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                holds: linked_hold::HoldBook::default(),
                 behavior: behavior::Behavior::new(self.seed, id),
                 active_since: self.tick,
                 anatomy: Shared::default(),
@@ -723,12 +738,16 @@ impl Game {
             .checked_add(1)
             .ok_or(GameError::IdentityExhausted)?;
         let id = self.next_door_id;
+        let affected = self.hold_geometry_candidates((0..i32::from(height)).filter_map(|offset| {
+            location.position.z.checked_add(offset).map(|z| Location { position: Position { z, ..location.position }, ..location })
+        }));
         self.with_recovery_transition(false, |candidate| {
             candidate
                 .world
                 .place_door(location, id, open, height)
                 .map_err(|_| GameError::InvalidLocation)?;
             candidate.next_door_id = next;
+            candidate.reconcile_holds_for_actors(affected)?;
             Ok(id)
         })
     }
@@ -944,11 +963,13 @@ impl Game {
         {
             return Err(GameError::InvalidLocation);
         }
+        let affected = self.hold_geometry_candidates([location]);
         self.with_recovery_transition(false, |candidate| {
             candidate
                 .world
                 .set_wall(location, wall)
-                .map_err(|_| GameError::InvalidLocation)
+                .map_err(|_| GameError::InvalidLocation)?;
+            candidate.reconcile_holds_for_actors(affected)
         })
     }
 

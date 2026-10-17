@@ -535,7 +535,19 @@ fn self_defense_healing_and_disclosed_self_step_retreat_keep_priority() {
 
 #[test]
 fn self_defense_never_replaces_a_paid_strike_prefix() {
+    paid_prefix_retains_priority(false);
+}
+
+#[test]
+fn erratic_movement_never_draws_or_replaces_a_paid_strike_prefix() {
+    paid_prefix_retains_priority(true);
+}
+
+fn paid_prefix_retains_priority(erratic: bool) {
     let mut game = fixture(|doc, owner| {
+        if erratic {
+            owner.modifiers.push(Modifier { scope: Scope::Always, op: ModifierOp::Locomotion { value: crate::locomotion::LocomotionValue::Erratic { chance: Some(crate::locomotion::MovementChance { numerator: 1, denominator: 1 }) } } });
+        }
         let mut other = definition("probe_sequence", "probe_guard");
         other["reach"] = json!({"kind":"melee"});
         other["ai"]["hostile"] = json!(true);
@@ -560,10 +572,11 @@ fn self_defense_never_replaces_a_paid_strike_prefix() {
     // As in the ordinary paid-prefix lifecycle tests, the opening action is
     // manually selected before autonomous control begins. An already-autonomous
     // actor correctly rejects a recorded action that differs from its decision.
-    assert_eq!(
-        game.choose_ai(OWNER).unwrap().action,
-        action("probe_defense")
-    );
+    if erratic {
+        assert!(matches!(game.choose_ai(OWNER).unwrap().action, Action::Move(_)));
+    } else {
+        assert_eq!(game.choose_ai(OWNER).unwrap().action, action("probe_defense"));
+    }
     let profile = game.combat.ai.remove(&OWNER).unwrap().profile;
     let initial_stamina = game
         .creature(OWNER)
@@ -633,6 +646,7 @@ fn self_defense_never_replaces_a_paid_strike_prefix() {
     let chosen = game.choose_ai(OWNER).unwrap();
     assert_eq!(chosen.action, attack);
     assert_eq!(chosen.plan, Some(frozen));
+    assert_eq!(chosen.behavior.rng, before.actors[&OWNER].behavior.rng);
     assert_eq!(game.preparation(OWNER).unwrap().remaining, 250);
     assert_eq!(
         game, before,
