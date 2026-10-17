@@ -72,6 +72,43 @@ def _require_native_display(environment):
         raise RuntimeError("Graphical process tests require DISPLAY; run under xvfb-run on Linux")
 
 
+def read_capture(path):
+    """Read one published framebuffer without interfering with replacement."""
+    if os.name != "nt":
+        with open(path, "rb") as source:
+            return source.read()
+
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                    ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    def open_shared(filename, _flags):
+        # Reading owns the old complete frame while the producer atomically
+        # publishes a new one. Ordinary Python opens omit FILE_SHARE_DELETE.
+        handle = kernel32.CreateFileW(
+            os.fsdecode(filename), 0x80000000, 0x00000001 | 0x00000002 | 0x00000004,
+            None, 3, 0x00000080, None)
+        if handle == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            # Success transfers ownership to the descriptor, then to open().
+            return msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        except BaseException as error:
+            if not kernel32.CloseHandle(handle):
+                error.add_note(f"Capture handle cleanup failed: {ctypes.WinError(ctypes.get_last_error())}")
+            raise
+
+    with open(path, "rb", opener=open_shared) as source:
+        return source.read()
+
+
 def underfoot(state):
     return next(cell for cell in state["observation"]["visible_cells"]
                 if cell["position"] == {"x": 0, "y": 0, "z": 0})
