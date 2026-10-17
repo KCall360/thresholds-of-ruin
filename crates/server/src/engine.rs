@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 43;
+pub(crate) const ARCHIVE_VERSION: u32 = 44;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -3729,7 +3729,7 @@ impl Engine {
         {
             return Err(Failure::new(
                 ErrorCode::InvalidAnnotation,
-                "Notes require 1â€“4096 bytes of plain text",
+                "Notes require 1Ã¢â‚¬â€œ4096 bytes of plain text",
             ));
         }
         match anchor {
@@ -4843,7 +4843,7 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 43);
+        assert_eq!(engine.archive.version, 44);
         assert_eq!(engine.archive.ruleset, "interactions-v39");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();

@@ -470,6 +470,7 @@ impl Game {
             self.items.insert(
                 result,
                 Item {
+                    corpse: None,
                     holds: vec![],
                     motion,
                     orientation,

@@ -1,0 +1,331 @@
+//! A renderer-independent projection of disclosed client state.
+use crate::{actor_model, creature_model, item_model, CreatureModel, ItemModel};
+use tor_client_common::{ClientState, Palette};
+use tor_protocol::*;
+
+/// One creature in view.
+#[derive(Clone)]
+pub struct Actor {
+    pub appearance_seed: Option<AppearanceSeed>,
+    pub model: CreatureModel,
+    pub id: ActorTarget,
+    pub name: String,
+    pub description: String,
+    pub position: Position,
+    pub hostile: bool,
+    pub injury: Option<Injury>,
+    pub is_self: bool,
+}
+
+/// Everything the window draws, in the observer frame of this moment.
+#[derive(Clone)]
+pub struct View {
+    pub shown: ReplyContext,
+    pub context: StreamContext,
+    pub branch: BranchId,
+    pub feet: Position,
+    pub visible: Vec<CellView>,
+    /// Remembered cells aligned to this frame that are not currently seen.
+    pub memory: Vec<RememberedMapCell>,
+    pub actors: Vec<Actor>,
+    pub items: Vec<GroundItem>,
+    pub inventory: Vec<Carried>,
+    pub narration: Vec<String>,
+    pub hp: Option<(u64, u64)>,
+    pub has_control: bool,
+    /// Whether a new action would be admitted now (no journey or work under way).
+    pub can_act: bool,
+    pub tick: u64,
+    /// Changes whenever the server's state does; events belong to one revision.
+    pub revision: u64,
+    /// What the action this view follows did.
+    pub events: Vec<Happening>,
+}
+
+/// Something seen to happen, from the combat events the server disclosed.
+#[derive(Clone, Debug)]
+pub enum Happening {
+    Ability {
+        caster: Option<ActorTarget>,
+        target: Option<ActorTarget>,
+        id: String,
+        name: String,
+        outcome: AbilityOutcome,
+        /// Ordinal of the blow within a strike sequence.
+        strike: Option<u16>,
+    },
+    Died(ActorTarget),
+    /// Health or injury actually worsened between two comparable views.
+    Hurt(ActorTarget),
+}
+
+/// An item lying in view.
+#[derive(Clone)]
+pub struct GroundItem {
+    pub corpse_seed: Option<AppearanceSeed>,
+    pub model: ItemModel,
+    pub corpse_model: CreatureModel,
+    pub id: ItemTarget,
+    pub name: String,
+    pub class: ItemClass,
+    pub quantity: u64,
+    pub description: String,
+    pub position: Position,
+    pub reachable: bool,
+}
+
+/// An item the character carries, with what can be done with it now.
+#[derive(Clone)]
+pub struct Carried {
+    pub model: ItemModel,
+    pub id: ItemTarget,
+    pub name: String,
+    pub class: ItemClass,
+    pub quantity: u64,
+    pub description: String,
+    /// How it is worn or held, when equipped.
+    pub equipped: Option<String>,
+    pub can_equip: bool,
+    pub drinkable: bool,
+    pub edible: bool,
+}
+
+pub fn view(state: &ClientState, palette: &Palette) -> View {
+    let o = &state.state().observation;
+    let hostile = |id| {
+        o.combat
+            .as_ref()
+            .is_some_and(|c| c.actors.iter().any(|a| a.actor == id && a.hostile))
+    };
+    let mut actors: Vec<Actor> = o
+        .visible_actors
+        .iter()
+        .map(|a| Actor {
+            appearance_seed: a.appearance_seed,
+            model: actor_model(palette, a),
+            id: a.id,
+            name: a.name.clone(),
+            description: a.description.clone(),
+            position: a.position,
+            hostile: hostile(a.id),
+            injury: o
+                .combat
+                .as_ref()
+                .and_then(|c| c.actors.iter().find(|row| row.actor == a.id))
+                .map(|row| row.injury),
+            is_self: a.id == o.self_target,
+        })
+        .collect();
+    // The observer's own body need not be listed among what it sees.
+    // A dead observer's body becomes its corpse, so it is no longer added.
+    let dead = o.combat.as_ref().is_some_and(|c| c.dead);
+    if !dead {
+        let primary = actors
+            .iter()
+            .position(|a| a.is_self && a.position == o.position);
+        let own = if let Some(index) = primary {
+            actors.remove(index)
+        } else {
+            Actor {
+                appearance_seed: o.self_appearance.as_ref().map(|appearance| appearance.seed),
+                model: creature_model(
+                    palette,
+                    o.self_appearance
+                        .as_ref()
+                        .and_then(|appearance| appearance.asset.as_deref()),
+                ),
+                id: o.self_target,
+                name: String::new(),
+                description: String::new(),
+                position: o.position,
+                hostile: false,
+                injury: None,
+                is_self: true,
+            }
+        };
+        // An upper body cell or another projection of this actor does not
+        // replace its known location. Reconciliation uses this primary first.
+        actors.insert(0, own);
+    }
+    let seen: std::collections::HashSet<Position> =
+        o.visible_cells.iter().map(|c| c.position).collect();
+    View {
+        shown: state.reply_context(),
+        context: state.context().clone(),
+        branch: state.branch().clone(),
+        feet: o.position,
+        visible: o.visible_cells.clone(),
+        memory: state
+            .map_memory()
+            .filter(|c| !seen.contains(&c.position))
+            .map(|c| c.appearance())
+            .collect(),
+        actors,
+        items: o
+            .ground_items
+            .iter()
+            .map(|g| GroundItem {
+                corpse_seed: g.item.corpse.as_ref().map(|appearance| appearance.seed),
+                model: item_model(palette, &g.item),
+                corpse_model: creature_model(
+                    palette,
+                    g.item
+                        .corpse
+                        .as_ref()
+                        .and_then(|appearance| appearance.asset.as_deref()),
+                ),
+                id: g.item.id,
+                name: g.item.name.clone(),
+                class: g.item.class,
+                quantity: g.item.quantity,
+                description: g.item.description.clone(),
+                position: g.position,
+                reachable: g.reachable,
+            })
+            .collect(),
+        inventory: o
+            .inventory
+            .iter()
+            .map(|item| {
+                let interactions = o.interactions.as_ref();
+                let affordance =
+                    interactions.and_then(|i| i.inventory.iter().find(|a| a.item == item.id));
+                let equipped = affordance.and_then(|a| a.equipped_slot).map(|index| {
+                    interactions
+                        .and_then(|i| i.slots.get(index as usize))
+                        .map_or_else(|| "in use".to_string(), |slot| slot.equipped_phrase.clone())
+                });
+                Carried {
+                    model: item_model(palette, item),
+                    id: item.id,
+                    name: item.name.clone(),
+                    class: item.class,
+                    quantity: item.quantity,
+                    description: item.description.clone(),
+                    can_equip: affordance
+                        .is_some_and(|a| a.slot.is_some() && a.equipped_slot.is_none()),
+                    equipped,
+                    drinkable: affordance.is_some_and(|a| a.drinkable),
+                    edible: affordance.is_some_and(|a| a.edible),
+                }
+            })
+            .collect(),
+        narration: state.narration().to_vec(),
+        hp: o.combat.as_ref().map(|c| (c.hp, c.max_hp)),
+        has_control: state.has_control(),
+        can_act: state.can_admit_intention(),
+        tick: o.tick,
+        revision: state.state().revision,
+        events: happenings(o),
+    }
+}
+
+/// Combat effects disclosed with this observation; never inferred from models.
+pub fn happenings(observation: &Observation) -> Vec<Happening> {
+    observation
+        .combat
+        .iter()
+        .flat_map(|c| &c.events)
+        .filter_map(|e| match e {
+            CombatEventView::Ability {
+                caster,
+                target,
+                ability,
+                outcome,
+                strike,
+            } => Some(Happening::Ability {
+                caster: *caster,
+                target: *target,
+                id: ability.id.clone(),
+                name: ability.name.clone(),
+                outcome: *outcome,
+                strike: *strike,
+            }),
+            CombatEventView::Died { actor } => Some(Happening::Died(*actor)),
+            _ => None,
+        })
+        .collect()
+}
+
+impl Happening {
+    /// Whether the server reports that the effect applied, without implying damage.
+    pub fn is_applied(&self) -> bool {
+        matches!(
+            self,
+            Self::Ability {
+                outcome: AbilityOutcome::Applied,
+                ..
+            }
+        )
+    }
+}
+
+/// Disclosed worsening only: a newly visible injury is not a new wound.
+pub fn observed_harm(before: &View, after: &View) -> Vec<ActorTarget> {
+    if before.context != after.context
+        || before.branch != after.branch
+        || before.shown.actor != after.shown.actor
+    {
+        return vec![];
+    }
+    let rank = |injury| match injury {
+        Injury::Healthy => 0,
+        Injury::Wounded => 1,
+        Injury::BadlyWounded => 2,
+        Injury::NearDeath => 3,
+    };
+    let mut hurt = std::collections::BTreeSet::new();
+    for actor in &after.actors {
+        if actor.is_self {
+            if matches!((before.hp, after.hp), (Some((old, _)), Some((now, _))) if now < old) {
+                hurt.insert(actor.id);
+            }
+        } else if let Some(now) = actor.injury {
+            if before.actors.iter().any(|old| {
+                old.id == actor.id && old.injury.is_some_and(|old| rank(now) > rank(old))
+            }) {
+                hurt.insert(actor.id);
+            }
+        }
+    }
+    hurt.into_iter().collect()
+}
+
+/// A terrain appearance for drawing and exploration. This carries no entity
+/// targets, door affordances or occupants. Remembered terrain is always dim.
+pub struct Terrain<'a> {
+    pub key: &'a str,
+    pub position: Position,
+    pub wall: bool,
+    pub stairs_up: bool,
+    pub stairs_down: bool,
+    pub door: Option<bool>,
+    pub seen: bool,
+    pub lit: bool,
+}
+impl View {
+    pub fn terrain(&self) -> impl Iterator<Item = Terrain<'_>> {
+        self.visible
+            .iter()
+            .map(|c| Terrain {
+                key: &c.key,
+                position: c.position,
+                wall: c.wall,
+                stairs_up: c.stairs_up,
+                stairs_down: c.stairs_down,
+                door: c.door.as_ref().map(|d| d.open),
+                seen: true,
+                lit: c.lit,
+            })
+            .chain(self.memory.iter().map(|c| Terrain {
+                key: &c.key,
+                position: c.position,
+                wall: c.wall,
+                stairs_up: c.stairs_up,
+                stairs_down: c.stairs_down,
+                door: c.door.as_ref().map(|d| d.open),
+                seen: false,
+                lit: false,
+            }))
+    }
+}

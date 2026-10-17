@@ -265,6 +265,41 @@ When you find or fix a bug:
 5. When a bug can't be fixed yet, record it with its reproduction in the
    [roadmap](../status.md) or feature guide. Don't add an ignored test.
 
+## Independent 3D client
+
+`crates/client-3d` is an optional, independently maintained workspace. The core
+verifier and dependency graph deliberately exclude it. Changes to core gameplay,
+protocol or other clients do not run 3D checks or require a simultaneous 3D update.
+This is a maintenance boundary, not a waiver of contract coverage for changes
+to the 3D client itself.
+
+When maintaining that client, run both profiles explicitly from the repository
+root:
+
+```sh
+python crates/client-3d/scripts/verify.py --profile debug
+python crates/client-3d/scripts/verify.py --profile release
+```
+
+The verifier owns one target directory and records source/toolchain fingerprints,
+commands and exit codes in its ignored local evidence directory, whose location
+it prints. It checks tooling, the authored
+showcase, formatting, lint, architecture, renderer/model contracts and actual
+native process acceptance using matching backend binaries. Source changes during
+a run invalidate its receipt. Its dedicated workflow runs Windows/Linux debug
+and release jobs only for its own subtree, its workflow, or a manual dispatch.
+Core checks remain required when a change also touches core files.
+
+Native cases open the actual Bevy window, capture GPU frames and deliver OS input.
+They cover native movement, door toggling, fetching to a disclosed item cell,
+selected-target combat and its motion, neutral model fallback, inventory action
+durability, private-launch save/process ownership and surfaced connection/save
+failure. Shared appearance and corpse persistence also have backend process
+contracts. These tests use the
+same display requirements and failure reporting rules as other graphical clients.
+See the [3D guide](../../crates/client-3d/README.md) and
+[client boundary](../architecture/clients.md#independently-maintained-3d-prototype).
+
 ## Cross-platform requirements
 
 - **CI:** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs the

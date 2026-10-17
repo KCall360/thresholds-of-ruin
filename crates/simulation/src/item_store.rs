@@ -243,6 +243,7 @@ mod tests {
 
     fn item(location: ItemLocation) -> Item {
         Item {
+            corpse: None,
             holds: vec![],
             location,
             quantity: 1,

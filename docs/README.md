@@ -11,6 +11,7 @@ rather than treating a historical plan as current behavior.
 | --- | --- |
 | Start playing | [Repository README](../README.md), then [text](play/text.md) or [ASCII](play/ascii.md) |
 | Play the Rogue starter slice | [Rogue presets and launch](play/rogue.md) |
+| Try the optional 3D prototype | [3D client guide](../crates/client-3d/README.md) |
 | Spend earned points or respec | [Player advancement](play/advancement.md) |
 | Understand the current game and limitations | [Gameplay](play/gameplay.md), [current status](status.md) |
 | Set up a development machine | [Setup](development/setup.md), [contributing](../CONTRIBUTING.md), [testing](development/testing.md) |
@@ -56,8 +57,8 @@ rather than treating a historical plan as current behavior.
 - [Progression and creature construction design](plans/progression-design.md):
   edge-first talents, regeneration and constructed Rogue monsters, with its
   [implementation plan](plans/progression.md)
-- [Presentation and atmosphere design](plans/presentation.md): common vocabulary,
-  traits, scenario overrides and per-individual appearance; unimplemented
+- [Presentation and atmosphere design](plans/presentation.md): implemented
+  vocabulary and creature seeds, plus remaining traits, overrides and player choices
 - [Rogue 5.4.4 research](research/rogue-5.4.4/README.md): pinned edition, rules and catalog
 
 [Status](status.md) owns project sequencing. Research is neither an alternate TOR

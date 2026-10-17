@@ -1,0 +1,32 @@
+# Prototype 3D client. It is its own workspace so Bevy stays out of the main
+# workspace's lockfile, build and verification tiers.
+[package]
+name = "tor-client-3d"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace]
+members = ["model"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[lints]
+workspace = true
+
+[dependencies]
+tor-client-common = { path = "../client-common" }
+tor-protocol = { path = "../protocol" }
+tor-client-3d-model = { path = "model" }
+tokio = { version = "1.53", features = ["macros", "rt", "net", "sync", "time"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+bevy = "0.16"
+
+[profile.dev]
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 3

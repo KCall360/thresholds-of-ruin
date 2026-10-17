@@ -3130,18 +3130,18 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (43, 17, "interactions-v39", 12, 5, 14, "tor-arena-run-v5")
+            (44, 17, "interactions-v39", 12, 5, 14, "tor-arena-run-v5")
         );
     }
 
     #[test]
-    fn idle_ai_format_preserves_protocol_rules_and_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 46);
+    fn idle_ai_and_presentation_formats_preserve_rules_and_physical_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 47);
         assert_eq!(super::RULES_INPUT_FORMAT, 12);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Private AI profiles and species policies change saved and compiled
-        // content payloads. Region actors still reference profile/species names;
-        // public messages, the rules vocabulary and physical framing are unchanged.
+        // content payloads. Presentation metadata advances the public protocol;
+        // the rules vocabulary and physical framing are unchanged.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&base[..6], b"TORB\x06\x00");
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();

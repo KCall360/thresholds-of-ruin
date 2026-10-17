@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 46;
+pub const PROTOCOL_VERSION: u32 = 47;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -388,8 +388,19 @@ pub struct Position {
     pub z: i32,
 }
 
+/// Disclosed cosmetic identity, shared by the creature and its remains.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreatureAppearance {
+    pub seed: crate::AppearanceSeed,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ItemView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corpse: Option<CreatureAppearance>,
     pub class: ItemClass,
     #[serde(with = "crate::integers::unsigned")]
     pub quantity: u64,
@@ -404,10 +415,11 @@ pub struct ItemView {
     pub known_supply: Option<crate::SupplyView>,
 }
 impl ItemView {
-    pub(crate) fn valid_supply(&self) -> bool {
+    pub(crate) fn valid_disclosure(&self) -> bool {
         self.known_supply
             .as_ref()
             .is_none_or(|supply| self.identified && supply.valid())
+            && (self.corpse.is_none() || (self.identified && self.class == ItemClass::Corpse))
     }
 }
 impl<'de> Deserialize<'de> for ItemView {
@@ -416,6 +428,8 @@ impl<'de> Deserialize<'de> for ItemView {
         #[serde(deny_unknown_fields)]
         struct Fields {
             class: ItemClass,
+            #[serde(default)]
+            corpse: Option<CreatureAppearance>,
             #[serde(with = "crate::integers::unsigned")]
             quantity: u64,
             appearance: String,
@@ -432,6 +446,7 @@ impl<'de> Deserialize<'de> for ItemView {
         let f: Fields = crate::bounded::named_map(d)?;
         let value = Self {
             class: f.class,
+            corpse: f.corpse,
             quantity: f.quantity,
             appearance: f.appearance,
             identified: f.identified,
@@ -441,10 +456,10 @@ impl<'de> Deserialize<'de> for ItemView {
             asset: f.asset,
             known_supply: f.known_supply,
         };
-        if value.valid_supply() {
+        if value.valid_disclosure() {
             Ok(value)
         } else {
-            Err(serde::de::Error::custom("invalid known supply"))
+            Err(serde::de::Error::custom("invalid item disclosure"))
         }
     }
 }
@@ -484,6 +499,8 @@ impl<'de> Deserialize<'de> for GroundItemView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActorView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance_seed: Option<crate::AppearanceSeed>,
     /// Empty when nothing names it. The observer's own body is the actor
     /// whose id is `Observation::self_target`; clients say who that is.
     #[serde(default)]
@@ -532,6 +549,9 @@ pub struct MotionView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
+    /// Own appearance is disclosed even when the body is outside the eye scene.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_appearance: Option<CreatureAppearance>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactions: Option<InteractionView>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -780,6 +800,8 @@ pub enum CombatEventView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellView {
+    /// Current server illumination, independent of sight or body awareness.
+    pub lit: bool,
     pub door: Option<DoorView>,
     /// Cosmetic material of a solid cell, not a physical interaction rule.
     /// Floors and ceilings are ordinary seen solid cells; clients derive them.

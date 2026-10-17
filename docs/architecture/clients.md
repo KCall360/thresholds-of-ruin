@@ -11,6 +11,45 @@ Wire ordering, limits, target references and delta formats belong to
 [protocol](../reference/protocol.md). This page describes client responsibilities
 and the presentation invariants needed when extending them.
 
+## Independently maintained 3D prototype
+
+The optional [3D client](../../crates/client-3d/README.md) also consumes
+`tor-client-common` and `tor-protocol`. Its separate Cargo workspace and lockfile
+keep Bevy outside the core workspace. The renderer-free `tor-client-3d-model`
+crate projects disclosed state and validates input policy; the window crate owns
+procedural meshes, animation, camera, UI and process/connection lifetime.
+
+The client retains prototype gameplay scope. It does not promise the Text or
+ASCII clients' full set of screens and actions. A private launch owns one server,
+uses fresh independent owner/spectator credentials and reserves a new save
+directory. External connections retain external server ownership. Clean exit
+waits for the shared connection's save barrier, and failures remain observable.
+
+Inputs retain the reply context of the displayed view. Bounded ordered queues
+admit one command at a time, while stream/branch changes clear local intentions
+and transient scene state. An aligned render chart derives only from disclosed
+cell keys; it resets when those keys cannot establish a consistent translation.
+
+Mesh recipes resolve palette-approved dotted assets through supported parents.
+Unknown creatures use a visible neutral marker; items fall back to their disclosed
+class, with a neutral marker for miscellaneous objects. Display text never
+selects anatomy. Shared opaque appearance seeds drive per-individual variation,
+and typed corpse metadata preserves the creature's recipe and seed. The live
+observer uses the same rule; bestiary appearance controls are offline previews.
+
+The server discloses a required `lit` boolean for every current cell. Visibility
+alone never supplies lighting: dark body awareness is rendered as muted unlit
+geometry, with decorative point lights and emissive materials suppressed.
+Remembered cells stay dim. Shared automatic map hydration restores only read-only
+terrain appearances; it never creates live actor, item or door targets. Map pages
+refresh the scene even when the live observation revision is unchanged.
+Lit cells retain artistic fill, palette tinting and procedural decoration.
+
+The [independent verification procedure](../development/testing.md#independent-3d-client)
+covers this workspace explicitly. Core development does not build it, run its
+checks or require a matching 3D update. A backend change can therefore require a
+later 3D maintenance update before this optional client works with it again.
+
 ## Validated state and four kinds of memory
 
 Shared state validates ordering, stream context, exact delta bases, disclosure

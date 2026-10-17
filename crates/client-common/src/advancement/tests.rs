@@ -414,6 +414,7 @@ fn respec_exact_supplies_reuse_known_touch_ground_facts_and_one_cost_ordinal() {
         supply_reachable: true,
         position: view.position,
         item: ItemView {
+            corpse: None,
             id: ItemTarget::from_digest([31; 32]),
             class: ItemClass::Misc,
             quantity: 2,

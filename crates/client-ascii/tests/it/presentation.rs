@@ -88,6 +88,7 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
         }
         let target = super::actor_target(42);
         let actor = ActorView {
+            appearance_seed: None,
             asset: None,
             id: target,
             name: "goblin".into(),
@@ -145,6 +146,7 @@ fn ability_selection_cancels_cleanly_and_clears_when_grants_or_control_change() 
         .observation
         .visible_actors
         .push(ActorView {
+            appearance_seed: None,
             asset: None,
             id: super::actor_target(42),
             name: "goblin".into(),
@@ -463,6 +465,7 @@ fn opaque_bytes_do_not_reorder_pickup_or_drop_choices() {
 fn opaque_bytes_do_not_reorder_attack_choices_or_duplicate_body_cells() {
     let mut snapshot = state().snapshot();
     let first = ActorView {
+        appearance_seed: None,
         id: super::actor_target(250),
         name: "first figure".into(),
         description: String::new(),
@@ -939,6 +942,7 @@ fn rewind_clears_old_drafts() {
     app.input(Input::Key { key: Key::Note });
     assert!(app.note.is_some());
     app.attack_targets.push(ActorView {
+        appearance_seed: None,
         asset: None,
         id: super::actor_target(2),
         name: "guard".into(),
@@ -989,7 +993,7 @@ fn state() -> ClientState {
         "state":{"wizard_game":false,"revision":"3","observation":{
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":1,"y":1,"z":0},
 
-            "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
+            "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
             "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true
@@ -1049,6 +1053,7 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
         .retain(|cell| cell.position.x != 2);
     assert_eq!(glyph_at(&other_level, &Default::default(), 2, 1), ' ');
     other_level.visible_cells.push(CellView {
+        lit: true,
         asset: None,
         door: None,
         material: "stone".into(),
@@ -1123,6 +1128,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
         .push(GroundItemView {
             reachable: true,
             item: ItemView {
+                corpse: None,
                 class: Default::default(),
                 asset: None,
                 quantity: 1,
@@ -1539,6 +1545,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
     ] {
         let mut view = state().state().clone();
         view.observation.visible_actors.push(ActorView {
+            appearance_seed: None,
             asset: None,
             id: super::actor_target(2),
             name: "guard".into(),
@@ -2148,6 +2155,7 @@ fn phase5_supportive_menu_lists_self_and_allies_but_never_neutrals() {
     view.visible_actors.clear();
     for (id, name) in [(ally, "companion"), (neutral, "stranger")] {
         view.visible_actors.push(ActorView {
+            appearance_seed: None,
             asset: None,
             id,
             name: name.into(),

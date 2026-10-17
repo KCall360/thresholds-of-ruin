@@ -28,6 +28,11 @@ needs an available comparison ref and `--base REF`. Do not use `--ci-profile` or
 `--ci-partition` to silently change local coverage; these selectors serve the
 complete [CI matrix](testing.md#running-the-checks).
 
+The optional [3D prototype](../../crates/client-3d/README.md) is a separate Cargo
+workspace. Core workspace commands do not build its executable or fetch Bevy.
+Use its guide for builds and [its independent checks](testing.md#independent-3d-client)
+when maintaining it; it shares the core backend's current protocol.
+
 ## Python test environment
 
 Use a Python interpreter supported by the hash-pinned wheels in

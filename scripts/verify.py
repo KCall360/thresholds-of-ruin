@@ -67,6 +67,9 @@ RUST_TEST_INPUTS.update({f"scripts/{name}.py": {"tor-server"} for name in (
     "test_service_contract_ci", "test_service_contract_host")})
 # Paths that otherwise never affect Rust packages or process behavior.
 INERT_PREFIXES = ("docs/", "perf/", ".github/", "README.md", "CONTRIBUTING.md", "AGENTS.md", "LICENSE", "ruff.toml", ".gitignore")
+# This frontend has its own Cargo workspace, lockfile, verifier and path-scoped
+# CI. Shared/core changes never acquire its checks as reverse dependencies.
+INDEPENDENT_PREFIXES = ("crates/client-3d/",)
 # Clients launched by process tests. Any other runtime package change selects every process test.
 # Each client package, and the text by which a process test can launch it: the
 # binary name or a `process_harness` helper for that client. The harness offers
@@ -124,6 +127,8 @@ def classify(paths, dirs):
     """Return (directly changed packages, whether everything is affected, unrecognized paths)."""
     direct, everything, unknown = set(), False, []
     for path in paths:
+        if path.startswith(INDEPENDENT_PREFIXES):
+            continue
         if path in RUST_TEST_INPUTS:
             direct.update(RUST_TEST_INPUTS[path])
             continue

@@ -41,6 +41,7 @@ class RogueVampireProcesses(ProcessTestCase):
     def client(self, *args, **kwargs):
         self.work_budget.check()
         kwargs["omit_memory"] = True  # This suite never asserts accumulated map memory.
+        kwargs["compact_background"] = True
         client, frame = super().client(*args, **kwargs)
         self.work_budget.track(client, frame)
         return client, frame
@@ -339,7 +340,7 @@ class RogueVampireProcesses(ProcessTestCase):
         consumed = self.act(player, {"type": "eat", "item": carried[0]["id"]})
         self.assertIsNone(consumed["error"])
         if consumed["intentions"]:
-            consumed = self.frame(player, lambda frame: not frame["intentions"])
+            consumed = self.frame(player, lambda frame: frame.get("state") is not None and not frame["intentions"])
         self.assertEqual(sum(int(row["quantity"]) for row in observation(consumed)["inventory"]
                              if row["name"] == "food ration"), 0)
         final = checkpoint(self, player)

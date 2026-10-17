@@ -124,9 +124,13 @@ carry their defaults and overrides in ordinary region records. Checkpoints,
 replay and rewind preserve lighting. Streaming activates perceived regions and
 loads geometry/lighting dependencies needed to resolve the scene exactly.
 
-Clients retain their presentation: illumination changes disclosure rather than
-adding brightness flags, shading, or movement narration. Portable lights and
-light propagation are deferred. The current save/ruleset versions reject older
+Every disclosed cell carries its current boolean `lit` value, independently of
+why it was perceived. This lets a renderer distinguish dark local awareness
+from illuminated sight without inferring illumination from visibility. Memory
+retains only the last disclosed value; it is not current authority. Text and
+ASCII retain their existing presentation. The 3D client mutes dark silhouettes
+and gates decorative glow on current illumination. Portable lights and light
+propagation are deferred. The current save/ruleset versions reject older
 incompatible saves; see [status](../status.md).
 
 ### Symmetry
