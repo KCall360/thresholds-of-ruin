@@ -468,6 +468,67 @@ class ActionCompletion(unittest.TestCase):
                 self.assertEqual(batches, [])
 
 
+class OwnerPolicyPeerCoordination(unittest.TestCase):
+    def setUp(self):
+        from test_creature_inspection_process import CreatureInspectionProcesses
+        self.coordinate = CreatureInspectionProcesses._outgoing_policy_peer_wait
+        self.harness = unittest.TestCase()
+        self.peer = object()
+        self.owner = {"error": None, "state": {"observation": {"tick": "150"}}}
+        self.snapshot = {"error": None, "state": {"observation": {"tick": "150", "ready": True}}}
+        self.refreshed = False
+        self.wait_error = None
+        self.operations = []
+        self.harness.request = Mock(side_effect=self.request)
+        self.harness.act = Mock(side_effect=self.act)
+
+    def request(self, peer, request):
+        self.assertIs(peer, self.peer)
+        self.assertEqual(request, {"type": "snapshot"})
+        self.operations.append("snapshot")
+        self.refreshed = True
+        return self.snapshot
+
+    def act(self, peer, action):
+        self.assertIs(peer, self.peer)
+        self.assertEqual(action, {"type": "wait"})
+        self.operations.append("wait")
+        # Retained CI ordering: the owner has started, but the peer has not
+        # observed that revision and its ordinary wait must be rejected.
+        return {"error": self.wait_error if self.refreshed else
+                "StaleRevision: Refresh the observation before acting"}
+
+    def wait(self):
+        return self.coordinate(self.harness, self.peer, self.owner)
+
+    def test_owner_observation_requires_peer_snapshot_before_one_wait(self):
+        self.assertIsNone(self.wait()["error"])
+        self.assertEqual(self.operations, ["snapshot", "wait"])
+        self.harness.request.assert_called_once()
+        self.harness.act.assert_called_once()
+
+    def test_snapshot_error_prevents_peer_wait(self):
+        self.snapshot["error"] = "Connection refused"
+        with self.assertRaisesRegex(AssertionError, "Connection refused"):
+            self.wait()
+        self.harness.act.assert_not_called()
+
+    def test_snapshot_must_be_ready_at_the_owner_tick(self):
+        for ready, tick in ((False, "150"), (True, "151")):
+            with self.subTest(ready=ready, tick=tick):
+                self.snapshot["state"]["observation"] = {"ready": ready, "tick": tick}
+                with self.assertRaises(AssertionError):
+                    self.wait()
+                self.harness.act.assert_not_called()
+
+    def test_peer_refusal_is_reported_without_retry(self):
+        self.wait_error = "StaleRevision: Refresh the observation before acting"
+        with self.assertRaisesRegex(AssertionError, "StaleRevision"):
+            self.wait()
+        self.assertEqual(self.operations, ["snapshot", "wait"])
+        self.harness.act.assert_called_once()
+
+
 class RogueActionSettlement(unittest.TestCase):
     """Script only disclosed frames; never build or launch the applications."""
 
