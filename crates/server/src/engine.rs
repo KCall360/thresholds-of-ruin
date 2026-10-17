@@ -3729,7 +3729,7 @@ impl Engine {
         {
             return Err(Failure::new(
                 ErrorCode::InvalidAnnotation,
-                "Notes require 1Ã¢â‚¬â€œ4096 bytes of plain text",
+                "Notes require 1â€“4096 bytes of plain text",
             ));
         }
         match anchor {

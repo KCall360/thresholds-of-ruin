@@ -536,7 +536,7 @@ fn window_loop(
                 "map_tiles":state.map(|s|tor_client_ascii::render::map_tiles(s, &app.palette)),
                 "palette":{"revision":app.palette.revision(),"stale":app.palette.stale()},
                 "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
-                "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
+                "has_control":state.is_some_and(|s|s.has_control()),"can_admit_intention":state.is_some_and(|s|s.can_admit_intention()),"connected":app.connected,"busy":app.busy,
                 "intentions":state.map(|s|s.intentions()),"action_hint":app.intention_hint(),
                 "places_open":app.places_open,"place_selected":app.place_selected,"place_name":app.place_name,
                 "narration":state.map(|s|s.narration()),
