@@ -687,9 +687,10 @@ mod tests {
 
     fn snapshot_message() -> ServerMessage {
         let samples: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(concat!(
+            &std::fs::read_to_string(format!(
+                "{}/../protocol/tests/fixtures/wire-v{}.json",
                 env!("CARGO_MANIFEST_DIR"),
-                "/../protocol/tests/fixtures/wire-v45.json"
+                tor_protocol::PROTOCOL_VERSION,
             ))
             .expect("regenerate current wire samples"),
         )

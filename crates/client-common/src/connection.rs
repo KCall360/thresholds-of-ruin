@@ -2,7 +2,9 @@ use crate::{observation_assets, ClientState, Palette};
 use futures_util::{SinkExt, StreamExt};
 use std::{
     error::Error,
+    future::{poll_fn, Future},
     net::SocketAddr,
+    task::Poll,
     time::{Duration, Instant},
 };
 use tokio::{net::TcpStream, time::timeout};
@@ -16,6 +18,15 @@ use tor_protocol::*;
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub type ConnectionError = Box<dyn Error + Send + Sync>;
 const DEADLINE: Duration = Duration::from_secs(10);
+
+#[derive(Debug)]
+struct QueryExpired(&'static str);
+impl std::fmt::Display for QueryExpired {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+impl Error for QueryExpired {}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum QueryPhase {
@@ -50,7 +61,7 @@ impl PendingQuery {
         limit: usize,
     ) -> Result<(), ConnectionError> {
         if tokio::time::Instant::now() >= self.deadline {
-            return Err(expired.into());
+            return Err(QueryExpired(expired).into());
         }
         if self.phase == QueryPhase::Queue {
             let message = ClientMessage::Request {
@@ -62,13 +73,13 @@ impl PendingQuery {
                 socket.feed(Message::Text(encode_bounded_json(&message, limit)?.into())),
             )
             .await
-            .map_err(|_| expired)??;
+            .map_err(|_| QueryExpired(expired))??;
             self.phase = QueryPhase::Flush;
         }
         if self.phase == QueryPhase::Flush {
             tokio::time::timeout_at(self.deadline, socket.flush())
                 .await
-                .map_err(|_| expired)??;
+                .map_err(|_| QueryExpired(expired))??;
             self.phase = QueryPhase::AwaitReply;
         }
         Ok(())
@@ -100,6 +111,7 @@ pub struct Connection {
     /// Applied exactly once, retained until its automatic query is flushed.
     pending_presentation: Option<ServerMessage>,
     palette_request: Option<PendingQuery>,
+    map_request: Option<(PendingQuery, MapQuery)>,
 }
 
 /// Whether a message shows the player a new moment of play. Only these are
@@ -214,6 +226,7 @@ impl Connection {
             last_recovery_snapshot: None,
             pending_presentation: None,
             palette_request: None,
+            map_request: None,
         })
     }
 
@@ -270,6 +283,8 @@ impl Connection {
     fn require_snapshot(&mut self) {
         self.inspection_pages.clear();
         self.advancement_pages.clear();
+        self.state.cancel_map_query();
+        self.map_request = None;
         if self.recovery.is_none() {
             self.recovery = Some(PendingQuery::new());
         }
@@ -304,8 +319,104 @@ impl Connection {
         Ok(())
     }
 
+    fn prepare_map_request(&mut self) -> Result<(), ConnectionError> {
+        if !self.is_synchronized() {
+            return Ok(());
+        }
+        if self.map_request.as_ref().is_some_and(|(pending, query)| {
+            !self.state.map_query_pending(&pending.request_id, query)
+        }) {
+            self.map_request = None;
+        }
+        if let Some((pending, _)) = &self.map_request {
+            if tokio::time::Instant::now() >= pending.deadline {
+                self.state.reject_map_query(&pending.request_id);
+                self.map_request = None;
+            }
+        }
+        if self.map_request.is_none() {
+            if let Some(query) = self.state.next_map_query() {
+                let mut pending = PendingQuery::new();
+                pending.request_id.insert_str(0, "map-");
+                self.state.bind_map_query(&query, &pending.request_id)?;
+                // Negotiated request limits can admit attachment/live traffic
+                // without admitting this larger optional background query.
+                let message = ClientMessage::Request {
+                    request_id: pending.request_id.clone(),
+                    request: Box::new(Request::Map {
+                        query: query.clone(),
+                    }),
+                };
+                match encode_bounded_json(&message, self.capabilities.max_request_bytes as usize) {
+                    Ok(_) => self.map_request = Some((pending, query)),
+                    Err(EncodeError::TooLarge { .. }) => {
+                        self.state.reject_map_query(&pending.request_id);
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Background writes share polling with live reads. The stored query phase
+    /// owns any queued frame across cancellation; a blocked flush must never
+    /// prevent an already-arrived observation from reaching the reducer.
+    async fn receive_with_map_request(
+        &mut self,
+    ) -> Result<(ServerMessage, usize), ConnectionError> {
+        poll_fn(|cx| {
+            if let Some((pending, _)) = &self.map_request {
+                if tokio::time::Instant::now() >= pending.deadline {
+                    self.state.reject_map_query(&pending.request_id);
+                    self.map_request = None;
+                }
+            }
+            // Prefer already-arrived live data over a background write. A
+            // Pending read registers its wake interest before we poll the send.
+            {
+                let mut received = std::pin::pin!(receive_sized(
+                    &mut self.socket,
+                    self.capabilities.max_response_bytes as usize,
+                    &mut self.responses,
+                ));
+                if let Poll::Ready(result) = received.as_mut().poll(cx) {
+                    return Poll::Ready(result);
+                }
+            }
+            if let Some((pending, query)) = &mut self.map_request {
+                let sent = {
+                    let mut send = std::pin::pin!(pending.send(
+                        &mut self.socket,
+                        Request::Map {
+                            query: query.clone()
+                        },
+                        "Map request timed out",
+                        self.capabilities.max_request_bytes as usize,
+                    ));
+                    send.as_mut().poll(cx)
+                };
+                if let Poll::Ready(Err(error)) = sent {
+                    if error.is::<QueryExpired>() {
+                        self.state.reject_map_query(&pending.request_id);
+                        self.map_request = None;
+                    } else {
+                        return Poll::Ready(Err(error));
+                    }
+                }
+            }
+            // Both readiness interests remain registered, while the caller
+            // retains the deadline independently of these short-lived polls.
+            Poll::Pending
+        })
+        .await
+    }
+
     /// Send a request; any skipping ends, so what follows is paced again.
     pub async fn request(&mut self, request: Request) -> Result<String, ConnectionError> {
+        if matches!(request, Request::Map { .. }) {
+            return Err("Map hydration is managed automatically".into());
+        }
         if !self.is_synchronized() {
             return Err("Resynchronizing; request was not sent".into());
         }
@@ -376,15 +487,16 @@ impl Connection {
         loop {
             self.progress_recovery().await?;
             self.progress_palette_request().await?;
+            self.prepare_map_request()?;
             if let Some(message) = self.pending_presentation.take() {
                 return Ok(message);
             }
-            let mut message = match self.held.take() {
-                Some(message) => message,
+            let (mut message, response_bytes) = match self.held.take() {
+                Some(message) => (message, 0),
                 None => match &self.recovery {
                     Some(recovery) => tokio::time::timeout_at(
                         recovery.deadline,
-                        receive(
+                        receive_sized(
                             &mut self.socket,
                             self.capabilities.max_response_bytes as usize,
                             &mut self.responses,
@@ -393,12 +505,24 @@ impl Connection {
                     .await
                     .map_err(|_| "Stream resynchronization timed out")??,
                     None => {
-                        receive(
-                            &mut self.socket,
-                            self.capabilities.max_response_bytes as usize,
-                            &mut self.responses,
-                        )
-                        .await?
+                        let deadline = self
+                            .map_request
+                            .as_ref()
+                            .map(|(pending, _)| pending.deadline);
+                        let received = self.receive_with_map_request();
+                        if let Some(deadline) = deadline {
+                            match tokio::time::timeout_at(deadline, received).await {
+                                Ok(result) => result?,
+                                Err(_) => {
+                                    if let Some((pending, _)) = self.map_request.take() {
+                                        self.state.reject_map_query(&pending.request_id);
+                                    }
+                                    continue;
+                                }
+                            }
+                        } else {
+                            received.await?
+                        }
                     }
                 },
             };
@@ -479,6 +603,64 @@ impl Connection {
             {
                 self.advancement_pages.clear();
                 return Err("Private advancement page sent without current control".into());
+            }
+            if let ServerMessage::MapPage {
+                context,
+                request_id,
+                page,
+            } = &message
+            {
+                // A newer observation cancels the old assembly. Late pages are
+                // discarded, never turned into a live-stream repair request.
+                if !self.is_synchronized()
+                    || page.base != self.state.observation_base()
+                    || page.branch != *self.state.branch()
+                    || context.input.stream != *self.state.context()
+                    || !self.map_request.as_ref().is_some_and(|(pending, query)| {
+                        pending.request_id == *request_id
+                            && self.state.map_query_pending(request_id, query)
+                    })
+                {
+                    continue;
+                }
+                self.state
+                    .accept_map_page(context, request_id, page, response_bytes)?;
+                self.map_request = None;
+                let ask = self.palette.notice(page.cells.iter().flat_map(|c| {
+                    c.asset
+                        .iter()
+                        .chain(c.door.iter().flat_map(|d| d.asset.iter()))
+                        .chain(c.ground_items.iter().flat_map(|i| i.asset.iter()))
+                        .map(String::as_str)
+                }));
+                if ask {
+                    self.pending_presentation = Some(message);
+                    self.palette_request = Some(PendingQuery::new());
+                    continue;
+                }
+                return Ok(message);
+            }
+            if let ServerMessage::Error {
+                request_id: Some(id),
+                ..
+            } = &message
+            {
+                if self.map_request.as_ref().is_some_and(|(pending, query)| {
+                    pending.request_id == *id && self.state.map_query_pending(id, query)
+                }) {
+                    let context = message
+                        .reply_context()
+                        .ok_or("Map error has no attachment context")?;
+                    self.state
+                        .validate_reply_context(context)
+                        .map_err(|e| format!("Invalid map error context: {e:?}"))?;
+                    self.state.reject_map_query(id);
+                    self.map_request = None;
+                    return Ok(message);
+                }
+                if id.starts_with("map-") {
+                    continue;
+                }
             }
             let reply_context = message.reply_context();
             if let Some(context) = reply_context {
@@ -701,6 +883,14 @@ async fn receive(
     limit: usize,
     responses: &mut ResponseAssembler,
 ) -> Result<ServerMessage, ConnectionError> {
+    Ok(receive_sized(socket, limit, responses).await?.0)
+}
+
+async fn receive_sized(
+    socket: &mut Socket,
+    limit: usize,
+    responses: &mut ResponseAssembler,
+) -> Result<(ServerMessage, usize), ConnectionError> {
     loop {
         match socket.next().await.ok_or("Server disconnected")?? {
             Message::Text(text) => {
@@ -708,6 +898,14 @@ async fn receive(
                     return Err(DecodeError::TooLarge { limit }.into());
                 }
                 let decoded = decode_response(&text)?;
+                if matches!(decoded, ServerMessage::MapPage { .. })
+                    && text.len() > MAX_MAP_PAGE_BYTES
+                {
+                    return Err(DecodeError::TooLarge {
+                        limit: MAX_MAP_PAGE_BYTES,
+                    }
+                    .into());
+                }
                 if matches!(decoded, ServerMessage::AdvancementPage { .. })
                     && text.len() > MAX_ADVANCEMENT_PAGE_BYTES
                 {
@@ -717,7 +915,7 @@ async fn receive(
                     .into());
                 }
                 if let Some(message) = responses.push(decoded)? {
-                    return Ok(message);
+                    return Ok((message, text.len()));
                 }
             }
             Message::Close(_) => return Err("Server disconnected".into()),

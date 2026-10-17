@@ -2645,14 +2645,24 @@ pub fn describe(
     };
     let what = match tile.kind {
         crate::map::Kind::Item => {
-            let items: Vec<_> = o
+            let live = o
                 .ground_items
                 .iter()
-                .chain(state.map_memory().flat_map(|c| c.ground_items.iter()))
-                .filter(|i| (i.position.x, i.position.y) == (x, y))
-                .collect();
-            match items.first() {
-                Some(item) => item_phrase(&item.item.name, item.item.quantity),
+                .find(|i| {
+                    (i.position.x, i.position.y) == (x, y)
+                        && (-2..=0).contains(&(i.position.z - o.position.z))
+                })
+                .map(|i| (&i.item.name, i.item.quantity));
+            let remembered = state
+                .map_memory()
+                .filter(|c| {
+                    (c.position.x, c.position.y) == (x, y)
+                        && (-2..=0).contains(&(c.position.z - o.position.z))
+                })
+                .find_map(|c| c.items().first())
+                .map(|i| (&i.name, i.quantity));
+            match live.or(remembered) {
+                Some((name, quantity)) => item_phrase(name, quantity),
                 None => "an object".into(),
             }
         }

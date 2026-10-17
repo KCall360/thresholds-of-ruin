@@ -220,6 +220,7 @@ impl World {
                     };
                     if visible {
                         cells.push(SightCell {
+                            physical: true,
                             location: cell.location,
                             offset: Position { x, y, z },
                             rotation: cell.rotation,

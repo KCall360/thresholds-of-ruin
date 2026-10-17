@@ -215,12 +215,14 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
             },
         )
         .unwrap();
+    let save_started = std::time::Instant::now();
     engine.flush().unwrap();
-    // Compact region-pooled terrain keeps the original checkpoint budget even
-    // with range 16 and both complete 64-actor admission windows retained.
-    let logical = engine.profile_checkpoint_json_encoding().unwrap().0;
+    let save_elapsed = save_started.elapsed();
+    // Persisted map appearances have a 2 MiB logical budget for this unchanged
+    // range-16, 64-actor workload with both complete admission windows retained.
+    let (logical, json_encoding_elapsed) = engine.profile_checkpoint_json_encoding().unwrap();
     assert!(
-        logical > 0 && logical < 1024 * 1024,
+        logical > 0 && logical < 2 * 1024 * 1024,
         "shared queue checkpoint is {logical} logical JSON bytes"
     );
     let bytes = engine.save_status().checkpoint_bytes;
@@ -228,12 +230,30 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
         bytes > 0 && bytes < 1024 * 1024,
         "shared queue checkpoint is {bytes} bytes"
     );
-    assert_eq!(engine.profile_checkpoint_encoding().unwrap().0, bytes);
+    let (measured, compressed_encoding_elapsed) = engine.profile_checkpoint_encoding().unwrap();
+    assert_eq!(measured, bytes);
     let expected: Vec<_> = (1..=64)
         .map(|id| engine.state(ActorId(id)).unwrap())
         .collect();
     drop(engine);
+    let reopen_started = std::time::Instant::now();
     let mut restored = Engine::open(&path, Scenario::two_room(0)).unwrap();
+    let reopen_elapsed = reopen_started.elapsed();
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "kind": "checkpoint_capacity",
+            "case": "queued_admissions",
+            "actors": 64,
+            "retained_boundaries": 256,
+            "logical_json_bytes": logical,
+            "compressed_checkpoint_bytes": bytes,
+            "json_capture_encode_ms": json_encoding_elapsed.as_secs_f64() * 1000.0,
+            "compressed_capture_encode_ms": compressed_encoding_elapsed.as_secs_f64() * 1000.0,
+            "checkpoint_save_barrier_wait_ms": save_elapsed.as_secs_f64() * 1000.0,
+            "reopen_ms": reopen_elapsed.as_secs_f64() * 1000.0,
+        })
+    );
     assert_eq!(restored.recovery_profile().records_replayed, 0);
     assert_eq!(restored.profile_counts().1, 256);
     for (index, state) in expected.into_iter().enumerate() {

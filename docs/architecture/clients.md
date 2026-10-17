@@ -22,46 +22,39 @@ an invented base.
 
 Keep these memories distinct:
 
-1. **Authoritative character knowledge:** backend navigation, known item facts
-   and learned place names. It survives disconnect/restart and rewinds with the
-   chosen game boundary.
-2. **Last-seen client memory:** historical disclosed cells keyed by opaque cell
-   identity. Hidden changes do not refresh them. Stored offsets describe the
-   last sighting, not a current global map.
-3. **Aligned presentation chart:** a bounded coordinate chart derived from
-   successive views. It can be discarded without forgetting authoritative names
-   or routes, or deleting the separate historical sightings.
+1. **Authoritative character knowledge:** backend navigation, item knowledge,
+   learned place names and last-seen map appearances. These survive disconnect
+   and restart and rewind with the selected game boundary.
+2. **Received appearance cache:** bounded value-only cells keyed by opaque
+   identity. Hidden changes never refresh them. Local sighting diagnostics are
+   optional when a fresh client receives older persisted knowledge.
+3. **Aligned presentation chart:** bounded coordinate occurrences referencing
+   those appearances. One physical key may have several witnessed offsets.
 4. **Text conversation/presentation state:** pronouns, clarification, pending
-   command chains, unhinted place identity and visited-description detail. It is
-   local to this client and not durable game state.
+   command chains, unhinted place identity and visited-description detail. It
+   remains local to the client rather than durable game state.
 
-Cells refresh only when disclosed, including clearing removed items. If one cell
-appears at several offsets in a view, key-indexed memory retains the last
-occurrence in deterministic scene order. Current observations retain all distinct
-occurrences. Creature occupants do not persist as ghosts in the remembered map.
+### Aligning and hydrating map memory
 
-### Aligning map memory
+[`map_memory.rs`](../../crates/client-common/src/map_memory.rs) aligns successive
+views only when unique shared keys imply one translation. Without that proof,
+[`map_hydration.rs`](../../crates/client-common/src/map_hydration.rs) obtains a
+bounded server projection of saved witnessed geometry. Neither owner invents
+hidden topology. Repeated physical keys share an appearance while retaining
+separate projected occurrences; conflicting payloads for one key are rejected.
 
-[`map_memory.rs`](../../crates/client-common/src/map_memory.rs) matches keys that
-occur exactly once in both successive views. Every usable match must imply the
-same translation. Elevation and rotated crossings can preserve a chart when the
-displayed axes and offsets agree. Absent, ambiguous or conflicting overlap resets
-the chart rather than guessing a global embedding. Teleportation and cyclic
-non-Euclidean views can cause this deliberately conservative reset.
+All six normal height planes fit the 63-by-33 footprint (12,474 positions).
+Appearance storage and a single staging transfer also have independent byte
+limits. Pages bind actor, branch, stream, observation and window; no partial or
+stale assembly replaces the chart. A new observation cancels pending assembly,
+while current disclosure and ordinary input remain usable. New clients and
+unaligned or uncovered windows hydrate automatically, without a redraw loop.
 
-The chart retains at most 4096 occurrences, preferring nearby cells with stable
-tie-breaking. Overflowing translated coordinates are discarded. Seeing a key
-refreshes all retained occurrences of that physical cell, preserving their
-aligned positions while clearing actors. A stationary aligned map avoids
-rebuilding its coordinate index.
-
-Aligned same-branch snapshots retain connection-local memory; branch changes
-clear it. A fresh client begins from its snapshot, not a reconstructed tour of
-saved history. Three-dimensional sight fills the bound with headroom and surfaces,
-so tall rooms can retain less explored floor area. Increasing capacity or dropping
-headroom requires measurement and care: headroom distinguishes low obstacles
-from full walls in the merged map. The display window is not a promise that all
-its possible cells fit in the cache.
+Current cells win over stale appearances, including observed empty item lists.
+Creatures never persist as map ghosts. Remembered doors and items contain
+appearance values only, so Text and ASCII cannot turn old targets into actions.
+Branch changes clear client knowledge before the new boundary is hydrated;
+normal saves retain the server-owned knowledge rather than the client cache.
 
 ## Text parsing and resolution
 

@@ -237,8 +237,33 @@ set and replays private queue transitions across gaps between retained states,
 including their recorded timing and terminal facts. The two windows are derived
 in one pass through the archive. Identical worlds and item maps across those boundaries are encoded once.
 Navigation cells and edges are pooled independently by source region, and so are
-remembered place names. Each
-navigation instance holds ordered table references; equal region contents are
+remembered place names. Their checkpoint codec is unchanged by the separate
+explored-map compaction.
+Explored appearances and bounded witnessed geometry are likewise actor-owned,
+region-shared checkpoint data. Changed sightings update their owning region;
+identical sightings do not create history entries. Acquisition is part of the
+ordinary candidate transaction before rewind capture and storage admission.
+Read-only snapshots, spectators and hydration never add knowledge. Saved map
+values contain last-seen appearance rather than current entity handles, and
+restoration never refreshes them from unseen terrain or items.
+
+The private explored-map codec stores exact appearances in one sorted, unique
+palette. Each cell bucket names its region once; ordered x/y columns contain
+explicit z/appearance-reference pairs, with one pair per remembered cell. Plain
+same-region, zero-rotation neighbors use explicit z/mask pairs in the same column
+shape. Masks from 1 through 63 encode only the six witnessed axial neighbors;
+checked coordinate addition reconstructs their targets. Exceptional links and
+ambiguous evidence retain their full explicit records. Witness and child tables
+remain explicit and cross-validated. No run, inferred cell or current-world lookup
+fills missing knowledge. Equal actor-to-map-instance owner directories are pooled
+across snapshots without merging differing owners or historical map values.
+The reader rejects malformed columns, invalid or noncanonical palette references,
+zero/out-of-range masks, coordinate overflow and overlapping plain/exceptional
+evidence. See the [capacity evidence](../development/performance.md#explored-map-checkpoint-capacity)
+for passing bounded production size/reopen checks and their single-run timing
+limits; these do not establish general responsiveness.
+
+Each navigation instance holds ordered table references; equal region contents are
 stored once even when ownership differs. Reference decoding shares the maps
 without expanding repeated cell/edge payloads. Empty or mixed-region table
 entries, invalid/duplicate/out-of-order references and malformed fields fail closed.

@@ -366,6 +366,9 @@ pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
 /// A region's floor, wall and door assets, if its scenario names them.
 pub type Terrain<'a> = &'a dyn Fn(w::RegionId) -> [Option<String>; 3];
 
+pub(crate) const WOODEN_DOOR_NAME: &str = "wooden door";
+pub(crate) const WOODEN_DOOR_DESCRIPTION: &str = "A plain wooden door with an iron handle.";
+
 pub fn observation(
     view: s::Observation,
     scene: Vec<w::SightCell>,
@@ -403,8 +406,8 @@ pub fn observation(
             asset: if cell.wall { wall } else { floor },
             door: visible.door.map(|door| p::DoorView {
                 id: targets.door(door.id),
-                name: "wooden door".into(),
-                description: "A plain wooden door with an iron handle.".into(),
+                name: WOODEN_DOOR_NAME.into(),
+                description: WOODEN_DOOR_DESCRIPTION.into(),
                 open: door.open,
                 reachable: visible.door_reachable,
                 approaches: visible
@@ -677,7 +680,7 @@ pub fn cell_key(salt: &str, actor: u64, location: w::Location) -> String {
         .collect()
 }
 
-fn item_class(class: s::ItemClass) -> p::ItemClass {
+pub(crate) fn item_class(class: s::ItemClass) -> p::ItemClass {
     match class {
         s::ItemClass::Misc => p::ItemClass::Misc,
         s::ItemClass::Weapon => p::ItemClass::Weapon,

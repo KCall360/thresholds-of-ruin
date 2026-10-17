@@ -259,6 +259,7 @@ pub fn whereabouts(p: Position) -> String {
 
 /// The disclosed view as referents.
 pub struct Scene<'a> {
+    pub view: &'a dyn super::scenery::ScenicView,
     pub state: &'a StateView,
     pub palette: &'a Palette,
     /// Places remembered, for the atmosphere of the place in view.
@@ -269,16 +270,17 @@ pub struct Scene<'a> {
 }
 
 impl<'a> Scene<'a> {
-    pub fn new(state: &'a StateView, palette: &'a Palette) -> Self {
+    pub fn new(state: &'a dyn super::scenery::ScenicView, palette: &'a Palette) -> Self {
         Self::remembering(state, palette, &crate::narrative::NO_PLACES)
     }
 
     /// The scene, with the places the engine remembers.
     pub fn remembering(
-        state: &'a StateView,
+        view: &'a dyn super::scenery::ScenicView,
         palette: &'a Palette,
         places: &'a crate::narrative::Places,
     ) -> Self {
+        let state = view.current();
         let o = &state.observation;
         let mut referents = Vec::new();
         for item in &o.inventory {
@@ -338,7 +340,10 @@ impl<'a> Scene<'a> {
                 way: None,
             });
         }
-        let roles = surfaces::roles_by(&o.visible_cells, |cell| adventure::surface(palette, cell));
+        let scenery = &view.scenery().observation;
+        let roles = surfaces::roles_by(&scenery.visible_cells, |cell| {
+            adventure::surface(palette, cell)
+        });
         for (surface, name, words, seen) in [
             (
                 Surface::Floor,
@@ -346,7 +351,8 @@ impl<'a> Scene<'a> {
                 &["floor", "ground"][..],
                 // Raw diagnostic regions show their floor on the open cells.
                 !roles.floors.is_empty()
-                    || o.visible_cells
+                    || scenery
+                        .visible_cells
                         .iter()
                         .any(|c| !c.wall && (c.asset.is_some() || !c.material.is_empty())),
             ),
@@ -385,7 +391,7 @@ impl<'a> Scene<'a> {
                 });
             }
         }
-        referents.extend(features(state));
+        referents.extend(features(view));
         referents.push(Referent {
             key: Key::Me,
             kind: Kind::Me,
@@ -417,6 +423,7 @@ impl<'a> Scene<'a> {
             }
         }
         Self {
+            view,
             state,
             palette,
             places,
@@ -631,9 +638,10 @@ fn figures(o: &Observation, palette: &Palette) -> Vec<Referent> {
 
 /// The place's own features that can be named: its ways out, the exit, and
 /// the directions in which it continues out of sight.
-fn features(state: &StateView) -> Vec<Referent> {
+fn features(view: &dyn super::scenery::ScenicView) -> Vec<Referent> {
     use super::place::{survey, Opening};
-    let place = survey(state);
+    let place = survey(view);
+    let state = view.current();
     let mut found: Vec<Referent> = Vec::new();
     let mut feature =
         |name: &str, heads: &[&str], way: Option<Direction>, position: Option<Position>| {
@@ -692,6 +700,9 @@ fn features(state: &StateView) -> Vec<Referent> {
             Opening::SurfaceExit => {}
             // Doors are things of their own.
             Opening::Door { .. } => {}
+            Opening::RememberedDoor { ref name, .. } => {
+                feature(name, &["door", "doorway", "way"], Some(way.direction), None)
+            }
         }
     }
     let exit = state

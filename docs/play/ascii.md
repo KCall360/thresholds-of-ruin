@@ -221,21 +221,26 @@ are rejected. The server handles stale obstacles using the character’s known
 routes. The travel cursor’s `<`/`>` keys find known stairs; they do not browse
 height. Height inspection belongs to the look cursor.
 
-The display aligns sightings only when shared opaque cell keys establish one
-consistent translation. No overlap, ambiguous matches or conflicting portal
-views reset the displayed chart rather than inventing geometry. Memory is local
-to this connection: aligned same-branch snapshots can retain it, but rewind clears
-it and restarting the client starts with the new snapshot. It is not restored
-from a save or history. The character’s durable place names and backend navigation
-knowledge are separate.
+The server saves each character's last-seen appearances and witnessed spatial
+relationships. Returning to an explored neighborhood or reconnecting hydrates
+that character's memory. Rewind restores the selected boundary's knowledge.
+Different characters do not share sightings, and spectators cannot teach them
+new cells. The character's durable place names and navigation routes remain
+separate from appearance memory.
 
-The chart retains at most 4096 cell occurrences, preferring nearby cells. Its
-window spans 31 cells each side in x and 16 in y, with heights from two below to
-three above the feet merged into the single map. Unknown cells stay blank and
-cells are never rescaled to fit. Three-dimensional views include headroom and
-solid surfaces, so that bound can cover less explored floor area in tall rooms.
-A single inconsistent alignment can discard the chart. Neither behavior means
-the character forgot a learned name or navigation route.
+The active chart covers 31 cells each side in x and 16 in y, with heights from
+two below to three above the feet merged into one map: all 12,474 possible cell
+positions fit. Bounded pages populate this window atomically while live input
+and current observations remain available. Unknown cells stay blank; remembered
+actors and actionable old item or door handles are never retained.
+
+Shared opaque keys align successive views. After an unaligned crossing, the
+server reconstructs placement from witnessed relationships, including rotations,
+without consulting hidden current terrain. Ambiguous placements are suppressed
+while independently certified cells remain. An exceptional projection or transfer
+limit is reported as incomplete; it does not silently claim a complete map or
+erase the last aligned chart. The bounded client cache is not the permanent
+knowledge store, so older floors can be hydrated again after cache eviction.
 
 F5 lists durable places. Up/Down selects; Enter edits and saves a name; Escape
 cancels or closes. Spectators may read the list. Names are 1–80 UTF-8 bytes without

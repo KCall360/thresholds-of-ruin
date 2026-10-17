@@ -125,10 +125,11 @@ A place hint is an optional authored point, not room membership, a boundary or a
 exploration claim. Names and remembered navigation belong to characters and are
 learned only at authoritative perception boundaries. Clients may organize places
 from disclosed geometry and retain stale last-seen cells; neither presentation
-caches nor names reconstruct undisclosed topology. Same-branch snapshots retain
-connection memory; branch resets clear it. Persistent actor navigation and names
-are separate from that connection-local memory. See [movement](../reference/movement.md) and
-[client architecture](clients.md).
+caches nor names reconstruct undisclosed topology. Actor-owned last-seen map
+appearances persist with navigation and names. Same-branch snapshots retain the
+bounded client cache; branch resets clear it before the server rehydrates the
+selected branch's nearby explored cells. See [movement](../reference/movement.md)
+and [client architecture](clients.md).
 
 ## Observation and client boundary
 

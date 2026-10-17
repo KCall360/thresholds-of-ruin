@@ -3,6 +3,8 @@ use crate::{Direction, Location, Position, World};
 /// Backend-only visible occurrence. Multiple offsets may reference one location.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SightCell {
+    /// Physical disclosure, excluding an abstract stair's synthetic landing.
+    pub physical: bool,
     pub location: Location,
     pub offset: Position,
     pub rotation: u8,

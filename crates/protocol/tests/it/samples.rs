@@ -39,6 +39,7 @@ fn request_kind(request: &Request) -> &'static str {
         Request::ReleaseControl => "release_control",
         Request::Snapshot => "snapshot",
         Request::Palette => "palette",
+        Request::Map { .. } => "map",
         Request::Command { command, .. } => match command {
             Command::Advancement { .. } => "command.advancement",
             Command::InspectStrikeSource { .. } => "command.inspect_strike_source",
@@ -78,6 +79,7 @@ const CLIENT_KINDS: &[&str] = &[
     "release_control",
     "snapshot",
     "palette",
+    "map",
     "command.rename_place",
     "command.resume_intention",
     "command.cancel_intention",
@@ -141,6 +143,7 @@ server_sample_kinds! {
     CreatureInspection => ("creature_inspection", None),
     CreatureStrikePage => ("creature_strike_page", None),
     AdvancementPage => ("advancement_page", None),
+    MapPage => ("map_page", None),
     CombatDiagnostics => ("combat_diagnostics", None),
     Error => ("error", None),
     Palette => ("palette", None),
@@ -175,6 +178,7 @@ fn server_kind(message: &ServerMessage) -> ServerSampleKind {
         ServerMessage::CreatureInspection { .. } => Kind::CreatureInspection,
         ServerMessage::CreatureStrikePage { .. } => Kind::CreatureStrikePage,
         ServerMessage::AdvancementPage { .. } => Kind::AdvancementPage,
+        ServerMessage::MapPage { .. } => Kind::MapPage,
         ServerMessage::CombatDiagnostics { .. } => Kind::CombatDiagnostics,
         ServerMessage::Error { .. } => Kind::Error,
         ServerMessage::Palette { .. } => Kind::Palette,
@@ -228,6 +232,7 @@ fn recorded_request_envelopes_preserve_payload_bytes_and_validation() {
         if matches!(
             payload,
             Request::Attach { .. }
+                | Request::Map { .. }
                 | Request::Command { .. }
                 | Request::History { .. }
                 | Request::HistoryBranch { .. }

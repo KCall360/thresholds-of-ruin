@@ -284,7 +284,9 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
                 println!("{line}");
             }
         }
-        ServerMessage::Palette { .. } | ServerMessage::Waiting { .. } => {}
+        ServerMessage::Palette { .. }
+        | ServerMessage::Waiting { .. }
+        | ServerMessage::MapPage { .. } => {}
         ServerMessage::Error { code, message, .. } => {
             println!("Server error {code:?}: {}", safe(message))
         }

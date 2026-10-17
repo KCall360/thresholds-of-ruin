@@ -6,10 +6,12 @@
 //! has no effect on play and never claims something the game hasn't
 //! disclosed.
 
+use crate::engine::scenery::ScenicView;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use tor_client_common::{surfaces, Palette};
-use tor_protocol::{Direction, Position, StateView};
+use tor_protocol::{Direction, Position};
 
 use crate::{
     adventure::{floor_material_with, surface},
@@ -27,15 +29,18 @@ use crate::{
 /// cell with the lowest key, which doesn't depend on where in the place the
 /// character stands. Keys are fixed for the game, so neither changes between
 /// visits.
-pub fn current_place_anchor(state: &StateView) -> Option<(&str, Position)> {
+pub fn current_place_anchor(state: &dyn ScenicView) -> Option<(&str, Position)> {
     current_place_anchor_in(state, &place::survey(state))
 }
 
-fn current_place_anchor_in<'a>(state: &'a StateView, place: &Place) -> Option<(&'a str, Position)> {
+fn current_place_anchor_in<'a>(
+    state: &'a dyn ScenicView,
+    place: &Place,
+) -> Option<(&'a str, Position)> {
     let inside = |c: &&tor_protocol::CellView| {
         !c.wall && c.position.z == 0 && place.columns.contains(&(c.position.x, c.position.y))
     };
-    let cells = &state.observation.visible_cells;
+    let cells = &state.scenery().observation.visible_cells;
     cells
         .iter()
         .filter(inside)
@@ -76,8 +81,9 @@ pub static NO_PLACES: Places = Places {
 };
 
 /// The key of the cell the character stands on.
-pub fn here_key(state: &StateView) -> Option<&str> {
+pub fn here_key(state: &dyn ScenicView) -> Option<&str> {
     state
+        .scenery()
         .observation
         .visible_cells
         .iter()
@@ -87,21 +93,22 @@ pub fn here_key(state: &StateView) -> Option<&str> {
 
 impl Places {
     /// Remember where the character begins, once.
-    pub fn begin(&mut self, state: &StateView) {
+    pub fn begin(&mut self, state: &dyn ScenicView) {
         if self.start.is_none() {
             self.start = here_key(state).map(str::to_owned);
         }
     }
 
     /// The key of the place the character is in.
-    pub fn key(&self, state: &StateView) -> Option<String> {
+    pub fn key(&self, state: &dyn ScenicView) -> Option<String> {
         self.key_in(state, &place::survey(state))
     }
 
     /// [`Places::key`] for a place already surveyed: its hint, else the key
     /// most of its cells were first seen under, else its lowest cell key.
-    pub fn key_in(&self, state: &StateView, place: &Place) -> Option<String> {
+    pub fn key_in(&self, state: &dyn ScenicView, place: &Place) -> Option<String> {
         let cells: Vec<&tor_protocol::CellView> = state
+            .scenery()
             .observation
             .visible_cells
             .iter()
@@ -139,10 +146,10 @@ impl Places {
 
     /// Remember the place the character is in under its key, and return
     /// the key.
-    pub fn learn(&mut self, state: &StateView) -> Option<String> {
+    pub fn learn(&mut self, state: &dyn ScenicView) -> Option<String> {
         let place = place::survey(state);
         let key = self.key_in(state, &place)?;
-        for cell in &state.observation.visible_cells {
+        for cell in &state.scenery().observation.visible_cells {
             if !cell.wall
                 && cell.position.z == 0
                 && place.columns.contains(&(cell.position.x, cell.position.y))
@@ -157,16 +164,17 @@ impl Places {
 }
 
 /// The anchor key of the character's current place.
-pub fn current_place_key(state: &StateView) -> Option<&str> {
+pub fn current_place_key(state: &dyn ScenicView) -> Option<&str> {
     current_place_anchor(state).map(|(k, _)| k)
 }
 
 /// The key of the place the character can name: an authored place hint
 /// inside it. Only hinted places are learned, so only they can be renamed.
-pub fn named_place_key(state: &StateView) -> Option<&str> {
+pub fn named_place_key(state: &dyn ScenicView) -> Option<&str> {
     let place = place::survey(state);
     let (key, _) = current_place_anchor_in(state, &place)?;
     state
+        .scenery()
         .observation
         .visible_cells
         .iter()
@@ -175,9 +183,10 @@ pub fn named_place_key(state: &StateView) -> Option<&str> {
 }
 
 /// The place's name, when the character has one for it.
-pub fn place_title(state: &StateView) -> Option<String> {
+pub fn place_title(state: &dyn ScenicView) -> Option<String> {
     let key = current_place_key(state)?;
     state
+        .scenery()
         .observation
         .places
         .iter()
@@ -190,8 +199,8 @@ pub fn place_title(state: &StateView) -> Option<String> {
 }
 
 /// The floor under the character and the walls in sight, as words.
-fn surfaces_here(state: &StateView, palette: &Palette) -> (Option<String>, Vec<String>) {
-    let cells = &state.observation.visible_cells;
+fn surfaces_here(state: &dyn ScenicView, palette: &Palette) -> (Option<String>, Vec<String>) {
+    let cells = &state.scenery().observation.visible_cells;
     let here = cells
         .iter()
         .find(|c| c.position == Position { x: 0, y: 0, z: 0 } && !c.wall);
@@ -217,7 +226,7 @@ fn narrow(place: &Place) -> bool {
 }
 
 fn atmosphere_of(
-    state: &StateView,
+    state: &dyn ScenicView,
     palette: &Palette,
     place: &Place,
     places: &Places,
@@ -229,24 +238,24 @@ fn atmosphere_of(
 }
 
 /// The atmosphere of the place the character is in.
-pub fn atmosphere(state: &StateView, palette: &Palette, places: &Places) -> Atmosphere {
+pub fn atmosphere(state: &dyn ScenicView, palette: &Palette, places: &Places) -> Atmosphere {
     atmosphere_of(state, palette, &place::survey(state), places)
 }
 
 /// What `smell` notices here. Flavour only.
-pub fn smell(state: &StateView, palette: &Palette, places: &Places) -> String {
+pub fn smell(state: &dyn ScenicView, palette: &Palette, places: &Places) -> String {
     atmosphere(state, palette, places).smell.to_owned()
 }
 
 /// What `listen` hears here. Flavour only, and never a claim about what is
 /// happening: the place's own sound, and a reminder of whoever is in sight.
-pub fn listen(state: &StateView, palette: &Palette, places: &Places) -> String {
+pub fn listen(state: &dyn ScenicView, palette: &Palette, places: &Places) -> String {
     let mut text = atmosphere(state, palette, places).sound.to_owned();
     // Each figure once, however many cells it fills; alike ones counted.
     let mut seen = std::collections::BTreeSet::new();
     let mut names: Vec<(String, u64)> = Vec::new();
-    for a in &state.observation.visible_actors {
-        if a.id == state.observation.self_target || !seen.insert(a.id) {
+    for a in &state.current().observation.visible_actors {
+        if a.id == state.current().observation.self_target || !seen.insert(a.id) {
             continue;
         }
         let name = safe(if a.name.is_empty() { "figure" } else { &a.name });
@@ -271,7 +280,7 @@ pub fn listen(state: &StateView, palette: &Palette, places: &Places) -> String {
 /// The place's kind with its mood word, "the dusty chamber", or with an
 /// indefinite article when `definite` isn't set.
 pub fn place_noun(
-    state: &StateView,
+    state: &dyn ScenicView,
     palette: &Palette,
     place: &Place,
     places: &Places,
@@ -323,13 +332,13 @@ fn fabric_phrase(floor: Option<&str>, walls: &[String]) -> String {
 /// The place in a few sentences: what kind of place, what it's made of, its
 /// atmosphere, how high its ceiling is when that's notable, and where it goes
 /// on out of sight.
-pub fn describe_place(state: &StateView, palette: &Palette, places: &Places) -> String {
+pub fn describe_place(state: &dyn ScenicView, palette: &Palette, places: &Places) -> String {
     describe_surveyed(state, palette, &place::survey(state), places)
 }
 
 /// [`describe_place`] for a place already surveyed.
 pub fn describe_surveyed(
-    state: &StateView,
+    state: &dyn ScenicView,
     palette: &Palette,
     place: &Place,
     places: &Places,
@@ -342,7 +351,7 @@ pub fn describe_surveyed(
         fabric_phrase(floor.as_deref(), &walls)
     )];
     sentences.extend(mood.description.iter().map(|s| (*s).to_owned()));
-    let cells = &state.observation.visible_cells;
+    let cells = &state.scenery().observation.visible_cells;
     if let Some((_, height)) = surfaces::ceiling_above(cells, Position { x: 0, y: 0, z: 0 }) {
         if height >= 4 {
             sentences.push("The ceiling is high above you.".into());

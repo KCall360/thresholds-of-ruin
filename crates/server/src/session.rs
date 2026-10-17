@@ -5,6 +5,9 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tor_protocol::*;
 
+#[path = "map_page_session.rs"]
+mod map_pages;
+
 #[cfg(feature = "service-contract-host")]
 #[path = "service_contract_host.rs"]
 pub(crate) mod contract_host;
@@ -92,6 +95,8 @@ impl RequestReply {
 
 enum ProcessedRequest {
     Reply(RequestReply),
+    /// Map cursors advance only after their correlated page is admitted.
+    Map(Box<map_pages::MapTransfer>),
     /// Snapshot publication owns the stream reset; no additional reply is due.
     Published,
     /// Persistence owns completion; poll it at the common publication boundary.
@@ -114,6 +119,7 @@ struct StrikeInspectionHandle {
 
 struct Client {
     strike_inspection: Option<StrikeInspectionHandle>,
+    map_transfer: Option<map_pages::MapTransfer>,
     role: AccessRole,
     user: String,
     frontend: String,
@@ -324,6 +330,7 @@ impl Service {
             id,
             Client {
                 strike_inspection: None,
+                map_transfer: None,
                 role: account.role,
                 user: account.user.clone(),
                 frontend,
@@ -380,6 +387,19 @@ impl Service {
         let clients = self.clients.len();
         match result {
             Ok(ProcessedRequest::Reply(reply)) => self.publish_reply(id, request_id, reply),
+            Ok(ProcessedRequest::Map(transfer)) => {
+                if let Err(error) = self.publish_map_page(id, &request_id, *transfer) {
+                    self.send(
+                        id,
+                        ServerMessage::Error {
+                            scope: self.error_scope(id),
+                            request_id: Some(request_id),
+                            code: error.code,
+                            message: error.message,
+                        },
+                    );
+                }
+            }
             Ok(ProcessedRequest::Published) => {}
             Ok(ProcessedRequest::SaveQueued) => unreachable!("handled by persistence"),
             Err(error) => self.send(
@@ -464,6 +484,9 @@ impl Service {
         let user = client.user.clone();
         let frontend = client.frontend.clone();
         match request {
+            Request::Map { query } => self
+                .prepare_map_page(id, query)
+                .map(|transfer| ProcessedRequest::Map(Box::new(transfer))),
             Request::Continue => {
                 if self.controllers.get(&actor) != Some(&id) {
                     return Err(Failure::new(
@@ -1688,6 +1711,7 @@ impl Service {
         let client = self.clients.get_mut(&id).expect("admitted client");
         client.context = Some(context);
         client.strike_inspection = None;
+        client.map_transfer = None;
         client.readiness = Some(readiness);
         client.waiting = None;
         client.observation_tick = snapshot.state.observation.tick;
@@ -1901,6 +1925,7 @@ impl Service {
             unreachable!()
         };
         if let UpdateBody::Observation { state, .. } = update.body {
+            client.map_transfer = None;
             client.last_observation = Some(DisclosedObservation {
                 branch,
                 base: ObservationBase {

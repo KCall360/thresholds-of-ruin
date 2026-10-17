@@ -161,8 +161,9 @@ claim about Rogue balance, successful earned-HD routes or release latency.
   [background saving](../architecture/persistence.md).
 - **Checkpoints.** Periodic snapshots and logical compaction bound the replay
   needed at startup, while all history stays retained. Navigation knowledge is
-  pooled by source region, so explored worlds stay small. See
-  [checkpoints](../architecture/persistence.md).
+  pooled by source region. Explored-map storage has separate
+  [capacity checks](#explored-map-checkpoint-capacity); pooling alone does not
+  establish a size or latency bound. See [checkpoints](../architecture/persistence.md).
 - **State sharing.** Command candidates own only decision state, revisions, the
   current branch, and the union of 128 selectable rewind states and 128 raw audit
   states (at most 256 shared boundaries). World collections,
@@ -822,20 +823,21 @@ python scripts/performance_driver.py --bin-dir target/release --output target/cl
 python scripts/performance_driver.py --bin-dir target/release --output target/client-no-capture --regions 256 --actors 8 --cycles 1 --pace-ms 0 --no-capture
 ```
 
-The separate client workload version 1 has 64/20,956 previously disclosed cells,
-a bounded 64/4096-cell chart, 64 current cells, bursts of 1/64 observations and
-20 samples per combination (80 total). It applies all updates before one canvas
-draw. Setup and memory-count inspection are outside timing; update payload cloning
-and validation are included. This stationary synthetic chart isolates historical
-memory and tile lookup costs; it is not an authoritative world/discovery workload.
-Continue `latency_bench --discovery-only` for real movement and growing knowledge.
-The original server fixture/version/order and retained validators are unchanged.
+The current separate client workload version 3 presents 64/20,956 disclosed
+cells and retains at most 12,474 appearance records. Its fixed 49-by-25 plane
+geometry populates z=0 upward, so the normal -2..3 viewport contains exactly
+64/4,900 chart cells. The fixture keeps 64 current cells, bursts of 1/64 updates
+and 20 samples per combination (80 total), applying each burst before one draw.
+Setup and count inspection are outside timing; update cloning and validation are
+included. This stationary synthetic workload does not measure authoritative
+exploration or reconnect cost. Historical versions 1/2 retain their original
+connection-cache counts in the validator and are not relabeled as current results.
 
 For semantic narration, run `cargo run --release --locked -p tor-client-ascii
---example client_bench -- --narration` and validate the JSON lines with
+--example client_bench -- --narration` and validate with
 `python scripts/client_performance_report.py FILE --narration`. This selects
-workload version 2 with actor and door sight changes; omitting the flag keeps
-version 1. Both use 64/20,956 remembered cells and 1/64-update bursts. See
+version 4 with actor and door sight changes; omitting the flag selects version 3.
+Version identity remains part of matched comparisons. See
 [narration and stream recovery](../architecture/clients.md).
 
 For immutable observation ownership, run `cargo run --release --locked -p
@@ -921,8 +923,9 @@ and diagnostic I/O; it is not physical keyboard-to-photon latency.
 The process suite runs eight regions and native OS keyboard input during a
 blocked checkpoint on that genuinely explored save. Set
 `TOR_SAVED_EXPLORATION_REGIONS=256` for the complete large acceptance case.
-The restarted client starts with its normal connection-local memory, while the
-traversal client retains every disclosed observation throughout exploration.
+The restarted client hydrates its bounded nearby map from persisted actor
+knowledge. The traversal driver separately retains every disclosed observation
+throughout exploration for its coverage audit.
 
 ## Opt-in timing correlation
 
@@ -1036,8 +1039,9 @@ and these small/large feature cases on the same release build and machine. No
 latency target or historical 3p finding is relaxed by this workload.
 
 Use `place_performance_driver.py --fresh-player` with a different output directory
-for a distinct attachment case: durable names remain, while connection-local
-diagnostic cell memory and history retention reset. The driver also records ack
+for a distinct attachment case: durable names and last-seen map knowledge remain,
+while local history retention resets and the bounded map cache hydrates. The
+driver also records ack
 line arrival, ready reader/queue work, cell counts and the size of ready JSON
 re-encoded by Python (not network byte counts). Keep both cases; see the
 [archived place-knowledge findings](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/place-knowledge-findings.md).
@@ -1400,6 +1404,83 @@ records build time separately; sub-microsecond query timing includes timer and
 scheduling noise. Operation counts, not those timings, establish scaling.
 
 ## Persistence evidence
+
+### Explored-map checkpoint capacity
+
+The existing
+[`checkpoint_preserves_queued_admissions_across_both_full_retained_windows` test](../../crates/server/tests/it/checkpoints.rs)
+keeps 64 actors, range-16 sight, and both complete retained windows (256 boundaries).
+Its logical JSON budget is now 2 MiB; its compressed checkpoint budget remains
+1 MiB. The
+[`explored_saved_fixture_checkpoint_matches_counting_diagnostic_and_reloads` test](../../crates/server/tests/it/performance_workloads.rs)
+keeps the complete eight/256-region traversal, periodic captures and three-record
+replay tail, with the unchanged 16 MiB logical budget. No actors, exploration,
+retained states, exact recovery comparisons, duplicate retries or queued-work
+assertions were removed to meet these limits. Both budgets are bounded regression
+contracts, separate from the production codec's unchanged 64 MiB limits.
+
+Both exact tests passed on October 17, 2026 at unchanged source
+`899c1e3794953e3d609c4ffc32ba5756c5d439c0`, tree
+`c177bbf0cb409a862161c8ede28835b2af6ff5ad`. Their shared server integration-test
+executable had SHA-256
+`9cbaf38cfa3644a6accf44ebd7f5ae9b303129a9ec6e9b0ef55b69e4b4aefc31`.
+It used Rust 1.99.0, the dev profile at opt-level 1 with debug assertions and
+overflow checks enabled, and the `service-contract-host` feature. Each test ran
+once; these are correctness-run diagnostics, not a release benchmark or matched
+before/after timing comparison. The corrected production writer measured:
+
+| Workload | Logical JSON bytes | Compressed checkpoint bytes |
+| --- | ---: | ---: |
+| 64 actors, both retained windows | 1,541,092 | 188,735 |
+| Eight explored regions | 666,872 | 70,319 |
+| 256 explored regions | 5,247,096 | 394,708 |
+
+Compressed counting matched actual stored payloads. The existing disclosed-state,
+retained-window, duplicate-retry and queued-work recovery assertions passed; the
+exploration test replayed exactly three tail records after each reopen.
+
+The first production Rust map representation failed the logical assertions at
+20,427,808 bytes for the queue case and 49,987,572 bytes for 256 explored regions.
+A read-only Python palette/columns/masks and owner-directory model of those
+captures produced 1,541,092 and 5,244,253 logical bytes respectively, round-tripping
+all four original map tables: cells, neighbors, witnesses and children. Those
+model results remain distinct from the corrected Rust measurements above.
+
+Removing only the queue capture's shared and per-snapshot explored-map fields
+left 1,003,010 bytes, only 45,566 bytes below the former 1 MiB logical limit.
+That counterfactual retained every other captured value and is not a map-free
+baseline execution. The approved 2 MiB queue limit accommodates durable map
+knowledge within the unchanged workload; the correction does not change the
+navigation codec to recover the old envelope.
+
+The production representation uses a sorted unique appearance palette, explicit
+region-local columns, six-neighbor masks, full exceptional/ambiguous evidence and
+shared owner directories. Model numbering and Python compression estimates are
+not measurements of the Rust serializer's output.
+
+The same correctness runs reported these server-only durations in milliseconds,
+rounded to three decimal places:
+
+| Workload | JSON capture/encode | Compressed capture/encode | Checkpoint flush wait | Tail flush wait | Reopen |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 64 actors, both retained windows | 68.580 | 76.598 | 89.762 | — | 210.839 |
+| Eight explored regions | 10.476 | 18.270 | 19.519 | 0.161 | 109.880 |
+| 256 explored regions | 122.057 | 159.352 | 190.742 | 0.174 | 3,059.407 |
+
+The two server tests emit diagnostic `checkpoint_capacity` JSON records when run
+with `--nocapture`. `json_capture_encode_ms` and
+`compressed_capture_encode_ms` include offline capture, pooling and counting
+serialization, without allocating a second encoded payload.
+`checkpoint_save_barrier_wait_ms` measures the existing flush call after any
+background progress; it is not total checkpoint I/O or total save cost. The
+exploration case separately reports `tail_save_barrier_wait_ms`. `reopen_ms`
+covers production open/validation and, for exploration, the three-record replay
+tail, excluding the subsequent equality assertions. The 256-region reopen took
+3.06 seconds including that three-record replay. These wall-clock diagnostics
+have no pass/fail timing threshold and do not measure client latency. One run
+per case establishes neither a general responsiveness guarantee, performance
+parity nor an arbitrary-world capacity bound; matched release measurements and
+broader verification remain separate requirements.
 
 ### Population checkpoint size regression
 

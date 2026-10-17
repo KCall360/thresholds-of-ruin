@@ -178,12 +178,9 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
     assert_eq!(client.state().observation.visible_cells[0].key, "2");
     assert!(client.state().observation.ground_items.is_empty());
     let remembered = client.memory().find(|view| view.key == "1").unwrap();
-    assert_eq!(
-        remembered.ground_items[0].item.id,
-        ItemTarget::from_digest([7; 32])
-    );
-    assert_eq!(remembered.last_seen_tick, 0);
-    assert_eq!(remembered.last_seen_revision, 0);
+    assert_eq!(remembered.ground_items[0].name, "token");
+    assert_eq!(remembered.last_seen_tick, Some(0));
+    assert_eq!(remembered.last_seen_revision, Some(0));
     client
         .apply(update(&client, snapshot(1, 200, 2), 2))
         .unwrap();
@@ -209,7 +206,7 @@ fn snapshots_preserve_same_branch_memory_but_clear_abandoned_futures() {
     super::reset_snapshot(&mut client, rewind).unwrap();
     assert_eq!(client.memory().count(), 1);
     assert_eq!(client.memory().next().unwrap().key, "1");
-    // A fresh connection has no access to the old client's memories.
+    // Before map hydration, a fresh snapshot contains only current disclosure.
     let fresh = ClientState::from_snapshot(snapshot(2, 100, 1)).unwrap();
     assert_eq!(fresh.memory().count(), 1);
 }
@@ -289,7 +286,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         .memory()
         .find(|cell| cell.position == distant)
         .unwrap();
-    assert_eq!(memory.last_seen_tick, 0);
+    assert_eq!(memory.last_seen_tick, Some(0));
     assert_eq!(memory.ground_items.len(), 1);
     let mut revisit = snapshot(1, 200, 2);
     Arc::make_mut(&mut revisit.state)
@@ -311,7 +308,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         .memory()
         .find(|cell| cell.position == distant)
         .unwrap();
-    assert_eq!(memory.last_seen_tick, 200);
+    assert_eq!(memory.last_seen_tick, Some(200));
     assert!(memory.ground_items.is_empty());
 }
 

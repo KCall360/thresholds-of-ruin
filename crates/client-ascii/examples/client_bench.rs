@@ -1,4 +1,4 @@
-//! Version 1 disclosed client workload: historical memory, bounded chart and bursts.
+//! Versions 3/4: bounded appearance memory, full viewport chart and update bursts.
 use std::{collections::BTreeSet, hint::black_box, sync::Arc, time::Instant};
 use tor_client_ascii::{render::Canvas, App};
 use tor_client_common::ClientState;
@@ -102,7 +102,8 @@ fn main() {
         ownership_diagnostic();
         return;
     }
-    // Keep the original workload unchanged; opt into disclosed actor/door churn.
+    // Geometry and burst inputs stay comparable to historical versions 1/2.
+    // Version 3/4 memory is bounded, and the chart retains the full viewport.
     for cells in [64, 20_956] {
         for burst in [1, 64] {
             let mut app = App::new();
@@ -167,7 +168,7 @@ fn main() {
                 canvas.draw(black_box(&app));
                 black_box(&canvas.pixels);
                 let render_ms = started.elapsed().as_secs_f64() * 1000.;
-                let mut result = serde_json::json!({"version":if narration {2} else {1},"cells":cells,"burst":burst,"sample":sample,
+                let mut result = serde_json::json!({"version":if narration {4} else {3},"cells":cells,"burst":burst,"sample":sample,
                     "memory":app.state.as_ref().unwrap().memory().count(),
                     "chart":app.state.as_ref().unwrap().map_memory().count(),"apply_ms":apply_ms,"render_ms":render_ms});
                 if narration {
@@ -191,6 +192,19 @@ fn fixture_context() -> tor_protocol::StreamContext {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn workload_chart_counts_match_its_four_in_window_positive_height_planes() {
+        for count in [64, 20_956] {
+            let client =
+                tor_client_common::ClientState::from_snapshot(super::snapshot(count)).unwrap();
+            assert_eq!(
+                client.memory().count(),
+                count.min(tor_protocol::MAX_MAP_TRANSFER_CELLS)
+            );
+            assert_eq!(client.map_memory().count(), count.min(49 * 25 * 4));
+        }
+    }
+
     #[test]
     fn workload_snapshot_matches_the_current_protocol() {
         for count in [64, 4096, 20_956] {

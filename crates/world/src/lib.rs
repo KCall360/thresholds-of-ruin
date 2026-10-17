@@ -102,7 +102,7 @@ mod tests {
 }
 
 mod shared;
-pub use shared::Shared;
+pub use shared::{Shared, SharedIdentity};
 
 mod rotation;
 pub use rotation::{compose_rotation, inverse_rotation, rotate_vector};

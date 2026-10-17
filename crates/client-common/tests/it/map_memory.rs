@@ -116,7 +116,9 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
     let remembered = client.map_memory().find(|c| c.key == "item").unwrap();
     assert_eq!(remembered.position, Position { x: 1, y: 0, z: 0 });
     assert_eq!(remembered.ground_items.len(), 1);
-    assert!(remembered.visible_actors.is_empty());
+    let serialized = serde_json::to_value(remembered.appearance()).unwrap();
+    assert!(serialized.get("visible_actors").is_none());
+    assert!(serialized["ground_items"][0].get("id").is_none());
     // The historical memory contract remains unchanged.
     assert_eq!(
         client
@@ -217,9 +219,9 @@ fn chart_size_and_extreme_translations_are_bounded() {
             .push(cell);
     }
     let mut client = ClientState::from_snapshot(initial).unwrap();
-    assert_eq!(client.map_memory().count(), 4096);
+    assert_eq!(client.map_memory().count(), 32);
     advance(&mut client, snapshot(&[("anchor", i32::MAX, 0)], 1));
-    assert_eq!(client.map_memory().count(), 1);
+    assert_eq!(client.map_memory().count(), 0);
 }
 
 fn cells(row: &[(String, i32, i32)]) -> Vec<(&str, i32, i32)> {
@@ -312,4 +314,368 @@ fn known_map_lookup_preserves_opaque_memory_keys_and_prefers_current_terrain() {
     assert!(cell.wall);
     advance(&mut client, snapshot(&[("here", 0, 0)], 3));
     assert!(client.map_cell(target).unwrap().wall);
+}
+
+fn map_cell(position: Position, key: &str) -> RememberedMapCell {
+    RememberedMapCell {
+        key: key.into(),
+        position,
+        wall: false,
+        material: "stone".into(),
+        asset: None,
+        place_hint: false,
+        stairs_up: false,
+        stairs_down: false,
+        door: None,
+        ground_items: vec![],
+    }
+}
+fn map_page(
+    client: &ClientState,
+    cells: Vec<RememberedMapCell>,
+    total: usize,
+    start: usize,
+    page: usize,
+) -> MapPage {
+    let end = start + cells.len();
+    MapPage {
+        transfer: "map-transfer".into(),
+        actor: client.state().observation.actor,
+        branch: client.branch().clone(),
+        base: client.observation_base(),
+        window: MapWindow::normal(),
+        start: start as u32,
+        page: page as u16,
+        total_cells: total as u32,
+        complete: true,
+        ambiguous: false,
+        limited: false,
+        cells,
+        next: (end < total).then(|| MapPageCursor {
+            transfer: "map-transfer".into(),
+            next: end as u32,
+            page: page as u16 + 1,
+        }),
+    }
+}
+fn bind_map(client: &mut ClientState, id: &str) -> MapQuery {
+    let query = client.next_map_query().expect("one automatic query");
+    client.bind_map_query(&query, id).unwrap();
+    query
+}
+fn accept_map(client: &mut ClientState, id: &str, page: &MapPage) -> Result<(), String> {
+    let context = client.reply_context();
+    let message = ServerMessage::MapPage {
+        context: context.clone(),
+        request_id: id.into(),
+        page: Box::new(page.clone()),
+    };
+    let bytes = encoded_length(&message, MAX_MAP_PAGE_BYTES)
+        .unwrap()
+        .unwrap();
+    client.accept_map_page(&context, id, page, bytes)
+}
+
+#[test]
+fn full_six_plane_hydration_is_atomic_bounded_and_does_not_gate_live_input() {
+    let mut client = ClientState::from_snapshot(snapshot(&[("here", 0, 0)], 0)).unwrap();
+    let live = client.state().clone();
+    let readiness = client.readiness().clone();
+    let mut cells = Vec::new();
+    for x in -31..=31 {
+        for y in -16..=16 {
+            for z in -2..=3 {
+                cells.push(map_cell(Position { x, y, z }, &format!("{x}:{y}:{z}")));
+            }
+        }
+    }
+    assert_eq!(cells.len(), MAX_MAP_TRANSFER_CELLS);
+    for (index, chunk) in cells.chunks(MAX_MAP_PAGE_CELLS).enumerate() {
+        let id = format!("page-{index}");
+        let query = bind_map(&mut client, &id);
+        assert_eq!(
+            query.cursor.as_ref().map(|c| c.page),
+            (index > 0).then_some(index as u16)
+        );
+        assert!(
+            client.next_map_query().is_none(),
+            "redraw cannot duplicate an in-flight request"
+        );
+        let page = map_page(
+            &client,
+            chunk.to_vec(),
+            cells.len(),
+            index * MAX_MAP_PAGE_CELLS,
+            index,
+        );
+        accept_map(&mut client, &id, &page).unwrap();
+        if page.next.is_some() {
+            assert_eq!(
+                client.map_memory().count(),
+                1,
+                "no partial staging can become display state"
+            );
+            assert!(client.map_hydration().pending);
+        }
+        assert_eq!(client.state(), &live);
+        assert_eq!(client.readiness(), &readiness);
+    }
+    assert_eq!(client.map_memory().count(), MAX_MAP_TRANSFER_CELLS);
+    assert!(client.memory().count() <= MAX_MAP_TRANSFER_CELLS);
+    assert_eq!(client.map_hydration().pages, 25);
+    assert!(client.map_hydration().complete);
+    assert!(!client.map_hydration().pending);
+    assert!(client.map_hydration().bytes <= MAX_MAP_TRANSFER_BYTES);
+    assert!(
+        client.next_map_query().is_none(),
+        "finished window must not loop"
+    );
+    assert_eq!(
+        client.map_cell(Position { x: 0, y: 0, z: 0 }).unwrap().key,
+        "here",
+        "live wins"
+    );
+    assert_eq!(
+        client
+            .memory()
+            .find(|c| c.key == "31:16:3")
+            .unwrap()
+            .last_seen_revision,
+        None
+    );
+}
+
+#[test]
+fn map_pages_reject_context_actor_branch_base_and_sequence_mismatches_without_publication() {
+    let mut client = ClientState::from_snapshot(snapshot(&[("here", 0, 0)], 0)).unwrap();
+    bind_map(&mut client, "first");
+    let first = map_page(
+        &client,
+        vec![map_cell(Position { x: 1, y: 0, z: 0 }, "old")],
+        2,
+        0,
+        0,
+    );
+    let before = client.clone();
+    let mut wrong = first.clone();
+    wrong.actor = ActorId(99);
+    assert!(accept_map(&mut client, "first", &wrong).is_err());
+    let mut wrong = first.clone();
+    wrong.branch = BranchId("another".into());
+    assert!(accept_map(&mut client, "first", &wrong).is_err());
+    let mut wrong = first.clone();
+    wrong.base.revision += 1;
+    assert!(accept_map(&mut client, "first", &wrong).is_err());
+    let mut context = client.reply_context();
+    context.input.stream.epoch += 1;
+    assert!(client
+        .accept_map_page(&context, "first", &first, 1000)
+        .is_err());
+    assert!(accept_map(&mut client, "unsolicited", &first).is_err());
+    let mut wrong = first.clone();
+    wrong.start = 1;
+    wrong.page = 1;
+    assert!(accept_map(&mut client, "first", &wrong).is_err());
+    assert_eq!(client, before);
+    accept_map(&mut client, "first", &first).unwrap();
+    assert!(
+        accept_map(&mut client, "first", &first).is_err(),
+        "duplicate cannot advance continuation"
+    );
+    bind_map(&mut client, "second");
+    let duplicated = map_page(&client, first.cells.clone(), 2, 1, 1);
+    assert!(accept_map(&mut client, "second", &duplicated).is_err());
+    assert_eq!(client.map_memory().count(), 1);
+}
+
+#[test]
+fn map_aliases_keep_all_occurrences_but_reject_conflicting_appearances() {
+    for conflict in [false, true] {
+        let mut client = ClientState::from_snapshot(snapshot(&[("here", 0, 0)], 0)).unwrap();
+        bind_map(&mut client, "aliases");
+        let first = map_cell(Position { x: 1, y: 0, z: 0 }, "same-physical-cell");
+        let mut second = first.clone();
+        second.position.x = 2;
+        second.wall = conflict;
+        let first_page = map_page(&client, vec![first], 2, 0, 0);
+        accept_map(&mut client, "aliases", &first_page).unwrap();
+        bind_map(&mut client, "alias-next");
+        let page = map_page(&client, vec![second], 2, 1, 1);
+        let result = accept_map(&mut client, "alias-next", &page);
+        assert_eq!(result.is_err(), conflict);
+        if conflict {
+            assert_eq!(client.map_memory().count(), 1);
+        } else {
+            assert_eq!(
+                client
+                    .map_memory()
+                    .filter(|c| c.key == "same-physical-cell")
+                    .count(),
+                2
+            );
+            assert_eq!(
+                client
+                    .memory()
+                    .filter(|c| c.key == "same-physical-cell")
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
+#[test]
+fn newer_observations_cancel_staging_and_limited_results_keep_an_aligned_cache() {
+    let mut client =
+        ClientState::from_snapshot(snapshot(&[("here", 0, 0), ("old", 1, 0)], 0)).unwrap();
+    let query = bind_map(&mut client, "old-query");
+    let page = map_page(
+        &client,
+        vec![map_cell(Position { x: 2, y: 0, z: 0 }, "staged")],
+        2,
+        0,
+        0,
+    );
+    accept_map(&mut client, "old-query", &page).unwrap();
+    advance(&mut client, snapshot(&[("here", 0, 0)], 1));
+    assert!(!client.map_query_pending("old-query", &query));
+    assert!(accept_map(&mut client, "old-query", &page).is_err());
+    bind_map(&mut client, "limited");
+    let mut page = map_page(&client, vec![], 0, 0, 0);
+    page.complete = false;
+    page.limited = true;
+    accept_map(&mut client, "limited", &page).unwrap();
+    assert!(client.map_cell(Position { x: 1, y: 0, z: 0 }).is_some());
+    assert!(client.map_hydration().limited);
+    assert!(!client.map_hydration().complete);
+    assert!(
+        client.next_map_query().is_none(),
+        "finished limited query never retries the same base/window"
+    );
+    let mut reset = snapshot(&[("here", 0, 0)], 1);
+    reset.context.epoch = client.context().epoch + 1;
+    client.replace_snapshot(reset).unwrap();
+    assert!(
+        client.next_map_query().is_some(),
+        "attachment reset requests fresh hydration"
+    );
+}
+
+#[test]
+fn map_hydration_queries_only_initial_unaligned_or_uncovered_windows() {
+    let mut client = ClientState::from_snapshot(snapshot(&[("here", 0, 0)], 0)).unwrap();
+    bind_map(&mut client, "initial");
+    let page = map_page(&client, vec![], 0, 0, 0);
+    accept_map(&mut client, "initial", &page).unwrap();
+    advance(&mut client, snapshot(&[("here", 0, 0)], 1));
+    assert!(
+        client.next_map_query().is_none(),
+        "unchanged aligned coverage stays valid"
+    );
+    advance(&mut client, snapshot(&[("here", -1, 0), ("next", 0, 0)], 2));
+    assert!(
+        client.next_map_query().is_some(),
+        "translation exits one edge of certified coverage"
+    );
+    advance(&mut client, snapshot(&[("unrelated", 0, 0)], 3));
+    assert!(
+        client.next_map_query().is_some(),
+        "unrelated scene needs its own chart"
+    );
+}
+
+#[test]
+fn map_transfer_counts_complete_reply_bytes_and_preserves_live_view_on_budget_failure() {
+    let mut client = ClientState::from_snapshot(snapshot(&[("here", 0, 0)], 0)).unwrap();
+    for index in 0..64 {
+        let id = format!("bytes-{index}");
+        bind_map(&mut client, &id);
+        let page = map_page(
+            &client,
+            vec![map_cell(
+                Position {
+                    x: (index % 63) as i32 - 31,
+                    y: (index / 63) as i32,
+                    z: 0,
+                },
+                &format!("c-{index}"),
+            )],
+            65,
+            index,
+            index,
+        );
+        client
+            .accept_map_page(&client.reply_context(), &id, &page, MAX_MAP_PAGE_BYTES)
+            .unwrap();
+    }
+    bind_map(&mut client, "overflow");
+    let page = map_page(
+        &client,
+        vec![map_cell(Position { x: 0, y: 2, z: 0 }, "last")],
+        65,
+        64,
+        64,
+    );
+    assert!(client
+        .accept_map_page(&client.reply_context(), "overflow", &page, 1)
+        .is_err());
+    assert_eq!(client.map_memory().count(), 1);
+    assert_eq!(client.map_hydration().bytes, MAX_MAP_TRANSFER_BYTES);
+}
+
+#[test]
+fn completed_ambiguous_map_publishes_certified_cells_and_failure_does_not_loop() {
+    let mut client = ClientState::from_snapshot(snapshot(&[("here", 0, 0)], 0)).unwrap();
+    bind_map(&mut client, "ambiguous");
+    let mut page = map_page(
+        &client,
+        vec![map_cell(Position { x: 1, y: 0, z: 0 }, "certified")],
+        1,
+        0,
+        0,
+    );
+    page.ambiguous = true;
+    accept_map(&mut client, "ambiguous", &page).unwrap();
+    assert!(client.map_hydration().complete && client.map_hydration().ambiguous);
+    assert!(!client.map_hydration().limited);
+    assert_eq!(
+        client.map_cell(Position { x: 1, y: 0, z: 0 }).unwrap().key,
+        "certified"
+    );
+    advance(&mut client, snapshot(&[("elsewhere", 0, 0)], 1));
+    bind_map(&mut client, "refused");
+    assert!(client.reject_map_query("refused"));
+    assert!(client.map_hydration().failed);
+    assert!(client.next_map_query().is_none());
+    advance(&mut client, snapshot(&[("elsewhere", 0, 0)], 2));
+    assert!(
+        client.next_map_query().is_none(),
+        "unchanged views do not retry a completed failure"
+    );
+}
+
+#[test]
+fn clipped_coverage_does_not_claim_evicted_cells_after_reversing_direction() {
+    let mut client = ClientState::from_snapshot(snapshot(&[("here", 0, 0)], 0)).unwrap();
+    bind_map(&mut client, "initial");
+    let page = map_page(
+        &client,
+        vec![map_cell(Position { x: -31, y: 0, z: 0 }, "left-edge")],
+        1,
+        0,
+        0,
+    );
+    accept_map(&mut client, "initial", &page).unwrap();
+    advance(&mut client, snapshot(&[("here", -1, 0)], 1));
+    bind_map(&mut client, "limited");
+    let mut limited = map_page(&client, vec![], 0, 0, 0);
+    limited.complete = false;
+    limited.limited = true;
+    accept_map(&mut client, "limited", &limited).unwrap();
+    assert!(client.map_memory().all(|c| c.key != "left-edge"));
+    advance(&mut client, snapshot(&[("here", 0, 0)], 2));
+    assert!(
+        client.next_map_query().is_some(),
+        "reverse travel cannot claim cropped-away coverage"
+    );
 }

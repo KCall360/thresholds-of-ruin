@@ -170,7 +170,6 @@ impl ItemStore {
         Some(edit(guard.item))
     }
 
-    #[cfg(test)]
     pub fn shares_storage(&self, other: &Self) -> bool {
         self.entries.shares_storage(&other.entries)
     }

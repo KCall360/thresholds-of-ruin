@@ -24,10 +24,29 @@ impl DiagnosticOutput {
         state: &tor_client_common::ClientState,
     ) -> serde_json::Value {
         if !self.omit_memory {
-            fields["memory"] = serde_json::json!(state.memory().collect::<Vec<_>>());
+            fields["memory"] = diagnostic_memory(state);
         }
+        fields["map_hydration"] = serde_json::json!(state.map_hydration());
         fields
     }
+}
+
+fn diagnostic_memory(state: &tor_client_common::ClientState) -> serde_json::Value {
+    let cells: Vec<_> = state
+        .memory()
+        .map(|cell| {
+            let mut value = serde_json::json!(cell);
+            // Preserve the harmless diagnostic item wrapper, without stale targets
+            // or affordances. The item's position is its owning cell's last sighting.
+            value["ground_items"] = serde_json::json!(cell
+                .ground_items
+                .iter()
+                .map(|item| serde_json::json!({"item":item,"position":cell.position}))
+                .collect::<Vec<_>>());
+            value
+        })
+        .collect();
+    serde_json::json!(cells)
 }
 
 #[derive(Deserialize)]
@@ -378,11 +397,14 @@ mod tests {
         let retained = retained_diagnostic_fields(&state);
         let full = DiagnosticOutput::default().project(retained.clone(), &state);
         let projected = DiagnosticOutput { omit_memory: true }.project(retained.clone(), &state);
-        let memory = serde_json::json!(state.memory().collect::<Vec<_>>());
+        let memory = diagnostic_memory(&state);
         let mut expected_full = retained.clone();
         expected_full["memory"] = memory;
+        expected_full["map_hydration"] = serde_json::json!(state.map_hydration());
         assert_eq!(full, expected_full);
-        assert_eq!(projected, retained);
+        let mut expected_projected = retained.clone();
+        expected_projected["map_hydration"] = serde_json::json!(state.map_hydration());
+        assert_eq!(projected, expected_projected);
         assert_eq!(full["memory"].as_array().unwrap().len(), 512);
         assert_eq!(
             projected["state"]["observation"]["visible_cells"]

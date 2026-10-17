@@ -24,25 +24,6 @@ const DANGER: u32 = 0xef958c;
 /// The key hint under the status lines.
 const HINT: &str = "? help  hjklyubn move/run  < > stairs  _ travel  ; look  i inventory  @ stats  z abilities  g pick up  a attack  ^P messages";
 
-/// Current cells plus remembered ones that fall inside the drawn map.
-fn display_observation(state: &tor_client_common::ClientState) -> Observation {
-    let mut view = state.state().observation.clone();
-    let visible: std::collections::BTreeSet<_> = view
-        .visible_cells
-        .iter()
-        .map(|c| (c.position.x, c.position.y, c.position.z))
-        .collect();
-    for cell in state.map_memory() {
-        let p = cell.position;
-        if !map::in_view(&view, p) || visible.contains(&(p.x, p.y, p.z)) {
-            continue;
-        }
-        view.visible_cells.push(cell.cell_view());
-        view.ground_items.extend(cell.ground_items.iter().cloned());
-    }
-    view
-}
-
 /// The map as drawn: one tile per column, current and remembered.
 pub fn map_tiles(
     state: &tor_client_common::ClientState,
@@ -55,8 +36,16 @@ pub fn map_tiles(
         .iter()
         .map(|c| (c.position.x, c.position.y, c.position.z))
         .collect();
-    map::tiles(&display_observation(state), palette, &|cell| {
-        current.contains(&(cell.position.x, cell.position.y, cell.position.z))
+    let mut cells: std::collections::BTreeMap<_, _> = state
+        .map_memory()
+        .map(|cell| (cell.position, cell.appearance()))
+        .collect();
+    for cell in map::appearance_cells(&state.state().observation) {
+        cells.insert(cell.position, cell);
+    }
+    let cells: Vec<_> = cells.into_values().collect();
+    map::appearance_tiles(&state.state().observation, &cells, palette, &|position| {
+        current.contains(&(position.x, position.y, position.z))
     })
 }
 
@@ -66,7 +55,13 @@ pub fn known_cell_at(
     x: usize,
     y: usize,
 ) -> Option<tor_protocol::Position> {
-    let position = map::cell_at(&display_observation(state), x, y)?;
+    let (dx, dy) = map::column_at(x, y)?;
+    let feet = state.state().observation.position;
+    let position = tor_protocol::Position {
+        x: feet.x.checked_add(dx)?,
+        y: feet.y.checked_add(dy)?,
+        z: feet.z,
+    };
     state.map_cell(position).map(|c| c.position)
 }
 
@@ -76,7 +71,11 @@ pub fn known_column(
     x: i32,
     y: i32,
 ) -> Option<tor_protocol::Position> {
-    let position = map::target(&display_observation(state), x, y)?;
+    let position = tor_protocol::Position {
+        x,
+        y,
+        z: state.state().observation.position.z,
+    };
     state.map_cell(position).map(|c| c.position)
 }
 

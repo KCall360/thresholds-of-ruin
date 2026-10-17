@@ -45,6 +45,7 @@ impl Scan<'_> {
             .world
             .geometry_ray(self.origin, self.orientation, x, y)
             .map(|(location, rotation)| SightCell {
+                physical: true,
                 location,
                 rotation,
                 offset: Position { x, y, z: 0 },
@@ -133,6 +134,7 @@ impl World {
                 );
                 current = passage.to;
                 cells.push(SightCell {
+                    physical: true,
                     location: current,
                     offset: Position {
                         x: 0,

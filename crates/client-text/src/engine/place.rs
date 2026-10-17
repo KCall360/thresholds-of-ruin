@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use tor_protocol::*;
 
 use super::scene::{bearing, distance};
+use super::scenery::ScenicView;
 
 type Column = (i32, i32);
 
@@ -21,13 +22,14 @@ const STEPS: [Column; 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 struct Columns<'a> {
     floor: BTreeMap<Column, &'a CellView>,
     head: BTreeMap<Column, &'a CellView>,
+    view: &'a dyn ScenicView,
 }
 
 impl<'a> Columns<'a> {
-    fn new(state: &'a StateView) -> Self {
+    fn new(state: &'a dyn ScenicView) -> Self {
         let mut floor = BTreeMap::new();
         let mut head = BTreeMap::new();
-        for c in &state.observation.visible_cells {
+        for c in &state.scenery().observation.visible_cells {
             let column = (c.position.x, c.position.y);
             match c.position.z {
                 0 => {
@@ -39,18 +41,26 @@ impl<'a> Columns<'a> {
                 _ => {}
             }
         }
-        Self { floor, head }
+        Self {
+            floor,
+            head,
+            view: state,
+        }
     }
 
-    fn door(&self, c: Column) -> Option<&'a DoorView> {
-        self.floor.get(&c).and_then(|cell| cell.door.as_ref())
+    fn door(&self, c: Column) -> Option<DoorAppearance<'a>> {
+        let cell = self.floor.get(&c)?;
+        cell.door.as_ref().map(DoorAppearance::Current).or_else(|| {
+            self.view
+                .remembered_door(cell.position)
+                .map(DoorAppearance::Remembered)
+        })
     }
 
     /// Open to walk in, and not a doorway.
     fn open(&self, c: Column) -> bool {
-        self.floor
-            .get(&c)
-            .is_some_and(|cell| !cell.wall && cell.door.is_none())
+        self.floor.get(&c).is_some_and(|cell| !cell.wall)
+            && self.door(c).is_none()
             && !self.head.get(&c).is_some_and(|cell| cell.wall)
     }
 
@@ -78,9 +88,20 @@ impl<'a> Columns<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+enum DoorAppearance<'a> {
+    Current(&'a DoorView),
+    Remembered(&'a MapDoorAppearance),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Opening {
     Door {
         id: DoorTarget,
+        name: String,
+        open: bool,
+    },
+    /// A descriptive last-seen doorway, without a live door target.
+    RememberedDoor {
         name: String,
         open: bool,
     },
@@ -119,7 +140,7 @@ impl Way {
     /// What it is, without an article: "archway", "open wooden door".
     pub fn kind_name(&self) -> String {
         match &self.kind {
-            Opening::Door { name, open, .. } => {
+            Opening::Door { name, open, .. } | Opening::RememberedDoor { name, open } => {
                 format!("{} {name}", if *open { "open" } else { "closed" })
             }
             Opening::Passage => "passage".into(),
@@ -173,7 +194,7 @@ fn position((x, y): Column) -> Position {
 /// and the bearing of that cell. The character must stand in a corridor
 /// (two ways off its cell, one of them ahead). The walk stops before a
 /// junction, a door beside the way, a dead end or unseen floor.
-pub fn corridor_ahead(state: &StateView, heading: Direction) -> Option<(Direction, String)> {
+pub fn corridor_ahead(state: &dyn ScenicView, heading: Direction) -> Option<(Direction, String)> {
     let cols = Columns::new(state);
     let open_steps = |(x, y): Column| -> Vec<Column> {
         STEPS
@@ -250,13 +271,19 @@ pub fn eighths(a: Direction, b: Direction) -> usize {
 }
 
 /// Work out the place from what the character sees.
-pub fn survey(state: &StateView) -> Place {
+pub fn survey(state: &dyn ScenicView) -> Place {
     let cols = Columns::new(state);
     let origin = (0, 0);
-    let walls = state.observation.visible_cells.iter().any(|c| c.wall);
+    let walls = state
+        .scenery()
+        .observation
+        .visible_cells
+        .iter()
+        .any(|c| c.wall);
     // With no walls in sight, gaps mean nothing: the place is the open
     // ground nearest the same authored anchor.
     let anchors: Vec<Column> = state
+        .scenery()
         .observation
         .visible_cells
         .iter()
@@ -338,15 +365,21 @@ pub fn survey(state: &StateView) -> Place {
         for (up, there) in [(true, here.stairs_up), (false, here.stairs_down)] {
             if there {
                 let terminal = up
-                    && state.observation.combat.as_ref().is_some_and(|combat| {
-                        combat.objective == Some(ObjectiveKind::RetrieveAndExit)
-                            && combat.exit.as_deref() == Some(here.key.as_str())
-                    });
+                    && state
+                        .scenery()
+                        .observation
+                        .combat
+                        .as_ref()
+                        .is_some_and(|combat| {
+                            combat.objective == Some(ObjectiveKind::RetrieveAndExit)
+                                && combat.exit.as_deref() == Some(here.key.as_str())
+                        });
                 let z = if up { 1 } else { -1 };
                 let landing = if terminal {
                     None
                 } else {
                     state
+                        .scenery()
                         .observation
                         .visible_cells
                         .iter()
@@ -493,8 +526,16 @@ fn way(cols: &Columns, place: &BTreeSet<Column>, group: &[Column], in_gap: bool)
         .and_then(|c| cols.key(*c))
         .map(str::to_owned);
     let kind = match door {
-        Some(d) => Opening::Door {
+        Some(DoorAppearance::Current(d)) => Opening::Door {
             id: d.id,
+            name: if d.name.trim().is_empty() {
+                "door".into()
+            } else {
+                crate::safe(&d.name).to_lowercase()
+            },
+            open: d.open,
+        },
+        Some(DoorAppearance::Remembered(d)) => Opening::RememberedDoor {
             name: if d.name.trim().is_empty() {
                 "door".into()
             } else {

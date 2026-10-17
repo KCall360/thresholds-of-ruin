@@ -734,6 +734,7 @@ impl Game {
                     continue;
                 }
                 scene.push(tor_world::SightCell {
+                    physical: false,
                     location: to,
                     rotation: tor_world::compose_rotation(
                         orientation,
@@ -769,6 +770,7 @@ impl Game {
             // another occupied cell at a join with different reverse geometry.
             for &(offset, (location, frame)) in &occupied {
                 scene.push(tor_world::SightCell {
+                    physical: true,
                     location,
                     rotation: frame,
                     offset: Position {

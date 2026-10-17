@@ -4,7 +4,10 @@
 //! or below the player (a stair's far landing, a distant ceiling) are left out.
 use std::collections::BTreeMap;
 use tor_client_common::{presentation, presentation::AsciiAppearance, Palette};
-use tor_protocol::{CellView, ItemView, Observation, Position};
+use tor_protocol::{
+    CellView, ItemClass, ItemView, MapDoorAppearance, MapItemAppearance, Observation, Position,
+    RememberedMapCell,
+};
 
 /// Map cells shown across and down; odd, so the player is centred.
 pub const COLS: i32 = 63;
@@ -71,9 +74,13 @@ pub fn creature(palette: &Palette, asset: Option<&str>) -> AsciiAppearance {
 /// Map, look and inventory use the same disclosed item asset. Its disclosed
 /// class is the safe fallback, including for a concealed appearance pool.
 pub fn item(palette: &Palette, item: &ItemView) -> AsciiAppearance {
-    presentation::resolve(palette, item.asset.as_deref()).map_or(
+    item_appearance(palette, item.class, item.asset.as_deref())
+}
+
+fn item_appearance(palette: &Palette, class: ItemClass, asset: Option<&str>) -> AsciiAppearance {
+    presentation::resolve(palette, asset).map_or(
         AsciiAppearance {
-            glyph: crate::item_glyph(item.class),
+            glyph: crate::item_glyph(class),
             color: ITEM,
         },
         |entry| entry.ascii,
@@ -93,7 +100,7 @@ fn center(dx: i32, dy: i32) -> Option<(usize, usize)> {
 }
 
 /// The column under a pixel, relative to the player.
-fn column_at(x: usize, y: usize) -> Option<(i32, i32)> {
+pub(crate) fn column_at(x: usize, y: usize) -> Option<(i32, i32)> {
     if x < LEFT || y < TOP {
         return None;
     }
@@ -110,18 +117,18 @@ pub fn in_view(o: &Observation, position: Position) -> bool {
 }
 
 struct Column<'a> {
-    cells: BTreeMap<i32, &'a CellView>,
+    cells: BTreeMap<i32, &'a RememberedMapCell>,
 }
 
 impl Column<'_> {
-    fn at(&self, dz: i32) -> Option<&CellView> {
+    fn at(&self, dz: i32) -> Option<&RememberedMapCell> {
         self.cells.get(&dz).copied()
     }
     fn open(&self, dz: i32) -> bool {
         self.at(dz).is_some_and(|c| !c.wall)
     }
     /// The column's terrain, and the cell it stands for.
-    fn terrain(&self) -> Option<(Kind, &CellView)> {
+    fn terrain(&self) -> Option<(Kind, &RememberedMapCell)> {
         for dz in [0, 1] {
             if let Some(cell) = self.at(dz).filter(|c| c.door.is_some()) {
                 return Some((Kind::Door, cell));
@@ -161,9 +168,66 @@ pub fn tiles(
     palette: &Palette,
     current: &dyn Fn(&CellView) -> bool,
 ) -> Vec<MapTile> {
+    let cells = appearance_cells(o);
+    let current_positions: std::collections::BTreeSet<_> = o
+        .visible_cells
+        .iter()
+        .filter(|c| current(c))
+        .map(|c| c.position)
+        .collect();
+    appearance_tiles(o, &cells, palette, &|p| current_positions.contains(&p))
+}
+
+pub(crate) fn appearance_cells(o: &Observation) -> Vec<RememberedMapCell> {
+    let mut items: BTreeMap<Position, Vec<&tor_protocol::GroundItemView>> = BTreeMap::new();
+    for item in &o.ground_items {
+        items.entry(item.position).or_default().push(item);
+    }
+    o.visible_cells
+        .iter()
+        .map(|cell| RememberedMapCell {
+            key: cell.key.clone(),
+            position: cell.position,
+            wall: cell.wall,
+            material: cell.material.clone(),
+            asset: cell.asset.clone(),
+            place_hint: cell.place_hint,
+            stairs_up: cell.stairs_up,
+            stairs_down: cell.stairs_down,
+            door: cell.door.as_ref().map(|d| MapDoorAppearance {
+                name: d.name.clone(),
+                description: d.description.clone(),
+                open: d.open,
+                asset: d.asset.clone(),
+            }),
+            ground_items: items
+                .get(&cell.position)
+                .into_iter()
+                .flatten()
+                .map(|g| MapItemAppearance {
+                    class: g.item.class,
+                    name: g.item.name.clone(),
+                    description: g.item.description.clone(),
+                    appearance: g.item.appearance.clone(),
+                    identified: g.item.identified,
+                    quantity: g.item.quantity,
+                    asset: g.item.asset.clone(),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// Appearance-only map input keeps remembered items and doors incapable of actions.
+pub(crate) fn appearance_tiles(
+    o: &Observation,
+    cells: &[RememberedMapCell],
+    palette: &Palette,
+    current: &dyn Fn(Position) -> bool,
+) -> Vec<MapTile> {
     let feet = o.position;
     let mut columns: BTreeMap<(i32, i32), Column> = BTreeMap::new();
-    for cell in &o.visible_cells {
+    for cell in cells {
         let dz = cell.position.z - feet.z;
         if !BAND.contains(&dz)
             || center(cell.position.x - feet.x, cell.position.y - feet.y).is_none()
@@ -187,13 +251,23 @@ pub fn tiles(
                 .or_insert(actor);
         }
     }
-    let mut items: BTreeMap<(i32, i32), &tor_protocol::GroundItemView> = BTreeMap::new();
+    let mut items: BTreeMap<(i32, i32), (ItemClass, Option<&str>)> = BTreeMap::new();
+    // Current piles retain their disclosed order and win over every stale
+    // occurrence in this column, even a lower remembered height plane.
     for item in &o.ground_items {
-        // Items lie at the player's level or down in a drop.
         if (-2..=0).contains(&(item.position.z - feet.z)) {
             items
                 .entry((item.position.x, item.position.y))
-                .or_insert(item);
+                .or_insert((item.item.class, item.item.asset.as_deref()));
+        }
+    }
+    for cell in cells {
+        if (-2..=0).contains(&(cell.position.z - feet.z)) {
+            if let Some(item) = cell.ground_items.first() {
+                items
+                    .entry((cell.position.x, cell.position.y))
+                    .or_insert((item.class, item.asset.as_deref()));
+            }
         }
     }
     let mut tiles = Vec::new();
@@ -201,7 +275,7 @@ pub fn tiles(
         let Some((terrain, cell)) = column.terrain() else {
             continue;
         };
-        let remembered = !column.cells.values().any(|c| current(c));
+        let remembered = !column.cells.values().any(|c| current(c.position));
         let (kind, glyph, color) = if (*x, *y) == (feet.x, feet.y) {
             let color = o
                 .visible_actors
@@ -214,7 +288,7 @@ pub fn tiles(
             let look = creature(palette, actor.asset.as_deref());
             (Kind::Creature, look.glyph, look.color)
         } else if let Some(item) = items.get(&(*x, *y)) {
-            let look = self::item(palette, &item.item);
+            let look = item_appearance(palette, item.0, item.1);
             (Kind::Item, look.glyph, look.color)
         } else {
             // Geometry and open/closed state remain authoritative. Cosmetic

@@ -167,7 +167,7 @@ assigns this credential the `spectator` role and identity, authorized for the
 scenario's actors. Only share this credential with someone who should watch;
 the player credential continues to allow control and annotations.
 
-Spectators may attach, request snapshots and palettes, and browse permitted
+Spectators may attach, request snapshots, palettes and explored-map pages, and browse permitted
 current or abandoned-branch history. All other
 requests are rejected with `Unauthorized`, before receipt lookup or mutation,
 even when an actor has no controller. Changing frontend labels, retrying an
@@ -267,7 +267,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":45,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":46,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -673,6 +673,30 @@ an AI actor, say) receives an unsolicited `error` with code `not_attached`
 and is disconnected. It may attach again once the actor is back in play.
 Messages already queued for a client, such as that error, are delivered
 before the connection closes.
+
+## Explored-map pages
+
+`map` is an attached, read-only request available to players and spectators.
+Its query binds the stream/epoch, branch, exact observation base and inclusive
+coordinate window. It cannot select a different actor. Initial requests have a
+null cursor; later pages echo the opaque transfer, next cell ordinal and page.
+The response uses the ordinary correlated reply context and appearance-only
+`map_page` cells. There are no actor occupants, live targets, reach flags or
+inferred action capabilities in remembered cells.
+
+A page contains at most 512 cells and 128 KiB including its escaped correlated
+envelope, or the host's smaller frame limit. A transfer allows at most 128 pages,
+12,474 positions and 8 MiB total response bytes. `complete` certifies the bounded
+projection; a null `next` separately marks transfer completion. `ambiguous` can
+accompany surviving certified cells. A work-limited response is an empty terminal
+page with `limited=true` and `complete=false`; an oversized appearance receives
+an explicit resource error. No partial transfer replaces the prior chart.
+
+The Service advances its continuation only after output admission. Stream,
+branch, observation or knowledge-root changes invalidate it. Clients cancel old
+assemblies on new observations and atomically install a correlated whole transfer,
+then overlay current disclosure. Automatic hydration is independent of gameplay
+readiness and does not issue actions, learn cells, or load distant world regions.
 
 ## Asset palettes
 

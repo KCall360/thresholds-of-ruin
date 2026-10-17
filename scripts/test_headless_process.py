@@ -7,6 +7,14 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
 class HeadlessProcesses(ProcessTestCase):
+    def hydrated(self, client, frame):
+        """Wait for the explicit bounded-map completion without changing gameplay."""
+        if not frame["map_hydration"]["complete"]:
+            frame = self.frame(client, lambda value: value["map_hydration"]["complete"])
+        self.assertFalse(frame["map_hydration"]["failed"])
+        self.assertFalse(frame["map_hydration"]["limited"])
+        return frame
+
     def test_omitting_diagnostic_memory_preserves_disclosure_and_reduces_serialized_output(self):
         self.server()
         player, initial = self.client(omit_memory=True)
@@ -28,6 +36,7 @@ class HeadlessProcesses(ProcessTestCase):
             synced = self.request(client, {"type": "snapshot"})
             self.assertIsNone(synced["error"])
             self.assertEqual(synced["state"], moved["state"])
+            self.hydrated(client, synced)
         full_frame = self.command(full, {"type": "inspect"})
         full_line = full.transcript[-1].encode("utf-8")
         projected_frame = self.command(projected, {"type": "inspect"})
@@ -309,7 +318,10 @@ class HeadlessProcesses(ProcessTestCase):
         self.assertEqual(next(i["position"] for i in moved["state"]["observation"]["ground_items"] if i["item"]["name"] == "stone tablet"), {"x":2,"y":0,"z":0})
         self.assertGreater(len(moved["memory"]), len(initial["memory"]))
         synced = self.request(player, {"type": "snapshot"})
-        self.assertEqual(synced["memory"], moved["memory"])
+        synced = self.hydrated(player, synced)
+        synced_cells = {cell["key"]: cell for cell in synced["memory"]}
+        for cell in moved["memory"]:
+            self.assertEqual(synced_cells[cell["key"]], cell)
         history = self.request(spectator, {"type": "history", "limit": 50, "before": None})
         self.assertIsNone(history["error"])
         player.stop()
@@ -318,7 +330,16 @@ class HeadlessProcesses(ProcessTestCase):
         self.server()
         resumed, state = self.client()
         self.assertEqual(state["state"], moved["state"])
-        self.assertEqual(len(state["memory"]), len(state["state"]["observation"]["visible_cells"]))
+        state = self.hydrated(resumed, state)
+        resumed_cells = {cell["key"]: cell for cell in state["memory"]}
+        self.assertEqual(resumed_cells.keys(), synced_cells.keys())
+        for key, cell in synced_cells.items():
+            # Hydration supplies appearance at the current placement, without
+            # inventing the original client's observation timestamp.
+            appearance_fields = cell.keys() - {"position", "last_seen_tick", "last_seen_revision"}
+            self.assertEqual({field: cell[field] for field in appearance_fields},
+                             {field: resumed_cells[key][field] for field in appearance_fields})
+        self.assertGreater(len(state["memory"]), len(state["state"]["observation"]["visible_cells"]))
         resumed.child.stdin.close()
         self.assertEqual(resumed.child.wait(timeout=10), 0)
 
@@ -349,6 +370,15 @@ class HeadlessProcesses(ProcessTestCase):
         self.assertNotEqual(rewound["branch"], initial["branch"])
         self.assertEqual(len(rewound["memory"]), len(rewound["state"]["observation"]["visible_cells"]))
         self.assertIn("stone tablet", json.dumps(rewound))
+        for frame in (before, after, refreshed, rewound):
+            for cell in frame["memory"]:
+                for entry in cell["ground_items"]:
+                    self.assertEqual(set(entry), {"item", "position"})
+                    self.assertEqual(set(entry["item"]), {
+                        "class", "quantity", "appearance", "identified", "description", "name", "asset"})
+                    for value in (entry, entry["item"]):
+                        for field in ("id", "reachable", "supply_reachable", "known_supply"):
+                            self.assertNotIn(field, value)
 
     def test_invalid_input_failed_actions_control_transfer_and_authentication(self):
         self.server()

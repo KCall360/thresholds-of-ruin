@@ -2118,6 +2118,28 @@ async fn a_doorway_out_of_sight_a_moment_later_is_still_a_way_out() {
     play(&mut link, &mut engine, "wait").await;
     let look = play(&mut link, &mut engine, "look").await;
     assert!(look.contains("An open oak door leads east."), "{look}");
+    let seen = tor_client_text::engine::seen(&link.client);
+    let scene = tor_client_text::engine::scene::Scene::new(&seen, &link.palette);
+    assert_eq!(
+        scene.state,
+        link.client.state(),
+        "actions retain the live observation"
+    );
+    assert!(
+        scene
+            .get(tor_client_text::engine::scene::Key::Door(
+                super::door_target(9)
+            ))
+            .is_none(),
+        "the remembered doorway cannot recreate a live door target"
+    );
+    let before = link.sent.len();
+    play(&mut link, &mut engine, "close oak door").await;
+    assert_eq!(
+        link.sent.len(),
+        before,
+        "memory cannot authorize a door action"
+    );
 }
 
 #[tokio::test]
@@ -3275,4 +3297,133 @@ async fn creature_catalog_text_turn_prints_rows_and_finishes_correlated_query() 
     );
     assert_eq!(link.sent.len(), 1);
     assert_eq!(link.client.snapshot(), before);
+}
+
+#[test]
+fn a_cold_hydrated_doorway_is_descriptive_and_current_sight_wins() {
+    use tor_client_text::engine::{
+        place,
+        scene::{Key, Scene},
+        scenery::ScenicView,
+    };
+    let full = crate::adventure::walled(&["#####", "#.@.'..", "#####"]);
+    let door_cell = full
+        .observation
+        .visible_cells
+        .iter()
+        .find(|c| c.door.is_some())
+        .unwrap()
+        .clone();
+    let mut hidden = full.clone();
+    hidden
+        .observation
+        .visible_cells
+        .retain(|c| c.position != door_cell.position);
+    let mut link = Scripted::new(hidden, obliging);
+    let query = link
+        .client
+        .next_map_query()
+        .expect("new attachment hydrates");
+    link.client.bind_map_query(&query, "cold-map").unwrap();
+    let remembered = RememberedMapCell {
+        key: door_cell.key.clone(),
+        position: door_cell.position,
+        wall: door_cell.wall,
+        material: door_cell.material.clone(),
+        asset: Some("remembered-doorway".into()),
+        place_hint: door_cell.place_hint,
+        stairs_up: false,
+        stairs_down: false,
+        door: Some(MapDoorAppearance {
+            name: "oak door".into(),
+            description: "Last seen open.".into(),
+            open: true,
+            asset: None,
+        }),
+        ground_items: vec![MapItemAppearance {
+            class: ItemClass::Potion,
+            description: "Last seen flask.".into(),
+            name: "red potion".into(),
+            appearance: "red potion".into(),
+            identified: false,
+            quantity: 3,
+            asset: None,
+        }],
+    };
+    let page = MapPage {
+        transfer: "cold-transfer".into(),
+        actor: link.client.snapshot().actor,
+        branch: query.branch.clone(),
+        base: query.base,
+        window: query.window,
+        start: 0,
+        page: 0,
+        total_cells: 1,
+        complete: true,
+        ambiguous: false,
+        limited: false,
+        cells: vec![remembered],
+        next: None,
+    };
+    let context = link.client.reply_context();
+    let message = ServerMessage::MapPage {
+        context: context.clone(),
+        request_id: "cold-map".into(),
+        page: Box::new(page.clone()),
+    };
+    let bytes = encode_response(&message, None, MAX_MAP_PAGE_BYTES)
+        .unwrap()
+        .text
+        .len();
+    link.client
+        .accept_map_page(&context, "cold-map", &page, bytes)
+        .unwrap();
+    assert!(link.client.map_hydration().complete);
+    let seen = tor_client_text::engine::seen(&link.client);
+    assert_eq!(seen.current(), link.client.state());
+    assert_eq!(
+        seen.scenery()
+            .observation
+            .visible_cells
+            .iter()
+            .find(|c| c.position == door_cell.position)
+            .unwrap()
+            .asset
+            .as_deref(),
+        Some("remembered-doorway")
+    );
+    let prose = tor_client_text::adventure::describe(&seen);
+    assert!(prose.contains("An open oak door leads east."), "{prose}");
+    assert!(
+        !prose.contains("red potion"),
+        "stale ground things are not current contents"
+    );
+    let scene = Scene::new(&seen, &link.palette);
+    assert!(scene.get(Key::Door(super::door_target(9))).is_none());
+    assert!(scene.state.observation.ground_items.is_empty());
+    assert!(place::survey(&seen)
+        .ways
+        .iter()
+        .any(|way| matches!(&way.kind, place::Opening::RememberedDoor { open: true, .. })));
+
+    let mut snapshot = link.client.snapshot();
+    snapshot.context.epoch += 1;
+    std::sync::Arc::make_mut(&mut snapshot.state)
+        .observation
+        .visible_cells
+        .push(CellView {
+            door: None,
+            ..door_cell.clone()
+        });
+    link.client.replace_snapshot(snapshot).unwrap();
+    let seen = tor_client_text::engine::seen(&link.client);
+    assert!(
+        seen.remembered_door(door_cell.position).is_none(),
+        "seen emptiness replaces old door appearance"
+    );
+    assert!(!place::survey(&seen)
+        .ways
+        .iter()
+        .any(|way| matches!(way.kind, place::Opening::RememberedDoor { .. })));
+    assert!(!tor_client_text::adventure::describe(&seen).contains("oak door"));
 }

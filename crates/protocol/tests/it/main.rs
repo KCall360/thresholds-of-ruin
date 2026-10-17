@@ -23,3 +23,5 @@ mod nutrition;
 mod unique_retrieval;
 
 mod creature_catalog;
+
+mod map_pages;

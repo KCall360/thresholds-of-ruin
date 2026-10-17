@@ -586,3 +586,71 @@ async fn named_creature_catalog_is_private_read_only_and_context_checked() {
         game.finish().await;
     }
 }
+
+/// Map hydration is an attached read capability available to ordinary spectators.
+#[tokio::test]
+async fn explored_map_pages_round_trip_without_control_or_game_mutation() {
+    let mut game = Game::start(false).await;
+    game.spectator.request("map-base", Request::Snapshot).await;
+    let ServerMessage::Snapshot {
+        snapshot: before, ..
+    } = receive(&mut game.spectator).await
+    else {
+        panic!("fresh spectator snapshot")
+    };
+    let mut query = MapQuery {
+        context: before.context.clone(),
+        branch: before.branch.clone(),
+        base: ObservationBase {
+            cursor: before.cursor,
+            revision: before.state.revision,
+        },
+        window: MapWindow::normal()
+            .checked_translate(before.state.observation.position)
+            .unwrap(),
+        cursor: None,
+    };
+    let mut cells = Vec::new();
+    for index in 0..MAX_MAP_TRANSFER_PAGES {
+        let id = format!("map-page-{index}");
+        game.spectator
+            .request(
+                &id,
+                Request::Map {
+                    query: query.clone(),
+                },
+            )
+            .await;
+        let ServerMessage::MapPage {
+            request_id,
+            context,
+            page,
+        } = receive(&mut game.spectator).await
+        else {
+            panic!("correlated map page")
+        };
+        assert_eq!(request_id, id);
+        assert_eq!(context.actor, ActorId(1));
+        assert_eq!(page.base, query.base);
+        assert!(page.complete && !page.limited);
+        assert_eq!(page.start as usize, cells.len());
+        cells.extend(page.cells);
+        query.cursor = page.next;
+        if query.cursor.is_none() {
+            break;
+        }
+    }
+    assert!(query.cursor.is_none() && !cells.is_empty());
+    game.spectator
+        .request("map-unchanged", Request::Snapshot)
+        .await;
+    let ServerMessage::Snapshot {
+        snapshot: after, ..
+    } = receive(&mut game.spectator).await
+    else {
+        panic!("unchanged spectator snapshot")
+    };
+    assert_eq!(after.state, before.state);
+    assert_eq!(after.history, before.history);
+    game.finish().await;
+}
