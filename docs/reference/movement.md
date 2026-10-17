@@ -12,8 +12,9 @@ Eight horizontal directions are available. Cardinal movement uses the actor's
 normal movement recovery. A diagonal is one atomic move with recovery
 `ceil(base_ticks × √2)`: 100 ticks becomes 142, and 75 becomes 107. Checked integer
 arithmetic avoids floating-point drift; overflow rejects before mutation.
-Up/down requires an explicit vertical connection. Empty headroom alone does not
-allow ascent.
+Up/down requires an explicit vertical connection or an effective flying grant.
+Flight permits open vertical paid movement; stationary denies all voluntary
+translation, including self-step abilities, without preventing imposed motion.
 
 The destination must be traversable and unoccupied. At least one side route must
 be clear: northeast needs north **or** east. Walls, closed doors and actors
@@ -131,6 +132,15 @@ the job without automatic rerouting. Known closed doors exclude routes, while a
 remembered open door can stop travel when it is now closed. Ground items and
 place hints alone do not obstruct a route. Character knowledge is historical,
 not live knowledge of every offscreen cell.
+
+Flying creatures can learn open vertical connections from the same disclosed
+scene. Each connection remembers whether it required flight when disclosed;
+ordinary vertical portals and stairs do not require it. Search filters that
+remembered requirement against the actor's current capability, including for
+offscreen connections. Capability changes refresh the current scene's movement
+links without discovering hidden cells or rescanning unseen geometry. Retained
+offscreen knowledge can become stale, and live whole-body execution still
+decides whether a step is legal.
 
 ### Execution and interruption
 

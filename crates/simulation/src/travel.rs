@@ -19,7 +19,50 @@ const DIRECTIONS: [Direction; 6] = [
 pub(crate) struct Navigation {
     pub(super) cells: RegionMap<Location, bool>,
     pub(super) places: RegionMap<Location, crate::PlaceName>,
-    pub(super) edges: RegionMap<(Location, Direction), (Location, u8)>,
+    pub(super) edges: RegionMap<(Location, Direction), KnownEdge>,
+}
+
+/// A traversal requirement learned with a disclosed edge, never inferred from
+/// hidden geometry while planning. Ordinary physical portals need no flight.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct KnownEdge {
+    pub destination: Location,
+    pub rotation: u8,
+    pub requires_flight: bool,
+}
+impl KnownEdge {
+    #[cfg(test)]
+    pub(crate) fn ordinary(destination: Location, rotation: u8) -> Self {
+        Self {
+            destination,
+            rotation,
+            requires_flight: false,
+        }
+    }
+    fn traversable(self, flying: bool) -> Option<(Location, u8)> {
+        (!self.requires_flight || flying).then_some((self.destination, self.rotation))
+    }
+}
+impl<'de> serde::Deserialize<'de> for KnownEdge {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            destination: Location,
+            rotation: u8,
+            requires_flight: bool,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        if fields.rotation >= 24 {
+            return Err(serde::de::Error::custom("invalid remembered rotation"));
+        }
+        Ok(Self {
+            destination: fields.destination,
+            rotation: fields.rotation,
+            requires_flight: fields.requires_flight,
+        })
+    }
 }
 
 impl Navigation {
@@ -27,8 +70,13 @@ impl Navigation {
         self.places.iter().all(|(location, place)| {
             self.cells.contains_key(location) && crate::places::valid_name(&place.name)
         }) && self.cells.keys().all(|location| world.knows(*location))
-            && self.edges.iter().all(|((from, _), (to, turns))| {
-                *turns < 24 && self.cells.contains_key(from) && self.cells.contains_key(to)
+            && self.edges.iter().all(|((from, direction), edge)| {
+                DIRECTIONS.contains(direction)
+                    && edge.rotation < 24
+                    && self.cells.contains_key(from)
+                    && self.cells.contains_key(&edge.destination)
+                    && (!edge.requires_flight
+                        || matches!(direction, Direction::Up | Direction::Down))
             })
     }
 }
@@ -214,6 +262,9 @@ impl<'a> RouteSearch<'a> {
     }
 
     fn expand(&mut self, cost: u128, node: Node) {
+        if self.actor.locomotion().stationary {
+            return;
+        }
         for direction in DIRECTIONS.into_iter().chain(
             Direction::HORIZONTAL
                 .into_iter()
@@ -222,11 +273,19 @@ impl<'a> RouteSearch<'a> {
             let local = direction.rotated(node.1);
             let edge = if let Some((a, b)) = local.components() {
                 let path = |first, second: Direction| {
-                    let &(side, r1) = self.knowledge.edges.get(&(node.0, first))?;
+                    let (side, r1) = self
+                        .knowledge
+                        .edges
+                        .get(&(node.0, first))?
+                        .traversable(self.actor.locomotion().flying)?;
                     if self.knowledge.cells.get(&side) != Some(&false) {
                         return None;
                     }
-                    let &(to, r2) = self.knowledge.edges.get(&(side, second.rotated(r1)))?;
+                    let (to, r2) = self
+                        .knowledge
+                        .edges
+                        .get(&(side, second.rotated(r1)))?
+                        .traversable(self.actor.locomotion().flying)?;
                     Some((to, tor_world::compose_rotation(r1, r2)))
                 };
                 match (path(a, b), path(b, a)) {
@@ -235,7 +294,10 @@ impl<'a> RouteSearch<'a> {
                     _ => None,
                 }
             } else {
-                self.knowledge.edges.get(&(node.0, local)).copied()
+                self.knowledge
+                    .edges
+                    .get(&(node.0, local))
+                    .and_then(|edge| edge.traversable(self.actor.locomotion().flying))
             };
             if let Some((to, rotation)) = edge {
                 if self.knowledge.cells.get(&to) != Some(&false) {
@@ -333,6 +395,7 @@ impl Game {
     pub fn refresh_navigation_scene(&mut self, id: ActorId, scene: &[tor_world::SightCell]) {
         self.refresh_places(id, scene);
         let can_use_stairs = self.can_use_abstract_stairs(id);
+        let flying = self.actors[&id].locomotion().flying;
         let knowledge = self.navigation.entry(id).or_default();
         let mut sources: Vec<_> = scene.iter().collect();
         // Stable grouping retains the chart's last valid proposal for aliases.
@@ -376,10 +439,10 @@ impl Game {
                     if !can_use_stairs && self.world.is_stair(cell.location, local) {
                         continue;
                     }
-                    if matches!(local, Direction::Up | Direction::Down)
+                    let requires_flight = matches!(local, Direction::Up | Direction::Down)
                         && self.world.passage(cell.location, local).is_none()
-                        && !self.world.is_stair(cell.location, local)
-                    {
+                        && !self.world.is_stair(cell.location, local);
+                    if requires_flight && !flying {
                         continue;
                     }
                     let offset =
@@ -402,7 +465,11 @@ impl Game {
                             .iter()
                             .position(|direction| *direction == local)
                             .expect("rotations preserve cardinal directions");
-                        proposed[bit] = Some((to, turns));
+                        proposed[bit] = Some(KnownEdge {
+                            destination: to,
+                            rotation: turns,
+                            requires_flight,
+                        });
                     }
                 }
             }
@@ -424,7 +491,8 @@ impl Game {
                     None
                 } else {
                     proposed[bit].or_else(|| {
-                        previous[bit].filter(|(to, _)| !disclosed.contains(&location_key(*to)))
+                        previous[bit]
+                            .filter(|edge| !disclosed.contains(&location_key(edge.destination)))
                     })
                 };
                 if next != previous[bit] {
@@ -506,6 +574,9 @@ impl Game {
                 route.reverse();
                 return Ok(route);
             }
+            if actor_state.locomotion().stationary {
+                continue;
+            }
             for direction in DIRECTIONS.into_iter().chain(
                 Direction::HORIZONTAL
                     .into_iter()
@@ -514,11 +585,17 @@ impl Game {
                 let local = direction.rotated(node.1);
                 let edge = if let Some((a, b)) = local.components() {
                     let path = |first, second: Direction| {
-                        let &(side, r1) = knowledge.edges.get(&(node.0, first))?;
+                        let (side, r1) = knowledge
+                            .edges
+                            .get(&(node.0, first))?
+                            .traversable(actor_state.locomotion().flying)?;
                         if knowledge.cells.get(&side) != Some(&false) {
                             return None;
                         }
-                        let &(to, r2) = knowledge.edges.get(&(side, second.rotated(r1)))?;
+                        let (to, r2) = knowledge
+                            .edges
+                            .get(&(side, second.rotated(r1)))?
+                            .traversable(actor_state.locomotion().flying)?;
                         Some((to, tor_world::compose_rotation(r1, r2)))
                     };
                     match (path(a, b), path(b, a)) {
@@ -527,7 +604,10 @@ impl Game {
                         _ => None,
                     }
                 } else {
-                    knowledge.edges.get(&(node.0, local)).copied()
+                    knowledge
+                        .edges
+                        .get(&(node.0, local))
+                        .and_then(|edge| edge.traversable(actor_state.locomotion().flying))
                 };
                 if let Some((to, rotation)) = edge {
                     if knowledge.cells.get(&to) != Some(&false) {
@@ -558,11 +638,16 @@ impl Game {
         for id in self.actors.keys().copied().collect::<Vec<_>>() {
             let scene = self.scene(id).expect("existing actor");
             self.refresh_places(id, &scene);
+            let flying = self.actors[&id].locomotion().flying;
+            let can_use_stairs = self.can_use_abstract_stairs(id);
             let knowledge = self.navigation.entry(id).or_default();
             let mut cells: BTreeMap<_, _> = knowledge.cells.iter().map(|(k, v)| (*k, *v)).collect();
             let mut edges: BTreeMap<_, _> = knowledge.edges.iter().map(|(k, v)| (*k, *v)).collect();
             let visible: BTreeSet<_> = scene.iter().map(|c| c.location).collect();
-            edges.retain(|(from, _), (to, _)| !(visible.contains(from) && visible.contains(to)));
+            edges.retain(|(from, direction), edge| {
+                !(visible.contains(from) && visible.contains(&edge.destination))
+                    && (can_use_stairs || !self.world.is_stair(*from, *direction))
+            });
             for cell in &scene {
                 let opaque = self.world.opaque(cell.location);
                 if !opaque || cells.contains_key(&cell.location) {
@@ -573,10 +658,13 @@ impl Game {
                 }
                 for direction in DIRECTIONS {
                     let local = direction.rotated(cell.rotation);
-                    if matches!(local, Direction::Up | Direction::Down)
+                    if !can_use_stairs && self.world.is_stair(cell.location, local) {
+                        continue;
+                    }
+                    let requires_flight = matches!(local, Direction::Up | Direction::Down)
                         && self.world.passage(cell.location, local).is_none()
-                        && !self.world.is_stair(cell.location, local)
-                    {
+                        && !self.world.is_stair(cell.location, local);
+                    if requires_flight && !flying {
                         continue;
                     }
                     let Some(to) = self.world.step(cell.location, local) else {
@@ -594,7 +682,14 @@ impl Game {
                                     == tor_world::compose_rotation(cell.rotation, turns)
                         })
                     {
-                        edges.insert((cell.location, local), (to, turns));
+                        edges.insert(
+                            (cell.location, local),
+                            KnownEdge {
+                                destination: to,
+                                rotation: turns,
+                                requires_flight,
+                            },
+                        );
                     }
                 }
             }
@@ -1019,7 +1114,7 @@ mod refresh_tests {
             for (offset, direction) in DIRECTIONS.into_iter().enumerate() {
                 knowledge.edges.insert(
                     (cells[n], direction),
-                    (cells[(n + offset + 1) % 20], ((n + offset) % 24) as u8),
+                    KnownEdge::ordinary(cells[(n + offset + 1) % 20], ((n + offset) % 24) as u8),
                 );
             }
         }

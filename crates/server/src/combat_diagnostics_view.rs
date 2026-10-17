@@ -109,6 +109,12 @@ fn record(
                 .effects
                 .iter()
                 .map(|effect| match effect {
+                    s::abilities::ResolvedEffect::ApplyLinkedHold { .. } => {
+                        p::DiagnosticEffect::LinkedHold {
+                            target,
+                            holder: p::ActorId(value.actor.0),
+                        }
+                    }
                     s::abilities::ResolvedEffect::Translate { mode, result } => {
                         p::DiagnosticEffect::Translate {
                             target,

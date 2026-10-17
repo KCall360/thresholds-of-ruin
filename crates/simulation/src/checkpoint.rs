@@ -77,6 +77,7 @@ pub struct Snapshot {
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
+    next_hold_id: u64,
     intentions: crate::intention::checkpoint::Snapshot,
     /// Region streaming state in [`SharedState`], omitted while empty so
     /// games that never stream save exactly as before.
@@ -548,6 +549,7 @@ impl Game {
             next_actor_id: self.next_actor_id,
             next_item_id: self.next_item_id,
             next_door_id: self.next_door_id,
+            next_hold_id: self.next_hold_id,
             intentions: shared.intentions.capture(&self.intentions),
             scenario_policy: (self.scenario_policy != Default::default())
                 .then(|| self.scenario_policy.clone()),
@@ -638,6 +640,7 @@ impl Game {
             next_actor_id: snapshot.next_actor_id,
             next_item_id: snapshot.next_item_id,
             next_door_id: snapshot.next_door_id,
+            next_hold_id: snapshot.next_hold_id,
             intentions: context
                 .intentions
                 .restore(snapshot.intentions, &context.shared.intentions)
@@ -703,6 +706,9 @@ impl Game {
             return Err(PersistError::Physics);
         }
         if game.event_log.iter().any(|event| match event {
+            crate::combat::CombatEvent::EscapeResolved { actor, hold, intention, .. } => actor.0 == 0
+                || actor.0 >= game.next_actor_id || hold.0 == 0 || hold.0 >= game.next_hold_id
+                || intention.is_some_and(|id| !game.intention_issued(id)),
             crate::combat::CombatEvent::Resolved { outcome, strike } => !outcome.valid()
                 || (outcome.target_rider_participated && !strike.is_some_and(|ordinal| usize::from(ordinal) < crate::limits::STRIKES))
                 || outcome.effects.iter().any(|effect| {
@@ -720,6 +726,7 @@ impl Game {
             || game.next_actor_id == 0
             || game.next_item_id == 0
             || game.next_door_id == 0
+            || game.next_hold_id == 0
             || game
                 .next_actor()
                 .is_some_and(|id| game.actors[&id].ready_at != game.tick)
@@ -757,6 +764,9 @@ impl Game {
         if !game.world.checkpoint_valid(game.next_door_id) {
             return Err(PersistError::World);
         }
+        if !game.loaded_holds_valid() {
+            return Err(PersistError::RunState);
+        }
         if !game.recovery_contexts_valid() {
             return Err(PersistError::Schedule);
         }
@@ -771,6 +781,7 @@ impl Game {
     /// attaching a stored region gives its actors the same.
     pub(crate) fn actor_state_valid(&self, id: ActorId, actor: &Actor) -> bool {
         id.0 != 0
+            && self.hold_actor_shape_valid(id, actor)
             && actor.active_since <= self.actor_clock(id)
             && actor.motion.active_fall.is_none_or(|fall| {
                 actor.alive()
@@ -794,6 +805,9 @@ impl Game {
                     && p.plan.actor() == id
                     && p.plan.valid(&self.content.rules)
                     && self.plan_source_valid(&p.plan)
+                    && p.progress
+                        .hold_binding()
+                        .is_none_or(|binding| binding.id.0 < self.next_hold_id)
                     && p.schedule_valid(self.actor_clock(id), actor.ready_at)
                     && (!p.active
                         || actor.combat.as_ref().is_none_or(|combat| {
@@ -803,7 +817,10 @@ impl Game {
                         }))
                     && p.plan.target().0 < self.next_actor_id
                     && (!(p.plan.as_ability().is_some()
-                        || matches!(p.plan, crate::abilities::Plan::Respec(_)))
+                        || matches!(
+                            p.plan,
+                            crate::abilities::Plan::Escape(_) | crate::abilities::Plan::Respec(_)
+                        ))
                         || actor.combat.as_ref().map(|c| c.creature()).is_some())
             })
             && actor.combat.as_ref().is_none_or(|c| c.valid())
@@ -1576,6 +1593,7 @@ mod tests {
 mod navigation_regions {
     use super::*;
     use crate::navigation_map::RegionMap;
+    use crate::travel::KnownEdge;
     use serde::{Deserializer, Serializer};
     use tor_world::{Direction, Location, RegionId};
 
@@ -1596,7 +1614,7 @@ mod navigation_regions {
         instances: Vec<Instance>,
     }
 
-    type Edges = RegionMap<(Location, Direction), (Location, u8)>;
+    type Edges = RegionMap<(Location, Direction), KnownEdge>;
     type Cells = RegionMap<Location, bool>;
     /// Ordered x/y columns with explicit [z, value] entries. No implicit runs
     /// or unbounded expansion: each decoded position has an encoded entry.
@@ -1699,7 +1717,7 @@ mod navigation_regions {
     struct EdgeRegion {
         region: RegionId,
         plain: Columns,
-        other: Vec<((Location, Direction), (Location, u8))>,
+        other: Vec<((Location, Direction), KnownEdge)>,
     }
 
     fn plain_target(from: Location, direction: Direction) -> Option<Location> {
@@ -1725,13 +1743,19 @@ mod navigation_regions {
             let mut plain = BTreeMap::<tor_world::Position, i32>::new();
             let mut other = Vec::new();
             let mut region = None;
-            for (&(from, direction), &(to, turns)) in map.iter() {
+            for (&(from, direction), &edge) in map.iter() {
+                let (to, turns) = (edge.destination, edge.rotation);
                 region = Some(from.region);
                 match DIRECTIONS.iter().position(|d| *d == direction) {
                     Some(bit) if is_plain(from, direction, to, turns) => {
-                        *plain.entry(from.position).or_default() |= 1 << bit;
+                        *plain.entry(from.position).or_default() |= (1 << bit)
+                            | if edge.requires_flight {
+                                1 << (bit + 6)
+                            } else {
+                                0
+                            };
                     }
-                    _ => other.push(((from, direction), (to, turns))),
+                    _ => other.push(((from, direction), edge)),
                 }
             }
             Self {
@@ -1745,7 +1769,10 @@ mod navigation_regions {
             let mut map = Edges::default();
             let mut count = 0usize;
             for (position, mask) in expand_columns(self.plain)? {
-                if !(1..64).contains(&mask) {
+                if !(1..4096).contains(&mask)
+                    || ((mask >> 6) & !(mask & 63)) != 0
+                    || ((mask >> 6) & 15) != 0
+                {
                     return None;
                 }
                 let from = Location {
@@ -1754,19 +1781,34 @@ mod navigation_regions {
                 };
                 for (bit, direction) in DIRECTIONS.into_iter().enumerate() {
                     if mask & (1 << bit) != 0 {
-                        map.insert((from, direction), (plain_target(from, direction)?, 0));
+                        map.insert(
+                            (from, direction),
+                            KnownEdge {
+                                destination: plain_target(from, direction)?,
+                                rotation: 0,
+                                requires_flight: mask & (1 << (bit + 6)) != 0,
+                            },
+                        );
                         count += 1;
                     }
                 }
             }
-            for ((from, direction), (to, turns)) in self.other {
+            let mut previous = None;
+            for ((from, direction), edge) in self.other {
+                let (to, turns) = (edge.destination, edge.rotation);
                 if from.region != self.region
+                    || turns >= 24
+                    || !DIRECTIONS.contains(&direction)
+                    || (edge.requires_flight
+                        && !matches!(direction, Direction::Up | Direction::Down))
+                    || previous.is_some_and(|key| key >= (from, direction))
                     || (DIRECTIONS.contains(&direction) && is_plain(from, direction, to, turns))
                     || map.contains_key(&(from, direction))
                 {
                     return None;
                 }
-                map.insert((from, direction), (to, turns));
+                previous = Some((from, direction));
+                map.insert((from, direction), edge);
                 count += 1;
             }
             (map.iter().count() == count).then_some(map)
@@ -1934,13 +1976,31 @@ mod navigation_regions {
         #[test]
         fn links_round_trip_with_plain_masks_and_unusual_links_in_full() {
             let mut map = Edges::default();
-            map.insert((at(1, 0, 0, 0), Direction::East), (at(1, 1, 0, 0), 0));
-            map.insert((at(1, 0, 0, 0), Direction::South), (at(1, 0, 1, 0), 0));
-            map.insert((at(1, 0, 0, 1), Direction::Down), (at(1, 0, 0, 0), 0));
+            map.insert(
+                (at(1, 0, 0, 0), Direction::East),
+                KnownEdge::ordinary(at(1, 1, 0, 0), 0),
+            );
+            map.insert(
+                (at(1, 0, 0, 0), Direction::South),
+                KnownEdge::ordinary(at(1, 0, 1, 0), 0),
+            );
+            map.insert(
+                (at(1, 0, 0, 1), Direction::Down),
+                KnownEdge::ordinary(at(1, 0, 0, 0), 0),
+            );
             // A portal, a rotated join, and a stair are stored in full.
-            map.insert((at(1, 4, 0, 0), Direction::East), (at(2, 0, 0, 0), 0));
-            map.insert((at(1, 0, 3, 0), Direction::West), (at(1, -1, 3, 0), 1));
-            map.insert((at(1, 2, 2, 0), Direction::Up), (at(3, 2, 2, 0), 0));
+            map.insert(
+                (at(1, 4, 0, 0), Direction::East),
+                KnownEdge::ordinary(at(2, 0, 0, 0), 0),
+            );
+            map.insert(
+                (at(1, 0, 3, 0), Direction::West),
+                KnownEdge::ordinary(at(1, -1, 3, 0), 1),
+            );
+            map.insert(
+                (at(1, 2, 2, 0), Direction::Up),
+                KnownEdge::ordinary(at(3, 2, 2, 0), 0),
+            );
             let encoded = EdgeRegion::encode(&map);
             assert_eq!(
                 encoded.plain,
@@ -1951,8 +2011,58 @@ mod navigation_regions {
         }
 
         #[test]
+        fn flight_masks_round_trip_and_reject_orphan_horizontal_and_unused_bits() {
+            let mut map = Edges::default();
+            let from = at(1, 2, 2, 0);
+            map.insert(
+                (from, Direction::Up),
+                KnownEdge {
+                    destination: at(1, 2, 2, 1),
+                    rotation: 0,
+                    requires_flight: true,
+                },
+            );
+            let saved = EdgeRegion::encode(&map);
+            assert_eq!(saved.plain, vec![(2, 2, vec![[0, (1 << 4) | (1 << 10)]])]);
+            let encoded = serde_json::to_vec(&saved).unwrap();
+            assert_eq!(
+                serde_json::from_slice::<EdgeRegion>(&encoded)
+                    .unwrap()
+                    .decode(),
+                Some(map)
+            );
+            for mask in [-1, 0, 64, 128, 129, (1 << 10), 4096, 8191] {
+                assert!(
+                    EdgeRegion {
+                        region: RegionId(1),
+                        plain: vec![(2, 2, vec![[0, mask]])],
+                        other: vec![]
+                    }
+                    .decode()
+                    .is_none(),
+                    "{mask}"
+                );
+            }
+            let edge = KnownEdge {
+                destination: at(2, 0, 0, 0),
+                rotation: 0,
+                requires_flight: true,
+            };
+            assert!(EdgeRegion {
+                region: RegionId(1),
+                plain: vec![],
+                other: vec![((from, Direction::East), edge)]
+            }
+            .decode()
+            .is_none());
+        }
+
+        #[test]
         fn non_canonical_or_malformed_links_are_rejected() {
-            let plain = ((at(1, 0, 0, 0), Direction::East), (at(1, 1, 0, 0), 0));
+            let plain = (
+                (at(1, 0, 0, 0), Direction::East),
+                KnownEdge::ordinary(at(1, 1, 0, 0), 0),
+            );
             let decode = |plain: Vec<[i32; 4]>, other| {
                 EdgeRegion {
                     region: RegionId(1),
@@ -1973,7 +2083,10 @@ mod navigation_regions {
             assert_eq!(decode(vec![[0, 0, 0, 64]], vec![]), None);
             assert_eq!(decode(vec![[1, 0, 0, 2], [0, 0, 0, 2]], vec![]), None);
             // Links belong to the pooled region.
-            let foreign = ((at(2, 4, 0, 0), Direction::East), (at(3, 0, 0, 0), 0));
+            let foreign = (
+                (at(2, 4, 0, 0), Direction::East),
+                KnownEdge::ordinary(at(3, 0, 0, 0), 0),
+            );
             assert_eq!(decode(vec![], vec![foreign]), None);
         }
     }

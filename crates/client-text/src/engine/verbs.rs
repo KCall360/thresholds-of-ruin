@@ -21,6 +21,9 @@ use crate::{
 /// actions; see [`super::turn`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Goal {
+    Escape {
+        hold: HoldTarget,
+    },
     UseItem {
         item: ItemTarget,
         operation: ItemOperation,
@@ -146,7 +149,7 @@ Look and ask: look, examine <thing>, look <direction>, exits, where am i, what n
 Handle things: take <thing>, take all, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, eat <food>, open or close <door>.
 Fight: attack <creature>, fight <creature> to keep attacking, follow <creature>, flee, back.
 Move: a direction (north, ne, up...) walks until there's something to see; go to <thing or place>, go to exit, go to start, places, name room <name>.
-Time: wait, resume, cancel [direction], escape <direction>, advancement.
+Time: wait, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, advancement.
 Techniques, if granted: rattling blow <creature>, measured cut <creature>, brace for impact, spark lance fire <creature>, falter <creature>, shell impact. stats lists yours; a first word is enough when it's unique, as in brace.
 Talking to the game: again repeats a command (attack again repeats an attack); chain commands with then, commas or full stops; answer a question with a name or its number; it, them, him and her mean what was last mentioned.
 Settings: brief, verbose and superbrief choose how places are described when you arrive; all skips <kinds> chooses what take all leaves behind; options shows them. Type help session for more, and quit to save and leave.";

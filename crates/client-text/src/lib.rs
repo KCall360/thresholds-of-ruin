@@ -7,7 +7,7 @@ pub mod engine;
 pub mod narrative;
 pub mod parser;
 
-pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor>, <disclosed ability name> <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, resume, cancel [direction], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor>, <disclosed ability name> <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -71,6 +71,29 @@ pub fn strike_command(
     }
 }
 
+/// Linked-hold Escape takes precedence over legacy flee idioms. Directions
+/// retain the separate cancel-and-step preparation control.
+pub fn hold_input(line: &str, state: &StateView) -> Option<Result<Input, String>> {
+    let (verb, rest) = word(line.trim());
+    if !verb.eq_ignore_ascii_case("escape") || (!rest.is_empty() && parse_direction(rest).is_ok()) {
+        return None;
+    }
+    let (kind, selector) = word(rest);
+    let selected = if rest.is_empty() {
+        tor_client_common::holds::select_hold(&state.observation, "")
+    } else if kind.eq_ignore_ascii_case("hold") && !selector.is_empty() {
+        tor_client_common::holds::select_hold(&state.observation, selector)
+    } else {
+        Err("Use escape, escape hold <number|#token|name>, or escape <direction>.".into())
+    };
+    Some(selected.map(|hold| {
+        Input::Command(Command::Act {
+            expected_revision: state.revision,
+            action: Action::Escape { hold },
+        })
+    }))
+}
+
 /// Explicit preparation controls, shared by script and adventure input.
 pub fn intention_input(line: &str) -> Option<Result<Input, String>> {
     let (verb, rest) = word(line.trim());
@@ -111,6 +134,9 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         return input;
     }
     if let Some(input) = strike_input(line) {
+        return input;
+    }
+    if let Some(input) = hold_input(line, state) {
         return input;
     }
     if let Some(input) = intention_input(line) {
@@ -598,7 +624,13 @@ pub fn inventory(state: &StateView) -> String {
 }
 
 pub fn stats(state: &StateView) -> String {
-    tor_client_common::stats::lines(state.observation.combat.as_ref()).join("\n")
+    let mut lines = tor_client_common::stats::lines(state.observation.combat.as_ref());
+    let holds = tor_client_common::holds::render_holds(&state.observation);
+    if !holds.is_empty() {
+        lines.push("Holds (escape hold <number|#token|name>):".into());
+        lines.extend(holds);
+    }
+    lines.join("\n")
 }
 
 pub fn history(entry: &HistoryEntry) -> String {
@@ -606,6 +638,10 @@ pub fn history(entry: &HistoryEntry) -> String {
         HistoryContent::PlaceRenamed { name, .. } => format!("Place named {}.", safe(name)),
         HistoryContent::Travel { .. } => "Travel requested.".into(),
         HistoryContent::Wizard { summary, .. } => safe(summary),
+        HistoryContent::Action {
+            event: Event::EscapeStarted { .. },
+            ..
+        } => "You begin trying to escape a hold.".into(),
         HistoryContent::Action { event, .. } => format!("{event:?}"),
         HistoryContent::Annotation {
             anchor,

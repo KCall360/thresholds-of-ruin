@@ -88,6 +88,7 @@ fn progress(next_strike: u16, successful_primaries: u16, receipt: u64) -> Prepar
         next_strike,
         successful_primaries,
         attempted_riders: [receipt, 0],
+        linked_hold: None,
     }
 }
 
@@ -144,13 +145,18 @@ fn all_regions() -> RegionTransition {
 fn sequence_rider_progress_requires_exact_bounded_fields() {
     let initial = json!({
         "kind": "ability", "next_strike": 0,
-        "successful_primaries": 0, "attempted_riders": [0, 0]
+        "successful_primaries": 0, "attempted_riders": [0, 0], "linked_hold": null
     });
     assert_eq!(
         serde_json::from_value::<PreparationProgress>(initial.clone()).unwrap(),
         progress(0, 0, 0)
     );
-    for field in ["next_strike", "successful_primaries", "attempted_riders"] {
+    for field in [
+        "next_strike",
+        "successful_primaries",
+        "attempted_riders",
+        "linked_hold",
+    ] {
         let mut missing = initial.clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(

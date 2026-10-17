@@ -96,6 +96,7 @@ pub enum Scope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Op {
+    Locomotion { value: Locomotion },
     Add { stat: Stat, value: i64 },
     Set { stat: Stat, value: i64 },
     Flag { flag: String },
@@ -104,6 +105,21 @@ pub enum Op {
     TalentReduction { category: String, amount: u32 },
     GrantAbility { ability: String },
 }
+// Authoring alone permits omitted erratic chance as suppression (TOML has no null).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Locomotion {
+    Stationary { enabled: bool },
+    Flying { enabled: bool },
+    Erratic { chance: Option<MovementChance> },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MovementChance {
+    pub numerator: u16,
+    pub denominator: u16,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Stat {
@@ -1269,5 +1285,26 @@ impl DisplacementProfile {
             },
             anchored: self.anchored,
         }
+    }
+}
+
+#[cfg(test)]
+mod locomotion_authoring_tests {
+    use super::*;
+    #[test]
+    fn omitted_erratic_chance_is_authoring_only_suppression() {
+        let authored: Modifier = toml::from_str(
+            "scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'erratic' } }",
+        )
+        .unwrap();
+        assert_eq!(
+            authored.compile().unwrap().op,
+            s::rules::ModifierOp::Locomotion {
+                value: s::locomotion::LocomotionValue::Erratic { chance: None }
+            }
+        );
+        assert!(toml::from_str::<Modifier>("scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'erratic', enabled = true, chance = { numerator = 1, denominator = 2 } } }").is_err());
+        let bad: Modifier = toml::from_str("scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'erratic', chance = { numerator = 2, denominator = 1 } } }").unwrap();
+        assert!(bad.compile().is_err());
     }
 }

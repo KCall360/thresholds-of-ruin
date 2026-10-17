@@ -238,6 +238,102 @@ mod tests {
     use crate::{journal::Action, Scenario};
     use tor_protocol::{Action as WireAction, Command as WireCommand};
 
+    #[test]
+    fn escape_resolves_only_observer_owned_live_hold_offers_without_actor_authority() {
+        use tor_protocol as wire;
+        use tor_simulation as sim;
+        let engine = crate::Engine::memory(crate::Scenario::two_room(42)).unwrap();
+        let actor = wire::ActorId(1);
+        let scope = engine.target_scope(actor);
+        let mut observation = engine.game.observe(sim::ActorId(1)).unwrap();
+        let first = sim::HoldId(7);
+        let second = sim::HoldId(8);
+        observation.linked_holds = vec![
+            sim::linked_hold::LinkedHoldObservation {
+                id: first,
+                holder: sim::ActorId(99),
+            },
+            sim::linked_hold::LinkedHoldObservation {
+                id: second,
+                holder: sim::ActorId(100),
+            },
+        ];
+        let action = wire::Action::Escape {
+            hold: scope.hold(second),
+        };
+        assert_eq!(
+            crate::wire_adapter::decode_action(&action, &scope, &observation).unwrap(),
+            Action::Escape { hold: second }
+        );
+        let absent = wire::Action::Escape {
+            hold: scope.hold(sim::HoldId(9)),
+        };
+        let foreign = wire::Action::Escape {
+            hold: engine.target_scope(wire::ActorId(2)).hold(second),
+        };
+        assert_eq!(
+            crate::wire_adapter::decode_action(&absent, &scope, &observation).unwrap_err(),
+            crate::wire_adapter::decode_action(&foreign, &scope, &observation).unwrap_err()
+        );
+        observation.linked_holds.clear();
+        assert!(crate::wire_adapter::decode_action(&action, &scope, &observation).is_err());
+        assert_eq!(
+            crate::wire_adapter::encode_action(&Action::Escape { hold: second }, &scope),
+            action,
+            "historical receipt encoding survives current offer removal"
+        );
+        let actor_action = wire::Action::UseAbility {
+            id: "basic_melee".into(),
+            invocation: wire::AbilityInvocation::ActorTarget {
+                target: scope.actor(sim::ActorId(99)),
+            },
+            supplies: Default::default(),
+        };
+        assert!(crate::wire_adapter::decode_action(&actor_action, &scope, &observation).is_err());
+    }
+
+    #[test]
+    fn linked_hold_projection_only_names_currently_visible_holders_without_rebinding() {
+        use tor_simulation as sim;
+        let engine = crate::Engine::memory(crate::Scenario::two_room(42)).unwrap();
+        let scope = engine.target_scope(ActorId(1));
+        let (mut observation, scene) = engine.game.observe_scene(sim::ActorId(1)).unwrap();
+        observation.visible_actors.clear();
+        observation.linked_holds = vec![sim::linked_hold::LinkedHoldObservation {
+            id: sim::HoldId(7),
+            holder: sim::ActorId(99),
+        }];
+        let project = |view| {
+            crate::adapt::observation(
+                view,
+                scene.clone(),
+                "fixture",
+                true,
+                &|_| [None, None, None],
+                &scope,
+            )
+        };
+        let hidden = project(observation.clone());
+        assert_eq!(hidden.linked_holds[0].holder, None);
+        observation.visible_actors.push(sim::ActorView {
+            id: sim::ActorId(99),
+            name: "Ordinary disclosed holder".into(),
+            location: observation.location,
+            asset: None,
+        });
+        let visible = project(observation.clone());
+        assert_eq!(
+            visible.linked_holds[0].target,
+            hidden.linked_holds[0].target
+        );
+        assert_eq!(
+            visible.linked_holds[0].holder,
+            Some(scope.actor(sim::ActorId(99)))
+        );
+        observation.visible_actors.clear();
+        assert_eq!(project(observation).linked_holds, hidden.linked_holds);
+    }
+
     fn spawn_then_fork_must_not_rebind_target(
         first: crate::journal::WizardOperation,
         second: crate::journal::WizardOperation,

@@ -1,7 +1,7 @@
-"""Materialize an explicitly sourced fourteen-species diagnostic package.
+"""Materialize an explicitly sourced eighteen-species diagnostic package.
 
 Never edits production. Bands condition the pinned Rogue source distribution on
-the eligible recipes, with Vampire/Jabberwock in the explicit mixed tail. Checked
+the eligible recipes, with Vampire/Griffin/Jabberwock in the explicit mixed tail. Checked
 racial growth still refuses beyond current construction/storage capacity. Inputs
 are not balance recommendations or earned progression evidence. Run only in the
 qualified coordinator lane; the ordinary compiler creates candidate certificates.
@@ -23,36 +23,40 @@ from ruleset_sources import resolve_with_dependencies
 REFERENCE = "c7c119f893bd2f8255f2ad78d58a32664ddb9a97"
 NAMES = {"E": "emu", "S": "snake", "H": "hobgoblin", "I": "ice_monster",
          "R": "rattlesnake", "Z": "zombie", "C": "centaur", "Q": "quagga", "Y": "yeti", "T": "troll",
-         "W": "wraith", "U": "black_unicorn", "V": "vampire", "J": "jabberwock"}
+         "W": "wraith", "U": "black_unicorn", "V": "vampire", "J": "jabberwock",
+         "K": "kestrel", "B": "bat", "F": "venus_flytrap", "G": "griffin"}
 # Integer proportions of unconditional source mass. Low-boundary redistribution
 # matters at depths 2..5; unsupported choices are explicitly conditioned away.
 BANDS = (
-    (1, 1, (("E", 1), ("S", 1), ("H", 1))),
-    (2, 2, (("E", 9), ("S", 9), ("H", 9), ("I", 5))),
-    (3, 3, (("E", 8), ("S", 8), ("H", 8), ("I", 5), ("R", 5))),
-    (4, 4, (("E", 7), ("S", 7), ("H", 7), ("I", 5), ("R", 5))),
-    (5, 5, (("E", 6), ("S", 6), ("H", 6), ("I", 5), ("R", 5), ("Z", 5))),
-    (6, 6, (("E", 1), ("S", 1), ("H", 1), ("I", 1), ("R", 1), ("Z", 1))),
-    (7, 7, (("E", 1), ("S", 1), ("H", 1), ("I", 1), ("R", 1), ("Z", 1), ("C", 1))),
-    (8, 9, (("S", 1), ("H", 1), ("I", 1), ("R", 1), ("Z", 1), ("C", 1), ("Q", 1))),
+    (1, 1, (("K", 1), ("E", 1), ("B", 1), ("S", 1), ("H", 1))),
+    (2, 2, (("K", 9), ("E", 9), ("B", 9), ("S", 9), ("H", 9), ("I", 5))),
+    (3, 3, (("K", 8), ("E", 8), ("B", 8), ("S", 8), ("H", 8), ("I", 5), ("R", 5))),
+    (4, 4, (("K", 7), ("E", 7), ("B", 7), ("S", 7), ("H", 7), ("I", 5), ("R", 5))),
+    (5, 5, (("K", 6), ("E", 6), ("B", 6), ("S", 6), ("H", 6), ("I", 5), ("R", 5), ("Z", 5))),
+    (6, 6, (("K", 1), ("E", 1), ("B", 1), ("S", 1), ("H", 1), ("I", 1), ("R", 1), ("Z", 1))),
+    (7, 7, (("E", 1), ("B", 1), ("S", 1), ("H", 1), ("I", 1), ("R", 1), ("Z", 1), ("C", 1))),
+    (8, 8, (("B", 1), ("S", 1), ("H", 1), ("I", 1), ("R", 1), ("Z", 1), ("C", 1), ("Q", 1))),
+    (9, 9, (("S", 1), ("H", 1), ("I", 1), ("R", 1), ("Z", 1), ("C", 1), ("Q", 1))),
     (10, 10, (("H", 1), ("I", 1), ("R", 1), ("Z", 1), ("C", 1), ("Q", 1))),
     (11, 11, (("I", 1), ("R", 1), ("Z", 1), ("C", 1), ("Q", 1), ("Y", 1))),
-    (12, 12, (("R", 1), ("Z", 1), ("C", 1), ("Q", 1), ("Y", 1))),
-    (13, 13, (("Z", 1), ("C", 1), ("Q", 1), ("Y", 1), ("T", 1))),
-    (14, 14, (("Z", 1), ("C", 1), ("Q", 1), ("Y", 1), ("T", 1), ("W", 1))),
-    (15, 16, (("C", 1), ("Q", 1), ("Y", 1), ("T", 1), ("W", 1))),
-    (17, 17, (("Q", 1), ("Y", 1), ("T", 1), ("W", 1), ("U", 1))),
-    (18, 18, (("Y", 1), ("T", 1), ("W", 1), ("U", 1))),
-    (19, 20, (("Y", 1), ("T", 1), ("W", 1), ("U", 1), ("V", 1))),
-    (21, 22, (("T", 1), ("W", 1), ("U", 1), ("V", 1), ("J", 1))),
-    (23, 23, (("W", 5), ("U", 5), ("V", 6), ("J", 6))),
-    (24, 24, (("U", 5), ("V", 7), ("J", 7))),
-    (25, 25, (("U", 5), ("V", 8), ("J", 8))),
-    (26, 26, (("U", 5), ("V", 9), ("J", 9))),
-    (27, 28, (("V", 1), ("J", 1))),
-    (29, 29, (("V", 7), ("J", 12))),
-    (30, 30, (("V", 8), ("J", 13))),
-    (31, None, (("V", 1), ("J", 1))),
+    (12, 12, (("R", 1), ("Z", 1), ("C", 1), ("Q", 1), ("Y", 1), ("F", 1))),
+    (13, 13, (("Z", 1), ("C", 1), ("Q", 1), ("Y", 1), ("F", 1), ("T", 1))),
+    (14, 14, (("Z", 1), ("C", 1), ("Q", 1), ("Y", 1), ("F", 1), ("T", 1), ("W", 1))),
+    (15, 16, (("C", 1), ("Q", 1), ("Y", 1), ("F", 1), ("T", 1), ("W", 1))),
+    (17, 17, (("Q", 1), ("Y", 1), ("F", 1), ("T", 1), ("W", 1), ("U", 1))),
+    (18, 18, (("Y", 1), ("F", 1), ("T", 1), ("W", 1), ("U", 1))),
+    (19, 19, (("Y", 1), ("F", 1), ("T", 1), ("W", 1), ("U", 1), ("V", 1))),
+    (20, 20, (("Y", 1), ("F", 1), ("T", 1), ("W", 1), ("U", 1), ("V", 1), ("G", 1))),
+    (21, 21, (("F", 1), ("T", 1), ("W", 1), ("U", 1), ("V", 1), ("G", 1), ("J", 1))),
+    (22, 22, (("T", 1), ("W", 1), ("U", 1), ("V", 1), ("G", 1), ("J", 1))),
+    (23, 23, (("W", 5), ("U", 5), ("V", 6), ("G", 6), ("J", 6))),
+    (24, 24, (("U", 5), ("V", 7), ("G", 7), ("J", 7))),
+    (25, 25, (("U", 5), ("V", 8), ("G", 8), ("J", 8))),
+    (26, 26, (("U", 5), ("V", 9), ("G", 9), ("J", 9))),
+    (27, 28, (("V", 1), ("G", 1), ("J", 1))),
+    (29, 29, (("V", 7), ("G", 12), ("J", 12))),
+    (30, 30, (("V", 8), ("G", 8), ("J", 13))),
+    (31, None, (("V", 1), ("G", 1), ("J", 1))),
 )
 # Birth policies belong to actor population choices, not canonical actor recipes.
 # The equal ration/bandage pool is provisional TOR tuning, not Rogue loot equivalence.
@@ -67,6 +71,8 @@ CARRIER_STOCK = {
     "T": {"version": 1, "pool": "rogue.vampire_supplies",
           "chance": {"numerator": 1, "denominator": 2}},
     "V": VAMPIRE_STOCK,
+    "G": {"version": 1, "pool": "rogue.vampire_supplies",
+          "chance": {"numerator": 1, "denominator": 5}},
     "J": {"version": 1, "pool": "rogue.vampire_supplies",
           "chance": {"numerator": 7, "denominator": 10}},
 }
@@ -137,9 +143,8 @@ def population_shape(source):
     expected["profiles"]["rogue.low_depth"]["stages"] = [canonical_actor_stage(), *supply_stages()]
     expected["carried_item_pools"] = {VAMPIRE_STOCK["pool"]: VAMPIRE_POOL}
     if exact(activation) == exact(expected):
-        return "canonical_fourteen_species"
+        return "canonical_eighteen_species"
     raise ValueError("Review changed population profile or carried-item pool before generating a candidate")
-
 
 def candidate_manifest(source, *, start_depth=1):
     domain = source["procedural_worlds"]["dungeon"]["domain"]
@@ -214,7 +219,7 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
                  "artifact_purpose": "diagnostic_population_package", "production_mutated": False,
                  "start_depth": start_depth,
                  "growth_evidence": "authored_hd_one_not_earned_route",
-                 "population_scope": "conditional_fourteen_species_with_open_vampire_jabberwock_tail",
+                 "population_scope": "conditional_eighteen_species_with_open_vampire_griffin_jabberwock_tail",
                  "depth_growth": copy.deepcopy(DEPTH_GROWTH),
                  "carried_stock": {"policies": {NAMES[glyph]: copy.deepcopy(policy)
                                                 for glyph, policy in CARRIER_STOCK.items()},

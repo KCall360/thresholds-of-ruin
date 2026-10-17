@@ -18,7 +18,7 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
     let mut view: Observation = serde_json::from_value(serde_json::json!({
         "actor":"1", "self_target":ActorTarget::from_digest([1; 32]), "tick":"0",
         "position":{"x":0,"y":0,"z":0},"ready":true,
-        "places":[],"visible_cells":[],"ground_items":[],"visible_actors":[],
+        "places":[],"visible_cells":[],"ground_items":[],"linked_holds":[],"visible_actors":[],
         "inventory": [
             {"known_supply":null,"quantity":"1","class":"ring","appearance":"silver ring","identified":false,"id":target(1),"name":"silver ring"},
             {"known_supply":null,"quantity":"1","class":"ring","appearance":"silver ring","identified":false,"id":target(2),"name":"silver ring"}

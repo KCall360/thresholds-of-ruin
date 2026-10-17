@@ -116,6 +116,7 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::F8 => Key::ResumeIntention,
         NativeKey::F9 => Key::CancelIntention,
         NativeKey::F10 => Key::Advancement,
+        NativeKey::F11 => Key::EscapeHold,
         NativeKey::R => Key::Release,
         NativeKey::F4 => Key::Note,
         NativeKey::F7 => Key::Wizard,
@@ -527,11 +528,17 @@ fn window_loop(
             }
             let capture_ms = capture_started.elapsed().as_secs_f64() * 1000.;
             let encode_started = Instant::now();
-            let encoded = serde_json::json!({"type":"frame","frame":frame,
+            let profile = serde_json::json!({
+                "version": 1, "network_events": network_events,
+                "apply_ms": apply_ms, "draw_ms": draw_ms,
+                "previous_report_encode_ms": previous_report_encode_ms,
+                "previous_report_write_ms": previous_report_write_ms,
+                "native_ms": native_ms, "capture_ms": capture_ms,
+                "previous_report_ms": previous_report_ms, "turn_interval_ms": turn_interval_ms
+            });
+            let mut frame_report = serde_json::json!({"type":"frame","frame":frame,
                 "presented_unix_ns":presented_unix_ns,
-                "profile":{"version":1,"network_events":network_events,"apply_ms":apply_ms,"draw_ms":draw_ms,
-                "previous_report_encode_ms":previous_report_encode_ms,"previous_report_write_ms":previous_report_write_ms,
-                "native_ms":native_ms,"capture_ms":capture_ms,"previous_report_ms":previous_report_ms,"turn_interval_ms":turn_interval_ms},"window_open":window.is_open(),
+                "profile":profile,"window_open":window.is_open(),
                 "state":state.map(|s|s.state()),"branch":state.map(|s|s.branch()),"history":state.map(|s|s.history()),
                 "map_tiles":state.map(|s|tor_client_ascii::render::map_tiles(s, &app.palette)),
                 "palette":{"revision":app.palette.revision(),"stale":app.palette.stale()},
@@ -539,17 +546,27 @@ fn window_loop(
                 "has_control":state.is_some_and(|s|s.has_control()),"can_admit_intention":state.is_some_and(|s|s.can_admit_intention()),"connected":app.connected,"busy":app.busy,
                 "intentions":state.map(|s|s.intentions()),"action_hint":app.intention_hint(),
                 "places_open":app.places_open,"place_selected":app.place_selected,"place_name":app.place_name,
-                "narration":state.map(|s|s.narration()),
+                "narration":state.map(|s|s.narration())});
+            let screen_report = serde_json::json!({
                 "messages":{"shown":app.messages.shown(app.role!=tor_protocol::AccessRole::Spectator),"more":app.messages.more(),"turn":app.messages.text(),"log":app.messages.log().collect::<Vec<_>>()},
                 "screen":{"inventory":app.inventory_open,"help":app.help_open,"stats":app.stats_open,"stats_scroll":app.stats_scroll,"message_log":app.message_log,"look_cursor":app.look_cursor,"running":app.running},
                 "inventory_rows":if app.inventory_open { state.map(|s|tor_client_ascii::inventory_entries(&app,&s.state().observation).iter().take(26).map(|entry|entry.long()).collect::<Vec<_>>()) } else { None },
                 "stats_rows":if app.stats_open { Some(app.stats_rows()) } else { None },
                 "advancement_open":app.advancement_open,"advancement_rows":app.advancement_rows(),"advancement_command":app.advancement_command,
                 "ability_choices":app.ability_choices,"selected_ability":app.selected_ability,
+                "hold_choices":app.hold_choice_offers(),"hold_rows":app.hold_rows(),
                 "supply_selection":app.supply_selection,"supply_rows":app.supply_rows(),
                 "status_lines":state.map(|s|tor_client_ascii::status_lines(&app,s)),
                 "status":app.status,"input_done":done,"native_input_sequence":native_input_sequence,
-                "wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
+                "wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)});
+            let serde_json::Value::Object(screen_fields) = screen_report else {
+                unreachable!("the screen report is an object literal");
+            };
+            frame_report
+                .as_object_mut()
+                .expect("the frame report is an object literal")
+                .extend(screen_fields);
+            let encoded = frame_report.to_string();
             previous_report_encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
             let write_started = Instant::now();
             println!("{encoded}");
@@ -594,6 +611,7 @@ mod tests {
         assert_eq!(native_key(NativeKey::F3), Some(Key::Control));
         assert_eq!(native_key(NativeKey::F8), Some(Key::ResumeIntention));
         assert_eq!(native_key(NativeKey::F10), Some(Key::Advancement));
+        assert_eq!(native_key(NativeKey::F11), Some(Key::EscapeHold));
         assert_eq!(native_key(NativeKey::F9), Some(Key::CancelIntention));
         assert_eq!(native_key(NativeKey::P), None);
         assert_eq!(native_key(NativeKey::F6), None);

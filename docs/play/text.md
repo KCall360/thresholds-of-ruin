@@ -80,6 +80,7 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `wait`, `z` | Wait, or continue existing recovery when unready |
 | `resume` | Resume eligible disclosed suspended or paused work |
 | `cancel` | Cancel eligible work in place |
+| `escape`, `escape hold <number|#token|name>` | Try to release one linked hold; bare `escape` selects only a sole offer |
 | `escape <direction>`, `cancel <direction>` | After your own strike prefix, cancel its remaining sequence and attempt one step |
 | `again`, `g`, `do it again` | Repeat the previous command |
 | `attack again`, `hit it once more` | Repeat the last attack on the same creature |
@@ -248,6 +249,16 @@ client-local and restart with the client. Durable names are a separate
 [character-knowledge contract](../architecture/clients.md#durable-place-knowledge).
 
 ## Turns, interruption and combat
+
+Linked holds appear separately in `stats`, with numbered choices and exact
+opaque handles. A holder is named only while ordinarily visible; an unseen
+holder stays "Unseen holder". With several holds, `escape` lists choices without
+acting. Use `escape hold 2`, an exact `#token`, or an unambiguous displayed name.
+The `hold` word keeps names such as "West" distinct from the existing
+`escape west` sequence-cancellation command. An ambiguous name asks you to choose
+a number or token. `again` retains the exact chosen hold rather than reusing its
+old row number. Escape takes time; success releases only that hold, so other
+holders can still prevent movement.
 
 Everything between prompts is composed as one passage. An approach and successful
 pickup can become “You walk over to the stone tablet and pick it up.” A failed

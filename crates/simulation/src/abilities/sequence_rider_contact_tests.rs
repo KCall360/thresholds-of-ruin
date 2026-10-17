@@ -126,6 +126,7 @@ fn assert_progress(game: &crate::Game, next: u16, hits: u16, receipts: [u64; 2])
             next_strike: next,
             successful_primaries: hits,
             attempted_riders: receipts,
+            linked_hold: None,
         }
     );
 }

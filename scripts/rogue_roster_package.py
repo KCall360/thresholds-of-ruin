@@ -12,7 +12,7 @@ from arena_matrix import toml_source
 from process_harness import ROOT
 
 PRODUCTION = ROOT / "scenarios/rogue-exploration"
-SPECIES = ("emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "centaur", "yeti", "troll", "wraith",
+SPECIES = ("bat", "kestrel", "venus_flytrap", "griffin", "emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "centaur", "yeti", "troll", "wraith",
            "black_unicorn", "ice_monster", "vampire", "jabberwock")
 # Every currently authored foe is selected by production population.
 PLAYABLE_SPECIES = SPECIES
@@ -27,7 +27,9 @@ def encounter_sources():
             "items": read("catalog/items.toml")["items"]}
 
 
-def encounter(species, *, character=1, autonomous=False):
+def encounter(species, *, character=1, autonomous=False, height=2):
+    if type(height) is not int or not 2 <= height <= 8:
+        raise ValueError("Encounter height must be an integer in 2..8")
     if species not in SPECIES or type(character) is not int or character not in (1, 2):
         raise ValueError("Choose an authored roster species and Warrior/Mage preset")
     source = encounter_sources()
@@ -40,14 +42,14 @@ def encounter(species, *, character=1, autonomous=False):
            "controller": "ai" if autonomous else "external"}
     if autonomous:
         foe["ai"] = "rogue_hostile"
-    region = {"id": 1, "name": "Isolated Rogue content encounter", "size": [7, 5, 2],
+    region = {"id": 1, "name": "Isolated Rogue content encounter", "size": [7, 5, height],
               "chamber": True, "gravity": [0, 0, -1], "anchors": {"start": [1, 2, 0]},
               "actors": [foe]}
     return manifest, region
 
 
-def roster_package(test, species, *, character=1, autonomous=False):
-    manifest, region = encounter(species, character=character, autonomous=autonomous)
+def roster_package(test, species, *, character=1, autonomous=False, height=2):
+    manifest, region = encounter(species, character=character, autonomous=autonomous, height=height)
     package = test.directory / ("roster-" + species)
     (package / "regions").mkdir(parents=True)
     (package / "catalog").mkdir()

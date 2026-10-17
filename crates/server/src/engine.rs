@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 44;
+pub(crate) const ARCHIVE_VERSION: u32 = 45;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -46,6 +46,9 @@ mod intention_tests;
 #[cfg(test)]
 #[path = "interaction_tests.rs"]
 mod interaction_tests;
+#[cfg(test)]
+#[path = "linked_hold_boundary_tests.rs"]
+mod linked_hold_boundary_tests;
 #[cfg(test)]
 #[path = "map_memory_tests.rs"]
 mod map_memory_tests;
@@ -3140,6 +3143,7 @@ impl Engine {
         let perception_changed = match action {
             Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
             Action::Move { .. }
+            | Action::Escape { .. }
             | Action::ChooseGrowthSource { .. }
             | Action::Purchase { .. }
             | Action::Respec { .. }
@@ -3188,11 +3192,17 @@ impl Engine {
         };
         outcome.next_tick = candidate.game.tick();
         outcome.next_actor = candidate.game.next_actor();
-        // Wait changes only tick/readiness. Other outcomes retain full
-        // comparison; new action kinds must make their impact explicit.
+        // Stationary waits usually change only tick/readiness. Capability
+        // expiry can change disclosed traversal without any geometry change.
         if !perception_changed {
             let started = Instant::now();
+            let mut capability_changes = Vec::new();
             for (&observer, revision) in candidate.revisions.iter_mut() {
+                if self.game.actor_locomotion(SimActor(observer.0))
+                    != candidate.game.actor_locomotion(SimActor(observer.0))
+                {
+                    capability_changes.push(observer);
+                }
                 if outcome.next_tick != tick
                     || ((observer == actor) != (outcome.next_actor == Some(SimActor(observer.0))))
                 {
@@ -3206,6 +3216,23 @@ impl Engine {
             }
             if let Some(profile) = profile.as_deref_mut() {
                 profile.revision_detection += started.elapsed();
+            }
+            for observer in capability_changes {
+                let started = Instant::now();
+                let after = candidate.revision_view(observer)?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.perception += started.elapsed();
+                    profile.actors_observed += 1;
+                }
+                let started = Instant::now();
+                candidate
+                    .game
+                    .refresh_navigation_scene(SimActor(observer.0), &after.scene);
+                candidate.observations.insert(observer, Arc::new(after));
+                navigation_refreshed = true;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.navigation_refresh += started.elapsed();
+                }
             }
         }
         // Navigation depends on geometry and each observer's scene, not the
@@ -3223,6 +3250,8 @@ impl Engine {
                 profile.actors_observed += 1;
             }
             if navigation_changed
+                || self.game.actor_locomotion(SimActor(actor.0))
+                    != candidate.game.actor_locomotion(SimActor(actor.0))
                 || candidate
                     .game
                     .navigation_scene_changed(&old.scene, &after.scene)
@@ -4843,14 +4872,14 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 44);
-        assert_eq!(engine.archive.ruleset, "interactions-v39");
+        assert_eq!(engine.archive.version, 45);
+        assert_eq!(engine.archive.ruleset, "interactions-v40");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {
                 previous.version = ARCHIVE_VERSION - 1;
             } else {
-                previous.ruleset = "interactions-v38".into();
+                previous.ruleset = "interactions-v39".into();
             }
             assert_eq!(
                 Engine::replay(previous, None, None).unwrap_err().code,

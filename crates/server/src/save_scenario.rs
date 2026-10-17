@@ -791,6 +791,15 @@ enum DamageExpr {
     deny_unknown_fields
 )]
 enum Effect {
+    ApplyLinkedHold {
+        #[serde(with = "mapped")]
+        policy: source::HoldPolicy,
+    },
+    HoldDamage {
+        #[serde(with = "DamageType")]
+        category: source::DamageType,
+        descriptor: Option<String>,
+    },
     DrainLatestHitDie,
     RestoreHitDie,
     StepSelfOneCell,
@@ -843,6 +852,116 @@ enum Effect {
         duration: u64,
         ability_tag: String,
     },
+}
+#[derive(Serialize)]
+#[serde(remote = "source::HoldPolicy", deny_unknown_fields)]
+struct HoldPolicy {
+    sustaining: String,
+    preparation: u64,
+    recovery: u64,
+    protection: u64,
+}
+impl HoldPolicy {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<source::HoldPolicy, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            sustaining: String,
+            preparation: u64,
+            recovery: u64,
+            protection: u64,
+        }
+        let f: Fields = super::named_map(d)?;
+        if tor_simulation::content_ids::FlagId::new(&f.sustaining).is_err()
+            || ![f.preparation, f.recovery, f.protection]
+                .into_iter()
+                .all(|value| (1..=tor_simulation::limits::NUMERIC as u64).contains(&value))
+        {
+            return Err(serde::de::Error::custom("Invalid stored hold policy"));
+        }
+        Ok(source::HoldPolicy {
+            sustaining: f.sustaining,
+            preparation: f.preparation,
+            recovery: f.recovery,
+            protection: f.protection,
+        })
+    }
+}
+
+#[cfg(test)]
+mod linked_hold_storage_tests {
+    use super::*;
+    #[test]
+    fn stored_linked_hold_effects_use_independent_strict_named_fields() {
+        for raw in [
+            r#"{"kind":"apply_linked_hold","policy":{"sustaining":"clutch","preparation":100,"recovery":100,"protection":400}}"#,
+            r#"{"kind":"hold_damage","category":"impact","descriptor":null}"#,
+        ] {
+            let restored: Owned<source::Effect> =
+                crate::storage::codec::strict(raw.as_bytes()).unwrap();
+            assert_eq!(
+                serde_json::to_value(Borrowed(&restored.0)).unwrap(),
+                serde_json::from_str::<serde_json::Value>(raw).unwrap()
+            );
+        }
+        for raw in [
+            r#"{"kind":"apply_linked_hold","policy":["clutch",100,100,400]}"#,
+            r#"{"kind":"apply_linked_hold","policy":{"sustaining":"clutch","preparation":0,"recovery":100,"protection":400}}"#,
+            r#"{"kind":"apply_linked_hold","policy":{"sustaining":"clutch","preparation":100,"recovery":100}}"#,
+            r#"{"kind":"apply_linked_hold","policy":{"sustaining":"clutch","preparation":100,"preparation":101,"recovery":100,"protection":400}}"#,
+            r#"{"kind":"hold_damage","category":"impact"}"#,
+            r#"{"kind":"hold_damage","category":"impact","descriptor":null,"holder":1}"#,
+            r#"["hold_damage","impact",null]"#,
+        ] {
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(raw.as_bytes()).is_err(),
+                "{raw}"
+            );
+        }
+    }
+    #[test]
+    fn compiled_hold_damage_rules_require_the_explicit_nullable_descriptor() {
+        use tor_simulation::rules::{Effect as RuleEffect, Ruleset, RulesetDocument, StrikeSource};
+        let mut document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let strike = serde_json::from_value(serde_json::json!({
+            "offset":0,"check":{"actor":"user","skill":{"kind":"natural_attack"},
+                "against":{"kind":"defense","defense":"physical"}},
+            "on_success":[RuleEffect::HoldDamage {
+                category:tor_simulation::combat::DamageType::Impact,descriptor:None}],
+            "on_failure":[],"descriptors":[],"riders":[]}))
+        .unwrap();
+        document
+            .abilities
+            .iter_mut()
+            .find(|ability| ability.id.as_str() == "clutch")
+            .unwrap()
+            .strikes = StrikeSource::Authored {
+            strikes: vec![strike],
+        };
+        Ruleset::validate(document.clone()).unwrap();
+        let current = encode_rules_document(&document).unwrap();
+        decode_rules_document(&current).unwrap();
+        let marked = r#"{"kind":"hold_damage","category":"impact","descriptor":null}"#;
+        assert_eq!(current.matches(marked).count(), 1);
+        // Preserve every other byte, so canonical key order cannot mask the field check.
+        let missing = current.replacen(marked, r#"{"kind":"hold_damage","category":"impact"}"#, 1);
+        assert!(decode_rules_document(&missing).is_err());
+    }
+    #[test]
+    fn hold_damage_increment_modifier_round_trips_authored_stored_and_compiled_forms() {
+        let raw = serde_json::json!({"scope":"always","op":{"kind":"add",
+            "stat":{"kind":"ability","ability":"clutch","stat":"hold_damage_increment"},"value":1}});
+        let authored: crate::creature_authoring::Modifier = serde_json::from_value(raw).unwrap();
+        let compiled = authored.compile().unwrap();
+        let stored = serde_json::to_value(Borrowed(&authored)).unwrap();
+        let restored: Owned<crate::creature_authoring::Modifier> =
+            serde_json::from_value(stored).unwrap();
+        assert_eq!(restored.0.compile().unwrap(), compiled);
+        assert!(serde_json::to_string(&compiled)
+            .unwrap()
+            .contains("hold_damage_increment"));
+    }
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::ConsumableSpec", deny_unknown_fields)]
@@ -1194,6 +1313,10 @@ enum ModifierScope {
     deny_unknown_fields
 )]
 enum ModifierOp {
+    Locomotion {
+        #[serde(with = "mapped")]
+        value: crate::creature_authoring::Locomotion,
+    },
     Add {
         #[serde(with = "mapped")]
         stat: crate::creature_authoring::Stat,
@@ -1223,6 +1346,34 @@ enum ModifierOp {
     GrantAbility {
         ability: String,
     },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::Locomotion",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum Locomotion {
+    Stationary {
+        enabled: bool,
+    },
+    Flying {
+        enabled: bool,
+    },
+    Erratic {
+        #[serde(with = "mapped")]
+        chance: Option<crate::creature_authoring::MovementChance>,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::MovementChance",
+    deny_unknown_fields
+)]
+struct MovementChance {
+    numerator: u16,
+    denominator: u16,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
@@ -2592,6 +2743,33 @@ macro_rules! remote {
         }
     )+};
 }
+impl Stored for crate::creature_authoring::MovementChance {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        MovementChance::serialize(self, serializer)
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Named;
+        impl<'de> serde::de::Visitor<'de> for Named {
+            type Value = crate::creature_authoring::MovementChance;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a bounded named movement probability")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                fields: A,
+            ) -> Result<Self::Value, A::Error> {
+                let value = MovementChance::deserialize(
+                    serde::de::value::MapAccessDeserializer::new(fields),
+                )?;
+                if value.denominator == 0 || value.numerator > value.denominator {
+                    return Err(serde::de::Error::custom("invalid stored movement chance"));
+                }
+                Ok(value)
+            }
+        }
+        deserializer.deserialize_map(Named)
+    }
+}
 impl Stored for crate::creature_authoring::Natural {
     fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         Natural::serialize(self, serializer)
@@ -2655,6 +2833,7 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    Locomotion => crate::creature_authoring::Locomotion,
     Rider => crate::creature_authoring::Rider,
     RiderCondition => crate::creature_authoring::RiderCondition,
     RulesStrikeSource => tor_simulation::rules::StrikeSource,
@@ -2773,6 +2952,7 @@ remote!(
     DamageComponentExpr => source::DamageComponentExpr,
     DamageExpr => source::DamageExpr,
     Effect => source::Effect,
+    HoldPolicy => source::HoldPolicy,
     CreatureCatalog => crate::creature_authoring::Catalog,
     DisplacementProfile => crate::creature_authoring::DisplacementProfile,
     Template => crate::creature_authoring::Template,
@@ -2861,7 +3041,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 12;
+const RULES_INPUT_FORMAT: u32 = 13;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -2961,7 +3141,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 14;
+const CONTENT_PACKAGE_FORMAT: u32 = 15;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -3039,6 +3219,31 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stored_locomotion_requires_nullable_chance_and_bounded_named_fraction() {
+        use super::{Borrowed, Owned};
+        use serde_json::json;
+        type Value = crate::creature_authoring::Locomotion;
+        for value in [
+            json!({"kind":"erratic","chance":null}),
+            json!({"kind":"erratic","chance":{"numerator":1,"denominator":5}}),
+        ] {
+            let decoded: Owned<Value> = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&decoded.0)).unwrap(), value);
+        }
+        for value in [
+            json!({"kind":"erratic"}),
+            json!({"kind":"erratic","chance":[1,5]}),
+            json!({"kind":"erratic","chance":{"numerator":2,"denominator":1}}),
+            json!({"kind":"erratic","chance":{"numerator":0,"denominator":0}}),
+            json!({"kind":"erratic","chance":{"numerator":1,"denominator":65536}}),
+            json!({"kind":"erratic","chance":null,"enabled":true}),
+            json!(["flying", true]),
+        ] {
+            assert!(serde_json::from_value::<Owned<Value>>(value).is_err());
+        }
+    }
+
     #[test]
     fn sequence_rider_stored_source_and_rules_require_independent_bounded_conditions() {
         use super::{Borrowed, Owned};
@@ -3130,18 +3335,18 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (44, 17, "interactions-v39", 12, 5, 14, "tor-arena-run-v5")
+            (45, 18, "interactions-v40", 13, 5, 15, "tor-arena-run-v5")
         );
     }
 
     #[test]
-    fn idle_ai_and_presentation_formats_preserve_rules_and_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 47);
-        assert_eq!(super::RULES_INPUT_FORMAT, 12);
+    fn combined_movement_and_presentation_formats_preserve_physical_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 48);
+        assert_eq!(super::RULES_INPUT_FORMAT, 13);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
-        // Private AI profiles and species policies change saved and compiled
-        // content payloads. Presentation metadata advances the public protocol;
-        // the rules vocabulary and physical framing are unchanged.
+        // Locomotion and linked-hold operands advance saved and compiled inputs;
+        // presentation metadata also advances the public protocol. None of these
+        // semantic payload changes alters the physical framing.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&base[..6], b"TORB\x06\x00");
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
@@ -4800,6 +5005,16 @@ impl Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            ApplyLinkedHold {
+                #[serde(with = "mapped")]
+                policy: source::HoldPolicy,
+            },
+            HoldDamage {
+                #[serde(with = "DamageType")]
+                category: source::DamageType,
+                #[serde(deserialize_with = "required_option")]
+                descriptor: Option<String>,
+            },
             DrainLatestHitDie {},
             RestoreHitDie {},
             StepSelfOneCell {},
@@ -4854,6 +5069,14 @@ impl Effect {
             },
         }
         Ok(match super::named_map(deserializer)? {
+            Fields::ApplyLinkedHold { policy } => source::Effect::ApplyLinkedHold { policy },
+            Fields::HoldDamage {
+                category,
+                descriptor,
+            } => source::Effect::HoldDamage {
+                category,
+                descriptor,
+            },
             Fields::DrainLatestHitDie {} => source::Effect::DrainLatestHitDie,
             Fields::RestoreHitDie {} => source::Effect::RestoreHitDie,
             Fields::StepSelfOneCell {} => source::Effect::StepSelfOneCell,

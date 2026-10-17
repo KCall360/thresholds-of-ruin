@@ -435,6 +435,19 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
         None => Step::Finish(End::Refused("You can't see a way to get there.".into())),
     };
     match goal {
+        Goal::Escape { hold } => {
+            if scene
+                .state
+                .observation
+                .linked_holds
+                .iter()
+                .any(|offer| offer.target == *hold)
+            {
+                act(Action::Escape { hold: *hold })
+            } else {
+                Step::Finish(End::Refused("That hold is no longer available.".into()))
+            }
+        }
         Goal::UseItem { item, operation } => {
             match tor_client_common::items::item_action(&scene.state.observation, *item, *operation)
             {
@@ -549,6 +562,7 @@ fn object(goal: &Goal, scene: &Scene) -> String {
         Goal::Go { direction, .. } | Goal::Step { direction } => {
             Some(direction_name(*direction).to_owned())
         }
+        Goal::Escape { .. } => Some("the hold".into()),
         Goal::Wait => None,
     }
     .unwrap_or_else(|| "it".into())
@@ -579,6 +593,7 @@ fn refusal(code: ErrorCode, goal: &Goal) -> String {
             Goal::Go { .. } | Goal::Approach { .. } | Goal::Visit { .. } => {
                 "You can't find a way there."
             }
+            Goal::Escape { .. } => "That hold is no longer available.",
             Goal::Wait => "You can't wait right now.",
         },
         ErrorCode::NotController | ErrorCode::ControlTaken => {

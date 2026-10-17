@@ -24,4 +24,5 @@ mod unique_retrieval;
 
 mod creature_catalog;
 
+mod linked_holds;
 mod map_pages;

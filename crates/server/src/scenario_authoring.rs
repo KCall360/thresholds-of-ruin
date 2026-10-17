@@ -172,6 +172,13 @@ pub enum DamageExpr {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    ApplyLinkedHold {
+        policy: HoldPolicy,
+    },
+    HoldDamage {
+        category: DamageType,
+        descriptor: Option<String>,
+    },
     DrainLatestHitDie,
     RestoreHitDie,
     StepSelfOneCell,
@@ -215,6 +222,40 @@ pub enum Effect {
         duration: u64,
         ability_tag: String,
     },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HoldPolicy {
+    pub sustaining: String,
+    pub preparation: u64,
+    pub recovery: u64,
+    pub protection: u64,
+}
+impl<'de> Deserialize<'de> for HoldPolicy {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            sustaining: String,
+            preparation: u64,
+            recovery: u64,
+            protection: u64,
+        }
+        let f: Fields = crate::creature_authoring::named_map(d)?;
+        if tor_simulation::content_ids::FlagId::new(&f.sustaining).is_err()
+            || ![f.preparation, f.recovery, f.protection]
+                .into_iter()
+                .all(|value| (1..=tor_simulation::limits::NUMERIC as u64).contains(&value))
+        {
+            return Err(serde::de::Error::custom("Invalid hold policy"));
+        }
+        Ok(Self {
+            sustaining: f.sustaining,
+            preparation: f.preparation,
+            recovery: f.recovery,
+            protection: f.protection,
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -366,6 +407,15 @@ impl<'de> Deserialize<'de> for Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            ApplyLinkedHold {
+                policy: HoldPolicy,
+            },
+            HoldDamage {
+                category: DamageType,
+                // TOML has no null value. Authoring may omit an unmarked
+                // descriptor; the independent stored schema requires null.
+                descriptor: Option<String>,
+            },
             DrainLatestHitDie {},
             RestoreHitDie {},
             StepSelfOneCell {},
@@ -421,6 +471,14 @@ impl<'de> Deserialize<'de> for Effect {
             }
         }
         Ok(match deserializer.deserialize_map(Named)? {
+            Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
+            Fields::HoldDamage {
+                category,
+                descriptor,
+            } => Self::HoldDamage {
+                category,
+                descriptor,
+            },
             Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
@@ -455,6 +513,63 @@ impl<'de> Deserialize<'de> for Effect {
                 ability_tag,
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod linked_hold_authoring_tests {
+    use super::*;
+    #[test]
+    fn linked_hold_effects_require_named_bounded_policy() {
+        let linked = serde_json::json!({"kind":"apply_linked_hold","policy":{
+            "sustaining":"clutch","preparation":100,"recovery":100,"protection":400}});
+        let damage =
+            serde_json::json!({"kind":"hold_damage","category":"impact","descriptor":null});
+        for value in [linked.clone(), damage.clone()] {
+            let decoded: Effect = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        }
+        for field in ["sustaining", "preparation", "recovery", "protection"] {
+            let mut missing = linked.clone();
+            missing["policy"].as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<Effect>(missing).is_err());
+        }
+        for invalid in [
+            serde_json::json!(0),
+            serde_json::json!(1_000_001),
+            serde_json::json!("100"),
+        ] {
+            let mut value = linked.clone();
+            value["policy"]["preparation"] = invalid;
+            assert!(serde_json::from_value::<Effect>(value).is_err());
+        }
+        let mut positional = linked.clone();
+        positional["policy"] = serde_json::json!(["clutch", 100, 100, 400]);
+        assert!(serde_json::from_value::<Effect>(positional).is_err());
+        let mut missing = damage.clone();
+        missing.as_object_mut().unwrap().remove("descriptor");
+        let unmarked: Effect = serde_json::from_value(missing).unwrap();
+        assert_eq!(serde_json::to_value(unmarked).unwrap(), damage);
+        let mut forged = linked;
+        forged["holder"] = 1.into();
+        assert!(serde_json::from_value::<Effect>(forged).is_err());
+    }
+
+    #[test]
+    fn hold_damage_toml_accepts_omitted_descriptor_and_round_trips_named_descriptors() {
+        for descriptor in [None, Some("fire")] {
+            let mut source = "kind = 'hold_damage'\ncategory = 'impact'\n".to_owned();
+            if let Some(descriptor) = descriptor {
+                source.push_str(&format!("descriptor = '{descriptor}'\n"));
+            }
+            let authored: Effect = toml::from_str(&source).unwrap();
+            let canonical = serde_json::json!({
+                "kind":"hold_damage", "category":"impact", "descriptor":descriptor
+            });
+            assert_eq!(serde_json::to_value(&authored).unwrap(), canonical);
+            let restored: Effect = toml::from_str(&toml::to_string(&authored).unwrap()).unwrap();
+            assert_eq!(serde_json::to_value(restored).unwrap(), canonical);
+        }
     }
 }
 

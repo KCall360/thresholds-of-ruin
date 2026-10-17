@@ -146,6 +146,7 @@ fn room(ox: i32, oy: i32, revision: u64) -> StateView {
             places: Vec::new(),
             actor: ActorId(1),
             self_target: ActorTarget::from_digest(synthetic_digest(1)),
+            linked_holds: vec![],
             tick: revision,
             position: Position { x: 0, y: 0, z: 0 },
             visible_cells: cells,

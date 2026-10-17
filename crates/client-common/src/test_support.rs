@@ -123,6 +123,7 @@ pub fn observation() -> Observation {
         visible_cells: vec![],
         ground_items: vec![],
         inventory: vec![],
+        linked_holds: vec![],
         visible_actors: vec![ActorView {
             appearance_seed: None,
             asset: None,

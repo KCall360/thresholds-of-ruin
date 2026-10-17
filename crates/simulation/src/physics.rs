@@ -325,6 +325,8 @@ impl Game {
             actor.body = tor_world::Shared::new(body);
             actor.motion.acceleration_remainder = [0; 3];
             actor.motion.active_fall = None;
+            drop(actor);
+            candidate.reconcile_holds_for_actor(id)?;
             Ok(())
         })
     }
@@ -339,7 +341,8 @@ impl Game {
         let a = &self.actors[&id];
         a.body.cells.len() > 1
             || a.motion.velocity != [0; 3]
-            || self.body_has_field(a.location, a.orientation, &a.body)
+            || self.effective_gravity(PhysicsEntity::Actor(id), a.location, a.orientation, &a.body)
+                != [0; 3]
             || self.physics.displaced.contains(&id)
             || self
                 .physics
@@ -497,41 +500,89 @@ impl Game {
         }
         Some((to, next_frame))
     }
+    /// Voluntary movement checks each cardinal leg in the region/frame where
+    /// it occurs. Imposed motion deliberately continues to use translate_body.
+    fn voluntary_leg_allowed(
+        &self,
+        id: ActorId,
+        from: Location,
+        direction: Direction,
+        flying: bool,
+    ) -> bool {
+        if self.world.is_stair(from, direction) {
+            return self.can_use_abstract_stairs(id);
+        }
+        !matches!(direction, Direction::Up | Direction::Down)
+            || flying
+            || self.world.passage(from, direction).is_some()
+    }
+
+    fn voluntary_reach(
+        &self,
+        id: ActorId,
+        from: Location,
+        direction: Direction,
+        flying: bool,
+    ) -> Option<(Location, u8)> {
+        let Some((a, b)) = direction.components() else {
+            if !self.voluntary_leg_allowed(id, from, direction, flying) {
+                return None;
+            }
+            return self.reach(from, direction);
+        };
+        // The same one-clear-side rule as World::diagonal_reach, with the
+        // actor's movement permissions applied before either leg is admitted.
+        let route = |first, second: Direction| {
+            if !self.voluntary_leg_allowed(id, from, first, flying) {
+                return None;
+            }
+            let (side, r1) = self.world.movement_neighbor(from, first)?;
+            if !self.world.walkable(side) || (side != from && self.occupied(side)) {
+                return None;
+            }
+            let second = second.rotated(r1);
+            if !self.voluntary_leg_allowed(id, side, second, flying) {
+                return None;
+            }
+            let (to, r2) = self.world.movement_neighbor(side, second)?;
+            (!self.world.is_wall(to)).then_some((to, compose_rotation(r1, r2)))
+        };
+        match (route(a, b), route(b, a)) {
+            (Some(a), Some(b)) if a == b => Some(a),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            _ => None,
+        }
+    }
+
     pub(crate) fn actor_translation(
         &self,
         id: ActorId,
         direction: Direction,
     ) -> Option<(Location, u8)> {
         let a = &self.actors[&id];
+        let locomotion = a.locomotion();
+        if locomotion.stationary {
+            return None;
+        }
         let local = direction.rotated(a.orientation);
-        if self.world.is_stair(a.location, direction) {
-            if !self.can_use_abstract_stairs(id) {
-                return None;
-            }
-            let (to, r) = self.reach(a.location, direction)?;
+        if !self.voluntary_leg_allowed(id, a.location, local, locomotion.flying) {
+            return None;
+        }
+        if self.world.is_stair(a.location, local) {
+            let (to, r) = self.reach(a.location, local)?;
             let frame = compose_rotation(a.orientation, r);
             return self
                 .body_fits(id, to, frame, &a.body)
                 .then_some((to, frame));
         }
-        if matches!(direction, Direction::Up | Direction::Down)
-            && self.world.passage(a.location, local).is_none()
-        {
-            return None;
-        }
         let physical = self.body_has_field(a.location, a.orientation, &a.body);
-        if physical && !self.supported(id) {
+        if physical && !locomotion.flying && !self.supported(id) {
             return None;
         }
         let (x, y, z) = direction.delta();
         if a.body.cells.len() == 1 && !physical {
-            if matches!(direction, Direction::Up | Direction::Down)
-                && self.world.passage(a.location, local).is_none()
-            {
-                return None;
-            }
             // Retain established beveled-corner walking for diagnostic fixtures.
-            let (to, r) = self.reach(a.location, local)?;
+            let (to, r) = self.voluntary_reach(id, a.location, local, locomotion.flying)?;
             let frame = compose_rotation(a.orientation, r);
             return self
                 .body_fits(id, to, frame, &a.body)
@@ -544,8 +595,16 @@ impl Game {
             let entity = PhysicsEntity::Actor(id);
             let (across, along) = ([i64::from(x), 0, 0], [0, i64::from(y), 0]);
             let by = |first: [i64; 3], second: [i64; 3]| {
+                let local = Direction::from_delta(rotate_vector(a.orientation, first))?;
+                if !self.voluntary_leg_allowed(id, a.location, local, locomotion.flying) {
+                    return None;
+                }
                 let (side, frame) =
                     self.translate_body(entity, a.location, a.orientation, &a.body, first)?;
+                let local = Direction::from_delta(rotate_vector(frame, second))?;
+                if !self.voluntary_leg_allowed(id, side, local, locomotion.flying) {
+                    return None;
+                }
                 self.translate_body(entity, side, frame, &a.body, second)
             };
             return match (by(across, along), by(along, across)) {
@@ -575,9 +634,24 @@ impl Game {
         }
         sum
     }
+    /// Creature flight changes acceleration, never imposed momentum or item gravity.
+    fn effective_gravity(
+        &self,
+        entity: PhysicsEntity,
+        at: Location,
+        frame: u8,
+        body: &BodySpec,
+    ) -> [i64; 3] {
+        if matches!(entity, PhysicsEntity::Actor(id) if self.actors[&id].locomotion().flying) {
+            [0; 3]
+        } else {
+            self.gravity_sum(at, frame, body)
+        }
+    }
     fn supported(&self, id: ActorId) -> bool {
         let a = &self.actors[&id];
-        let gravity = self.gravity_sum(a.location, a.orientation, &a.body);
+        let gravity =
+            self.effective_gravity(PhysicsEntity::Actor(id), a.location, a.orientation, &a.body);
         (0..3).any(|axis| {
             if gravity[axis] == 0 {
                 return false;
@@ -626,7 +700,7 @@ impl Game {
         if self.region_frozen(at.region) {
             return true;
         }
-        let gravity = self.gravity_sum(at, frame, body);
+        let gravity = self.effective_gravity(entity, at, frame, body);
         if gravity == [0; 3] {
             return motion.velocity != [0; 3];
         }
@@ -640,14 +714,29 @@ impl Game {
     /// Only the current forced physical chain can license later impact damage.
     /// Unknown/frozen geometry is not permission to retire saved provenance.
     pub(crate) fn fall_continues(&self, id: ActorId, actor: &crate::Actor) -> bool {
-        self.actor_frozen(id)
-            || self.fall_motion_continues(
-                PhysicsEntity::Actor(id),
-                actor.location,
-                actor.orientation,
-                &actor.body,
-                &actor.motion,
-            )
+        if self.actor_frozen(id) || self.region_frozen(actor.location.region) {
+            return true;
+        }
+        let gravity = if actor.locomotion().flying {
+            [0; 3]
+        } else {
+            self.gravity_sum(actor.location, actor.orientation, &actor.body)
+        };
+        if gravity == [0; 3] {
+            return actor.motion.velocity != [0; 3];
+        }
+        (0..3).any(|axis| {
+            gravity[axis] != 0
+                && (actor.motion.velocity[axis] != 0
+                    || !self.gravity_axis_blocked(
+                        PhysicsEntity::Actor(id),
+                        actor.location,
+                        actor.orientation,
+                        &actor.body,
+                        gravity,
+                        axis,
+                    ))
+        })
     }
 
     pub(crate) fn retire_settled_fall(&mut self, id: ActorId) {
@@ -754,6 +843,7 @@ impl Game {
                 a.motion = motion;
                 a.visited.insert(at.region);
                 drop(a);
+                self.reconcile_holds_for_actor(id)?;
                 // Falling into a frozen region freezes the actor there.
                 self.sync_actor_lifecycle(id)?;
                 if self.run_outcome().terminal && !self.population_entry_pending() {
@@ -867,7 +957,7 @@ impl Game {
         if motion.velocity != [0; 3] {
             return true;
         }
-        let gravity = self.gravity_sum(at, frame, body);
+        let gravity = self.effective_gravity(entity, at, frame, body);
         (0..3).any(|axis| {
             gravity[axis] != 0 && !self.gravity_axis_blocked(entity, at, frame, body, gravity, axis)
         })
@@ -883,15 +973,16 @@ impl Game {
             return Ok(());
         };
         let from = self.actors[&id].location;
-        if self.floor_activation.is_none() || from.region == at.region {
-            return Ok(());
-        }
         let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
         actor.location = at;
         actor.orientation = frame;
         actor.motion = motion.clone();
         actor.visited.insert(at.region);
         drop(actor);
+        self.reconcile_holds_for_actor(id)?;
+        if self.floor_activation.is_none() || from.region == at.region {
+            return Ok(());
+        }
         self.sync_actor_lifecycle(id)?;
         self.accepted_region_entry(id, from, at, crate::floor_activation::EntryCause::Physics)
     }
@@ -910,7 +1001,7 @@ impl Game {
         {
             motion.active_fall = None;
         }
-        let gravity = self.gravity_sum(at, frame, body);
+        let gravity = self.effective_gravity(entity, at, frame, body);
         for axis in 0..3 {
             let resting = motion.velocity[axis] == 0
                 && self.gravity_axis_blocked(entity, at, frame, body, gravity, axis);

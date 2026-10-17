@@ -24,11 +24,11 @@ class RogueRosterStudyTests(unittest.TestCase):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
         return {imported: hashlib.sha256((ROOT / DEFAULT_RULES).read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
 
-    def test_diagnostics_are_fourteen_fixed_foes_at_three_reference_bands_not_playable_starts(self):
+    def test_diagnostics_are_eighteen_fixed_foes_at_three_reference_bands_not_playable_starts(self):
         source = encounter_sources()
         before = copy.deepcopy(source)
         cases = source_cases(source)
-        self.assertEqual(len(cases), 42)
+        self.assertEqual(len(cases), 54)
         self.assertEqual({row["reference_hd"] for row in cases}, {1, 6, 11})
         for case in cases:
             for arm, family in (("baseline", "warrior_mixed"), ("candidate", "mage_mixed")):
@@ -108,10 +108,10 @@ class RogueRosterStudyTests(unittest.TestCase):
 
     def test_case_and_seed_inventory_exposes_omissions_and_freezes_timeout_budget(self):
         full = run_manifest()
-        self.assertEqual((full["required_cases"], full["package_count"], full["expected_runs"]), (42, 168, 336))
+        self.assertEqual((full["required_cases"], full["package_count"], full["expected_runs"]), (54, 216, 432))
         self.assertEqual(full["missing_cases"], [])
         small = run_manifest(["42"], 0.5, ["hobgoblin-hd1"], reference="playable-unspent")
-        self.assertEqual((small["required_cases"], len(small["missing_cases"])), (14, 13))
+        self.assertEqual((small["required_cases"], len(small["missing_cases"])), (18, 17))
         self.assertEqual((small["expected_runs"], small["maximum_replay_timeout_seconds"]), (4, 2))
         self.assertTrue(small["pilot"])
         self.assertFalse(small["complete_design"])

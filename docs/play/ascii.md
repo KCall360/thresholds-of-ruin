@@ -123,6 +123,7 @@ Automatic server launch and packaged builds are not available; see [status](../s
 | F3 / R | Acquire / release actor control |
 | F8 / F9 | Resume or cancel eligible work when the server grants that control |
 | F10 | Owner-only advancement/respec screen; [command and preview controls](advancement.md) |
+| F11 | Escape a linked hold. A sole hold is selected immediately; otherwise Up/Down chooses and Enter confirms |
 | Enter on the end screen | Close the victory or death summary |
 | Escape | Cancel or close what's open, otherwise quit |
 
@@ -137,6 +138,13 @@ cooldown remaining; the server still decides whether the action can start.
 Inventory letters stay with an item for as long as you carry it; a letter
 freed by dropping an item is reused. In a choice menu, letter keys choose
 items rather than acting as commands; arrow keys and Enter also work.
+
+When held, status shows the number of incoming holds. F11's choices name a
+holder only while that creature is ordinarily visible; otherwise they say
+"Unseen holder". Esc or F11 dismisses the choice without acting. A refreshed
+observation clears an open selection, so a row can never silently change to a
+different hold. Escape takes time and attempts to release exactly the chosen
+hold; another holder can still prevent movement.
 
 During your own multi-strike preparation, status shows the completed prefix,
 next-strike delay and cancellation recovery debt. If the server permits it, a

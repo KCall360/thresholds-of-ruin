@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **47**, save format **44**, scenario format **17**, ruleset
-**`interactions-v39`**, scenario validator **`tor-scenario-29`**. Unsupported
+**Current formats:** protocol **48**, save format **45**, scenario format **18**, ruleset
+**`interactions-v40`**, scenario validator **`tor-scenario-30`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **12**, ContentPackage **14** and
+The independent compiled inputs use RulesInput **13**, ContentPackage **15** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -19,8 +19,10 @@ formats remain unchanged. Current payloads require explicit nullable rider
 conditions, bounded sequence-hit/attempt progress, actor nutrition, condition
 semantics, exact periodic-regeneration nutrition rates/fractions and personal
 status alongside invocation and reply-context shapes, source-owned form choices,
-fall provenance, durable floor-activation records, explicit cell illumination and
-shared creature/corpse appearance. Prior payload identities remain rejection-only.
+fall provenance, effective locomotion operands, learned flight requirements,
+linked-hold identities, frozen Escape plans, durable floor-activation records,
+explicit cell illumination and shared creature/corpse appearance. Prior payload
+identities remain rejection-only.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
 saved game. Returning to an explored neighborhood or opening a fresh client
@@ -31,9 +33,11 @@ refreshed or invented. See [remembered maps](play/ascii.md#remembered-map)
 and [the read-only transfer](reference/protocol.md#explored-map-pages). This
 current-format change does not reconstruct visual history absent from older
 saves; retain an older save with its matching build when finishing that run.
-Its private checkpoint representation compacts exact map appearances and plain
-neighbor evidence, and pools equal owner directories across snapshots; navigation
-encoding and the retained workload stay unchanged. The queue fixture has an
+The measured map-compaction change compacts exact appearances and plain
+neighbor evidence, and pools equal owner directories across snapshots; its
+navigation encoding and retained workload were unchanged. The current locomotion
+batch adds explicit learned flight requirements, covered by focused persistence
+and capability-loss tests. The queue fixture has an
 approved 2 MiB logical budget, with its 1 MiB compressed budget and exploration's
 16 MiB logical budget unchanged. The corrected production writer passes both
 capacity/reopen tests: 1,541,092 logical bytes for the queue fixture and 5,247,096
@@ -82,13 +86,13 @@ flows remain unavailable. See [measurement limits](development/performance.md#pr
 | Default adventure | Authored five-chamber retrieval/escape dungeon, persistent death, shared text and ASCII play | [Gameplay](play/gameplay.md) |
 | Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, finite supply costs and cooldowns, universal Bind Wounds, ordered strikes and explicit-branch riders, anatomy equipment, timed consumption and explicitly authored nutrition/recovery policies | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
 | Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, self-or-ally targeting, immutable strike plans with live execution validation, atomic cancel-and-step with retained commitment, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
-| World | Region-local 3D geometry, all 24 portal rotations, multi-cell bodies, gravity, finite material volumes, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |
+| World | Region-local 3D geometry, all 24 portal rotations, multi-cell bodies, gravity, source-derived flight/stationary/erratic movement, finite material volumes, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |
 | Perception | Range-16 illuminated eye-based 3D sight, body-local awareness, opaque disclosed targets, stale client memory and durable place knowledge | [Perception](architecture/perception.md), [clients](architecture/clients.md) |
 | Sessions and storage | Loopback authenticated WebSockets, control transfer and spectators, background journaling, explicit durability barriers, checkpoints, replay and bounded wizard rewind | [Protocol](reference/protocol.md), [persistence](architecture/persistence.md) |
 | Region lifecycle | Lazy authored/generated content, active/frozen/detached regions, deterministic preparation, independent persistence and asset palettes | [Streaming](architecture/streaming.md) |
 | Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |
 | Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, bounded declared-depth character starts, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
-| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, fourteen-species depth-selected population, finite care and Centaur/Yeti/Troll/Vampire/Jabberwock birth stock, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
+| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, eighteen-species depth-selected population, finite care and Centaur/Yeti/Troll/Vampire/Griffin/Jabberwock birth stock, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
 | Tools | JSON-lines headless client with opt-in omission of diagnostic map memory, privileged inspection/setup/rewind, bounded context-bound strike detail pages, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
 
 Development supports [fast local Rust feedback](development/testing.md#fast-local-rust-feedback)
@@ -274,13 +278,13 @@ Required nutrition keeps its exact policy through runtime-preserving rebuilds;
 standalone cross-policy replacements reject atomically.
 The current format tuple includes these nutrition operands and the shared status
 clock/protection records. The shared bundled policy remains disabled, while
-Rogue explicitly enrolls Warrior/Mage, keeps its fourteen selected foe recipes
+Rogue explicitly enrolls Warrior/Mage, keeps its eighteen selected foe recipes
 exempt and shares its finite ration between eating and respec. Authored bounded empty-depletion triggers
 now use ordinary shared status effects and indexed actor deadlines; personal
 condition facts and events reach ordinary Text/ASCII views. Status restrictions,
 paid-work pauses and follow-up protection use the same typed condition lifecycle.
-Authored Held/Frozen encounters,
-final Rogue constants and survival balance remain open. See
+Production Ice Monster Frozen and Venus flytrap linked-Held encounters now
+use shared rules. Final Rogue constants and survival balance remain open. See
 [nutrition](reference/creature-rules.md#shared-nutrition-eating-and-starvation).
 
 The internal received-Health-loss timer preserves a rules-authored actor-active
@@ -330,11 +334,26 @@ against source-owned intent. Idle actions use only the actor's senses and known
 routes/items, with bounded useful equipment and supply collection. Explicit Wait
 blocks all idle movement, including loot detours, while permitting independently
 enabled useful underfoot actions; acquisition, pursuit and combat stay separate.
-The bundled packages author provisional species distinctions, including stationary
+The bundled packages author provisional species distinctions, including Wait-idle
 ice monsters and stone constructs. This does not activate the full Rogue roster,
 add a food economy or establish balance; see
 [behavior and provocation](reference/creature-rules.md#creature-behavior-and-provocation)
 and [authored idle policy](reference/scenario-packages.md#behavior-defaults-and-ai-overrides).
+
+Shared locomotion now derives stationary, flying and explicitly bounded erratic
+capabilities from active sources. Genuine flight permits paid unsupported and
+open-vertical movement with ordinary multicell/portal clearance and NPC stair
+policy, preserves imposed velocity and resumes gravity on capability loss.
+Learned flight-only routes retain their disclosed requirements through persistence.
+B/K/F/G expand the selected population to eighteen species; F's shared Clutch and
+Tightening Hold use exact live relationships, while ordinary Escape has paid
+preparation/recovery and holder-specific protection. Focused unit, Service,
+recipe-combat and nongraphical actual-process witnesses cover these mechanics,
+including source-free recovery of paid Escape work. Native input and the full
+cross-platform matrix remain merge requirements; these witnesses do not establish
+numerical balance. See
+[locomotion](reference/creature-rules.md#locomotion-capabilities) and
+[the production roster](play/rogue.md#flight-and-linked-holds).
 
 ## Important limitations
 
@@ -353,8 +372,8 @@ and [authored idle policy](reference/scenario-packages.md#behavior-defaults-and-
 - The 3d6 kernel keeps the existing initial defense/bonus values; this is not
   a claim of balanced Rogue builds. The point economy, Health recovery and the
   initial authored talent values still require content calibration.
-- The Rogue starter slice selects fourteen-species depth-selected population,
-  finite starting/floor supplies and Centaur/Yeti/Troll/Vampire/Jabberwock birth stock, alongside
+- The Rogue starter slice selects eighteen-species depth-selected population,
+  finite starting/floor supplies and Centaur/Yeti/Troll/Vampire/Griffin/Jabberwock birth stock, alongside
   authored hunger/fainting/starvation and ration eating. The full 26-species roster,
   calibrated food pressure, complete item catalog, traps, wandering population,
   calibrated depth curve and complete run balancing remain unfinished. The Amulet
@@ -429,7 +448,7 @@ recreate them. Its
 ongoing performance acceptance, including persistence tails, is distinct from
 whether floor generation exists. Add omitted rooms, mazes, secrets and traps as
 shared support arrives. Extend shared survival, items, ranged/perception and
-species behavior; extend the selected fourteen-species roster to all 26 species and
+species behavior; extend the selected eighteen-species roster to all 26 species and
 qualify complete pressured runs. Work beyond the accepted 256-HD guard, including
 exact-row deep storage and disclosure paging, is deferred rather than a
 prerequisite for functional Rogue.

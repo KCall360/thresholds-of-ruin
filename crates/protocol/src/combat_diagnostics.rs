@@ -40,6 +40,10 @@ pub struct DiagnosticCost {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
+    LinkedHold {
+        target: ActorId,
+        holder: ActorId,
+    },
     Translate {
         target: ActorId,
         mode: DiagnosticMovementMode,
@@ -218,6 +222,9 @@ impl CombatDiagnosticRecord {
             && self.outcome.effects.len() <= 128
             && self.outcome.effects.iter().all(|effect| match effect {
                 DiagnosticEffect::Translate { target, .. } => *target == self.target,
+                DiagnosticEffect::LinkedHold { target, holder } => {
+                    *target == self.target && *holder == self.actor && target != holder
+                }
                 DiagnosticEffect::Observation { target } => *target == self.actor,
                 DiagnosticEffect::Damage { target, amount }
                 | DiagnosticEffect::Heal { target, amount }
@@ -308,6 +315,10 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            LinkedHold {
+                target: ActorId,
+                holder: ActorId,
+            },
             Translate {
                 target: ActorId,
                 mode: DiagnosticMovementMode,
@@ -370,6 +381,7 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::LinkedHold { target, holder } => Self::LinkedHold { target, holder },
             Fields::Translate {
                 target,
                 mode,

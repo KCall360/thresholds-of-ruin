@@ -87,6 +87,16 @@ class RogueRosterPackageTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 encounter(species, character=character)
 
+    def test_flight_witness_height_changes_only_bounded_geometry(self):
+        normal_manifest, normal_region = encounter("griffin")
+        manifest, region = encounter("griffin", height=5)
+        self.assertEqual(manifest, normal_manifest)
+        normal_region["size"][2] = 5
+        self.assertEqual(region, normal_region)
+        for height in (True, 0, 1, 9, 3.5):
+            with self.assertRaises(ValueError):
+                encounter("griffin", height=height)
+
     def test_source_free_fallback_is_unrelated_and_requires_real_compiler_success(self):
         for result in (0, 1):
             with self.subTest(returncode=result), tempfile.TemporaryDirectory() as directory:

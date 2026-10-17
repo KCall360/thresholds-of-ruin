@@ -162,6 +162,7 @@ fn wizard_preload_physical_entry_and_teleport_share_one_saved_retrieval_batch() 
     assert_eq!(
         engine.game.preparation(SimActor(2)).unwrap().progress,
         tor_simulation::combat::PreparationProgress::Ability {
+            linked_hold: None,
             next_strike: 1,
             successful_primaries: 0,
             attempted_riders: [0; 2]

@@ -65,6 +65,7 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
             let observed = game.observe(actor).unwrap();
             match action {
                 Action::UseAbility { .. }
+                | Action::Escape { .. }
                 | Action::Equip { .. }
                 | Action::Unequip { .. }
                 | Action::Drink { .. }

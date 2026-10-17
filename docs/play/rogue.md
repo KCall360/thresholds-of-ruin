@@ -1,9 +1,9 @@
 # Play the Rogue starter slice
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
-authors Warrior and Mage presets, fourteen depth-selected foe species, equipped
+authors Warrior and Mage presets, eighteen depth-selected foe species, equipped
 starting gear, and finite bandage/ration supplies on persistent generated floors.
-The package selects the canonical E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J population, with focused
+The package selects the canonical K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J population, with focused
 source-qualified activation coverage. Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
 the complete roster and calibrated depth curve remain unfinished. The Amulet
@@ -12,7 +12,7 @@ and intentional surface escape provide the retrieval/ascent objective. The defau
 
 Creatures follow explicit species defaults before engaging a foe, using only
 their own senses and known surroundings. Most explore and prefer less-visited
-cells; the ice monster waits. Their separate door, care, equipment and useful-loot
+cells; the ice monster and stationary flytrap wait. Their separate door, care, equipment and useful-loot
 permissions are listed below. Passive acquisition still requires ordinary hostile
 provocation, and mean acquisition still uses the existing seeded wake check.
 Idle policy does not change remembered pursuit or combat. Rogue's NPC stair
@@ -22,7 +22,7 @@ adventure. Frozen floors do not accumulate missed roaming turns.
 
 ## Species idle policy
 
-These are provisional TOR choices for all fifteen authored species, including
+These are provisional TOR choices for all nineteen authored species, including
 the player species. They are not a claim of original Rogue behavioral parity or
 balanced encounter pressure. Human defaults apply only when a human is explicitly
 AI-controlled; they do not automate the selected player's turns.
@@ -30,9 +30,9 @@ AI-controlled; they do not automate the selected player's turns.
 | Species | Idle | Doors | Care | Equipment | Useful loot |
 | --- | --- | --- | --- | --- | --- |
 | Human, hobgoblin, centaur, troll, vampire | Explore | Yes | Yes | Yes | Yes |
-| Emu, snake, rattlesnake, quagga, black unicorn, zombie, wraith, jabberwock | Explore | No | No | No | No |
+| Bat, kestrel, griffin, emu, snake, rattlesnake, quagga, black unicorn, zombie, wraith, jabberwock | Explore | No | No | No | No |
 | Yeti | Explore | No | Yes | No | Yes |
-| Ice monster | Wait | No | No | No | No |
+| Ice monster, Venus flytrap | Wait | No | No | No | No |
 
 All keep their authored acquisition disposition and 1,000-tick actor-active
 memory. The shared `rogue_hostile` profile overrides only the flee threshold to
@@ -171,6 +171,25 @@ A dose spends one unit. Positive actual restoration teaches its identity; drinki
 at zero deficit consumes it without learning. Character-owned knowledge persists
 after the last unit and through save/replay. See [item knowledge](../reference/items.md).
 
+## Flight and linked holds
+
+Bat and kestrel each own one animal racial HD, with 1d2 and 1d4 natural damage.
+Bat is passive and has an authored 1/2 erratic-movement chance; kestrel is mean.
+Both fly and carry no birth stock. Griffin owns thirteen magical-beast racial
+HD, RG1 on HD 1 and Second Strike on HD 2, with 4d3/3d5 natural damage. It is
+mean, flies and has a 20% finite birth-stock chance from the shared supply pool.
+Flight permits unsupported paid movement but preserves clearance, imposed
+velocity and Rogue's NPC abstract-stair prohibition.
+
+Venus flytrap owns eight plant racial HD, remains mean and stationary, and buys
+Clutch on HD 1 and Tightening Hold on HD 6. The creating contact deals zero
+damage. Later qualifying Clutch or basic-melee primaries against that exact live
+link increment its damage channel, including misses; damage still requires a hit.
+Escape has base 100 preparation/100 recovery scaled by Speed and 400 actor-active
+ticks of reapplication protection against that holder. Forced displacement can
+break the link; stationary does not anchor F against pushes. It carries no stock.
+See [movement capabilities](../reference/creature-rules.md#locomotion-capabilities).
+
 ## Floors keep their history
 
 Each first entry by the selected character evaluates four ordered stages:
@@ -180,14 +199,14 @@ bandages and one ration respectively. The appended `rogue.restore_strength` stag
 attempts one ordinary potion unit on every floor from depth 1 onward. This is
 provisional TOR availability, not Rogue's 13% subtype probability; legal placement
 can still fail, so it does not guarantee a cure. The actor stage's authored depth bands
-select emu (E), snake (S), hobgoblin (H), ice monster (I), rattlesnake (R), zombie (Z), centaur (C),
-quagga (Q), yeti (Y), troll (T), wraith (W), black unicorn (U), vampire (V) and jabberwock (J). Centaur is eligible at
-depths 7–16, rattlesnake at 3–12, yeti at 11–20, troll at 13–22 and wraith at 14–23, inclusive. Jabberwock enters at depth 21. Depth 1 selects E/S/H equally;
-depth 27 onward selects V/J, with equal weights except V:J 7:12 at depth 29
-and 8:13 at depth 30. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
+select K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J. Kestrel (K) is eligible at depths
+1–6, bat (B) at 1–8, centaur at 7–16, rattlesnake at 3–12, yeti at 11–20,
+Venus flytrap (F) at 12–21, troll at 13–22 and wraith at 14–23. Griffin (G)
+enters at 20 and Jabberwock at 21. Depth 1 selects K/E/B/S/H equally; depth 27
+onward selects V/G/J, equal except 7:12:12 at 29 and 8:8:13 at 30. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
 owns the full band/weight table. The historical `rogue.eight_species_foes`
 and `rogue.vampire_supplies` IDs stay unchanged to preserve unrelated deterministic
-streams. Four-U, four-V and four-J draws are possible; these
+streams. Four-U, four-V, four-G and four-J draws are possible; these
 provisional counts and weights do not establish a safe or calibrated depth curve.
 Foe placement excludes your current sight, body occupancy and protected arrival
 cells. A stage can record a failed placement when legal space is unavailable;
@@ -204,9 +223,9 @@ The actor stage uses `racial_after` depth 26: each birth appends one actual raci
 HD per depth beyond 26, preserving its base rows, purchases and seeded per-HD
 Health rolls. New rows keep their ordinary unspent grants. J has 15 HD at depth
 26 and reaches 256 at 267; a sampled J requests 257 at 268 and refuses the whole
-entry atomically, without partial population or time advance. All-V draws can
-remain valid through depth 274, where V reaches 256 HD; at 275 either selected
-recipe exceeds capacity. Admission follows the actual sampled recipes, without
+entry atomically, without partial population or time advance. G reaches 256 HD
+at 269 and refuses at 270. All-V draws remain valid through depth 274, where V
+reaches 256 HD; at 275 all three tail recipes exceed capacity. Admission follows the actual sampled recipes, without
 clamping or replacing an over-cap choice. This is a current construction-capacity
 limit, not a designed HD plateau.
 
@@ -295,6 +314,11 @@ Focused actual-process contracts include:
   [`test_rogue_restoration_process.py`](../../scripts/test_rogue_restoration_process.py).
   This bounded controlled encounter retains the actual Warrior kit; it is not a
   generated-route or balance sample.
+- Production stationary F movement rejection and ordinary unsupported B/K/G
+  flight, with persisted G continuation, in
+  [`test_rogue_locomotion_process.py`](../../scripts/test_rogue_locomotion_process.py).
+  Production recipe combat mapping is asserted separately by the server roster
+  integration tests, including F Clutch, later basic-melee GR2 damage and Escape.
 - Production-origin depth-27 activation, actual V growth and carried stock through
   source-deleted recovery in
   [`test_rogue_activation_process.py`](../../scripts/test_rogue_activation_process.py).
@@ -302,7 +326,7 @@ Focused actual-process contracts include:
 The selected population has focused source-qualified coverage of these changed
 contracts; historical E/S walkthroughs remain separate evidence.
 The [earned-route pilot](../development/rogue-earned-route.md) retains its frozen
-eight-species inputs and adverse or censored outcomes; it is not fourteen-species
+eight-species inputs and adverse or censored outcomes; it is not eighteen-species
 acceptance. Reaching depth 27 records arrival, not
 Vampire combat survival. Broad integrated/native verification and final
 Windows/Linux CI remain required gates. These bounded cases do not close HD 1–6
@@ -311,7 +335,7 @@ play, pressured escape or numerical calibration. See [status](../status.md) and 
 
 ## Reconstructed roster and depth source checkpoint
 
-The selected E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J recipes use the shared compiler and character-sheet
+The selected K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J recipes use the shared compiler and character-sheet
 pipeline. Centaur owns four actual Warrior HD, with Second Strike purchased on
 HD 2 and Third Strike on HD 4; its natural sequence is 1d2/1d5/1d5. Yeti owns four
 actual racial HD, purchases Second Strike on HD 2 and uses 1d6/1d6; its cold
@@ -423,8 +447,8 @@ Depth 26 is not terminal, and no HD cap is a designed late-floor policy. Actual-
 fights, earned advancement/escape routes and coupled food/recovery measurements
 remain necessary to assess these provisional food, recovery, ability and stat costs.
 
-Each species explicitly owns its acquisition disposition: E/S/H/R/Z/Q/U/V are
-mean, while I/C/Y/W/J and the player species are passive.
+Each species explicitly owns its acquisition disposition: K/E/S/H/R/Z/Q/F/T/U/V/G
+are mean, while B/I/C/Y/W/J and the player species are passive.
 The [idle policy matrix](#species-idle-policy) and 1,000-tick memory bound are
 provisional. CH1 explicitly declares hostile contact, independent of its AI
 priority; its strike and rider come from the shared natural attack pipeline.

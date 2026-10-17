@@ -145,6 +145,7 @@ CLIENT = [
                 {"type": "move", "direction": "north_east"},
                 {"type": "take", "item": "i_" + "04" * 32, "quantity": "2"},
                 {"type": "drop", "item": "i_" + "04" * 32, "quantity": None},
+                {"type": "escape", "hold": "h_" + "09" * 32},
                 {"type": "wait"},
             ]),
             {"type": "annotate", "anchor": {"type": "state", "revision": "3"}, "text": "A note",
