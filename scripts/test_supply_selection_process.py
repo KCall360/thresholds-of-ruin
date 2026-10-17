@@ -23,7 +23,8 @@ class SupplySelectionProcesses(ProcessTestCase):
         for adventure in [False, True]:
             with self.subTest(adventure=adventure):
                 self.save = self.directory / f"text-supply-{adventure}.db"
-                package = prepare(self, bandages=1 if adventure else 2, autonomous=True)
+                package = prepare(self, bandages=1 if adventure else 2, autonomous=True,
+                                  isolate_partner=True)
                 server = self.server(scenario=package)
                 observer, initial = self.client(observe=True)
                 source = bandage(initial)
@@ -64,7 +65,7 @@ class SupplySelectionNativeProcesses(ProcessTestCase):
     graphical = True
 
     def test_native_exact_supply_picker_preserves_tick_until_confirmation(self):
-        self.server(scenario=prepare(self, autonomous=True))
+        self.server(scenario=prepare(self, autonomous=True, isolate_partner=True))
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
         initial = self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
         observer, _ = self.client(observe=True)

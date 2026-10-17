@@ -11,6 +11,36 @@ def cardinal_melee_candidate(actor):
     return p["z"] == 0 and abs(p["x"]) + abs(p["y"]) == 1
 
 
+def disclosed_contact_step(observation, actor):
+    """Approach current contact through one disclosed, unoccupied cardinal cell.
+
+    This bounded fixture choice never follows a stale target position or reads
+    private placement. The ordinary server still admits the resulting Move.
+    """
+    target = actor["position"]
+    if target["z"] != 0 or cardinal_melee_candidate(actor):
+        raise AssertionError("Contact approach needs a distant disclosed ground target")
+    directions = {(-1, 0): "west", (1, 0): "east", (0, -1): "north", (0, 1): "south"}
+    occupied = {(row["position"]["x"], row["position"]["y"])
+                for row in observation["visible_actors"] if row["position"]["z"] == 0
+                and row["id"] != observation["self_target"]}
+    distance = abs(target["x"]) + abs(target["y"])
+    choices = []
+    for cell in observation["visible_cells"]:
+        p = cell["position"]
+        offset = (p["x"], p["y"])
+        if (p["z"] != 0 or cell["wall"] or offset not in directions or offset in occupied
+                or (cell.get("door") and not cell["door"]["open"])):
+            continue
+        remaining = abs(target["x"] - p["x"]) + abs(target["y"] - p["y"])
+        if remaining < distance:
+            choices.append((remaining, p["x"], p["y"], cell, directions[offset]))
+    if not choices:
+        raise AssertionError("No disclosed open cardinal approach to the current target")
+    _, _, _, cell, direction = min(choices, key=lambda row: row[:3])
+    return cell, direction
+
+
 def disclosed_actor_candidates(actors):
     """Deduplicate body sightings in public geometry order, preferring feet.
 

@@ -43,6 +43,10 @@ def restoration_package(test):
     manifest["id"] = "rogue-rattlesnake-restoration"
     region.update(size=[4, 1, 2], anchors={"start": [1, 0, 0]})
     region["actors"][0].update(at=[2, 0, 0])
+    # This restoration mechanism needs contact and underfoot pickup, not a
+    # chase. Seal R's far end without changing production AI; the player's
+    # west cell remains available for the original source-free revisit.
+    region["walls"] = [[3, 0, z] for z in range(2)]
     # Explicit reachable stock, not evidence of a generated population attempt.
     region["items"] = [{"id": 1000, "at": [1, 0, 0], "archetype": POTION, "quantity": 1}]
     package = test.directory / "restoration"

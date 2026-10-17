@@ -23,6 +23,35 @@ class RogueReachChoices(unittest.TestCase):
         self.assertFalse(ground_sight_candidate(actor(0, 0, 1), 6))
 
 
+class DisclosedContactApproach(unittest.TestCase):
+    def test_current_diagonal_target_uses_open_cardinal_cell_not_stale_contact(self):
+        from rogue_test_support import disclosed_contact_step
+        target = {"id": "foe", **actor(1, 1)}
+        west = {"key": "west", **actor(-1, 0), "wall": False}
+        east = {"key": "east", **actor(1, 0), "wall": True}
+        south = {"key": "south", **actor(0, 1), "wall": False}
+        view = {"self_target": "self", "visible_actors": [target],
+                "visible_cells": [west, east, south]}
+        self.assertEqual(disclosed_contact_step(view, target), (south, "south"))
+        south["door"] = {"open": False}
+        with self.assertRaisesRegex(AssertionError, "No disclosed open"):
+            disclosed_contact_step(view, target)
+
+    def test_occupied_or_undisclosed_cells_are_not_approaches(self):
+        from rogue_test_support import disclosed_contact_step
+        target = {"id": "foe", **actor(2, 0)}
+        east = {"key": "east", **actor(1, 0), "wall": False}
+        view = {"self_target": "self", "visible_actors": [target], "visible_cells": []}
+        with self.assertRaisesRegex(AssertionError, "No disclosed open"):
+            disclosed_contact_step(view, target)
+        view["visible_cells"] = [east]
+        view["visible_actors"].append({"id": "other", **actor(1, 0)})
+        with self.assertRaisesRegex(AssertionError, "No disclosed open"):
+            disclosed_contact_step(view, target)
+        view["visible_actors"].pop()
+        self.assertEqual(disclosed_contact_step(view, target), (east, "east"))
+
+
 class RogueCareChoices(unittest.TestCase):
     def action(self, foes, *, injured, contacted=()):
         from rogue_test_support import care_combat_action

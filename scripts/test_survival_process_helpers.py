@@ -16,6 +16,32 @@ from nutrition_package import observed_meal_complete
 from status_condition_package import WORK, WOUND, actor_clock, checkpoint, condition_remaining, prepare
 
 
+class SupplySelectionIsolation(unittest.TestCase):
+    def test_opt_in_seals_only_partner_geometry_and_preserves_shared_fixture(self):
+        from types import SimpleNamespace
+        import supply_package
+        results = []
+        for isolated in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                fake = SimpleNamespace(directory=Path(directory), bin=Path("compiler-bin"), suffix="",
+                                       assertEqual=self.assertEqual)
+                with patch("supply_package.load_rules", return_value={}), \
+                        patch("supply_package.subprocess.run", return_value=SimpleNamespace(returncode=0, stderr="")):
+                    package = supply_package.prepare(fake, autonomous=True, isolate_partner=isolated)
+                results.append((tomllib.loads((package / "scenario.toml").read_text()),
+                                tomllib.loads((package / "regions/1.toml").read_text())))
+        (shared_manifest, shared), (isolated_manifest, isolated) = results
+        self.assertEqual(isolated_manifest, shared_manifest)
+        self.assertEqual(shared["actors"][0]["at"], [3, 1, 0])
+        self.assertEqual(isolated["actors"][0], {**shared["actors"][0], "at": [4, 1, 0]})
+        self.assertEqual(isolated["actors"][0]["controller"], "ai")
+        self.assertEqual(isolated["actors"][0]["ai"], "partner")
+        self.assertEqual(isolated["walls"], shared["walls"] + [
+            [3, y, z] for y in range(shared["size"][1]) for z in range(shared["size"][2])])
+        self.assertEqual({key: value for key, value in isolated.items() if key not in ("actors", "walls")},
+                         {key: value for key, value in shared.items() if key not in ("actors", "walls")})
+
+
 class SavedCheckpointHandles(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()

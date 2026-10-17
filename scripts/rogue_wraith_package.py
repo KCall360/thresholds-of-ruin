@@ -14,7 +14,8 @@ def recovery_sources():
     manifest, region = encounter("wraith", character=1, autonomous=True)
     manifest["id"] = "rogue-wraith-earned-recovery"
     manifest["characters"][0]["creature"]["hit_dice"].append({"source": "warrior", "purchases": []})
-    # A one-cell winding passage makes each bend a separate encounter bay.
+    # Full-height closed gates keep roaming creatures in separate encounter
+    # bays. The player's ordinary disclosed door actions open one bay at a time.
     # The initial two legs separate ordinary purchases from the first foe.
     path = [(1, 1)]
     bays = [(1, -1), (1, 1), (1, -1), (1, 1), (1, 1),
@@ -31,6 +32,8 @@ def recovery_sources():
         anchors={"start": [*path[0], 0]},
         walls=[[x, y, z] for x in range(width) for y in range(height)
                for z in range(2) if (x, y) not in floor],
+        doors=[{"id": 100 + bay, "at": [*path[8 + 8 * bay], 0],
+                "open": False, "height": 2} for bay in range(10)],
         actors=[{"id": 3 + bay, "at": [*path[10 + 8 * bay], 0],
                  "archetype": "rogue.wraith" if bay == 8 else "rogue.emu",
                  "controller": "ai", "ai": "rogue_hostile"} for bay in range(10)])

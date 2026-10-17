@@ -18,6 +18,32 @@ def source(name):
 
 
 class RogueRestorationContent(unittest.TestCase):
+    def test_contact_fixture_seals_only_r_far_cell_and_preserves_production_ai(self):
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from rogue_roster_package import encounter
+        from test_rogue_restoration_process import restoration_package
+        with tempfile.TemporaryDirectory() as directory:
+            fake = SimpleNamespace(directory=Path(directory), bin=Path("compiler-bin"), suffix="",
+                assertEqual=self.assertEqual, check_disk=lambda: None,
+                work_budget=SimpleNamespace(output=SimpleNamespace(paths=())))
+            with patch("test_rogue_restoration_process.subprocess.run",
+                       return_value=SimpleNamespace(returncode=0)):
+                package = restoration_package(fake)
+            manifest = tomllib.loads((package / "scenario.toml").read_text())
+            region = tomllib.loads((package / "regions/1.toml").read_text())
+        expected, _ = encounter("rattlesnake", character=1, autonomous=True)
+        expected["id"] = "rogue-rattlesnake-restoration"
+        self.assertEqual(manifest, expected)
+        self.assertEqual(region["walls"], [[3, 0, 0], [3, 0, 1]])
+        self.assertEqual(region["size"], [4, 1, 2])
+        self.assertEqual(region["anchors"], {"start": [1, 0, 0]})
+        self.assertEqual(region["actors"][0]["at"], [2, 0, 0])
+        self.assertEqual(region["actors"][0]["controller"], "ai")
+        self.assertEqual(region["items"], [{"id": 1000, "at": [1, 0, 0],
+            "archetype": "rogue.restore_strength", "quantity": 1}])
+
     def test_rattlesnake_owns_two_racial_rows_only_vn1_at_hd_one(self):
         actors = source("catalog/actors.toml")["actors"]
         self.assertIn(RATTLESNAKE, actors, "Approved R recipe is missing")

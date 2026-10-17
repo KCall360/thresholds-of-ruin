@@ -12,7 +12,7 @@ import unittest
 from process_harness import ProcessTestCase, settle_rogue_action
 from process_work_budget import ProcessWorkBudget
 from rogue_roster_package import encounter_sources, unrelated_fallback
-from rogue_test_support import disclosed_actor_candidates
+from rogue_test_support import cardinal_melee_candidate, disclosed_actor_candidates, disclosed_contact_step
 from rogue_vampire_package import generated_carrier_package
 from scalar_wire import u64
 from status_condition_package import actor_creature, checkpoint, combat, observation
@@ -63,6 +63,16 @@ class RogueCarrierProcesses(ProcessTestCase):
         return next((row for row in disclosed_actor_candidates(observation(current)["visible_actors"])
                      if row["name"] == species), None)
 
+    def approach(self, player, current, species):
+        for _ in range(8):
+            target = self.target(current, species)
+            self.assertIsNotNone(target)
+            if cardinal_melee_candidate(target):
+                return current, target
+            _, direction = disclosed_contact_step(observation(current), target)
+            current = self.execute(player, {"type": "move", "direction": direction})
+        self.fail("Carrier was not reached within eight ordinary steps")
+
     def observed_sequence(self, player, start, target, strikes, *, ability="basic_melee"):
         for raw in player.transcript[start:]:
             frame = json.loads(raw)
@@ -103,17 +113,7 @@ class RogueCarrierProcesses(ProcessTestCase):
             # Ordinary unequip gives a low-damage provocation without altering either
             # creature sheet. Re-equip only after observing the full natural sequence.
             current = self.execute(player, {"type": "unequip", "item": weapon})
-            for _ in range(8):
-                target = self.target(current, species)
-                self.assertIsNotNone(target)
-                position = target["position"]
-                if max(abs(position["x"]), abs(position["y"])) <= 1:
-                    break
-                direction = (("east" if position["x"] > 0 else "west") if position["x"] else
-                             ("south" if position["y"] > 0 else "north"))
-                current = self.execute(player, {"type": "move", "direction": direction})
-            else:
-                self.fail("Carrier was not reached within eight ordinary steps")
+            current, target = self.approach(player, current, species)
             current = self.execute(player, {"type": "wait"})
             before = checkpoint(self, player)
             self.assertEqual(combat(current)["hp"], health, "Passive newborn must not attack on sight or approach")
@@ -139,6 +139,10 @@ class RogueCarrierProcesses(ProcessTestCase):
                           if item["location"] == {"Carried": actor_id}}, {item_id},
                          "A carrier owns exactly its single finite birth-stock stack")
         if passive:
+            # The paid passive Wait can let a roaming carrier leave contact.
+            # Reacquire only its current disclosed cardinal position.
+            current, target = self.approach(player, current, species)
+            self.assertEqual(target["id"], target_id)
             start = len(player.transcript)
             current = self.execute(player, {"type": "use_ability", "id": "basic_melee",
                 "invocation": {"kind": "actor_target", "target": target_id}})

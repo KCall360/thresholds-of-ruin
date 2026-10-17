@@ -13,7 +13,7 @@ import unittest
 
 from process_harness import ProcessTestCase, ROOT, settle_rogue_action, underfoot
 from process_work_budget import ProcessBudgetExceeded, ProcessWorkBudget
-from rogue_test_support import cardinal_melee_candidate, disclosed_actor_candidates
+from rogue_test_support import cardinal_melee_candidate, disclosed_actor_candidates, disclosed_contact_step
 from rogue_wraith_package import disclosed_corridor_step, drain_interval, recovery_package
 from scalar_wire import u64
 from status_condition_package import actor_creature, checkpoint, combat, observation
@@ -218,6 +218,12 @@ class RogueWraithProcesses(ProcessTestCase):
         origin = underfoot(current["state"])["key"]
         self.visited.add(origin)
         cell, direction = disclosed_corridor_step(current, self.visited, destination)
+        if cell.get("door") and not cell["door"]["open"]:
+            # Opening is paid ordinary work. Reconsider the fresh observation
+            # before moving, since the newly disclosed creature can roam.
+            self.assertTrue(cell["door"]["reachable"])
+            return self.action(player, current, {"type": "set_door",
+                "door": cell["door"]["id"], "open": True})
         current, events = self.action(player, current, {"type": "move", "direction": direction})
         self.assertEqual(underfoot(current["state"])["key"], cell["key"])
         self.visited.add(cell["key"])
@@ -263,9 +269,17 @@ class RogueWraithProcesses(ProcessTestCase):
     def fight(self, player, current, target, name):
         self.sample["phase"] = "fight_" + name
         while True:
+            if name == "wraith" and u64(stats(current)["hit_dice"]["total"]) == 1:
+                # Reapproach is paid too: a drain during that Move must stop
+                # before another hostile player input, just like an attack.
+                self.check_disk()
+                return current
             seen = [row for row in self.targets(current) if row["id"] == target]
             self.assertEqual(len(seen), 1, "A lost target is not evidence of death")
-            self.assertTrue(cardinal_melee_candidate(seen[0]))
+            if not cardinal_melee_candidate(seen[0]):
+                cell, _ = disclosed_contact_step(observation(current), seen[0])
+                current, _ = self.step(player, current, cell["key"])
+                continue
             technique = next(row for row in stats(current)["abilities"] if row["id"] == "rattling_blow")
             stamina = next(row for row in stats(current)["resources"] if row["resource"]["id"] == "stamina")
             cost = technique["cost"]
@@ -337,7 +351,16 @@ class RogueWraithProcesses(ProcessTestCase):
         previous, here = self.last_edge
         self.assertEqual(here, underfoot(current["state"])["key"])
         current, _ = self.step(player, current, previous)
-        current, _ = self.step(player, current, here)
+        return_cell, _ = disclosed_corridor_step(current, self.visited, here)
+        occupants = [row for row in observation(current)["visible_actors"]
+                     if row["position"] == return_cell["position"]]
+        if occupants:
+            # A passive roaming W may step into the vacated cell. Its current
+            # public contact replaces a colliding return Move, never an attack.
+            self.assertTrue(all(row["id"] == self.wraith for row in occupants))
+            self.assertTrue(cardinal_melee_candidate(occupants[0]))
+        else:
+            current, _ = self.step(player, current, here)
         self.assertEqual(actor_creature(self.saved)["build"], actor_creature(passive)["build"])
         self.assertFalse(any(event["type"] == "ability" and event["caster"] == self.wraith
             for event in events_since(player, start, revision)), "Passive W cannot attack before provocation")
@@ -369,6 +392,37 @@ class RogueWraithProcesses(ProcessTestCase):
 
 
 class RogueWraithTargetSelection(unittest.TestCase):
+    def test_drain_during_contact_reapproach_stops_before_a_player_attack(self):
+        from unittest.mock import patch
+        driver = RogueWraithProcesses()
+        driver.sample = {}
+        initial = {"state": {"observation": {"self_target": "self",
+            "visible_actors": [{"id": "foe", "position": {"x": 2, "y": 0, "z": 0}}],
+            "visible_cells": [{"key": "next", "position": {"x": 1, "y": 0, "z": 0}, "wall": False}],
+            "combat": {"own_stats": {"hit_dice": {"total": "2"}}}}}}
+        drained = {"state": {"observation": {"combat": {"own_stats": {"hit_dice": {"total": "1"}}}}}}
+        with patch.object(driver, "step", return_value=(drained, [])) as step, \
+                patch.object(driver, "action") as action, patch.object(driver, "check_disk"):
+            self.assertIs(driver.fight(None, initial, "foe", "wraith"), drained)
+            step.assert_called_once_with(None, initial, "next")
+            action.assert_not_called()
+
+    def test_closed_disclosed_gate_opens_without_reusing_its_old_move(self):
+        from unittest.mock import patch
+        driver = RogueWraithProcesses()
+        driver.visited, driver.last_edge = set(), None
+        here = {"key": "here", "position": {"x": 0, "y": 0, "z": 0}, "wall": False}
+        gate = {"key": "gate", "position": {"x": 1, "y": 0, "z": 0}, "wall": False,
+                "door": {"id": "observed-door", "open": False, "reachable": True}}
+        initial = {"state": {"observation": {"visible_cells": [here, gate]}}}
+        refreshed = {"newly_disclosed_creature_may_have_moved": True}
+        with patch.object(driver, "action", return_value=(refreshed, [])) as action:
+            self.assertEqual(driver.step(None, initial), (refreshed, []))
+            action.assert_called_once_with(None, initial, {
+                "type": "set_door", "door": "observed-door", "open": True})
+        self.assertEqual(driver.visited, {"here"})
+        self.assertIsNone(driver.last_edge)
+
     def test_fight_stops_at_public_survived_wraith_loss_before_another_attack(self):
         from unittest.mock import patch
         driver = RogueWraithProcesses()

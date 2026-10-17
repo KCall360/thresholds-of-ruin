@@ -254,6 +254,8 @@ class RogueRosterContent(unittest.TestCase):
             "archetype": "rogue.wraith" if bay == 8 else "rogue.emu",
             "controller": "ai", "ai": "rogue_hostile"} for bay in range(10)])
         self.assertNotIn("items", region)
+        self.assertEqual(region["doors"], [{"id": 100 + bay,
+            "at": [*path[8 + 8 * bay], 0], "open": False, "height": 2} for bay in range(10)])
         self.assertEqual(len(set(path)), len(path))
         self.assertTrue(all(abs(x - nx) + abs(y - ny) == 1
                             for (x, y), (nx, ny) in zip(path, path[1:])))
