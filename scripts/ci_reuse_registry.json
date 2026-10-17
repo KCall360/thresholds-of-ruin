@@ -53,7 +53,7 @@
     "scripts/test_rogue_route_budget_process.py": "d18aa2d82f1acc6fbe01137d30049b65eae46817",
     "scripts/process_work_budget.py": "d53bdeb14499ab68913882f76e79095173f925af",
     "scripts/arena_evaluation.py": "56c5e931afae031c4f9d9be4f229e6905bc3e2a5",
-    "scripts/process_harness.py": "cc22563cb7893477126b3572a900ff65f0e4c61c",
+    "scripts/process_harness.py": "50cd6fedd35de6e0ba51231af276949b743438bc",
     "scripts/service_contract_ci.py": "d8fbe7f5e801e20bd41f3cf41a931353e75ab5f9",
     "scripts/service_contract_host.py": "709a15985f76e24773131c7852084e893bcc1feb",
     "scripts/service_contract_tests.py": "a14f56d3f1ae838ba4d2fc1b5b535163e269a694",
@@ -67,7 +67,7 @@
   "import_blobs": {
     "scripts/arena_matrix.py": "8c3670b89f148fb9f874da6b2262065a915bac1a",
     "scripts/ruleset_sources.py": "a092039ce09b15e0cc398a2bb6b31921f217d4db",
-    "scripts/process_harness.py": "cc22563cb7893477126b3572a900ff65f0e4c61c",
+    "scripts/process_harness.py": "50cd6fedd35de6e0ba51231af276949b743438bc",
     "scripts/arena_evaluation.py": "56c5e931afae031c4f9d9be4f229e6905bc3e2a5",
     "scripts/scalar_wire.py": "0238e7122f7c7a90f46c923d89ecc464f835e69f",
     "scripts/process_rule_fixtures.py": "4e8534a0f337ae28ccaa1d3956d12805c423b183",
