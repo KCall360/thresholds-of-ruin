@@ -68,8 +68,16 @@ pub struct SupplyView {
     pub name: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CorpseAppearance {
+    pub actor: ActorId,
+    pub asset: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemView {
+    pub corpse: Option<CorpseAppearance>,
     pub class: crate::ItemClass,
     pub description: String,
     pub id: ItemId,
@@ -83,6 +91,7 @@ pub struct ItemView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroundItemView {
+    pub corpse: Option<CorpseAppearance>,
     pub class: crate::ItemClass,
     pub description: String,
     pub id: ItemId,
@@ -139,6 +148,8 @@ pub struct ExitView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CellView {
+    /// Illumination of this disclosed occurrence, including dark awareness.
+    pub lit: bool,
     pub frame: u8,
     pub door: Option<tor_world::Door>,
     pub door_reachable: bool,
@@ -260,6 +271,7 @@ impl Game {
             match item.location {
                 ItemLocation::Ground(location) if visible(location) => {
                     ground_items.push(GroundItemView {
+                        corpse: identified.then(|| item.corpse.clone()).flatten(),
                         class: item.spec.class,
                         description: item_description(name),
                         id: item_id,
@@ -307,6 +319,7 @@ impl Game {
                         });
                     }
                     inventory.push(ItemView {
+                        corpse: identified.then(|| item.corpse.clone()).flatten(),
                         class: item.spec.class,
                         description: item_description(name),
                         id: item_id,
@@ -391,6 +404,7 @@ impl Game {
             visible_cells: occurrences
                 .iter()
                 .map(|&(location, frame)| CellView {
+                    lit: self.world.is_lit(location) == Some(true),
                     frame,
                     door: self.world.door(location),
                     // A tall door is one door: only its base cell is offered

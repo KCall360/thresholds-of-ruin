@@ -26,6 +26,7 @@ fn app() -> App {
         supply_reachable: true,
         position: Position { x: 1, y: 0, z: 0 },
         item: ItemView {
+            corpse: None,
             id: super::item_target(4),
             class: ItemClass::Misc,
             quantity: 1,

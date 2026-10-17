@@ -505,6 +505,7 @@ fn repeated_views_of_self_are_not_potential_hazards() {
     let mut observation = service.engine.observation(ActorId(1)).unwrap();
     observation.visible_actors = vec![
         ActorView {
+            appearance_seed: None,
             name: "figure".into(),
             description: "A figure.".into(),
             asset: None,
@@ -512,6 +513,7 @@ fn repeated_views_of_self_are_not_potential_hazards() {
             position: Position { x: 1, y: 0, z: 0 },
         },
         ActorView {
+            appearance_seed: None,
             name: "figure".into(),
             description: "A figure.".into(),
             asset: None,
@@ -522,6 +524,7 @@ fn repeated_views_of_self_are_not_potential_hazards() {
             position: Position { x: 2, y: 0, z: 0 },
         },
         ActorView {
+            appearance_seed: None,
             name: "figure".into(),
             description: "A figure.".into(),
             asset: None,

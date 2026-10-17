@@ -11,7 +11,7 @@ fn snapshot(hidden: bool) -> Snapshot {
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":(0..if hidden {1} else {4}).map(|x|serde_json::json!({
                 "key":x.to_string(),"position":{"x":x,"y":0,"z":0},"wall":x==3,
-                "stairs_up":x==2,"stairs_down":false,"place_hint":false
+                "stairs_up":x==2,"stairs_down":false,"lit":true,"place_hint":false
             })).collect::<Vec<_>>(),
             "ground_items":if hidden {vec![]} else {vec![serde_json::json!({"supply_reachable":false,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"token"},"position":{"x":1,"y":0,"z":0},"reachable":false})]},
             "visible_actors":if hidden {vec![]} else {vec![serde_json::json!({"id":super::actor_target(2),"position":{"x":2,"y":0,"z":0}})]},

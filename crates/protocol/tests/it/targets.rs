@@ -2,6 +2,33 @@ use std::collections::BTreeSet;
 use tor_protocol::{ActorTarget, DoorTarget, ItemTarget};
 
 #[test]
+fn cosmetic_seeds_are_canonical_and_cannot_be_used_as_interaction_targets() {
+    use tor_protocol::AppearanceSeed;
+    let seed = AppearanceSeed::from_digest([0xab; 32]);
+    let token = seed.to_string();
+    assert_eq!(token.len(), 66);
+    assert_eq!(token.parse::<AppearanceSeed>().unwrap(), seed);
+    assert_eq!(
+        serde_json::from_value::<AppearanceSeed>(serde_json::json!(token)).unwrap(),
+        seed
+    );
+    assert!(token.parse::<ActorTarget>().is_err());
+    assert!(token.parse::<ItemTarget>().is_err());
+    assert!(token.parse::<DoorTarget>().is_err());
+    for bad in [
+        token.to_uppercase(),
+        token[..65].into(),
+        format!(" {token}"),
+        format!("{token}0"),
+        token.replacen("ab", "zz", 1),
+        token.replacen("p_", "a_", 1),
+    ] {
+        assert!(bad.parse::<AppearanceSeed>().is_err());
+    }
+    assert!(serde_json::from_value::<AppearanceSeed>(serde_json::json!(17)).is_err());
+}
+
+#[test]
 fn data_defined_ability_commands_and_events_round_trip_with_opaque_targets() {
     let target = ActorTarget::from_digest([9; 32]);
     for ability in [

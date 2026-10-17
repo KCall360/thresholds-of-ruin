@@ -16,6 +16,8 @@ ALLOWED = {
     "tor-client-ascii": {"tor-client-common", "tor-protocol"},
     "tor-client-text": {"tor-client-common", "tor-protocol"},
     "tor-client-headless": {"tor-client-common", "tor-protocol"},
+    "tor-client-3d": {"tor-client-3d-model", "tor-client-common", "tor-protocol"},
+    "tor-client-3d-model": {"tor-client-common", "tor-protocol"},
     "tor-test-support": {
         "tor-world", "tor-simulation", "tor-protocol", "tor-server",
         "tor-client-common", "tor-client-ascii", "tor-client-text",
@@ -50,10 +52,14 @@ def violations(metadata):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cargo", default="cargo", help="Path to the Cargo executable")
+    parser.add_argument("--manifest-path", help="Check an independently maintained workspace")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
+    command = [args.cargo, "metadata", "--format-version", "1", "--no-deps", "--locked"]
+    if args.manifest_path:
+        command.extend(["--manifest-path", args.manifest_path])
     result = subprocess.run(
-        [args.cargo, "metadata", "--format-version", "1", "--no-deps", "--locked"],
+        command,
         cwd=root, check=True, capture_output=True, text=True, encoding="utf-8",
     )
     errors = violations(json.loads(result.stdout))

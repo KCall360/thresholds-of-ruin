@@ -473,6 +473,7 @@ mod tests {
 
     fn observation() -> Observation {
         Observation {
+            self_appearance: None,
             interactions: None,
             combat: None,
             motion: None,
@@ -494,6 +495,7 @@ mod tests {
         let before = observation();
         let mut after = before.clone();
         let actor = ActorView {
+            appearance_seed: None,
             asset: None,
             id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "figure".into(),
@@ -517,6 +519,7 @@ mod tests {
         let mut view = observation();
         let item = tor_protocol::ItemTarget::from_digest([3; 32]);
         view.inventory.push(tor_protocol::ItemView {
+            corpse: None,
             class: tor_protocol::ItemClass::Potion,
             quantity: 2,
             appearance: "red potion".into(),
@@ -557,6 +560,7 @@ mod tests {
     fn doors_require_consecutive_sight_and_do_not_name_a_cause() {
         let mut before = observation();
         before.visible_cells.push(CellView {
+            lit: true,
             key: "seen".into(),
             position: Position { x: 1, y: 0, z: 0 },
             wall: false,
@@ -607,6 +611,7 @@ mod tests {
             "You leave the dungeon with the objective item."
         );
         view.inventory.push(ItemView {
+            corpse: None,
             class: Default::default(),
             asset: None,
             quantity: 1,
@@ -643,6 +648,7 @@ mod tests {
             "You pick up the item."
         );
         view.inventory.push(ItemView {
+            corpse: None,
             class: Default::default(),
             asset: None,
             quantity: 1,
@@ -737,6 +743,7 @@ mod tests {
     fn combat_lines_are_written_from_events_and_disclosed_names() {
         let mut view = observation();
         view.visible_actors.push(ActorView {
+            appearance_seed: None,
             asset: None,
             id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "ruin scout".into(),
@@ -819,6 +826,7 @@ mod tests {
         let mut before = observation();
         before.ready = false;
         before.visible_actors.push(ActorView {
+            appearance_seed: None,
             asset: None,
             id: scout,
             name: "ruin scout".into(),

@@ -583,7 +583,7 @@ mod tests {
                         "position": {"x": x, "y": y, "z": z},
                         "wall": ch == '#',
                         "material": "stone",
-                        "place_hint": false,
+                        "lit":true,"place_hint": false,
                         "stairs_up": false,
                         "stairs_down": false,
                         "door": door.then(|| serde_json::json!({

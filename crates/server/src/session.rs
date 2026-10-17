@@ -2208,6 +2208,7 @@ mod tests {
         // insufficient: the retained cell holds most of the full payload.
         let o = &next.observation;
         let witness = StateDelta {
+            self_appearance: o.self_appearance.clone(),
             interactions: None,
             base_revision: base.revision,
             wizard_game: next.wizard_game,

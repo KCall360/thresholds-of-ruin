@@ -11,8 +11,10 @@ persistent. A separate [**Rogue starter slice**](docs/play/rogue.md) authors War
 and Mage presets, ordinary low-depth foes and finite supplies on open-ended,
 generated persistent floors. Its full roster, survival systems, calibrated depth
 curve and retrieval/escape victory remain unfinished. This is a development build, without an installer or automatic
-server launch. Windows and Linux are supported; remote connections and a future
-3D frontend remain planned.
+server launch for the Text and ASCII clients. Windows and Linux are supported.
+An optional [procedural 3D prototype](crates/client-3d/README.md) has its own
+workspace, checks and private local-server launcher. Remote deployment remains
+planned.
 
 The name is provisional. Code and content are original; NetHack and Rogue are
 gameplay references. See [current capabilities and limitations](docs/status.md).
@@ -61,6 +63,7 @@ drop, and `_` or a map click to travel. Full controls and examples:
 
 - [Text play](docs/play/text.md)
 - [ASCII play](docs/play/ascii.md)
+- [Optional 3D prototype](crates/client-3d/README.md)
 - [Current gameplay](docs/play/gameplay.md)
 - [Choose a Rogue Warrior or Mage](docs/play/rogue.md)
 - [Command-line options and spectator credentials](docs/reference/cli.md)

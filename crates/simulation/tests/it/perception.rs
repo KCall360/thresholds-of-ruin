@@ -192,6 +192,33 @@ fn lighting_combines_body_awareness_with_distant_visual_perception() {
     }
     assert!(seen.iter().any(|c| c.location == cell(1, 14, 3, 2)));
     assert!(!seen.iter().any(|c| c.location == cell(1, 8, 3, 2)));
+    let observed = game.observe(actor).unwrap();
+    assert!(
+        !observed
+            .visible_cells
+            .iter()
+            .find(|c| c.location == cell(1, 2, 3, 1))
+            .unwrap()
+            .lit
+    );
+    assert!(
+        observed
+            .visible_cells
+            .iter()
+            .find(|c| c.location == cell(1, 14, 3, 2))
+            .unwrap()
+            .lit
+    );
+    game.set_cell_light(cell(1, 2, 3, 1), true).unwrap();
+    assert!(
+        game.observe(actor)
+            .unwrap()
+            .visible_cells
+            .iter()
+            .find(|c| c.location == cell(1, 2, 3, 1))
+            .unwrap()
+            .lit
+    );
     game.refresh_navigation();
     assert!(game.known_cells(actor).any(|c| c == cell(1, 14, 3, 2)));
     assert!(!game.known_cells(actor).any(|c| c == cell(1, 8, 3, 2)));

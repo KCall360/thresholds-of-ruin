@@ -712,7 +712,8 @@ class RouteExecution:
         # Same ordinary arguments as ProcessTestCase.client, with per-frame
         # output/deadline checks already active during the initial disclosure.
         self.player = self.harness.launch('tor-client-headless', [
-            '--connect', self.harness.address, '--actor', str(self.actor), '--omit-memory'])
+            '--connect', self.harness.address, '--actor', str(self.actor),
+            '--omit-memory', '--compact-background'])
         self.current = self.frame(self.player, lambda frame: frame['type'] == 'ready')
 
     def issue(self, value, *, kind='read'):

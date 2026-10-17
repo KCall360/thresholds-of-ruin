@@ -1,10 +1,12 @@
 # Architecture and ownership
 
 Thresholds of Ruin has one authoritative backend and interchangeable text,
-graphical ASCII and headless clients. A game can continue across client switches.
+graphical ASCII and headless clients, plus an optional procedural 3D prototype.
+A game can continue across client switches.
 Actor identity and control ownership are explicit: there is no global player.
-Gameplay is single-player; multiplayer input policy and a 3D frontend remain
-separate future work. Windows is the primary platform and Linux is continuously
+Gameplay is single-player; multiplayer input policy remains future work.
+The 3D frontend is maintained in a separate workspace with its own verification.
+Windows is the primary platform and Linux is continuously
 tested. [Project status](../status.md) owns supported formats and implementation
 scope; this page explains boundaries and why they exist.
 

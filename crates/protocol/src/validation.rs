@@ -83,7 +83,7 @@ impl StateView {
         if o.inventory
             .iter()
             .chain(o.ground_items.iter().map(|item| &item.item))
-            .any(|item| item.quantity == 0 || !item.valid_supply())
+            .any(|item| item.quantity == 0 || !item.valid_disclosure())
         {
             return Err(InvalidState::InvalidItem);
         }

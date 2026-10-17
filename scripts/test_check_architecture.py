@@ -37,6 +37,20 @@ class FixtureBoundaryTests(unittest.TestCase):
 
 
 class ArchitectureTests(unittest.TestCase):
+    def test_independent_3d_workspace_can_use_only_disclosed_client_state(self):
+        for client in ("tor-client-3d", "tor-client-3d-model"):
+            graph = metadata([package(client, [
+                dependency("tor-client-common"), dependency("tor-protocol"),
+            ])])
+            self.assertEqual(violations(graph), [])
+
+    def test_independent_3d_workspace_rejects_every_backend_dependency_kind(self):
+        for client in ("tor-client-3d", "tor-client-3d-model"):
+            for target in ("tor-world", "tor-simulation", "tor-server"):
+                for kind in (None, "build", "dev"):
+                    graph = metadata([package(client, [dependency(target, kind=kind)])])
+                    self.assertEqual(violations(graph), [f"{client} -> {target} is forbidden"])
+
     def test_server_dev_edges_are_explicit_and_never_runtime_edges(self):
         for target in ("tor-client-common", "tor-client-ascii", "tor-test-support"):
             for kind in (None, "build", "dev"):

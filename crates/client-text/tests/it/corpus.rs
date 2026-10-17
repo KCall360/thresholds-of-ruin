@@ -31,7 +31,7 @@ fn state() -> StateView {
         "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
-            "wall":false,"material":"stone","place_hint":x==1,
+            "wall":false,"material":"stone","lit":true,"place_hint":x==1,
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[

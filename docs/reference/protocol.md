@@ -200,7 +200,11 @@ visible-actor rows or the combat summaries of other actors.
 
 The protocol requires a backend-resolved observer-relative scene. Positions
 are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
-opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`, plus nullable `door` facts.
+opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, `place_hint`, and
+required boolean `lit`, plus nullable `door` facts. `lit` is current server
+illumination: a cell disclosed through local body awareness can be dark. It
+does not add cells to the scene or confer sight targeting. Remembered values
+remain last-disclosed information until a fresh observation replaces them.
 Cells also carry terrain `material` (empty for carved voids). Floors and
 ceilings are ordinary seen solid cells, not separate facts; items include `description` and a
 `reachable` flag, and actors carry perceived `name` and `description`. These
@@ -248,6 +252,21 @@ positions. These references do not expose region identities or a global frame.
 references, including repeated portal views. Delta observations require the
 same self target as their base; a different target scope requires a snapshot.
 
+Creature appearance uses a separate opaque `p_` token followed by 64 lowercase
+hexadecimal digits. An actor's optional `appearance_seed` is shared across
+observers, sessions and reloads within one save. `self_appearance` supplies the
+observer's own `{seed, asset?}` even when its body is outside the eye scene.
+These cosmetic tokens cannot be used as interaction targets and are derived
+without simulation randomness. An absent appearance means a generic client
+fallback, never permission to infer an identity from display text.
+
+An identified corpse item can disclose `corpse: {seed, asset?}`, captured from
+the creature at death. Its ordinary `asset` still describes the item itself.
+Clients use the captured creature data to preserve the body's appearance;
+item names and arbitrary authored properties do not identify its source. Other
+item classes and unidentified items cannot disclose corpse metadata. Full views
+and deltas carry the same appearance facts.
+
 References grant no authority. After authority and original receipt lookup,
 a fresh action resolves only against the cached observer disclosure: attack and ability use
 uses visible actors or self, doors use visible cells, take uses ground items,
@@ -267,7 +286,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":46,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":47,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and

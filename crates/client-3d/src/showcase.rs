@@ -1,0 +1,51 @@
+//! Authored gallery fixtures. Gameplay resolves disclosed assets in the model crate.
+use tor_client_3d_model::{CreatureModel, ItemModel};
+
+pub fn creature(label: &str) -> CreatureModel {
+    match label {
+        "Warrior" => CreatureModel::Human,
+        "Mage" => CreatureModel::Mage,
+        "blue sentinel" => CreatureModel::BlueSentinel,
+        "red sentinel" => CreatureModel::RedSentinel,
+        "red arcanist" => CreatureModel::RedMage,
+        "ruin scout" => CreatureModel::Scout,
+        "stone guardian" => CreatureModel::Guardian,
+        "hobgoblin" => CreatureModel::Hobgoblin,
+        "zombie" => CreatureModel::Zombie,
+        "vampire" => CreatureModel::Vampire,
+        "yeti" => CreatureModel::Yeti,
+        "emu" => CreatureModel::Emu,
+        "snake" => CreatureModel::Snake,
+        "quagga" => CreatureModel::Quagga,
+        "black unicorn" => CreatureModel::BlackUnicorn,
+        "centaur" => CreatureModel::Centaur,
+        "ember wisp" => CreatureModel::Wisp,
+        "ice monster" => CreatureModel::Ice,
+        _ => CreatureModel::Placeholder,
+    }
+}
+
+pub fn item(label: &str) -> ItemModel {
+    match label {
+        "mace" => ItemModel::Mace,
+        "iron greatsword" => ItemModel::Greatsword,
+        "dagger" => ItemModel::ShortSword,
+        "ring mail" => ItemModel::RingMail,
+        "clean bandage" => ItemModel::Bandage,
+        "food ration" => ItemModel::Ration,
+        "emu corpse" => ItemModel::Corpse,
+        "dawn seal" => ItemModel::Seal,
+        "copper token" | "silver token" | "iron token" => ItemModel::Coins,
+        "stone tablet" => ItemModel::Tablet,
+        "bubbling potion" => ItemModel::Potion,
+        "gold ring" => ItemModel::Ring,
+        "amulet" => ItemModel::Amulet,
+        "scroll" => ItemModel::Scroll,
+        "spellbook" => ItemModel::Spellbook,
+        "wand" => ItemModel::Wand,
+        "ruby" => ItemModel::Gem,
+        "pickaxe" => ItemModel::Pick,
+        "pouch" => ItemModel::Pouch,
+        _ => ItemModel::Placeholder,
+    }
+}

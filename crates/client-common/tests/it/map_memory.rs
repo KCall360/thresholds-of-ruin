@@ -11,7 +11,7 @@ fn snapshot(cells: &[(&str, i32, i32)], revision: u64) -> Snapshot {
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells.iter().map(|(key,x,y)| serde_json::json!({
                 "key":key,"position":{"x":x,"y":y,"z":0},"wall":false,
-                "stairs_up":false,"stairs_down":false,"place_hint":false
+                "stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
             })).collect::<Vec<_>>(),
             "ground_items":[],"inventory":[],"visible_actors":[],"ready":true
         }}
@@ -45,6 +45,7 @@ fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
         .observation
         .visible_actors
         .push(ActorView {
+            appearance_seed: None,
             asset: None,
             id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "figure".into(),
@@ -86,6 +87,7 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
         .ground_items
         .push(GroundItemView {
             item: ItemView {
+                corpse: None,
                 class: Default::default(),
                 asset: None,
                 quantity: 1,
@@ -104,6 +106,7 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
         .observation
         .visible_actors
         .push(ActorView {
+            appearance_seed: None,
             asset: None,
             id: tor_protocol::ActorTarget::from_digest([2; 32]),
             position: Position { x: 3, y: 0, z: 0 },
@@ -884,6 +887,7 @@ fn incremental_map_ambiguous_region_survives_later_failure_and_current_sight_win
             key: "live-edge".into(),
             position: Position { x: 31, y: 0, z: 0 },
             wall: false,
+            lit: true,
             material: String::new(),
             asset: None,
             place_hint: false,

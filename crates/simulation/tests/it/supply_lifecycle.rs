@@ -1459,6 +1459,7 @@ fn phase5_container_checkpoint_rejects_positional_held_item() {
     *item = json!(declared_field_values(
         item,
         &[
+            "corpse",
             "motion",
             "orientation",
             "spec",

@@ -1,5 +1,5 @@
-//! Typed opaque entity references. Tokens identify disclosed entities, not scene
-//! occurrences or authority. The server owns their derivation and resolution.
+//! Typed opaque tokens. Interaction references and shared cosmetic seeds have
+//! distinct namespaces; neither grants authority. The server owns derivation.
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, str::FromStr};
 
@@ -8,7 +8,7 @@ pub struct InvalidTarget;
 
 impl fmt::Display for InvalidTarget {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("Invalid opaque interaction target")
+        formatter.write_str("Invalid typed opaque token")
     }
 }
 
@@ -29,8 +29,8 @@ macro_rules! target {
         pub struct $name([u8; 32]);
 
         impl $name {
-            /// Construct a token from the server's scoped derivation. A token
-            /// alone grants no authority and must still be resolved by the server.
+            /// Construct a token from the server-owned derivation. A token
+            /// alone grants no authority; its type determines its purpose.
             pub const fn from_digest(digest: [u8; 32]) -> Self {
                 Self(digest)
             }
@@ -79,7 +79,7 @@ macro_rules! target {
                     type Value = $name;
 
                     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                        formatter.write_str("a canonical typed opaque interaction target")
+                        formatter.write_str("a canonical typed opaque token")
                     }
 
                     fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
@@ -106,4 +106,10 @@ target!(
     DoorTarget,
     b'd',
     "Observer-scoped reference to a disclosed door."
+);
+
+target!(
+    AppearanceSeed,
+    b'p',
+    "Shared cosmetic identity of one creature, independent of observer and interaction authority."
 );

@@ -1,0 +1,17 @@
+[package]
+name = "tor-client-3d-model"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tor-client-common = { path = "../../client-common" }
+tor-protocol = { path = "../../protocol" }
+
+[dev-dependencies]
+tor-client-common = { path = "../../client-common", features = ["test-support"] }
+serde_json = "1"

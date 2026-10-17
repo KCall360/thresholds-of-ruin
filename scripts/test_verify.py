@@ -85,6 +85,17 @@ class Selection(unittest.TestCase):
         direct, _, _ = verify.classify(["crates/client-ascii/src/lib.rs"], dirs)
         self.assertEqual(direct, {"tor-client-ascii"})
 
+    def test_independently_maintained_3d_inputs_do_not_select_core_packages(self):
+        paths = ["crates/client-3d/src/main.rs", "crates/client-3d/Cargo.lock",
+                 "crates/client-3d/scripts/test_client_process.py", ".github/workflows/client-3d.yml"]
+        self.assertEqual(verify.classify(paths, self.dirs), (set(), False, []))
+
+    def test_core_changes_do_not_acquire_3d_build_or_test_steps(self):
+        direct, everything, _ = verify.classify(["crates/protocol/src/wire.rs"], self.dirs)
+        self.assertFalse(everything)
+        steps = verify.plan("push", verify.dependents(direct, self.deps), [])
+        self.assertFalse(any("client-3d" in str(command) for _, command, _ in steps))
+
 
 class ProcessSelection(unittest.TestCase):
     def setUp(self):

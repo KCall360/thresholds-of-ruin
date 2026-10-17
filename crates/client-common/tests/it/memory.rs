@@ -9,7 +9,7 @@ fn snapshot(cell_id: u64, tick: u64, revision: u64) -> Snapshot {
         "has_control":false, "intentions":[],"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":tick.to_string(),"position":{"x":1,"y":1,"z":0},
-            "places":[],"visible_cells":[{"key":cell_id.to_string(),"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"place_hint":false}],"ground_items":[],"inventory":[],"visible_actors":[],
+            "places":[],"visible_cells":[{"key":cell_id.to_string(),"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"lit":true,"place_hint":false}],"ground_items":[],"inventory":[],"visible_actors":[],
             "ready":true
         }}
     }))
@@ -87,6 +87,7 @@ fn solid_cell_memory_is_stale_until_refreshed_and_clears_on_rewind() {
     let mut first = snapshot(1, 0, 0);
     let ceiling = &mut Arc::make_mut(&mut first.state).observation.visible_cells[0];
     ceiling.wall = true;
+    ceiling.lit = false;
     ceiling.material = "granite".into();
     let mut client = ClientState::from_snapshot(first).unwrap();
     client
@@ -157,6 +158,7 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
         .push(GroundItemView {
             reachable: false,
             item: ItemView {
+                corpse: None,
                 class: Default::default(),
                 asset: None,
                 quantity: 1,
@@ -249,6 +251,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         .observation
         .visible_cells
         .push(CellView {
+            lit: true,
             asset: None,
             door: None,
             material: "stone".into(),
@@ -265,6 +268,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         .push(GroundItemView {
             reachable: false,
             item: ItemView {
+                corpse: None,
                 class: Default::default(),
                 asset: None,
                 quantity: 1,
@@ -293,6 +297,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         .observation
         .visible_cells
         .push(CellView {
+            lit: true,
             asset: None,
             door: None,
             material: "stone".into(),

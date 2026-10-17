@@ -924,6 +924,12 @@ impl Game {
             && item.holds_valid()
             && (item.spec.stackable || item.quantity == 1)
             && item.spec.valid()
+            && item.corpse.as_ref().is_none_or(|corpse| {
+                item.spec.class == crate::ItemClass::Corpse
+                    && !item.spec.stackable
+                    && corpse.actor.0 != 0
+                    && corpse.actor.0 < self.next_actor_id
+            })
             && item.spec.validate_rules(self.content.rules()).is_ok()
             && item.motion.valid()
             && item.motion.active_fall.is_none()
