@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 41;
+pub(crate) const ARCHIVE_VERSION: u32 = 42;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -46,6 +46,9 @@ mod intention_tests;
 #[cfg(test)]
 #[path = "interaction_tests.rs"]
 mod interaction_tests;
+#[cfg(test)]
+#[path = "map_memory_tests.rs"]
+mod map_memory_tests;
 #[cfg(test)]
 #[path = "package_invariant_tests.rs"]
 mod package_invariant_tests;
@@ -602,8 +605,10 @@ pub struct Failure {
 impl Failure {
     pub(crate) fn simulation_failure(error: tor_simulation::GameError) -> Option<Self> {
         if matches!(error, tor_simulation::GameError::PopulationCapacity(_)) {
-            return Some(Self::new(ErrorCode::ResourceLimit,
-                "Floor entry exceeds current simulation capacity; no movement or population was committed"));
+            return Some(Self::new(
+                ErrorCode::ResourceLimit,
+                "Floor entry exceeds current simulation capacity; no movement or population was committed",
+            ));
         }
         use tor_simulation::creatures::{BuildError, CreatureStateError};
         use tor_simulation::GameError;
@@ -1551,6 +1556,43 @@ impl Candidate {
 
     /// Learn only from the final candidate's ordinary observer projections.
     /// Queries stay pure, and storage rejection drops this candidate wholesale.
+    fn record_explored_knowledge(
+        &mut self,
+        before: &Game,
+        terrain: adapt::Terrain<'_>,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<(), Failure> {
+        for actor in self.actors() {
+            if !self
+                .game
+                .map_disclosure_changed_since(before, SimActor(actor.0))
+            {
+                continue;
+            }
+            let view = match self.observations.get(&actor) {
+                Some(view) => view.clone(),
+                None => {
+                    let started = Instant::now();
+                    let view = Arc::new(self.revision_view(actor)?);
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.perception += started.elapsed();
+                        profile.actors_observed += 1;
+                    }
+                    self.observations.insert(actor, view.clone());
+                    view
+                }
+            };
+            self.game
+                .record_explored_observation(
+                    SimActor(actor.0),
+                    &crate::map_memory::inputs(&view.observation, terrain),
+                    &view.scene,
+                )
+                .map_err(|_| invalid_archive())?;
+        }
+        Ok(())
+    }
+
     fn record_observation_knowledge(
         &mut self,
         mut profile: Option<&mut CommandProfile>,
@@ -1880,6 +1922,28 @@ impl Engine {
             revisions.insert(ActorId(id.0), 0);
         }
         game.refresh_navigation();
+        // Initial knowledge is part of the initial immutable boundary, never a
+        // side effect of the first client query.
+        let terrain = |region: tor_world::RegionId| {
+            scenario
+                .package
+                .as_deref()
+                .and_then(|p| p.region_terrain(region.0))
+                .map_or([None, None, None], |t| {
+                    [t.floor.clone(), t.wall.clone(), t.door.clone()]
+                })
+        };
+        let mut initial_views = BTreeMap::new();
+        for actor in revisions.keys().copied() {
+            let view = Arc::new(revision_view(&game, actor)?);
+            game.record_explored_observation(
+                SimActor(actor.0),
+                &crate::map_memory::inputs(&view.observation, &terrain),
+                &view.scene,
+            )
+            .map_err(|_| invalid_archive())?;
+            initial_views.insert(actor, view);
+        }
         let initial_activations = game.activations_since(0).map_err(|_| invalid_archive())?;
         let initial_retrievals = game.retrieval_entries().to_vec();
         let branch = BranchId(Uuid::new_v4().to_string());
@@ -1899,7 +1963,7 @@ impl Engine {
             game,
             revisions,
             receipts: BTreeMap::new(),
-            observations: ObservationCache::default(),
+            observations: ObservationCache(Mutex::new(initial_views)),
             history_index: crate::history_index::HistoryIndex::default(),
             path: None,
             lock: None,
@@ -2477,6 +2541,71 @@ impl Engine {
             })
             .collect();
         Ok(observation)
+    }
+    pub fn explored_map(
+        &self,
+        actor: ActorId,
+        window: tor_protocol::MapWindow,
+    ) -> Result<crate::PreparedMapProjection, Failure> {
+        self.revision(actor)?;
+        let normal = tor_protocol::MapWindow::normal();
+        if window.validate().is_err()
+            || !normal.contains(window.min)
+            || !normal.contains(window.max)
+        {
+            return Err(Failure::new(
+                ErrorCode::InvalidAction,
+                "Map window is outside the current viewport",
+            ));
+        }
+        let view = self.revision_view(actor)?;
+        let projection = self
+            .game
+            .project_explored_map(
+                SimActor(actor.0),
+                &view.scene,
+                tor_simulation::MapWindow {
+                    min: tor_world::Position {
+                        x: window.min.x,
+                        y: window.min.y,
+                        z: window.min.z,
+                    },
+                    max: tor_world::Position {
+                        x: window.max.x,
+                        y: window.max.y,
+                        z: window.max.z,
+                    },
+                },
+            )
+            .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Invalid map window"))?;
+        if projection.appearance_limited {
+            return Err(Failure::new(
+                ErrorCode::ResourceLimit,
+                "Map appearance exceeds its response budget",
+            ));
+        }
+        Ok(crate::PreparedMapProjection {
+            cells: projection
+                .cells
+                .into_iter()
+                .map(|c| crate::map_memory::wire_cell(c, &self.archive.view_salt, actor))
+                .collect(),
+            complete: projection.complete,
+            ambiguous: projection.ambiguous,
+            limited: projection.limited,
+            work: projection.work,
+            root: self.game.map_knowledge_root(SimActor(actor.0)),
+        })
+    }
+    pub fn map_projection_is_current(
+        &self,
+        actor: ActorId,
+        prepared: &crate::PreparedMapProjection,
+    ) -> bool {
+        self.game.has_actor(SimActor(actor.0))
+            && self
+                .game
+                .map_knowledge_is_current(SimActor(actor.0), &prepared.root)
     }
     fn revision_view(&self, actor: ActorId) -> Result<Arc<RevisionView>, Failure> {
         self.observations.view(&self.game, actor)
@@ -3463,6 +3592,17 @@ impl Engine {
             candidate.observations = self.observations.snapshot();
         }
         if !matches!(entry.content, JournalContent::Annotation { .. }) {
+            let terrain = |region: tor_world::RegionId| {
+                self.archive
+                    .scenario
+                    .package
+                    .as_deref()
+                    .and_then(|p| p.region_terrain(region.0))
+                    .map_or([None, None, None], |t| {
+                        [t.floor.clone(), t.wall.clone(), t.door.clone()]
+                    })
+            };
+            candidate.record_explored_knowledge(&self.game, &terrain, profile.as_deref_mut())?;
             candidate.record_observation_knowledge(profile.as_deref_mut())?;
             let started = Instant::now();
             candidate.boundaries.push_back(Arc::new(Boundary {
@@ -4203,8 +4343,10 @@ impl Candidate {
                     crate::wizard_creatures::resolve(&self.game, regions, selector, depth)?;
                 let capacity = |error| {
                     if Failure::simulation_failure(error).is_some() {
-                        Failure::new(ErrorCode::ResourceLimit,
-                            "Creature spawn exceeds current simulation capacity; no creature or stock was created")
+                        Failure::new(
+                            ErrorCode::ResourceLimit,
+                            "Creature spawn exceeds current simulation capacity; no creature or stock was created",
+                        )
                     } else {
                         invalid()
                     }
@@ -4427,6 +4569,29 @@ mod scaling_tests {
         assert_eq!(result.is_ok(), expected.is_ok());
         if expected.is_ok() {
             reference.refresh_navigation();
+            // The full-view oracle must also commit the appearances disclosed
+            // by those views, as the ordinary Engine transaction does.
+            let terrain = |region: tor_world::RegionId| {
+                engine
+                    .archive
+                    .scenario
+                    .package
+                    .as_deref()
+                    .and_then(|p| p.region_terrain(region.0))
+                    .map_or([None, None, None], |t| {
+                        [t.floor.clone(), t.wall.clone(), t.door.clone()]
+                    })
+            };
+            for observer in engine.actors() {
+                let view = revision_view(&reference, observer).unwrap();
+                reference
+                    .record_explored_observation(
+                        SimActor(observer.0),
+                        &crate::map_memory::inputs(&view.observation, &terrain),
+                        &view.scene,
+                    )
+                    .unwrap();
+            }
         }
         assert_eq!(
             engine.game, reference,
@@ -4676,7 +4841,7 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 41);
+        assert_eq!(engine.archive.version, 42);
         assert_eq!(engine.archive.ruleset, "interactions-v39");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();

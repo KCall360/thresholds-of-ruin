@@ -42,10 +42,75 @@ async fn send(server: &mut Server, message: ServerMessage) {
 async fn receive(server: &mut Server) -> Option<ClientMessage> {
     loop {
         match server.next().await?.unwrap() {
-            Message::Text(text) => return Some(serde_json::from_str(&text).unwrap()),
+            Message::Text(text) => {
+                let message: ClientMessage = serde_json::from_str(&text).unwrap();
+                if let ClientMessage::Request {
+                    request_id,
+                    request,
+                } = &message
+                {
+                    if let Request::Map { query } = request.as_ref() {
+                        assert!(request_id.starts_with("map-"));
+                        query.validate().unwrap();
+                        assert!(query.cursor.is_none());
+                        assert_eq!(query.context, super::stream_context(0));
+                        assert_eq!(query.branch, BranchId("branch-1".into()));
+                        // This healthy palette peer has no older remembered
+                        // cells. Answer its independent query exactly once.
+                        send(
+                            server,
+                            ServerMessage::MapPage {
+                                context: ReplyContext {
+                                    input: InputContext {
+                                        stream: query.context.clone(),
+                                        readiness_revision: 0,
+                                    },
+                                    actor: ActorId(1),
+                                    branch: query.branch.clone(),
+                                    cursor: query.base.cursor,
+                                    revision: query.base.revision,
+                                },
+                                request_id: request_id.clone(),
+                                page: Box::new(MapPage {
+                                    transfer: request_id.clone(),
+                                    actor: ActorId(1),
+                                    branch: query.branch.clone(),
+                                    base: query.base,
+                                    window: query.window,
+                                    start: 0,
+                                    page: 0,
+                                    total_cells: 0,
+                                    complete: true,
+                                    ambiguous: false,
+                                    limited: false,
+                                    cells: vec![],
+                                    next: None,
+                                }),
+                            },
+                        )
+                        .await;
+                        continue;
+                    }
+                }
+                return Some(message);
+            }
             Message::Close(_) => return None,
             _ => {}
         }
+    }
+}
+
+/// Observe palette/live messages without treating a completed independent map
+/// query as another palette revision. Unexpected message kinds remain visible.
+async fn next_palette_message(client: &mut Connection) -> ServerMessage {
+    loop {
+        let message = client.next().await.unwrap();
+        if let ServerMessage::MapPage { page, .. } = &message {
+            assert!(page.complete && page.next.is_none() && page.cells.is_empty());
+            assert!(client.state.map_hydration().complete);
+            continue;
+        }
+        return message;
     }
 }
 
@@ -234,23 +299,23 @@ async fn palette_repair_scenario() {
         .await
         .unwrap();
     assert_eq!(client.palette.revision(), None);
-    client.next().await.unwrap();
+    next_palette_message(&mut client).await;
     assert_eq!(client.palette.revision(), Some(1));
     assert!(client.palette.holds("terrain.floor.cave"));
-    client.next().await.unwrap();
+    next_palette_message(&mut client).await;
     assert!(client.palette.holds("item.coin"));
-    client.next().await.unwrap();
+    next_palette_message(&mut client).await;
     assert!(client.palette.stale());
     assert!(!client.palette.holds("item.coin"));
-    client.next().await.unwrap();
+    next_palette_message(&mut client).await;
     assert_eq!(client.palette.revision(), Some(5));
     assert!(!client.palette.stale());
-    client.next().await.unwrap();
-    client.next().await.unwrap();
+    next_palette_message(&mut client).await;
+    next_palette_message(&mut client).await;
     assert_eq!(client.palette.revision(), Some(6));
     assert!(!client.palette.holds("creature.rat"));
     assert!(!client.palette.holds("item.coin"));
-    client.next().await.unwrap();
+    next_palette_message(&mut client).await;
     client.close().await.unwrap();
     server.await.unwrap();
 }

@@ -372,6 +372,31 @@ class ClientPerformanceReport(unittest.TestCase):
         rows[0]['narration_count'] = 0
         with self.assertRaises(ValueError): client_performance_report.validate(rows, version=2)
 
+    def test_current_map_footprint_versions_preserve_all_rendered_planes(self):
+        for version in (3, 4):
+            rows = self.rows()
+            for row in rows:
+                row.update(version=version, memory=min(row['cells'], 12474),
+                           chart=min(row['cells'], 4900))
+                if version == 4:
+                    row['narration_count'] = 1 if row['burst'] == 1 and row['sample'] == 0 else 2
+            summary = client_performance_report.validate(rows, version=version)
+            self.assertEqual(len(summary), 8)
+            self.assertTrue(all(group['n'] == 20 for group in summary.values()))
+
+    def test_current_map_footprint_rejects_old_truncation_and_unbounded_memory(self):
+        rows = self.rows()
+        for row in rows:
+            row.update(version=3, memory=min(row['cells'], 12474), chart=min(row['cells'], 4900))
+        index = next(i for i, row in enumerate(rows) if row['cells'] == 20956)
+        for key, value in (('chart', 4096), ('chart', 12474), ('memory', 20956)):
+            broken = copy.deepcopy(rows)
+            broken[index][key] = value
+            with self.assertRaises(ValueError):
+                client_performance_report.validate(broken, version=3)
+        with self.assertRaises(ValueError):
+            client_performance_report.validate(rows, version=1)
+
     def test_rejects_missing_reordered_invalid_or_unbounded_samples(self):
         rows = self.rows()
         for broken in (rows[:-1], rows[::-1], rows+rows[:1]):

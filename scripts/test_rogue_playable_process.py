@@ -804,6 +804,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         def budgeted_client(*args, **kwargs):
             budget.check()
             kwargs["omit_memory"] = True
+            kwargs["compact_background"] = True
             client, frame = original_client(*args, **kwargs)
             budget.track(client, frame)
             return client, frame

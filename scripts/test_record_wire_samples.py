@@ -250,7 +250,7 @@ class CompleteRecordingContracts(unittest.TestCase):
 
     def test_publication_waits_for_every_hook_and_preserves_existing_output_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "wire-v45.json"
+            output = Path(directory) / "wire-current.json"
             for failure in ("class_setup", "setup", "body", "teardown", "cleanup",
                             "class_teardown", "class_cleanup"):
                 with self.subTest(failure=failure):
@@ -264,13 +264,13 @@ class CompleteRecordingContracts(unittest.TestCase):
             with patch("record_wire_samples.Recorder", return_value=case), patch("builtins.print"):
                 record_wire_samples.record_samples(output=output)
             document = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(document["protocol"], 45)
+            self.assertEqual(document["protocol"], record_wire_samples.PROTOCOL)
             self.assertEqual(document["server"], [ESCAPE_SAMPLE])
             self.assertEqual(trace[-1], "class_cleanup")
 
     def test_failed_atomic_publication_keeps_the_prior_fixture_and_removes_staging_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "wire-v45.json"
+            output = Path(directory) / "wire-current.json"
             output.write_text("prior validated samples", encoding="utf-8")
             case, _ = recording_case()
             with patch("record_wire_samples.Recorder", return_value=case), \

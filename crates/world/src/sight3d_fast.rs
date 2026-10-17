@@ -394,6 +394,7 @@ impl World {
                     if let Some((location, rotation)) = self.geometry_route(at, frame, [x, y, z]) {
                         if self.contains(location) {
                             cells.push(SightCell {
+                                physical: true,
                                 location,
                                 rotation,
                                 offset: Position { x, y, z },
@@ -638,6 +639,7 @@ impl World {
                         let i = scene.index(o).expect("targets lie within reach");
                         let (location, rotation) = scene.resolved[scene.slot[i] as usize];
                         cells.push(SightCell {
+                            physical: true,
                             location,
                             offset: Position { x, y, z },
                             rotation,

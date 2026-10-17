@@ -106,7 +106,7 @@ Every stdout line is a JSON frame containing:
 - `state.observation.combat.sequence`: nullable own multi-strike progress, next
   strike time and cancellation debt. Perceived ability events carry only their
   actual nullable `strike` ordinal, never an opponent's future total.
-- `memory`: local last-seen cell contents, described below; omitted only when
+- `memory`: bounded last-seen appearances, described below; omitted only when
   the client is explicitly started with `--omit-memory`.
 - `palette`: the client's current [asset palette](protocol.md#asset-palettes):
   `revision` (null before the first palette arrives), `assets`, and `stale`,
@@ -118,6 +118,19 @@ Every stdout line is a JSON frame containing:
 - `message`: the received protocol message, or null. History query pages and
   accepted action results are available here; no hidden state is added.
 - `error`: an input/request error on `ready`, otherwise null.
+
+For long diagnostic runs, `--compact-background` is an explicit opt-in. Raw
+`map_page`, `palette` and `waiting` messages still appear unchanged in `message`,
+with `type`, `error`, `map_hydration` and `state_omitted: true`. Only their repeated
+derived attachment fields are absent: `state`, `branch`, `cursor`, `role`,
+`has_control`, `readiness`, `input_context`, `history`, `intentions`, `travel`,
+`memory`, `palette`, `advancement`, `advancement_page`, `synchronized` and
+`capabilities`. Absence means no derived snapshot was printed, never empty
+state. Consumers must read the raw message or wait for a complete frame rather
+than clear their state. Every `ready` frame, observation and lifecycle update,
+snapshot, protocol error and local error remains complete. Default output is
+unchanged; this option can be combined with `--omit-memory`. It changes neither
+map hydration nor server traffic and does not remove any raw message or error.
 
 Private strike inspection is available to wizard accounts through the ordinary
 `request` command envelope. After `wizard creature inspect <actor-id>`, use
@@ -163,41 +176,45 @@ finishes at its matching response.
 
 ## Current observations and memory
 
-All clients retain last-seen cells in their shared `ClientState`.
-The headless frontend exposes this historical memory for inspection. ASCII
-uses a separate aligned [map cache](../architecture/clients.md) to display dimmed remembered
-areas; text continues to describe current observations.
+The server persists each actor's last disclosed cell appearances. Clients keep a
+bounded local cache and request the remembered neighborhood after attachment,
+return or loss of alignment. The headless frontend exposes that cache for
+inspection; ASCII uses its aligned [map chart](../architecture/clients.md) to
+display dimmed remembered areas. Text describes current observations.
 
-Each memory entry holds an opaque cell key, last-seen relative position, wall and
-stair facts, contents, and last-seen tick/revision. Entries are ordered by opaque
-key. A remembered offset is historical, not a current map coordinate. Unseen
-cells stay unknown; history never manufactures sightings.
-Changes outside the current visible cells do not refresh memory. Observing a cell
-again replaces its remembered contents, including removing absent objects; other
-cells in the same room can remain stale. Stale actors/items can appear in more
-than one remembered cell: these are historical sightings, not current locations.
-Inventory remains in current state and is not inferred from remembered objects.
+Each memory entry contains an opaque cell key, relative position, terrain,
+stairs, a door appearance and item appearances. Each diagnostic ground-item entry
+wraps its appearance in `item` with the owning cell's last-seen `position`. Neither
+the entry nor its appearance contains entity handles, reachability or action
+affordances; memory contains no actors. Item appearances can remain
+stale in several cells until each cell is observed again. Inventory always comes
+from the current observation. Current sightings replace remembered contents,
+including clearing objects that are no longer present; unseen changes do not
+refresh knowledge. The local last-seen tick/revision is nullable: a hydrated
+appearance does not invent the original observation's timestamp.
 
-Same-branch snapshots refresh the current view and retain other memories.
-Rewind changes branch and clears abandoned-future memory, starting with the
-restored snapshot. Memory is local to a connection and is not saved or recovered
-from history: restarting a client starts with its attachment snapshot only.
+Same-branch snapshots refresh the current view. Rewind clears abandoned-future
+client knowledge and hydrates from the restored actor's saved knowledge. A new
+client after save/reopen receives that same persisted neighborhood. The
+`map_hydration` diagnostic reports pending, complete, ambiguous, limited and
+failed states plus bounded transfer counts. Gameplay can proceed while pages
+arrive, and a new observation cancels a superseded transfer. Appearance pages
+are installed atomically; missing or limited coverage is never reported complete.
 
-For long scripted runs that need current disclosure but do not inspect historical
-cells, `--omit-memory` leaves the top-level `memory` member out of every diagnostic
-frame. The default still prints the full list. The option acts only at JSON
-serialization: it does not collect or serialize the historical list, but
-`ClientState` still accumulates, refreshes and resets memory normally. All other
-fields, including `state.observation`, messages, history, intentions, advancement,
-readiness, palette and errors, remain present and unchanged. It does not change
-requests, wire traffic, gameplay, save state or diagnostic wait deadlines.
+The cache is independently bounded to 12,474 cell appearances and 8 MiB of
+encoded appearance data. Its chart covers the ordinary 63 × 33 viewport at all
+six height planes. Larger explored history remains on the server. Geometry is
+aligned only through disclosed identities and witnessed placements; ambiguous
+placements are suppressed rather than guessed.
 
-This avoids repeatedly printing an ever-growing historical list; it does not
-bound the complete frame, total logs or client memory usage. The process harness
-offers the explicit per-client `client(omit_memory=True)` opt-in for drivers
-that do not assert accumulated memory. Full-memory acceptance tests keep the
-default; the long ordinary Rogue floor/combat/revisit and source-free floor-entry
-drivers opt in and still assert current observations and authoritative results.
+For scripted runs that do not inspect these appearances, `--omit-memory` leaves
+the top-level `memory` member out of diagnostic frames. This affects JSON output
+only: the shared state still receives and installs map pages. All other fields,
+including `state.observation`, hydration status, messages, history, intentions,
+advancement, readiness, palette and errors, remain present. It changes neither
+requests nor gameplay/save behavior. The option reduces repeated output; it
+does not bound total logs or complete frames. Process drivers use the explicit
+`client(omit_memory=True)` option only when they do not assert remembered cells.
 
 The [geometry model](../architecture/geometry.md) supplies explicit visible cells,
 bounded portal sight, rotations, walls and stairs. The protocol requires
@@ -230,5 +247,5 @@ text uses them as described in [the adventure interface](../play/text.md).
 
 `state.observation.places` contains authoritative durable names and opaque anchor
 keys, including offscreen entries. This survives restart independently of the
-connection-local `memory` list. A controller can send `rename_place` through the
+bounded `memory` cache. A controller can send `rename_place` through the
 ordinary `request` command. See [place knowledge](movement.md).

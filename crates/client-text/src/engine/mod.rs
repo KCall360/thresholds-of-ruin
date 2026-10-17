@@ -9,6 +9,8 @@ pub mod prose;
 pub mod resolve;
 pub mod rhetoric;
 pub mod scene;
+pub mod scenery;
+pub use scenery::seen;
 pub mod settings;
 pub mod turn;
 pub mod verbs;
@@ -334,7 +336,7 @@ impl Engine {
     /// The scene in view, read with the player's settings.
     fn scene<'a>(
         &'a self,
-        state: &'a StateView,
+        state: &'a dyn scenery::ScenicView,
         palette: &'a tor_client_common::Palette,
     ) -> Scene<'a> {
         let mut scene = Scene::remembering(state, palette, &self.places);
@@ -1398,46 +1400,6 @@ enum Flow {
     Continue,
     Stop,
     Quit,
-}
-
-/// The view places and ways are read from: what's in sight, and the cells
-/// remembered from earlier views, aligned to this one, that fill out a column
-/// partly in sight or lie within two cells. So a doorway seen a moment ago is
-/// still a way out when standing beside it hides it. Only those: memory
-/// charts across portals can misplace cells farther off. Things and figures
-/// are only what's in sight; remembered doors are as last seen.
-pub fn seen(client: &tor_client_common::ClientState) -> StateView {
-    let mut state = client.state().clone();
-    let shown: BTreeSet<Position> = state
-        .observation
-        .visible_cells
-        .iter()
-        .map(|c| c.position)
-        .collect();
-    let columns: BTreeSet<(i32, i32)> = shown.iter().map(|p| (p.x, p.y)).collect();
-    for cell in client.map_memory() {
-        let (x, y) = (cell.position.x, cell.position.y);
-        let near = x.abs() <= 2 && y.abs() <= 2;
-        if shown.contains(&cell.position) || !(near || columns.contains(&(x, y))) {
-            continue;
-        }
-        state.observation.visible_cells.push(CellView {
-            door: cell.door.clone().map(|door| DoorView {
-                reachable: false,
-                approaches: Vec::new(),
-                ..door
-            }),
-            material: cell.material.clone(),
-            key: cell.key.clone(),
-            stairs_up: cell.stairs_up,
-            stairs_down: cell.stairs_down,
-            position: cell.position,
-            wall: cell.wall,
-            place_hint: cell.place_hint,
-            asset: None,
-        });
-    }
-    state
 }
 
 /// The scene described in full, as the game opens or after a snapshot, with

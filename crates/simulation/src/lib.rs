@@ -67,7 +67,12 @@ pub mod checkpoint;
 pub use checkpoint::PersistError;
 pub mod diagnostics;
 pub mod earned_growth;
+mod explored_map;
 mod fixture;
+pub use explored_map::{
+    map_work_counts, reset_map_work_counts, MapAppearance, MapCellInput, MapDoorAppearance,
+    MapItemAppearance, MapKnowledgeRoot, MapProjection, MapWindow, MapWorkCounts, ProjectedMapCell,
+};
 mod navigation_map;
 mod observation;
 mod places;
@@ -424,6 +429,8 @@ pub struct Game {
     survival_diagnostics: Option<Shared<survival_diagnostics::SurvivalBatch>>,
     physics: physics::Physics,
     navigation: BTreeMap<ActorId, Shared<travel::Navigation>>,
+    explored_maps: BTreeMap<ActorId, Shared<explored_map::ExploredMap>>,
+    map_validation: explored_map::MapValidationCache,
     world: Shared<World>,
     seed: u64,
     tick: u64,
@@ -456,6 +463,8 @@ impl Clone for Game {
             survival_diagnostics: self.survival_diagnostics.clone(),
             physics: self.physics.clone(),
             navigation: self.navigation.clone(),
+            explored_maps: self.explored_maps.clone(),
+            map_validation: self.map_validation.clone(),
             world: self.world.clone(),
             seed: self.seed,
             tick: self.tick,
@@ -598,6 +607,8 @@ impl Game {
             survival_diagnostics: None,
             physics: physics::Physics::default(),
             navigation: BTreeMap::new(),
+            explored_maps: BTreeMap::new(),
+            map_validation: Default::default(),
             world: Shared::new(world),
             seed,
             tick: 0,
@@ -819,6 +830,11 @@ impl Game {
 
     pub fn add_region(&mut self, region: Region) -> Result<(), GameError> {
         self.with_recovery_transition(false, |candidate| {
+            // Replacing known absent metadata can change membership bounds.
+            // Ordinary new regions and residency changes preserve root proofs.
+            if candidate.world.knows_region(region.id) {
+                candidate.map_validation = Default::default();
+            }
             candidate
                 .world
                 .add_region(region)
@@ -828,6 +844,11 @@ impl Game {
 
     pub fn add_chamber(&mut self, region: Region) -> Result<(), GameError> {
         self.with_recovery_transition(false, |candidate| {
+            // Replacing known absent metadata can change membership bounds.
+            // Ordinary new regions and residency changes preserve root proofs.
+            if candidate.world.knows_region(region.id) {
+                candidate.map_validation = Default::default();
+            }
             candidate
                 .world
                 .add_chamber(region)

@@ -3,6 +3,9 @@
 mod advancement;
 pub use advancement::*;
 
+pub mod map_pages;
+pub use map_pages::*;
+
 mod strike_inspection;
 mod strike_pages;
 pub use strike_inspection::*;

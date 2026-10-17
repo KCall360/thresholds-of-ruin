@@ -99,6 +99,10 @@ fn volume_stair_landing_preserves_the_crossing_frame() {
         .unwrap();
     assert_eq!(landing.location, target);
     assert_eq!(landing.rotation, compose_rotation(23, 1));
+    assert!(
+        !landing.physical,
+        "an abstract stair panel is not physical placement evidence"
+    );
 }
 
 #[test]

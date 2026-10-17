@@ -1,41 +1,21 @@
 use crate::{ObservationStream, StreamError};
 use serde::Serialize;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use tor_protocol::*;
 
-/// Last disclosed contents of one cell, not current world truth. Only a fresh
-/// observation of this exact cell can replace its remembered contents.
+/// Last disclosed appearance. Hydrated records have no invented sighting time,
+/// entity handles, occupants, reachability or supply affordances.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RememberedCell {
-    pub door: Option<DoorView>,
-    pub material: String,
-    pub key: String,
-    /// Relative offset at the last sighting, not a current map location.
-    pub position: Position,
-    pub wall: bool,
-    pub place_hint: bool,
-    pub last_seen_tick: u64,
-    pub last_seen_revision: u64,
-    pub ground_items: Vec<GroundItemView>,
-    pub visible_actors: Vec<ActorView>,
-    pub stairs_up: bool,
-    pub stairs_down: bool,
+    #[serde(flatten)]
+    pub appearance: RememberedMapCell,
+    pub last_seen_tick: Option<u64>,
+    pub last_seen_revision: Option<u64>,
 }
-
-impl RememberedCell {
-    pub fn cell_view(&self) -> CellView {
-        CellView {
-            key: self.key.clone(),
-            position: self.position,
-            wall: self.wall,
-            stairs_up: self.stairs_up,
-            stairs_down: self.stairs_down,
-            place_hint: self.place_hint,
-            door: self.door.clone(),
-            material: self.material.clone(),
-            asset: None,
-        }
+impl std::ops::Deref for RememberedCell {
+    type Target = RememberedMapCell;
+    fn deref(&self) -> &Self::Target {
+        &self.appearance
     }
 }
 
@@ -46,8 +26,8 @@ pub struct ClientState {
     snapshot: Snapshot,
     stream: ObservationStream,
     observation_base: ObservationBase,
-    memory: BTreeMap<String, RememberedCell>,
     map_memory: crate::map_memory::MapMemory,
+    map_hydration: crate::map_hydration::MapHydration,
     narration: Vec<String>,
     narration_lines: Vec<crate::narration::Line>,
 }
@@ -83,8 +63,8 @@ impl ClientState {
                 revision: snapshot.state.revision,
             },
             snapshot,
-            memory: BTreeMap::new(),
             map_memory: Default::default(),
+            map_hydration: Default::default(),
             narration: Vec::new(),
             narration_lines: Vec::new(),
         };
@@ -92,33 +72,34 @@ impl ClientState {
         Ok(client)
     }
 
-    /// Local observations only; place names and history never manufacture views.
-    /// Memory lasts for this connection and is cleared on a branch change.
+    /// Bounded appearance records from received sightings and actor-owned hydration.
+    /// Place names never manufacture views; branch changes clear this cache.
     pub fn memory(&self) -> impl Iterator<Item = &RememberedCell> {
-        self.memory.values()
+        self.map_memory.records.values()
     }
 
     /// Disclosed sightings aligned to the current view, without remembered actors.
-    /// Ambiguous/disconnected views start a new chart; at most 4096 cells are kept.
-    pub fn map_memory(&self) -> impl Iterator<Item = &RememberedCell> {
-        self.map_memory.cells.values()
+    /// Ambiguous/disconnected views start a new chart. All six viewport planes fit.
+    pub fn map_memory(&self) -> impl Iterator<Item = crate::map_memory::MapCell<'_>> {
+        self.map_memory.positioned()
     }
 
     /// Current disclosure wins over aligned stale map memory. This never
     /// manufactures knowledge from an unaligned historical sighting.
-    pub fn map_cell(&self, position: Position) -> Option<CellView> {
-        self.state()
-            .observation
-            .visible_cells
+    pub fn map_cell(&self, position: Position) -> Option<RememberedMapCell> {
+        let view = &self.state().observation;
+        view.visible_cells
             .iter()
             .find(|c| c.position == position)
-            .cloned()
-            .or_else(|| {
-                self.map_memory
-                    .cells
-                    .get(&(position.x, position.y, position.z))
-                    .map(RememberedCell::cell_view)
+            .map(|cell| {
+                let items: Vec<_> = view
+                    .ground_items
+                    .iter()
+                    .filter(|i| i.position == position)
+                    .collect();
+                crate::map_memory::appearance(cell, &items)
             })
+            .or_else(|| self.map_memory.at(position))
     }
 
     /// A validated snapshot establishes a new stream boundary atomically.
@@ -133,46 +114,134 @@ impl ClientState {
         }
         let mut candidate = Self::from_snapshot(snapshot)?;
         if candidate.branch() == self.branch() {
-            candidate.memory = std::mem::take(&mut self.memory);
             candidate.map_memory = std::mem::take(&mut self.map_memory);
             candidate.remember_view();
+            candidate.map_memory.coverage = None;
         }
         *self = candidate;
         Ok(())
     }
 
     fn remember_view(&mut self) {
-        let observation = &self.snapshot.state.observation;
-        for cell in &observation.visible_cells {
-            self.memory.insert(
-                cell.key.clone(),
-                RememberedCell {
-                    door: cell.door.clone(),
-                    material: cell.material.clone(),
-                    key: cell.key.clone(),
-                    position: cell.position,
-                    wall: cell.wall,
-                    place_hint: cell.place_hint,
-                    last_seen_tick: observation.tick,
-                    last_seen_revision: self.snapshot.state.revision,
-                    ground_items: observation
-                        .ground_items
-                        .iter()
-                        .filter(|item| item.position == cell.position)
-                        .cloned()
-                        .collect(),
-                    visible_actors: observation
-                        .visible_actors
-                        .iter()
-                        .filter(|actor| actor.position == cell.position)
-                        .cloned()
-                        .collect(),
-                    stairs_up: cell.stairs_up,
-                    stairs_down: cell.stairs_down,
-                },
+        let moved = self.map_memory.observe(
+            &self.snapshot.state.observation,
+            self.snapshot.state.revision,
+        );
+        let context = self.context().clone();
+        let branch = self.branch().clone();
+        self.map_hydration.observe(
+            context,
+            self.snapshot.actor,
+            branch,
+            self.observation_base,
+            moved,
+        );
+        if self.map_memory.limited {
+            self.map_hydration.status.limited = true;
+            self.map_hydration.status.complete = false;
+        }
+    }
+
+    /// Hydration never changes ordinary live readiness or input authority.
+    pub fn map_hydration(&self) -> &crate::MapHydrationStatus {
+        &self.map_hydration.status
+    }
+
+    pub fn next_map_query(&mut self) -> Option<MapQuery> {
+        let Some(window) = MapWindow::normal().checked_translate(self.state().observation.position)
+        else {
+            self.map_hydration.status.failed = true;
+            self.map_hydration.status.complete = false;
+            return None;
+        };
+        self.map_hydration
+            .query(window, self.map_memory.needs_window(window))
+    }
+    pub fn bind_map_query(
+        &mut self,
+        query: &MapQuery,
+        request_id: &str,
+    ) -> Result<(), &'static str> {
+        self.map_hydration.bind(query, request_id)
+    }
+    pub fn map_query_pending(&self, request_id: &str, query: &MapQuery) -> bool {
+        self.map_hydration.pending(request_id, query)
+    }
+    pub fn reject_map_query(&mut self, request_id: &str) -> bool {
+        self.map_hydration.reject(request_id)
+    }
+    pub fn cancel_map_query(&mut self) {
+        self.map_hydration.cancel();
+    }
+    pub fn accept_map_page(
+        &mut self,
+        context: &ReplyContext,
+        request_id: &str,
+        page: &MapPage,
+        encoded_response_bytes: usize,
+    ) -> Result<(), String> {
+        self.validate_reply_context(context)
+            .map_err(|e| format!("Invalid map reply context: {e:?}"))?;
+        if let Some(update) =
+            self.map_hydration
+                .accept(context, request_id, page, encoded_response_bytes)?
+        {
+            self.map_memory.install(update.window, update.cells);
+            // Exact current disclosure overlays stale memory, including seen emptiness.
+            self.map_memory.overlay(
+                &self.snapshot.state.observation,
+                self.snapshot.state.revision,
+            );
+            if self.map_memory.limited {
+                self.map_hydration.status.limited = true;
+                self.map_hydration.status.complete = false;
+            }
+        }
+        Ok(())
+    }
+    /// For the native presentation thread, after transport has validated a complete transfer.
+    pub fn map_memory_update(&self) -> Option<crate::MapMemoryUpdate> {
+        let window = MapWindow::normal().checked_translate(self.state().observation.position)?;
+        Some(crate::MapMemoryUpdate {
+            context: self.context().clone(),
+            actor: self.snapshot.actor,
+            branch: self.branch().clone(),
+            base: self.observation_base,
+            window,
+            cells: if self.map_hydration.status.complete {
+                self.map_memory()
+                    .map(|c| (c.position, c.appearance()))
+                    .collect()
+            } else {
+                Default::default()
+            },
+            status: self.map_hydration.status.clone(),
+        })
+    }
+    pub fn apply_map_memory_update(
+        &mut self,
+        update: crate::MapMemoryUpdate,
+    ) -> Result<(), StreamError> {
+        if update.context != *self.context()
+            || update.actor != self.snapshot.actor
+            || update.branch != *self.branch()
+            || update.base != self.observation_base
+        {
+            return Err(StreamError::WrongObservationBase);
+        }
+        if update.status.complete {
+            self.map_memory.install(update.window, update.cells);
+            self.map_memory.overlay(
+                &self.snapshot.state.observation,
+                self.snapshot.state.revision,
             );
         }
-        self.map_memory.observe(observation, &self.memory);
+        self.map_hydration.status = update.status;
+        if self.map_memory.limited {
+            self.map_hydration.status.limited = true;
+            self.map_hydration.status.complete = false;
+        }
+        Ok(())
     }
 
     /// Current disclosed stream boundary, excluding connection-local memory.

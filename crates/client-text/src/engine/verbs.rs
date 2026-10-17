@@ -682,12 +682,12 @@ fn intransitive(verb: Verb, scene: &Scene) -> Interpretation {
         Verb::Quit => Interpretation::Quit,
         Verb::Diagnose => say(condition(scene.state)),
         Verb::Listen => say(crate::narrative::listen(
-            scene.state,
+            scene.view,
             scene.palette,
             scene.places,
         )),
         Verb::Smell => say(crate::narrative::smell(
-            scene.state,
+            scene.view,
             scene.palette,
             scene.places,
         )),
@@ -763,7 +763,7 @@ fn look_toward(direction: Direction, scene: &Scene) -> String {
             prose::and_list(&names)
         ));
     }
-    let ways: Vec<String> = crate::adventure::exits(scene.state, direction)
+    let ways: Vec<String> = crate::adventure::exits(scene.view, direction)
         .into_iter()
         .map(|e| e.label)
         .collect();
@@ -810,7 +810,7 @@ const ALL_DIRECTIONS: [Direction; 10] = [
 fn exits_answer(scene: &Scene) -> String {
     let mut ways: Vec<String> = Vec::new();
     for d in ALL_DIRECTIONS {
-        for exit in crate::adventure::exits(scene.state, d) {
+        for exit in crate::adventure::exits(scene.view, d) {
             if !ways.contains(&exit.label) {
                 ways.push(exit.label);
             }
@@ -898,7 +898,7 @@ fn what_now(scene: &Scene) -> String {
     }
     let ways: Vec<String> = ALL_DIRECTIONS
         .iter()
-        .filter(|d| !crate::adventure::exits(scene.state, **d).is_empty())
+        .filter(|d| !crate::adventure::exits(scene.view, **d).is_empty())
         .map(|d| direction_name(*d).to_owned())
         .collect();
     if !ways.is_empty() {
@@ -954,7 +954,7 @@ fn meta_answer(meta: Meta, scene: &Scene) -> Interpretation {
     match meta {
         Meta::Exits => say(exits_answer(scene)),
         Meta::Where => say(crate::adventure::describe_place_with(
-            scene.state,
+            scene.view,
             scene.palette,
             scene.places,
         )),
@@ -987,7 +987,7 @@ fn meta_answer(meta: Meta, scene: &Scene) -> Interpretation {
 fn directional(direction: Direction, scene: &Scene) -> Interpretation {
     // Stairs and terminal exits are explicitly taken in one move.
     if matches!(direction, Direction::Up | Direction::Down)
-        && super::place::survey(scene.state).ways(direction).any(|w| {
+        && super::place::survey(scene.view).ways(direction).any(|w| {
             matches!(
                 w.kind,
                 super::place::Opening::Stairs | super::place::Opening::SurfaceExit
@@ -996,7 +996,7 @@ fn directional(direction: Direction, scene: &Scene) -> Interpretation {
     {
         return goal(Goal::Step { direction });
     }
-    let ways = crate::adventure::exits(scene.state, direction);
+    let ways = crate::adventure::exits(scene.view, direction);
     let go = |key: &str| {
         goal(Goal::Go {
             direction,
@@ -1339,7 +1339,7 @@ fn transitive_meaning(
         }
         (Verb::Go, _) if remembered(direct, scene).is_some() => {
             let (key, name) = remembered(direct, scene).expect("checked");
-            if crate::narrative::current_place_key(scene.state) == Some(key) {
+            if crate::narrative::current_place_key(scene.view) == Some(key) {
                 say(format!("You're already in {name}."))
             } else {
                 goal(Goal::Visit {
@@ -1656,7 +1656,7 @@ fn stature(r: &Referent, scene: &Scene) -> Option<&'static str> {
 }
 
 fn surface(r: &Referent, scene: &Scene) -> String {
-    let cells = &scene.state.observation.visible_cells;
+    let cells = &scene.view.scenery().observation.visible_cells;
     let roles = tor_client_common::surfaces::roles_by(cells, |cell| {
         crate::adventure::surface(scene.palette, cell)
     });
@@ -1782,7 +1782,7 @@ fn session_command(session: &SessionCommand, scene: &Scene) -> Interpretation {
         })),
         SessionCommand::Name { target, name } => {
             if matches!(target.as_str(), "room" | "place" | "here") {
-                match crate::narrative::named_place_key(state) {
+                match crate::narrative::named_place_key(scene.view) {
                     Some(key) => tool(Input::Command(Command::RenamePlace {
                         expected_revision: state.revision,
                         key: key.into(),

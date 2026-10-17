@@ -28,7 +28,7 @@ def validate_presentation_profile(profile):
 
 
 def validate(rows, version=1):
-    if type(version) is not int or version not in (1, 2):
+    if type(version) is not int or version not in (1, 2, 3, 4):
         raise ValueError('Unsupported client workload version')
     expected = [(cells, burst, sample) for cells in (64, 20956)
                 for burst in (1, 64) for sample in range(20)]
@@ -38,9 +38,14 @@ def validate(rows, version=1):
     for row in rows:
         positive_counts(row, ("version", "cells", "burst", "memory", "chart"))
         nonnegative_counts(row, ("sample",))
-        if row["version"] != version or row["memory"] != row["cells"] or row["chart"] != min(4096, row["cells"]):
+        # Versions 1/2 retain the historical connection-cache contract. The
+        # current fixture fills 49x25 cells per positive-z plane: its rendered
+        # -2..3 footprint contains four populated planes, exactly 4,900 cells.
+        memory = row["cells"] if version < 3 else min(12474, row["cells"])
+        chart = min(4096 if version < 3 else 4900, row["cells"])
+        if row["version"] != version or row["memory"] != memory or row["chart"] != chart:
             raise ValueError("Wrong workload version or memory/chart coverage")
-        if version == 2:
+        if version in (2, 4):
             expected_count = 1 if row['burst'] == 1 and row['sample'] == 0 else 2
             if type(row.get('narration_count')) is not int or row['narration_count'] != expected_count:
                 raise ValueError('Missing semantic narration coverage')
@@ -101,11 +106,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("samples", type=Path)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--narration', action='store_true', help='Require version 2 semantic workload')
+    mode.add_argument('--narration', action='store_true', help='Require current version 4 semantic workload')
     mode.add_argument('--ownership', action='store_true', help='Require paired immutable observation ownership samples')
     args = parser.parse_args()
     rows = [json.loads(line) for line in args.samples.read_text(encoding="utf-8-sig").splitlines()]
-    result = validate_ownership(rows) if args.ownership else validate(rows, version=2 if args.narration else 1)
+    result = validate_ownership(rows) if args.ownership else validate(rows, version=4 if args.narration else 3)
     print(json.dumps(result, indent=2))
 
 

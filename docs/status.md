@@ -6,7 +6,7 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **45**, save format **41**, scenario format **16**, ruleset
+**Current formats:** protocol **46**, save format **42**, scenario format **16**, ruleset
 **`interactions-v39`**, scenario validator **`tor-scenario-28`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
@@ -20,6 +20,25 @@ conditions, bounded sequence-hit/attempt progress, actor nutrition, condition
 semantics, exact periodic-regeneration nutrition rates/fractions and personal
 status alongside invocation and reply-context shapes, source-owned form choices,
 fall provenance and durable floor-activation records. Prior payload identities remain rejection-only.
+
+Characters retain last-seen terrain, doors, stairs and item appearances in the
+saved game. Returning to an explored neighborhood or opening a fresh client
+hydrates a bounded complete map window; unseen changes and creature occupants
+are not refreshed or invented. See [remembered maps](play/ascii.md#remembered-map)
+and [the read-only transfer](reference/protocol.md#explored-map-pages). This
+current-format change does not reconstruct visual history absent from older
+saves; retain an older save with its matching build when finishing that run.
+Its private checkpoint representation compacts exact map appearances and plain
+neighbor evidence, and pools equal owner directories across snapshots; navigation
+encoding and the retained workload stay unchanged. The queue fixture has an
+approved 2 MiB logical budget, with its 1 MiB compressed budget and exploration's
+16 MiB logical budget unchanged. The corrected production writer passes both
+capacity/reopen tests: 1,541,092 logical bytes for the queue fixture and 5,247,096
+for 256 explored regions. The [capacity evidence](development/performance.md#explored-map-checkpoint-capacity)
+separates those results from failed-first/model sizes and single correctness-run
+timings. The 256-region reopen took 3.06 seconds including three replayed records;
+passing capacity checks does not establish general responsiveness or release
+performance parity.
 
 Wizard tools can list and spawn named scenario-authored creature recipes with
 explicit population context, destination/explicit depth, shared exact-HD

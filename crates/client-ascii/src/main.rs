@@ -283,6 +283,13 @@ fn window_loop(
                         Event::Update(update) => app
                             .update(*update)
                             .map_err(|e| format!("Invalid presentation update: {e:?}"))?,
+                        Event::MapMemory(update) => {
+                            if let Some(state) = app.state.as_mut() {
+                                state
+                                    .apply_map_memory_update(*update)
+                                    .map_err(|e| format!("Invalid presentation map: {e:?}"))?;
+                            }
+                        }
                         Event::CreatureInspection(report) => app.show_inspection(&report)?,
                         Event::CreatureCatalog(page) => app.show_creature_catalog(&page)?,
                         Event::StrikeQuerySent(id) => app.bind_strike_request(&id),

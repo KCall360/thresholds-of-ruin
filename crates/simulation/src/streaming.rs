@@ -6,6 +6,7 @@
 use crate::actor_record::ActorRecord;
 use crate::ai::Ai;
 use crate::creatures::Content;
+use crate::explored_map::ExploredMap;
 use crate::observation::SIGHT_RANGE;
 use crate::travel::Navigation;
 use crate::{Actor, ActorId, Game, GameError, Impact, Item, ItemId, ItemLocation, PhysicsEntity};
@@ -321,8 +322,8 @@ impl Directory {
 }
 
 /// Everything located in one detached region: its world slice, the actors
-/// anchored there (with their AI and navigation), its ground items, and the
-/// items those actors carry. Stored actors refer to the save’s shared catalog.
+/// anchored there (with their AI, navigation and complete explored map), its
+/// ground items, and the items those actors carry. Stored actors refer to the save’s shared catalog.
 /// Decoding resolves these references explicitly before the game attaches it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RegionRecord {
@@ -331,6 +332,7 @@ pub struct RegionRecord {
     stamps: BTreeMap<ActorId, u64>,
     ai: BTreeMap<ActorId, Ai>,
     navigation: BTreeMap<ActorId, Navigation>,
+    explored_maps: BTreeMap<ActorId, Shared<ExploredMap>>,
     items: BTreeMap<ItemId, Item>,
     displaced: BTreeSet<ActorId>,
     impacts: Vec<Impact>,
@@ -345,6 +347,8 @@ pub struct RegionRecordData {
     stamps: BTreeMap<ActorId, u64>,
     ai: BTreeMap<ActorId, Ai>,
     navigation: BTreeMap<ActorId, Navigation>,
+    #[serde(with = "crate::checkpoint::explored_actor_maps")]
+    explored_maps: BTreeMap<ActorId, Shared<ExploredMap>>,
     items: BTreeMap<ItemId, Item>,
     displaced: BTreeSet<ActorId>,
     impacts: Vec<Impact>,
@@ -361,6 +365,7 @@ impl RegionRecordData {
             stamps: record.stamps.clone(),
             ai: record.ai.clone(),
             navigation: record.navigation.clone(),
+            explored_maps: record.explored_maps.clone(),
             items: record.items.clone(),
             displaced: record.displaced.clone(),
             impacts: record.impacts.clone(),
@@ -370,6 +375,15 @@ impl RegionRecordData {
         self,
         content: Arc<Content>,
     ) -> Result<RegionRecord, crate::checkpoint::PersistError> {
+        let mut maps = crate::checkpoint::ExploredOwnerValidation::new(self.explored_maps.values())
+            .ok_or(crate::checkpoint::PersistError::ExploredMap)?;
+        if self
+            .explored_maps
+            .iter()
+            .any(|(id, map)| !self.actors.contains_key(id) || !maps.structure(map))
+        {
+            return Err(crate::checkpoint::PersistError::ExploredMap);
+        }
         for (id, item) in &self.items {
             item.spec.validate_rules(content.rules()).map_err(|error| {
                 crate::checkpoint::PersistError::ItemDefinition { item: *id, error }
@@ -389,6 +403,7 @@ impl RegionRecordData {
             stamps: self.stamps,
             ai: self.ai,
             navigation: self.navigation,
+            explored_maps: self.explored_maps,
             items: self.items,
             displaced: self.displaced,
             impacts: self.impacts,
@@ -405,6 +420,22 @@ impl RegionRecord {
     /// Invariants of the record alone, as the record of `region` detached no
     /// later than `tick`.
     fn valid_contents(&self, region: RegionId, tick: u64) -> bool {
+        self.valid_contents_with_map_trust(region, tick, false)
+    }
+    fn valid_contents_with_map_trust(
+        &self,
+        region: RegionId,
+        tick: u64,
+        trusted_maps: bool,
+    ) -> bool {
+        let mut maps = if trusted_maps {
+            None
+        } else {
+            match crate::checkpoint::ExploredOwnerValidation::new(self.explored_maps.values()) {
+                Some(validation) => Some(validation),
+                None => return false,
+            }
+        };
         self.world.id() == region
             && self.world.valid()
             && self
@@ -432,6 +463,10 @@ impl RegionRecord {
                 .navigation
                 .keys()
                 .all(|id| self.actors.contains_key(id))
+            && self.explored_maps.iter().all(|(id, map)| {
+                self.actors.contains_key(id)
+                    && (trusted_maps || maps.as_mut().is_some_and(|maps| maps.structure(map)))
+            })
             && self.displaced.iter().all(|id| self.actors.contains_key(id))
             && self.items.values().all(|item| {
                 item.holds_valid()
@@ -1621,6 +1656,7 @@ impl Game {
             stamps: BTreeMap::new(),
             ai: BTreeMap::new(),
             navigation: BTreeMap::new(),
+            explored_maps: BTreeMap::new(),
             items: BTreeMap::new(),
             displaced: BTreeSet::new(),
             impacts,
@@ -1638,6 +1674,9 @@ impl Game {
             if let Some(navigation) = self.navigation.remove(&id) {
                 record.navigation.insert(id, (*navigation).clone());
             }
+            if let Some(map) = self.explored_maps.remove(&id) {
+                record.explored_maps.insert(id, map);
+            }
             if self.physics.displaced.remove(&id) {
                 record.displaced.insert(id);
             }
@@ -1653,18 +1692,30 @@ impl Game {
         self.lifecycle.next_record = id.0.checked_add(1).ok_or(invalid)?;
         self.lifecycle.frozen.remove(&region);
         self.lifecycle.detached.insert(region, id);
+        self.map_validation.detach(id, &record.explored_maps);
         Ok((id, Shared::new(record)))
     }
 
     /// Validate arriving definitions before computing their bodies or pins.
     /// Complete cross-region geometry is checked once those pins are loaded.
     fn check_arrival_states(
-        &self,
+        &mut self,
         arrived: &[(RegionId, RegionIdentities)],
     ) -> Result<(), TransitionError> {
         if arrived.is_empty() {
             return Ok(());
         }
+        let mut maps = crate::checkpoint::ExploredOwnerValidation::new(
+            arrived
+                .iter()
+                .flat_map(|(_, ids)| ids.actors.iter())
+                .filter_map(|id| {
+                    self.explored_maps
+                        .get(id)
+                        .filter(|map| !self.map_validation.loaded_matches(*id, map))
+                }),
+        )
+        .ok_or(TransitionError::InvalidRecord(arrived[0].0))?;
         for (region, identities) in arrived {
             let invalid = Err(TransitionError::InvalidRecord(*region));
             let actors_valid = identities.actors.iter().all(|id| {
@@ -1675,6 +1726,9 @@ impl Game {
                         .navigation
                         .get(id)
                         .is_none_or(|n| n.checkpoint_valid(&self.world))
+                    && self.explored_maps.get(id).is_none_or(|map| {
+                        self.map_validation.loaded_matches(*id, map) || maps.world(map, &self.world)
+                    })
             });
             let items_valid = identities.items.iter().all(|id| {
                 self.items
@@ -1683,6 +1737,11 @@ impl Game {
             });
             if !actors_valid || !items_valid {
                 return invalid;
+            }
+            for actor in &identities.actors {
+                if let Some(map) = self.explored_maps.get(actor) {
+                    self.map_validation.accept_loaded(*actor, map);
+                }
             }
         }
         Ok(())
@@ -1726,6 +1785,7 @@ impl Game {
     ) -> Result<RegionIdentities, TransitionError> {
         let invalid = TransitionError::InvalidRecord(region);
         let unavailable = TransitionError::RecordUnavailable(region);
+        let expected_record = self.lifecycle.detached.get(&region).copied();
         let record = if self.lifecycle.unbuilt.remove(&region) {
             let record = records.build(region).ok_or(unavailable)?;
             Shared::new(record)
@@ -1743,7 +1803,11 @@ impl Game {
         // Checked here, not only on restore, because restore never reads
         // records, and a built record must hold exactly the identities its
         // source declared.
-        if !record.valid_contents(region, self.tick)
+        let trusted_maps = expected_record.is_some_and(|id| {
+            self.map_validation
+                .detached_matches(id, &record.explored_maps)
+        });
+        if !record.valid_contents_with_map_trust(region, self.tick, trusted_maps)
             || !record.matches_directory(region, &self.lifecycle.directory)
         {
             return Err(invalid);
@@ -1754,6 +1818,7 @@ impl Game {
             stamps,
             ai,
             navigation,
+            explored_maps,
             items,
             displaced,
             impacts,
@@ -1764,6 +1829,9 @@ impl Game {
             return Err(invalid);
         }
         self.world.attach_region(world).map_err(|_| invalid)?;
+        if let Some(id) = expected_record {
+            self.map_validation.attach(id, &explored_maps, trusted_maps);
+        }
         self.actors.extend(actors);
         for id in stamps.keys() {
             self.actors.set_timer_active(*id, false);
@@ -1772,6 +1840,7 @@ impl Game {
         self.combat.ai.extend(ai);
         self.navigation
             .extend(navigation.into_iter().map(|(id, n)| (id, Shared::new(n))));
+        self.explored_maps.extend(explored_maps);
         if !items.is_empty() {
             self.items.extend(items);
         }
@@ -1822,6 +1891,10 @@ impl Game {
             };
             expected.insert(*region, record.identities());
             record.valid_contents(*region, self.tick)
+                && record
+                    .explored_maps
+                    .values()
+                    .all(|map| map.checkpoint_valid(&self.world))
                 && record.actors.values().all(|actor| {
                     actor.motion.active_fall.is_none_or(|fall| {
                         fall.owner.0 < self.next_actor_id
@@ -2520,6 +2593,7 @@ mod tests {
                 record.stamps.remove(&other);
                 record.ai.remove(&other);
                 record.navigation.remove(&other);
+                record.explored_maps.remove(&other);
                 record.displaced.remove(&other);
                 assert!(record.valid_contents(four, game.tick()));
                 assert!(!record.matches_directory(four, &game.lifecycle.directory));
@@ -3093,5 +3167,406 @@ mod tests {
             need.loaded.contains(&RegionId(3)),
             "dark geometry still needs to be read"
         );
+    }
+}
+
+#[cfg(test)]
+mod explored_map_tests {
+    use super::*;
+    use crate::explored_map::{MapAppearance, Witness};
+    use std::num::NonZeroU64;
+    use tor_world::Position;
+
+    fn at(region: u64, x: i32) -> Location {
+        Location {
+            region: RegionId(region),
+            position: Position { x, y: 1, z: 0 },
+        }
+    }
+
+    fn remembered() -> Shared<MapAppearance> {
+        Shared::new(MapAppearance {
+            wall: true,
+            material: "stale stone".into(),
+            asset: None,
+            place_hint: false,
+            stairs_up: false,
+            stairs_down: true,
+            door: None,
+            ground_items: Vec::new(),
+        })
+    }
+
+    fn detached() -> (Game, ActorId, RecordId, Shared<RegionRecord>) {
+        let mut game = Game::region_corridor(42, 3, crate::test_creatures::content());
+        let actor = game
+            .spawn_actor(at(1, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let mut map = ExploredMap::default();
+        map.cells.insert(at(1, 1), remembered());
+        map.cells.insert(at(3, 9), remembered());
+        map.witnesses.insert(
+            at(3, 9),
+            Witness::Placed {
+                anchor: at(1, 1),
+                delta: [32, 0, 0],
+                rotation: 0,
+            },
+        );
+        map.children.insert((at(1, 1), [32, 0, 0], at(3, 9)), 0);
+        game.explored_maps.insert(actor, Shared::new(map));
+        let original = game.explored_maps[&actor].clone();
+        game.freeze_region(RegionId(1)).unwrap();
+        let (id, record) = game.detach_record(RegionId(1)).unwrap();
+        assert!(record.explored_maps[&actor].shares_storage(&original));
+        (game, actor, id, record)
+    }
+
+    fn acquired(size: i32) -> (Game, ActorId) {
+        let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+        world
+            .add_region(tor_world::Region {
+                id: RegionId(1),
+                name: "memory".into(),
+                bounds: tor_world::Extent::new(6000, 3, 1).unwrap(),
+            })
+            .unwrap();
+        let mut game = Game::new(world, 42, crate::test_creatures::content());
+        let actor = game
+            .spawn_actor(at(1, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let inputs = (1..=size)
+            .map(|x| crate::MapCellInput {
+                location: at(1, x),
+                appearance: (*remembered()).clone(),
+            })
+            .collect::<Vec<_>>();
+        game.record_explored_observation(actor, &inputs, &[])
+            .unwrap();
+        (game, actor)
+    }
+
+    #[test]
+    fn trusted_repeat_arrivals_do_not_rescan_history_and_release_detached_proofs() {
+        for size in [16, 4096, 5000] {
+            let (mut game, actor) = acquired(size);
+            game.freeze_region(RegionId(1)).unwrap();
+            for _ in 0..3 {
+                let (id, record) = game.detach_record(RegionId(1)).unwrap();
+                assert!(game
+                    .map_validation
+                    .detached_matches(id, &record.explored_maps));
+                assert!(!game
+                    .map_validation
+                    .detached_matches(RecordId(id.0 + 1), &record.explored_maps));
+                let branch = game.clone();
+                let mut records = MemoryRecords::default();
+                records.put(id, record.clone());
+                crate::reset_map_work_counts();
+                let identities = game.attach_record(RegionId(1), &mut records).unwrap();
+                game.check_arrival_states(&[(RegionId(1), identities)])
+                    .unwrap();
+                let work = crate::map_work_counts();
+                assert_eq!(
+                    (
+                        work.validation_cells,
+                        work.validation_relations,
+                        work.world_location_checks
+                    ),
+                    (0, 0, 0)
+                );
+                assert!(work.validation_directory_entries_copied <= 1);
+                assert!(!game
+                    .map_validation
+                    .detached_matches(id, &record.explored_maps));
+                assert!(branch
+                    .map_validation
+                    .detached_matches(id, &record.explored_maps));
+                assert!(game
+                    .map_validation
+                    .loaded_matches(actor, &game.explored_maps[&actor]));
+            }
+        }
+    }
+
+    #[test]
+    fn trusted_arrival_proofs_reject_swapped_branch_and_cow_forged_roots() {
+        let (mut original, actor) = acquired(16);
+        let mut branch = original.clone();
+        branch
+            .add_region(tor_world::Region {
+                id: RegionId(2),
+                name: "other branch".into(),
+                bounds: tor_world::Extent::new(3, 3, 1).unwrap(),
+            })
+            .unwrap();
+        branch
+            .record_explored_observation(
+                actor,
+                &[crate::MapCellInput {
+                    location: at(2, 1),
+                    appearance: (*remembered()).clone(),
+                }],
+                &[],
+            )
+            .unwrap();
+        original.freeze_region(RegionId(1)).unwrap();
+        branch.freeze_region(RegionId(1)).unwrap();
+        let (id, record) = original.detach_record(RegionId(1)).unwrap();
+        let (branch_id, branch_record) = branch.detach_record(RegionId(1)).unwrap();
+        assert_eq!(
+            id, branch_id,
+            "rewound branches may reuse an allocation ordinal"
+        );
+        let mut forged = (*record).clone();
+        forged
+            .explored_maps
+            .get_mut(&actor)
+            .unwrap()
+            .cells
+            .insert(at(1, 999_999), remembered());
+        for replacement in [branch_record, Shared::new(forged)] {
+            assert!(!original
+                .map_validation
+                .detached_matches(id, &replacement.explored_maps));
+            let mut records = MemoryRecords::default();
+            records.put(id, replacement);
+            let before = original.clone();
+            crate::reset_map_work_counts();
+            assert_eq!(
+                original.transition_regions(
+                    &RegionTransition {
+                        active: BTreeSet::from([RegionId(1)]),
+                        loaded: BTreeSet::from([RegionId(1)]),
+                    },
+                    &mut records
+                ),
+                Err(TransitionError::InvalidRecord(RegionId(1)))
+            );
+            assert_eq!(original, before);
+            assert!(crate::map_work_counts().validation_cells >= 16);
+            assert!(crate::map_work_counts().world_location_checks >= 16);
+        }
+    }
+
+    #[test]
+    fn untrusted_decoded_arrival_earns_proof_only_after_full_validation() {
+        let (mut game, actor) = acquired(64);
+        game.freeze_region(RegionId(1)).unwrap();
+        let (id, record) = game.detach_record(RegionId(1)).unwrap();
+        let bytes = serde_json::to_vec(&*record).unwrap();
+        let restored = serde_json::from_slice::<RegionRecordData>(&bytes)
+            .unwrap()
+            .restore(game.content().clone())
+            .unwrap();
+        assert!(!game
+            .map_validation
+            .detached_matches(id, &restored.explored_maps));
+        let mut records = MemoryRecords::default();
+        records.put(id, Shared::new(restored));
+        crate::reset_map_work_counts();
+        let identities = game.attach_record(RegionId(1), &mut records).unwrap();
+        game.check_arrival_states(&[(RegionId(1), identities)])
+            .unwrap();
+        let work = crate::map_work_counts();
+        assert_eq!(
+            (work.validation_cells, work.world_location_checks),
+            (128, 64)
+        );
+        assert!(game
+            .map_validation
+            .loaded_matches(actor, &game.explored_maps[&actor]));
+    }
+
+    #[test]
+    fn untrusted_shared_owner_roots_validate_once_per_record_operation() {
+        const CELLS: i32 = 4096;
+        for owners in [1, 32, 64] {
+            let (mut game, actor) = acquired(CELLS);
+            let map = game.explored_maps[&actor].clone();
+            for x in 2..=owners {
+                let other = game
+                    .spawn_actor(at(1, x), NonZeroU64::new(100).unwrap())
+                    .unwrap();
+                game.explored_maps.insert(other, map.clone());
+            }
+            game.freeze_region(RegionId(1)).unwrap();
+            let (id, record) = game.detach_record(RegionId(1)).unwrap();
+            let bytes = serde_json::to_vec(&*record).unwrap();
+            let decoded = serde_json::from_slice::<RegionRecordData>(&bytes).unwrap();
+            crate::reset_map_work_counts();
+            let restored = decoded.restore(game.content().clone()).unwrap();
+            assert_eq!(crate::map_work_counts().validation_cells, CELLS as usize);
+            crate::reset_map_work_counts();
+            assert!(restored.valid_contents(RegionId(1), game.tick()));
+            assert_eq!(crate::map_work_counts().validation_cells, CELLS as usize);
+            let mut records = MemoryRecords::default();
+            records.put(id, Shared::new(restored));
+            crate::reset_map_work_counts();
+            let identities = game.attach_record(RegionId(1), &mut records).unwrap();
+            game.check_arrival_states(&[(RegionId(1), identities)])
+                .unwrap();
+            let work = crate::map_work_counts();
+            assert_eq!(work.validation_cells, 2 * CELLS as usize);
+            assert_eq!(work.world_location_checks, CELLS as usize);
+        }
+    }
+
+    #[test]
+    fn replacing_known_region_or_chamber_metadata_invalidates_loaded_and_detached_proofs() {
+        for chamber in [false, true] {
+            let (mut game, actor) = acquired(16);
+            game.add_region(tor_world::Region {
+                id: RegionId(2),
+                name: "old bounds".into(),
+                bounds: tor_world::Extent::new(10, 3, 1).unwrap(),
+            })
+            .unwrap();
+            let other = game
+                .spawn_actor(at(2, 1), NonZeroU64::new(100).unwrap())
+                .unwrap();
+            let input = [crate::MapCellInput {
+                location: at(2, 9),
+                appearance: (*remembered()).clone(),
+            }];
+            for owner in [actor, other] {
+                game.record_explored_observation(owner, &input, &[])
+                    .unwrap();
+            }
+            game.freeze_region(RegionId(2)).unwrap();
+            let (id, record) = game.detach_record(RegionId(2)).unwrap();
+            assert!(game
+                .map_validation
+                .loaded_matches(actor, &game.explored_maps[&actor]));
+            assert!(game
+                .map_validation
+                .detached_matches(id, &record.explored_maps));
+            let replacement = tor_world::Region {
+                id: RegionId(2),
+                name: "new bounds".into(),
+                bounds: tor_world::Extent::new(2, 3, 1).unwrap(),
+            };
+            if chamber {
+                game.add_chamber(replacement).unwrap();
+            } else {
+                game.add_region(replacement).unwrap();
+            }
+            assert!(!game
+                .map_validation
+                .loaded_matches(actor, &game.explored_maps[&actor]));
+            assert!(!game
+                .map_validation
+                .detached_matches(id, &record.explored_maps));
+            // Old absent metadata cannot be used to re-earn a proof while new
+            // loaded metadata now owns the region's authoritative bounds.
+            assert!(!game.explored_maps[&actor].world_locations_valid(&game.world));
+            assert_eq!(
+                game.record_explored_observation(actor, &input, &[]),
+                Err(GameError::InvalidLocation)
+            );
+            // A new owner has no previous map to reject first. This isolates
+            // admission of a newly supplied location against current bounds.
+            let fresh = game
+                .spawn_actor(at(1, 2), NonZeroU64::new(100).unwrap())
+                .unwrap();
+            assert!(
+                game.world.knows(input[0].location),
+                "old absent metadata still covers the input"
+            );
+            assert!(!game.explored_maps.contains_key(&fresh));
+            assert_eq!(
+                game.record_explored_observation(fresh, &input, &[]),
+                Err(GameError::InvalidLocation)
+            );
+            assert!(!game.explored_maps.contains_key(&fresh));
+        }
+    }
+
+    #[test]
+    fn detaching_and_reattaching_an_actor_retains_its_complete_explored_map() {
+        let (mut game, actor, id, record) = detached();
+        assert!(!game.explored_maps.contains_key(&actor));
+        assert_eq!(record.explored_maps[&actor].cells.iter().count(), 2);
+        assert!(record.explored_maps[&actor].cells.contains_key(&at(3, 9)));
+        let bytes = serde_json::to_vec(&*record).unwrap();
+        let decoded: RegionRecordData = serde_json::from_slice(&bytes).unwrap();
+        let restored = decoded.restore(game.content().clone()).unwrap();
+        assert_eq!(restored, *record);
+        assert_eq!(serde_json::to_vec(&restored).unwrap(), bytes);
+        // Reading saved appearance evidence does not attach its actor's terrain.
+        assert_eq!(game.region_state(RegionId(1)), Some(RegionState::Detached));
+        let expected = restored.explored_maps[&actor].clone();
+        let mut records = MemoryRecords::default();
+        records.put(id, Shared::new(restored));
+        assert!(game.detached_records_valid(&mut records));
+        let identities = game.attach_record(RegionId(1), &mut records).unwrap();
+        game.check_arrival_states(&[(RegionId(1), identities)])
+            .unwrap();
+        assert!(game.explored_maps[&actor].shares_storage(&expected));
+        assert_eq!(
+            game.explored_maps[&actor]
+                .cells
+                .get(&at(3, 9))
+                .unwrap()
+                .material,
+            "stale stone"
+        );
+        assert_eq!(game.explored_maps[&actor].children.iter().count(), 1);
+    }
+
+    #[test]
+    fn detached_explored_maps_require_the_current_shape_and_valid_owner_references() {
+        let (game, actor, _, record) = detached();
+        let value = serde_json::to_value(RegionRecordData::capture(&record)).unwrap();
+        let mut missing = value.clone();
+        missing.as_object_mut().unwrap().remove("explored_maps");
+        assert!(serde_json::from_value::<RegionRecordData>(missing).is_err());
+        let mut dangling = value.clone();
+        dangling["explored_maps"]["owners"][0][1] = serde_json::json!(999);
+        assert!(serde_json::from_value::<RegionRecordData>(dangling).is_err());
+        let mut duplicate = value.clone();
+        let owner = duplicate["explored_maps"]["owners"][0].clone();
+        duplicate["explored_maps"]["owners"]
+            .as_array_mut()
+            .unwrap()
+            .push(owner);
+        assert!(serde_json::from_value::<RegionRecordData>(duplicate).is_err());
+        let mut other_actor = RegionRecordData::capture(&record);
+        let map = other_actor.explored_maps.remove(&actor).unwrap();
+        other_actor.explored_maps.insert(ActorId(999), map);
+        assert_eq!(
+            other_actor.restore(game.content().clone()),
+            Err(crate::PersistError::ExploredMap)
+        );
+        let mut corrupt = value;
+        corrupt["explored_maps"]["maps"]["children"][0][0][1] = serde_json::json!(23);
+        assert!(serde_json::from_value::<RegionRecordData>(corrupt).is_err());
+    }
+
+    #[test]
+    fn arrival_rejects_unknown_remembered_locations_without_publishing_partial_state() {
+        let (mut game, actor, id, record) = detached();
+        let mut damaged = (*record).clone();
+        damaged
+            .explored_maps
+            .get_mut(&actor)
+            .unwrap()
+            .cells
+            .insert(at(3, 999), remembered());
+        assert!(damaged.valid_contents(RegionId(1), game.tick()));
+        let mut records = MemoryRecords::default();
+        records.put(id, Shared::new(damaged));
+        assert!(!game.detached_records_valid(&mut records));
+        let before = game.clone();
+        let request = RegionTransition {
+            active: BTreeSet::from([RegionId(1), RegionId(2), RegionId(3)]),
+            loaded: BTreeSet::from([RegionId(1), RegionId(2), RegionId(3)]),
+        };
+        assert_eq!(
+            game.transition_regions(&request, &mut records),
+            Err(TransitionError::InvalidRecord(RegionId(1)))
+        );
+        assert_eq!(game, before);
+        assert!(!game.explored_maps.contains_key(&actor));
     }
 }

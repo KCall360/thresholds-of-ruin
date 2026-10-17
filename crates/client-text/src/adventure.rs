@@ -1,4 +1,6 @@
 //! Scene descriptions and ways onward, using only the disclosed observer scene.
+use crate::engine::scenery::ScenicView;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use tor_client_common::{presentation, surfaces, Palette};
@@ -88,14 +90,14 @@ pub(crate) struct Exit {
 
 /// Ways onward in a direction: the place's openings, or else an authored
 /// anchor in another place seen that way.
-pub(crate) fn exits(state: &StateView, direction: Direction) -> Vec<Exit> {
+pub(crate) fn exits(state: &dyn ScenicView, direction: Direction) -> Vec<Exit> {
     exits_from(&crate::engine::place::survey(state), state, direction)
 }
 
 /// [`exits`] for a place already surveyed.
 fn exits_from(
     place: &crate::engine::place::Place,
-    state: &StateView,
+    state: &dyn ScenicView,
     direction: Direction,
 ) -> Vec<Exit> {
     use crate::engine::place::Opening;
@@ -121,7 +123,10 @@ fn exits_from(
                 Some(lies) => format!("{} to the {}", w.label(), direction_name(lies)),
                 None => format!("{} {toward}", w.label()),
             },
-            closed: matches!(w.kind, Opening::Door { open: false, .. }),
+            closed: matches!(
+                w.kind,
+                Opening::Door { open: false, .. } | Opening::RememberedDoor { open: false, .. }
+            ),
         })
         .collect();
     if !ways.is_empty() {
@@ -132,6 +137,7 @@ fn exits_from(
     // Places seen elsewhere guide the way only across open ground; within
     // walls the ways out are the openings.
     let mut anchors: Vec<_> = state
+        .scenery()
         .observation
         .visible_cells
         .iter()
@@ -155,12 +161,14 @@ fn exits_from(
             _ => p.x.unsigned_abs().abs_diff(p.y.unsigned_abs()),
         };
         let far = state
+            .scenery()
             .observation
             .visible_cells
             .iter()
             .filter(|c| {
                 !c.wall
                     && c.door.is_none()
+                    && state.remembered_door(c.position).is_none()
                     && c.position.z == 0
                     && bearing(c.position) == Some(direction)
                     && (open || place.contains(c.position))
@@ -186,6 +194,7 @@ fn exits_from(
         .filter(|c| seen.insert(c.key.clone()))
         .map(|c| {
             let item = state
+                .scenery()
                 .observation
                 .ground_items
                 .iter()
@@ -203,8 +212,9 @@ fn exits_from(
 }
 
 /// The authored hint inside a place, if it has one.
-fn hint<'a>(state: &'a StateView, place: &Place) -> Option<&'a str> {
+fn hint<'a>(state: &'a dyn ScenicView, place: &Place) -> Option<&'a str> {
     state
+        .scenery()
         .observation
         .visible_cells
         .iter()
@@ -220,8 +230,8 @@ fn hint<'a>(state: &'a StateView, place: &Place) -> Option<&'a str> {
 /// entering a room, at a junction or a door, or where the way runs out.
 /// Whether something came into view is the caller's to judge.
 pub fn onward(
-    before: &StateView,
-    now: &StateView,
+    before: &dyn ScenicView,
+    now: &dyn ScenicView,
     direction: Direction,
 ) -> Option<(Direction, String)> {
     use crate::engine::place::{survey, Form};
@@ -250,8 +260,8 @@ pub fn onward(
 
 /// What a walk would stop to look at, if it came into view: things and
 /// doors, with how to name them and where they are.
-pub(crate) fn sights(state: &StateView) -> Vec<(String, String, String)> {
-    let o = &state.observation;
+pub(crate) fn sights(state: &dyn ScenicView) -> Vec<(String, String, String)> {
+    let o = &state.current().observation;
     let mut seen = Vec::new();
     for item in &o.ground_items {
         seen.push((
@@ -443,8 +453,8 @@ fn counted_list(names: &[(String, u64)]) -> String {
 /// "There is a stone guardian to the east, and two wounded rats to the
 /// north." Figures alike in the same place are counted together, and their
 /// injuries go with their names.
-fn figures_sentence(state: &StateView, palette: &Palette) -> Vec<String> {
-    let o = &state.observation;
+fn figures_sentence(state: &dyn ScenicView, palette: &Palette) -> Vec<String> {
+    let o = &state.current().observation;
     let mut sentences = Vec::new();
     let mut entries = Vec::new();
     for actor in unified_actors(&o.visible_actors) {
@@ -492,8 +502,8 @@ fn gapped(clauses: &[String]) -> String {
 }
 
 /// "A copper token lies at your feet; two stone tablets lie to the east."
-fn things_sentences(state: &StateView, place: &Place) -> Vec<String> {
-    let o = &state.observation;
+fn things_sentences(state: &dyn ScenicView, place: &Place) -> Vec<String> {
+    let o = &state.current().observation;
     let mut seen = BTreeSet::new();
     let mut items: Vec<&GroundItemView> = o
         .ground_items
@@ -555,7 +565,7 @@ fn things_sentences(state: &StateView, place: &Place) -> Vec<String> {
 }
 
 /// Doors in sight that aren't ways out of this place.
-fn other_doors(state: &StateView, place: &Place) -> Option<String> {
+fn other_doors(state: &dyn ScenicView, place: &Place) -> Option<String> {
     let ways: BTreeSet<DoorTarget> = place
         .ways
         .iter()
@@ -566,7 +576,7 @@ fn other_doors(state: &StateView, place: &Place) -> Option<String> {
         .collect();
     let mut doors = BTreeSet::new();
     let mut entries = Vec::new();
-    let mut cells: Vec<&CellView> = state.observation.visible_cells.iter().collect();
+    let mut cells: Vec<&CellView> = state.current().observation.visible_cells.iter().collect();
     cells.sort_by_key(|c| (distance(c.position), &c.key));
     for cell in cells {
         if let Some(door) = &cell.door {
@@ -604,7 +614,7 @@ const DIRECTIONS: [Direction; 10] = [
 /// The ways out by kind: "An archway leads east, a passage north, and open
 /// wooden doors south and west." Directions with no opening but a place seen
 /// that way follow: "You can also head east."
-fn ways_sentences(state: &StateView, place: &Place) -> Vec<String> {
+fn ways_sentences(state: &dyn ScenicView, place: &Place) -> Vec<String> {
     // Openings of one kind, with the directions they lead and how many.
     let mut kinds: Vec<(String, Vec<Direction>)> = Vec::new();
     for way in &place.ways {
@@ -654,7 +664,12 @@ fn ways_sentences(state: &StateView, place: &Place) -> Vec<String> {
             prose::or_list(&elsewhere)
         ));
     }
-    let walls = state.observation.visible_cells.iter().any(|c| c.wall);
+    let walls = state
+        .scenery()
+        .observation
+        .visible_cells
+        .iter()
+        .any(|c| c.wall);
     if sentences.is_empty() && walls && place.continues.is_empty() {
         sentences.push("You see no way onward.".into());
     }
@@ -663,20 +678,20 @@ fn ways_sentences(state: &StateView, place: &Place) -> Vec<String> {
 
 /// [`describe_with`] without a palette: every thing keeps its disclosed
 /// material or name.
-pub fn describe(state: &StateView) -> String {
+pub fn describe(state: &dyn ScenicView) -> String {
     describe_with(state, &Palette::default())
 }
 
 /// [`describe_in`] with no places remembered.
-pub fn describe_with(state: &StateView, palette: &Palette) -> String {
+pub fn describe_with(state: &dyn ScenicView, palette: &Palette) -> String {
     describe_in(state, palette, &Places::default())
 }
 
 /// The character's condition, as the first lines of a description: HP and
 /// how the run stands. The objective too when `objective` is set.
-fn status_lines(state: &StateView, objective: bool) -> Vec<String> {
+fn status_lines(state: &dyn ScenicView, objective: bool) -> Vec<String> {
     let mut lines = Vec::new();
-    if let Some(c) = &state.observation.combat {
+    if let Some(c) = &state.current().observation.combat {
         lines.push(format!("HP {}/{}", c.hp, c.max_hp));
         lines.extend(
             c.public_plan
@@ -702,7 +717,7 @@ fn status_lines(state: &StateView, objective: bool) -> Vec<String> {
             );
         }
     }
-    if state.wizard_game {
+    if state.current().wizard_game {
         lines.push("*** WIZARD GAME — permanently marked ***".into());
     }
     lines
@@ -711,7 +726,7 @@ fn status_lines(state: &StateView, objective: bool) -> Vec<String> {
 /// The scene in prose, as the game opens: condition, objective and the
 /// place. Floors, walls and unnamed figures are described by their asset
 /// words where the palette holds their assets.
-pub fn describe_in(state: &StateView, palette: &Palette, places: &Places) -> String {
+pub fn describe_in(state: &dyn ScenicView, palette: &Palette, places: &Places) -> String {
     let mut lines = status_lines(state, true);
     lines.push(describe_place_with(state, palette, places));
     lines.join("\n")
@@ -719,7 +734,7 @@ pub fn describe_in(state: &StateView, palette: &Palette, places: &Places) -> Str
 
 /// The scene as `look` shows it: like [`describe_with`], without repeating
 /// the objective, which `objective` recalls.
-pub fn look_with(state: &StateView, palette: &Palette, places: &Places) -> String {
+pub fn look_with(state: &dyn ScenicView, palette: &Palette, places: &Places) -> String {
     let mut lines = status_lines(state, false);
     lines.push(describe_place_with(state, palette, places));
     lines.join("\n")
@@ -729,7 +744,7 @@ pub fn look_with(state: &StateView, palette: &Palette, places: &Places) -> Strin
 /// place it is, when it has none), its ways out when `ways` is set, and who
 /// and what is in it.
 pub fn brief_place_with(
-    state: &StateView,
+    state: &dyn ScenicView,
     palette: &Palette,
     places: &Places,
     ways: bool,
@@ -756,9 +771,10 @@ pub fn brief_place_with(
 }
 
 /// Where the objective's exit is, when it's in sight.
-fn exit_sentence(state: &StateView) -> Option<String> {
-    let key = state.observation.combat.as_ref()?.exit.as_ref()?;
+fn exit_sentence(state: &dyn ScenicView) -> Option<String> {
+    let key = state.current().observation.combat.as_ref()?.exit.as_ref()?;
     let cell = state
+        .current()
         .observation
         .visible_cells
         .iter()
@@ -771,7 +787,7 @@ fn exit_sentence(state: &StateView) -> Option<String> {
 }
 
 /// Who and what is in the place, as a paragraph.
-fn contents(state: &StateView, palette: &Palette, place: &Place) -> Option<String> {
+fn contents(state: &dyn ScenicView, palette: &Palette, place: &Place) -> Option<String> {
     let mut sentences = figures_sentence(state, palette);
     sentences.extend(
         things_sentences(state, place)
@@ -784,7 +800,7 @@ fn contents(state: &StateView, palette: &Palette, place: &Place) -> Option<Strin
 
 /// The place alone, as on arriving there: its name, a paragraph on the place
 /// and its ways out, and a paragraph on who and what is in it.
-pub fn describe_place_with(state: &StateView, palette: &Palette, places: &Places) -> String {
+pub fn describe_place_with(state: &dyn ScenicView, palette: &Palette, places: &Places) -> String {
     let place = crate::engine::place::survey(state);
     let mut lines = Vec::new();
     // A place with no name is titled by what it is: "Large, hushed hall".

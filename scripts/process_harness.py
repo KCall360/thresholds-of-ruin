@@ -914,12 +914,13 @@ class ProcessTestCase(unittest.TestCase):
         client.until(match, seconds)
         return found[-1]
 
-    def client(self, token=TOKEN, observe=False, actor=None, *, omit_memory=False):
-        """Keep full diagnostics unless this driver explicitly omits map memory."""
+    def client(self, token=TOKEN, observe=False, actor=None, *, omit_memory=False, compact_background=False):
+        """Opt-in projections keep ready and gameplay frames fully state-bearing."""
         client = self.launch("tor-client-headless", [
             "--connect", self.address, *(["--observe"] if observe else []),
             *(["--actor", str(actor)] if actor else []),
-            *(["--omit-memory"] if omit_memory else [])], token=token)
+            *(["--omit-memory"] if omit_memory else []),
+            *(["--compact-background"] if compact_background else [])], token=token)
         return client, self.frame(client, lambda frame: frame["type"] == "ready")
 
     def command(self, client, value):

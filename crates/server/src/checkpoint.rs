@@ -252,6 +252,9 @@ impl DiskCheckpoint {
             || self.boundaries.len() > MAX_RETAINED_BOUNDARIES
             // Private queue transitions do not create additional world states.
             || !self.shared.valid_world_count(REWIND_BOUNDARIES + 1)
+            || !self.shared.explored_map_references_valid(
+                std::iter::once(&self.game).chain(self.boundaries.iter().map(|b| &b.game)),
+            )
             || Uuid::parse_str(&self.current_branch.0).is_err()
             || archive.records.last().map_or(&archive.branch, |r| &r.entry.branch)
                 != &self.current_branch
@@ -643,7 +646,7 @@ mod tests {
             .unwrap();
         let sequence = engine.archive.records.len() as u64;
         let valid = Checkpoint::capture(&engine).encode("test", sequence);
-        assert_eq!(valid.version, 41);
+        assert_eq!(valid.version, 42);
         valid.restore(engine.archive.clone()).unwrap();
         for version in [0, ARCHIVE_VERSION - 1, ARCHIVE_VERSION + 1] {
             let mut obsolete = Checkpoint::capture(&engine).encode("test", sequence);

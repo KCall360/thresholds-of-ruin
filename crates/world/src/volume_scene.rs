@@ -24,6 +24,7 @@ impl World {
                     }
                     if let Some((location, rotation)) = self.volume_ray(origin, frame, offset) {
                         cells.push(SightCell {
+                            physical: true,
                             location,
                             rotation,
                             offset: Position { x, y, z },
@@ -43,6 +44,7 @@ impl World {
                     continue;
                 };
                 cells.push(SightCell {
+                    physical: false,
                     location: to,
                     rotation: compose_rotation(frame, self.crossing_rotation(origin, direction)),
                     offset: Position {

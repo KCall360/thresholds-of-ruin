@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 45;
+pub const PROTOCOL_VERSION: u32 = 46;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -76,6 +76,7 @@ impl AccessRole {
                 Request::Attach { .. }
                     | Request::Snapshot
                     | Request::Palette
+                    | Request::Map { .. }
                     | Request::History { .. }
                     | Request::HistoryBranch { .. }
             )
@@ -1061,6 +1062,10 @@ pub enum Request {
     AcquireControl,
     ReleaseControl,
     Snapshot,
+    /// Read-only appearances owned by the attached actor.
+    Map {
+        query: crate::MapQuery,
+    },
     /// The whole current palette, as after attaching.
     Palette,
     Command {
@@ -1242,6 +1247,12 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    #[serde(deserialize_with = "crate::map_pages::read_page_reply")]
+    MapPage {
+        context: ReplyContext,
+        request_id: String,
+        page: Box<crate::MapPage>,
+    },
     #[serde(deserialize_with = "crate::creature_catalog::read_reply")]
     CreatureCatalog {
         context: ReplyContext,
@@ -1320,7 +1331,8 @@ pub enum ServerMessage {
 impl ServerMessage {
     pub fn reply_context(&self) -> Option<&ReplyContext> {
         match self {
-            Self::CreatureCatalog { context, .. }
+            Self::MapPage { context, .. }
+            | Self::CreatureCatalog { context, .. }
             | Self::AdvancementPage { context, .. }
             | Self::Ack { context, .. }
             | Self::History { context, .. }

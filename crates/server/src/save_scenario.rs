@@ -3097,13 +3097,13 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (41, 16, "interactions-v39", 12, 5, 13, "tor-arena-run-v5")
+            (42, 16, "interactions-v39", 12, 5, 13, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn sequence_rider_format_preserves_journal_and_compression_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 45);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 46);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Physical framing and region placement are unchanged. Conditional riders
         // and preparation progress use the new independent payload identities.
@@ -5447,8 +5447,16 @@ mod population_boundary_tests {
         ] {
             let mut missing = good.clone();
             let (parent, field) = path.rsplit_once('/').unwrap();
-            missing.pointer_mut(parent).unwrap().as_object_mut().unwrap().remove(field);
-            assert!(decode_content_package(&serde_json::to_vec(&missing).unwrap()).is_err(), "{path}");
+            missing
+                .pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                decode_content_package(&serde_json::to_vec(&missing).unwrap()).is_err(),
+                "{path}"
+            );
         }
         let actor = &good["package"]["manifest"]["floor_activation"]["profiles"]["plain"]["stages"]
             [0]["bands"][0]["choices"][0];

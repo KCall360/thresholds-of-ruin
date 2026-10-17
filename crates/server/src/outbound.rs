@@ -458,9 +458,10 @@ mod tests {
     #[test]
     fn snapshot_batch_admission_is_atomic_and_leases_every_part() {
         let samples: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(concat!(
+            &std::fs::read_to_string(format!(
+                "{}/../protocol/tests/fixtures/wire-v{}.json",
                 env!("CARGO_MANIFEST_DIR"),
-                "/../protocol/tests/fixtures/wire-v45.json"
+                tor_protocol::PROTOCOL_VERSION,
             ))
             .expect("regenerate current wire samples"),
         )

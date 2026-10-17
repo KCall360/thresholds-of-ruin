@@ -14,6 +14,7 @@ pub enum Event {
     Role(AccessRole),
     Snapshot(Box<Snapshot>),
     Update(Box<StreamUpdate>),
+    MapMemory(Box<tor_client_common::MapMemoryUpdate>),
     Status(String),
     /// The server refused a request, in the player's words.
     Refused(String),
@@ -197,6 +198,11 @@ async fn next(
     // before awaiting more input, using the last successful UI publication.
     publish_palette_change(shown, &connection.palette, tx)?;
     let message = connection.next().await?;
+    if matches!(&message, ServerMessage::MapPage {page,..} if page.next.is_none()) {
+        if let Some(update) = connection.state.map_memory_update() {
+            publish(tx, Event::MapMemory(Box::new(update)))?;
+        }
+    }
     publish_palette_change(shown, &connection.palette, tx)?;
     Ok(message)
 }
@@ -317,7 +323,7 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
         ServerMessage::Welcome { .. } => Err("Unexpected repeated welcome".into()),
         ServerMessage::SnapshotPart { .. } => Err("Unexpected unassembled snapshot part".into()),
         // `next` already forwarded the current palette, including stale changes.
-        ServerMessage::Palette { .. } => Ok(()),
+        ServerMessage::Palette { .. } | ServerMessage::MapPage { .. } => Ok(()),
         // Input permissions arrive through ordered readiness updates.
         ServerMessage::Waiting { .. } => Ok(()),
     }
@@ -447,8 +453,30 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
     use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
+    async fn next_non_map_frame(
+        socket: &mut WebSocketStream<TcpStream>,
+    ) -> Option<Result<Message, tokio_tungstenite::tungstenite::Error>> {
+        loop {
+            let frame = socket.next().await?;
+            if let Ok(Message::Text(text)) = &frame {
+                if let Ok(ClientMessage::Request {
+                    request_id,
+                    request,
+                }) = serde_json::from_str::<ClientMessage>(text)
+                {
+                    if let Request::Map { query } = *request {
+                        assert!(request_id.starts_with("map-"));
+                        query.validate().unwrap();
+                        assert!(query.cursor.is_none(), "unanswered maps cannot continue");
+                        continue;
+                    }
+                }
+            }
+            return Some(frame);
+        }
+    }
     async fn receive(socket: &mut WebSocketStream<TcpStream>) -> ClientMessage {
-        let frame = timeout(Duration::from_secs(2), socket.next())
+        let frame = timeout(Duration::from_secs(2), next_non_map_frame(socket))
             .await
             .unwrap()
             .unwrap()
@@ -944,7 +972,7 @@ mod tests {
                     },
                 )
                 .await;
-                if let Some(Ok(Message::Text(text))) = socket.next().await {
+                if let Some(Ok(Message::Text(text))) = next_non_map_frame(&mut socket).await {
                     panic!("request must not be replayed: {text}");
                 }
             });

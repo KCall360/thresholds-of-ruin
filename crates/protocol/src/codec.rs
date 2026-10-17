@@ -188,6 +188,11 @@ pub fn decode_response(text: &str) -> Result<crate::ServerMessage, DecodeError> 
             limit: MAX_RESPONSE_BYTES,
         });
     }
+    if text.len() > crate::MAX_MAP_PAGE_BYTES && response_kind::map_page(text)? {
+        return Err(DecodeError::TooLarge {
+            limit: crate::MAX_MAP_PAGE_BYTES,
+        });
+    }
     if text.len() > crate::MAX_ADVANCEMENT_PAGE_BYTES && response_kind::advancement_page(text)? {
         return Err(DecodeError::TooLarge {
             limit: crate::MAX_ADVANCEMENT_PAGE_BYTES,
@@ -286,15 +291,15 @@ pub fn encode_response(
     limit: usize,
 ) -> Result<EncodedResponse, EncodeError> {
     use crate::{ServerMessage, StateDelta, StreamUpdate, UpdateBody};
-    let limit = limit.min(
-        if matches!(message, ServerMessage::AdvancementPage { .. }) {
-            crate::MAX_ADVANCEMENT_PAGE_BYTES
-        } else if matches!(message, ServerMessage::CreatureStrikePage { .. }) {
-            crate::MAX_STRIKE_PAGE_BYTES
-        } else {
-            MAX_RESPONSE_BYTES
-        },
-    );
+    let limit = limit.min(if matches!(message, ServerMessage::MapPage { .. }) {
+        crate::MAX_MAP_PAGE_BYTES
+    } else if matches!(message, ServerMessage::AdvancementPage { .. }) {
+        crate::MAX_ADVANCEMENT_PAGE_BYTES
+    } else if matches!(message, ServerMessage::CreatureStrikePage { .. }) {
+        crate::MAX_STRIKE_PAGE_BYTES
+    } else {
+        MAX_RESPONSE_BYTES
+    });
     let observation = match message {
         ServerMessage::Update { update } => match &update.body {
             UpdateBody::Observation { state, event } => Some((update, state, event)),
@@ -414,7 +419,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v45.json"
+                "/tests/fixtures/wire-v46.json"
             ))
             .expect("regenerate current wire samples"),
         )
@@ -565,7 +570,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v45.json"
+                "/tests/fixtures/wire-v46.json"
             ))
             .expect("regenerate current wire samples"),
         )

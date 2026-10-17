@@ -4,8 +4,40 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_tungstenite::{accept_async, WebSocketStream};
 
+async fn next_non_map_frame(
+    socket: &mut WebSocketStream<TcpStream>,
+) -> Option<Result<Message, tokio_tungstenite::tungstenite::Error>> {
+    loop {
+        let frame = socket.next().await?;
+        if let Ok(Message::Text(text)) = &frame {
+            if let Ok(ClientMessage::Request {
+                request_id,
+                request,
+            }) = serde_json::from_str::<ClientMessage>(text)
+            {
+                if let Request::Map { query } = *request {
+                    assert!(request_id.starts_with("map-"));
+                    query.validate().unwrap();
+                    assert!(query.cursor.is_none(), "unanswered maps cannot continue");
+                    continue;
+                }
+            }
+        }
+        return Some(frame);
+    }
+}
+fn visible_model(
+    state: &ClientState,
+) -> (Snapshot, Vec<crate::RememberedCell>, Vec<RememberedMapCell>) {
+    (
+        state.snapshot(),
+        state.memory().cloned().collect(),
+        state.map_memory().map(|c| c.appearance()).collect(),
+    )
+}
+
 async fn receive(socket: &mut WebSocketStream<TcpStream>) -> ClientMessage {
-    let frame = timeout(Duration::from_secs(2), socket.next())
+    let frame = timeout(Duration::from_secs(2), next_non_map_frame(socket))
         .await
         .unwrap()
         .unwrap()
@@ -80,7 +112,7 @@ async fn an_expired_recovery_cannot_send_or_apply_queued_traffic_in_any_phase() 
         let mut client = Connection::connect(address, "token".into(), ActorId(1), "test")
             .await
             .unwrap();
-        let before = client.state.clone();
+        let before = visible_model(&client.state);
         client.require_snapshot();
         let recovery = client.recovery.as_mut().unwrap();
         recovery.phase = phase;
@@ -90,7 +122,7 @@ async fn an_expired_recovery_cannot_send_or_apply_queued_traffic_in_any_phase() 
             .unwrap()
             .unwrap_err();
         assert_eq!(error.to_string(), "Stream resynchronization timed out");
-        assert_eq!(client.state, before);
+        assert_eq!(visible_model(&client.state), before);
         assert!(!client.is_synchronized());
         assert!(client.request(Request::AcquireControl).await.is_err());
         drop(client);
@@ -172,7 +204,7 @@ async fn canceled_partial_snapshot_read_keeps_assembly_and_disables_requests() {
         socket.send(Message::Ping(Vec::new().into())).await.unwrap();
         // The client's automatic pong proves its pending read consumed the part
         // and the following ping. Cancel at this barrier, without a timing race.
-        let pong = timeout(Duration::from_secs(2), socket.next())
+        let pong = timeout(Duration::from_secs(2), next_non_map_frame(&mut socket))
             .await
             .unwrap()
             .unwrap()
@@ -187,13 +219,14 @@ async fn canceled_partial_snapshot_read_keeps_assembly_and_disables_requests() {
     let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
         .await
         .unwrap();
-    let before = client.state.clone();
+    let before = visible_model(&client.state);
     tokio::select! {
         message = client.next() => panic!("partial transfer escaped: {message:?}"),
         received = received => received.unwrap(),
     }
     assert_eq!(
-        client.state, before,
+        visible_model(&client.state),
+        before,
         "partial snapshot must not replace the visible model"
     );
     assert!(!client.is_synchronized());
@@ -292,14 +325,14 @@ async fn receipts_keep_original_branch_identity_but_cannot_name_another_actor() 
                     },
                 )
                 .await;
-                if let Some(Ok(Message::Text(text))) = socket.next().await {
+                if let Some(Ok(Message::Text(text))) = next_non_map_frame(&mut socket).await {
                     panic!("receipt handling must not replay input: {text}");
                 }
             });
             let mut client = Connection::connect(address, "token".into(), ActorId(1), "test")
                 .await
                 .unwrap();
-            let before = client.state.clone();
+            let before = visible_model(&client.state);
             let id = client.request(Request::Save).await.unwrap();
             let result = client.next().await;
             if foreign_actor {
@@ -311,13 +344,13 @@ async fn receipts_keep_original_branch_identity_but_cannot_name_another_actor() 
                 assert_eq!(
                     result.unwrap(),
                     ServerMessage::Ack {
-                        context: before.reply_context(),
+                        context: before.0.reply_context(),
                         request_id: id,
                         receipt: expected
                     }
                 );
             }
-            assert_eq!(client.state, before);
+            assert_eq!(visible_model(&client.state), before);
             drop(client);
             server.await.unwrap();
         }
@@ -326,6 +359,15 @@ async fn receipts_keep_original_branch_identity_but_cannot_name_another_actor() 
 
 #[tokio::test]
 async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation() {
+    backpressure_observation(false).await;
+}
+
+#[tokio::test]
+async fn blocked_map_flush_survives_cancellation_without_starving_or_duplicating() {
+    backpressure_observation(true).await;
+}
+
+async fn backpressure_observation(block_map_first: bool) {
     use tokio::io::AsyncReadExt;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -349,11 +391,13 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
         }),
     };
     let expected = update.clone();
+    let map_context = initial.reply_context();
     let mut context = initial.reply_context();
     context.cursor.sequence += 1;
     context.revision = state.revision;
     let (sent, arrived) = tokio::sync::oneshot::channel();
     let (release, drain) = tokio::sync::oneshot::channel::<usize>();
+    let (map_blocked, allow_update) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut socket = accept_async(stream).await.unwrap();
@@ -384,8 +428,14 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
             },
         )
         .await;
-        send(&mut socket, update).await;
-        sent.send(()).unwrap();
+        if block_map_first {
+            sent.send(()).unwrap();
+            allow_update.await.unwrap();
+            send(&mut socket, update).await;
+        } else {
+            send(&mut socket, update).await;
+            sent.send(()).unwrap();
+        }
         // Test-only raw padding fills TCP without retaining an unbounded queue.
         // Drain it before decoding the subsequent real WebSocket query.
         let mut remaining = drain.await.unwrap();
@@ -399,16 +449,64 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
                 .unwrap();
             remaining -= size;
         }
-        let ClientMessage::Request {
-            request_id,
-            request,
-        } = receive(&mut socket).await
-        else {
-            panic!("expected one palette request")
+        let mut obsolete_map = None;
+        let request_id = loop {
+            let frame = timeout(Duration::from_secs(2), socket.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let ClientMessage::Request {
+                request_id,
+                request,
+            } = serde_json::from_str::<ClientMessage>(frame.to_text().unwrap()).unwrap()
+            else {
+                panic!("expected one palette request")
+            };
+            match *request {
+                Request::Map { query } => {
+                    assert!(
+                        obsolete_map.is_none(),
+                        "a canceled blocked Map must not be queued twice"
+                    );
+                    query.validate().unwrap();
+                    assert_eq!(query.context, map_context.input.stream);
+                    assert_eq!(query.base.revision, map_context.revision);
+                    assert!(query.cursor.is_none());
+                    obsolete_map = Some((request_id, query));
+                }
+                Request::Palette => break request_id,
+                other => panic!("expected one palette request, got {other:?}"),
+            }
         };
-        let Request::Palette = *request else {
-            panic!("expected one palette request")
-        };
+        assert!(!block_map_first || obsolete_map.is_some());
+        if let Some((request_id, query)) = obsolete_map {
+            // The newer observation canceled this transfer before the socket
+            // could finish sending it. Its late answer must not be published.
+            send(
+                &mut socket,
+                ServerMessage::MapPage {
+                    context: map_context,
+                    request_id,
+                    page: Box::new(MapPage {
+                        transfer: "obsolete-map".into(),
+                        actor: ActorId(1),
+                        branch: query.branch,
+                        base: query.base,
+                        window: query.window,
+                        start: 0,
+                        page: 0,
+                        total_cells: 0,
+                        complete: true,
+                        ambiguous: false,
+                        limited: false,
+                        cells: vec![],
+                        next: None,
+                    }),
+                },
+            )
+            .await;
+        }
         send(
             &mut socket,
             ServerMessage::Palette {
@@ -449,6 +547,27 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
             written < 32 * 1024 * 1024,
             "test pressure must stay bounded"
         );
+    }
+    if block_map_first {
+        assert!(timeout(Duration::from_millis(50), client.next())
+            .await
+            .is_err());
+        let pending = &client.map_request.as_ref().unwrap().0;
+        assert!(
+            pending.phase == QueryPhase::Flush,
+            "Map must be blocked in flush"
+        );
+        let identity = pending.request_id.clone();
+        assert!(timeout(Duration::from_millis(20), client.next())
+            .await
+            .is_err());
+        let pending = &client.map_request.as_ref().unwrap().0;
+        assert!(pending.phase == QueryPhase::Flush);
+        assert_eq!(
+            pending.request_id, identity,
+            "cancellation retains the queued identity"
+        );
+        map_blocked.send(()).unwrap();
     }
     assert!(timeout(Duration::from_millis(50), client.next())
         .await
@@ -531,6 +650,7 @@ async fn advertised_request_limit_rejects_locally_and_keeps_connection_usable() 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let initial = snapshot();
+    let base_sequence = initial.cursor.sequence;
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut socket = accept_async(stream).await.unwrap();
@@ -560,17 +680,44 @@ async fn advertised_request_limit_rejects_locally_and_keeps_connection_usable() 
             &mut socket,
             ServerMessage::Snapshot {
                 request_id: "attach".into(),
-                snapshot: Box::new(initial),
+                snapshot: Box::new(initial.clone()),
             },
         )
         .await;
-        assert!(
-            matches!(
-                receive(&mut socket).await,
-                ClientMessage::Request { request, .. } if matches!(*request, Request::Snapshot)
-            ),
-            "oversized command must not be sent before the valid query"
-        );
+        for sequence in base_sequence + 1..=base_sequence + 2 {
+            send(
+                &mut socket,
+                ServerMessage::Update {
+                    update: Box::new(StreamUpdate {
+                        context: initial.context.clone(),
+                        actor: initial.actor,
+                        branch: initial.branch.clone(),
+                        cursor: StreamCursor {
+                            sequence,
+                            tick: initial.cursor.tick,
+                        },
+                        body: UpdateBody::Control {
+                            has_control: initial.has_control,
+                        },
+                    }),
+                },
+            )
+            .await;
+        }
+        // Inspect the raw packet: an oversized automatic Map request must not
+        // be swallowed by the unrelated-fixture receive helper.
+        let frame = timeout(Duration::from_secs(2), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        match serde_json::from_str::<ClientMessage>(frame.to_text().unwrap()).unwrap() {
+            ClientMessage::Request {
+                request_id,
+                request,
+            } if matches!(*request, Request::Snapshot) => request_id,
+            _ => panic!("neither oversized command nor automatic Map may precede the valid query"),
+        }
     });
     let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
         .await
@@ -585,8 +732,19 @@ async fn advertised_request_limit_rejects_locally_and_keeps_connection_usable() 
         error.downcast_ref::<EncodeError>(),
         Some(EncodeError::TooLarge { limit: 256 })
     ));
-    client.request(Request::Snapshot).await.unwrap();
-    server.await.unwrap();
+    for sequence in base_sequence + 1..=base_sequence + 2 {
+        assert!(matches!(
+            client.next().await.unwrap(),
+            ServerMessage::Update { .. }
+        ));
+        assert_eq!(client.state.snapshot().cursor.sequence, sequence);
+        assert!(client.is_synchronized());
+        assert!(client.state.map_hydration().failed);
+        assert!(!client.state.map_hydration().pending);
+        assert!(client.map_request.is_none());
+    }
+    let request_id = client.request(Request::Snapshot).await.unwrap();
+    assert_eq!(server.await.unwrap(), request_id);
 }
 
 #[tokio::test]
@@ -1769,6 +1927,330 @@ async fn creature_catalog_rejects_wrong_attachment_actor_and_malformed_payload()
             );
         }
         assert_eq!(client.state.snapshot(), before);
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn spectator_map_hydration_survives_cancellation_without_blocking_live_state() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let initial = snapshot();
+    let expected = initial.clone();
+    let (queried, query_seen) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                user: "test".into(),
+                actors: vec![initial.actor],
+                role: AccessRole::Spectator,
+            },
+        )
+        .await;
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id: "attach".into(),
+                snapshot: Box::new(initial.clone()),
+            },
+        )
+        .await;
+        // Unlike unrelated transport fixtures, this owner inspects every map packet.
+        let packet = socket.next().await.unwrap().unwrap();
+        let ClientMessage::Request {
+            request_id,
+            request,
+        } = serde_json::from_str(packet.to_text().unwrap()).unwrap()
+        else {
+            panic!("map request")
+        };
+        let Request::Map { query } = *request else {
+            panic!("automatic map query")
+        };
+        assert_eq!(query.context, initial.context);
+        assert!(query.cursor.is_none());
+        queried.send(()).unwrap();
+        released.await.unwrap();
+        let cell = |x, key: &str| RememberedMapCell {
+            key: key.into(),
+            position: Position {
+                x,
+                y: query.window.min.y,
+                z: query.window.min.z,
+            },
+            wall: false,
+            material: "stone".into(),
+            asset: None,
+            place_hint: false,
+            stairs_up: false,
+            stairs_down: false,
+            door: None,
+            ground_items: vec![],
+        };
+        let mut page = MapPage {
+            transfer: "hydration".into(),
+            actor: initial.actor,
+            branch: initial.branch.clone(),
+            base: query.base,
+            window: query.window,
+            start: 0,
+            page: 0,
+            total_cells: 2,
+            complete: true,
+            ambiguous: false,
+            limited: false,
+            cells: vec![cell(query.window.min.x, "hydrated-first")],
+            next: Some(MapPageCursor {
+                transfer: "hydration".into(),
+                next: 1,
+                page: 1,
+            }),
+        };
+        send(
+            &mut socket,
+            ServerMessage::MapPage {
+                context: initial.reply_context(),
+                request_id,
+                page: Box::new(page.clone()),
+            },
+        )
+        .await;
+        let packet = socket.next().await.unwrap().unwrap();
+        let ClientMessage::Request {
+            request_id,
+            request,
+        } = serde_json::from_str(packet.to_text().unwrap()).unwrap()
+        else {
+            panic!("continuation")
+        };
+        let Request::Map { query: next } = *request else {
+            panic!("map continuation")
+        };
+        assert_eq!(
+            next.cursor, page.next,
+            "canceled next must not resend its first query"
+        );
+        page.start = 1;
+        page.page = 1;
+        page.cells = vec![cell(query.window.min.x + 1, "hydrated-second")];
+        page.next = None;
+        send(
+            &mut socket,
+            ServerMessage::MapPage {
+                context: initial.reply_context(),
+                request_id,
+                page: Box::new(page),
+            },
+        )
+        .await;
+    });
+    let mut client = Connection::connect(address, "test".into(), expected.actor, "headless")
+        .await
+        .unwrap();
+    tokio::select! {
+        value = client.next() => panic!("no map page released yet: {value:?}"),
+        seen = query_seen => seen.unwrap(),
+    }
+    assert!(client.is_synchronized());
+    assert_eq!(client.state.snapshot(), expected);
+    assert!(client.state.map_hydration().pending);
+    release.send(()).unwrap();
+    let first = client.next().await.unwrap();
+    assert!(matches!(first,ServerMessage::MapPage{page,..} if page.next.is_some()));
+    assert!(client
+        .state
+        .memory()
+        .all(|cell| cell.key != "hydrated-first"));
+    let last = client.next().await.unwrap();
+    assert!(matches!(last,ServerMessage::MapPage{page,..} if page.next.is_none()));
+    assert!(client.state.map_hydration().complete);
+    assert!(client
+        .state
+        .memory()
+        .any(|cell| cell.key == "hydrated-second"));
+    assert_eq!(client.state.snapshot(), expected);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn manual_map_request_is_rejected_without_sending_or_replacing_automatic_state() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let initial = snapshot();
+    let actor = initial.actor;
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                user: "test".into(),
+                actors: vec![actor],
+                role: AccessRole::Spectator,
+            },
+        )
+        .await;
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id: "attach".into(),
+                snapshot: Box::new(initial),
+            },
+        )
+        .await;
+        assert!(
+            !matches!(socket.next().await, Some(Ok(Message::Text(_)))),
+            "manual request must not reach the wire"
+        );
+    });
+    let mut client = Connection::connect(address, "test".into(), actor, "headless")
+        .await
+        .unwrap();
+    let before = client.state.clone();
+    let query = MapQuery {
+        context: client.state.context().clone(),
+        branch: client.state.branch().clone(),
+        base: client.state.observation_base(),
+        window: MapWindow::normal(),
+        cursor: None,
+    };
+    assert_eq!(
+        client
+            .request(Request::Map { query })
+            .await
+            .unwrap_err()
+            .to_string(),
+        "Map hydration is managed automatically"
+    );
+    assert_eq!(client.state, before);
+    drop(client);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn canceled_map_reply_is_discarded_and_map_error_cannot_cancel_another_context() {
+    for late in [true, false] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let initial = snapshot();
+        let actor = initial.actor;
+        let (queried, seen) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                    user: "test".into(),
+                    actors: vec![actor],
+                    role: AccessRole::Spectator,
+                },
+            )
+            .await;
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Snapshot {
+                    request_id: "attach".into(),
+                    snapshot: Box::new(initial.clone()),
+                },
+            )
+            .await;
+            let packet = socket.next().await.unwrap().unwrap();
+            let ClientMessage::Request {
+                request_id,
+                request,
+            } = serde_json::from_str(packet.to_text().unwrap()).unwrap()
+            else {
+                panic!("query")
+            };
+            let Request::Map { query } = *request else {
+                panic!("map")
+            };
+            queried.send(()).unwrap();
+            released.await.unwrap();
+            if late {
+                send(
+                    &mut socket,
+                    ServerMessage::MapPage {
+                        context: initial.reply_context(),
+                        request_id,
+                        page: Box::new(MapPage {
+                            transfer: "late".into(),
+                            actor,
+                            branch: initial.branch.clone(),
+                            base: query.base,
+                            window: query.window,
+                            start: 0,
+                            page: 0,
+                            total_cells: 0,
+                            complete: true,
+                            ambiguous: false,
+                            limited: false,
+                            cells: vec![],
+                            next: None,
+                        }),
+                    },
+                )
+                .await;
+                send(&mut socket, ServerMessage::Waiting { on: Waiting::You }).await;
+            } else {
+                let mut context = initial.reply_context();
+                context.actor = ActorId(actor.0 + 1);
+                send(
+                    &mut socket,
+                    ServerMessage::Error {
+                        scope: ErrorScope::Attached { context },
+                        request_id: Some(request_id),
+                        code: ErrorCode::InvalidAction,
+                        message: "Wrong actor".into(),
+                    },
+                )
+                .await;
+            }
+        });
+        let mut client = Connection::connect(address, "test".into(), actor, "headless")
+            .await
+            .unwrap();
+        tokio::select! { message = client.next() => panic!("reply before release: {message:?}"), ready = seen => ready.unwrap(), }
+        let before = visible_model(&client.state);
+        if late {
+            client.map_request.as_mut().unwrap().0.deadline =
+                tokio::time::Instant::now() - Duration::from_millis(1);
+        }
+        release.send(()).unwrap();
+        let result = client.next().await;
+        if late {
+            assert!(matches!(result.unwrap(), ServerMessage::Waiting { .. }));
+            assert!(client.state.map_hydration().failed);
+            assert!(client.is_synchronized());
+        } else {
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid map error context"));
+            assert!(
+                client.state.map_hydration().pending,
+                "foreign error cannot mutate the assembly"
+            );
+        }
+        assert_eq!(visible_model(&client.state), before);
         server.await.unwrap();
     }
 }

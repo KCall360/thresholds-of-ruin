@@ -8,12 +8,50 @@ use tokio::{
     time::timeout,
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
-use tor_client_common::Connection;
+use tor_client_common::{ClientState, Connection, RememberedCell};
 use tor_protocol::*;
 
 type Server = WebSocketStream<TcpStream>;
+
+/// This fault-injection peer deliberately leaves optional map hydration pending.
+/// Recognize only validated automatic initial queries; all recovery/gameplay
+/// traffic still reaches the scenario's original exact request assertions.
+async fn next_non_map_frame(
+    server: &mut Server,
+) -> Option<Result<Message, tokio_tungstenite::tungstenite::Error>> {
+    loop {
+        let frame = server.next().await?;
+        if let Ok(Message::Text(text)) = &frame {
+            if let ClientMessage::Request {
+                request_id,
+                request,
+            } = serde_json::from_str::<ClientMessage>(text).unwrap()
+            {
+                if let Request::Map { query } = *request {
+                    assert!(request_id.starts_with("map-"));
+                    query.validate().unwrap();
+                    assert!(query.cursor.is_none(), "unanswered maps cannot continue");
+                    assert_eq!(query.context.stream, super::stream_context(0).stream);
+                    assert_eq!(query.branch, BranchId("validation".into()));
+                    continue;
+                }
+            }
+        }
+        return Some(frame);
+    }
+}
+
+/// Snapshot includes permissions, history and all authoritative live fields;
+/// appearance stores retain their own assertions independently of bookkeeping.
+fn visible_model(state: &ClientState) -> (Snapshot, Vec<RememberedCell>, Vec<RememberedMapCell>) {
+    (
+        state.snapshot(),
+        state.memory().cloned().collect(),
+        state.map_memory().map(|cell| cell.appearance()).collect(),
+    )
+}
 async fn receive(server: &mut Server) -> ClientMessage {
-    let message = timeout(Duration::from_secs(2), server.next())
+    let message = timeout(Duration::from_secs(2), next_non_map_frame(server))
         .await
         .unwrap()
         .unwrap()
@@ -79,7 +117,7 @@ async fn an_attached_connection_does_not_treat_unscoped_errors_as_host_outcomes(
                 },
             )
             .await;
-            if let Some(Ok(Message::Text(text))) = server.next().await {
+            if let Some(Ok(Message::Text(text))) = next_non_map_frame(&mut server).await {
                 panic!("unscoped error must not send host requests: {text}")
             }
         });
@@ -96,7 +134,7 @@ async fn an_attached_connection_does_not_treat_unscoped_errors_as_host_outcomes(
                 "Host error has no current attachment"
             }
         );
-        assert_eq!(client.state, before);
+        assert_eq!(visible_model(&client.state), visible_model(&before));
         drop(client);
         server.await.unwrap();
     }
@@ -154,7 +192,7 @@ async fn foreign_reply_identity_fails_even_while_recovering_and_never_confirms_a
                     },
                 )
                 .await;
-                if let Some(Ok(Message::Text(text))) = server.next().await {
+                if let Some(Ok(Message::Text(text))) = next_non_map_frame(&mut server).await {
                     panic!("foreign identity must not cause another request: {text}")
                 }
             });
@@ -171,7 +209,7 @@ async fn foreign_reply_identity_fails_even_while_recovering_and_never_confirms_a
                     "Reply belongs to another attachment"
                 }
             );
-            assert_eq!(client.state, before);
+            assert_eq!(visible_model(&client.state), visible_model(&before));
             drop(client);
             server.await.unwrap();
         }
@@ -242,7 +280,7 @@ async fn a_reply_naming_missing_permissions_repairs_before_completing_but_keeps_
                 },
             )
             .await;
-            if let Some(Ok(Message::Text(text))) = server.next().await {
+            if let Some(Ok(Message::Text(text))) = next_non_map_frame(&mut server).await {
                 panic!("input must not be replayed: {text}")
             }
         });
@@ -257,7 +295,7 @@ async fn a_reply_naming_missing_permissions_repairs_before_completing_but_keeps_
             !client.is_synchronized(),
             "a reply must not install an unseen permission generation"
         );
-        assert_eq!(client.state, before);
+        assert_eq!(visible_model(&client.state), visible_model(&before));
         assert!(pending.observe(&client, &reply).is_none());
         let reset = client.next().await.unwrap();
         assert!(client.is_recovery_snapshot(&reset));
@@ -338,7 +376,7 @@ async fn stale_query_payloads_are_quarantined_through_repair_even_if_later_heade
                 },
             )
             .await;
-            if let Some(Ok(Message::Text(text))) = server.next().await {
+            if let Some(Ok(Message::Text(text))) = next_non_map_frame(&mut server).await {
                 panic!("quarantined payload must not send work: {text}")
             }
         });
@@ -475,7 +513,7 @@ async fn a_sequence_gap_requests_a_snapshot_without_replaying_input_or_losing_pe
             },
         )
         .await;
-        if let Some(Ok(Message::Text(text))) = server.next().await {
+        if let Some(Ok(Message::Text(text))) = next_non_map_frame(&mut server).await {
             panic!("recovery must not send a duplicate snapshot or gameplay input: {text}");
         }
     });
@@ -486,7 +524,7 @@ async fn a_sequence_gap_requests_a_snapshot_without_replaying_input_or_losing_pe
     let pending = client.request(Request::Save).await.unwrap();
     let message = client.next().await.unwrap();
     assert!(matches!(message, ServerMessage::Ack { request_id, .. } if request_id == pending));
-    assert_eq!(client.state, before);
+    assert_eq!(visible_model(&client.state), visible_model(&before));
     // Cancellation while waiting for the reset must preserve the same pending recovery.
     assert!(timeout(Duration::from_millis(20), client.next())
         .await
@@ -502,7 +540,7 @@ async fn a_sequence_gap_requests_a_snapshot_without_replaying_input_or_losing_pe
         })
         .await
         .is_err());
-    assert_eq!(client.state, before);
+    assert_eq!(visible_model(&client.state), visible_model(&before));
     release.send(()).unwrap();
     let message = client.next().await.unwrap();
     assert!(client.is_recovery_snapshot(&message));
@@ -617,7 +655,7 @@ async fn an_invalid_correlated_recovery_snapshot_fails_without_publishing_or_ret
                 )
                 .await;
             }
-            if let Some(Ok(Message::Text(text))) = server.next().await {
+            if let Some(Ok(Message::Text(text))) = next_non_map_frame(&mut server).await {
                 panic!("invalid recovery must not create a retry loop: {text}");
             }
         });
@@ -634,7 +672,11 @@ async fn an_invalid_correlated_recovery_snapshot_fails_without_publishing_or_ret
             }),
             "{mode}: {error}"
         );
-        assert_eq!(client.state, before, "{mode}");
+        assert_eq!(
+            visible_model(&client.state),
+            visible_model(&before),
+            "{mode}"
+        );
         assert!(!client.is_synchronized());
         assert!(client.request(Request::Snapshot).await.is_err());
         drop(client);
@@ -739,7 +781,7 @@ async fn oversized_fragmented_response_fails_before_deserialization_or_stream_re
             .await
             .unwrap();
         // Any snapshot request would turn a capacity violation into unnecessary repair.
-        while let Some(Ok(message)) = server.next().await {
+        while let Some(Ok(message)) = next_non_map_frame(&mut server).await {
             if let Message::Text(text) = message {
                 panic!("oversized input must not cause repair: {text}");
             }
@@ -829,7 +871,7 @@ async fn fragmented_response_depth_limit_rejects_before_state_changes_or_repair(
                     .await
                     .unwrap();
             }
-            while let Some(Ok(message)) = server.next().await {
+            while let Some(Ok(message)) = next_non_map_frame(&mut server).await {
                 assert!(
                     !matches!(message, Message::Text(_)),
                     "resource rejection must not send a repair or gameplay request"
@@ -851,7 +893,7 @@ async fn fragmented_response_depth_limit_rejects_before_state_changes_or_repair(
                 result.is_err(),
                 "overdeep ignored fields must reject before publication"
             );
-            assert_eq!(client.state, before);
+            assert_eq!(visible_model(&client.state), visible_model(&before));
         } else {
             assert!(matches!(result.unwrap(), ServerMessage::Update { .. }));
             assert_eq!(client.state.state().revision, 1);

@@ -364,3 +364,115 @@ fn palette_tints_terrain_without_replacing_geometry_state_or_memory_cues() {
         );
     }
 }
+
+#[test]
+fn cold_hydrated_item_and_door_draw_without_action_handles_and_preserve_cell_travel() {
+    let mut client = ClientState::from_snapshot(snapshot(true)).unwrap();
+    let query = client.next_map_query().unwrap();
+    client.bind_map_query(&query, "hydrate").unwrap();
+    let cell = |x, key: &str| RememberedMapCell {
+        key: key.into(),
+        position: Position { x, y: 0, z: 0 },
+        wall: false,
+        material: "stone".into(),
+        asset: None,
+        place_hint: false,
+        stairs_up: false,
+        stairs_down: false,
+        door: None,
+        ground_items: vec![],
+    };
+    let mut item = cell(1, "remembered-floor");
+    item.ground_items.push(MapItemAppearance {
+        class: ItemClass::Potion,
+        name: "amber bottle".into(),
+        description: "A bottle".into(),
+        appearance: "amber bottle".into(),
+        identified: false,
+        quantity: 2,
+        asset: None,
+    });
+    let mut door = cell(2, "remembered-door");
+    door.door = Some(MapDoorAppearance {
+        name: "oak door".into(),
+        description: "Old oak".into(),
+        open: false,
+        asset: None,
+    });
+    let page = MapPage {
+        transfer: "cold".into(),
+        actor: ActorId(1),
+        branch: client.branch().clone(),
+        base: query.base,
+        window: query.window,
+        start: 0,
+        page: 0,
+        total_cells: 2,
+        complete: true,
+        ambiguous: false,
+        limited: false,
+        cells: vec![item, door],
+        next: None,
+    };
+    let response = ServerMessage::MapPage {
+        context: client.reply_context(),
+        request_id: "hydrate".into(),
+        page: Box::new(page.clone()),
+    };
+    let bytes = encoded_length(&response, MAX_MAP_PAGE_BYTES)
+        .unwrap()
+        .unwrap();
+    client
+        .accept_map_page(&client.reply_context(), "hydrate", &page, bytes)
+        .unwrap();
+    assert!(client.state().observation.ground_items.is_empty());
+    assert!(client
+        .state()
+        .observation
+        .visible_cells
+        .iter()
+        .all(|cell| cell.door.is_none()));
+    let mut presented = ClientState::from_snapshot(snapshot(true)).unwrap();
+    presented
+        .apply_map_memory_update(client.map_memory_update().unwrap())
+        .unwrap();
+    let tiles = render::map_tiles(&presented, &Default::default());
+    let bottle = tiles.iter().find(|tile| tile.position.x == 1).unwrap();
+    assert_eq!(bottle.glyph, '!');
+    assert!(bottle.remembered);
+    assert_eq!(bottle.color, render::MEMORY_COLOR);
+    let door = tiles.iter().find(|tile| tile.position.x == 2).unwrap();
+    assert_eq!(door.glyph, '+');
+    assert!(door.remembered);
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(presented);
+    app.ready();
+    let request = super::request(app.input(Input::Click {
+        x: bottle.center.0,
+        y: bottle.center.1,
+    }))
+    .unwrap();
+    assert!(
+        matches!(request,Request::Command {command:Command::Travel {destination,..},..} if destination == "remembered-floor")
+    );
+}
+
+#[test]
+fn current_pile_wins_over_a_lower_remembered_pile_in_the_same_column() {
+    let mut first = snapshot(false);
+    let view = &mut Arc::make_mut(&mut first.state).observation;
+    view.visible_cells[1].position.z = -2;
+    view.ground_items[0].position.z = -2;
+    view.ground_items[0].item.class = ItemClass::Potion;
+    let mut state = ClientState::from_snapshot(first).unwrap();
+    let mut next = snapshot(false);
+    next.context.epoch = 1;
+    let view = &mut Arc::make_mut(&mut next.state).observation;
+    view.ground_items[0].item.class = ItemClass::Weapon;
+    // Keep a unique stationary anchor; the foot cell has another physical key.
+    view.visible_cells[1].key = "upper-floor".into();
+    state.replace_snapshot(next).unwrap();
+    let tiles = render::map_tiles(&state, &Default::default());
+    assert_eq!(tiles.iter().find(|t| t.position.x == 1).unwrap().glyph, ')');
+}

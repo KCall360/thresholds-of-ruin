@@ -15,6 +15,7 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 #[derive(Clone, Copy, Default)]
 struct DiagnosticOutput {
     omit_memory: bool,
+    compact_background: bool,
 }
 
 impl DiagnosticOutput {
@@ -23,11 +24,49 @@ impl DiagnosticOutput {
         mut fields: serde_json::Value,
         state: &tor_client_common::ClientState,
     ) -> serde_json::Value {
-        if !self.omit_memory {
-            fields["memory"] = serde_json::json!(state.memory().collect::<Vec<_>>());
+        // Background transport is still emitted verbatim. Only the repeated
+        // derived snapshot is omitted, and the absence is explicit. Every
+        // observation/lifecycle update, ready result and error stays complete.
+        if self.compact_background
+            && fields["type"] != "ready"
+            && fields["error"].is_null()
+            && matches!(
+                fields["message"]["type"].as_str(),
+                Some("map_page" | "palette" | "waiting")
+            )
+        {
+            return serde_json::json!({
+                "type": fields["type"],
+                "message": fields["message"],
+                "error": fields["error"],
+                "map_hydration": state.map_hydration(),
+                "state_omitted": true,
+            });
         }
+        if !self.omit_memory {
+            fields["memory"] = diagnostic_memory(state);
+        }
+        fields["map_hydration"] = serde_json::json!(state.map_hydration());
         fields
     }
+}
+
+fn diagnostic_memory(state: &tor_client_common::ClientState) -> serde_json::Value {
+    let cells: Vec<_> = state
+        .memory()
+        .map(|cell| {
+            let mut value = serde_json::json!(cell);
+            // Preserve the harmless diagnostic item wrapper, without stale targets
+            // or affordances. The item's position is its owning cell's last sighting.
+            value["ground_items"] = serde_json::json!(cell
+                .ground_items
+                .iter()
+                .map(|item| serde_json::json!({"item":item,"position":cell.position}))
+                .collect::<Vec<_>>());
+            value
+        })
+        .collect();
+    serde_json::json!(cells)
 }
 
 #[derive(Deserialize)]
@@ -78,13 +117,14 @@ async fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--omit-memory]\nSet TOR_SERVER_TOKEN. Send JSON lines: advancement, act, resume_intention, cancel_intention, wizard, request, inspect, quit. cancel_intention accepts an optional step direction after a completed strike.\n--omit-memory omits only accumulated memory from diagnostic JSON; current observations and client state are unchanged.\nSee docs/reference/headless.md for the input and output contract.");
+                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--omit-memory] [--compact-background]\nSet TOR_SERVER_TOKEN. Send JSON lines: advancement, act, resume_intention, cancel_intention, wizard, request, inspect, quit. cancel_intention accepts an optional step direction after a completed strike.\n--omit-memory omits only accumulated memory from diagnostic JSON; current observations and client state are unchanged.\n--compact-background retains raw map/palette/waiting messages but omits their repeated derived state; ready, updates and errors stay complete.\nSee docs/reference/headless.md for the input and output contract.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
             "--actor" => actor = ActorId(args.next().ok_or("Missing --actor ID")?.parse()?),
             "--observe" => observe = true,
             "--omit-memory" => output.omit_memory = true,
+            "--compact-background" => output.compact_background = true,
             _ => return Err("Unknown command-line option".into()),
         }
     }
@@ -357,6 +397,78 @@ mod tests {
     }
 
     #[test]
+    fn compact_background_keeps_raw_messages_and_marks_omitted_derived_state() {
+        let state = diagnostic_state(512);
+        let before = state.clone();
+        for message in [
+            serde_json::json!({"type":"map_page", "request_id":"map-test", "page":{"cells":[{"key":"known", "description":"raw map payload"}]}}),
+            serde_json::json!({"type":"palette", "assets":["raw-asset"]}),
+            serde_json::json!({"type":"waiting", "on":"others"}),
+        ] {
+            let mut fields = retained_diagnostic_fields(&state);
+            fields["message"] = message.clone();
+            let full = DiagnosticOutput::default().project(fields.clone(), &state);
+            let compact = DiagnosticOutput {
+                compact_background: true,
+                ..Default::default()
+            }
+            .project(fields, &state);
+            assert_eq!(compact["message"], message);
+            assert_eq!(compact["type"], full["type"]);
+            assert_eq!(compact["error"], full["error"]);
+            assert_eq!(compact["map_hydration"], full["map_hydration"]);
+            assert_eq!(compact["state_omitted"], true);
+            assert!(compact.get("state").is_none());
+            assert!(compact.get("history").is_none());
+            assert!(
+                serde_json::to_vec(&compact).unwrap().len() * 2
+                    < serde_json::to_vec(&full).unwrap().len()
+            );
+        }
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn compact_background_preserves_ready_observations_and_every_error_in_full() {
+        let state = diagnostic_state(512);
+        for kind in ["ready", "response", "update"] {
+            for message in [
+                serde_json::json!({"type":"snapshot"}),
+                serde_json::json!({"type":"update", "update":{"body":{"type":"observation"}}}),
+                serde_json::json!({"type":"update", "update":{"body":{"type":"intention"}}}),
+                serde_json::json!({"type":"error", "request_id":"map-expired", "code":"stale_context", "message":"raw error"}),
+            ] {
+                let mut fields = retained_diagnostic_fields(&state);
+                fields["type"] = kind.into();
+                fields["message"] = message;
+                let full = DiagnosticOutput::default().project(fields.clone(), &state);
+                let compact = DiagnosticOutput {
+                    compact_background: true,
+                    ..Default::default()
+                }
+                .project(fields, &state);
+                assert_eq!(compact, full);
+            }
+        }
+        for kind in ["ready", "response"] {
+            let mut fields = retained_diagnostic_fields(&state);
+            fields["type"] = kind.into();
+            fields["message"] = serde_json::json!({"type":"map_page"});
+            if kind == "response" {
+                fields["error"] = "local failure".into();
+            }
+            assert_eq!(
+                DiagnosticOutput {
+                    compact_background: true,
+                    ..Default::default()
+                }
+                .project(fields.clone(), &state),
+                DiagnosticOutput::default().project(fields, &state)
+            );
+        }
+    }
+
+    #[test]
     fn creature_catalog_reply_is_preserved_by_both_headless_projection_modes() {
         let state = diagnostic_state(2);
         let message: ServerMessage = serde_json::from_value(serde_json::json!({
@@ -365,7 +477,11 @@ mod tests {
         })).unwrap();
         let fields = serde_json::json!({"type":"response", "message":message});
         for omit_memory in [false, true] {
-            let result = DiagnosticOutput { omit_memory }.project(fields.clone(), &state);
+            let result = DiagnosticOutput {
+                omit_memory,
+                ..Default::default()
+            }
+            .project(fields.clone(), &state);
             assert_eq!(result["message"], fields["message"]);
             assert_eq!(result["message"]["request_id"], "catalog");
         }
@@ -377,12 +493,19 @@ mod tests {
         let before = state.clone();
         let retained = retained_diagnostic_fields(&state);
         let full = DiagnosticOutput::default().project(retained.clone(), &state);
-        let projected = DiagnosticOutput { omit_memory: true }.project(retained.clone(), &state);
-        let memory = serde_json::json!(state.memory().collect::<Vec<_>>());
+        let projected = DiagnosticOutput {
+            omit_memory: true,
+            ..Default::default()
+        }
+        .project(retained.clone(), &state);
+        let memory = diagnostic_memory(&state);
         let mut expected_full = retained.clone();
         expected_full["memory"] = memory;
+        expected_full["map_hydration"] = serde_json::json!(state.map_hydration());
         assert_eq!(full, expected_full);
-        assert_eq!(projected, retained);
+        let mut expected_projected = retained.clone();
+        expected_projected["map_hydration"] = serde_json::json!(state.map_hydration());
+        assert_eq!(projected, expected_projected);
         assert_eq!(full["memory"].as_array().unwrap().len(), 512);
         assert_eq!(
             projected["state"]["observation"]["visible_cells"]
@@ -407,7 +530,11 @@ mod tests {
             let state = diagnostic_state(remembered_cells);
             let retained = retained_diagnostic_fields(&state);
             let full = DiagnosticOutput::default().project(retained.clone(), &state);
-            let projected = DiagnosticOutput { omit_memory: true }.project(retained, &state);
+            let projected = DiagnosticOutput {
+                omit_memory: true,
+                ..Default::default()
+            }
+            .project(retained, &state);
             let full_bytes = serde_json::to_vec(&full).unwrap();
             let projected_bytes = serde_json::to_vec(&projected).unwrap();
             assert_eq!(

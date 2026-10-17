@@ -4,12 +4,35 @@ use std::{
     borrow::Borrow,
     cmp::Ordering,
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::{Arc, Weak},
 };
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct Shared<T>(Arc<T>);
+
+/// Non-owning identity of an immutable allocation. The weak control block
+/// prevents address reuse from making a different allocation compare equal.
+pub struct SharedIdentity<T>(Weak<T>);
+impl<T> Clone for SharedIdentity<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+impl<T> std::fmt::Debug for SharedIdentity<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedIdentity")
+            .field("alive", &(self.0.strong_count() > 0))
+            .finish()
+    }
+}
+impl<T> SharedIdentity<T> {
+    pub fn matches(&self, value: &Shared<T>) -> bool {
+        self.0
+            .upgrade()
+            .is_some_and(|root| Arc::ptr_eq(&root, &value.0))
+    }
+}
 
 impl<T> Borrow<T> for Shared<T> {
     fn borrow(&self) -> &T {
@@ -54,6 +77,13 @@ impl<T> Shared<T> {
     pub fn shares_storage(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
+    pub fn weak_identity(&self) -> SharedIdentity<T> {
+        SharedIdentity(Arc::downgrade(&self.0))
+    }
+    /// Diagnostic COW accounting; does not grant gameplay authority.
+    pub fn is_shared(&self) -> bool {
+        Arc::strong_count(&self.0) > 1
+    }
 }
 impl<T> Deref for Shared<T> {
     type Target = T;
@@ -71,6 +101,26 @@ impl<T: Clone> DerefMut for Shared<T> {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn weak_identity_does_not_retain_payload_or_match_cow_and_new_allocations() {
+        let mut value = Shared::new(vec![1]);
+        let identity = value.weak_identity();
+        assert!(identity.matches(&value));
+        value.push(2);
+        assert!(
+            !identity.matches(&value),
+            "even a sole strong owner detaches weak identities on mutation"
+        );
+        let identity = value.weak_identity();
+        drop(value);
+        assert!(!identity.matches(&Shared::new(vec![1, 2])));
+        assert_eq!(
+            identity.0.strong_count(),
+            0,
+            "weak validation evidence must not retain history"
+        );
+    }
 
     #[test]
     fn ordered_shared_values_borrow_content_and_detach_on_edit() {

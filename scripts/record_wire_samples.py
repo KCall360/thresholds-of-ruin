@@ -110,6 +110,11 @@ CLIENT = [
         {"type": "release_control"},
         {"type": "snapshot"},
         {"type": "palette"},
+        {"type": "map", "query": {
+            "context": {"stream": "sample-attachment", "epoch": "1"},
+            "branch": "branch-1", "base": {"cursor": {"sequence": "1", "tick": "1"}, "revision": "3"},
+            "window": {"min": {"x": -31, "y": -16, "z": -2}, "max": {"x": 31, "y": 16, "z": 3}},
+            "cursor": None}},
         {"type": "history", "before": "entry-1", "limit": 20},
         *({"type": "command", "context": {
             "stream": {"stream": "sample-attachment", "epoch": "1"}, "readiness_revision": "3"},
@@ -262,6 +267,10 @@ class Recorder(ProcessTestCase):
     def runTest(self):
         server = self.server(scenario="generated-filler", seed=5)
         player, initial = self.client()
+        # Capture one actual automatic map page before later observations can
+        # supersede its hydration. Ordinary readiness remains independent.
+        if not initial.get("map_hydration", {}).get("complete"):
+            self.frame(player, lambda frame: frame.get("map_hydration", {}).get("complete"))
         watcher, _ = self.client(SPECTATOR_TOKEN)
         self.request(player, {"type": "palette"})
         self.request(player, {"type": "history", "limit": 5, "before": None})

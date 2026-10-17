@@ -692,6 +692,7 @@ mod refresh_tests {
             position: Position { x: 2, y: 1, z: 0 },
         };
         let cell = tor_world::SightCell {
+            physical: true,
             location,
             rotation: 0,
             wall: false,

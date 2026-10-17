@@ -31,6 +31,27 @@ impl<K, V> Default for RegionMap<K, V> {
     }
 }
 impl<K: RegionKey, V> RegionMap<K, V> {
+    /// Immutable bucket access for the explored-map checkpoint owner. Callers
+    /// retain Shared ownership while assigning call-local canonical identities.
+    pub(crate) fn shared_regions(
+        &self,
+    ) -> impl Iterator<Item = (&RegionId, &Shared<BTreeMap<K, V>>)> {
+        self.regions.iter()
+    }
+    pub(crate) fn from_shared_region(region: RegionId, bucket: Shared<BTreeMap<K, V>>) -> Self {
+        Self {
+            regions: BTreeMap::from([(region, bucket)]),
+        }
+    }
+    pub fn region_count(&self) -> usize {
+        self.regions.len()
+    }
+    pub fn copy_on_write_entries(&self, region: RegionId) -> usize {
+        self.regions
+            .get(&region)
+            .filter(|map| map.is_shared())
+            .map_or(0, |map| map.len())
+    }
     pub fn region(&self, region: RegionId) -> Option<&BTreeMap<K, V>> {
         self.regions.get(&region).map(|map| &**map)
     }

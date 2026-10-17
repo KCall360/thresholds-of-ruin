@@ -14,6 +14,8 @@ mod engine;
 pub mod generation_recipe;
 pub mod generator;
 mod history_index;
+mod map_memory;
+pub use map_memory::PreparedMapProjection;
 mod outbound;
 pub mod procedural_world;
 mod wizard_creatures;

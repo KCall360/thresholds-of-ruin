@@ -354,25 +354,46 @@ fn explored_saved_fixture_checkpoint_matches_counting_diagnostic_and_reloads() {
         }
         let before = engine.state(ActorId(1)).unwrap();
         let counts = engine.profile_counts();
-        let measured = engine.profile_checkpoint_encoding().unwrap().0;
-        let logical = engine.profile_checkpoint_json_encoding().unwrap().0;
+        let (measured, compressed_encoding_elapsed) = engine.profile_checkpoint_encoding().unwrap();
+        let (logical, json_encoding_elapsed) = engine.profile_checkpoint_json_encoding().unwrap();
         assert_eq!(engine.state(ActorId(1)).unwrap(), before);
         assert_eq!(engine.profile_counts(), counts);
         assert!(
             logical < 16 * 1024 * 1024,
             "explored checkpoint must fit with headroom: {regions} regions, {logical} logical bytes"
         );
+        let save_started = std::time::Instant::now();
         engine.flush().unwrap();
+        let save_elapsed = save_started.elapsed();
         assert_eq!(engine.save_status().checkpoint_sequence, counts.0 as u64);
         assert_eq!(engine.save_status().checkpoint_bytes, measured);
         for _ in 0..3 {
             step(&mut engine, Action::Wait);
         }
+        let tail_save_started = std::time::Instant::now();
         engine.flush().unwrap();
+        let tail_save_elapsed = tail_save_started.elapsed();
         let before = engine.state(ActorId(1)).unwrap();
         let counts = engine.profile_counts();
         drop(engine);
+        let reopen_started = std::time::Instant::now();
         let resumed = Engine::open(&path, scenario).unwrap();
+        let reopen_elapsed = reopen_started.elapsed();
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "kind": "checkpoint_capacity",
+                "case": "explored_regions",
+                "regions": regions,
+                "logical_json_bytes": logical,
+                "compressed_checkpoint_bytes": measured,
+                "json_capture_encode_ms": json_encoding_elapsed.as_secs_f64() * 1000.0,
+                "compressed_capture_encode_ms": compressed_encoding_elapsed.as_secs_f64() * 1000.0,
+                "checkpoint_save_barrier_wait_ms": save_elapsed.as_secs_f64() * 1000.0,
+                "tail_save_barrier_wait_ms": tail_save_elapsed.as_secs_f64() * 1000.0,
+                "reopen_ms": reopen_elapsed.as_secs_f64() * 1000.0,
+            })
+        );
         assert_eq!(resumed.state(ActorId(1)).unwrap(), before);
         assert_eq!(resumed.profile_counts(), counts);
         assert_eq!(resumed.recovery_profile().records_replayed, 3);

@@ -1,4 +1,4 @@
-"""Native ASCII remembered map, using only received client observations."""
+"""Native ASCII remembered map, using only server-disclosed appearances."""
 import json
 import os
 import shutil
@@ -76,9 +76,25 @@ class AsciiMemoryProcesses(ProcessTestCase):
         window.child.wait(timeout=10)
         observer.stop(); server.stop()
         self.server()
-        _, resumed = self.window()
-        self.assertEqual(resumed["state"],refreshed["state"])
-        self.assertFalse(any(t["remembered"] for t in resumed["map_tiles"]))
+        window, resumed = self.window()
+        restored_position = {"x": 4, "y": 0, "z": 0}
+        def restored_memory(frame):
+            return any(tile["position"] == restored_position and tile["remembered"]
+                       for tile in frame["map_tiles"])
+        if not restored_memory(resumed):
+            resumed = self.frame(window, restored_memory)
+        self.assertEqual(resumed["state"], refreshed["state"])
+        restored = self.tile(resumed, 4)
+        self.assertEqual(restored["glyph"], ".")
+        self.assertEqual(restored["color"], 0x626262)
+        self.assertNotIn(restored_position, [
+            cell["position"] for cell in resumed["state"]["observation"]["visible_cells"]
+        ])
+        pixels = self.capture.read_bytes().split(b"\n", 3)[3]
+        cx, cy = restored["center"]
+        colors = [pixels[(y * 1200 + x) * 3:(y * 1200 + x) * 3 + 3]
+                  for y in range(cy - 4, cy + 4) for x in range(cx - 4, cx + 4)]
+        self.assertIn(bytes([98, 98, 98]), colors)
 
     def test_rotated_crossing_keeps_item_aligned_and_rewind_clears_chart(self):
         self.server(wizard=True, scenario="ascii-memory-rotated")

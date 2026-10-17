@@ -214,3 +214,8 @@ fn root_kind(text: &str, expected: &[u8], complete: bool) -> Result<bool, Decode
 pub(super) fn advancement_page(text: &str) -> Result<bool, DecodeError> {
     root_kind(text, b"advancement_page", false)
 }
+
+/// Select the map cap before allocating its appearance DTOs.
+pub(super) fn map_page(text: &str) -> Result<bool, DecodeError> {
+    root_kind(text, b"map_page", false)
+}
