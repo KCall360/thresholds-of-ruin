@@ -923,6 +923,13 @@ the deterministic bounded dice kernel. Canonical tuning lives in
 strict, identity-keyed overrides. Ability tags select families of abilities for
 modifiers without enumerating each technique ID.
 
+`hold_damage` is a hostile melee primary-success payload bound to one exact
+linked hold. Its category is required; TOML authoring omits `descriptor` for
+unmarked damage because TOML has no null value. Stored content and frozen plans
+instead require the explicit nullable descriptor field. An initial grab has no
+damage payload. Later executed qualifying primaries advance the frozen
+`hold_damage_increment` once, including a miss; damage applies only on success.
+
 ### Creature behavior and provocation
 
 Every ability requires source-owned `interaction = "non_hostile"` or

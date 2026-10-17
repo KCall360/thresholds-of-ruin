@@ -3510,6 +3510,7 @@ async fn adventure_bare_escape_uses_the_sole_hold_and_respects_control() {
     assert_eq!(link.sent.len(), 1);
     let mut snapshot = link.client.snapshot();
     snapshot.has_control = false;
+    snapshot.readiness.admission = false;
     link.client = ClientState::from_snapshot(snapshot).unwrap();
     let text = play(&mut link, &mut engine, "escape").await;
     assert!(text.contains("observing"), "{text}");
