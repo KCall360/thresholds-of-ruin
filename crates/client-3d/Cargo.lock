@@ -4385,6 +4385,7 @@ dependencies = [
  "tor-client-common",
  "tor-protocol",
  "uuid",
+ "wgpu-types",
 ]
 
 [[package]]

@@ -7,6 +7,9 @@ workspace, lockfile, tests, and verification gate.
 
 Windows defaults to Direct3D 12 for live play and both offline showcases.
 All three modes use single-sample rendering and Bevy's built-in FXAA.
+On CPU Direct3D 12 adapters, rendering waits for each submitted frame to finish
+before queuing another, bounding the software GPU's outstanding resources while
+retaining the same models, materials, shadows, and resolution.
 Other platforms retain Bevy's renderer defaults. The standard `WGPU_BACKEND`
 environment variable can select another backend explicitly. Capture diagnostics
 identify the actual adapter, backend and driver; verification receipts also
@@ -86,6 +89,10 @@ unwinding stop and reap that process. Joining an existing server leaves its
 process lifetime with its owner. Quitting uses the shared client's durable
 save barrier before stopping a private backend; failed or unconfirmed closure
 returns a failing process status.
+
+Startup applies every handshake and control-acquisition message to shared state,
+then presents one settled initial view. Status explanations follow that view
+before input becomes ready; normal gameplay updates retain their original order.
 
 The worker admits one command at a time. Its event queue holds at most 64
 notifications, preserves their order, and applies at most one view per frame

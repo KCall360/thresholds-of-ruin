@@ -148,6 +148,7 @@ pub(super) fn capture(
             }) },
         "renderer": adapter.as_ref().map(|adapter| serde_json::json!({
             "backend": format!("{:?}", adapter.backend), "adapter": adapter.name,
+            "device_type": format!("{:?}", adapter.device_type),
             "driver": adapter.driver, "driver_info": adapter.driver_info,
         })),
         "tick": view.map(|view| view.tick.to_string()),

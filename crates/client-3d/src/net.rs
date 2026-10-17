@@ -12,6 +12,9 @@ pub use tor_client_3d_model::{Cmd, Happening, Input, View};
 use tor_client_common::{Connection, PendingRequest, RequestCompletion};
 use tor_protocol::*;
 
+mod startup;
+use startup::InitialPresentation;
+
 type Error = Box<dyn std::error::Error + Send + Sync>;
 const EVENT_CAPACITY: usize = 64;
 const EVENTS_PER_FRAME: usize = 16;
@@ -168,16 +171,23 @@ fn present(
     message: &ServerMessage,
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
+    if let Some(event) = presentation_event(connection, message) {
+        publish(tx, event)?;
+    }
+    Ok(())
+}
+
+fn presentation_event(connection: &Connection, message: &ServerMessage) -> Option<Event> {
     match message {
         ServerMessage::Update { .. }
         | ServerMessage::Snapshot { .. }
         | ServerMessage::Palette { .. }
-        | ServerMessage::MapPage { .. } => publish(
-            tx,
-            Event::View(Box::new(view(&connection.state, &connection.palette))),
-        ),
-        ServerMessage::Error { message, .. } => publish(tx, Event::Status(message.clone())),
-        _ => Ok(()),
+        | ServerMessage::MapPage { .. } => Some(Event::View(Box::new(view(
+            &connection.state,
+            &connection.palette,
+        )))),
+        ServerMessage::Error { message, .. } => Some(Event::Status(message.clone())),
+        _ => None,
     }
 }
 
@@ -208,14 +218,18 @@ async fn session(
     mut rx: async_mpsc::Receiver<Input>,
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
-    publish(
-        tx,
-        Event::View(Box::new(view(&connection.state, &connection.palette))),
-    )?;
+    let mut initial = InitialPresentation::default();
     if !observe && connection.role() != AccessRole::Spectator {
-        transact(connection, Request::AcquireControl, tx).await?;
+        transact_with(connection, Request::AcquireControl, |event| {
+            initial.record(event)
+        })
+        .await?;
     }
-    publish(tx, Event::Ready)?;
+    // Shared state has applied every handshake message. Present its settled
+    // projection once, then explanations and readiness, before accepting input.
+    for event in initial.finish(Box::new(view(&connection.state, &connection.palette))) {
+        publish(tx, event)?;
+    }
     loop {
         tokio::select! {
             biased;
@@ -243,6 +257,14 @@ async fn transact(
     request: Request,
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
+    transact_with(connection, request, |event| publish(tx, event)).await
+}
+
+async fn transact_with(
+    connection: &mut Connection,
+    request: Request,
+    mut deliver: impl FnMut(Event) -> Result<(), Error>,
+) -> Result<(), Error> {
     let id = connection.request(request).await?;
     let mut pending = PendingRequest::new(id);
     timeout(Duration::from_secs(10), async {
@@ -251,12 +273,13 @@ async fn transact(
             let completion = pending.observe(connection, &message);
             let complete = completion.is_some();
             let unknown = matches!(completion, Some(RequestCompletion::Unknown));
-            present(connection, &message, tx)?;
+            if let Some(event) = presentation_event(connection, &message) {
+                deliver(event)?;
+            }
             if unknown {
-                publish(
-                    tx,
-                    Event::Status("Resynchronized; the last request may have completed.".into()),
-                )?;
+                deliver(Event::Status(
+                    "Resynchronized; the last request may have completed.".into(),
+                ))?;
             }
             if complete {
                 return Ok::<(), Error>(());
