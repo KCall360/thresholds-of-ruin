@@ -408,7 +408,7 @@ class RogueChecks:
         self.assertIsNone(frame["error"], command)
         if (command.startswith("confirm") or command == "resume") and any(
                 row["phase"] == "queued" for row in frame["intentions"]):
-            frame = self.frame(player, lambda current: not any(
+            frame = self.frame(player, lambda current: not current.get("state_omitted", False) and not any(
                 row["phase"] == "queued" for row in current["intentions"]))
         return frame
 
@@ -1015,7 +1015,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
     def test_ordinary_rogue_death_stays_terminal_after_reopening(self):
         server = self.server(scenario="rogue-exploration", seed=42)
         # This driver checks terminal/current state, not accumulated map memory.
-        player, current = self.client(omit_memory=True)
+        player, current = self.client(omit_memory=True, compact_background=True)
         at, visited, floor = (0, 0), set(), set()
         for _ in range(2500):
             view = observation(current)
@@ -1050,7 +1050,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         player.stop()
         server.stop()
         self.server(seed=None)
-        player, reopened = self.client(omit_memory=True)
+        player, reopened = self.client(omit_memory=True, compact_background=True)
         self.assertEqual(reopened["state"], current["state"])
         self.assertTrue(observation(reopened)["combat"]["dead"])
         self.assertTrue(observation(reopened)["combat"]["terminal"])

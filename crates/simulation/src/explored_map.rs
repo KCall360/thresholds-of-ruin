@@ -825,6 +825,13 @@ impl MapWindow {
             max: offset(self.max, [1; 3])?,
         })
     }
+    fn projection_halo(self, domain: Self) -> Option<Self> {
+        self.halo()?;
+        if !domain.contains(self.min) || !domain.contains(self.max) {
+            return None;
+        }
+        domain.halo()
+    }
     fn local_bounds(self, p: Position, rotation: u8) -> Option<([i64; 3], [i64; 3])> {
         let a = checked_rotate(rotation, difference(self.min, p))?;
         let b = checked_rotate(rotation, difference(self.max, p))?;
@@ -1204,7 +1211,18 @@ impl Projection<'_> {
 
 impl ExploredMap {
     fn project(&self, scene: &[SightCell], window: MapWindow) -> Result<MapProjection, GameError> {
-        let halo = window.halo().ok_or(GameError::InvalidLocation)?;
+        self.project_region(scene, window, window)
+    }
+
+    fn project_region(
+        &self,
+        scene: &[SightCell],
+        window: MapWindow,
+        domain: MapWindow,
+    ) -> Result<MapProjection, GameError> {
+        let halo = window
+            .projection_halo(domain)
+            .ok_or(GameError::InvalidLocation)?;
         let mut current = BTreeMap::new();
         let mut seeds = BTreeSet::new();
         let mut omitted = false;
@@ -1270,6 +1288,30 @@ impl Game {
         match self.explored_maps.get(&actor) {
             Some(map) => map.project(scene, window),
             None => ExploredMap::default().project(scene, window),
+        }
+    }
+
+    /// Project a subwindow using the containing domain's current scene anchors
+    /// and one-cell traversal halo. Output clipping never narrows the evidence
+    /// used to resolve placements, aliases or ambiguity. Both windows retain
+    /// the ordinary bounds and all projection work limits remain in force.
+    pub fn project_explored_map_region(
+        &self,
+        actor: ActorId,
+        scene: &[SightCell],
+        window: MapWindow,
+        domain: MapWindow,
+    ) -> Result<MapProjection, GameError> {
+        // Reject malformed caller metadata before consulting actor-owned state.
+        window
+            .projection_halo(domain)
+            .ok_or(GameError::InvalidLocation)?;
+        if !self.actors.contains_key(&actor) {
+            return Err(GameError::UnknownActor);
+        }
+        match self.explored_maps.get(&actor) {
+            Some(map) => map.project_region(scene, window, domain),
+            None => ExploredMap::default().project_region(scene, window, domain),
         }
     }
 }
@@ -1340,6 +1382,182 @@ mod tests {
         game.record_explored_observation(actor, &inputs, scene)
             .unwrap();
     }
+    fn assert_clipped_projection(
+        map: &ExploredMap,
+        scene: &[SightCell],
+        output: MapWindow,
+        domain: MapWindow,
+        full: &MapProjection,
+    ) {
+        let mut expected = full.clone();
+        expected.cells.retain(|cell| output.contains(cell.position));
+        assert_eq!(map.project_region(scene, output, domain).unwrap(), expected);
+    }
+
+    #[test]
+    fn projection_regions_require_valid_containing_bounded_domains() {
+        let (game, actor) = game();
+        let point = MapWindow {
+            min: pos(0, 0, 0),
+            max: pos(0, 0, 0),
+        };
+        let reversed = MapWindow {
+            min: pos(1, 0, 0),
+            ..point
+        };
+        let outside = MapWindow {
+            min: pos(32, 0, 0),
+            max: pos(32, 0, 0),
+        };
+        let too_wide = MapWindow {
+            min: pos(-64, 0, 0),
+            max: pos(65, 0, 0),
+        };
+        let lowest = MapWindow {
+            min: pos(i32::MIN, 0, 0),
+            max: pos(i32::MIN, 0, 0),
+        };
+        let highest = MapWindow {
+            min: pos(i32::MAX, 0, 0),
+            max: pos(i32::MAX, 0, 0),
+        };
+        for (output, domain) in [
+            (outside, window()),
+            (reversed, window()),
+            (point, reversed),
+            (point, too_wide),
+            (lowest, lowest),
+            (highest, highest),
+            (
+                MapWindow {
+                    min: pos(i32::MIN + 1, 0, 0),
+                    max: pos(i32::MIN + 1, 0, 0),
+                },
+                MapWindow {
+                    max: pos(i32::MIN + 1, 0, 0),
+                    ..lowest
+                },
+            ),
+            (
+                MapWindow {
+                    min: pos(i32::MAX - 1, 0, 0),
+                    max: pos(i32::MAX - 1, 0, 0),
+                },
+                MapWindow {
+                    min: pos(i32::MAX - 1, 0, 0),
+                    ..highest
+                },
+            ),
+            (window(), point),
+        ] {
+            assert_eq!(
+                game.project_explored_map_region(actor, &[], output, domain),
+                Err(GameError::InvalidLocation),
+                "output={output:?}, domain={domain:?}"
+            );
+        }
+        for output in [point, window()] {
+            let projection = game
+                .project_explored_map_region(actor, &[], output, window())
+                .unwrap();
+            assert!(projection.complete && projection.cells.is_empty());
+        }
+        assert_eq!(
+            game.project_explored_map_region(ActorId(actor.0 + 1), &[], point, window()),
+            Err(GameError::UnknownActor)
+        );
+        assert_eq!(
+            game.project_explored_map_region(ActorId(actor.0 + 1), &[], point, too_wide),
+            Err(GameError::InvalidLocation)
+        );
+    }
+
+    #[test]
+    fn off_sight_region_uses_only_its_actors_saved_appearances_and_bounded_anchors() {
+        let (mut game, actor) = game();
+        let other = game
+            .spawn_actor(at(1, 2), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let anchor = seen(at(1, 1), pos(0, 0, 0), 0);
+        let edge = seen(at(1, 32), pos(31, 0, 0), 0);
+        record(&mut game, actor, &[anchor, edge]);
+        record(&mut game, other, &[anchor]);
+        let slab = MapWindow {
+            min: pos(31, -16, -2),
+            max: window().max,
+        };
+        // The saved wall deliberately differs from the live floor. Projection
+        // must not refresh it or borrow another actor's knowledge.
+        assert!(!game.world.is_wall(edge.location));
+        let before = game.clone();
+        reset_map_work_counts();
+        let full = game
+            .project_explored_map(actor, &[anchor], window())
+            .unwrap();
+        let partial = game
+            .project_explored_map_region(actor, &[anchor], slab, window())
+            .unwrap();
+        assert_eq!(partial.cells.len(), 1);
+        assert_eq!(partial.cells[0].location, edge.location);
+        assert_eq!(&*partial.cells[0].appearance, &appearance("old"));
+        assert_clipped_projection(
+            &game.explored_maps[&actor],
+            &[anchor],
+            slab,
+            window(),
+            &full,
+        );
+        let unseen = game
+            .project_explored_map_region(other, &[anchor], slab, window())
+            .unwrap();
+        assert!(unseen.complete && unseen.cells.is_empty());
+        // A domain without a current anchor stays empty; no historical scan or
+        // world fallback expands it. The legacy API keeps its local semantics.
+        let unanchored = game
+            .project_explored_map_region(actor, &[anchor], slab, slab)
+            .unwrap();
+        assert!(unanchored.complete && unanchored.cells.is_empty());
+        assert_eq!(
+            game.project_explored_map(actor, &[anchor], slab).unwrap(),
+            unanchored
+        );
+        assert_eq!(game, before);
+        assert_eq!(map_work_counts(), MapWorkCounts::default());
+    }
+
+    #[test]
+    fn small_output_does_not_bypass_projection_domain_work_caps() {
+        let mut map = ExploredMap::default();
+        let cell = at(1, 1);
+        map.cells.insert(cell, Shared::new(appearance("wall")));
+        for direction in DIRECTIONS {
+            map.neighbors.insert(
+                (cell, direction),
+                Neighbor::Placed {
+                    target: cell,
+                    rotation: 0,
+                },
+            );
+        }
+        let domain = MapWindow {
+            min: pos(-64, -64, -64),
+            max: pos(64, 64, 64),
+        };
+        let output = MapWindow {
+            min: pos(64, 64, 64),
+            max: pos(64, 64, 64),
+        };
+        let scene = [seen(cell, pos(0, 0, 0), 0)];
+        let full = map.project(&scene, domain).unwrap();
+        assert!(full.limited && !full.complete && full.cells.is_empty());
+        assert!(!full.appearance_limited);
+        assert!(full.work.projection_states <= MAX_STATES);
+        assert!(full.work.candidate_relations <= MAX_RELATIONS);
+        assert!(full.work.inverse_checks <= MAX_RELATIONS);
+        assert!(full.work.range_seeks <= MAX_SEEKS);
+        assert_clipped_projection(&map, &scene, output, domain, &full);
+    }
+
     #[test]
     fn acquisition_checks_new_world_references_and_does_not_trust_forged_roots() {
         let (mut game, actor) = game();
@@ -1455,6 +1673,21 @@ mod tests {
                     assert!(cell.appearance.wall);
                 }
                 assert_eq!(result.cells.len(), 3);
+                for cell in &result.cells {
+                    assert_clipped_projection(
+                        &game.explored_maps[&actor],
+                        &[seed],
+                        MapWindow {
+                            min: cell.position,
+                            max: cell.position,
+                        },
+                        MapWindow {
+                            min: pos(-10, -10, -10),
+                            max: pos(10, 10, 10),
+                        },
+                        &result,
+                    );
+                }
             }
         }
     }
@@ -1476,6 +1709,16 @@ mod tests {
         assert!(result.complete && result.ambiguous);
         assert!(result.cells.iter().any(|c| c.location == rival.location));
         assert!(!result.cells.iter().any(|c| c.location == b.location));
+        assert_clipped_projection(
+            &game.explored_maps[&actor],
+            &[a, rival],
+            MapWindow {
+                min: rival.offset,
+                max: rival.offset,
+            },
+            window(),
+            &result,
+        );
     }
     #[test]
     fn inverse_witness_index_seeks_past_distant_history_without_candidate_scan() {
@@ -1705,6 +1948,21 @@ mod tests {
         map.cells.insert(scene[0].location, Shared::new(huge));
         let limited = map.project(&scene, window()).unwrap();
         assert!(limited.limited && !limited.complete && limited.cells.is_empty());
+        let output = MapWindow {
+            min: pos(31, 16, 3),
+            max: pos(31, 16, 3),
+        };
+        let small = map.project_region(&scene, output, window()).unwrap();
+        assert!(small.complete && !small.appearance_limited);
+        assert_eq!(small.cells.len(), 1);
+        assert_eq!(small.cells[0].position, output.min);
+        assert_eq!(small.cells[0].appearance.material, "stone");
+        let oversized = MapWindow {
+            min: scene[0].offset,
+            max: scene[0].offset,
+        };
+        let limited = map.project_region(&scene, oversized, window()).unwrap();
+        assert!(limited.appearance_limited && !limited.complete && limited.cells.is_empty());
     }
     #[test]
     fn checked_rotation_rejects_sign_overflow_and_accepts_every_finite_cube_frame() {
@@ -1747,6 +2005,18 @@ mod tests {
                 .len(),
             63
         );
+        for (min, max) in [(-31, -31), (-1, 1), (31, 31)] {
+            assert_clipped_projection(
+                &game.explored_maps[&actor],
+                &[a],
+                MapWindow {
+                    min: pos(min, 0, 0),
+                    max: pos(max, 0, 0),
+                },
+                window(),
+                &result,
+            );
+        }
     }
     #[test]
     fn conflicting_cycle_suppresses_only_ambiguous_placements() {
@@ -1785,6 +2055,18 @@ mod tests {
                 .collect::<BTreeSet<_>>(),
             BTreeSet::from([a, b, d])
         );
+        for output in [
+            MapWindow {
+                min: pos(1, -1, 0),
+                max: pos(1, 0, 0),
+            },
+            MapWindow {
+                min: pos(31, 0, 0),
+                max: pos(31, 0, 0),
+            },
+        ] {
+            assert_clipped_projection(&map, &[seen(a, pos(0, 0, 0), 0)], output, window(), &result);
+        }
     }
     #[test]
     fn observers_keep_independent_last_seen_values_and_observed_emptiness_clears_items() {

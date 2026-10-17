@@ -452,7 +452,10 @@ class ActionCompletion(unittest.TestCase):
                     "readiness": {"revision": str(revision)},
                 }
                 newer = {"readiness": {"revision": str(revision + 1)}}
-                batches = [[executed], [executed, newer]]
+                compact = [{"type": "update", "message": {"type": kind},
+                            "state_omitted": True}
+                           for kind in ("map_page", "palette", "waiting")]
+                batches = [[*compact, executed], [*compact, executed, newer]]
 
                 def frame(client, predicate):
                     selected = next((item for item in batches.pop(0) if predicate(item)), None)

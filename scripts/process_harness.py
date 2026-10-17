@@ -958,7 +958,8 @@ class ProcessTestCase(unittest.TestCase):
         # changes the controls; wait for that ordered permission update. Pause
         # is not completion: the caller decides whether to resume the paid work.
         revision = int(executed["readiness"]["revision"])
-        return self.frame(client, lambda frame: int(frame["readiness"]["revision"]) > revision)
+        return self.frame(client, lambda frame: not frame.get("state_omitted", False)
+                          and int(frame["readiness"]["revision"]) > revision)
 
     def play(self, client, steps):
         """Play fixture steps as ordinary actions: `{"move": direction}` or `{"take": item name}`."""

@@ -563,16 +563,16 @@ fn newer_observations_cancel_staging_and_limited_results_keep_an_aligned_cache()
 
 #[test]
 fn map_hydration_queries_only_initial_unaligned_or_uncovered_windows() {
-    let mut client = ClientState::from_snapshot(snapshot(&[("here", 0, 0)], 0)).unwrap();
+    let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
     bind_map(&mut client, "initial");
     let page = map_page(&client, vec![], 0, 0, 0);
     accept_map(&mut client, "initial", &page).unwrap();
-    advance(&mut client, snapshot(&[("here", 0, 0)], 1));
+    advance(&mut client, oriented_snapshot(0, 0, 0, 1));
     assert!(
         client.next_map_query().is_none(),
         "unchanged aligned coverage stays valid"
     );
-    advance(&mut client, snapshot(&[("here", -1, 0), ("next", 0, 0)], 2));
+    advance(&mut client, oriented_snapshot(-1, 0, 0, 2));
     assert!(
         client.next_map_query().is_some(),
         "translation exits one edge of certified coverage"
@@ -608,17 +608,8 @@ fn map_transfer_counts_complete_reply_bytes_and_preserves_live_view_on_budget_fa
             .accept_map_page(&client.reply_context(), &id, &page, MAX_MAP_PAGE_BYTES)
             .unwrap();
     }
-    bind_map(&mut client, "overflow");
-    let page = map_page(
-        &client,
-        vec![map_cell(Position { x: 0, y: 2, z: 0 }, "last")],
-        65,
-        64,
-        64,
-    );
-    assert!(client
-        .accept_map_page(&client.reply_context(), "overflow", &page, 1)
-        .is_err());
+    assert!(client.next_map_query().is_none());
+    assert!(client.map_hydration().failed && !client.map_hydration().pending);
     assert_eq!(client.map_memory().count(), 1);
     assert_eq!(client.map_hydration().bytes, MAX_MAP_TRANSFER_BYTES);
 }
@@ -656,7 +647,7 @@ fn completed_ambiguous_map_publishes_certified_cells_and_failure_does_not_loop()
 
 #[test]
 fn clipped_coverage_does_not_claim_evicted_cells_after_reversing_direction() {
-    let mut client = ClientState::from_snapshot(snapshot(&[("here", 0, 0)], 0)).unwrap();
+    let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
     bind_map(&mut client, "initial");
     let page = map_page(
         &client,
@@ -666,16 +657,347 @@ fn clipped_coverage_does_not_claim_evicted_cells_after_reversing_direction() {
         0,
     );
     accept_map(&mut client, "initial", &page).unwrap();
-    advance(&mut client, snapshot(&[("here", -1, 0)], 1));
-    bind_map(&mut client, "limited");
+    advance(&mut client, oriented_snapshot(-1, 0, 0, 1));
+    let query = bind_map(&mut client, "limited");
     let mut limited = map_page(&client, vec![], 0, 0, 0);
+    limited.window = query.window;
     limited.complete = false;
     limited.limited = true;
     accept_map(&mut client, "limited", &limited).unwrap();
     assert!(client.map_memory().all(|c| c.key != "left-edge"));
-    advance(&mut client, snapshot(&[("here", 0, 0)], 2));
+    advance(&mut client, oriented_snapshot(0, 0, 0, 2));
     assert!(
         client.next_map_query().is_some(),
         "reverse travel cannot claim cropped-away coverage"
     );
+}
+
+fn oriented_snapshot(dx: i32, dy: i32, dz: i32, revision: u64) -> Snapshot {
+    let mut value = snapshot(
+        &[("a", dx, dy), ("b", dx + 1, dy), ("c", dx, dy + 1)],
+        revision,
+    );
+    for cell in &mut Arc::make_mut(&mut value.state).observation.visible_cells {
+        cell.position.z = dz;
+    }
+    value
+}
+fn finish_region(client: &mut ClientState, id: &str, cells: Vec<RememberedMapCell>) -> MapWindow {
+    let query = bind_map(client, id);
+    let mut page = map_page(client, cells.clone(), cells.len(), 0, 0);
+    page.window = query.window;
+    accept_map(client, id, &page).unwrap();
+    query.window
+}
+
+#[test]
+fn incremental_map_one_axis_moves_request_only_uncovered_face() {
+    for (dx, dy, dz, volume) in [(-1, 0, 0, 198), (0, -1, 0, 378), (0, 0, -1, 2079)] {
+        let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
+        finish_region(&mut client, "initial", vec![]);
+        advance(&mut client, oriented_snapshot(dx, dy, dz, 1));
+        let query = client.next_map_query().unwrap();
+        assert_eq!(
+            query.window.volume(),
+            Some(volume),
+            "must fetch only the uncovered face"
+        );
+    }
+}
+
+#[test]
+fn incremental_map_diagonal_regions_preserve_committed_memory_and_native_partial_coverage() {
+    let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
+    finish_region(
+        &mut client,
+        "initial",
+        vec![map_cell(Position { x: 10, y: 10, z: 0 }, "retained")],
+    );
+    advance(&mut client, oriented_snapshot(-1, -1, 0, 1));
+    let mut shown = client.clone();
+    let x = finish_region(
+        &mut client,
+        "x-edge",
+        vec![map_cell(Position { x: 31, y: 0, z: 0 }, "edge")],
+    );
+    assert_eq!(x.volume(), Some(192));
+    assert!(
+        !client.map_hydration().complete,
+        "one edge does not cover the other edge"
+    );
+    shown
+        .apply_map_memory_update(client.map_memory_update().unwrap())
+        .unwrap();
+    assert_eq!(
+        shown.map_cell(Position { x: 31, y: 0, z: 0 }).unwrap().key,
+        "edge"
+    );
+    assert_eq!(
+        shown.map_cell(Position { x: 9, y: 9, z: 0 }).unwrap().key,
+        "retained"
+    );
+    let y = finish_region(&mut client, "y-edge", vec![]);
+    assert_eq!(y.volume(), Some(378));
+    assert!(!x.contains(y.min));
+    assert!(client.map_hydration().complete);
+    assert!(client.next_map_query().is_none());
+}
+
+#[test]
+fn incremental_map_three_axis_faces_cover_corners_without_overlap() {
+    let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
+    finish_region(&mut client, "initial", vec![]);
+    advance(&mut client, oriented_snapshot(-1, -1, -1, 1));
+    let mut requested = std::collections::BTreeSet::new();
+    for (index, volume) in [160, 315, 2079].into_iter().enumerate() {
+        let window = finish_region(&mut client, &format!("face-{index}"), vec![]);
+        assert_eq!(window.volume(), Some(volume));
+        for x in window.min.x..=window.max.x {
+            for y in window.min.y..=window.max.y {
+                for z in window.min.z..=window.max.z {
+                    assert!(
+                        requested.insert(Position { x, y, z }),
+                        "faces must not overlap"
+                    );
+                }
+            }
+        }
+        assert_eq!(client.map_hydration().complete, index == 2);
+        assert_eq!(client.map_hydration().pages, index + 1);
+    }
+    assert_eq!(requested.len(), 2554);
+    assert!(requested.contains(&Position { x: 31, y: 16, z: 3 }));
+    assert!(client.next_map_query().is_none());
+}
+
+#[test]
+fn incremental_map_sparse_collinear_and_rotated_anchors_require_full_refresh() {
+    for cells in [
+        vec![("a", -1, 0)],
+        vec![("a", -1, 0), ("b", 0, 0)],
+        vec![("a", 0, 0), ("b", 0, 1), ("c", -1, 0)],
+    ] {
+        let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
+        finish_region(&mut client, "initial", vec![]);
+        advance(&mut client, snapshot(&cells, 1));
+        assert_eq!(client.next_map_query().unwrap().window, MapWindow::normal());
+    }
+}
+
+#[test]
+fn incremental_map_interrupted_initial_pages_never_publish_and_then_settle() {
+    let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
+    for step in 0..3 {
+        let id = format!("initial-{step}");
+        bind_map(&mut client, &id);
+        let staged = map_page(
+            &client,
+            vec![map_cell(Position { x: 10, y: 0, z: 0 }, "never-published")],
+            2,
+            0,
+            0,
+        );
+        accept_map(&mut client, &id, &staged).unwrap();
+        assert!(client.map_hydration().bytes > 0);
+        assert_eq!(client.map_hydration().pages, 1);
+        advance(
+            &mut client,
+            oriented_snapshot(-step - 1, 0, 0, (step + 1) as u64),
+        );
+        assert!(client.map_memory().all(|c| c.key != "never-published"));
+        assert!(accept_map(&mut client, &id, &staged).is_err());
+    }
+    finish_region(
+        &mut client,
+        "settled",
+        vec![map_cell(Position { x: 10, y: 0, z: 0 }, "committed")],
+    );
+    assert!(client.map_hydration().complete);
+    advance(&mut client, oriented_snapshot(-4, 0, 0, 4));
+    let query = bind_map(&mut client, "partial-edge");
+    let mut page = map_page(
+        &client,
+        vec![map_cell(Position { x: 31, y: 0, z: 0 }, "staged-edge")],
+        2,
+        0,
+        0,
+    );
+    page.window = query.window;
+    accept_map(&mut client, "partial-edge", &page).unwrap();
+    advance(&mut client, oriented_snapshot(-5, 0, 0, 5));
+    assert!(client.map_memory().any(|c| c.key == "committed"));
+    assert!(client.map_memory().all(|c| c.key != "staged-edge"));
+    assert_eq!(client.next_map_query().unwrap().window.volume(), Some(396));
+}
+
+#[test]
+fn incremental_map_same_base_budget_includes_previous_completed_regions() {
+    let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
+    finish_region(&mut client, "initial", vec![]);
+    advance(&mut client, oriented_snapshot(-1, -1, -1, 1));
+    for index in 0..64 {
+        let id = format!("budget-{index}");
+        let query = bind_map(&mut client, &id);
+        let (start, page, total) = if index == 0 {
+            (0, 0, 1)
+        } else {
+            (index - 1, index - 1, 65)
+        };
+        let cells = vec![map_cell(
+            Position {
+                x: if index == 0 { 31 } else { index as i32 - 32 },
+                y: if index == 0 { 0 } else { 16 },
+                z: 0,
+            },
+            &id,
+        )];
+        let mut page = map_page(&client, cells, total, start, page);
+        page.window = query.window;
+        client
+            .accept_map_page(&client.reply_context(), &id, &page, MAX_MAP_PAGE_BYTES)
+            .unwrap();
+    }
+    assert!(client.next_map_query().is_none());
+    assert!(client.map_hydration().failed && !client.map_hydration().pending);
+    assert_eq!(client.map_hydration().bytes, MAX_MAP_TRANSFER_BYTES);
+    assert!(client.map_memory().any(|c| c.key == "budget-0"));
+    assert!(client.map_memory().all(|c| c.key != "budget-1"));
+    assert!(!client.map_hydration().complete);
+}
+
+#[test]
+fn incremental_map_ambiguous_region_survives_later_failure_and_current_sight_wins() {
+    let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
+    finish_region(
+        &mut client,
+        "initial",
+        vec![
+            map_cell(Position { x: 10, y: 10, z: 0 }, "same"),
+            map_cell(Position { x: 11, y: 10, z: 0 }, "same"),
+        ],
+    );
+    let mut next = oriented_snapshot(-1, -1, 0, 1);
+    Arc::make_mut(&mut next.state)
+        .observation
+        .visible_cells
+        .push(CellView {
+            key: "live-edge".into(),
+            position: Position { x: 31, y: 0, z: 0 },
+            wall: false,
+            material: String::new(),
+            asset: None,
+            place_hint: false,
+            stairs_up: false,
+            stairs_down: false,
+            door: None,
+        });
+    advance(&mut client, next);
+    let query = bind_map(&mut client, "ambiguous-edge");
+    let mut page = map_page(
+        &client,
+        vec![map_cell(Position { x: 31, y: 0, z: 0 }, "stale-edge")],
+        1,
+        0,
+        0,
+    );
+    page.window = query.window;
+    page.ambiguous = true;
+    accept_map(&mut client, "ambiguous-edge", &page).unwrap();
+    assert!(client.map_hydration().ambiguous);
+    assert!(!client.map_hydration().complete);
+    assert_eq!(
+        client.map_cell(Position { x: 31, y: 0, z: 0 }).unwrap().key,
+        "live-edge"
+    );
+    assert_eq!(client.map_memory().filter(|c| c.key == "same").count(), 2);
+    let mut shown = client.clone();
+    bind_map(&mut client, "failed-second");
+    assert!(client.reject_map_query("failed-second"));
+    assert!(client.next_map_query().is_none());
+    assert!(client.map_hydration().ambiguous && client.map_hydration().failed);
+    shown
+        .apply_map_memory_update(client.map_memory_update().unwrap())
+        .unwrap();
+    assert_eq!(
+        shown.map_cell(Position { x: 31, y: 0, z: 0 }).unwrap().key,
+        "live-edge"
+    );
+    assert_eq!(shown.map_memory().filter(|c| c.key == "same").count(), 2);
+    assert!(!shown.map_hydration().complete);
+}
+
+#[test]
+fn incremental_map_same_base_alias_conflicts_do_not_rewrite_committed_regions() {
+    for conflict in [false, true] {
+        let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
+        finish_region(&mut client, "initial", vec![]);
+        advance(&mut client, oriented_snapshot(-1, -1, 0, 1));
+        finish_region(
+            &mut client,
+            "first",
+            vec![map_cell(Position { x: 31, y: 0, z: 0 }, "shared")],
+        );
+        let query = bind_map(&mut client, "second");
+        let mut cell = map_cell(Position { x: 0, y: 16, z: 0 }, "shared");
+        cell.wall = conflict;
+        let mut page = map_page(&client, vec![cell], 1, 0, 0);
+        page.window = query.window;
+        assert_eq!(accept_map(&mut client, "second", &page).is_err(), conflict);
+        assert!(
+            !client
+                .map_cell(Position { x: 31, y: 0, z: 0 })
+                .unwrap()
+                .wall,
+            "second region cannot mutate an earlier conflicting alias"
+        );
+        assert_eq!(
+            client.map_memory().filter(|c| c.key == "shared").count(),
+            if conflict { 1 } else { 2 }
+        );
+    }
+}
+
+#[test]
+fn incremental_map_reserves_reply_headroom_before_requesting_another_page() {
+    let mut client = ClientState::from_snapshot(oriented_snapshot(0, 0, 0, 0)).unwrap();
+    finish_region(&mut client, "initial", vec![]);
+    advance(&mut client, oriented_snapshot(-1, -1, 0, 1));
+    for index in 0..64 {
+        let id = format!("reserve-{index}");
+        let query = bind_map(&mut client, &id);
+        let (start, page, total) = if index == 0 {
+            (0, 0, 1)
+        } else {
+            (index - 1, index - 1, 65)
+        };
+        let cells = vec![map_cell(
+            Position {
+                x: if index == 0 { 31 } else { index as i32 - 32 },
+                y: if index == 0 { 0 } else { 16 },
+                z: 0,
+            },
+            &id,
+        )];
+        let mut page = map_page(&client, cells, total, start, page);
+        page.window = query.window;
+        let bytes = if index == 0 {
+            MAX_MAP_PAGE_BYTES / 2
+        } else {
+            MAX_MAP_PAGE_BYTES
+        };
+        client
+            .accept_map_page(&client.reply_context(), &id, &page, bytes)
+            .unwrap();
+    }
+    assert!(
+        client.next_map_query().is_none(),
+        "do not ask a conforming server for a reply without its maximum byte headroom"
+    );
+    assert!(client.map_hydration().failed && !client.map_hydration().pending);
+    assert_eq!(
+        client.map_hydration().bytes,
+        MAX_MAP_TRANSFER_BYTES - MAX_MAP_PAGE_BYTES / 2
+    );
+    assert!(client.map_memory().any(|c| c.key == "reserve-0"));
+    assert!(client.map_memory().all(|c| c.key != "reserve-1"));
 }

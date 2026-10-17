@@ -50,6 +50,36 @@ stale assembly replaces the chart. A new observation cancels pending assembly,
 while current disclosure and ordinary input remain usable. New clients and
 unaligned or uncovered windows hydrate automatically, without a redraw loop.
 
+Certified coverage is one exact rectangle, translated and clipped with the
+viewport only when shared unique anchors include two independent vectors and
+all agree on the translation. Sparse, collinear or conflicting anchors require
+a full refresh; they cannot certify an unchanged orientation. The existing
+appearance alignment remains conservative where full coverage cannot be proved.
+After a trusted move, hydration expands coverage one entire adjacent face at a
+time, in x/y/z order. Later faces include already filled corners. Each completed
+region replaces only that region's appearances, preserving the rest of the chart;
+empty certified regions remove old placements there. Unfinished, cancelled or
+limited regions never extend coverage. Complete ambiguous projections retain
+their certified cells and their ambiguity indicator.
+
+Page, cell and response-byte limits apply cumulatively across regions of one
+observation base, including completed regions before an interrupted transfer.
+Before each request, the client reserves maximum reply-byte headroom and the
+possible remaining page cells. Exhaustion stops optional acquisition without
+disconnecting live gameplay or discarding committed regions. Repeated physical
+keys across completed regions at the same base must agree on appearance;
+conflicts cannot rewrite a previously committed region.
+New observations cancel staging and begin a new bounded acquisition budget;
+this is not a lifetime traffic cap. Initial or unalignable views still request
+the full viewport and can be interrupted by movement. Failed regions do not
+retry in a redraw loop. Native presentation handoffs contain the full committed
+positioned chart and its exact partial coverage, even before the whole viewport
+is complete; transfer staging is never a presentation snapshot. These native
+handoffs occur on terminal map replies. A local pre-request budget refusal can
+therefore leave the presentation model's diagnostic failure flag unchanged;
+its partial coverage remains accurate, and ASCII neither displays nor uses that
+flag. The transport/headless model reports the refusal directly.
+
 Current cells win over stale appearances, including observed empty item lists.
 Creatures never persist as map ghosts. Remembered doors and items contain
 appearance values only, so Text and ASCII cannot turn old targets into actions.

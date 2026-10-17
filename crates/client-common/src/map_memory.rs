@@ -96,11 +96,13 @@ impl MapMemory {
                 .or_default()
                 .push(cell.position);
         }
+        let mut anchors = Vec::new();
         let mut shift = None;
         let mut conflict = false;
         for (key, positions) in &current {
             if let Some(old) = self.previous.get(key) {
                 if let ([before], [after]) = (old.as_slice(), positions.as_slice()) {
+                    anchors.push(*before);
                     let delta = (
                         i64::from(after.x) - i64::from(before.x),
                         i64::from(after.y) - i64::from(before.y),
@@ -112,6 +114,33 @@ impl MapMemory {
             }
         }
         let translation = shift.filter(|_| !conflict);
+        // A translation of one point or a line cannot exclude a rotation.
+        // Only two independent anchor vectors certify retained coverage.
+        let oriented = anchors.first().is_some_and(|origin| {
+            let vector = |a: &Position| {
+                [
+                    i128::from(a.x) - i128::from(origin.x),
+                    i128::from(a.y) - i128::from(origin.y),
+                    i128::from(a.z) - i128::from(origin.z),
+                ]
+            };
+            anchors
+                .iter()
+                .skip(1)
+                .map(vector)
+                .find(|v| *v != [0; 3])
+                .is_some_and(|v| {
+                    anchors.iter().skip(1).map(vector).any(|w| {
+                        v[0] * w[1] != v[1] * w[0]
+                            || v[0] * w[2] != v[2] * w[0]
+                            || v[1] * w[2] != v[2] * w[1]
+                    })
+                })
+        });
+        let lost_orientation = self.coverage.is_some() && !oriented;
+        if !oriented {
+            self.coverage = None;
+        }
         if translation != Some((0, 0, 0)) {
             let old = std::mem::take(&mut self.cells);
             self.coverage = self.coverage.and_then(|w| {
@@ -151,7 +180,7 @@ impl MapMemory {
         });
         self.overlay(view, revision);
         self.previous = current;
-        translation != Some((0, 0, 0))
+        translation != Some((0, 0, 0)) || lost_orientation
     }
     pub fn overlay(&mut self, view: &Observation, revision: u64) {
         let window = MapWindow::normal().checked_translate(view.position);
@@ -236,8 +265,70 @@ impl MapMemory {
             .as_ref()
             .is_none_or(|w| !w.contains(requested.min) || !w.contains(requested.max))
     }
-    pub fn install(&mut self, window: MapWindow, cells: BTreeMap<Position, RememberedMapCell>) {
+    /// Grow the certified rectangle by an entire adjacent face, never a
+    /// bounding box over holes. Later axes include already committed corners.
+    pub fn next_uncovered(&self, requested: MapWindow) -> Option<MapWindow> {
+        let Some(covered) = self.coverage else {
+            return Some(requested);
+        };
+        let mut min = [covered.min.x, covered.min.y, covered.min.z];
+        let mut max = [covered.max.x, covered.max.y, covered.max.z];
+        let wanted_min = [requested.min.x, requested.min.y, requested.min.z];
+        let wanted_max = [requested.max.x, requested.max.y, requested.max.z];
+        for axis in 0..3 {
+            if min[axis] > wanted_min[axis] {
+                max[axis] = min[axis].checked_sub(1)?;
+                min[axis] = wanted_min[axis];
+                return Some(bounds(min, max));
+            }
+            if max[axis] < wanted_max[axis] {
+                min[axis] = max[axis].checked_add(1)?;
+                max[axis] = wanted_max[axis];
+                return Some(bounds(min, max));
+            }
+        }
+        None
+    }
+    pub fn install_region(
+        &mut self,
+        viewport: MapWindow,
+        window: MapWindow,
+        cells: BTreeMap<Position, RememberedMapCell>,
+    ) -> Result<(), &'static str> {
+        if self.next_uncovered(viewport) != Some(window) {
+            return Err("Map region is not the next exact uncovered face");
+        }
+        let coverage = self.coverage.map_or(window, |old| MapWindow {
+            min: Position {
+                x: old.min.x.min(window.min.x),
+                y: old.min.y.min(window.min.y),
+                z: old.min.z.min(window.min.z),
+            },
+            max: Position {
+                x: old.max.x.max(window.max.x),
+                y: old.max.y.max(window.max.y),
+                z: old.max.z.max(window.max.z),
+            },
+        });
+        self.cells.retain(|position, _| !window.contains(*position));
+        self.coverage = Some(coverage);
+        self.install_cells(cells);
+        self.trim();
+        Ok(())
+    }
+    /// Native presentation receives a complete positioned snapshot, including
+    /// honest partial coverage; it never receives unfinished transfer staging.
+    pub fn install_snapshot(
+        &mut self,
+        coverage: Option<MapWindow>,
+        cells: BTreeMap<Position, RememberedMapCell>,
+    ) {
         self.cells.clear();
+        self.coverage = coverage;
+        self.install_cells(cells);
+        self.trim();
+    }
+    fn install_cells(&mut self, cells: BTreeMap<Position, RememberedMapCell>) {
         self.limited = false;
         for (position, appearance) in cells {
             let key = appearance.key.clone();
@@ -259,8 +350,6 @@ impl MapMemory {
             }
             self.cells.insert(position, key);
         }
-        self.coverage = Some(window);
-        self.trim();
     }
 }
 fn translate(p: Position, x: i64, y: i64, z: i64) -> Option<Position> {
@@ -269,4 +358,19 @@ fn translate(p: Position, x: i64, y: i64, z: i64) -> Option<Position> {
         y: i32::try_from(i64::from(p.y).checked_add(y)?).ok()?,
         z: i32::try_from(i64::from(p.z).checked_add(z)?).ok()?,
     })
+}
+
+fn bounds(min: [i32; 3], max: [i32; 3]) -> MapWindow {
+    MapWindow {
+        min: Position {
+            x: min[0],
+            y: min[1],
+            z: min[2],
+        },
+        max: Position {
+            x: max[0],
+            y: max[1],
+            z: max[2],
+        },
+    }
 }

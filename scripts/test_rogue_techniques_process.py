@@ -120,7 +120,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
         confirmed = self.command(player, {"type": "advancement", "command": "confirm"})
         self.assertIsNone(confirmed["error"])
         if any(row["phase"] == "queued" for row in confirmed["intentions"]):
-            confirmed = self.frame(player, lambda frame: not any(
+            confirmed = self.frame(player, lambda frame: not frame.get("state_omitted", False) and not any(
                 row["phase"] == "queued" for row in frame["intentions"]))
         self.settled(player, confirmed)
         page = self.command(player, {"type": "advancement", "command": "overview"})
@@ -150,7 +150,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
     def apply_first_technique(self, character, selection, identity):
         self.server(scenario="rogue-exploration", seed=42, character=character)
         # Current observations and transient events are asserted, not map memory.
-        player, _ = self.client(actor=character, omit_memory=True)
+        player, _ = self.client(actor=character, omit_memory=True, compact_background=True)
         self.assert_first_floor_population(character)
         current = self.buy_first(player, selection, identity)
         at, floor, visited = (0, 0), set(), set()
@@ -195,7 +195,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
 
     def test_bind_wounds_heals_combat_injury_spends_one_bandage_and_obeys_cooldown(self):
         self.server(scenario="rogue-exploration", seed=42)
-        player, current = self.client(omit_memory=True)
+        player, current = self.client(omit_memory=True, compact_background=True)
         self.assert_first_floor_population(1)
         self.assertFalse(current["state"]["wizard_game"])
         at, floor, visited, seen = (0, 0), set(), set(), set()

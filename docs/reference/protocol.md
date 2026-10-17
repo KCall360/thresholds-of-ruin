@@ -698,6 +698,17 @@ assemblies on new observations and atomically install a correlated whole transfe
 then overlay current disclosure. Automatic hydration is independent of gameplay
 readiness and does not issue actions, learn cells, or load distant world regions.
 
+A subwindow clips the returned appearances, not their anchoring domain: the
+server traverses saved witnessed geometry within the normal viewport and its
+existing bounded halo, using current sight only as anchors. A thin off-sight
+edge has the same certified appearances as that portion of the full projection
+when both outputs fit their appearance limits. Appearance limits apply to the
+requested output window. The same traversal/work limits apply; requesting a narrow window
+cannot walk arbitrary historical knowledge or read unseen live world state.
+Clients can retain certified coverage and request only uncovered face regions.
+Each region remains an atomic context-bound transfer; this changes no wire or
+save format.
+
 ## Asset palettes
 
 A scenario can name assets: dotted lowercase identifiers such as

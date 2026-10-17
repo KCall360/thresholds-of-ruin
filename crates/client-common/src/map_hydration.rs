@@ -21,9 +21,15 @@ pub struct MapMemoryUpdate {
     pub(crate) actor: ActorId,
     pub(crate) branch: BranchId,
     pub(crate) base: ObservationBase,
-    pub(crate) window: MapWindow,
+    pub(crate) coverage: Option<MapWindow>,
     pub(crate) cells: BTreeMap<Position, RememberedMapCell>,
     pub(crate) status: MapHydrationStatus,
+}
+/// One atomically validated region, separate from the native viewport snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MapRegionUpdate {
+    pub window: MapWindow,
+    pub cells: BTreeMap<Position, RememberedMapCell>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Boundary {
@@ -49,6 +55,9 @@ pub(crate) struct MapHydration {
     active: Option<Assembly>,
     attempted: Option<MapWindow>,
     pub status: MapHydrationStatus,
+    work: (usize, usize, usize),
+    ambiguous: bool,
+    accepted_aliases: BTreeMap<String, RememberedMapCell>,
 }
 impl MapHydration {
     pub fn observe(
@@ -66,6 +75,9 @@ impl MapHydration {
             base,
         };
         if self.boundary.as_ref() != Some(&boundary) {
+            self.work = (0, 0, 0);
+            self.ambiguous = false;
+            self.accepted_aliases.clear();
             let reattached = self.boundary.as_ref().is_none_or(|old| {
                 old.context != boundary.context
                     || old.actor != boundary.actor
@@ -87,6 +99,10 @@ impl MapHydration {
             let boundary = self.boundary.as_ref()?;
             self.attempted = Some(window);
             self.status = MapHydrationStatus {
+                cells: self.work.0,
+                pages: self.work.1,
+                bytes: self.work.2,
+                ambiguous: self.ambiguous,
                 pending: true,
                 ..Default::default()
             };
@@ -107,11 +123,34 @@ impl MapHydration {
                 bytes: 0,
             });
         }
-        self.active
-            .as_ref()
-            .filter(|a| a.request.is_none())
-            .map(|a| a.query.clone())
+        let active = self.active.as_ref().filter(|a| a.request.is_none())?;
+        // A conforming peer may fill the next page. Reserve that headroom before
+        // asking: optional acquisition must never disconnect live gameplay just
+        // because earlier regions at this base consumed the cumulative budget.
+        let remaining_cells = active.total.map_or_else(
+            || {
+                active
+                    .query
+                    .window
+                    .volume()
+                    .unwrap_or(MAX_MAP_TRANSFER_CELLS)
+            },
+            |total| (total as usize).saturating_sub(active.cells.len()),
+        );
+        let reserve_cells = remaining_cells.min(MAX_MAP_PAGE_CELLS);
+        if self.work.1 >= MAX_MAP_TRANSFER_PAGES
+            || self.work.2 > MAX_MAP_TRANSFER_BYTES - MAX_MAP_PAGE_BYTES
+            || reserve_cells > MAX_MAP_TRANSFER_CELLS.saturating_sub(self.work.0)
+        {
+            self.active = None;
+            self.status.pending = false;
+            self.status.complete = false;
+            self.status.failed = true;
+            return None;
+        }
+        Some(active.query.clone())
     }
+
     pub fn bind(&mut self, query: &MapQuery, id: &str) -> Result<(), &'static str> {
         let active = self
             .active
@@ -152,7 +191,7 @@ impl MapHydration {
         id: &str,
         page: &MapPage,
         bytes: usize,
-    ) -> Result<Option<MapMemoryUpdate>, &'static str> {
+    ) -> Result<Option<MapRegionUpdate>, &'static str> {
         page.validate()?;
         let boundary = self.boundary.as_ref().ok_or("Map has no attachment")?;
         let active = self.active.as_ref().ok_or("Unsolicited map page")?;
@@ -193,7 +232,15 @@ impl MapHydration {
             .bytes
             .checked_add(bytes)
             .ok_or("Map transfer byte overflow")?;
-        if bytes > MAX_MAP_PAGE_BYTES
+        let aggregate_bytes = self
+            .work
+            .2
+            .checked_add(bytes)
+            .ok_or("Map aggregate byte overflow")?;
+        if aggregate_bytes > MAX_MAP_TRANSFER_BYTES
+            || self.work.1 >= MAX_MAP_TRANSFER_PAGES
+            || self.work.0 + page.cells.len() > MAX_MAP_TRANSFER_CELLS
+            || bytes > MAX_MAP_PAGE_BYTES
             || total_bytes > MAX_MAP_TRANSFER_BYTES
             || active.pages >= MAX_MAP_TRANSFER_PAGES
             || active.cells.len() + page.cells.len() > MAX_MAP_TRANSFER_CELLS
@@ -217,15 +264,21 @@ impl MapHydration {
         active.bytes = total_bytes;
         active.pages += 1;
         active.request = None;
+        self.work = (
+            self.work.0 + page.cells.len(),
+            self.work.1 + 1,
+            aggregate_bytes,
+        );
+        self.ambiguous |= page.ambiguous;
         self.status = MapHydrationStatus {
             pending: page.next.is_some(),
             complete: page.complete && page.next.is_none(),
-            ambiguous: page.ambiguous,
+            ambiguous: self.ambiguous,
             limited: page.limited,
             failed: false,
-            cells: active.cells.len(),
-            pages: active.pages,
-            bytes: total_bytes,
+            cells: self.work.0,
+            pages: self.work.1,
+            bytes: self.work.2,
         };
         if let Some(cursor) = &page.next {
             active.query.cursor = Some(cursor.clone());
@@ -237,7 +290,11 @@ impl MapHydration {
         }
         // Aliases of one physical key must carry one appearance, with only their
         // presentation position differing. This never merges different positions.
-        let mut seen: BTreeMap<&str, &RememberedMapCell> = BTreeMap::new();
+        let mut seen: BTreeMap<&str, &RememberedMapCell> = self
+            .accepted_aliases
+            .iter()
+            .map(|(key, cell)| (key.as_str(), cell))
+            .collect();
         for cell in active.cells.values() {
             if let Some(previous) = seen.insert(&cell.key, cell) {
                 let mut same = previous.clone();
@@ -249,14 +306,14 @@ impl MapHydration {
                 }
             }
         }
-        Ok(Some(MapMemoryUpdate {
-            context: boundary.context.clone(),
-            actor: boundary.actor,
-            branch: boundary.branch.clone(),
-            base: boundary.base,
+        // Only completed, validated regions become same-base comparison input.
+        // The cumulative cell/byte budget also bounds this auxiliary cache.
+        for cell in active.cells.values() {
+            self.accepted_aliases.insert(cell.key.clone(), cell.clone());
+        }
+        Ok(Some(MapRegionUpdate {
             window: page.window,
             cells: active.cells,
-            status: self.status.clone(),
         }))
     }
 }

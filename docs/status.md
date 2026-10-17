@@ -23,8 +23,10 @@ fall provenance and durable floor-activation records. Prior payload identities r
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
 saved game. Returning to an explored neighborhood or opening a fresh client
-hydrates a bounded complete map window; unseen changes and creature occupants
-are not refreshed or invented. See [remembered maps](play/ascii.md#remembered-map)
+hydrates a bounded complete map window. Trusted movement retains certified
+coverage and requests only uncovered face regions; uncertain alignment falls
+back to a full bounded refresh. Unseen changes and creature occupants are not
+refreshed or invented. See [remembered maps](play/ascii.md#remembered-map)
 and [the read-only transfer](reference/protocol.md#explored-map-pages). This
 current-format change does not reconstruct visual history absent from older
 saves; retain an older save with its matching build when finishing that run.
