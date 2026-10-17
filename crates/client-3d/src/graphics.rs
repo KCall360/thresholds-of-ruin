@@ -21,6 +21,9 @@ pub(super) fn plugins() -> PluginGroupBuilder {
     DefaultPlugins
         .set(RenderPlugin {
             render_creation: settings.into(),
+            // A ready world must not draw only its UI while asynchronously
+            // compiling the material pipelines needed by its meshes.
+            synchronous_pipeline_compilation: true,
             ..default()
         })
         .add(SoftwareFramePacingPlugin)

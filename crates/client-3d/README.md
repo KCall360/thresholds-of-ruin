@@ -7,6 +7,9 @@ workspace, lockfile, tests, and verification gate.
 
 Windows defaults to Direct3D 12 for live play and both offline showcases.
 All three modes use single-sample rendering and Bevy's built-in FXAA.
+New shader pipelines compile before drawing, so a ready scene does not briefly
+show only its HUD while world geometry is missing. The first use of a shader
+variant can pause that frame while compilation completes.
 On CPU Direct3D 12 adapters, rendering waits for each submitted frame to finish
 before queuing another, bounding the software GPU's outstanding resources while
 retaining the same models, materials, shadows, and resolution.
