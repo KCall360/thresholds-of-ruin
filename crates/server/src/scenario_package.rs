@@ -4580,7 +4580,9 @@ mod tests {
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
             ("validator", "tor-scenario-28"),
+            ("validator", "tor-scenario-29"),
             ("ruleset", "interactions-v38"),
+            ("ruleset", "interactions-v39"),
         ] {
             let mut package = original.clone();
             if boundary == "validator" {

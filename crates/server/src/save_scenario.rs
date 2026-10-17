@@ -920,6 +920,35 @@ mod linked_hold_storage_tests {
         }
     }
     #[test]
+    fn compiled_hold_damage_rules_require_the_explicit_nullable_descriptor() {
+        use tor_simulation::rules::{Effect as RuleEffect, Ruleset, RulesetDocument, StrikeSource};
+        let mut document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let strike = serde_json::from_value(serde_json::json!({
+            "offset":0,"check":{"actor":"user","skill":{"kind":"natural_attack"},
+                "against":{"kind":"defense","defense":"physical"}},
+            "on_success":[RuleEffect::HoldDamage {
+                category:tor_simulation::combat::DamageType::Impact,descriptor:None}],
+            "on_failure":[],"descriptors":[],"riders":[]}))
+        .unwrap();
+        document
+            .abilities
+            .iter_mut()
+            .find(|ability| ability.id.as_str() == "clutch")
+            .unwrap()
+            .strikes = StrikeSource::Authored {
+            strikes: vec![strike],
+        };
+        Ruleset::validate(document.clone()).unwrap();
+        let current = encode_rules_document(&document).unwrap();
+        decode_rules_document(&current).unwrap();
+        let marked = r#"{"kind":"hold_damage","category":"impact","descriptor":null}"#;
+        assert_eq!(current.matches(marked).count(), 1);
+        // Preserve every other byte, so canonical key order cannot mask the field check.
+        let missing = current.replacen(marked, r#"{"kind":"hold_damage","category":"impact"}"#, 1);
+        assert!(decode_rules_document(&missing).is_err());
+    }
+    #[test]
     fn hold_damage_increment_modifier_round_trips_authored_stored_and_compiled_forms() {
         let raw = serde_json::json!({"scope":"always","op":{"kind":"add",
             "stat":{"kind":"ability","ability":"clutch","stat":"hold_damage_increment"},"value":1}});

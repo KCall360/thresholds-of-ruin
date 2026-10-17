@@ -1,5 +1,12 @@
 use super::*;
 use crate::{Game, GameError};
+
+/// Live execution witnesses, separate from the immutable paid plan operands.
+struct BatchExecutionFacts<'a> {
+    contact: Option<&'a crate::combat::contact::MeleeContact>,
+    hold_damage: Option<super::HoldDamageExecution>,
+}
+
 impl Game {
     pub(crate) fn plan_actor_available(&self, plan: &Plan) -> bool {
         self.actors
@@ -165,8 +172,10 @@ impl Game {
             crate::lifecycle::ResolutionPublication::Primary {
                 strike: index as u16,
             },
-            contact.as_ref(),
-            hold_damage,
+            BatchExecutionFacts {
+                contact: contact.as_ref(),
+                hold_damage,
+            },
         )?;
         if strike.qualifying_primary_check()
             && primary.selected_branch == Some(crate::rules::RiderTrigger::Success)
@@ -225,8 +234,10 @@ impl Game {
                         strike: index as u16,
                         ordinal: ordinal as u16,
                     },
-                    contact.as_ref(),
-                    None,
+                    BatchExecutionFacts {
+                        contact: contact.as_ref(),
+                        hold_damage: None,
+                    },
                 )?;
                 progress.record_created_hold(
                     rider_receipt.created_hold(),
@@ -250,8 +261,7 @@ impl Game {
         activity: &mut crate::lifecycle::DamageActivityGuard,
         intention: Option<crate::IntentionId>,
         site: crate::lifecycle::ResolutionPublication,
-        contact: Option<&crate::combat::contact::MeleeContact>,
-        hold_damage: Option<super::HoldDamageExecution>,
+        facts: BatchExecutionFacts<'_>,
     ) -> Result<
         (
             resolve::BatchResolution,
@@ -267,8 +277,8 @@ impl Game {
         };
         let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
         let mut context = self.resolution_context(plan, actor, target)?;
-        context.spatial = self.spatial_resolution_input(plan, contact);
-        context.hold_damage = hold_damage;
+        context.spatial = self.spatial_resolution_input(plan, facts.contact);
+        context.hold_damage = facts.hold_damage;
         if plan.contextual_conditions(EffectRecipient::Target, &self.content.rules) {
             let placement = context
                 .spatial

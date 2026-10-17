@@ -103,9 +103,10 @@ now support B/K/F/G. The stationary plant F owns GR1 on HD1 and GR2 on HD6;
 Clutch creates a shared linked hold and later qualifying attack-tag HoldDamage
 primaries use its exact live-link increment. Ordinary paid Escape and per-holder
 protection use the same action, lifecycle and persistence boundaries. B/K/G keep
-their authored flight, natural damage and owned advancement rows. Fresh focused
-and integrated qualification of this reconstruction remains required; these
-mechanisms do not establish pressured escape or complete-run balance.
+their authored flight, natural damage and owned advancement rows. Focused unit,
+Service, recipe-combat and nongraphical process witnesses cover these mechanisms;
+native input and complete cross-platform qualification remain merge requirements.
+They do not establish pressured escape or complete-run balance.
 The retrieval/ascent victory is implemented; complete survival balancing remains open.
 Persistent floors and paired return stairs are intentional TOR adaptations,
 not exact replication of Rogue's regenerated floors and independent arrivals.

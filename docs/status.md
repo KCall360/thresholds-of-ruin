@@ -10,7 +10,7 @@ Every change still requires the [testing policy](development/testing.md).
 **`interactions-v40`**, scenario validator **`tor-scenario-30`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities. Save format 44 is
-provisional for this batch pending reconciliation with PR161 before publication.
+provisional for this batch pending reconciliation with PR161 before integration.
 
 The independent compiled inputs use RulesInput **13**, ContentPackage **15** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
@@ -36,7 +36,8 @@ saves; retain an older save with its matching build when finishing that run.
 The measured map-compaction change compacts exact appearances and plain
 neighbor evidence, and pools equal owner directories across snapshots; its
 navigation encoding and retained workload were unchanged. The current locomotion
-batch adds explicit learned flight requirements and needs fresh qualification. The queue fixture has an
+batch adds explicit learned flight requirements, covered by focused persistence
+and capability-loss tests. The queue fixture has an
 approved 2 MiB logical budget, with its 1 MiB compressed budget and exploration's
 16 MiB logical budget unchanged. The corrected production writer passes both
 capacity/reopen tests: 1,541,092 logical bytes for the queue fixture and 5,247,096
@@ -346,9 +347,11 @@ policy, preserves imposed velocity and resumes gravity on capability loss.
 Learned flight-only routes retain their disclosed requirements through persistence.
 B/K/F/G expand the selected population to eighteen species; F's shared Clutch and
 Tightening Hold use exact live relationships, while ordinary Escape has paid
-preparation/recovery and holder-specific protection. This reconstruction's focused
-unit, Service, recipe-combat and actual-process witnesses require fresh execution;
-source review is not qualification or numerical balance evidence. See
+preparation/recovery and holder-specific protection. Focused unit, Service,
+recipe-combat and nongraphical actual-process witnesses cover these mechanics,
+including source-free recovery of paid Escape work. Native input and the full
+cross-platform matrix remain merge requirements; these witnesses do not establish
+numerical balance. See
 [locomotion](reference/creature-rules.md#locomotion-capabilities) and
 [the production roster](play/rogue.md#flight-and-linked-holds).
 

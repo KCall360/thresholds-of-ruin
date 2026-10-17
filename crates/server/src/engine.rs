@@ -4872,14 +4872,14 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 43);
+        assert_eq!(engine.archive.version, 44);
         assert_eq!(engine.archive.ruleset, "interactions-v40");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {
                 previous.version = ARCHIVE_VERSION - 1;
             } else {
-                previous.ruleset = "interactions-v38".into();
+                previous.ruleset = "interactions-v39".into();
             }
             assert_eq!(
                 Engine::replay(previous, None, None).unwrap_err().code,
