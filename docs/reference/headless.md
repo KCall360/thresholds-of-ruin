@@ -119,6 +119,19 @@ Every stdout line is a JSON frame containing:
   accepted action results are available here; no hidden state is added.
 - `error`: an input/request error on `ready`, otherwise null.
 
+For long diagnostic runs, `--compact-background` is an explicit opt-in. Raw
+`map_page`, `palette` and `waiting` messages still appear unchanged in `message`,
+with `type`, `error`, `map_hydration` and `state_omitted: true`. Only their repeated
+derived attachment fields are absent: `state`, `branch`, `cursor`, `role`,
+`has_control`, `readiness`, `input_context`, `history`, `intentions`, `travel`,
+`memory`, `palette`, `advancement`, `advancement_page`, `synchronized` and
+`capabilities`. Absence means no derived snapshot was printed, never empty
+state. Consumers must read the raw message or wait for a complete frame rather
+than clear their state. Every `ready` frame, observation and lifecycle update,
+snapshot, protocol error and local error remains complete. Default output is
+unchanged; this option can be combined with `--omit-memory`. It changes neither
+map hydration nor server traffic and does not remove any raw message or error.
+
 Private strike inspection is available to wizard accounts through the ordinary
 `request` command envelope. After `wizard creature inspect <actor-id>`, use
 `command.type: "inspect_strike_source"` with the current attached-observer

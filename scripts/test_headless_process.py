@@ -65,6 +65,42 @@ class HeadlessProcesses(ProcessTestCase):
             self.assertTrue({"ready", "response", "update"}.issubset({row["type"] for row in frames}))
             self.assertTrue(all("memory" not in row for row in frames))
 
+    def test_compact_background_retains_raw_pages_and_complete_gameplay_and_errors(self):
+        self.server()
+        player, initial = self.client(omit_memory=True, compact_background=True)
+        self.assertIn("state", initial)
+        self.assertNotIn("state_omitted", initial)
+        self.hydrated(player, initial)
+        before = self.command(player, {"type": "inspect"})
+        moved = self.act(player, {"type": "move", "direction": "east"})
+        self.assertIsNone(moved["error"])
+        self.assertGreater(int(moved["state"]["observation"]["tick"]),
+                           int(before["state"]["observation"]["tick"]))
+        self.assertIn("history", moved)
+        self.hydrated(player, moved)
+        invalid = self.command(player, {"type": "not_an_input"})
+        self.assertIn("Invalid input", invalid["error"])
+        self.assertEqual(invalid["state"], moved["state"])
+        rejected = self.act(player, {"type": "take", "item": "i_" + "00" * 32})
+        self.assertIsNotNone(rejected["error"])
+        self.assertIn("state", rejected)
+        frames = [json.loads(line) for line in player.transcript if line.startswith("{")]
+        compact = [row for row in frames if row.get("state_omitted")]
+        pages = [row for row in compact if row["message"]["type"] == "map_page"]
+        self.assertTrue(pages, "Actual background hydration must exercise the projection")
+        self.assertTrue(any(row["message"]["page"]["cells"] for row in pages))
+        for row in compact:
+            self.assertEqual(set(row), {"type", "message", "error", "map_hydration", "state_omitted"})
+            self.assertIn(row["message"]["type"], {"map_page", "palette", "waiting"})
+            self.assertNotIn("state", row)
+        errors = [row for row in frames if (row.get("message") or {}).get("type") == "error"]
+        self.assertTrue(errors, "A real rejected request must remain visible")
+        for row in frames:
+            if row["type"] == "ready" or (row.get("message") or {}).get("type") in {"error", "update", "snapshot"}:
+                self.assertIn("state", row)
+                self.assertIn("history", row)
+                self.assertNotIn("state_omitted", row)
+
     def test_diagnostic_actor_and_revision_keep_numeric_schema_independent_of_wire(self):
         self.server()
         player = self.launch("tor-client-headless", ["--connect", self.address],

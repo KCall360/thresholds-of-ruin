@@ -226,6 +226,10 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
 
         def inspect():
+            # Another client's wizard mutation can finish before this observer
+            # consumes its ordered updates. Synchronize explicitly before the
+            # context-bound inspection; do not retry a rejected operation.
+            self.assertIsNone(self.request(observer, {"type": "snapshot"})["error"])
             offset = len(observer.transcript)
             self.assertIsNone(self.command(observer, {"type": "wizard", "command": "creature inspect 1"})["error"])
             messages = [json.loads(line).get("message") for line in observer.transcript[offset:] if line.startswith("{")]

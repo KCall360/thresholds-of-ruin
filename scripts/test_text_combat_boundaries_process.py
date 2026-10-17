@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import threading
 import tomllib
+import unittest
 from contextlib import closing
 
 from arena_matrix import toml_source
@@ -29,6 +30,7 @@ class AttackBoundary:
         self.held = threading.Event()
         self.release = threading.Event()
         self.replies = []
+        self.map_rejections = []
         self.waiting = []
         self.events = []
         self.health = []
@@ -45,8 +47,15 @@ class AttackBoundary:
         if kind == "snapshot":
             self.snapshots += 1
         if kind in ("ack", "error") and message.get("request_id") is not None:
-            self.replies.append(message)
-            if len(self.replies) > 64:
+            # An expired read-only hydration query is not another paid action.
+            # Keep its complete error as separate evidence; every other error
+            # remains in the gameplay reply count and still fails the witness.
+            if (kind == "error" and message["request_id"].startswith("map-")
+                    and message.get("code") == "stale_context"):
+                self.map_rejections.append(message)
+            else:
+                self.replies.append(message)
+            if len(self.replies) + len(self.map_rejections) > 64:
                 raise AssertionError("Unbounded Text request loop")
         if kind == "waiting":
             self.waiting.append(message["on"])
@@ -90,6 +99,27 @@ class AttackBoundary:
                 raise AssertionError("Test did not release the completed attack boundary")
 
 
+class AttackBoundaryTests(unittest.TestCase):
+    def test_background_map_stale_context_is_separate_from_gameplay_replies(self):
+        boundary = AttackBoundary()
+        stale = {"type": "error", "request_id": "map-background", "code": "stale_context"}
+        ack = {"type": "ack", "request_id": "move", "receipt": {"type": "immediate"}}
+        boundary(stale)
+        boundary(ack)
+        self.assertEqual(boundary.replies, [ack])
+        self.assertEqual(boundary.map_rejections, [stale])
+
+    def test_other_map_errors_and_gameplay_stale_context_still_count(self):
+        boundary = AttackBoundary()
+        replies = [
+            {"type": "error", "request_id": "map-background", "code": "invalid_request"},
+            {"type": "error", "request_id": "move", "code": "stale_context"},
+        ]
+        for message in replies:
+            boundary(message)
+        self.assertEqual(boundary.replies, replies)
+
+
 class TextCombatBoundaryProcesses(ProcessTestCase):
     def validate(self, package):
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
@@ -108,6 +138,7 @@ class TextCombatBoundaryProcesses(ProcessTestCase):
         finally:
             self.address = upstream
         boundary.replies.clear()
+        boundary.map_rejections.clear()
         boundary.waiting.clear()
         boundary.events.clear()
         boundary.health.clear()

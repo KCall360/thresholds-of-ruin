@@ -109,6 +109,25 @@ class HeadlessDiagnostics(unittest.TestCase):
                 self.assertFalse(frame.call_args.args[1]({"type": "update"}))
 
 
+    def test_compact_background_requires_explicit_opt_in_and_keeps_ready_state(self):
+        harness = ProcessTestCase()
+        harness.address = "127.0.0.1:1"
+        ready = {"type": "ready", "state": {"observation": {"tick": "7"}}}
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled), patch.object(harness, "launch") as launch, \
+                    patch.object(harness, "frame", return_value=ready) as frame:
+                _, result = harness.client(omit_memory=True, compact_background=enabled)
+                arguments = ["--connect", harness.address, "--omit-memory"]
+                if enabled:
+                    arguments.append("--compact-background")
+                self.assertEqual(launch.call_args.args, ("tor-client-headless", arguments))
+                self.assertIs(result, ready)
+                predicate = frame.call_args.args[1]
+                self.assertTrue(predicate(ready))
+                self.assertFalse(predicate({"type": "update", "state_omitted": True,
+                                            "message": {"type": "map_page"}}))
+
+
 class SaveBarriers(unittest.TestCase):
     def assert_cleanup_actor(self, options, expected):
         with tempfile.TemporaryDirectory() as directory:
