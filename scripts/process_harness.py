@@ -220,9 +220,12 @@ def settle_rogue_action(test, player, current, *, survive=True):
             return (not combat["preparation_active"] and len(pending) == 1
                     and pending[0]["phase"] == "paused"
                     and pending[0]["intention"] in frame["readiness"]["resume"])
-        # Observation, lifecycle and permission have distinct publication
-        # boundaries. Ready selects the actor; it does not finish preparation.
+        # Resolution can precede the final permission delta. Old cancel/resume
+        # targets still carry the previous input context, even with admission.
+        # Wait for that boundary before the walkthrough sends another query.
         return (view["ready"] and frame["readiness"]["admission"]
+                and not frame["readiness"]["resume"]
+                and not frame["readiness"]["cancel"]
                 and not any(row["phase"] in ("queued", "started")
                             for row in frame["intentions"]))
 
