@@ -30,7 +30,9 @@ impl Game {
     }
     pub(crate) fn condition_blocks_action(&self, id: ActorId, action: &crate::Action) -> bool {
         use crate::rules::ConditionRestriction;
-        if self.locomotion_blocks_action(id, action) { return true; }
+        if self.locomotion_blocks_action(id, action) {
+            return true;
+        }
         [
             ConditionRestriction::VoluntaryActions,
             ConditionRestriction::OrdinaryMovement,
@@ -47,12 +49,13 @@ impl Game {
     ) -> bool {
         self.actors.get(&id).is_some_and(|actor| {
             (operation == crate::rules::ConditionRestriction::OrdinaryMovement
-                && actor.holds.links().next().is_some()) || actor.combat.as_ref().is_some_and(|combat| {
-                combat.creature().condition_restricts_after(
-                    operation,
-                    self.actor_clock(id).saturating_sub(actor.active_since),
-                )
-            })
+                && actor.holds.links().next().is_some())
+                || actor.combat.as_ref().is_some_and(|combat| {
+                    combat.creature().condition_restricts_after(
+                        operation,
+                        self.actor_clock(id).saturating_sub(actor.active_since),
+                    )
+                })
         })
     }
     /// Absolute deadlines are updated only when their actor changes. Frozen

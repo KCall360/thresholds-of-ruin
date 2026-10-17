@@ -1297,7 +1297,9 @@ fn fold(
 
     derived.attributes = attribute_values(derived.attributes, &values, rules)?;
     derived.flags = flags(&derived.sources);
-    derived.locomotion = crate::locomotion::LocomotionCapabilities::from_modifiers(derived.sources.values().flatten());
+    derived.locomotion = crate::locomotion::LocomotionCapabilities::from_modifiers(
+        derived.sources.values().flatten(),
+    );
     fold_attribute_dependents(derived, build, &values)?;
     derived.health_recovery_period = recovery_period(derived.base_health_recovery_period, &values)?;
     let mut quiet_values = values.clone();
@@ -1353,7 +1355,10 @@ fn fold(
                         .apply(&modifier.op)
                         .map_err(|_| BuildError::DerivedLimit)?;
                 }
-                ModifierOp::Add { .. } | ModifierOp::Set { .. } | ModifierOp::Flag { .. } | ModifierOp::Locomotion { .. } => {}
+                ModifierOp::Add { .. }
+                | ModifierOp::Set { .. }
+                | ModifierOp::Flag { .. }
+                | ModifierOp::Locomotion { .. } => {}
             }
         }
     }
@@ -1417,7 +1422,8 @@ fn fold(
         derived.ability_values.insert(
             ability.clone(),
             AbilityValues {
-                hold_damage_increment: u32::try_from(stat(AbilityStat::HoldDamageIncrement)?).map_err(|_| BuildError::DerivedLimit)?,
+                hold_damage_increment: u32::try_from(stat(AbilityStat::HoldDamageIncrement)?)
+                    .map_err(|_| BuildError::DerivedLimit)?,
                 dice: dice as u16,
                 flat: stat(AbilityStat::FlatBonus)? as i32,
                 check_bonus: stat(AbilityStat::CheckBonus)? as i32,

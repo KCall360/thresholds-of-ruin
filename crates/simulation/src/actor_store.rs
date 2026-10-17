@@ -224,7 +224,9 @@ impl ActorStore {
         let mut timer_deadlines = BTreeSet::new();
         for (&id, actor) in &entries {
             add_member(&mut regions, actor.location.region, id);
-            if actor.holds.has_links() { add_member(&mut held_owners, actor.location.region, id); }
+            if actor.holds.has_links() {
+                add_member(&mut held_owners, actor.location.region, id);
+            }
             if let Some(interval) = next_timer(actor) {
                 timer_deadlines.insert((interval, id));
             }
@@ -309,7 +311,10 @@ impl ActorStore {
 
     /// Sparse source index excludes protection-only books.
     pub(crate) fn held_owners_in(&self, region: RegionId) -> impl Iterator<Item = ActorId> + '_ {
-        self.held_owners.get(&region).into_iter().flat_map(|owners| owners.iter().copied())
+        self.held_owners
+            .get(&region)
+            .into_iter()
+            .flat_map(|owners| owners.iter().copied())
     }
 
     /// Includes every loaded actor's body, including corpses. Callers apply their
@@ -403,13 +408,17 @@ impl ActorStore {
                 self.timer_deadlines.remove(&(interval, id));
             }
             remove_member(&mut self.regions, old.location.region, id);
-            if old.holds.has_links() { remove_member(&mut self.held_owners, old.location.region, id); }
+            if old.holds.has_links() {
+                remove_member(&mut self.held_owners, old.location.region, id);
+            }
         }
         if let Some(interval) = deadline {
             self.timer_deadlines.insert((interval, id));
         }
         add_member(&mut self.regions, region, id);
-        if held { add_member(&mut self.held_owners, region, id); }
+        if held {
+            add_member(&mut self.held_owners, region, id);
+        }
         self.bodies
             .get_mut()
             .unwrap_or_else(|e| e.into_inner())
@@ -430,7 +439,9 @@ impl ActorStore {
             self.timer_deadlines.remove(&(interval, *id));
         }
         remove_member(&mut self.regions, old.location.region, *id);
-        if old.holds.has_links() { remove_member(&mut self.held_owners, old.location.region, *id); }
+        if old.holds.has_links() {
+            remove_member(&mut self.held_owners, old.location.region, *id);
+        }
         self.bodies
             .get_mut()
             .unwrap_or_else(|e| e.into_inner())
@@ -534,8 +545,12 @@ impl Drop for ActorEdit<'_> {
         }
         let held = self.actor.holds.has_links();
         if self.before != self.actor.location.region || self.before_held != held {
-            if self.before_held { remove_member(self.held_owners, self.before, self.id); }
-            if held { add_member(self.held_owners, self.actor.location.region, self.id); }
+            if self.before_held {
+                remove_member(self.held_owners, self.before, self.id);
+            }
+            if held {
+                add_member(self.held_owners, self.actor.location.region, self.id);
+            }
         }
         if self.before != self.actor.location.region {
             remove_member(self.regions, self.before, self.id);
@@ -566,7 +581,12 @@ fn next_timer(actor: &Actor) -> Option<u64> {
         .and_then(|interval| actor.active_since.checked_add(interval));
     creature
         .into_iter()
-        .chain(actor.holds.next_change_in().and_then(|interval| actor.active_since.checked_add(interval)))
+        .chain(
+            actor
+                .holds
+                .next_change_in()
+                .and_then(|interval| actor.active_since.checked_add(interval)),
+        )
         .chain(
             actor
                 .engagement_deadline()

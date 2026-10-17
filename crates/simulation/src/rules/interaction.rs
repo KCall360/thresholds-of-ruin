@@ -133,7 +133,9 @@ impl Ruleset {
         bound(
             interaction != Interaction::NonHostile
                 || !effects.any(|effect| match effect {
-                    PlannedEffect::ApplyLinkedHold { .. } | PlannedEffect::HoldDamage { .. } => true,
+                    PlannedEffect::ApplyLinkedHold { .. } | PlannedEffect::HoldDamage { .. } => {
+                        true
+                    }
                     PlannedEffect::Damage { damage } => damage.can_harm(),
                     PlannedEffect::PushTargetOneCell { .. } | PlannedEffect::DrainLatestHitDie => {
                         true
@@ -223,7 +225,11 @@ impl Ruleset {
         MODIFIER_VISITS.with(|visits| visits.set(visits.get() + modifiers.len()));
         // Catalog flag graphs and expansion sizes have already been validated.
         modifiers.iter().any(|modifier| match &modifier.op {
-            ModifierOp::Locomotion { value } => matches!(value, crate::locomotion::LocomotionValue::Stationary { enabled: true } | crate::locomotion::LocomotionValue::Flying { enabled: false }),
+            ModifierOp::Locomotion { value } => matches!(
+                value,
+                crate::locomotion::LocomotionValue::Stationary { enabled: true }
+                    | crate::locomotion::LocomotionValue::Flying { enabled: false }
+            ),
             ModifierOp::Flag { flag } => {
                 seen.insert(flag.clone())
                     && self.flag(flag).is_some_and(|definition| {

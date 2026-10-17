@@ -242,13 +242,31 @@ pub fn validate_strike_shapes(strikes: &[StrikeDef]) -> Result<(), RulesetError>
             "strike_offset",
         )?;
         previous = strike.offset;
-        let tightening = |effects: &[Effect]| effects.iter().filter(|effect| matches!(effect, Effect::HoldDamage { .. })).count();
-        bound(tightening(&strike.on_success) <= 1
-            && tightening(&strike.on_failure) == 0
-            && strike.riders.iter().all(|rider| tightening(&rider.effects) == 0)
-            && (tightening(&strike.on_success) == 0 || strike.check.as_ref().is_some_and(|check|
-                check.actor == CheckActor::User && matches!(check.against, Against::Defense { defense: DefenseKind::Physical }))),
-            "hold_damage_primary")?;
+        let tightening = |effects: &[Effect]| {
+            effects
+                .iter()
+                .filter(|effect| matches!(effect, Effect::HoldDamage { .. }))
+                .count()
+        };
+        bound(
+            tightening(&strike.on_success) <= 1
+                && tightening(&strike.on_failure) == 0
+                && strike
+                    .riders
+                    .iter()
+                    .all(|rider| tightening(&rider.effects) == 0)
+                && (tightening(&strike.on_success) == 0
+                    || strike.check.as_ref().is_some_and(|check| {
+                        check.actor == CheckActor::User
+                            && matches!(
+                                check.against,
+                                Against::Defense {
+                                    defense: DefenseKind::Physical
+                                }
+                            )
+                    })),
+            "hold_damage_primary",
+        )?;
         bound(
             strike.riders.len() <= crate::limits::RIDERS_PER_STRIKE,
             "riders",
@@ -281,7 +299,9 @@ pub fn validate_strike_shapes(strikes: &[StrikeDef]) -> Result<(), RulesetError>
             for effect in branch {
                 bound(effect.valid_shape(), "effect")?;
                 if let Effect::HoldDamage { descriptor, .. } = effect {
-                    descriptors = descriptors.checked_add(usize::from(descriptor.is_some())).ok_or_else(|| sequence_bound("sequence_descriptors"))?;
+                    descriptors = descriptors
+                        .checked_add(usize::from(descriptor.is_some()))
+                        .ok_or_else(|| sequence_bound("sequence_descriptors"))?;
                 }
                 if let Effect::Damage {
                     damage: DamageExpr::Components { components },

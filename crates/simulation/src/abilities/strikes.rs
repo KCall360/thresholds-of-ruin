@@ -302,10 +302,18 @@ impl FrozenStrike {
                     .iter()
                     .all(|id| rules.document().descriptors.iter().any(|def| &def.id == id))
         };
-        let tightening = |effects: &[PlannedEffect]| effects.iter().filter(|effect| matches!(effect, PlannedEffect::HoldDamage { .. })).count();
+        let tightening = |effects: &[PlannedEffect]| {
+            effects
+                .iter()
+                .filter(|effect| matches!(effect, PlannedEffect::HoldDamage { .. }))
+                .count()
+        };
         tightening(&self.on_success) <= 1
             && tightening(&self.on_failure) == 0
-            && self.riders.iter().all(|rider| tightening(&rider.effects) == 0)
+            && self
+                .riders
+                .iter()
+                .all(|rider| tightening(&rider.effects) == 0)
             && (tightening(&self.on_success) == 0 || self.qualifying_primary_check())
             && self.offset <= crate::limits::NUMERIC as u64
             && usize::from(self.origin.ordinal()) < crate::limits::STRIKES

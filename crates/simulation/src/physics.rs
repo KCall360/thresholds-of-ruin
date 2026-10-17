@@ -341,7 +341,8 @@ impl Game {
         let a = &self.actors[&id];
         a.body.cells.len() > 1
             || a.motion.velocity != [0; 3]
-            || self.effective_gravity(PhysicsEntity::Actor(id), a.location, a.orientation, &a.body) != [0; 3]
+            || self.effective_gravity(PhysicsEntity::Actor(id), a.location, a.orientation, &a.body)
+                != [0; 3]
             || self.physics.displaced.contains(&id)
             || self
                 .physics
@@ -634,14 +635,23 @@ impl Game {
         sum
     }
     /// Creature flight changes acceleration, never imposed momentum or item gravity.
-    fn effective_gravity(&self, entity: PhysicsEntity, at: Location, frame: u8, body: &BodySpec) -> [i64; 3] {
+    fn effective_gravity(
+        &self,
+        entity: PhysicsEntity,
+        at: Location,
+        frame: u8,
+        body: &BodySpec,
+    ) -> [i64; 3] {
         if matches!(entity, PhysicsEntity::Actor(id) if self.actors[&id].locomotion().flying) {
             [0; 3]
-        } else { self.gravity_sum(at, frame, body) }
+        } else {
+            self.gravity_sum(at, frame, body)
+        }
     }
     fn supported(&self, id: ActorId) -> bool {
         let a = &self.actors[&id];
-        let gravity = self.effective_gravity(PhysicsEntity::Actor(id), a.location, a.orientation, &a.body);
+        let gravity =
+            self.effective_gravity(PhysicsEntity::Actor(id), a.location, a.orientation, &a.body);
         (0..3).any(|axis| {
             if gravity[axis] == 0 {
                 return false;
@@ -704,10 +714,29 @@ impl Game {
     /// Only the current forced physical chain can license later impact damage.
     /// Unknown/frozen geometry is not permission to retire saved provenance.
     pub(crate) fn fall_continues(&self, id: ActorId, actor: &crate::Actor) -> bool {
-        if self.actor_frozen(id) || self.region_frozen(actor.location.region) { return true; }
-        let gravity = if actor.locomotion().flying { [0; 3] } else { self.gravity_sum(actor.location, actor.orientation, &actor.body) };
-        if gravity == [0; 3] { return actor.motion.velocity != [0; 3]; }
-        (0..3).any(|axis| gravity[axis] != 0 && (actor.motion.velocity[axis] != 0 || !self.gravity_axis_blocked(PhysicsEntity::Actor(id), actor.location, actor.orientation, &actor.body, gravity, axis)))
+        if self.actor_frozen(id) || self.region_frozen(actor.location.region) {
+            return true;
+        }
+        let gravity = if actor.locomotion().flying {
+            [0; 3]
+        } else {
+            self.gravity_sum(actor.location, actor.orientation, &actor.body)
+        };
+        if gravity == [0; 3] {
+            return actor.motion.velocity != [0; 3];
+        }
+        (0..3).any(|axis| {
+            gravity[axis] != 0
+                && (actor.motion.velocity[axis] != 0
+                    || !self.gravity_axis_blocked(
+                        PhysicsEntity::Actor(id),
+                        actor.location,
+                        actor.orientation,
+                        &actor.body,
+                        gravity,
+                        axis,
+                    ))
+        })
     }
 
     pub(crate) fn retire_settled_fall(&mut self, id: ActorId) {
@@ -951,7 +980,9 @@ impl Game {
         actor.visited.insert(at.region);
         drop(actor);
         self.reconcile_holds_for_actor(id)?;
-        if self.floor_activation.is_none() || from.region == at.region { return Ok(()); }
+        if self.floor_activation.is_none() || from.region == at.region {
+            return Ok(());
+        }
         self.sync_actor_lifecycle(id)?;
         self.accepted_region_entry(id, from, at, crate::floor_activation::EntryCause::Physics)
     }

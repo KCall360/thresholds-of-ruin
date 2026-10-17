@@ -26,10 +26,17 @@ impl<'de> Deserialize<'de> for HoldCreationSite {
             primary_success: bool,
         }
         let f: Fields = crate::bounded::named_map(d)?;
-        if usize::from(f.strike) >= crate::limits::STRIKES || f.rider.is_some_and(|v| usize::from(v) >= crate::limits::RIDERS_PER_STRIKE) {
+        if usize::from(f.strike) >= crate::limits::STRIKES
+            || f.rider
+                .is_some_and(|v| usize::from(v) >= crate::limits::RIDERS_PER_STRIKE)
+        {
             return Err(serde::de::Error::custom("invalid hold creation site"));
         }
-        Ok(Self { strike: f.strike, rider: f.rider, primary_success: f.primary_success })
+        Ok(Self {
+            strike: f.strike,
+            rider: f.rider,
+            primary_success: f.primary_success,
+        })
     }
 }
 impl<'de> Deserialize<'de> for HoldBinding {
@@ -42,7 +49,10 @@ impl<'de> Deserialize<'de> for HoldBinding {
             created_at: Option<HoldCreationSite>,
         }
         let f: Fields = crate::bounded::named_map(d)?;
-        Ok(Self { id: f.id, created_at: f.created_at })
+        Ok(Self {
+            id: f.id,
+            created_at: f.created_at,
+        })
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -68,8 +78,8 @@ impl<'de> Deserialize<'de> for PreparationProgress {
                 next_strike: u16,
                 successful_primaries: u16,
                 attempted_riders: [u64; 2],
-        #[serde(deserialize_with = "crate::bounded::required_option")]
-        linked_hold: Option<HoldBinding>,
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                linked_hold: Option<HoldBinding>,
             },
             Escape {},
             Item {},
@@ -102,34 +112,92 @@ impl<'de> Deserialize<'de> for PreparationProgress {
 }
 impl PreparationProgress {
     pub(crate) fn hold_binding(self) -> Option<HoldBinding> {
-        match self { Self::Ability { linked_hold, .. } => linked_hold, _ => None }
+        match self {
+            Self::Ability { linked_hold, .. } => linked_hold,
+            _ => None,
+        }
     }
-    pub(crate) fn record_created_hold(&mut self, id: Option<crate::linked_hold::HoldId>, site: HoldCreationSite) {
+    pub(crate) fn record_created_hold(
+        &mut self,
+        id: Option<crate::linked_hold::HoldId>,
+        site: HoldCreationSite,
+    ) {
         if let (Self::Ability { linked_hold, .. }, Some(id)) = (self, id) {
-            if linked_hold.is_none() { *linked_hold = Some(HoldBinding { id, created_at: Some(site) }); }
+            if linked_hold.is_none() {
+                *linked_hold = Some(HoldBinding {
+                    id,
+                    created_at: Some(site),
+                });
+            }
         }
     }
     fn hold_binding_valid(self, plan: &crate::abilities::AbilityPlan) -> bool {
-        let Self::Ability { next_strike, successful_primaries, attempted_riders, linked_hold, .. } = self else { return false; };
+        let Self::Ability {
+            next_strike,
+            successful_primaries,
+            attempted_riders,
+            linked_hold,
+            ..
+        } = self
+        else {
+            return false;
+        };
         if let Some(initial) = plan.initial_hold {
-            return linked_hold == Some(HoldBinding { id: initial, created_at: None });
+            return linked_hold
+                == Some(HoldBinding {
+                    id: initial,
+                    created_at: None,
+                });
         }
-        let Some(binding) = linked_hold else { return true; };
-        let Some(site) = binding.created_at else { return false; };
-        if site.strike >= next_strike { return false; }
-        let Some(strike) = plan.strikes.get(usize::from(site.strike)) else { return false; };
-        if strike.check.is_none() && !site.primary_success { return false; }
-        if strike.qualifying_primary_check() && ((successful_primaries & (1 << site.strike) != 0) != site.primary_success) { return false; }
+        let Some(binding) = linked_hold else {
+            return true;
+        };
+        let Some(site) = binding.created_at else {
+            return false;
+        };
+        if site.strike >= next_strike {
+            return false;
+        }
+        let Some(strike) = plan.strikes.get(usize::from(site.strike)) else {
+            return false;
+        };
+        if strike.check.is_none() && !site.primary_success {
+            return false;
+        }
+        if strike.qualifying_primary_check()
+            && ((successful_primaries & (1 << site.strike) != 0) != site.primary_success)
+        {
+            return false;
+        }
         let effects = if let Some(ordinal) = site.rider {
-            let Some(rider) = strike.riders.get(usize::from(ordinal)) else { return false; };
-            if (rider.trigger == crate::rules::RiderTrigger::Success) != site.primary_success { return false; }
+            let Some(rider) = strike.riders.get(usize::from(ordinal)) else {
+                return false;
+            };
+            if (rider.trigger == crate::rules::RiderTrigger::Success) != site.primary_success {
+                return false;
+            }
             if rider.condition.is_some() {
-                let Some(slot) = plan.conditional_rider_slot(usize::from(site.strike), usize::from(ordinal)) else { return false; };
-                if attempted_riders[slot / 64] & (1 << (slot % 64)) == 0 { return false; }
+                let Some(slot) =
+                    plan.conditional_rider_slot(usize::from(site.strike), usize::from(ordinal))
+                else {
+                    return false;
+                };
+                if attempted_riders[slot / 64] & (1 << (slot % 64)) == 0 {
+                    return false;
+                }
             }
             &rider.effects
-        } else if site.primary_success { &strike.on_success } else { &strike.on_failure };
-        effects.iter().any(|effect| matches!(effect, crate::abilities::PlannedEffect::ApplyLinkedHold { .. }))
+        } else if site.primary_success {
+            &strike.on_success
+        } else {
+            &strike.on_failure
+        };
+        effects.iter().any(|effect| {
+            matches!(
+                effect,
+                crate::abilities::PlannedEffect::ApplyLinkedHold { .. }
+            )
+        })
     }
     pub(crate) fn new(plan: &Plan) -> Self {
         if matches!(plan, Plan::Escape(_)) {
@@ -141,7 +209,13 @@ impl PreparationProgress {
                 next_strike: 0,
                 successful_primaries: 0,
                 attempted_riders: [0; 2],
-                linked_hold: plan.as_ability().and_then(|plan| plan.initial_hold).map(|id| HoldBinding { id, created_at: None }),
+                linked_hold: plan
+                    .as_ability()
+                    .and_then(|plan| plan.initial_hold)
+                    .map(|id| HoldBinding {
+                        id,
+                        created_at: None,
+                    }),
             }
         } else {
             Self::Item {}
@@ -260,14 +334,15 @@ impl PreparationProgress {
         let Some(eligible) = self.eligible_riders(plan) else {
             return false;
         };
-        self.hold_binding_valid(plan) && eligible.iter().enumerate().all(|(slot, site)| {
-            let attempted = attempted_riders[slot / 64] & (1 << (slot % 64)) != 0;
-            match site {
-                None => !attempted,
-                // A later hit proves the target survived the eligible attempt site.
-                Some(index) => attempted || u32::from(successful_primaries) >> (index + 1) == 0,
-            }
-        })
+        self.hold_binding_valid(plan)
+            && eligible.iter().enumerate().all(|(slot, site)| {
+                let attempted = attempted_riders[slot / 64] & (1 << (slot % 64)) != 0;
+                match site {
+                    None => !attempted,
+                    // A later hit proves the target survived the eligible attempt site.
+                    Some(index) => attempted || u32::from(successful_primaries) >> (index + 1) == 0,
+                }
+            })
     }
 
     /// Loaded, committed live targets cannot justify an omitted past attempt.
@@ -292,7 +367,9 @@ impl Preparation {
     pub(crate) fn next_strike(&self) -> Option<usize> {
         match self.progress {
             PreparationProgress::Ability { next_strike, .. } => Some(usize::from(next_strike)),
-            PreparationProgress::Escape {} | PreparationProgress::Item {} | PreparationProgress::Respec {} => None,
+            PreparationProgress::Escape {}
+            | PreparationProgress::Item {}
+            | PreparationProgress::Respec {} => None,
         }
     }
     pub(crate) fn has_prefix(&self) -> bool {

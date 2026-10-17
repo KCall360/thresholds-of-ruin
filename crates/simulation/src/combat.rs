@@ -221,7 +221,10 @@ pub enum ObjectiveKind {
 /// One disclosed event for every data-defined ability, including the basic attack.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DisclosedCombatEvent {
-    EscapeResolved { hold: crate::linked_hold::HoldId, success: bool },
+    EscapeResolved {
+        hold: crate::linked_hold::HoldId,
+        success: bool,
+    },
     Ability {
         caster: Option<ActorId>,
         target: Option<ActorId>,
@@ -443,9 +446,15 @@ impl Game {
                         strike: *strike,
                     })
                 }
-                CombatEvent::EscapeResolved { actor, hold, success, .. } if *actor == id => {
-                    Some(DisclosedCombatEvent::EscapeResolved { hold: *hold, success: *success })
-                }
+                CombatEvent::EscapeResolved {
+                    actor,
+                    hold,
+                    success,
+                    ..
+                } if *actor == id => Some(DisclosedCombatEvent::EscapeResolved {
+                    hold: *hold,
+                    success: *success,
+                }),
                 CombatEvent::Interrupted { actor, .. } if *actor == id => {
                     Some(DisclosedCombatEvent::Interrupted { actor: *actor })
                 }

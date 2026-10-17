@@ -14,7 +14,7 @@ import unittest
 
 from arena_matrix import toml_source
 from service_contract_host import HostError, ServiceHost
-from linked_hold_service_contracts import LinkedHoldServiceContracts
+from linked_hold_service_contracts import LinkedHoldServiceContracts as LinkedHoldServiceContracts
 
 ROOT = Path(__file__).resolve().parent.parent
 

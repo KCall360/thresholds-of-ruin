@@ -410,7 +410,9 @@ pub enum Selector {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModifierOp {
-    Locomotion { value: crate::locomotion::LocomotionValue },
+    Locomotion {
+        value: crate::locomotion::LocomotionValue,
+    },
     Add {
         stat: Stat,
         value: i64,
@@ -445,7 +447,9 @@ impl<'de> Deserialize<'de> for ModifierOp {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
-            Locomotion { value: crate::locomotion::LocomotionValue },
+            Locomotion {
+                value: crate::locomotion::LocomotionValue,
+            },
             Add {
                 stat: Stat,
                 value: i64,
@@ -944,12 +948,12 @@ impl<'de> Deserialize<'de> for Effect {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             ApplyLinkedHold {
-        policy: crate::linked_hold::HoldPolicy,
-    },
-    HoldDamage {
-        category: crate::combat::DamageType,
-        descriptor: Option<crate::content_ids::DescriptorId>,
-    },
+                policy: crate::linked_hold::HoldPolicy,
+            },
+            HoldDamage {
+                category: crate::combat::DamageType,
+                descriptor: Option<crate::content_ids::DescriptorId>,
+            },
             DrainLatestHitDie {},
             RestoreHitDie {},
             StepSelfOneCell {},
@@ -996,7 +1000,13 @@ impl<'de> Deserialize<'de> for Effect {
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
-            Fields::HoldDamage { category, descriptor } => Self::HoldDamage { category, descriptor },
+            Fields::HoldDamage {
+                category,
+                descriptor,
+            } => Self::HoldDamage {
+                category,
+                descriptor,
+            },
             Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
@@ -1709,8 +1719,16 @@ impl Ruleset {
         for d in &mut document.abilities {
             bound(d.spatial_shape_valid(), "ability_spatial_shape")?;
             if let StrikeSource::Authored { strikes } = &d.strikes {
-                bound(!strikes.iter().any(|strike| strike.on_success.iter().any(|effect| matches!(effect, Effect::HoldDamage { .. })))
-                    || (d.reach == Reach::Melee && d.interaction == Interaction::HostileToTarget), "hold_damage_melee")?;
+                bound(
+                    !strikes.iter().any(|strike| {
+                        strike
+                            .on_success
+                            .iter()
+                            .any(|effect| matches!(effect, Effect::HoldDamage { .. }))
+                    }) || (d.reach == Reach::Melee
+                        && d.interaction == Interaction::HostileToTarget),
+                    "hold_damage_melee",
+                )?;
             }
             if let TimingSource::SelectedWeaponAdjusted {
                 preparation,
@@ -2302,7 +2320,12 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
             ModifierOp::Reduction { amount, .. } | ModifierOp::TalentReduction { amount, .. } => {
                 bound(i64::from(*amount) <= crate::limits::NUMERIC, "reduction")?
             }
-            ModifierOp::Locomotion { value: crate::locomotion::LocomotionValue::Erratic { chance: Some(chance) } } => bound(chance.valid(), "movement_chance")?,
+            ModifierOp::Locomotion {
+                value:
+                    crate::locomotion::LocomotionValue::Erratic {
+                        chance: Some(chance),
+                    },
+            } => bound(chance.valid(), "movement_chance")?,
             ModifierOp::Locomotion { .. }
             | ModifierOp::Flag { .. }
             | ModifierOp::Immunity { .. }

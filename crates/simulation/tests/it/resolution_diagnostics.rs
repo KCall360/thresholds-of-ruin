@@ -51,6 +51,8 @@ fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
             }),
         }],
         tokens: vec![],
+        hold_damage_increment: 0,
+        initial_hold: None,
     }
 }
 fn snapshot() -> Snapshot {

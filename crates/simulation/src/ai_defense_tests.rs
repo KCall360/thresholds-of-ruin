@@ -546,7 +546,17 @@ fn erratic_movement_never_draws_or_replaces_a_paid_strike_prefix() {
 fn paid_prefix_retains_priority(erratic: bool) {
     let mut game = fixture(|doc, owner| {
         if erratic {
-            owner.modifiers.push(Modifier { scope: Scope::Always, op: ModifierOp::Locomotion { value: crate::locomotion::LocomotionValue::Erratic { chance: Some(crate::locomotion::MovementChance { numerator: 1, denominator: 1 }) } } });
+            owner.modifiers.push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Locomotion {
+                    value: crate::locomotion::LocomotionValue::Erratic {
+                        chance: Some(crate::locomotion::MovementChance {
+                            numerator: 1,
+                            denominator: 1,
+                        }),
+                    },
+                },
+            });
         }
         let mut other = definition("probe_sequence", "probe_guard");
         other["reach"] = json!({"kind":"melee"});
@@ -573,9 +583,15 @@ fn paid_prefix_retains_priority(erratic: bool) {
     // manually selected before autonomous control begins. An already-autonomous
     // actor correctly rejects a recorded action that differs from its decision.
     if erratic {
-        assert!(matches!(game.choose_ai(OWNER).unwrap().action, Action::Move(_)));
+        assert!(matches!(
+            game.choose_ai(OWNER).unwrap().action,
+            Action::Move(_)
+        ));
     } else {
-        assert_eq!(game.choose_ai(OWNER).unwrap().action, action("probe_defense"));
+        assert_eq!(
+            game.choose_ai(OWNER).unwrap().action,
+            action("probe_defense")
+        );
     }
     let profile = game.combat.ai.remove(&OWNER).unwrap().profile;
     let initial_stamina = game

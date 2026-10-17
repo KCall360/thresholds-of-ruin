@@ -5,10 +5,10 @@ use tor_server::{
     scenario_package::{resolve_rules_source, resolve_source},
 };
 use tor_simulation::{
+    combat::CombatEvent,
     content_ids::{AbilityId, SpeciesId, TalentId},
     creatures::record::BuildRecord,
     rules::Ruleset,
-    combat::CombatEvent,
     Action, ActorId, CreatureIdentity, Game,
 };
 use tor_world::{Extent, Location, Position, Region, RegionId, World};
@@ -902,10 +902,16 @@ fn production_flytrap_uses_ordinary_clutch_tightening_and_single_escape() {
     use tor_simulation::abilities::{AbilityInvocation, ResolvedEffect};
     use tor_world::Direction;
     let (mut game, holder, subject) = production_combat_fixture("venus_flytrap");
-    let at = |x| Location { region: RegionId(1), position: Position { x, y: 2, z: 0 } };
+    let at = |x| Location {
+        region: RegionId(1),
+        position: Position { x, y: 2, z: 0 },
+    };
     let before = game.clone();
     assert!(game.act(holder, Action::Move(Direction::North)).is_err());
-    assert_eq!(game, before, "the real F recipe stays stationary without charging a turn");
+    assert_eq!(
+        game, before,
+        "the real F recipe stays stationary without charging a turn"
+    );
     let clutch = || Action::UseAbility {
         id: AbilityId::new("clutch").unwrap(),
         invocation: AbilityInvocation::ActorTarget { target: subject },
@@ -913,12 +919,22 @@ fn production_flytrap_uses_ordinary_clutch_tightening_and_single_escape() {
     };
     for _ in 0..12 {
         completed(&mut game, holder, clutch());
-        if !game.linked_holds(subject).is_empty() { break; }
+        if !game.linked_holds(subject).is_empty() {
+            break;
+        }
     }
     let links = game.linked_holds(subject);
-    assert_eq!(links.len(), 1, "an ordinary production Clutch hit establishes exactly one hold");
+    assert_eq!(
+        links.len(),
+        1,
+        "an ordinary production Clutch hit establishes exactly one hold"
+    );
     assert_eq!(links[0].holder, holder);
-    assert_eq!(game.creature(subject).unwrap().health().injury(), 0, "the creating F contact has zero damage");
+    assert_eq!(
+        game.creature(subject).unwrap().health().injury(),
+        0,
+        "the creating F contact has zero damage"
+    );
     // Later qualifying attacks use the same live relationship regardless of ability ID.
     let basic_melee = || Action::UseAbility {
         id: AbilityId::new("basic_melee").unwrap(),
@@ -928,29 +944,62 @@ fn production_flytrap_uses_ordinary_clutch_tightening_and_single_escape() {
     let mut tightened = false;
     for attempt in 1..=12u32 {
         let events = completed(&mut game, holder, basic_melee());
-        assert_eq!(game.linked_holds(subject), links, "later hits preserve the exact relationship");
-        let damage: u32 = events.iter().filter_map(|event| match event {
-            CombatEvent::Resolved { outcome, .. } if outcome.actor == holder && outcome.target == subject =>
-                Some(outcome.effects.iter().filter_map(|effect| match effect {
-                    ResolvedEffect::Damage { amount } => Some(*amount), _ => None,
-                }).sum::<u32>()),
-            _ => None,
-        }).sum();
+        assert_eq!(
+            game.linked_holds(subject),
+            links,
+            "later hits preserve the exact relationship"
+        );
+        let damage: u32 = events
+            .iter()
+            .filter_map(|event| match event {
+                CombatEvent::Resolved { outcome, .. }
+                    if outcome.actor == holder && outcome.target == subject =>
+                {
+                    Some(
+                        outcome
+                            .effects
+                            .iter()
+                            .filter_map(|effect| match effect {
+                                ResolvedEffect::Damage { amount } => Some(*amount),
+                                _ => None,
+                            })
+                            .sum::<u32>(),
+                    )
+                }
+                _ => None,
+            })
+            .sum();
         if damage > 0 {
-            assert_eq!(damage, attempt, "GR2 increments each later primary, including any miss");
+            assert_eq!(
+                damage, attempt,
+                "GR2 increments each later primary, including any miss"
+            );
             tightened = true;
             break;
         }
     }
-    assert!(tightened, "the real F natural HoldDamage channel must deal its later GR2 damage");
+    assert!(
+        tightened,
+        "the real F natural HoldDamage channel must deal its later GR2 damage"
+    );
     let events = completed(&mut game, subject, Action::Escape { hold: links[0].id });
-    assert_eq!(events.iter().filter(|event| matches!(event,
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event,
         CombatEvent::EscapeResolved { actor, hold, success: true, .. }
-            if *actor == subject && *hold == links[0].id)).count(), 1);
+            if *actor == subject && *hold == links[0].id))
+            .count(),
+        1
+    );
     assert!(game.linked_holds(subject).is_empty());
     completed(&mut game, subject, Action::Move(Direction::East));
     assert_eq!(game.observe(subject).unwrap().location, at(4));
-    assert_eq!(game.observe(holder).unwrap().location, at(2), "attacking and tightening never move F");
+    assert_eq!(
+        game.observe(holder).unwrap().location,
+        at(2),
+        "attacking and tightening never move F"
+    );
 }
 
 #[test]
@@ -975,10 +1024,12 @@ fn production_flying_roster_executes_authored_basic_melee_primaries_and_damage()
             let primaries: Vec<_> = events
                 .iter()
                 .filter_map(|event| match event {
-                    CombatEvent::Resolved { outcome, strike: Some(ordinal) }
-                        if outcome.actor == attacker
-                            && outcome.target == subject
-                            && outcome.ability.as_ref() == Some(&basic) =>
+                    CombatEvent::Resolved {
+                        outcome,
+                        strike: Some(ordinal),
+                    } if outcome.actor == attacker
+                        && outcome.target == subject
+                        && outcome.ability.as_ref() == Some(&basic) =>
                     {
                         Some((*ordinal, outcome))
                     }
@@ -986,14 +1037,17 @@ fn production_flying_roster_executes_authored_basic_melee_primaries_and_damage()
                 })
                 .collect();
             assert_eq!(
-                primaries.iter().map(|(ordinal, _)| *ordinal).collect::<Vec<_>>(),
+                primaries
+                    .iter()
+                    .map(|(ordinal, _)| *ordinal)
+                    .collect::<Vec<_>>(),
                 expected,
                 "{name}: ordinary basic melee executes every authored primary once, in order"
             );
             for (ordinal, outcome) in primaries {
-                damaged[usize::from(ordinal)] |= outcome.effects.iter().any(|effect| {
-                    matches!(effect, ResolvedEffect::Damage { amount } if *amount > 0)
-                });
+                damaged[usize::from(ordinal)] |= outcome.effects.iter().any(
+                    |effect| matches!(effect, ResolvedEffect::Damage { amount } if *amount > 0),
+                );
             }
             if damaged.iter().all(|damage| *damage) {
                 break;
@@ -1003,7 +1057,10 @@ fn production_flying_roster_executes_authored_basic_melee_primaries_and_damage()
             damaged.iter().all(|damage| *damage),
             "{name}: every authored natural primary eventually deals positive damage"
         );
-        assert!(game.creature(subject).unwrap().health().injury() > 0, "{name}");
+        assert!(
+            game.creature(subject).unwrap().health().injury() > 0,
+            "{name}"
+        );
     }
 }
 
@@ -1020,7 +1077,11 @@ fn rogue_flytrap_clutch_has_shared_policy_and_tightening_is_owned_at_hd_six() {
     let basic = AbilityId::new("basic_melee").unwrap();
     for ability in [&clutch, &basic] {
         assert_eq!(
-            build.derive().unwrap().ability_values(ability).hold_damage_increment,
+            build
+                .derive()
+                .unwrap()
+                .ability_values(ability)
+                .hold_damage_increment,
             1,
             "{ability}"
         );
@@ -1057,7 +1118,11 @@ fn rogue_flytrap_clutch_has_shared_policy_and_tightening_is_owned_at_hd_six() {
     assert!(without_gr2.derive().unwrap().abilities.contains(&clutch));
     for ability in [&clutch, &basic] {
         assert_eq!(
-            without_gr2.derive().unwrap().ability_values(ability).hold_damage_increment,
+            without_gr2
+                .derive()
+                .unwrap()
+                .ability_values(ability)
+                .hold_damage_increment,
             0,
             "{ability}"
         );
@@ -1076,7 +1141,10 @@ fn rogue_flytrap_clutch_has_shared_policy_and_tightening_is_owned_at_hd_six() {
     assert!(state.derived().abilities.contains(&clutch));
     for ability in [&clutch, &basic] {
         assert_eq!(
-            state.derived().ability_values(ability).hold_damage_increment,
+            state
+                .derived()
+                .ability_values(ability)
+                .hold_damage_increment,
             0,
             "{ability}"
         );
@@ -1086,7 +1154,10 @@ fn rogue_flytrap_clutch_has_shared_policy_and_tightening_is_owned_at_hd_six() {
     assert_eq!(state.build().choices()[5], build.choices()[5]);
     for ability in [&clutch, &basic] {
         assert_eq!(
-            state.derived().ability_values(ability).hold_damage_increment,
+            state
+                .derived()
+                .ability_values(ability)
+                .hold_damage_increment,
             1,
             "{ability}"
         );

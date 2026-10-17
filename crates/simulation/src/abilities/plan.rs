@@ -308,8 +308,8 @@ impl Plan {
             Self::Escape(plan) => plan.tokens.as_slice(),
             _ => &[],
         }
-            .iter()
-            .map(|claim| &claim.reservation)
+        .iter()
+        .map(|claim| &claim.reservation)
     }
     pub fn actor(&self) -> ActorId {
         match self {
@@ -458,8 +458,12 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             | PlannedEffect::PushTargetOneCell { .. }
             | PlannedEffect::DrainLatestHitDie
             | PlannedEffect::RestoreHitDie => true,
-            PlannedEffect::ApplyLinkedHold { policy } => policy.valid() && rules.flag(&policy.sustaining).is_some(),
-            PlannedEffect::HoldDamage { descriptor, .. } => descriptor.as_ref().is_none_or(|id| rules.descriptor(id).is_some()),
+            PlannedEffect::ApplyLinkedHold { policy } => {
+                policy.valid() && rules.flag(&policy.sustaining).is_some()
+            }
+            PlannedEffect::HoldDamage { descriptor, .. } => descriptor
+                .as_ref()
+                .is_none_or(|id| rules.descriptor(id).is_some()),
             PlannedEffect::Damage { damage } => rules.validate_damage(damage).is_ok(),
             PlannedEffect::Heal { amount }
             | PlannedEffect::Nourish { amount }
@@ -555,8 +559,20 @@ pub(super) fn effects_match_definition_scoped(
             .zip(actual)
             .enumerate()
             .all(|(index, (expected, actual))| match (expected, actual) {
-                (Effect::ApplyLinkedHold { policy: expected }, PlannedEffect::ApplyLinkedHold { policy: actual }) => expected == actual,
-                (Effect::HoldDamage { category: a, descriptor: d }, PlannedEffect::HoldDamage { category: b, descriptor: e }) => a == b && d == e,
+                (
+                    Effect::ApplyLinkedHold { policy: expected },
+                    PlannedEffect::ApplyLinkedHold { policy: actual },
+                ) => expected == actual,
+                (
+                    Effect::HoldDamage {
+                        category: a,
+                        descriptor: d,
+                    },
+                    PlannedEffect::HoldDamage {
+                        category: b,
+                        descriptor: e,
+                    },
+                ) => a == b && d == e,
                 (Effect::StepSelfOneCell, PlannedEffect::StepSelfOneCell)
                 | (Effect::DrainLatestHitDie, PlannedEffect::DrainLatestHitDie)
                 | (Effect::RestoreHitDie, PlannedEffect::RestoreHitDie) => true,
@@ -898,8 +914,16 @@ impl Game {
         effects
             .iter()
             .map(|effect| match effect {
-                Effect::ApplyLinkedHold { policy } => Ok(PlannedEffect::ApplyLinkedHold { policy: policy.clone() }),
-                Effect::HoldDamage { category, descriptor } => Ok(PlannedEffect::HoldDamage { category: *category, descriptor: descriptor.clone() }),
+                Effect::ApplyLinkedHold { policy } => Ok(PlannedEffect::ApplyLinkedHold {
+                    policy: policy.clone(),
+                }),
+                Effect::HoldDamage {
+                    category,
+                    descriptor,
+                } => Ok(PlannedEffect::HoldDamage {
+                    category: *category,
+                    descriptor: descriptor.clone(),
+                }),
                 Effect::DrainLatestHitDie => Ok(PlannedEffect::DrainLatestHitDie),
                 Effect::RestoreHitDie => Ok(PlannedEffect::RestoreHitDie),
                 Effect::StepSelfOneCell => Ok(PlannedEffect::StepSelfOneCell),
@@ -1031,13 +1055,13 @@ impl<'de> Deserialize<'de> for PlannedEffect {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             ApplyLinkedHold {
-        policy: crate::linked_hold::HoldPolicy,
-    },
-    HoldDamage {
-        category: crate::combat::DamageType,
-        #[serde(deserialize_with = "crate::bounded::required_option")]
-        descriptor: Option<crate::content_ids::DescriptorId>,
-    },
+                policy: crate::linked_hold::HoldPolicy,
+            },
+            HoldDamage {
+                category: crate::combat::DamageType,
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                descriptor: Option<crate::content_ids::DescriptorId>,
+            },
             DrainLatestHitDie {},
             RestoreHitDie {},
             StepSelfOneCell {},
@@ -1084,7 +1108,13 @@ impl<'de> Deserialize<'de> for PlannedEffect {
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
-            Fields::HoldDamage { category, descriptor } => Self::HoldDamage { category, descriptor },
+            Fields::HoldDamage {
+                category,
+                descriptor,
+            } => Self::HoldDamage {
+                category,
+                descriptor,
+            },
             Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,

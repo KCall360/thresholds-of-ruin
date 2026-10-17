@@ -41,7 +41,9 @@ pub(crate) struct PublishedResolution {
     role: PublishedRole,
 }
 impl PublishedResolution {
-    pub(crate) fn created_hold(self) -> Option<crate::linked_hold::HoldId> { self.created_hold }
+    pub(crate) fn created_hold(self) -> Option<crate::linked_hold::HoldId> {
+        self.created_hold
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PublishedRole {
@@ -429,8 +431,11 @@ impl Game {
                 self.commit_actor_outcome(transition)?;
                 events.extend(self.event_log.split_off(event_start));
                 let highwater = self.next_hold_id;
-                let applied = self.apply_linked_hold(outcome.actor, recipient_id, policy.clone())?;
-                if self.next_hold_id != highwater { created_hold = created_hold.or(applied); }
+                let applied =
+                    self.apply_linked_hold(outcome.actor, recipient_id, policy.clone())?;
+                if self.next_hold_id != highwater {
+                    created_hold = created_hold.or(applied);
+                }
                 transition = self.actor_outcome(recipient_id)?;
                 transition.events.extend(events);
                 if applied.is_some() {

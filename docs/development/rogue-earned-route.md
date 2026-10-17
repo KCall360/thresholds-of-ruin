@@ -20,7 +20,7 @@ adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
 `scripts/fixtures/rogue-earned-baseline-v9` retains exact package inputs and its
 current bundled-rule dependency hash. Its source-only transition changes only
-scenario format 17 to 18 and the bundled import from interactions-v39 to
+scenario format 17 to 18 and the previous bundled import to
 interactions-v40. The remaining authored package bytes are unchanged. Frozen
 v6–v8 inputs and their source/transition receipts remain immutable research
 evidence. Shared locomotion and linked-hold rules make this a new experiment

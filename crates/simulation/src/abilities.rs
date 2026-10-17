@@ -19,8 +19,9 @@ pub use plan::{
     AbilityPlan, CheckThreshold, Plan, PlannedAmount, PlannedCheck, PlannedEffect, RuleError,
 };
 pub use resolve::{
-    resolve, ApplicationSnapshot, EffectApplicationError, EffectRecipient, Outcome, OutcomeStatus,
-    HoldDamageExecution, ResolutionContext, ResolutionPlan, ResolvedCheck, ResolvedEffect, Snapshot,
+    resolve, ApplicationSnapshot, EffectApplicationError, EffectRecipient, HoldDamageExecution,
+    Outcome, OutcomeStatus, ResolutionContext, ResolutionPlan, ResolvedCheck, ResolvedEffect,
+    Snapshot,
 };
 pub(crate) use resolve::{resolve_checked, resolve_escape_check, ActorEffectState};
 pub use strikes::{

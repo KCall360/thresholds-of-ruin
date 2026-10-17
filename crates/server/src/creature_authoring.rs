@@ -1293,8 +1293,16 @@ mod locomotion_authoring_tests {
     use super::*;
     #[test]
     fn omitted_erratic_chance_is_authoring_only_suppression() {
-        let authored: Modifier = toml::from_str("scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'erratic' } }").unwrap();
-        assert_eq!(authored.compile().unwrap().op, s::rules::ModifierOp::Locomotion { value: s::locomotion::LocomotionValue::Erratic { chance: None } });
+        let authored: Modifier = toml::from_str(
+            "scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'erratic' } }",
+        )
+        .unwrap();
+        assert_eq!(
+            authored.compile().unwrap().op,
+            s::rules::ModifierOp::Locomotion {
+                value: s::locomotion::LocomotionValue::Erratic { chance: None }
+            }
+        );
         assert!(toml::from_str::<Modifier>("scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'erratic', enabled = true, chance = { numerator = 1, denominator = 2 } } }").is_err());
         let bad: Modifier = toml::from_str("scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'erratic', chance = { numerator = 2, denominator = 1 } } }").unwrap();
         assert!(bad.compile().is_err());

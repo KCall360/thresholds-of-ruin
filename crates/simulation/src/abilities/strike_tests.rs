@@ -382,7 +382,7 @@ fn ordered_strikes_schedule_keeps_frozen_prefix_and_starts_recovery_after_last()
         );
         assert_eq!(
             serde_json::to_value(preparation).unwrap()["progress"],
-            json!({"kind":"ability","next_strike":completed,"successful_primaries":0,"attempted_riders":[0,0]})
+            json!({"kind":"ability","next_strike":completed,"successful_primaries":0,"attempted_riders":[0,0],"linked_hold":null})
         );
     }
     game.tick = 30;

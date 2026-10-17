@@ -232,14 +232,14 @@ impl Game {
         Ok(())
     }
 }
-pub(crate) fn read_action<'de, D: serde::Deserializer<'de>>(d: D) -> Result<(HoldId,), D::Error> {
+pub(crate) fn read_action<'de, D: serde::Deserializer<'de>>(d: D) -> Result<HoldId, D::Error> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Fields {
         hold: HoldId,
     }
     let f: Fields = crate::bounded::named_map(d)?;
-    Ok((f.hold,))
+    Ok(f.hold)
 }
 pub(crate) fn read_completion<'de, D: serde::Deserializer<'de>>(
     d: D,
@@ -263,6 +263,27 @@ mod tests {
     use crate::{Action, CreatureIdentity, OutcomeKind};
     use std::num::NonZeroU64;
     use tor_world::{Extent, Location, Position, Region, RegionId, World};
+
+    #[test]
+    fn escape_action_requires_exact_named_inner_and_outer_objects() {
+        let canonical = serde_json::json!({"type": "escape", "value": {"hold": 7}});
+        let action = serde_json::from_value::<Action>(canonical.clone()).unwrap();
+        assert_eq!(action, Action::Escape { hold: HoldId(7) });
+        assert_eq!(serde_json::to_value(action).unwrap(), canonical);
+        for malformed in [
+            serde_json::json!(["escape", {"hold": 7}]),
+            serde_json::json!({"type": "escape", "value": [7]}),
+            serde_json::json!({"type": "escape", "value": {}}),
+            serde_json::json!({"type": "escape", "value": {"hold": 7, "holder": 2}}),
+            serde_json::json!({"type": "escape", "value": {"hold": 0}}),
+            serde_json::json!({"type": "escape", "value": {"hold": u64::MAX}}),
+        ] {
+            assert!(
+                serde_json::from_value::<Action>(malformed.clone()).is_err(),
+                "{malformed}"
+            );
+        }
+    }
 
     fn policy() -> HoldPolicy {
         HoldPolicy {
@@ -406,18 +427,17 @@ mod tests {
             Plan::Escape(tor_world::Shared::new(plan.clone())),
             "current Speed/Strength cannot recompile paid operands"
         );
-        assert!(
-            game.preparation(ActorId(1))
-                .unwrap()
-                .plan
-                .as_ability()
-                .is_none()
-        );
+        assert!(game
+            .preparation(ActorId(1))
+            .unwrap()
+            .plan
+            .as_ability()
+            .is_none());
         assert_eq!(
             game.preparation(ActorId(1)).unwrap().plan.work(),
             crate::Work::Escape { hold: first }
         );
-        let mut shared = crate::SharedState::default();
+        let mut shared = crate::checkpoint::SharedState::default();
         let saved = game.checkpoint(&mut shared);
         game = Game::restore_checkpoint(saved, &shared, game.content.clone()).unwrap();
         complete(&mut game);
@@ -436,19 +456,17 @@ mod tests {
             ActorId(1),
             crate::rules::ConditionRestriction::OrdinaryMovement
         ));
-        assert!(
-            game.actors[&ActorId(1)]
-                .holds
-                .incoming
-                .iter()
-                .any(|slot| matches!(
-                    slot,
-                    crate::linked_hold::HoldSlot::Protection {
-                        holder: ActorId(2),
-                        remaining
-                    } if *remaining + game.actors[&ActorId(1)].active_since == plan.preparation + 400
-                ))
-        );
+        assert!(game.actors[&ActorId(1)]
+            .holds
+            .incoming
+            .iter()
+            .any(|slot| matches!(
+                slot,
+                crate::linked_hold::HoldSlot::Protection {
+                    holder: ActorId(2),
+                    remaining
+                } if *remaining + game.actors[&ActorId(1)].active_since == plan.preparation + 400
+            )));
         assert!(game.event_log.iter().any(|event| matches!(event,
             crate::combat::CombatEvent::EscapeResolved { actor: ActorId(1), hold, success: true, .. } if *hold == first)));
         let own = game.observe(ActorId(1)).unwrap();
@@ -499,12 +517,10 @@ mod tests {
         assert_eq!(game.actors[&ActorId(1)].ready_at, game.tick);
         assert!(game.linked_hold(ActorId(1), replacement).is_some());
         assert!(game.linked_hold(ActorId(1), second).is_some());
-        assert!(
-            !game
-                .event_log
-                .iter()
-                .any(|event| matches!(event, crate::combat::CombatEvent::EscapeResolved { .. }))
-        );
+        assert!(!game
+            .event_log
+            .iter()
+            .any(|event| matches!(event, crate::combat::CombatEvent::EscapeResolved { .. })));
     }
     #[test]
     fn linked_hold_escape_generic_tokens_reserve_both_endpoints_and_retire_once() {
@@ -522,11 +538,10 @@ mod tests {
         }
         let plan = start(&mut game, first, false);
         assert_eq!(plan.tokens.len(), 4);
-        assert!(
-            plan.tokens
-                .iter()
-                .all(|claim| claim.reservation.qualification.is_none())
-        );
+        assert!(plan
+            .tokens
+            .iter()
+            .all(|claim| claim.reservation.qualification.is_none()));
         assert!(game.token_reservations_valid(ActorId(1), false));
         assert!(game.token_reservations_valid(ActorId(2), false));
         complete(&mut game);
@@ -573,12 +588,10 @@ mod tests {
             assert!(serde_json::from_value::<Action>(action).is_err());
         }
         assert!(serde_json::from_str::<Action>(r#"{"type":"escape","value":[1]}"#).is_err());
-        assert!(
-            serde_json::from_str::<crate::combat::PreparationProgress>(
-                r#"{"kind":"escape","next_strike":0}"#
-            )
-            .is_err()
-        );
+        assert!(serde_json::from_str::<crate::combat::PreparationProgress>(
+            r#"{"kind":"escape","next_strike":0}"#
+        )
+        .is_err());
         let mut forged = (*plan).clone();
         forged.hold = HoldId(game.next_hold_id);
         assert!(!game.escape_plan_source_valid(&forged));
@@ -620,13 +633,11 @@ mod tests {
             )
         );
         complete(&mut game);
-        assert!(
-            game.creature(ActorId(1))
-                .unwrap()
-                .conditions()
-                .instances()
-                .any(|condition| condition.qualification.is_some()
-                    && condition.reserved_by.is_none())
-        );
+        assert!(game
+            .creature(ActorId(1))
+            .unwrap()
+            .conditions()
+            .instances()
+            .any(|condition| condition.qualification.is_some() && condition.reserved_by.is_none()));
     }
 }

@@ -122,7 +122,9 @@ pub struct ItemId(pub u64);
     deny_unknown_fields
 )]
 pub enum Action {
-    Escape { hold: linked_hold::HoldId },
+    Escape {
+        hold: linked_hold::HoldId,
+    },
     ChooseGrowthSource {
         basis: player_advancement::AdvancementBasis,
         source: earned_growth::GrowthSource,
@@ -182,7 +184,9 @@ impl<'de> serde::Deserialize<'de> for Action {
         )]
         enum Fields {
             #[serde(deserialize_with = "crate::escape::read_action")]
-            Escape { hold: linked_hold::HoldId },
+            Escape {
+                hold: linked_hold::HoldId,
+            },
             ChooseGrowthSource {
                 basis: player_advancement::AdvancementBasis,
                 source: earned_growth::GrowthSource,
@@ -299,7 +303,9 @@ pub enum GameError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
-    EscapeStarted { hold: linked_hold::HoldId },
+    EscapeStarted {
+        hold: linked_hold::HoldId,
+    },
     GrowthSourceChosen {
         basis: player_advancement::AdvancementBasis,
         source: earned_growth::GrowthSource,
@@ -739,7 +745,13 @@ impl Game {
             .ok_or(GameError::IdentityExhausted)?;
         let id = self.next_door_id;
         let affected = self.hold_geometry_candidates((0..i32::from(height)).filter_map(|offset| {
-            location.position.z.checked_add(offset).map(|z| Location { position: Position { z, ..location.position }, ..location })
+            location.position.z.checked_add(offset).map(|z| Location {
+                position: Position {
+                    z,
+                    ..location.position
+                },
+                ..location
+            })
         }));
         self.with_recovery_transition(false, |candidate| {
             candidate

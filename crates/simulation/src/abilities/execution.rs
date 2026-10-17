@@ -130,18 +130,31 @@ impl Game {
         }
         let hold_damage = progress.hold_binding().and_then(|binding| {
             (ability.hold_damage_increment > 0
-                && strike.on_success.iter().any(|effect| matches!(effect, PlannedEffect::HoldDamage { .. }))
+                && strike
+                    .on_success
+                    .iter()
+                    .any(|effect| matches!(effect, PlannedEffect::HoldDamage { .. }))
                 && self.valid_linked_hold(ability.actor, ability.target, binding.id))
-                .then(|| self.linked_hold(ability.target, binding.id))
-                .flatten()
-                .and_then(|link| link.escalation.checked_add(ability.hold_damage_increment))
-                .filter(|bonus| *bonus <= crate::linked_hold::HOLD_ESCALATION_MAX)
-                .map(|bonus| super::HoldDamageExecution { id: binding.id, bonus })
+            .then(|| self.linked_hold(ability.target, binding.id))
+            .flatten()
+            .and_then(|link| link.escalation.checked_add(ability.hold_damage_increment))
+            .filter(|bonus| *bonus <= crate::linked_hold::HOLD_ESCALATION_MAX)
+            .map(|bonus| super::HoldDamageExecution {
+                id: binding.id,
+                bonus,
+            })
         });
-        if progress.hold_binding().is_some_and(|binding| self.valid_linked_hold(ability.actor, ability.target, binding.id))
-            && ability.hold_damage_increment > 0
-            && strike.on_success.iter().any(|effect| matches!(effect, PlannedEffect::HoldDamage { .. }))
-            && hold_damage.is_none() { return Err(GameError::Rule(RuleError::InvalidPlan)); }
+        if progress.hold_binding().is_some_and(|binding| {
+            self.valid_linked_hold(ability.actor, ability.target, binding.id)
+        }) && ability.hold_damage_increment > 0
+            && strike
+                .on_success
+                .iter()
+                .any(|effect| matches!(effect, PlannedEffect::HoldDamage { .. }))
+            && hold_damage.is_none()
+        {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        }
         let mut budget = resolve::StrikeBudget::new(strike);
         let mut activity = crate::lifecycle::DamageActivityGuard::default();
         let (mut primary, primary_receipt) = self.resolve_batch_in_transaction(
@@ -166,12 +179,22 @@ impl Game {
         }
         if let Some(branch) = primary.selected_branch {
             if let Some(execution) = hold_damage {
-                self.advance_linked_hold(ability.actor, ability.target, execution.id, ability.hold_damage_increment)?;
+                self.advance_linked_hold(
+                    ability.actor,
+                    ability.target,
+                    execution.id,
+                    ability.hold_damage_increment,
+                )?;
             }
             let primary_success = branch == crate::rules::RiderTrigger::Success;
-            progress.record_created_hold(primary_receipt.created_hold(), crate::sequence::HoldCreationSite {
-                strike: index as u16, rider: None, primary_success,
-            });
+            progress.record_created_hold(
+                primary_receipt.created_hold(),
+                crate::sequence::HoldCreationSite {
+                    strike: index as u16,
+                    rider: None,
+                    primary_success,
+                },
+            );
             for (ordinal, rider) in strike.riders.iter().enumerate() {
                 if rider.trigger != branch {
                     continue;
@@ -205,9 +228,14 @@ impl Game {
                     contact.as_ref(),
                     None,
                 )?;
-                progress.record_created_hold(rider_receipt.created_hold(), crate::sequence::HoldCreationSite {
-                    strike: index as u16, rider: Some(ordinal as u16), primary_success,
-                });
+                progress.record_created_hold(
+                    rider_receipt.created_hold(),
+                    crate::sequence::HoldCreationSite {
+                        strike: index as u16,
+                        rider: Some(ordinal as u16),
+                        primary_success,
+                    },
+                );
                 primary.outcome.target_rider_participated =
                     self.merge_committed_rider_participation(primary_receipt, rider_receipt)?;
             }

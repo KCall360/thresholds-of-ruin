@@ -192,7 +192,9 @@ impl ConsumableSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Work {
-    Escape { hold: crate::linked_hold::HoldId },
+    Escape {
+        hold: crate::linked_hold::HoldId,
+    },
     Respec {
         basis: crate::player_advancement::AdvancementBasis,
         replacement: crate::player_respec::ReplacementOperation,
@@ -222,7 +224,9 @@ impl<'de> serde::Deserialize<'de> for Work {
         #[derive(serde::Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
-            Escape { hold: crate::linked_hold::HoldId },
+            Escape {
+                hold: crate::linked_hold::HoldId,
+            },
             Respec {
                 basis: crate::player_advancement::AdvancementBasis,
                 replacement: crate::player_respec::ReplacementOperation,

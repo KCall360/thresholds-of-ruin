@@ -170,12 +170,24 @@ fn assert_wait_refresh(suppressed: bool) {
         .any(|message| matches!(message, ServerMessage::Error { .. })));
     let after = service.engine.state(actor).unwrap();
     assert!(after.observation.tick > before.observation.tick);
-    assert_eq!(after.observation.visible_cells, before.observation.visible_cells);
+    assert_eq!(
+        after.observation.visible_cells,
+        before.observation.visible_cells
+    );
     if suppressed {
-        assert_eq!(service.engine.travel_route(actor, &destination).unwrap().len(), 1,
-            "expiry must learn newly disclosed flight edges even without motion");
+        assert_eq!(
+            service
+                .engine
+                .travel_route(actor, &destination)
+                .unwrap()
+                .len(),
+            1,
+            "expiry must learn newly disclosed flight edges even without motion"
+        );
     } else {
-        assert!(service.engine.travel_route(actor, &destination).is_err(),
-            "expired flight must not leave an executable vertical route");
+        assert!(
+            service.engine.travel_route(actor, &destination).is_err(),
+            "expired flight must not leave an executable vertical route"
+        );
     }
 }

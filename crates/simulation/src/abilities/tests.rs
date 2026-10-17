@@ -1559,6 +1559,7 @@ fn observation_effects() -> Vec<PlannedEffect> {
 }
 fn observation_context(source: &Snapshot) -> ResolutionContext {
     ResolutionContext {
+        hold_damage: None,
         spatial: None,
         target_recovery_context: None,
         source_recovery_context: None,
