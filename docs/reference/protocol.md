@@ -432,6 +432,15 @@ The action `{"type":"escape","hold":"<opaque hold token>"}` selects exactly one
 current own offer under the ordinary action context, branch and revision gates.
 A hold token cannot inspect an actor, reveal an endpoint or authorize another
 observer. It remains stable when its holder enters or leaves ordinary sight.
+A new ordinary human `move` action while held admits that same paid Escape
+against the oldest active hold (the smallest monotonic internal hold identity).
+Selection happens after ordinary receipt/context validation. The original Move
+request remains the idempotent receipt; durable admitted work binds the exact
+selected hold. No movement occurs, and success does not queue or retry the
+requested step. Explicit Escape still selects another offer when desired.
+Existing queued/preparing work keeps its normal busy/admission rules; travel,
+autonomous decisions and directional cancellation are not converted.
+
 Pending Escape discloses only that action and ordinary preparation progress;
 its internal opposed check is not a public ability plan. History uses
 `escape_started` with `hold`; completion uses `escape_resolved` with `hold` and

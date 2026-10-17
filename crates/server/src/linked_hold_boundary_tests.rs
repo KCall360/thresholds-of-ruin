@@ -3,7 +3,7 @@
 use super::*;
 use serde_json::{json, Value};
 
-fn scenario() -> crate::Scenario {
+pub(super) fn scenario() -> crate::Scenario {
     let manifest: crate::scenario_package::Manifest =
         toml::from_str(include_str!("../../../scenarios/two-room/scenario.toml")).unwrap();
     let mut manifest = serde_json::to_value(manifest).unwrap();
@@ -91,8 +91,12 @@ fn wait(engine: &mut Engine, serial: usize) {
     command(engine, actor, &format!("wait-{serial}"), request);
 }
 
-fn establish(engine: &mut Engine) {
-    for actor in [ActorId(2), ActorId(3)] {
+pub(super) fn establish(engine: &mut Engine) {
+    establish_with_holders(engine, &[ActorId(2), ActorId(3)]);
+}
+
+pub(super) fn establish_with_holders(engine: &mut Engine, holders: &[ActorId]) {
+    for &actor in holders {
         let request = Command::AdmitIntention {
             expected_revision: engine.revision(actor).unwrap(),
             action: Action::UseAbility {
@@ -106,7 +110,7 @@ fn establish(engine: &mut Engine) {
         command(engine, actor, &format!("contact-{}", actor.0), request);
     }
     for serial in 0..40 {
-        if engine.game.linked_holds(SimActor(1)).len() == 2
+        if engine.game.linked_holds(SimActor(1)).len() == holders.len()
             && engine.next_actor() == Some(ActorId(1))
         {
             return;
@@ -115,22 +119,29 @@ fn establish(engine: &mut Engine) {
             wait(engine, serial);
         }
     }
-    panic!("ordinary contacts must establish two incoming holds");
+    panic!("ordinary contacts must establish the requested incoming holds");
 }
 
 #[test]
 fn escape_admission_and_resolution_storage_failures_preserve_exact_links_rng_and_receipts() {
-    for resolution in [false, true] {
+    for (resolution, move_attempt) in [(false, false), (true, false), (false, true), (true, true)] {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("escape.db");
         let scenario = scenario();
         let mut engine = Engine::open(&path, scenario.clone()).unwrap();
         establish(&mut engine);
         let holds = engine.game.linked_holds(SimActor(1));
-        let chosen = holds[1].id;
+        let chosen = holds[usize::from(!move_attempt)].id;
+        let remaining = holds[usize::from(move_attempt)];
         let escape = Command::AdmitIntention {
             expected_revision: engine.revision(ActorId(1)).unwrap(),
-            action: Action::Escape { hold: chosen },
+            action: if move_attempt {
+                Action::Move {
+                    direction: Direction::West,
+                }
+            } else {
+                Action::Escape { hold: chosen }
+            },
         };
         let mut original = None;
         let (actor, request) = if resolution {
@@ -202,7 +213,7 @@ fn escape_admission_and_resolution_storage_failures_preserve_exact_links_rng_and
             "fault must occur after a meaningful candidate transition"
         );
         if resolution {
-            assert_eq!(healthy.game.linked_holds(SimActor(1)), vec![holds[0]]);
+            assert_eq!(healthy.game.linked_holds(SimActor(1)), vec![remaining]);
         } else {
             assert!(healthy.game.pending_intention(SimActor(1)).is_some());
         }
@@ -273,7 +284,7 @@ fn escape_admission_and_resolution_storage_failures_preserve_exact_links_rng_and
         assert_eq!(duplicate.entry, accepted.entry);
         assert_eq!(authority(&retry.game), completed);
         if resolution {
-            assert_eq!(retry.game.linked_holds(SimActor(1)), vec![holds[0]]);
+            assert_eq!(retry.game.linked_holds(SimActor(1)), vec![remaining]);
             assert!(matches!(
                 retry.request_receipt(original.as_ref().unwrap()),
                 RequestReceipt::Admitted {

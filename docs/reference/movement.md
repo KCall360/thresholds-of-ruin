@@ -39,6 +39,17 @@ The frontend names northeast as `ne` or `northeast`; wire direction values use
 cardinal/vertical faces, not authored diagonal portals. ASCII `d` drops an item;
 `>` descends. Keep full key mappings in the client guide.
 
+### Moving while held
+
+For an ordinary human movement command, the server resolves a current incoming
+linked hold into a normal paid Escape attempt against the oldest active link.
+The requested direction does not move the actor or become a follow-up step,
+even when Escape succeeds. Each further attempt is a new command; explicit
+Escape can select a different hold. Ordinary busy/context checks still apply.
+This input convenience does not change simulation movement, autonomous actions,
+travel steps or directional cancellation. See
+[linked holds and Escape](protocol.md#linked-holds-and-escape).
+
 ## Doors
 
 Doors are independent entities, including doors within a region and on join

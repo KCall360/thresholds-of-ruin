@@ -23,6 +23,8 @@ use crate::journal::{
 };
 
 pub(crate) const ARCHIVE_VERSION: u32 = 45;
+#[path = "action_resolution.rs"]
+mod action_resolution;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -31,6 +33,7 @@ pub mod arena_evaluation;
 mod checkpoint;
 #[path = "command_request.rs"]
 mod command_request;
+use action_resolution::ActionResolution;
 #[path = "floor_activation_audit.rs"]
 mod floor_activation_audit;
 #[cfg(test)]
@@ -52,6 +55,9 @@ mod linked_hold_boundary_tests;
 #[cfg(test)]
 #[path = "map_memory_tests.rs"]
 mod map_memory_tests;
+#[cfg(test)]
+#[path = "move_escape_admission_tests.rs"]
+mod move_escape_admission_tests;
 #[cfg(test)]
 #[path = "package_invariant_tests.rs"]
 mod package_invariant_tests;
@@ -970,6 +976,8 @@ pub(crate) struct Record {
     pub(crate) retrieval_after: Option<RetrievalBoundaryState>,
     pub(crate) entry: JournalEntry,
     pub(crate) receipt: Option<Receipt>,
+    /// Required private binding between the original input and admitted work.
+    pub(crate) action_resolution: ActionResolution,
     /// Exact new ledger entries, private to persistence and replay.
     pub(crate) activations: Vec<FloorActivationRecord>,
     /// Latest owning transaction only; empty non-entry deltas remain explicit.
@@ -1164,6 +1172,9 @@ impl Record {
 
     /// Check audit metadata even when recovery restores a checkpoint instead of replaying.
     pub(crate) fn valid_admission(&self) -> bool {
+        if !self.valid_action_resolution() {
+            return false;
+        }
         if self.receipt.as_ref().is_some_and(|receipt| {
             matches!(
                 receipt.command,
@@ -1174,11 +1185,9 @@ impl Record {
             return false;
         }
         match (&self.entry.content, self.receipt.as_ref()) {
-            (JournalContent::IntentionAdmitted { intention, action }, Some(receipt)) => {
+            (JournalContent::IntentionAdmitted { intention, .. }, Some(receipt)) => {
                 intention.0 != 0
-                    && matches!(&receipt.command, Command::AdmitIntention {
-                        action: requested, ..
-                    } if requested == action)
+                    && matches!(&receipt.command, Command::AdmitIntention { .. })
                     && receipt.actor == self.entry.actor
                     && receipt.branch == self.entry.branch
                     && self.entry.audience == Audience::Private
@@ -2322,7 +2331,8 @@ impl Engine {
             };
             if result.map_err(|_| invalid_archive())? != record.entry
                 || engine.archive.records.last().is_none_or(|actual| {
-                    actual.activations != record.activations
+                    actual.action_resolution != record.action_resolution
+                        || actual.activations != record.activations
                         || actual.retrievals != record.retrievals
                         || actual.retrieval_before != record.retrieval_before
                         || actual.retrieval_after != record.retrieval_after
@@ -3057,6 +3067,7 @@ impl Engine {
                 after_tick: self.game.tick(),
                 entry: entry.clone(),
                 receipt: Some(receipt),
+                action_resolution: ActionResolution::Unchanged,
                 activations: self
                     .game
                     .activations_since(activation_count)
@@ -3296,6 +3307,7 @@ impl Engine {
         mut candidate: Candidate,
     ) -> Result<CommandResult, Failure> {
         let (receipt, revision) = checked.into_parts();
+        let mut action_resolution = ActionResolution::Unchanged;
         let mut tick = self.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
@@ -3329,11 +3341,14 @@ impl Engine {
                 )
             }
             Command::AdmitIntention { action, .. } => {
+                let (action, resolution) =
+                    ActionResolution::resolve(&candidate.game, receipt.actor, action);
+                action_resolution = resolution;
                 let intention = candidate
                     .game
                     .admit_intention(
                         SimActor(receipt.actor.0),
-                        adapt::action(action),
+                        adapt::action(&action),
                         tor_simulation::IntentionOrigin::Human,
                     )
                     .map_err(|error| {
@@ -3353,7 +3368,7 @@ impl Engine {
                     Audience::Private,
                     JournalContent::IntentionAdmitted {
                         intention,
-                        action: action.clone(),
+                        action: action.into_owned(),
                     },
                 )
             }
@@ -3475,10 +3490,13 @@ impl Engine {
                 expected_revision: _,
                 action,
             } => {
+                let (action, resolution) =
+                    ActionResolution::resolve(&candidate.game, receipt.actor, action);
+                action_resolution = resolution;
                 let outcome = self.resolve_action_transition(
                     &mut candidate,
                     receipt.actor,
-                    action,
+                    &action,
                     None,
                     profile.as_deref_mut(),
                 )?;
@@ -3488,7 +3506,7 @@ impl Engine {
                     },
                     Audience::Actor,
                     JournalContent::Action {
-                        action: action.clone(),
+                        action: action.into_owned(),
                         event: adapt::event(outcome.kind),
                     },
                 )
@@ -3554,14 +3572,37 @@ impl Engine {
             audience,
             content,
         };
-        self.commit_candidate(candidate, entry, Some(receipt.clone()), profile)
+        self.commit_candidate_with_resolution(
+            candidate,
+            entry,
+            Some(receipt.clone()),
+            action_resolution,
+            profile,
+        )
     }
 
     fn commit_candidate(
         &mut self,
+        candidate: Candidate,
+        entry: JournalEntry,
+        receipt: Option<Receipt>,
+        profile: Option<&mut CommandProfile>,
+    ) -> Result<CommandResult, Failure> {
+        self.commit_candidate_with_resolution(
+            candidate,
+            entry,
+            receipt,
+            ActionResolution::Unchanged,
+            profile,
+        )
+    }
+
+    fn commit_candidate_with_resolution(
+        &mut self,
         mut candidate: Candidate,
         mut entry: JournalEntry,
         receipt: Option<Receipt>,
+        action_resolution: ActionResolution,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
         if candidate.game.population_entry_pending() {
@@ -3612,6 +3653,7 @@ impl Engine {
             after_tick: candidate.game.tick(),
             entry: entry.clone(),
             receipt,
+            action_resolution,
             activations,
         };
         let survival = candidate.game.take_survival_diagnostics();
@@ -3725,6 +3767,7 @@ impl Engine {
             after_tick: self.game.tick(),
             entry: entry.clone(),
             receipt: None,
+            action_resolution: ActionResolution::Unchanged,
             activations: Vec::new(),
             retrievals: Vec::new(),
         };
@@ -3823,7 +3866,8 @@ impl Engine {
         // This bounded invariant runs before either persistence enqueue or
         // candidate publication. Rewind's target was validated by apply_wizard;
         // restoring it is not an entry and cannot carry a new receipt batch.
-        if record.retrieval_before != RetrievalBoundaryState::capture(&self.game)
+        if !record.valid_action_resolution_at(&self.game)
+            || record.retrieval_before != RetrievalBoundaryState::capture(&self.game)
             || record.retrieval_after != RetrievalBoundaryState::capture(&candidate.game)
         {
             return Err(invalid_archive());
@@ -4966,6 +5010,7 @@ mod playable_rogue_schema_tests {
                 "retrieval_after",
                 "entry",
                 "receipt",
+                "action_resolution",
                 "activations",
                 "retrievals",
             ],

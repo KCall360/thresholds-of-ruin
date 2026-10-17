@@ -138,11 +138,20 @@ class LinkedHoldServiceContracts(unittest.TestCase):
         self.assert_private()
 
     def test_hidden_selected_hold_success_retry_and_context_rejections_are_exact(self):
+        self.assert_hidden_escape_retry_and_context(move=False)
+
+    def test_hidden_move_selects_oldest_hold_without_moving_or_retargeting_retry(self):
+        self.assert_hidden_escape_retry_and_context(move=True)
+
+    def assert_hidden_escape_retry_and_context(self, *, move):
         current = self.establish()
         offers = current["state"]["observation"]["linked_holds"]
-        selected, other = offers[1]["target"], offers[0]["target"]
+        selected, other = (offers[0]["target"], offers[1]["target"]) if move else (
+            offers[1]["target"], offers[0]["target"])
         baseline = self.audit()
-        canonical = self.command(current, {"type": "escape", "hold": selected})
+        action = {"type": "move", "direction": "west"} if move else {
+            "type": "escape", "hold": selected}
+        canonical = self.command(current, action)
         for field in ("revision", "readiness", "branch", "stream"):
             invalid = copy.deepcopy(canonical)
             if field == "revision":
@@ -175,6 +184,10 @@ class LinkedHoldServiceContracts(unittest.TestCase):
             self.assertEqual(replay[field], receipt[field], field)
         self.assertEqual(self.audit(), completed, "retry must not escape the remaining holder")
         self.assert_escape_lifecycle(selected, True)
+        if move:
+            self.assertFalse(any(value.get("type") == "moved"
+                for value in objects(self.subject_frames)),
+                "a Move resolved as Escape must not emit a movement event")
 
     def test_hidden_failed_escape_keeps_both_links_and_generic_completion(self):
         current = self.establish(success=False)

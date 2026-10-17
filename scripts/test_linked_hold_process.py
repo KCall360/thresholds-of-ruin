@@ -71,9 +71,6 @@ class LinkedHoldProcesses(ProcessTestCase):
         subject = peers.pop(1)
         first, _ = holds(initial)
         start = checkpoint(self, subject)["actors"]["1"]["location"]
-        blocked = self.act(subject, {"type": "move", "direction": "west"})
-        self.assertIsNotNone(blocked["error"])
-        self.assertEqual(self.snapshot(subject)["state"], initial["state"])
         self.assertIsNone(self.request(subject, {"type": "release_control"})["error"])
         text, _ = self.text_client()
         choices = text.command("escape")
@@ -97,10 +94,6 @@ class LinkedHoldProcesses(ProcessTestCase):
                 if expected:
                     self.assertIn(f"1. {NAMES[1]} (#{first['target']})", presented)
                 self.assertNotIn(f"2. {NAMES[2]}", presented)
-                if expected:
-                    self.assertIn("Server error", text.command("west"))
-                    self.assertEqual(self.snapshot(subject)["state"], after["state"],
-                                     "escaping the selected second hold must leave the first blocking movement")
         text.command("west")
         moved = self.advance(subject, peers, settled)
         # Observation positions are body-relative and stay at the origin. The
@@ -110,6 +103,34 @@ class LinkedHoldProcesses(ProcessTestCase):
         self.assertEqual(checkpoint(self, subject)["actors"]["1"]["location"],
                          destination)
         self.assertEqual(holds(moved), [])
+
+    @non_graphical
+    def test_move_escapes_oldest_hold_one_at_a_time_without_automatic_movement(self):
+        _, _, peers, initial = self.establish()
+        subject = peers.pop(1)
+        remaining = holds(initial)
+        start = checkpoint(self, subject)["actors"]["1"]["location"]
+        for _ in range(2):
+            before = checkpoint(self, subject)
+            links = [row["link"] for row in before["actors"]["1"]["holds"]["incoming"]
+                     if row["kind"] == "linked"]
+            oldest = min(links, key=lambda link: link["id"])
+            started = self.act(subject, {"type": "move", "direction": "west"})
+            self.assertIsNone(started["error"])
+            self.assertTrue(combat(started)["preparation_active"])
+            paid = checkpoint(self, subject)
+            plan = paid["actors"]["1"]["pending"]["plan"]
+            self.assertEqual((plan["kind"], plan["hold"]), ("escape", oldest["id"]))
+            self.assertEqual(paid["rules_rng"], before["rules_rng"],
+                             "converting a Move must not consume an extra movement/check roll")
+            self.assertEqual(paid["actors"]["1"]["location"], start)
+            remaining = remaining[1:]
+            self.advance(subject, peers, lambda value: holds(value) == remaining and settled(value))
+            self.assertEqual(checkpoint(self, subject)["actors"]["1"]["location"], start,
+                             "Escape success must not automatically perform the requested Move")
+        self.assertIsNone(self.act(subject, {"type": "move", "direction": "west"})["error"])
+        self.assertEqual(checkpoint(self, subject)["actors"]["1"]["location"],
+            {**start, "position": {**start["position"], "x": start["position"]["x"] - 1}})
 
     def test_native_f11_explicit_offer_selection_escapes_the_second_hold(self):
         _, _, peers, initial = self.establish()

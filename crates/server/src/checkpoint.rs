@@ -141,7 +141,8 @@ fn replay_private_boundary(
     if !matches!(record.entry.content, JournalContent::Annotation { .. }) {
         game.begin_retrieval_transaction();
     }
-    if record.entry.tick != before.tick()
+    if !record.valid_action_resolution_at(&before)
+        || record.entry.tick != before.tick()
         || record.before_tick != before.tick()
         || record.retrieval_before != RetrievalBoundaryState::capture(&before)
     {
@@ -469,7 +470,10 @@ impl DiskCheckpoint {
                         .as_ref()
                         .map(|(game, revisions)| (game, revisions))
                         .unwrap_or((&previous.game, &previous.revisions));
-                    if record.before_tick != preceding.tick() || record.after_tick != game.tick() {
+                    if !record.valid_action_resolution_at(preceding)
+                        || record.before_tick != preceding.tick()
+                        || record.after_tick != game.tick()
+                    {
                         return Err(invalid_archive());
                     }
                     if !record.entry.content.rewindable() {

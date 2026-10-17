@@ -20,7 +20,8 @@ conditions, bounded sequence-hit/attempt progress, actor nutrition, condition
 semantics, exact periodic-regeneration nutrition rates/fractions and personal
 status alongside invocation and reply-context shapes, source-owned form choices,
 fall provenance, effective locomotion operands, learned flight requirements,
-linked-hold identities, frozen Escape plans, durable floor-activation records,
+linked-hold identities, frozen Escape plans, exact private Move-to-Escape
+admission bindings, durable floor-activation records,
 explicit cell illumination and shared creature/corpse appearance. Prior payload
 identities remain rejection-only.
 

@@ -186,7 +186,10 @@ Clutch on HD 1 and Tightening Hold on HD 6. The creating contact deals zero
 damage. Later qualifying Clutch or basic-melee primaries against that exact live
 link increment its damage channel, including misses; damage still requires a hit.
 Escape has base 100 preparation/100 recovery scaled by Speed and 400 actor-active
-ticks of reapplication protection against that holder. Forced displacement can
+ticks of reapplication protection against that holder. A movement command while
+held instead attempts paid Escape from the oldest active hold, without moving
+or queuing movement after success. Explicit Escape can choose a different hold.
+Forced displacement can
 break the link; stationary does not anchor F against pushes. It carries no stock.
 See [movement capabilities](../reference/creature-rules.md#locomotion-capabilities).
 

@@ -882,6 +882,7 @@ mod tests {
             "retrievals": [],
             "retrieval_before": null,
             "retrieval_after": null,
+            "action_resolution": {"kind":"unchanged"},
             "entry": {
                 "intention_suspensions": [], "intention_ends": [],
                 "id": "entry", "branch": "branch", "actor": 18446744073709551615,
