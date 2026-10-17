@@ -709,6 +709,27 @@ class RogueActionSettlement(unittest.TestCase):
                     self.assertIs(settle_rogue_action(self.harness, self.player, pending), done)
                 command.assert_not_called()
 
+    def test_resolved_action_waits_for_final_cancel_capability_update(self):
+        # CI received resolution at input revision3 with the old cancel target;
+        # revision4 cleared it. An overview sent between those was StaleContext.
+        pending, done = self.frame(), self.frame()
+        pending["readiness"]["cancel"] = ["paid-1"]
+        pending["readiness"]["revision"] = "3"
+        done["readiness"]["revision"] = "4"
+        with patch.object(self.harness, "command") as command, \
+                patch.object(self.harness, "frame", side_effect=self.wait_through([pending, done])) as wait:
+            self.assertIs(settle_rogue_action(self.harness, self.player, pending), done)
+        wait.assert_called_once()
+        command.assert_not_called()
+
+    def test_resolved_action_waits_for_stale_resume_capability_to_clear(self):
+        pending, done = self.frame(resume=("paid-1",)), self.frame()
+        with patch.object(self.harness, "command") as command, \
+                patch.object(self.harness, "frame", side_effect=self.wait_through([done])) as wait:
+            self.assertIs(settle_rogue_action(self.harness, self.player, pending), done)
+        wait.assert_called_once()
+        command.assert_not_called()
+
     def test_active_preparation_is_not_settled_or_resumed(self):
         active = self.frame(remaining="50", active=True, phase="started", resume=("paid-1",))
         done = self.frame()
