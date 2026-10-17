@@ -435,6 +435,7 @@ fn forged_newer_hold_is_rejected_by_replay_and_authoritative_checkpoint_predeces
                 .iter()
                 .any(|boundary| boundary.id.as_ref() == Some(&accepted.entry.id)));
         }
+        assert_recovery(&engine);
         let mut forged = engine.archive.clone();
         let record = &mut forged.records[index];
         record.receipt.as_mut().unwrap().command = raw;
