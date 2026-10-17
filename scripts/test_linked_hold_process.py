@@ -70,34 +70,45 @@ class LinkedHoldProcesses(ProcessTestCase):
         _, _, peers, initial = self.establish()
         subject = peers.pop(1)
         first, _ = holds(initial)
+        start = checkpoint(self, subject)["actors"]["1"]["location"]
         blocked = self.act(subject, {"type": "move", "direction": "west"})
         self.assertIsNotNone(blocked["error"])
         self.assertEqual(self.snapshot(subject)["state"], initial["state"])
         self.assertIsNone(self.request(subject, {"type": "release_control"})["error"])
         text, _ = self.text_client()
         choices = text.command("escape")
-        self.assertIn("Held 1:", choices)
-        self.assertIn("Held 2:", choices)
+        self.assertIn("Choose a hold", choices)
+        for number, offer in enumerate(holds(initial), 1):
+            self.assertIn(f"{number}. {NAMES[number]} (#{offer['target']})", choices)
         self.assertEqual(self.snapshot(subject)["state"], initial["state"],
                          "an ambiguous Text command must not select either hold")
 
         # One process covers both canonical selector forms without extra fixtures.
         for selector, expected in (("2", [first]), ("#" + first["target"], [])):
             with self.subTest(selector=selector):
-                self.assertIn("EscapeStarted", text.command("escape hold " + selector))
+                self.assertIn("You begin trying to escape a hold.",
+                              text.command("escape hold " + selector))
                 after = self.advance(subject, peers,
                     lambda value: holds(value) == expected and settled(value))
                 self.assertEqual(observation(after)["position"], observation(initial)["position"])
+                self.assertEqual(checkpoint(self, subject)["actors"]["1"]["location"], start)
                 presented = text.command("stats")
-                self.assertEqual("Held 1:" in presented, bool(expected))
-                self.assertNotIn("Held 2:", presented)
+                self.assertEqual("Holds (escape hold" in presented, bool(expected))
+                if expected:
+                    self.assertIn(f"1. {NAMES[1]} (#{first['target']})", presented)
+                self.assertNotIn(f"2. {NAMES[2]}", presented)
                 if expected:
                     self.assertIn("Server error", text.command("west"))
                     self.assertEqual(self.snapshot(subject)["state"], after["state"],
                                      "escaping the selected second hold must leave the first blocking movement")
         text.command("west")
         moved = self.advance(subject, peers, settled)
-        self.assertEqual(observation(moved)["position"], {"x": 0, "y": 1, "z": 0})
+        # Observation positions are body-relative and stay at the origin. The
+        # durable physical location witnesses the actual successful translation.
+        destination = {**start, "position": {**start["position"],
+                       "x": start["position"]["x"] - 1}}
+        self.assertEqual(checkpoint(self, subject)["actors"]["1"]["location"],
+                         destination)
         self.assertEqual(holds(moved), [])
 
     def test_native_f11_explicit_offer_selection_escapes_the_second_hold(self):

@@ -1,17 +1,17 @@
 {
   "validator": "tor-scenario-30",
   "ruleset": "interactions-v40",
-  "ruleset_hash": "20c312b7800c9513638cdc185f13eccd395dc2a336089f14d2f1d8b71c643b05",
+  "ruleset_hash": "a5c382b6856cfedcb5407c936c63fd76bb4786a4344d65932de5dc883ac08275",
   "ruleset_dependencies": {
-    "interactions-v40": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
+    "interactions-v40": "d162e6f2bd267b2f1fe65135a28f45d0f1b6048cae34abcaed3226fe8937c96c"
   },
-  "content_hash": "708dd0d4286c95ae84139c72e0d9dfb8c84fb49ecb56a4e18c198bc0f50666ba",
+  "content_hash": "14c276b95d1a933621750bb78f12d716bd2b2fa126202564cff4aea1812ecb6e",
   "files": {
     "index.json": "06cd492c64660944d924945aabdef638f6b10ba5d85940d8d6bfa497be49c3d1",
-    "rules.toml": "99c782133966437970dd40980aa50dba57bf416dbab20282a49fe772c497dd97",
-    "scenario.toml": "5a3e774407348af5cf6a893816fd2148dd0207561eeabe74fa7c296939348f38"
+    "rules.toml": "fd1b6f494bfcdfa9b76248fb6a7a789c58755c22839c2317f19fb6f081126107",
+    "scenario.toml": "6f5f6ea4e2b66c220edbd8b9fcaae4818cac0a1d0f3340bd0ade70762c55af18"
   },
   "regions": 1,
-  "model_hash": "5bd710d68c912c8a2ab9b9ffc27129bd7b6914d74026e6ff2af5ba74c952cc11",
+  "model_hash": "a1104663f58b427f24e6a30c1aedfef6173f01154fdc5e14a74b93358884e608",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }

@@ -1,20 +1,20 @@
 {
   "validator": "tor-scenario-30",
   "ruleset": "interactions-v40",
-  "ruleset_hash": "1ce3e861cc6d75565555dfc2c82bb7cc9172d4471d207eeefb3471683246fcd8",
+  "ruleset_hash": "b993721b220099123e628b635d5dfde686b10ad3e18c3d7e6a5881e167ffebeb",
   "ruleset_dependencies": {
-    "interactions-v40": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
+    "interactions-v40": "d162e6f2bd267b2f1fe65135a28f45d0f1b6048cae34abcaed3226fe8937c96c"
   },
-  "content_hash": "3a05a191024a4cc341aea9bf6d4bda02d320627425750ed18c6d1389a12248d1",
+  "content_hash": "4c80c48409cc7cab085590fa2b74f42279fbfdd4eff4afdc28e6864ed25325b0",
   "files": {
-    "catalog/actors.toml": "c8ce90bd402fffb8d56eaaf278cfd9a2e8a80e67b545f777f6a9dec8525ef714",
-    "catalog/creatures.toml": "28e4190b8e5153992fe8ffd970e0a7f5430ecd6bb3daecda1d59d9f3958b43a7",
+    "catalog/actors.toml": "9b8b54109f4c7537206b29f893d7403236d8b89139efc70cd70145699c3e8bd5",
+    "catalog/creatures.toml": "d17918eb46945616bb7d44ff891e96b0071ac1617bb32fb21597ca4f75bfe08b",
     "catalog/items.toml": "b346a7328ed5ec70677087a0e1dcdb3cd193f9541b5bfce428f2ad922cc68c69",
     "index.json": "9bcdcd8e7340350480abf05c4edbe9b8a8ef04e77258d462167b598589354902",
-    "rules.toml": "755bf834aabb7dbb55795533f49582a0a85e27f498cdea1b7cb9a84af0f189fa",
-    "scenario.toml": "1e130efef1ceab35ee7127bff374943bd79fa96ff6664353f952b5f81ba4151d"
+    "rules.toml": "2ec2f202bb3eb90e13c0a392b0537c28c2b8b7498e6b1e05974f8028e28f715e",
+    "scenario.toml": "eb3618ffd4a572fedfb350c75fd8f27b95df7f163957146a688dd64e09c343b9"
   },
   "regions": 0,
-  "model_hash": "713e717ea0d7b646e3a70c0e8925e096af6f5a57eda069198f03e150c45bf16a",
+  "model_hash": "560fdb005b0011bf18ad763ca86c7acc877ae13654e9a2ae6d98b2065846763e",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }

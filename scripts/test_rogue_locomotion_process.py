@@ -69,7 +69,7 @@ class RogueLocomotionProcesses(ProcessTestCase):
                 self.assertEqual(height(hovering, name), start + 1)
                 self.assertGreaterEqual(u64(view(hovering)["tick"]), u64(view(initial)["tick"]) + 200)
                 saved = self.request(foe, {"type": "snapshot"})
-                motion = view(saved)["motion"]
+                motion = view(saved).get("motion")
                 if motion is not None:
                     self.assertEqual(motion["velocity"], ["0", "0", "0"])
                 if species == "griffin":
