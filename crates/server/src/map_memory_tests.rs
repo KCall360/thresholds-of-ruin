@@ -112,6 +112,104 @@ fn map_windows_must_be_inside_the_current_normal_viewport() {
 }
 
 #[test]
+fn off_sight_edge_slab_matches_the_full_normal_projection() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("paired-stairs");
+    let original = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scenarios/tests/paired-stairs");
+    std::fs::create_dir_all(source.join("regions")).unwrap();
+    for file in [
+        "scenario.toml",
+        "rules.toml",
+        "regions/1.toml",
+        "regions/2.toml",
+        "regions/3.toml",
+    ] {
+        std::fs::copy(original.join(file), source.join(file)).unwrap();
+    }
+    std::fs::write(
+        source.join("regions/1.toml"),
+        "id = 1\nname = \"Upper floor\"\nsize = [32, 5, 1]\nchamber = true\n\
+         anchors = { stair = [1, 1, 0] }\n",
+    )
+    .unwrap();
+    crate::scenario_package::validate(&source).unwrap();
+    let scenario = crate::scenario_package::load(&source, 42, None, false).unwrap();
+    let mut engine = Engine::memory(scenario).unwrap();
+    let mut edge_key = None;
+    for step in 1..=32 {
+        engine
+            .command(
+                "map-test",
+                "test",
+                actor(),
+                &format!("edge-walk-{step}"),
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: engine.revision(actor()).unwrap(),
+                    action: Action::Move {
+                        direction: if step <= 16 {
+                            Direction::East
+                        } else {
+                            Direction::West
+                        },
+                    },
+                },
+            )
+            .unwrap();
+        if step == 16 {
+            let observation = engine.observation(actor()).unwrap();
+            edge_key = Some(
+                observation
+                    .visible_cells
+                    .iter()
+                    .find(|cell| cell.position == tor_protocol::Position { x: 15, y: 0, z: 0 })
+                    .expect("ordinary walking must disclose the future viewport-edge cell")
+                    .key
+                    .clone(),
+            );
+        }
+    }
+    let slab = tor_protocol::MapWindow {
+        min: tor_protocol::Position {
+            x: 31,
+            ..window().min
+        },
+        max: window().max,
+    };
+    assert!(engine
+        .revision_view(actor())
+        .unwrap()
+        .scene
+        .iter()
+        .filter(|cell| cell.physical)
+        .all(|cell| cell.offset.x < slab.min.x - 1));
+    let full = engine.explored_map(actor(), window()).unwrap();
+    assert!(full.complete && !full.limited, "{full:?}");
+    let expected: Vec<_> = full
+        .cells
+        .iter()
+        .filter(|cell| slab.contains(cell.position))
+        .cloned()
+        .collect();
+    assert!(expected
+        .iter()
+        .any(|cell| Some(&cell.key) == edge_key.as_ref()));
+    let before = engine.game.clone();
+    reset_map_work_counts();
+    let partial = engine.explored_map(actor(), slab).unwrap();
+    assert_eq!(
+        partial.cells, expected,
+        "an edge slab without a live seed must retain the full viewport's remembered cells"
+    );
+    assert_eq!(partial.complete, full.complete);
+    assert_eq!(partial.ambiguous, full.ambiguous);
+    assert_eq!(partial.limited, full.limited);
+    assert_eq!(engine.game, before);
+    no_map_writes(map_work_counts());
+}
+
+#[test]
 fn unchanged_wait_builds_no_ordinary_views_or_scenes_and_writes_no_map_knowledge() {
     let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
     let root = engine.game.map_knowledge_root(sim_actor());

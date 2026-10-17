@@ -2559,23 +2559,25 @@ impl Engine {
             ));
         }
         let view = self.revision_view(actor)?;
+        let simulation_window = |window: tor_protocol::MapWindow| tor_simulation::MapWindow {
+            min: tor_world::Position {
+                x: window.min.x,
+                y: window.min.y,
+                z: window.min.z,
+            },
+            max: tor_world::Position {
+                x: window.max.x,
+                y: window.max.y,
+                z: window.max.z,
+            },
+        };
         let projection = self
             .game
-            .project_explored_map(
+            .project_explored_map_region(
                 SimActor(actor.0),
                 &view.scene,
-                tor_simulation::MapWindow {
-                    min: tor_world::Position {
-                        x: window.min.x,
-                        y: window.min.y,
-                        z: window.min.z,
-                    },
-                    max: tor_world::Position {
-                        x: window.max.x,
-                        y: window.max.y,
-                        z: window.max.z,
-                    },
-                },
+                simulation_window(window),
+                simulation_window(normal),
             )
             .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Invalid map window"))?;
         if projection.appearance_limited {

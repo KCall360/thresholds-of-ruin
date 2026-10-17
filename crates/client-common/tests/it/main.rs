@@ -2,6 +2,7 @@
 //! links one test executable instead of one per file.
 
 mod items;
+mod map_budget;
 mod map_memory;
 mod memory;
 mod observation_stream;

@@ -160,5 +160,47 @@ class DisclosedFloorRoutes(unittest.TestCase):
         self.assertTrue(required.issubset(key for key, _ in route))
 
 
+class CompactAdvancementFrames(unittest.TestCase):
+    def wait_for_full_settlement(self, queued, settled):
+        frames = [{"message": {"type": kind}, "state_omitted": True}
+                  for kind in ("map_page", "palette", "waiting")]
+        frames.extend([queued, settled])
+
+        def wait(player, predicate):
+            selected = next((frame for frame in frames if predicate(frame)), None)
+            self.assertIs(selected, settled)
+            return selected
+        return wait
+
+    def test_playable_advancement_ignores_compact_background_until_full_settlement(self):
+        from unittest.mock import patch
+        import test_rogue_playable_process as playable
+        driver = playable.RoguePlayableProcesses()
+        queued = {"error": None, "intentions": [{"phase": "queued"}]}
+        settled = {"error": None, "intentions": [{"phase": "resolved"}]}
+        with patch.object(driver, "command", return_value=queued), \
+                patch.object(driver, "frame", side_effect=self.wait_for_full_settlement(queued, settled)):
+            self.assertIs(driver.advance(object(), "confirm"), settled)
+
+    def test_technique_purchase_ignores_compact_background_until_full_settlement(self):
+        from unittest.mock import patch
+        import test_rogue_techniques_process as techniques
+        driver = techniques.RogueTechniquesProcesses()
+        before = {"error": None, "state": {"observation": {"combat": {
+            "own_stats": {"abilities": []}}}}}
+        after = {"error": None, "state": {"observation": {"combat": {
+            "own_stats": {"abilities": [{"id": "learned"}]}}}}}
+        queued = {"error": None, "intentions": [{"phase": "queued"}]}
+        settled = {"error": None, "intentions": [{"phase": "resolved"}]}
+        ledger = {"error": None, "advancement_page": {"entries": [{"value": {
+            "points": {"earned": "1", "spent": "1", "unspent": "0"}}}]}}
+        with patch.object(driver, "request", side_effect=[before, after]), \
+                patch.object(driver, "command", side_effect=[before, before, queued, ledger]), \
+                patch.object(driver, "frame", side_effect=self.wait_for_full_settlement(queued, settled)), \
+                patch.object(driver, "settled") as settle:
+            self.assertIs(driver.buy_first(object(), "talent learned", "learned"), after)
+            self.assertIs(settle.call_args.args[1], settled)
+
+
 if __name__ == "__main__":
     unittest.main()

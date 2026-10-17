@@ -223,8 +223,10 @@ class ProceduralWorldProcesses(ProcessTestCase):
         for x in [0, 1]:
             for z in [0, 1]:
                 self.wizard_command(wizard, f"wall 401 {x} 0 {z} open")
-        self.wizard_command(wizard, "teleport 1 401 0 0 0")
+        teleported = self.wizard_command(wizard, "teleport 1 401 0 0 0")
         before = self.request(player, {"type": "snapshot"})
+        self.assertIsNone(before["error"])
+        self.assertEqual(before["state"], teleported["state"])
         moved = self.act(player, {"type": "move", "direction": "east"})
         self.assertIsNone(moved["error"])
         self.assertNotEqual(underfoot(before["state"])["key"], underfoot(moved["state"])["key"])
@@ -235,7 +237,11 @@ class ProceduralWorldProcesses(ProcessTestCase):
         # depending on undisclosed generated terrain or the entry selection.
         for z in [0, 1]:
             self.wizard_command(wizard, f"wall 1 0 0 {z} open")
-        self.wizard_command(wizard, "teleport 1 1 0 0 0")
+        teleported = self.wizard_command(wizard, "teleport 1 1 0 0 0")
+        # A wizard reply cannot synchronize the player's separate socket.
+        returned = self.request(player, {"type": "snapshot"})
+        self.assertIsNone(returned["error"])
+        self.assertEqual(returned["state"], teleported["state"])
         self.assertIsNone(self.act(player, {"type": "wait"})["error"])
         self.flush_save()
         player.stop()
@@ -246,7 +252,10 @@ class ProceduralWorldProcesses(ProcessTestCase):
         self.server("--checkpoint-interval", 0, seed=None, wizard=True)
         player, _ = self.client()
         wizard = self.wizard()
-        self.wizard_command(wizard, "teleport 1 401 0 0 0")
+        teleported = self.wizard_command(wizard, "teleport 1 401 0 0 0")
+        restored = self.request(player, {"type": "snapshot"})
+        self.assertIsNone(restored["error"])
+        self.assertEqual(restored["state"], teleported["state"])
         again = self.act(player, {"type": "move", "direction": "east"})
         self.assertIsNone(again["error"])
         self.assertEqual(underfoot(again["state"])["key"], changed_cell)

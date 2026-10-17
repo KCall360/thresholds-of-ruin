@@ -154,8 +154,9 @@ impl ClientState {
             self.map_hydration.status.complete = false;
             return None;
         };
+        let missing = self.map_memory.next_uncovered(window);
         self.map_hydration
-            .query(window, self.map_memory.needs_window(window))
+            .query(missing.unwrap_or(window), missing.is_some())
     }
     pub fn bind_map_query(
         &mut self,
@@ -186,7 +187,12 @@ impl ClientState {
             self.map_hydration
                 .accept(context, request_id, page, encoded_response_bytes)?
         {
-            self.map_memory.install(update.window, update.cells);
+            let viewport = MapWindow::normal()
+                .checked_translate(self.state().observation.position)
+                .ok_or("Invalid map viewport")?;
+            self.map_memory
+                .install_region(viewport, update.window, update.cells)?;
+            self.map_hydration.status.complete = !self.map_memory.needs_window(viewport);
             // Exact current disclosure overlays stale memory, including seen emptiness.
             self.map_memory.overlay(
                 &self.snapshot.state.observation,
@@ -201,20 +207,17 @@ impl ClientState {
     }
     /// For the native presentation thread, after transport has validated a complete transfer.
     pub fn map_memory_update(&self) -> Option<crate::MapMemoryUpdate> {
-        let window = MapWindow::normal().checked_translate(self.state().observation.position)?;
+        MapWindow::normal().checked_translate(self.state().observation.position)?;
         Some(crate::MapMemoryUpdate {
             context: self.context().clone(),
             actor: self.snapshot.actor,
             branch: self.branch().clone(),
             base: self.observation_base,
-            window,
-            cells: if self.map_hydration.status.complete {
-                self.map_memory()
-                    .map(|c| (c.position, c.appearance()))
-                    .collect()
-            } else {
-                Default::default()
-            },
+            coverage: self.map_memory.coverage,
+            cells: self
+                .map_memory()
+                .map(|c| (c.position, c.appearance()))
+                .collect(),
             status: self.map_hydration.status.clone(),
         })
     }
@@ -229,8 +232,9 @@ impl ClientState {
         {
             return Err(StreamError::WrongObservationBase);
         }
-        if update.status.complete {
-            self.map_memory.install(update.window, update.cells);
+        {
+            self.map_memory
+                .install_snapshot(update.coverage, update.cells);
             self.map_memory.overlay(
                 &self.snapshot.state.observation,
                 self.snapshot.state.revision,

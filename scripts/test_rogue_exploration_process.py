@@ -191,7 +191,7 @@ class RogueExplorationProcess(ProcessTestCase):
         # Natural disclosed exploration can take hundreds of moves. Exercise
         # checkpoint recovery here; the short test above covers journal-only.
         server = self.server("--checkpoint-interval", 64, scenario=package)
-        player, welcome = self.client()
+        player, welcome = self.client(omit_memory=True, compact_background=True)
         self.assert_safe_entry(welcome["state"])
         self.assert_private_floor_metadata(welcome["state"])
         departure = explore_to_stairs(self, player, welcome["state"])
@@ -199,7 +199,7 @@ class RogueExplorationProcess(ProcessTestCase):
         arrived = self.act(player, {"type": "move", "direction": "down"})
         self.assertIsNone(arrived["error"])
         self.assertTrue(underfoot(arrived["state"])["stairs_up"])
-        observer, watched = self.client(token=SPECTATOR_TOKEN, observe=True)
+        observer, watched = self.client(token=SPECTATOR_TOKEN, observe=True, omit_memory=True, compact_background=True)
         self.assertEqual(watched["state"], arrived["state"])
         self.assert_private_floor_metadata(watched["state"])
         self.flush_save()
@@ -222,10 +222,10 @@ class RogueExplorationProcess(ProcessTestCase):
             json.dumps(arrived["state"], ensure_ascii=False, indent=2), encoding="utf-8")
         shutil.rmtree(package)
         self.server("--checkpoint-interval", 64, seed=None)
-        player, resumed = self.client()
+        player, resumed = self.client(omit_memory=True, compact_background=True)
         self.assertEqual(resumed["state"], arrived["state"])
         self.assert_private_floor_metadata(resumed["state"])
-        observer, watched = self.client(token=SPECTATOR_TOKEN, observe=True)
+        observer, watched = self.client(token=SPECTATOR_TOKEN, observe=True, omit_memory=True, compact_background=True)
         self.assertEqual(watched["state"], resumed["state"])
         returned = self.act(player, {"type": "move", "direction": "up"})
         self.assertIsNone(returned["error"])
@@ -264,7 +264,7 @@ class RogueExplorationProcess(ProcessTestCase):
 
     def test_adventure_uses_generated_floor_stairs(self):
         self.server(scenario="tests/rogue-geometry")
-        player, welcome = self.client()
+        player, welcome = self.client(omit_memory=True, compact_background=True)
         explore_to_stairs(self, player, welcome["state"])
         player.stop()
         adventure, welcome = self.adventure()

@@ -51,7 +51,7 @@ class LongRunDiagnosticChoices(unittest.TestCase):
                 driver.slow_spectator_recovery()
             relay.assert_called_once_with(driver.address, measure_actor_facts=True)
             launch.assert_called_once_with("tor-client-headless",
-                ["--connect", relay.return_value.address, "--omit-memory"], token=TOKEN)
+                ["--connect", relay.return_value.address, "--omit-memory", "--compact-background"], token=TOKEN)
 
     def test_repeated_diagnostic_snapshots_explicitly_omit_unasserted_memory(self):
         driver = RunUntilBlockedProcesses()
@@ -61,7 +61,7 @@ class LongRunDiagnosticChoices(unittest.TestCase):
             platform.name = "nt"  # Do not touch a real diagnostic pipe in this pure test.
             with self.assertRaises(StopIteration):
                 driver.test_blocked_timing_diagnostics_do_not_block_play_or_durable_save()
-            client.assert_called_once_with(omit_memory=True)
+            client.assert_called_once_with(omit_memory=True, compact_background=True)
 
     def test_concurrent_snapshot_watchers_explicitly_omit_unasserted_memory(self):
         driver = RunUntilBlockedProcesses()
@@ -69,9 +69,9 @@ class LongRunDiagnosticChoices(unittest.TestCase):
                 side_effect=[("player", {}), StopIteration]) as client:
             with self.assertRaises(StopIteration):
                 driver.test_concurrent_readers_preserve_ai_progress_and_saved_boundaries()
-            self.assertEqual(client.call_args_list[0].kwargs, {"omit_memory": True})
+            self.assertEqual(client.call_args_list[0].kwargs, {"omit_memory": True, "compact_background": True})
             self.assertEqual(client.call_args_list[1].args, (SPECTATOR_TOKEN,))
-            self.assertEqual(client.call_args_list[1].kwargs, {"omit_memory": True})
+            self.assertEqual(client.call_args_list[1].kwargs, {"omit_memory": True, "compact_background": True})
 
 
 class RunUntilBlockedProcesses(ProcessTestCase):
@@ -144,7 +144,7 @@ class RunUntilBlockedProcesses(ProcessTestCase):
             server.child.wait(timeout=10)
         self.addCleanup(kill_server)
         # Exercise every snapshot and server diagnostic without reprinting map memory.
-        player, initial = self.client(omit_memory=True)
+        player, initial = self.client(omit_memory=True, compact_background=True)
         for _ in range(256):
             snapshot = self.request(player, {"type": "snapshot"})
             self.assertIsNone(snapshot["error"])
@@ -176,8 +176,8 @@ class RunUntilBlockedProcesses(ProcessTestCase):
 
     def test_concurrent_readers_preserve_ai_progress_and_saved_boundaries(self):
         server = self.server(scenario="first-dungeon", seed=None)
-        player, initial = self.client(omit_memory=True)
-        watchers = [self.client(SPECTATOR_TOKEN, omit_memory=True)[0] for _ in range(4)]
+        player, initial = self.client(omit_memory=True, compact_background=True)
+        watchers = [self.client(SPECTATOR_TOKEN, omit_memory=True, compact_background=True)[0] for _ in range(4)]
         started = Barrier(len(watchers) + 1)
 
         def read_snapshots(client):
@@ -246,8 +246,9 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         player_relay = StreamRelay(self.address, measure_actor_facts=True)
         self.addCleanup(player_relay.close)
         # The relay measures original server frames, before this stdout-only projection.
+        # Background derived snapshots are unused; ready, action results and errors stay full.
         player = self.launch("tor-client-headless",
-                             ["--connect", player_relay.address, "--omit-memory"], token=TOKEN)
+                             ["--connect", player_relay.address, "--omit-memory", "--compact-background"], token=TOKEN)
         initial = self.frame(player, lambda f: f["type"] == "ready")
         send_budget = tcp_send_buffer_budget()
         relay = StreamRelay(self.address, receive_buffer=RECEIVE_BUFFER)
