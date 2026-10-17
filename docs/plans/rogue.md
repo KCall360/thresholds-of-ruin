@@ -230,8 +230,12 @@ sequence, passive acquisition and 70% finite birth stock. Its purchased shared
 Rending Pair attempts one 1d6 rider after two qualifying hits in that sequence.
 The remaining 12 species are unfinished. Complete trapdoor, arrow,
 sleeping gas, bear trap, teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
-must respect destination generation/loading and geometry. Add seeded wandering
-population while floors are active.
+must respect destination generation/loading and geometry. Existing hobgoblins
+roam using personal visible surroundings and visit counts, including reachable
+door opening; NPC stair traversal remains disabled. This is separate from the
+unfinished seeded wandering population while floors are active. Other species'
+idle interests and species-scoped scavenging remain future work; the current
+shared population profile does not enable generic loot/equipment tactics.
 
 Acceptance: generation restricts content correctly; depth increases pressure
 through TOR mechanics; all specials work via ordinary actions/physics; inactive
