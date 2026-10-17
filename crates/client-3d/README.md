@@ -112,6 +112,8 @@ dedicated `client-3d.yml` workflow. On Ubuntu this includes
 `libxkbcommon-x11-0` for X11 keyboard support; see
 [Bevy's Linux dependencies](https://github.com/bevyengine/bevy/blob/main/docs/linux_dependencies.md).
 Logs and source/toolchain receipts stay under `.local/verify-3d/`.
+Failed native processes retain their bounded diagnostics in that run's
+`process-failures/` directory, which the independent workflow uploads with its logs.
 
 Core verification deliberately excludes this workspace. Core changes do not
 require maintaining or checking the 3D client; its own workflow runs when its

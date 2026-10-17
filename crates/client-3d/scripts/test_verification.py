@@ -17,6 +17,37 @@ ROOT = HERE.parents[2]
 
 
 class IndependentVerification(unittest.TestCase):
+    def test_failed_native_child_retains_evidence_inside_its_verification_logs(self):
+        spec = importlib.util.spec_from_file_location("client_3d_verify_artifacts", HERE / "verify.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        child = ("import os,pathlib; "
+                 "p=pathlib.Path(os.environ['TOR_TEST_ARTIFACTS']); "
+                 "p.mkdir(parents=True,exist_ok=True); "
+                 "(p/'witness.txt').write_text('retained child diagnostic'); "
+                 "raise SystemExit(1)")
+        with tempfile.TemporaryDirectory(dir=ROOT / ".local") as temporary:
+            directory = Path(temporary)
+            outside = directory / "unrelated-artifacts"
+            with mock.patch.object(module, "ROOT", directory), \
+                    mock.patch.object(module, "TARGET", directory / "target"), \
+                    mock.patch.object(module, "steps", return_value=[
+                        ("process-tests", [module.sys.executable, "-c", child])]), \
+                    mock.patch.object(module, "source_identity", return_value={"inputs_sha256": "fixed"}), \
+                    mock.patch.object(module.subprocess, "check_output", return_value="fixture toolchain"), \
+                    mock.patch.dict(os.environ, {"TOR_TEST_ARTIFACTS": str(outside)}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(module.main([]), 1, "retaining evidence must not mask failure")
+            receipts = list((directory / ".local/verify-3d").glob("*/receipt.json"))
+            self.assertEqual(len(receipts), 1)
+            evidence = receipts[0].parent / "process-failures/witness.txt"
+            self.assertTrue(evidence.is_file(), "the uploaded log directory lost the failing child evidence")
+            self.assertEqual(evidence.read_text(), "retained child diagnostic")
+            self.assertFalse(outside.exists(), "a verifier must own its artifact destination")
+            receipt = json.loads(receipts[0].read_text())
+            self.assertEqual(receipt["environment"]["TOR_TEST_ARTIFACTS"], str(evidence.parent))
+            self.assertFalse(receipt["passed"])
+
     def test_receipt_records_renderer_and_build_configuration_without_credentials(self):
         spec = importlib.util.spec_from_file_location("client_3d_verify_configuration", HERE / "verify.py")
         module = importlib.util.module_from_spec(spec)

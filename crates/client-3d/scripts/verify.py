@@ -32,7 +32,7 @@ CONFIGURATION = (
     "WGPU_BACKEND", "WGPU_ADAPTER_NAME", "WGPU_POWER_PREF", "WGPU_SETTINGS_PRIO", "WGPU_DX12_COMPILER",
     "WGPU_GLES_MINOR_VERSION", "WGPU_VALIDATION", "WGPU_DEBUG", "DISPLAY", "WAYLAND_DISPLAY",
     "WGPU_DISCARD_HAL_LABELS", "WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER", "WGPU_GPU_BASED_VALIDATION",
-    "TOR_TEST_PROFILE", "TOR_TEST_BINARIES", "TOR_3D_TEST_BINARY",
+    "TOR_TEST_PROFILE", "TOR_TEST_BINARIES", "TOR_3D_TEST_BINARY", "TOR_TEST_ARTIFACTS",
 )
 
 
@@ -82,6 +82,7 @@ def main(argv=None):
     environment = {**os.environ, "CARGO_BUILD_JOBS": "2", "CARGO_PROFILE_DEV_DEBUG": "0", "PYTHONUTF8": "1",
                    "CARGO_TARGET_DIR": str(TARGET), "TEMP": str(temporary), "TMP": str(temporary),
                    "TOR_TEST_PROFILE": args.profile, "TOR_TEST_BINARIES": str(TARGET / args.profile),
+                   "TOR_TEST_ARTIFACTS": str(logs / "process-failures"),
                    "TOR_3D_TEST_BINARY": str(TARGET / args.profile / ("tor-client-3d.exe" if os.name == "nt" else "tor-client-3d"))}
     lock = TARGET / ".verify-3d-owner"
     TARGET.mkdir(parents=True, exist_ok=True)
