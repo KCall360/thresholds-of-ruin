@@ -9,13 +9,16 @@ from process_harness import ROOT
 from ruleset_sources import load_rules
 
 
-def prepare(test, *, bandages=1, hit_dice=1, hostile=False, autonomous=False):
+def prepare(test, *, bandages=1, hit_dice=1, hostile=False, autonomous=False,
+            isolate_partner=False):
     """Two carers flank one exact known ground stack; no wizard or private holds.
 
     Actors 1 and 2 start at [1,1,0] and [3,1,0]. Both are externally controlled
     unless autonomous=True makes actor 2 an AI. Item 10 is the clean bandage at
     [2,1,0], omitted when bandages=0. Bundled Bind Wounds is unmodified. A hostile
     partner belongs to the explicit foe faction; ordinary allies share carers.
+    Selection-only witnesses may seal the partner at x=4 behind a full-height
+    x=3 wall, preserving autonomous turns without competing for the UI's stack.
     """
     if type(bandages) is not int or not 0 <= bandages <= 1_000_000:
         raise ValueError("Bandage quantity must be a bounded nonnegative integer")
@@ -61,6 +64,10 @@ def prepare(test, *, bandages=1, hit_dice=1, hostile=False, autonomous=False):
                "creature": creature("second carer", "foe" if hostile else "carers")}
     if autonomous:
         partner["ai"] = "partner"
+    if isolate_partner:
+        partner["at"] = [4, 1, 0]
+        region["walls"].extend([[3, y, z] for y in range(region["size"][1])
+                                for z in range(region["size"][2])])
     region["actors"] = [partner]
     path.write_text(toml_source(region), encoding="utf-8", newline="\n")
     validated = subprocess.run([compiler, "validate", package], capture_output=True,

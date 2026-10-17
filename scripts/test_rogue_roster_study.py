@@ -13,8 +13,8 @@ from unittest.mock import patch
 from arena_evaluation import digest, participant_contract
 from arena_matrix import recipe, toml_source
 from rogue_roster_study import (
-    AI_SOURCES, DEFAULT_RULES, INPUTS, PLAYABLE_AI, PLAYABLE_AI_NAME, PRODUCTION,
-    REFERENCES, ROOT, create_study, encounter_sources, run_manifest,
+    AI_SOURCES, AUTHORING_AI_SOURCE, DEFAULT_RULES, INPUTS, PLAYABLE_AI, PLAYABLE_AI_NAME,
+    PRODUCTION, REFERENCES, ROOT, RUNTIME_AI_SOURCE, create_study, encounter_sources, run_manifest,
     source_cases, study_encounter,
 )
 
@@ -65,22 +65,40 @@ class RogueRosterStudyTests(unittest.TestCase):
                             self.assertEqual(source, original)
 
     def test_proxy_values_match_existing_authoritative_general_policy_not_default(self):
-        self.assertEqual(PLAYABLE_AI, {"care": True, "equipment": True, "loot": True, "flee_percent": 25})
-        for relative in AI_SOURCES:
+        self.assertEqual(PLAYABLE_AI, {"idle": "explore", "doors": True, "care": True,
+                                       "equipment": True, "loot": True, "flee_percent": 25})
+        def general_fields(relative):
             text = (ROOT / relative).read_text()
             body = text.split("pub fn general() -> Self {", 1)[1].split("}", 1)[0]
-            fields = dict(re.findall(r"\b(care|equipment|loot|flee_percent): (true|false|[0-9]+)", body))
-            self.assertEqual({key: json.loads(value) for key, value in fields.items()}, PLAYABLE_AI)
+            return dict(re.findall(r"^\s+(\w+): ([^,\n]+),", body, re.MULTILINE))
+        concrete_fields = {key: json.dumps(value) for key, value in PLAYABLE_AI.items() if key != "idle"}
+        self.assertEqual(general_fields(RUNTIME_AI_SOURCE),
+                         {"idle": "crate::behavior::IdleBehavior::Explore", **concrete_fields})
+        self.assertEqual(general_fields(AUTHORING_AI_SOURCE),
+                         {"idle": "None", **{key: f"Some({value})" for key, value in concrete_fields.items()}})
+        self.assertEqual(set(AI_SOURCES), {AUTHORING_AI_SOURCE, RUNTIME_AI_SOURCE})
+        self.assertTrue(set(AI_SOURCES).issubset(INPUTS))
         source = encounter_sources()
         self.assertNotIn(PLAYABLE_AI_NAME, source["manifest"]["ai_profiles"])
         self.assertTrue(all(row["unselected"] == "omit" for row in source["manifest"]["characters"]))
-        policy = run_manifest(reference="playable-unspent")["controller_policy"]
-        self.assertEqual(policy["provenance"], "AiProfile::general()")
-        self.assertFalse(policy["human_route_evidence"])
-        self.assertEqual(policy["opening_action"], "none")
-        self.assertEqual(policy["species_disposition"], "unchanged")
-        self.assertIn("no contact is not combat survival", " ".join(
-            run_manifest(reference="playable-unspent")["limitations"]))
+        for reference in REFERENCES[1:]:
+            with self.subTest(reference=reference):
+                report = run_manifest(reference=reference)
+                policy = report["controller_policy"]
+                self.assertEqual(policy["provenance"], "tor_simulation::ai::AiProfile::general()")
+                self.assertEqual(policy["source_files"], [RUNTIME_AI_SOURCE])
+                self.assertEqual(policy["values"], PLAYABLE_AI)
+                self.assertFalse(policy["human_route_evidence"])
+                self.assertEqual(policy["opening_action"], "none")
+                self.assertEqual(policy["species_disposition"], "unchanged")
+                self.assertIn("no contact is not combat survival", " ".join(report["limitations"]))
+                for arm in ("baseline", "candidate"):
+                    self.assertEqual(report["reference_builds"][arm]["ai_profile"], PLAYABLE_AI)
+                    manifest, _ = study_encounter(source_cases(source, reference)[0], arm,
+                                                  "forward", source, reference=reference)
+                    self.assertEqual(manifest["ai_profiles"][PLAYABLE_AI_NAME], PLAYABLE_AI)
+                    self.assertEqual(tomllib.loads(toml_source(manifest))["ai_profiles"][PLAYABLE_AI_NAME],
+                                     PLAYABLE_AI)
 
     def test_snapshot_reader_returns_exact_authored_sources_without_inserting_a_fake_normal_profile(self):
         snapshot = {name: (ROOT / name).read_bytes() for name in INPUTS}
@@ -188,7 +206,7 @@ class RogueRosterStudyTests(unittest.TestCase):
             self.assertFalse((output / "study.json").exists())
 
     def test_source_or_compiler_drift_never_publishes_a_validated_inventory(self):
-        for changed in (DEFAULT_RULES, "scripts/arena_recipes.json", AI_SOURCES[0], "compiler"):
+        for changed in (DEFAULT_RULES, "scripts/arena_recipes.json", *AI_SOURCES, "compiler"):
             with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 # A real directory/.. alias covers canonicalization without

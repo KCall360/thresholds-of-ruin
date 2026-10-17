@@ -10,7 +10,7 @@ from arena_matrix import FAMILIES, HD_LEVELS, create_matrix, encounter, recipe, 
 class ArenaMatrixTests(unittest.TestCase):
     def test_generated_encounter_uses_current_scenario_format(self):
         manifest, _ = encounter("warrior_rank_heavy", 1, False, False, "current-test-ruleset")
-        self.assertEqual(manifest["format"], 16)
+        self.assertEqual(manifest["format"], 17)
 
     def test_named_starter_allocations_cover_one_six_and_eleven_with_exact_paid_forms(self):
         names = {"warrior_rank_heavy", "warrior_talent_heavy", "warrior_mixed",

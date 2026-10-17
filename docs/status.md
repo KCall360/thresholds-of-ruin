@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **46**, save format **42**, scenario format **16**, ruleset
-**`interactions-v39`**, scenario validator **`tor-scenario-28`**. Unsupported
+**Current formats:** protocol **46**, save format **43**, scenario format **17**, ruleset
+**`interactions-v39`**, scenario validator **`tor-scenario-29`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **12**, ContentPackage **13** and
+The independent compiled inputs use RulesInput **12**, ContentPackage **14** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -53,7 +53,8 @@ Actor population choices can carry zero or one finite ordinary stack at birth
 from explicit source-owned pools. Independent deterministic decisions, complete
 entry rollback, nested historical receipt audits and current-only pinned save
 adapters implement the mechanism. Inventory and death drops use ordinary item state;
-AI tactics remain explicit opt-ins. Rogue selects a provisional Vampire
+AI tactics follow species defaults and explicit profile overrides rather than
+inventory ownership. Rogue selects a provisional Vampire
 ration/bandage policy with focused activation coverage; earned survival,
 deep-scale storage and numerical balance remain open. See
 [birth-stock authoring](reference/scenario-packages.md#first-entry-population).
@@ -316,14 +317,23 @@ pressured escape or calibrated builds. See the
 
 Typed creature behavior is a new reconstruction of the agreed mechanism, not
 an exact restoration of the unavailable implementation. Species own acquisition,
-idle and memory policy; actor-owned engagement and deterministic RNG survive
-controller changes. Source-owned interaction semantics license provocation only
+idle, door, care, equipment, loot and flee defaults alongside memory policy;
+actor-owned engagement and deterministic RNG survive controller changes. Explicit
+AI enrollment can use those defaults without a named profile. Profiles partially
+override supplied tactical fields, and omitted species behavior falls back to
+passive exploration without tools. Population stages with no `ai` remain externally
+controlled. Source-owned interaction semantics license provocation only
 from a committed strike and ordinary disclosed evidence. Non-hostile grants
 reject current modifier-induced harm, and frozen admission checks captured effects
-against source-owned intent. Generic care/equipment/
-loot tactics require explicit profile opt-ins. This does not activate the full
-Rogue roster or establish balance; see
-[behavior and provocation](reference/creature-rules.md#creature-behavior-and-provocation).
+against source-owned intent. Idle actions use only the actor's senses and known
+routes/items, with bounded useful equipment and supply collection. Explicit Wait
+blocks all idle movement, including loot detours, while permitting independently
+enabled useful underfoot actions; acquisition, pursuit and combat stay separate.
+The bundled packages author provisional species distinctions, including stationary
+ice monsters and stone constructs. This does not activate the full Rogue roster,
+add a food economy or establish balance; see
+[behavior and provocation](reference/creature-rules.md#creature-behavior-and-provocation)
+and [authored idle policy](reference/scenario-packages.md#behavior-defaults-and-ai-overrides).
 
 ## Important limitations
 

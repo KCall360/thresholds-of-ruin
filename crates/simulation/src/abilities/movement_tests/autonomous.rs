@@ -32,6 +32,8 @@ fn autonomous_retreat_selects_a_typed_self_step_and_keeps_ordinary_turn_identity
             equipment: true,
             loot: true,
             flee_percent: 100,
+            idle: crate::behavior::IdleBehavior::Wait,
+            doors: false,
         },
     )
     .unwrap();
@@ -106,6 +108,8 @@ fn retreat_fixture() -> (crate::Game, crate::ActorId, crate::ActorId) {
             equipment: true,
             loot: true,
             flee_percent: 100,
+            idle: crate::behavior::IdleBehavior::Wait,
+            doors: false,
         },
     )
     .unwrap();

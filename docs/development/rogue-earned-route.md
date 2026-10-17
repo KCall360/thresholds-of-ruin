@@ -16,15 +16,16 @@ fixture, never a replacement or an independent rate sample.
 
 The route arm named `production` is the explicit, frozen preactivation E/S source
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
-adaptation for the current rules identity. Its ordinary population remains two
+adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v7` retains exact package inputs and the
-current bundled-rule dependency hash. Its transition receipt changes only the
-scenario format and bundled rules import required by the current reader; every
-other authored gameplay byte is retained. The previous fixture and its original
-source/transition receipts remain immutable research evidence. Shared rules now
-include conditional sequence riders and Rending Pair, so this is a new experiment
-input, with no claim of identical outcomes or a requalified pilot. The source
+`scripts/fixtures/rogue-earned-baseline-v8` retains exact package inputs and the
+unchanged bundled-rule dependency hash. Its transition receipt changes only the
+scenario format required by the current reader; the rules import and every other
+authored gameplay byte are retained. The previous fixture and its original
+source/transition receipts remain immutable research evidence. AI execution now
+resolves species-owned idle/tool defaults and partial actor policy overrides and
+selects idle work before exploring, so this is a new experiment input, with no
+claim of identical outcomes or a requalified pilot. The source
 receipt alone does not establish compiler validation, regenerated certificates
 or route acceptance. Current route CI must still qualify the adapted fixture.
 New campaigns have distinct source fingerprints and cannot resume an earlier
@@ -310,7 +311,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v7"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v8"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```

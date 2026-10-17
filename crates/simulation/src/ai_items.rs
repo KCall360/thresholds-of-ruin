@@ -9,21 +9,80 @@ impl Game {
         &self,
         actor: ActorId,
         view: &Observation,
+        profile: &crate::ai::AiProfile,
+        sight: &[tor_world::SightCell],
         route: &mut impl FnMut(Location) -> Option<Vec<TravelStep>>,
     ) -> Option<Action> {
+        if view.ground_items.is_empty() {
+            return None;
+        }
         let has_healing = view
             .inventory
             .iter()
             .any(|item| self.known_healing(actor, item.id));
+        let supplies = if profile.care
+            && view
+                .ground_items
+                .iter()
+                .any(|item| item.known_supply.is_some())
+        {
+            self.healing_supply_reserve(actor, sight)
+        } else {
+            Default::default()
+        };
+        let wants_food = profile.care
+            && required_nutrition(view).is_some()
+            && !view
+                .inventory
+                .iter()
+                .any(|item| self.known_food(actor, item.id));
         view.ground_items
             .iter()
-            .filter(|item| {
-                self.gear_destination(actor, item.id).is_some()
-                    || (!has_healing && self.known_healing(actor, item.id))
-            })
-            .filter(|item| !self.exposed_to_visible_hostile(actor, item.location, view))
             .filter_map(|item| {
-                let path = route(item.location)?;
+                let useful_gear =
+                    profile.equipment && self.gear_destination(actor, item.id).is_some();
+                let healing = profile.care && !has_healing && self.known_healing(actor, item.id);
+                let food = wants_food && self.known_food(actor, item.id);
+                let supply = profile
+                    .care
+                    .then(|| {
+                        let id = &item.known_supply.as_ref()?.id;
+                        let required = *supplies.get(id)?;
+                        let carried = view
+                            .inventory
+                            .iter()
+                            .filter(|owned| {
+                                owned
+                                    .known_supply
+                                    .as_ref()
+                                    .is_some_and(|known| &known.id == id)
+                            })
+                            .fold(0_u64, |sum, owned| sum.saturating_add(owned.quantity));
+                        required
+                            .checked_sub(carried)
+                            .filter(|quantity| *quantity > 0)
+                    })
+                    .flatten();
+                if useful_gear || healing || food {
+                    Some((item, 1))
+                } else {
+                    supply.map(|quantity| (item, quantity.min(item.quantity)))
+                }
+            })
+            .filter(|(item, _)| !self.exposed_to_visible_hostile(actor, item.location, view))
+            .filter_map(|(item, quantity)| {
+                if profile.idle == crate::behavior::IdleBehavior::Wait
+                    && item.location != view.location
+                {
+                    return None;
+                }
+                // Present underfoot contact needs no remembered route. A newly
+                // spawned actor may not yet have a navigation record at all.
+                let path = if item.location == view.location {
+                    Vec::new()
+                } else {
+                    route(item.location)?
+                };
                 if path.len() > 3 {
                     return None;
                 }
@@ -36,13 +95,86 @@ impl Game {
                 } else {
                     Action::Take {
                         item: item.id,
-                        quantity: Some(1),
+                        quantity: Some(quantity),
                     }
                 };
+                if self.condition_blocks_action(actor, &action) {
+                    return None;
+                }
                 Some((path.len(), item.id, action))
             })
             .min_by_key(|(distance, item, _)| (*distance, *item))
             .map(|(_, _, action)| action)
+    }
+
+    pub(crate) fn known_food(&self, actor: ActorId, item: ItemId) -> bool {
+        self.items.get(&item).is_some_and(|item| {
+            item.spec.edible.is_some()
+                && (!item.spec.concealed
+                    || self
+                        .actors
+                        .get(&actor)
+                        .is_some_and(|owner| owner.knowledge.contains(&item.spec.identity)))
+        })
+    }
+
+    /// One ordinary use of an owned, exclusively restorative technique. Names,
+    /// hidden piles and other actors' claims never grant an interest in supplies.
+    fn healing_supply_reserve(
+        &self,
+        actor: ActorId,
+        sight: &[tor_world::SightCell],
+    ) -> std::collections::BTreeMap<crate::content_ids::SupplyId, u64> {
+        let Some(creature) = self.creature(actor) else {
+            return Default::default();
+        };
+        let rules = creature.build().ruleset();
+        let mut choices: Vec<_> = creature
+            .derived()
+            .abilities
+            .iter()
+            .filter_map(|id| {
+                rules
+                    .ability(id)
+                    .map(|definition| (definition.ai.priority, id, definition))
+            })
+            .collect();
+        choices.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        for (_, id, definition) in choices {
+            if definition.ai.hostile || definition.supply_costs.is_empty() {
+                continue;
+            }
+            if let Some(cost) = &definition.cost {
+                let available = creature.costs().available(cost.resource);
+                let maximum = creature.costs().resources().maximum(cost.resource);
+                if cost
+                    .start
+                    .checked_add(cost.resolution)
+                    .is_none_or(|total| total > available)
+                    || u64::from(available) * 100
+                        < u64::from(maximum) * u64::from(definition.ai.minimum_resource_percent)
+                {
+                    continue;
+                }
+            }
+            // Compilation resolves self reach, cooldown, unlocked strikes and
+            // effective operands without allocating physical supply claims.
+            let Ok(plan) = self.ability_plan_in_scene(actor, id, actor, sight) else {
+                continue;
+            };
+            if !crate::ai::safe_healing_plan(&plan) {
+                continue;
+            }
+            // Keep one complete recipe; component-wise minima across alternatives
+            // could leave an inventory able to pay for neither.
+            let mut required = std::collections::BTreeMap::<_, u64>::new();
+            for cost in &definition.supply_costs {
+                let count = required.entry(cost.supply.clone()).or_default();
+                *count = count.saturating_add(cost.quantity);
+            }
+            return required;
+        }
+        Default::default()
     }
 
     fn known_gear(&self, actor: ActorId, item: ItemId) -> Option<&EquipmentSpec> {
@@ -188,6 +320,12 @@ impl Game {
     }
 }
 
+pub(crate) fn required_nutrition(view: &Observation) -> Option<crate::nutrition::Hunger> {
+    match view.combat.as_ref()?.own_stats.as_ref()?.nutrition {
+        crate::nutrition::NutritionView::Required { hunger, .. } => Some(hunger),
+        crate::nutrition::NutritionView::Exempt => None,
+    }
+}
 #[derive(PartialEq, Eq)]
 struct GearScore {
     maximum_health: u64,

@@ -1,5 +1,5 @@
 //! Install prepared creature definitions at the original construction boundary.
-//! Authoring defaults and symbolic references have already been resolved.
+//! Resolve partial task policy against the installed species at this boundary.
 use super::compiler::PreparedCreature;
 use super::diagnostics::Origin;
 use super::{fail, Failure};
@@ -65,8 +65,17 @@ fn configure_inner(
         .profile()
         .map_err(|reference| ConfigurationError::MissingAi(reference.name.into()))?
     {
-        game.configure_ai(id, profile.clone())
-            .map_err(|_| fail("AI requires an owned creature build"))?;
+        game.configure_ai(
+            id,
+            profile.resolve(
+                game.creature(id)
+                    .ok_or_else(|| fail("AI requires an owned creature build"))?
+                    .build()
+                    .species()
+                    .behavior,
+            ),
+        )
+        .map_err(|_| fail("AI requires an owned creature build"))?;
     }
     if let Some(body) = definition.body {
         if !body.cells.contains(&body.eye) {

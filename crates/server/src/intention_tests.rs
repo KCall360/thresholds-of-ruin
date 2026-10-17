@@ -3582,10 +3582,11 @@ mod ordered_strikes_ai_replay_tests {
         manifest.ai_profiles.insert(
             "retreat".into(),
             crate::scenario_package::AiProfile {
-                care: true,
-                equipment: true,
-                loot: true,
-                flee_percent: 99,
+                care: Some(true),
+                equipment: Some(true),
+                loot: Some(true),
+                flee_percent: Some(99),
+                ..Default::default()
             },
         );
         let mut regions: Vec<RegionDef> = [1, 2]

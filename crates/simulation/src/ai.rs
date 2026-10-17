@@ -1,6 +1,7 @@
 //! Decisions use disclosed observations and remembered navigation, never hidden targets.
 use crate::{Action, ActorId, Game, GameError};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use std::collections::BTreeMap;
 use tor_world::{Direction, Location};
 
@@ -11,6 +12,8 @@ fn low_health(current: u64, maximum: u64, percent: u32) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiProfile {
+    pub idle: crate::behavior::IdleBehavior,
+    pub doors: bool,
     pub care: bool,
     pub equipment: bool,
     pub loot: bool,
@@ -21,6 +24,8 @@ impl<'de> Deserialize<'de> for AiProfile {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            idle: crate::behavior::IdleBehavior,
+            doors: bool,
             care: bool,
             equipment: bool,
             loot: bool,
@@ -28,6 +33,8 @@ impl<'de> Deserialize<'de> for AiProfile {
         }
         let fields: Fields = crate::bounded::named_map(d)?;
         Ok(Self {
+            idle: fields.idle,
+            doors: fields.doors,
             care: fields.care,
             equipment: fields.equipment,
             loot: fields.loot,
@@ -38,6 +45,8 @@ impl<'de> Deserialize<'de> for AiProfile {
 impl Default for AiProfile {
     fn default() -> Self {
         Self {
+            idle: crate::behavior::IdleBehavior::Explore,
+            doors: false,
             care: false,
             equipment: false,
             loot: false,
@@ -46,9 +55,11 @@ impl Default for AiProfile {
     }
 }
 impl AiProfile {
-    /// Explicit generic adventurer policy; species still own acquisition and idle behavior.
+    /// Explicit generic adventurer policy; species still own acquisition.
     pub fn general() -> Self {
         Self {
+            idle: crate::behavior::IdleBehavior::Explore,
+            doors: true,
             care: true,
             equipment: true,
             loot: true,
@@ -57,6 +68,19 @@ impl AiProfile {
     }
     pub fn valid(&self) -> bool {
         self.flee_percent <= 100
+    }
+}
+
+impl From<crate::behavior::BehaviorPolicy> for AiProfile {
+    fn from(policy: crate::behavior::BehaviorPolicy) -> Self {
+        Self {
+            idle: policy.idle,
+            doors: policy.doors,
+            care: policy.care,
+            equipment: policy.equipment,
+            loot: policy.loot,
+            flee_percent: policy.flee_percent,
+        }
     }
 }
 
@@ -73,8 +97,7 @@ pub enum State {
 pub(crate) struct Ai {
     pub profile: AiProfile,
     pub state: State,
-    #[serde(with = "visit_counts")]
-    pub visits: BTreeMap<Location, u64>,
+    pub visits: crate::navigation_map::RegionMap<Location, u64>,
 }
 
 impl<'de> Deserialize<'de> for Ai {
@@ -84,8 +107,7 @@ impl<'de> Deserialize<'de> for Ai {
         struct Fields {
             profile: AiProfile,
             state: State,
-            #[serde(with = "visit_counts")]
-            visits: BTreeMap<Location, u64>,
+            visits: crate::navigation_map::RegionMap<Location, u64>,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
         Ok(Self {
@@ -93,32 +115,6 @@ impl<'de> Deserialize<'de> for Ai {
             state: fields.state,
             visits: fields.visits,
         })
-    }
-}
-
-// JSON object keys cannot represent a region-local location. Ordered entries also
-// let the reader reject duplicate locations instead of silently overwriting them.
-mod visit_counts {
-    use super::*;
-    use serde::{Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(
-        visits: &BTreeMap<Location, u64>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        visits.iter().collect::<Vec<_>>().serialize(serializer)
-    }
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<BTreeMap<Location, u64>, D::Error> {
-        let entries = Vec::<(Location, u64)>::deserialize(deserializer)?;
-        let mut visits = BTreeMap::new();
-        for (location, count) in entries {
-            if visits.insert(location, count).is_some() {
-                return Err(serde::de::Error::custom("Duplicate AI visit location"));
-            }
-        }
-        Ok(visits)
     }
 }
 
@@ -156,6 +152,36 @@ const TRANSITIONS: [(bool, bool, State); 4] = [
     (false, false, State::Search),
 ];
 
+/// Only positive healing, across all compiled active branches and riders.
+pub(crate) fn safe_healing_plan(plan: &crate::abilities::Plan) -> bool {
+    use crate::abilities::{Plan, PlannedAmount, PlannedEffect};
+    let Plan::Ability(ability) = plan else {
+        return false;
+    };
+    let mut positive = false;
+    let harmless = ability
+        .strikes
+        .iter()
+        .flat_map(|strike| {
+            strike
+                .on_success
+                .iter()
+                .chain(&strike.on_failure)
+                .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+        })
+        .all(|effect| match effect {
+            PlannedEffect::Heal { amount } => {
+                positive |= match amount {
+                    PlannedAmount::Fixed { amount } => *amount > 0,
+                    PlannedAmount::Rolled { dice } => dice.maximum() > 0,
+                };
+                true
+            }
+            _ => false,
+        });
+    harmless && positive
+}
+
 impl Game {
     pub fn configure_ai(&mut self, actor: ActorId, profile: AiProfile) -> Result<(), GameError> {
         if !profile.valid() {
@@ -166,14 +192,18 @@ impl Game {
         if self.health(actor).is_none() {
             return Err(GameError::UnknownActor);
         }
-        self.combat.ai.insert(
-            actor,
-            Ai {
-                profile,
-                state: State::Search,
-                visits: BTreeMap::new(),
-            },
-        );
+        if let Some(ai) = self.combat.ai.get_mut(&actor) {
+            ai.profile = profile;
+        } else {
+            self.combat.ai.insert(
+                actor,
+                Ai {
+                    profile,
+                    state: State::Search,
+                    visits: Default::default(),
+                },
+            );
+        }
         Ok(())
     }
 
@@ -240,10 +270,6 @@ impl Game {
                     }
                 }
             }
-            if policy.idle == crate::behavior::IdleBehavior::Explore {
-                let visits = ai.visits.entry(view.location).or_default();
-                *visits = visits.saturating_add(1);
-            }
         }
         let target = behavior.engagement.and_then(|entry| {
             view.visible_actors
@@ -286,22 +312,23 @@ impl Game {
                 return Some(AiDecision::ability(plan, ai, behavior));
             }
         }
-        if ai.state != State::Flee && !self.exposed_to_visible_hostile(id, view.location, view) {
-            if let Some(action) = ai
-                .profile
-                .equipment
-                .then(|| self.choose_gear(id, view))
-                .flatten()
+        if ai.profile.care
+            && retained.is_none()
+            && ai.state == State::Search
+            && !self.exposed_to_visible_hostile(id, view.location, view)
+            && crate::ai_items::required_nutrition(view)
+                .is_some_and(|hunger| hunger != crate::nutrition::Hunger::Nourished)
+        {
+            if let Some(item) = view
+                .inventory
+                .iter()
+                .find(|item| self.known_food(id, item.id))
             {
-                return Some(AiDecision::action(action, ai, behavior));
-            }
-            if let Some(action) = ai
-                .profile
-                .loot
-                .then(|| self.choose_nearby_loot(id, view, &mut route))
-                .flatten()
-            {
-                return Some(AiDecision::action(action, ai, behavior));
+                return Some(AiDecision::action(
+                    Action::Eat { item: item.id },
+                    ai,
+                    behavior,
+                ));
             }
         }
         if ai.state == State::Flee {
@@ -396,7 +423,30 @@ impl Game {
                 ai.state = State::Search;
             }
         }
-        if ai.state == State::Search && policy.idle == crate::behavior::IdleBehavior::Explore {
+        if ai.state == State::Search && !self.exposed_to_visible_hostile(id, view.location, view) {
+            if let Some(action) = ai
+                .profile
+                .equipment
+                .then(|| self.choose_gear(id, view))
+                .flatten()
+            {
+                return Some(AiDecision::action(action, ai, behavior));
+            }
+            if let Some(action) = ai
+                .profile
+                .loot
+                .then(|| {
+                    self.choose_nearby_loot(id, view, &ai.profile, &snapshot.sight, &mut route)
+                })
+                .flatten()
+            {
+                return Some(AiDecision::action(action, ai, behavior));
+            }
+        }
+        if ai.state == State::Search
+            && ai.profile.doors
+            && self.condition_allows_voluntary_input(id)
+        {
             if let Some(door) = view
                 .visible_cells
                 .iter()
@@ -412,6 +462,28 @@ impl Game {
                     ai,
                     behavior,
                 ));
+            }
+        }
+        if ai.state == State::Search
+            && ai.profile.idle == crate::behavior::IdleBehavior::Explore
+            && self.condition_allows_voluntary_input(id)
+        {
+            let can_move =
+                !self.condition_restricts(id, crate::rules::ConditionRestriction::OrdinaryMovement);
+            if retained.is_none() && can_move {
+                let count = ai
+                    .visits
+                    .get(&view.location)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                crate::diagnostics::ai_visit_entries_copied(
+                    ai.visits.copy_on_write_entries(view.location.region),
+                );
+                ai.visits.insert(view.location, count);
+            }
+            if !can_move {
+                return Some(AiDecision::action(Action::Wait, ai, behavior));
             }
             let mut candidates = Vec::new();
             for direction in Direction::HORIZONTAL
@@ -524,7 +596,6 @@ impl Game {
         sight: &[tor_world::SightCell],
         view: &crate::Observation,
     ) -> Option<crate::abilities::Plan> {
-        use crate::abilities::{Plan, PlannedAmount, PlannedEffect};
         let creature = self.creature(actor)?;
         let rules = creature.build().ruleset();
         let mut candidates: Vec<_> = creature
@@ -569,31 +640,7 @@ impl Game {
                 };
                 plan
             };
-            let Plan::Ability(ability) = &plan else {
-                continue;
-            };
-            let mut positive = false;
-            let harmless = ability
-                .strikes
-                .iter()
-                .flat_map(|strike| {
-                    strike
-                        .on_success
-                        .iter()
-                        .chain(&strike.on_failure)
-                        .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
-                })
-                .all(|effect| match effect {
-                    PlannedEffect::Heal { amount } => {
-                        positive |= match amount {
-                            PlannedAmount::Fixed { amount } => *amount > 0,
-                            PlannedAmount::Rolled { dice } => dice.maximum() > 0,
-                        };
-                        true
-                    }
-                    _ => false,
-                });
-            if harmless && positive {
+            if safe_healing_plan(&plan) {
                 if let Some(plan) = self.physical_ai_plan(plan, view) {
                     return Some(plan);
                 }
@@ -1082,7 +1129,7 @@ mod tests {
         // The eastward first step is adjacent to the hostile; the northward
         // alternative remains safe and must still be considered.
         assert_eq!(
-            game.choose_nearby_loot(actor, &view, &mut route),
+            game.choose_nearby_loot(actor, &view, &AiProfile::general(), &[], &mut route),
             Some(Action::Move(Direction::North))
         );
         game.teleport(human, at(1, 8, 2)).unwrap();
@@ -1094,7 +1141,9 @@ mod tests {
             .retain(|item| item.id == crate::ItemId(22));
         let mut search = game.route_search(actor).unwrap();
         assert_eq!(
-            game.choose_nearby_loot(actor, &view, &mut |at| search.route(at).ok()),
+            game.choose_nearby_loot(actor, &view, &AiProfile::general(), &[], &mut |at| search
+                .route(at)
+                .ok()),
             None
         );
     }
@@ -1104,6 +1153,7 @@ mod tests {
         let mut game = fixture();
         let actor = ActorId(2);
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
+        game.set_region_light(RegionId(2), false).unwrap();
         let mut potion = crate::ItemSpec::ordinary("healing".into());
         potion.class = crate::ItemClass::Potion;
         potion.stackable = true;
@@ -1153,6 +1203,14 @@ mod tests {
         game.teleport(actor, at(1, 3, 1)).unwrap();
         assert_eq!(
             game.choose_ai(actor).unwrap().action,
+            Action::Move(Direction::East),
+            "engagement takes priority over even an underfoot healing reserve"
+        );
+        let mut unengaged = game.clone();
+        unengaged.teleport(ActorId(1), at(2, 4, 2)).unwrap();
+        unengaged.set_region_light(RegionId(2), false).unwrap();
+        assert_eq!(
+            unengaged.choose_ai(actor).unwrap().action,
             Action::Take {
                 item: crate::ItemId(20),
                 quantity: Some(1)
@@ -1168,6 +1226,7 @@ mod tests {
             slots: vec![crate::EquipmentSlot::new("ring").unwrap(); 2],
         });
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
+        game.set_region_light(RegionId(2), false).unwrap();
         ring(&mut game, 10, 1, false);
         ring(&mut game, 11, 2, false);
         ring(&mut game, 12, 3, true);
@@ -1196,6 +1255,7 @@ mod tests {
             slots: vec![crate::EquipmentSlot::new("ring").unwrap(); 1],
         });
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
+        game.set_region_light(RegionId(2), false).unwrap();
         ring(&mut game, 10, 1, false);
         ring(&mut game, 11, 2, false);
         game.equip_authored(ActorId(2), crate::ItemId(10), crate::EquipmentSlotId(0))
@@ -1694,3 +1754,7 @@ mod wide_scalar_ratio_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "ai_idle_tests.rs"]
+mod idle_tests;

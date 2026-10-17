@@ -71,6 +71,36 @@ def sequence_rider_fixture():
         "wizard": True, "frame_bytes": 65536, "client_bytes": 262144, "total_bytes": 524288}
 
 
+def idle_roaming_fixture():
+    """One authored active region; a solid wall keeps the two actors unseen."""
+    manifest = tomllib.loads((ROOT / "scenarios/two-room/scenario.toml").read_text(encoding="utf-8"))
+    # Intentionally omit species behavior and the enrolled actor's AI profile.
+    manifest["creatures"] = {"species": {"idle_roamer": {"kind": "humanoid",
+        "attributes": dict.fromkeys(("strength", "speed", "intellect", "willpower", "awareness", "presence"), 0),
+        "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 50, "recovery": 50,
+            "strikes": [{"offset": 0, "check": {"actor": "user", "skill": {"kind": "selected_weapon"},
+                "against": {"kind": "defense", "defense": "physical"}}, "on_success": [{"kind": "damage",
+                    "damage": {"kind": "components", "components": [{"category": "impact",
+                        "amount": {"kind": "fixed", "amount": 1}}]}}],
+                "on_failure": [], "descriptors": [], "riders": []}]}}}}
+
+    def creature(name):
+        return {"species": "idle_roamer", "name": name, "faction": "neutral", "binding": "intellect",
+            "starting_skills": ["heavy_weaponry", "athletics"], "restoration": "authored",
+            "nutrition": {"kind": "exempt"}, "hit_dice": [{"source": "racial"}]}
+
+    manifest["characters"][0]["creature"] = creature("Waiting player")
+    region = {"id": 1, "name": "Divided idle room", "size": [13, 5, 2],
+        "chamber": True, "gravity": [0, 0, -1], "anchors": {"start": [1, 2, 0]},
+        "walls": [[5, y, z] for y in range(5) for z in range(2)],
+        "actors": [{"id": 2, "at": [9, 2, 0], "turn_ticks": 100, "controller": "ai",
+            "creature": creature("Idle roamer")}]}
+    return {"manifest": manifest, "regions": [region],
+        "rules": (ROOT / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"),
+        "seed": 42, "wizard": False,
+        "frame_bytes": 65536, "client_bytes": 262144, "total_bytes": 524288}
+
+
 def assert_catalog_page(test, page, after):
     """Scenario assertions, not a replacement for the production wire decoder."""
     selectors = [row["selector"] for row in page["entries"]]
@@ -142,6 +172,81 @@ class CatalogServiceContracts(unittest.TestCase):
                 "branch": snapshot["branch"], "command": {"type": "wizard",
                     "expected_revision": snapshot["state"]["revision"], "operation": operation}})
         return self.drain(connection, raw=raw)
+
+    def test_default_enrolled_ai_roams_unseen_after_encoded_player_wait(self):
+        self.close_case()
+        fixture = idle_roaming_fixture()
+        self.frame_bytes = fixture["frame_bytes"]
+        self.case = self.host.call("create", **fixture)["case"]
+        player, initial_player = self.connect("player")
+        observer, initial_roamer = self.connect("spectator", actor=2)
+
+        def checked_drain(connection):
+            messages = self.drain(connection)
+            self.assertFalse([row for row in messages if row["type"] == "error"], messages)
+            statuses = [row["update"]["body"]["status"] for row in messages
+                if row["type"] == "update" and row["update"]["body"]["type"] == "intention"]
+            self.assertFalse([row for row in statuses if row["phase"] in ("failed", "cancelled")], statuses)
+            return messages
+
+        def snapshot(connection):
+            self.host.request(case=self.case, connection=connection,
+                request_id="snapshot", request={"type": "snapshot"})
+            snapshots = [row["snapshot"] for row in checked_drain(connection) if row["type"] == "snapshot"]
+            self.assertEqual(len(snapshots), 1)
+            return snapshots[0]
+
+        def position(current, hidden_name):
+            view = current["state"]["observation"]
+            self.assertFalse(any(actor["name"] == hidden_name for actor in view["visible_actors"]),
+                "the wall must preserve each actor's own disclosed knowledge")
+            cells = [cell for cell in view["visible_cells"]
+                if cell["position"] == {"x": 0, "y": 0, "z": 0}]
+            self.assertEqual(len(cells), 1, "positive control: observer sees its actor's own floor")
+            self.assertFalse(cells[0]["wall"])
+            return cells[0]["key"]
+
+        player_position = position(initial_player, "Idle roamer")
+        positions = {position(initial_roamer, "Waiting player")}
+        self.host.request(case=self.case, connection=player,
+            request_id="acquire", request={"type": "acquire_control"})
+        checked_drain(player)
+        for turn in range(6):
+            current = snapshot(player)
+            self.assertTrue(current["has_control"])
+            self.assertTrue(current["readiness"]["admission"])
+            self.host.request(case=self.case, connection=player, request_id=f"wait-{turn}",
+                request={"type": "command", "context": {"stream": current["context"],
+                    "readiness_revision": current["readiness"]["revision"]}, "branch": current["branch"],
+                    "command": {"type": "act", "expected_revision": current["state"]["revision"],
+                        "action": {"type": "wait"}}})
+            receipts = [row["receipt"] for row in checked_drain(player) if row["type"] == "ack"]
+            self.assertEqual(len(receipts), 1)
+            self.assertEqual(receipts[0]["type"], "admitted")
+            intention = receipts[0]["intention"]
+            resolved = []
+            # Explicit bounded Service turns, not a test-host run-until-blocked shortcut.
+            for _ in range(8):
+                result = self.host.call("step", case=self.case)
+                messages = [row for peer in (player, observer) for row in checked_drain(peer)]
+                resolved.extend(row["update"]["body"]["status"] for row in messages
+                    if row["type"] == "update" and row["update"]["body"]["type"] == "intention"
+                    and row["update"]["body"]["status"]["intention"] == intention
+                    and row["update"]["body"]["status"]["phase"] == "resolved")
+                if result == {"status": "blocked"}:
+                    break
+                self.assertEqual(result, {"status": "progress"}, messages)
+            else:
+                self.fail("two-actor idle fixture exceeded its eight-step wait budget")
+            self.assertEqual(len(resolved), 1, "ordinary player wait must really finish exactly once")
+            self.assertEqual(position(snapshot(player), "Idle roamer"), player_position)
+            roamer = snapshot(observer)
+            self.assertEqual(roamer["actor"], "2")
+            self.assertFalse(roamer["has_control"])
+            self.assertFalse(roamer["readiness"]["admission"])
+            positions.add(position(roamer, "Waiting player"))
+        self.assertGreater(len(positions), 1,
+            "omitted behavior and profile must produce unseen autonomous movement through Service")
 
     def test_encoded_sequence_gate_waits_for_two_hits_and_applies_once(self):
         self.close_case()

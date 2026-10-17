@@ -35,7 +35,8 @@ class RogueVampireContent(unittest.TestCase):
         vampire = species[VAMPIRE]
         self.assertEqual(vampire["kind"], "undead")
         self.assertEqual(vampire["behavior"], {
-            "disposition": "mean", "idle": "wait", "memory_ticks": 1000})
+            "disposition": "mean", "idle": "explore", "memory_ticks": 1000,
+            "doors": True, "care": True, "equipment": True, "loot": True, "flee_percent": 25})
         ops = [modifier["op"] for modifier in vampire["modifiers"]]
         self.assertIn({"kind": "flag", "flag": "regenerative"}, ops)
         self.assertFalse(any(op["kind"] == "grant_ability" for op in ops))

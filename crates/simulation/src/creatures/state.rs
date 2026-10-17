@@ -1871,6 +1871,7 @@ mod compiled_tests {
             disposition: crate::behavior::Disposition::Mean,
             idle: crate::behavior::IdleBehavior::Explore,
             memory_ticks: 1234,
+            ..Default::default()
         };
         species.displacement = Some(super::super::DisplacementProfile {
             size: super::super::CreatureSize::Huge,

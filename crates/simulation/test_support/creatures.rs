@@ -107,6 +107,7 @@ pub(crate) fn unmodified_species(id: &str) -> Species {
             disposition: tor_simulation::behavior::Disposition::Mean,
             idle: tor_simulation::behavior::IdleBehavior::Explore,
             memory_ticks: 1000,
+            ..Default::default()
         },
         displacement: None,
         id: SpeciesId::new(id).unwrap(),

@@ -52,6 +52,7 @@ fn fixture_with(
         disposition,
         idle: IdleBehavior::Wait,
         memory_ticks,
+        ..Default::default()
     };
     let mut document = crate::test_creatures::ruleset().document().clone();
     edit(&mut document, &mut species);
@@ -98,7 +99,14 @@ fn fixture_with(
         BTreeMap::new(),
     )
     .unwrap();
-    game.configure_ai(ActorId(2), AiProfile::default()).unwrap();
+    game.configure_ai(
+        ActorId(2),
+        AiProfile {
+            idle: IdleBehavior::Wait,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     game.refresh_navigation();
     game
 }

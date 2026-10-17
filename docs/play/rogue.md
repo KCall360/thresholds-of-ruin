@@ -10,14 +10,44 @@ the complete roster and calibrated depth curve remain unfinished. The Amulet
 and intentional surface escape provide the retrieval/ascent objective. The default launch still selects the separate
 [first dungeon](gameplay.md).
 
-Hobgoblins roam before noticing a foe, using their own visible surroundings and
-preferring less-visited cells. They can open reachable doors, but cannot use
-Rogue's stairs. Once they personally perceive a hostile, the existing seeded
-wake check can replace roaming with pursuit or combat. Other species retain
-their current waiting behavior. Roaming does not enable healing, equipment
-changes or loot collection; those remain separate explicit AI policies.
+Creatures follow explicit species defaults before engaging a foe, using only
+their own senses and known surroundings. Most explore and prefer less-visited
+cells; the ice monster waits. Their separate door, care, equipment and useful-loot
+permissions are listed below. Passive acquisition still requires ordinary hostile
+provocation, and mean acquisition still uses the existing seeded wake check.
+Idle policy does not change remembered pursuit or combat. Rogue's NPC stair
+restriction remains in force.
 Only active creatures take turns, and waiting for player input still pauses the
 adventure. Frozen floors do not accumulate missed roaming turns.
+
+## Species idle policy
+
+These are provisional TOR choices for all fifteen authored species, including
+the player species. They are not a claim of original Rogue behavioral parity or
+balanced encounter pressure. Human defaults apply only when a human is explicitly
+AI-controlled; they do not automate the selected player's turns.
+
+| Species | Idle | Doors | Care | Equipment | Useful loot |
+| --- | --- | --- | --- | --- | --- |
+| Human, hobgoblin, centaur, troll, vampire | Explore | Yes | Yes | Yes | Yes |
+| Emu, snake, rattlesnake, quagga, black unicorn, zombie, wraith, jabberwock | Explore | No | No | No | No |
+| Yeti | Explore | No | Yes | No | Yes |
+| Ice monster | Wait | No | No | No | No |
+
+All keep their authored acquisition disposition and 1,000-tick actor-active
+memory. The shared `rogue_hostile` profile overrides only the flee threshold to
+zero; species defaults use 25%. It cannot flatten the species' distinct tools or
+idle choices. Explicit Wait prevents every idle move, including a detour to loot,
+while still permitting useful underfoot actions if independently enabled.
+
+Care and looting use ordinary finite items and the creature's own identity
+knowledge. Useful pickup is bounded by known usable equipment, one healing
+reserve and supplies for one payable use of a safe owned healing ability. Only
+actors with required nutrition keep a food reserve; the current foe recipes are
+nutrition-exempt. No hidden item effect becomes a goal, and excess stock and gold
+are not collected. Birth stock alone does not teach an item's identity or grant
+a tactic. See [the shared policy](../reference/scenario-packages.md#behavior-defaults-and-ai-overrides)
+for fallback and override authoring.
 
 ## Choose a new-save preset
 
@@ -230,14 +260,13 @@ hostile acquisition, plus least-visited choice in a three-cell corridor. The
 stair witness also enables traversal as a counterfactual, proving that the
 production restriction is what prevents descent.
 
-Roaming grows each actor’s visit history. Decision previews copy the acting
-actor’s history; ordinary committed actions also clone every loaded AI history,
-including when the player acts. A bounded four-hobgoblin witness records 0, 62
-and 236 copied visit entries per player wait after 0, 16 and 64 rounds, with one
-game clone and no route searches. These structural counts do not establish
-world-independent costs, acceptable large-world latency or calibrated encounter
-pressure. Residency and population bounds matter; this slice does not redesign
-that existing cloning path.
+Roaming grows each actor’s visit history. Snapshots share immutable history
+buckets by region; an idle update copies only the acting actor’s current region
+bucket. Ordinary player waits copy no visit entries, including after mature
+four-actor roaming. The actor/region directory still has a cloning cost, and the
+active bucket’s update cost grows with its visited cells. The bounded structural
+tests check those costs and retained sharing; they do not establish
+world-independent latency or calibrated encounter pressure.
 Focused actual-process contracts include:
 
 - Exact selected-Mage form and future-source choices retained after source-deleted
@@ -286,15 +315,15 @@ The selected E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J recipes use the shared compiler and cha
 pipeline. Centaur owns four actual Warrior HD, with Second Strike purchased on
 HD 2 and Third Strike on HD 4; its natural sequence is 1d2/1d5/1d5. Yeti owns four
 actual racial HD, purchases Second Strike on HD 2 and uses 1d6/1d6; its cold
-subtype retains descriptor immunity. Both wait passively until actual hostile
-provocation. Their 15%/30% birth carry chances follow the pinned reference, while
-the equal ration/bandage pool is provisional TOR scenario tuning, not original
+subtype retains descriptor immunity. Both explore while retaining passive
+acquisition until actual hostile provocation. Their 15%/30% birth carry chances
+follow the pinned reference, while the equal ration/bandage pool is provisional TOR scenario tuning, not original
 loot equivalence. Birth creates one ordinary finite item, which drops with the
-same identity on death and never restocks on revisit or restart. This grants no
-care, equipment or loot AI. Troll adds six actual racial HD with RG1 Regeneration
-on HD 1, Second Strike on HD 2 and Third Strike on HD 4; its other points remain
+same identity on death and never restocks on revisit or restart. Tool permissions
+come from the [species policy](#species-idle-policy), independently of birth stock.
+Troll adds six actual racial HD with RG1 Regeneration on HD 1, Second Strike on HD 2 and Third Strike on HD 4; its other points remain
 unspent. Its separately checked 1d8/1d8/2d6 sequence follows ordinary mean
-acquisition, with wait-idle and 1,000-tick memory. Its reference 50% carry chance
+acquisition, with exploration and 1,000-tick memory. Its reference 50% carry chance
 uses that same provisional pool. The regenerative flag only permits RG1, which
 supplies the existing −50% Health-recovery-period modifier; no RG2 is selected.
 Troll's giant attributes (2/1/0/1/1/0), Physical defense +3, two-cell body of mass
@@ -329,9 +358,9 @@ and recovery retain their ordinary active-time behavior. No ice-only scheduler o
 fixed-damage replacement attack is introduced.
 
 The wraith owns five actual undead racial-HD rows. DR2 Energy Drain costs the
-HD 1 point, has no DR1 parent, and leaves four points unspent. W waits passively
-until ordinary hostile provocation. Its single keen 1d6 contact is followed by a
-separate natural-attack check against Spiritual that removes the victim's latest
+HD 1 point, has no DR1 parent, and leaves four points unspent. W explores but
+retains passive acquisition until ordinary hostile provocation. Its single keen
+1d6 contact is followed by a separate natural-attack check against Spiritual that removes the victim's latest
 actual HD and its purchases. There is no extra 1d10 loss, percentage proc, Feed,
 flight, incorporeality or regeneration. W has zero carried-loot chance and appears
 only at depths 14–23. Its standard undead d12 Health and immunities, attributes
@@ -387,16 +416,18 @@ heavy-weaponry/discipline starting ranks, 100/100 action timing and signature AI
 priority 20 are provisional tuning inputs. The selected population attaches V's
 reference 20% birth carry chance: one ordinary ration or clean
 bandage with equal weights. This restricted pool is not Rogue's full item pool;
-it enables no equipment, care or loot tactics. Revisit and restart do not restock.
+the vampire's separately authored species policy enables its useful tool actions.
+Revisit and restart do not restock.
 Earned-survival qualification remains open.
 Depth 26 is not terminal, and no HD cap is a designed late-floor policy. Actual-kit
 fights, earned advancement/escape routes and coupled food/recovery measurements
 remain necessary to assess these provisional food, recovery, ability and stat costs.
 
-Each species explicitly owns its acquisition disposition: E/S/H/Z/Q/U/V are
-mean, while I/C/Y/W/J and the player species are passive. Idle waiting and the
-1000-tick memory bound are provisional. CH1 explicitly declares hostile contact,
-independent of its AI priority; its strike and rider come from the shared natural
-attack pipeline. Care, equipment and loot tactics remain explicit profile opt-ins.
+Each species explicitly owns its acquisition disposition: E/S/H/R/Z/Q/U/V are
+mean, while I/C/Y/W/J and the player species are passive.
+The [idle policy matrix](#species-idle-policy) and 1,000-tick memory bound are
+provisional. CH1 explicitly declares hostile contact, independent of its AI
+priority; its strike and rider come from the shared natural attack pipeline.
+Tool use follows species defaults with only explicitly supplied profile overrides.
 The full 26-species roster, scaling beyond current build/storage capacity and
 broad integrated acceptance remain open.

@@ -1109,6 +1109,8 @@ fn ordered_strikes_ai_resumes_paid_prefix_through_actual_scheduling() {
             equipment: true,
             loot: true,
             flee_percent: 0,
+            idle: crate::behavior::IdleBehavior::Wait,
+            doors: false,
         },
     )
     .unwrap();
@@ -1155,6 +1157,8 @@ fn ordered_strikes_fleeing_ai_uses_atomic_escape_and_old_preparation_identity() 
             equipment: true,
             loot: true,
             flee_percent: 100,
+            idle: crate::behavior::IdleBehavior::Wait,
+            doors: false,
         },
     )
     .unwrap();
@@ -3602,6 +3606,8 @@ fn ordered_strikes_self_step_retreat_never_replaces_paid_prefix() {
             equipment: true,
             loot: true,
             flee_percent: 100,
+            idle: crate::behavior::IdleBehavior::Wait,
+            doors: false,
         },
     )
     .unwrap();

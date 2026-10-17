@@ -48,12 +48,12 @@ use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
 pub const RULESET: &str = "interactions-v39";
-const VALIDATOR: &str = "tor-scenario-28";
+const VALIDATOR: &str = "tor-scenario-29";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 16;
+pub const FORMAT: u32 = 17;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -2504,11 +2504,7 @@ impl Package {
             }
         }
         for (name, profile) in &self.manifest.ai_profiles {
-            require(
-                label(name) && tor_simulation::ai::AiProfile::from(profile.clone()).valid(),
-                "Invalid AI profile",
-            )
-            .map_err(|failure| {
+            require(label(name) && profile.valid(), "Invalid AI profile").map_err(|failure| {
                 in_declaration(
                     failure,
                     format!(
@@ -2670,7 +2666,7 @@ impl Package {
             )?;
             require(
                 matches!(c.unselected.as_str(), "omit" | "ai")
-                    && (c.unselected == "ai") == c.ai.is_some()
+                    && (c.unselected == "ai" || c.ai.is_none())
                     && c.ai.as_ref().is_none_or(|s| label(s)),
                 "Invalid unselected character controller",
             )?;
@@ -2937,7 +2933,7 @@ impl Package {
             }
             require(
                 matches!(a.controller.as_str(), "external" | "ai")
-                    && (a.controller == "ai") == a.ai.is_some()
+                    && (a.controller == "ai" || a.ai.is_none())
                     && a.ai.as_ref().is_none_or(|s| label(s)),
                 "Invalid actor controller",
             )
@@ -4573,15 +4569,16 @@ mod tests {
     }
 
     #[test]
-    fn sequence_rider_rejects_previous_validator_and_rules_identity() {
+    fn current_package_rejects_previous_validator_and_rules_identity() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-28");
+        assert_eq!(original.certificate.validator, "tor-scenario-29");
         assert_eq!(original.certificate.ruleset, "interactions-v39");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
+            ("validator", "tor-scenario-28"),
             ("ruleset", "interactions-v38"),
         ] {
             let mut package = original.clone();
@@ -4863,10 +4860,11 @@ mod tests {
         manifest.ai_profiles.insert(
             "careful".into(),
             AiProfile {
-                care: true,
-                equipment: true,
-                loot: true,
-                flee_percent: 19,
+                care: Some(true),
+                equipment: Some(true),
+                loot: Some(true),
+                flee_percent: Some(19),
+                ..Default::default()
             },
         );
         manifest.characters = (1..=16)
@@ -4903,10 +4901,11 @@ mod tests {
             manifest.ai_profiles.insert(
                 "careful".into(),
                 AiProfile {
-                    care: true,
-                    equipment: true,
-                    loot: true,
-                    flee_percent: 19,
+                    care: Some(true),
+                    equipment: Some(true),
+                    loot: Some(true),
+                    flee_percent: Some(19),
+                    ..Default::default()
                 },
             );
             let mut companion = manifest.characters[0].clone();
@@ -5920,7 +5919,7 @@ value = 13
         package.manifest.ai_profiles.insert(
             "guard".into(),
             AiProfile {
-                flee_percent: 101,
+                flee_percent: Some(101),
                 ..Default::default()
             },
         );
@@ -6070,10 +6069,11 @@ value = 13
         manifest.ai_profiles.insert(
             "careful".into(),
             AiProfile {
-                care: true,
-                equipment: true,
-                loot: true,
-                flee_percent: 19,
+                care: Some(true),
+                equipment: Some(true),
+                loot: Some(true),
+                flee_percent: Some(19),
+                ..Default::default()
             },
         );
         regions[0].actors.extend([
@@ -6168,7 +6168,8 @@ value = 13
         }
         assert_eq!(
             snapshot["combat"]["ai"]["2"]["profile"],
-            serde_json::json!({"care": true, "equipment": true, "loot": true, "flee_percent": 19})
+            serde_json::json!({"idle": "explore", "doors": false,
+                "care": true, "equipment": true, "loot": true, "flee_percent": 19})
         );
         assert_eq!(
             shared["actors"][snapshot["actors"].as_u64().unwrap() as usize]["3"]["motion"]
@@ -6317,19 +6318,30 @@ value = 13
     }
 
     #[test]
-    fn authoring_ai_requires_explicit_tactics_and_preserves_values() {
-        let declaration =
-            serde_json::json!({"care":true,"equipment":false,"loot":false,"flee_percent":19});
-        let author: AiProfile = serde_json::from_value(declaration.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&author).unwrap(), declaration);
-        let compiled = tor_simulation::ai::AiProfile::from(author);
-        assert_eq!(serde_json::to_value(&compiled).unwrap(), declaration);
-        for field in ["care", "equipment", "loot", "flee_percent"] {
-            let mut missing = declaration.clone();
-            missing.as_object_mut().unwrap().remove(field);
-            assert!(serde_json::from_value::<AiProfile>(missing).is_err());
-        }
-        assert!(serde_json::from_value::<AiProfile>(serde_json::json!({})).is_err());
+    fn authoring_ai_overrides_inherit_without_losing_explicit_false_or_zero() {
+        let species = tor_simulation::behavior::BehaviorPolicy {
+            doors: true,
+            care: true,
+            equipment: true,
+            loot: true,
+            ..Default::default()
+        };
+        let author: AiProfile = serde_json::from_value(serde_json::json!({
+            "idle":"wait","doors":false,"care":false,"flee_percent":0
+        }))
+        .unwrap();
+        let resolved = author.resolve(species);
+        assert_eq!(resolved.idle, tor_simulation::behavior::IdleBehavior::Wait);
+        assert!(!resolved.doors && !resolved.care);
+        assert!(resolved.equipment && resolved.loot);
+        assert_eq!(resolved.flee_percent, 0);
+        assert_eq!(AiProfile::default().resolve(species), species.into());
+        assert!(serde_json::from_value::<AiProfile>(serde_json::json!({"unknown":true})).is_err());
+        assert!(
+            !serde_json::from_value::<AiProfile>(serde_json::json!({"flee_percent":101}))
+                .unwrap()
+                .valid()
+        );
     }
 
     #[test]

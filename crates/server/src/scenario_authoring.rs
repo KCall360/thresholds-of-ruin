@@ -281,27 +281,39 @@ impl From<BodySpec> for tor_simulation::BodySpec {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+/// Authored task overrides. Omission inherits the species' explicit defaults.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiProfile {
-    pub care: bool,
-    pub equipment: bool,
-    pub loot: bool,
-    pub flee_percent: u32,
+    pub idle: Option<crate::creature_authoring::IdleBehavior>,
+    pub doors: Option<bool>,
+    pub care: Option<bool>,
+    pub equipment: Option<bool>,
+    pub loot: Option<bool>,
+    pub flee_percent: Option<u32>,
 }
-
 impl<'de> Deserialize<'de> for AiProfile {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
+        #[derive(Deserialize, Default)]
         #[serde(deny_unknown_fields)]
         struct Fields {
-            care: bool,
-            equipment: bool,
-            loot: bool,
-            flee_percent: u32,
+            #[serde(default)]
+            idle: Option<crate::creature_authoring::IdleBehavior>,
+            #[serde(default)]
+            doors: Option<bool>,
+            #[serde(default)]
+            care: Option<bool>,
+            #[serde(default)]
+            equipment: Option<bool>,
+            #[serde(default)]
+            loot: Option<bool>,
+            #[serde(default)]
+            flee_percent: Option<u32>,
         }
         let fields: Fields = crate::creature_authoring::named_map(d)?;
         Ok(Self {
+            idle: fields.idle,
+            doors: fields.doors,
             care: fields.care,
             equipment: fields.equipment,
             loot: fields.loot,
@@ -309,35 +321,42 @@ impl<'de> Deserialize<'de> for AiProfile {
         })
     }
 }
-impl Default for AiProfile {
-    fn default() -> Self {
-        Self {
-            care: false,
-            equipment: false,
-            loot: false,
-            flee_percent: 25,
-        }
-    }
-}
-
 impl AiProfile {
     pub fn general() -> Self {
         Self {
-            care: true,
-            equipment: true,
-            loot: true,
-            flee_percent: 25,
+            idle: None,
+            doors: Some(true),
+            care: Some(true),
+            equipment: Some(true),
+            loot: Some(true),
+            flee_percent: Some(25),
         }
     }
-}
-
-impl From<AiProfile> for tor_simulation::ai::AiProfile {
-    fn from(value: AiProfile) -> Self {
-        Self {
-            care: value.care,
-            equipment: value.equipment,
-            loot: value.loot,
-            flee_percent: value.flee_percent,
+    pub fn valid(&self) -> bool {
+        self.flee_percent.is_none_or(|percent| percent <= 100)
+    }
+    pub fn resolve(
+        &self,
+        species: tor_simulation::behavior::BehaviorPolicy,
+    ) -> tor_simulation::ai::AiProfile {
+        let idle = self
+            .idle
+            .map(|idle| match idle {
+                crate::creature_authoring::IdleBehavior::Wait => {
+                    tor_simulation::behavior::IdleBehavior::Wait
+                }
+                crate::creature_authoring::IdleBehavior::Explore => {
+                    tor_simulation::behavior::IdleBehavior::Explore
+                }
+            })
+            .unwrap_or(species.idle);
+        tor_simulation::ai::AiProfile {
+            idle,
+            doors: self.doors.unwrap_or(species.doors),
+            care: self.care.unwrap_or(species.care),
+            equipment: self.equipment.unwrap_or(species.equipment),
+            loot: self.loot.unwrap_or(species.loot),
+            flee_percent: self.flee_percent.unwrap_or(species.flee_percent),
         }
     }
 }

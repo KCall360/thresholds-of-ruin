@@ -60,7 +60,7 @@ fn prepare_recipe(
 
 #[derive(Clone, Debug)]
 pub(super) enum AiReference {
-    Resolved(Arc<tor_simulation::ai::AiProfile>),
+    Resolved(Arc<super::AiProfile>),
     // Defer reporting until the original AI configuration boundary, so earlier
     // combat/geometry failures retain their precedence. Names are diagnostic only.
     Missing(String),
@@ -74,13 +74,11 @@ pub(super) enum PreparedControl {
 }
 
 impl PreparedControl {
-    fn ai(
-        name: Option<&String>,
-        profiles: &BTreeMap<String, Arc<tor_simulation::ai::AiProfile>>,
-    ) -> Self {
+    fn ai(name: Option<&String>, profiles: &BTreeMap<String, Arc<super::AiProfile>>) -> Self {
         Self::Ai(match name.and_then(|name| profiles.get(name)) {
             Some(profile) => AiReference::Resolved(profile.clone()),
-            None => AiReference::Missing(name.cloned().unwrap_or_else(|| "<unspecified>".into())),
+            None if name.is_none() => AiReference::Resolved(Arc::new(super::AiProfile::default())),
+            None => AiReference::Missing(name.cloned().expect("named profile")),
         })
     }
 
@@ -91,9 +89,7 @@ impl PreparedControl {
         }
     }
 
-    pub fn profile(
-        &self,
-    ) -> Result<Option<&tor_simulation::ai::AiProfile>, MissingAiReference<'_>> {
+    pub fn profile(&self) -> Result<Option<&super::AiProfile>, MissingAiReference<'_>> {
         match self {
             Self::Ai(AiReference::Resolved(profile)) => Ok(Some(profile)),
             Self::Ai(AiReference::Missing(name)) => Err(MissingAiReference { name }),
@@ -252,7 +248,7 @@ pub(super) struct PreparedDefinitions {
     archetypes: BTreeMap<String, PreparedArchetype>,
     ordinary: PreparedArchetype,
     pub characters: Vec<PreparedCharacter>,
-    ai_profiles: BTreeMap<String, Arc<tor_simulation::ai::AiProfile>>,
+    ai_profiles: BTreeMap<String, Arc<super::AiProfile>>,
     omitted: BTreeSet<u64>,
     pub objective_item: Option<u64>,
 }
@@ -300,7 +296,7 @@ impl PreparedDefinitions {
         let ai_profiles: BTreeMap<_, _> = manifest
             .ai_profiles
             .iter()
-            .map(|(name, author)| (name.clone(), Arc::new(author.clone().into())))
+            .map(|(name, author)| (name.clone(), Arc::new(author.clone())))
             .collect();
         let characters: Vec<_> =
             manifest
@@ -508,7 +504,14 @@ impl PreparedDefinitions {
             .map(|name| {
                 self.ai_profiles
                     .get(name)
-                    .map(|profile| (**profile).clone())
+                    .map(|profile| {
+                        profile.resolve(
+                            definition
+                                .recipe
+                                .as_ref()
+                                .map_or_else(Default::default, Recipe::behavior),
+                        )
+                    })
                     .ok_or_else(|| fail(format!("Unknown population AI profile {name:?}")))
             })
             .transpose()?;
@@ -1177,10 +1180,11 @@ mod tests {
         manifest.ai_profiles.insert(
             "careful".into(),
             AiProfile {
-                care: true,
-                equipment: true,
-                loot: true,
-                flee_percent: 19,
+                care: Some(true),
+                equipment: Some(true),
+                loot: Some(true),
+                flee_percent: Some(19),
+                ..Default::default()
             },
         );
         let mut other = manifest.characters[0].clone();
@@ -1203,7 +1207,7 @@ mod tests {
             .ai_profiles
             .get_mut("careful")
             .unwrap()
-            .flee_percent = 99;
+            .flee_percent = Some(99);
         assert_eq!(
             prepared.characters[1]
                 .creature
@@ -1212,7 +1216,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .flee_percent,
-            19
+            Some(19)
         );
         let selected_other = PreparedDefinitions::new(&manifest, 2).unwrap();
         assert!(selected_other.characters[1]
@@ -1222,6 +1226,25 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(selected_other.omitted_carrier(Some(1)));
+        manifest.characters[1].ai = None;
+        let defaulted = PreparedDefinitions::new(&manifest, 1).unwrap();
+        assert_eq!(
+            defaulted.characters[1]
+                .creature
+                .control
+                .profile()
+                .unwrap()
+                .unwrap(),
+            &AiProfile::default()
+        );
+        assert!(
+            PreparedDefinitions::new(&manifest, 2).unwrap().characters[1]
+                .creature
+                .control
+                .profile()
+                .unwrap()
+                .is_none()
+        );
         manifest.characters[1].ai = Some("missing".into());
         let deferred = PreparedDefinitions::new(&manifest, 1).unwrap();
         assert!(deferred.characters[1].creature.control.spawned());
@@ -1253,10 +1276,11 @@ mod tests {
         manifest.ai_profiles.insert(
             "careful".into(),
             AiProfile {
-                care: true,
-                equipment: true,
-                loot: true,
-                flee_percent: 19,
+                care: Some(true),
+                equipment: Some(true),
+                loot: Some(true),
+                flee_percent: Some(19),
+                ..Default::default()
             },
         );
         manifest.appearance_pools.insert(
@@ -1334,8 +1358,8 @@ mod tests {
         assert_eq!(guard.turn_ticks, Some(73));
         assert_eq!(guard.actor_asset.as_deref(), Some("creature.guard"));
         assert_eq!(guard.item_asset.as_deref(), Some("item.hidden"));
-        assert!(prepared.ai_profiles["careful"].care);
-        assert_eq!(prepared.ai_profiles["careful"].flee_percent, 19);
+        assert_eq!(prepared.ai_profiles["careful"].care, Some(true));
+        assert_eq!(prepared.ai_profiles["careful"].flee_percent, Some(19));
         let ordinary = prepared.archetype(&None).unwrap();
         assert!(ordinary.recipe.is_none() && ordinary.body.is_none() && !ordinary.stackable);
         assert!(prepared.archetype(&Some("missing".into())).is_err());
