@@ -386,11 +386,24 @@ impl Game {
     /// execution; an unloaded owner fails atomically instead of losing XP.
     pub(crate) fn apply_resolved_outcome_with_origin(
         &mut self,
-        mut outcome: Outcome,
+        outcome: Outcome,
         site: ResolutionPublication,
         activity: &mut DamageActivityGuard,
         origin: Option<crate::earned_growth::FatalOrigin>,
     ) -> Result<PublishedResolution, GameError> {
+        self.apply_resolved_outcome_with_transfer(outcome, site, activity, origin, None)
+    }
+
+    pub(crate) fn apply_resolved_theft(&mut self, outcome: Outcome, site: ResolutionPublication, activity: &mut DamageActivityGuard, receipt: crate::theft::TransferReceipt) -> Result<PublishedResolution, GameError> {
+        self.apply_resolved_outcome_with_transfer(outcome, site, activity, None, Some(receipt))
+    }
+
+    fn apply_resolved_outcome_with_transfer(&mut self, mut outcome: Outcome, site: ResolutionPublication, activity: &mut DamageActivityGuard, origin: Option<crate::earned_growth::FatalOrigin>, transfer: Option<crate::theft::TransferReceipt>) -> Result<PublishedResolution, GameError> {
+        let recorded_transfer = outcome.effects.iter().find_map(|effect| match effect { ResolvedEffect::Theft { quantity, .. } => Some(*quantity), _ => None });
+        if recorded_transfer != transfer.as_ref().map(crate::theft::TransferReceipt::quantity)
+            || (recorded_transfer.is_some() && (outcome.effects.len() != 1 || outcome.actor == outcome.target || !matches!(site, ResolutionPublication::Rider { .. }))) {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        }
         if outcome.result != crate::abilities::OutcomeStatus::Miss {
             outcome.result = outcome.canonical_result();
         }
@@ -422,6 +435,11 @@ impl Game {
         let mut created_hold = None;
         for index in 0..outcome.effects.len() {
             let effect = &outcome.effects[index];
+            if matches!(effect, ResolvedEffect::Theft { .. }) {
+                outcome.effects[applied_count] = effect.clone();
+                applied_count += 1;
+                continue;
+            }
             if let ResolvedEffect::ApplyLinkedHold { policy } = effect {
                 // Earlier effects become authoritative before testing contact/capability.
                 transition.state.location = placement.location;

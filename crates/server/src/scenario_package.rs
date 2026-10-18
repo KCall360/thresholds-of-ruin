@@ -25,6 +25,7 @@ pub use population::{
     ActorPopulationBand, ActorPopulationChoice, CarriedItemChoice, CarriedItemPool, CarriedLoot,
     CarryChance, CharacterLoadout, FloorActivation, PopulationBand, PopulationChoice,
     PopulationDepth, PopulationDepthGrowth, PopulationProfile, PopulationStage, Protagonist,
+    PopulationQuantityExpr, QuantityExpression,
     ScenarioCapabilities,
 };
 pub use retrieval::UniqueRetrieval;
@@ -36,7 +37,8 @@ pub use rules_source::{resolve_rules_source, ResolvedRules};
 mod source;
 pub use authoring::{
     AiProfile, AmountExpr, AnatomySpec, BodySpec, ConsumableSpec, DamageComponentExpr, DamageExpr,
-    DamageType, DiceExpr, Effect, EquipmentSlot, EquipmentSpec, HoldPolicy, ItemClass,
+    CurrencyKind, DamageType, DiceExpr, Effect, EquipmentSlot, EquipmentSpec, HoldPolicy, ItemClass,
+    RelocationGate, RelocationPolicy, TheftSelection,
     PushDirection,
 };
 use compiler::PreparedDefinitions;
@@ -48,13 +50,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v40";
-const VALIDATOR: &str = "tor-scenario-30";
+pub const RULESET: &str = "interactions-v41";
+const VALIDATOR: &str = "tor-scenario-31";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 18;
+pub const FORMAT: u32 = 19;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -232,6 +234,9 @@ pub struct Archetype {
     pub edible: Option<EdibleSpec>,
     pub supply: Option<String>,
     #[serde(default)]
+    pub magical: bool,
+    pub currency: Option<CurrencyKind>,
+    #[serde(default)]
     pub class: crate::scenario_package::ItemClass,
     pub body: Option<BodySpec>,
     pub identity: Option<String>,
@@ -257,6 +262,9 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             consumable: Option<ConsumableSpec>,
             edible: Option<EdibleSpec>,
             supply: Option<String>,
+            #[serde(default)]
+            magical: bool,
+            currency: Option<CurrencyKind>,
             #[serde(default)]
             class: crate::scenario_package::ItemClass,
             body: Option<BodySpec>,
@@ -288,6 +296,8 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             consumable: fields.consumable,
             edible: fields.edible,
             supply: fields.supply,
+            magical: fields.magical,
+            currency: fields.currency,
             class: fields.class,
             body: fields.body,
             identity: fields.identity,
@@ -316,6 +326,8 @@ impl Clone for Archetype {
             consumable: self.consumable.clone(),
             edible: self.edible.clone(),
             supply: self.supply.clone(),
+            magical: self.magical,
+            currency: self.currency,
             class: self.class,
             body: self.body.clone(),
             identity: self.identity.clone(),
@@ -1363,6 +1375,14 @@ impl Package {
         identity: &str,
         seed: u64,
     ) -> Result<BTreeMap<u64, RegionDef>, Failure> {
+        Ok(self.generated_group(identity, seed)?.regions)
+    }
+
+    fn generated_group(
+        &self,
+        identity: &str,
+        seed: u64,
+    ) -> Result<crate::generation_recipe::GeneratedGroup, Failure> {
         let group = self.generation_group(identity, seed)?;
         let recipe = self
             .manifest
@@ -1480,7 +1500,9 @@ impl Package {
             .group_identity(owner.0)
             .ok_or_else(|| fail("Missing generation group owner"))?;
         let group = self.generation_group(&identity, seed)?;
-        let definitions = self.group_definitions(&identity, seed)?;
+        let generated = self.generated_group(&identity, seed)?;
+        let rooms = generated.rooms;
+        let definitions = generated.regions;
         let shell: BTreeMap<u64, Arc<RegionDef>> = definitions
             .into_iter()
             .map(|(id, def)| (id, Arc::new(def)))
@@ -1541,7 +1563,7 @@ impl Package {
                 Ok((declaration, record))
             })
             .collect::<Result<Vec<_>, Failure>>()?;
-        let activation = self.activation_scope(&identity, group.depth, &members)?;
+        let activation = self.activation_scope(&identity, group.depth, &members, &rooms)?;
         Ok(PreparedGroup {
             records,
             files,
@@ -3100,11 +3122,15 @@ impl Package {
         // Full authoring validation materializes each floor once. Drain this
         // temporary batch into definitions; it is never a terrain baseline.
         let mut generated = BTreeMap::new();
+        let mut generated_rooms = BTreeMap::new();
         let mut defs = Vec::new();
         for entry in &self.index.regions {
             if let Some(owner) = index.group_owners.get(&entry.id) {
                 if !generated.contains_key(&entry.id) {
-                    generated.extend(self.group_definitions(&index.groups[owner], seed)?);
+                    let identity = &index.groups[owner];
+                    let group = self.generated_group(identity, seed)?;
+                    generated_rooms.insert(identity.clone(), group.rooms);
+                    generated.extend(group.regions);
                 }
                 defs.push(Arc::new(
                     generated.remove(&entry.id).expect("validated group member"),
@@ -3116,11 +3142,9 @@ impl Package {
         // Include the actual spawned roots, not every preceding floor. Families
         // without a spawned root retain one representative validation group.
         for identity in self.initial_procedural_groups(index.homes.values().map(|at| at.region.0)) {
-            defs.extend(
-                self.group_definitions(&identity, seed)?
-                    .into_values()
-                    .map(Arc::new),
-            );
+            let group = self.generated_group(&identity, seed)?;
+            generated_rooms.insert(identity, group.rooms);
+            defs.extend(group.regions.into_values().map(Arc::new));
         }
         for r in &defs {
             self.check_region(r)?;
@@ -3172,7 +3196,8 @@ impl Package {
                 .copied()
                 .filter(|region| group.members.contains(&region.id))
                 .collect();
-            if let Some(scope) = self.activation_scope(&identity, group.depth, &members)? {
+            let rooms = generated_rooms.get(&identity).ok_or_else(|| fail("Missing generated room metadata"))?;
+            if let Some(scope) = self.activation_scope(&identity, group.depth, &members, rooms)? {
                 game.register_activation_scope(scope)
                     .map_err(|error| fail(format!("Initial activation scope: {error:?}")))?;
             }
@@ -4574,8 +4599,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-30");
-        assert_eq!(original.certificate.ruleset, "interactions-v40");
+        assert_eq!(original.certificate.validator, "tor-scenario-31");
+        assert_eq!(original.certificate.ruleset, "interactions-v41");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -5692,7 +5717,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v40"
+        let source = r#"import = "interactions-v41"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

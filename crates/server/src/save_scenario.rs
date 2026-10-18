@@ -404,7 +404,18 @@ enum PopulationStage {
             deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>"
         )]
         bands: Vec<source::PopulationBand>,
-        quantity: u64,
+        #[serde(with = "mapped")]
+        quantity: source::QuantityExpression,
+    },
+    RoomItems {
+        id: String,
+        version: u32,
+        #[serde(serialize_with = "mapped::serialize", deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>")]
+        bands: Vec<source::PopulationBand>,
+        #[serde(with = "mapped")]
+        quantity: source::QuantityExpression,
+        #[serde(with = "mapped")]
+        chance: source::CarryChance,
     },
     Actors {
         id: String,
@@ -421,6 +432,31 @@ enum PopulationStage {
         depth_growth: source::PopulationDepthGrowth,
         avoid_protagonist_sight: bool,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::PopulationQuantityExpr", tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum PopulationQuantityExpr {
+    Fixed { quantity: u64 },
+    Uniform { minimum: u64, maximum: u64 },
+    DepthScaledUniform { minimum: u64, maximum_base: u64, per_depth: u64 },
+}
+
+// Numeric authoring sugar is canonicalized once. Saved inputs always require
+// the current tagged representation and never accept an older scalar payload.
+impl Stored for source::QuantityExpression {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Fixed(quantity) => source::PopulationQuantityExpr::Fixed { quantity: *quantity }.encode(serializer),
+            Self::Expression(expression) => expression.encode(serializer),
+        }
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        source::PopulationQuantityExpr::decode(deserializer).map(|value| match value {
+            source::PopulationQuantityExpr::Fixed { quantity } => Self::Fixed(quantity),
+            expression => Self::Expression(expression),
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -503,7 +539,8 @@ struct CarriedItemPool {
 struct CarriedItemChoice {
     archetype: String,
     weight: u32,
-    quantity: u64,
+    #[serde(with = "mapped")]
+    quantity: source::QuantityExpression,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -639,6 +676,12 @@ enum ItemClass {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(remote = "source::CurrencyKind", rename_all = "snake_case")]
+enum CurrencyKind {
+    Gold,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Archetype", deny_unknown_fields)]
 struct Archetype {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -654,6 +697,9 @@ struct Archetype {
     edible: Option<source::EdibleSpec>,
     #[serde(deserialize_with = "required_option")]
     supply: Option<String>,
+    magical: bool,
+    #[serde(with = "mapped")]
+    currency: Option<source::CurrencyKind>,
     #[serde(with = "mapped")]
     class: crate::scenario_package::ItemClass,
     #[serde(with = "mapped")]
@@ -714,6 +760,8 @@ struct AiProfile {
     equipment: Option<bool>,
     #[serde(deserialize_with = "required_option")]
     loot: Option<bool>,
+    #[serde(deserialize_with = "required_option")]
+    gold: Option<bool>,
     #[serde(deserialize_with = "stored_optional_flee")]
     flee_percent: Option<u32>,
 }
@@ -783,6 +831,30 @@ enum DamageExpr {
         components: Vec<source::DamageComponentExpr>,
     },
 }
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::TheftSelection", tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum TheftSelection {
+    Currency {
+        #[serde(with = "mapped")]
+        currency: source::CurrencyKind,
+        #[serde(with = "mapped")]
+        amount: source::PopulationQuantityExpr,
+    },
+    MagicalUnit,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::RelocationPolicy", rename_all = "snake_case")]
+enum RelocationPolicy {
+    SameFloor,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::RelocationGate", deny_unknown_fields)]
+struct RelocationGate {
+    flag: String,
+    #[serde(with = "mapped")]
+    policy: source::RelocationPolicy,
+}
+
 #[derive(Serialize)]
 #[serde(
     remote = "source::Effect",
@@ -791,6 +863,12 @@ enum DamageExpr {
     deny_unknown_fields
 )]
 enum Effect {
+    Theft {
+        #[serde(with = "mapped")]
+        selection: source::TheftSelection,
+        #[serde(with = "mapped")]
+        relocation: Option<source::RelocationGate>,
+    },
     ApplyLinkedHold {
         #[serde(with = "mapped")]
         policy: source::HoldPolicy,
@@ -1022,6 +1100,7 @@ struct BehaviorPolicy {
     care: bool,
     equipment: bool,
     loot: bool,
+    gold: bool,
     #[serde(deserialize_with = "stored_flee")]
     flee_percent: u32,
 }
@@ -2864,6 +2943,9 @@ named_remote!(
     FloorActivation => source::FloorActivation,
     PopulationProfile => source::PopulationProfile,
     PopulationStage => source::PopulationStage,
+    PopulationQuantityExpr => source::PopulationQuantityExpr,
+    TheftSelection => source::TheftSelection,
+    RelocationGate => source::RelocationGate,
     PopulationDepth => source::PopulationDepth,
     PopulationDepthGrowth => source::PopulationDepthGrowth,
     PopulationBand => source::PopulationBand,
@@ -2942,6 +3024,8 @@ remote!(
     TerrainAssets => source::TerrainAssets,
     AppearancePool => source::AppearancePool,
     Archetype => source::Archetype,
+    CurrencyKind => source::CurrencyKind,
+    RelocationPolicy => source::RelocationPolicy,
     ItemClass => crate::scenario_package::ItemClass,
     Character => source::Character,
     Objective => source::Objective,
@@ -3041,7 +3125,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 13;
+const RULES_INPUT_FORMAT: u32 = 14;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -3141,7 +3225,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 15;
+const CONTENT_PACKAGE_FORMAT: u32 = 16;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -3335,7 +3419,7 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (45, 18, "interactions-v40", 13, 5, 15, "tor-arena-run-v5")
+            (46, 19, "interactions-v41", 14, 5, 16, "tor-arena-run-v5")
         );
     }
 
@@ -3456,7 +3540,7 @@ mod tests {
 
     #[test]
     fn stored_behavior_and_interaction_have_independent_required_shapes() {
-        let behavior = serde_json::json!({"disposition":"passive","idle":"wait","memory_ticks":1000,"doors":false,"care":false,"equipment":false,"loot":false,"flee_percent":25});
+        let behavior = serde_json::json!({"disposition":"passive","idle":"wait","memory_ticks":1000,"doors":false,"care":false,"equipment":false,"loot":false,"gold":false,"flee_percent":25});
         let decode = |value: &serde_json::Value| {
             serde_json::from_slice::<super::Owned<crate::creature_authoring::BehaviorPolicy>>(
                 &serde_json::to_vec(value).unwrap(),
@@ -3476,6 +3560,7 @@ mod tests {
             "care",
             "equipment",
             "loot",
+            "gold",
             "flee_percent",
         ] {
             let mut missing = behavior.clone();
@@ -3517,14 +3602,14 @@ mod tests {
 
     #[test]
     fn stored_partial_ai_profiles_require_nullable_fields_and_bounded_values() {
-        let empty = serde_json::json!({"idle":null,"doors":null,"care":null,"equipment":null,"loot":null,"flee_percent":null});
+        let empty = serde_json::json!({"idle":null,"doors":null,"care":null,"equipment":null,"loot":null,"gold":null,"flee_percent":null});
         let decode = |value: &serde_json::Value| {
             crate::storage::codec::strict::<super::Owned<crate::scenario_package::AiProfile>>(
                 &serde_json::to_vec(value).unwrap(),
             )
         };
         assert!(decode(&empty).is_ok());
-        for field in ["idle", "doors", "care", "equipment", "loot", "flee_percent"] {
+        for field in ["idle", "doors", "care", "equipment", "loot", "gold", "flee_percent"] {
             let mut missing = empty.clone();
             missing.as_object_mut().unwrap().remove(field);
             assert!(
@@ -3532,7 +3617,7 @@ mod tests {
                 "stored {field} must not use source defaults"
             );
         }
-        let explicit = serde_json::json!({"idle":"wait","doors":false,"care":false,"equipment":false,"loot":false,"flee_percent":0});
+        let explicit = serde_json::json!({"idle":"wait","doors":false,"care":false,"equipment":false,"loot":false,"gold":false,"flee_percent":0});
         let profile = decode(&explicit).unwrap().0;
         assert_eq!(
             serde_json::to_value(super::Borrowed(&profile)).unwrap(),
@@ -4686,7 +4771,7 @@ mod ordered_strike_save_tests {
             tor_simulation::limits::NUMERIC as u64 + 1,
             u64::MAX,
         ] {
-            let value = json!({"disposition":"passive", "idle":"wait", "memory_ticks":memory_ticks, "doors":false, "care":false, "equipment":false, "loot":false, "flee_percent":25});
+            let value = json!({"disposition":"passive", "idle":"wait", "memory_ticks":memory_ticks, "doors":false, "care":false, "equipment":false, "loot":false, "gold":false, "flee_percent":25});
             assert_eq!(
                 crate::storage::codec::strict::<Owned<crate::creature_authoring::BehaviorPolicy>>(
                     &serde_json::to_vec(&value).unwrap()
@@ -5005,6 +5090,12 @@ impl Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Theft {
+                #[serde(with = "mapped")]
+                selection: source::TheftSelection,
+                #[serde(with = "mapped")]
+                relocation: Option<source::RelocationGate>,
+            },
             ApplyLinkedHold {
                 #[serde(with = "mapped")]
                 policy: source::HoldPolicy,
@@ -5069,6 +5160,7 @@ impl Effect {
             },
         }
         Ok(match super::named_map(deserializer)? {
+            Fields::Theft { selection, relocation } => source::Effect::Theft { selection, relocation },
             Fields::ApplyLinkedHold { policy } => source::Effect::ApplyLinkedHold { policy },
             Fields::HoldDamage {
                 category,
@@ -6542,6 +6634,63 @@ mod restorable_loss_stored_effect_tests {
                 crate::storage::codec::strict::<Owned<source::Effect>>(duplicate.as_bytes())
                     .is_err()
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod theft_gold_schema_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn saved_item_traits_require_explicit_current_authority_fields() {
+        let source: source::Archetype = serde_json::from_value(json!({"name":"coin", "class":"coin", "stackable":true, "currency":"gold"})).unwrap();
+        let encoded = serde_json::to_value(Borrowed(&source)).unwrap();
+        assert_eq!(encoded["magical"], false);
+        assert_eq!(encoded["currency"], "gold");
+        let restored: Owned<source::Archetype> = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), encoded);
+        for field in ["magical", "currency"] {
+            let mut missing = encoded.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<Owned<source::Archetype>>(missing).is_err());
+        }
+        let mut unknown = encoded;
+        unknown["currency"] = json!("future_currency");
+        assert!(serde_json::from_value::<Owned<source::Archetype>>(unknown).is_err());
+    }
+
+    #[test]
+    fn saved_population_quantities_are_tagged_even_when_authored_as_scalars() {
+        let source: source::QuantityExpression = serde_json::from_value(json!(7)).unwrap();
+        let encoded = serde_json::to_value(Borrowed(&source)).unwrap();
+        assert_eq!(encoded, json!({"kind":"fixed", "quantity":7}));
+        let restored: Owned<source::QuantityExpression> = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), encoded);
+        for malformed in [json!(7), json!(["fixed", 7]), json!({"kind":"fixed"}),
+            json!({"kind":"uniform","minimum":2}), json!({"kind":"fixed","quantity":7,"depth":1})] {
+            assert!(serde_json::from_value::<Owned<source::QuantityExpression>>(malformed).is_err());
+        }
+    }
+
+    #[test]
+    fn saved_theft_requires_independent_selection_and_nullable_relocation() {
+        for selection in [json!({"kind":"magical_unit"}), json!({"kind":"currency","currency":"gold","amount":{"kind":"uniform","minimum":2,"maximum":61}})] {
+            let authored: source::Effect = serde_json::from_value(json!({"kind":"theft", "selection":selection})).unwrap();
+            let encoded = serde_json::to_value(Borrowed(&authored)).unwrap();
+            assert_eq!(encoded["relocation"], json!(null));
+            let restored: Owned<source::Effect> = serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), encoded);
+            for field in ["selection", "relocation"] {
+                let mut missing = encoded.clone();
+                missing.as_object_mut().unwrap().remove(field);
+                assert!(serde_json::from_value::<Owned<source::Effect>>(missing).is_err());
+            }
+            let mut extra = encoded.clone(); extra["item"] = json!(1);
+            assert!(serde_json::from_value::<Owned<source::Effect>>(extra).is_err());
+            let mut positional = encoded; positional["selection"] = json!(["magical_unit"]);
+            assert!(serde_json::from_value::<Owned<source::Effect>>(positional).is_err());
         }
     }
 }

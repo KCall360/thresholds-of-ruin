@@ -1,19 +1,20 @@
 # Play the Rogue starter slice
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
-authors Warrior and Mage presets, eighteen depth-selected foe species, equipped
+authors Warrior and Mage presets, twenty-one depth-selected foe species, equipped
 starting gear, and finite bandage/ration supplies on persistent generated floors.
-The package selects the canonical K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J population, with focused
-source-qualified activation coverage. Its historical package name is unchanged.
+The package selects the canonical K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/U/V/G/J population.
+The L/N/O theft/gold additions still need the qualification described below.
+Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
-the complete roster and calibrated depth curve remain unfinished. The Amulet
+five production species and the calibrated depth curve remain unfinished. The Amulet
 and intentional surface escape provide the retrieval/ascent objective. The default launch still selects the separate
 [first dungeon](gameplay.md).
 
 Creatures follow explicit species defaults before engaging a foe, using only
 their own senses and known surroundings. Most explore and prefer less-visited
-cells; the ice monster and stationary flytrap wait. Their separate door, care, equipment and useful-loot
-permissions are listed below. Passive acquisition still requires ordinary hostile
+cells; the ice monster and stationary flytrap wait. Their separate door, care,
+equipment, useful-loot and Gold-interest permissions are listed below. Passive acquisition still requires ordinary hostile
 provocation, and mean acquisition still uses the existing seeded wake check.
 Idle policy does not change remembered pursuit or combat. Rogue's NPC stair
 restriction remains in force.
@@ -22,17 +23,20 @@ adventure. Frozen floors do not accumulate missed roaming turns.
 
 ## Species idle policy
 
-These are provisional TOR choices for all nineteen authored species, including
+These are provisional TOR choices for all twenty-two authored species, including
 the player species. They are not a claim of original Rogue behavioral parity or
 balanced encounter pressure. Human defaults apply only when a human is explicitly
 AI-controlled; they do not automate the selected player's turns.
 
-| Species | Idle | Doors | Care | Equipment | Useful loot |
-| --- | --- | --- | --- | --- | --- |
-| Human, hobgoblin, centaur, troll, vampire | Explore | Yes | Yes | Yes | Yes |
-| Bat, kestrel, griffin, emu, snake, rattlesnake, quagga, black unicorn, zombie, wraith, jabberwock | Explore | No | No | No | No |
-| Yeti | Explore | No | Yes | No | Yes |
-| Ice monster, Venus flytrap | Wait | No | No | No | No |
+| Species | Idle | Doors | Care | Equipment | Useful loot | Gold interest |
+| --- | --- | --- | --- | --- | --- | --- |
+| Human, hobgoblin, centaur, troll, vampire | Explore | Yes | Yes | Yes | Yes | No |
+| Orc | Explore | Yes | Yes | Yes | Yes | Yes |
+| Leprechaun | Explore | Yes | No | No | No | Yes |
+| Nymph | Explore | Yes | No | No | No | No |
+| Bat, kestrel, griffin, emu, snake, rattlesnake, quagga, black unicorn, zombie, wraith, jabberwock | Explore | No | No | No | No | No |
+| Yeti | Explore | No | Yes | No | Yes | No |
+| Ice monster, Venus flytrap | Wait | No | No | No | No | No |
 
 All keep their authored acquisition disposition and 1,000-tick actor-active
 memory. The shared `rogue_hostile` profile overrides only the flee threshold to
@@ -44,8 +48,9 @@ Care and looting use ordinary finite items and the creature's own identity
 knowledge. Useful pickup is bounded by known usable equipment, one healing
 reserve and supplies for one payable use of a safe owned healing ability. Only
 actors with required nutrition keep a food reserve; the current foe recipes are
-nutrition-exempt. No hidden item effect becomes a goal, and excess stock and gold
-are not collected. Birth stock alone does not teach an item's identity or grant
+nutrition-exempt. No hidden item effect becomes a useful-loot goal and excess
+supplies are not collected. Leprechaun and orc separately seek known reachable
+Gold, after self-preservation and retaliation and before ordinary idle behavior. Birth stock alone does not teach an item's identity or grant
 a tactic. See [the shared policy](../reference/scenario-packages.md#behavior-defaults-and-ai-overrides)
 for fallback and override authoring.
 
@@ -193,17 +198,54 @@ Forced displacement can
 break the link; stationary does not anchor F against pushes. It carries no stock.
 See [movement capabilities](../reference/creature-rules.md#locomotion-capabilities).
 
+## Gold and theft
+
+Gold is a finite ordinary inventory stack. Take and drop it with the same commands
+and quantity controls as other items. Each present room gets one 50% first-entry
+Gold chance, and each successfully placed leprechaun is born carrying finite Gold. Amounts use the
+shared positive quantity range, from 2 through `51 + 10 * floor depth` inclusive;
+birth amounts use the birth floor. There is no separate purse or repeat death roll.
+A successful room chance can still skip placement when no legal cell is available.
+Revisiting a floor or restarting does not replace spent or stolen stock.
+
+Leprechauns (L) appear at depths 6–15. Their three actual fey HD own Filch Gold
+(TR1) on HD 1 and Vanish (TR3) on HD 2, with one point unspent and a natural 1d1
+strike. The separate Cognitive-checked theft rider takes one rolled amount capped
+by all free carried Gold. Its range is frozen from the current floor when the
+attack is prepared. Nymphs (N), at depths 10–19, likewise own three fey HD,
+Filch Charm (TR2) on HD 1 and Vanish on HD 2, with one unspent point and zero
+natural damage. Their checked rider can steal one free unequipped magical unit.
+L and N retain passive acquisition until ordinarily provoked.
+
+Both successful thieves may relocate to a legal cell on the same floor after an
+actual transfer. Failed checks, no eligible stock or fully held units cannot
+trigger Vanish. Held reservations remain protected, and theft cannot take
+equipped items. The concealed restore-strength potion and the Amulet of Yendor
+are magical; ordinary ring mail is not. Theft does not identify a concealed item
+for either actor. Stolen items and Gold remain ordinary inventory, recoverable
+through normal death drops. The Amulet remains the same unique objective item.
+
+Orcs (O) appear at depths 4–13 with one humanoid Warrior HD, purchased W02
+Measured Cut, natural 1d8 damage and passive acquisition until provoked. Their explicit
+Gold interest does not grant theft. These are provisional TOR builds and
+behaviors, not a calibrated survival curve or original Rogue timing. See
+[shared theft and Gold](../reference/items.md#theft-and-gold) for exact inventory
+and preparation contracts.
+
 ## Floors keep their history
 
-Each first entry by the selected character evaluates four ordered stages:
+Each first entry by the selected character evaluates five ordered stages:
 `rogue.eight_species_foes` makes four weighted actor attempts, then the unchanged
 `rogue.bandages` and `rogue.rations` stages each attempt one stack, containing two
 bandages and one ration respectively. The appended `rogue.restore_strength` stage
 attempts one ordinary potion unit on every floor from depth 1 onward. This is
 provisional TOR availability, not Rogue's 13% subtype probability; legal placement
-can still fail, so it does not guarantee a cure. The actor stage's authored depth bands
-select K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J. Kestrel (K) is eligible at depths
-1–6, bat (B) at 1–8, centaur at 7–16, rattlesnake at 3–12, yeti at 11–20,
+can still fail, so it does not guarantee a cure. The final independent
+`rogue.room_gold` stage makes the per-room Gold decisions described above; the earlier stage order and
+random streams are unchanged. The actor stage's authored depth bands
+select K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/U/V/G/J. Kestrel (K) is eligible at depths
+1–6, bat (B) at 1–8, orc at 4–13, leprechaun at 6–15, centaur at 7–16,
+rattlesnake at 3–12, nymph at 10–19, yeti at 11–20,
 Venus flytrap (F) at 12–21, troll at 13–22 and wraith at 14–23. Griffin (G)
 enters at 20 and Jabberwock at 21. Depth 1 selects K/E/B/S/H equally; depth 27
 onward selects V/G/J, equal except 7:12:12 at 29 and 8:8:13 at 30. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
@@ -266,7 +308,7 @@ persistent terminal outcomes; restarting does not grant a new Amulet or victory.
 All starting stats, equipment bonuses, foe timing, quantities, XP policy and the
 depth-selected population are provisional TOR tuning. A successful seeded
 walkthrough is behavioral coverage, not evidence of balanced Warrior/Mage runs. Bow/arrows,
-most species, traps, wandering populations, calibrated food pressure and complete
+the five remaining species, traps, wandering populations, calibrated food pressure and complete
 run balancing remain in the [Rogue plan](../plans/rogue.md).
 
 Shared engine support and playable content have different acceptance boundaries.
@@ -326,10 +368,17 @@ Focused actual-process contracts include:
   source-deleted recovery in
   [`test_rogue_activation_process.py`](../../scripts/test_rogue_activation_process.py).
 
-The selected population has focused source-qualified coverage of these changed
-contracts; historical E/S walkthroughs remain separate evidence.
+These existing witnesses cover their named contracts; historical E/S walkthroughs
+remain separate evidence. This L/N/O theft/gold batch has not yet established
+focused unit, integration, Service, actual-process, source-free recovery or final
+repository/Windows/Linux debug/release qualification. The added contracts need
+coverage for free and held stock, one-roll cross-stack conservation, magical
+selection and concealment, actual-transfer-gated same-floor relocation, depth
+capture, room-stream isolation, death recovery and strict current-format restore.
+Changing documentation or extending the roster does not make an older run evidence
+for those contracts. No UI or 3D feature is added by this batch.
 The [earned-route pilot](../development/rogue-earned-route.md) retains its frozen
-eight-species inputs and adverse or censored outcomes; it is not eighteen-species
+eight-species inputs and adverse or censored outcomes; it is not twenty-one-species
 acceptance. Reaching depth 27 records arrival, not
 Vampire combat survival. Broad integrated/native verification and final
 Windows/Linux CI remain required gates. These bounded cases do not close HD 1–6
@@ -338,7 +387,7 @@ play, pressured escape or numerical calibration. See [status](../status.md) and 
 
 ## Reconstructed roster and depth source checkpoint
 
-The selected K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J recipes use the shared compiler and character-sheet
+The selected K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/U/V/G/J recipes use the shared compiler and character-sheet
 pipeline. Centaur owns four actual Warrior HD, with Second Strike purchased on
 HD 2 and Third Strike on HD 4; its natural sequence is 1d2/1d5/1d5. Yeti owns four
 actual racial HD, purchases Second Strike on HD 2 and uses 1d6/1d6; its cold

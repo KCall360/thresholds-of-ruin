@@ -150,6 +150,8 @@ pub(super) struct PreparedArchetype {
     pub consumable: Option<tor_simulation::ConsumableSpec>,
     pub edible: Option<tor_simulation::EdibleSpec>,
     pub supply: Option<tor_simulation::content_ids::SupplyId>,
+    pub magical: bool,
+    pub currency: Option<tor_simulation::CurrencyKind>,
     pub class: tor_simulation::ItemClass,
     pub body: Option<tor_simulation::BodySpec>,
     pub identity: Option<String>,
@@ -208,6 +210,8 @@ impl PreparedArchetype {
                     Ok::<_, Failure>(id)
                 })
                 .transpose()?,
+            magical: author.magical,
+            currency: author.currency.map(Into::into),
             class: author.class.into(),
 
             body: author.body.clone().map(Into::into),
@@ -598,6 +602,8 @@ impl PreparedDefinitions {
             consumable: inherited.consumable.clone(),
             edible: inherited.edible.clone(),
             supply: inherited.supply.clone(),
+            magical: inherited.magical,
+            currency: inherited.currency,
             class: author.class.map(Into::into).unwrap_or(inherited.class),
             archetype: key,
             identity,

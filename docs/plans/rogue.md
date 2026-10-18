@@ -71,7 +71,7 @@ per-group, graph-query, validation and preparation budgets still apply.
 Room lighting is depth-dependent and corridors are dark; the graph may include
 extra connections. The [starter slice](../play/rogue.md) adds explicit Warrior/Mage
 presets, an equipped mace and ring mail, finite bandages/rations, and ordinary
-K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J builds selected by the eighteen-species population policy. The
+K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/U/V/G/J builds selected by the twenty-one-species population policy. The
 initial HD point remains unspent and future growth explicitly
 selects the matching class. Floor profiles are separate from geometry preparation:
 first successful selected-character entry evaluates each finite stage once, and
@@ -82,8 +82,9 @@ finite supplies and cooldowns. Four weighted actor attempts use authored depth b
 exact racial rows after depth 26 and finite C/Y/T/V/G/J birth stock at
 15%/30%/50%/20%/20%/70%.
 The equal ration/bandage pool is provisional TOR scenario tuning, not original
-loot equivalence. The population has focused source-qualified activation coverage; its
-equipment/stat values and weights remain provisional.
+loot equivalence. Earlier population contracts have focused source-qualified
+coverage; the L/N/O theft/gold additions still need their own qualification. Equipment/stat values
+and weights remain provisional.
 [Playable acceptance](../play/rogue.md#scope-and-verification)
 and calibration retain their separate requirements.
 W adds five undead racial rows with parentless DR2 paid on HD1, passive 1d6
@@ -107,6 +108,18 @@ their authored flight, natural damage and owned advancement rows. Focused unit,
 Service, recipe-combat and nongraphical process witnesses cover these mechanisms;
 native input and complete cross-platform qualification remain merge requirements.
 They do not establish pressured escape or complete-run balance.
+L/N/O add the shared [theft and Gold](../reference/items.md#theft-and-gold)
+contracts: checked Cognitive currency/magical-item riders, preparation-frozen
+same-floor relocation only after actual transfer, protected held units and
+ordinary finite inventory/death recovery. L has three fey HD with TR1(1), TR3(2),
+natural 1d1, depths 6–15 and finite birth Gold. N has three fey HD with TR2(1),
+TR3(2), natural zero damage and depths 10–19. O has one humanoid Warrior HD,
+W02(1), natural 1d8 and depths 4–13. Source-owned quantity expressions resolve
+checked positive u64 ranges using explicit birth/preparation depth. The appended
+50% per-present-room Gold stage preserves earlier stage ordering and random
+streams. This brings production selection to 21 species, with five remaining.
+The unique objective helper is unchanged. This batch adds no UI or 3D scope and
+has not yet established its required validation evidence.
 The retrieval/ascent victory is implemented; complete survival balancing remains open.
 Persistent floors and paired return stairs are intentional TOR adaptations,
 not exact replication of Rogue's regenerated floors and independent arrivals.
@@ -152,7 +165,7 @@ source-granted defenses, stacking and active-time recovery across freeze/replay.
 
 The shared foundation covers nutrition, eating, starvation and authored stochastic
 condition triggers through the shared status gate. The Rogue package now explicitly
-enrolls Warrior/Mage, keeps all eighteen selected foe recipes exempt, and makes its
+enrolls Warrior/Mage, keeps all twenty-one selected foe recipes exempt, and makes its
 existing ration edible.
 Its layered acceptance contracts do not establish complete-run survival,
 production balance or final Rogue configuration. A creature requiring nutrition must use an authored shared rules
@@ -225,7 +238,7 @@ safeguards and treasure-room population only when prerequisites exist.
 
 ### Species, traps and pressure
 
-Extend the selected E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J population to all 26 species, each with its
+Extend the selected 21-species population to all 26 species, each with its
 normal-play ability/behavior case. Complete earned-survival qualification and
 calibrate the depth/spawn tables.
 Centaur and yeti are selected at depths 7–16 and 11–20 respectively, with
@@ -238,23 +251,26 @@ rider; ordinary restoration removes recorded Strength deficit. Jabberwock enters
 at depth 21 with fifteen aberration racial HD, NA1(2), NA3(8), a heavy 2d12/2d4
 sequence, passive acquisition and 70% finite birth stock. Its purchased shared
 Rending Pair attempts one 1d6 rider after two qualifying hits in that sequence.
-The remaining 12 species are unfinished. Complete trapdoor, arrow,
+The five remaining production species are aquator, dragon, medusa, phantom and
+xeroc. Complete trapdoor, arrow,
 sleeping gas, bear trap, teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
 must respect destination generation/loading and geometry. Existing hobgoblins
 roam using personal visible surroundings and visit counts, including reachable
 door opening; NPC stair traversal remains disabled. This is separate from the
 unfinished seeded wandering population while floors are active. Other species'
-idle interests and species-scoped scavenging remain future work; the current
-shared population profile does not enable generic loot/equipment tactics.
+richer idle interests remain future work. Current species-owned useful-item and
+Gold-interest policies remain independent of the shared profile's flee override;
+carrying birth stock alone never grants a tactic.
 
 Acceptance: generation restricts content correctly; depth increases pressure
 through TOR mechanics; all specials work via ordinary actions/physics; inactive
 floors neither spawn nor accumulate catch-up spawning.
 
 Difficulty continues beyond the goal's eligibility depth within the current
-256-HD capacity, which is accepted for functional Rogue. The selected mixed V/J
+256-HD capacity, which is accepted for functional Rogue. The selected mixed V/G/J
 tail reaches J's limit at depth 267; a sampled J at 268 or deeper refuses the
-whole entry atomically. All-V draws can remain valid through 274. Admission
+whole entry atomically. G reaches its limit at 269 and refuses at 270;
+all-V draws can remain valid through 274. Admission
 checks the sampled recipe and never clamps or replaces it. This explicit
 operational refusal is not a terminal objective. Work beyond that capacity is
 deferred below. Preserve every actual per-HD record and its seeded Health for both PCs and monsters. Compile

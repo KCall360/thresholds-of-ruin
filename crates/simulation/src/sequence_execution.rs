@@ -14,6 +14,8 @@ impl Game {
             if self.actor_frozen(id) {
                 continue;
             }
+            self.ensure_preparation_residency(id)?;
+            if self.region_transition_pending() { return Ok(()); }
             // Includes equal-offset rows without rescanning every actor per rider.
             for _ in 0..=crate::limits::STRIKES {
                 let Some(preparation) = self.preparation(id).cloned() else {

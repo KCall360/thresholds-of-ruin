@@ -344,6 +344,7 @@ pub struct BehaviorPolicy {
     pub care: bool,
     pub equipment: bool,
     pub loot: bool,
+    pub gold: bool,
     pub flee_percent: u32,
 }
 impl<'de> Deserialize<'de> for BehaviorPolicy {
@@ -365,6 +366,8 @@ impl<'de> Deserialize<'de> for BehaviorPolicy {
             equipment: bool,
             #[serde(default)]
             loot: bool,
+            #[serde(default)]
+            gold: bool,
             #[serde(default = "default_flee")]
             flee_percent: u32,
         }
@@ -382,6 +385,7 @@ impl<'de> Deserialize<'de> for BehaviorPolicy {
             care: fields.care,
             equipment: fields.equipment,
             loot: fields.loot,
+            gold: fields.gold,
             flee_percent: fields.flee_percent,
         })
     }
@@ -408,6 +412,7 @@ impl Default for BehaviorPolicy {
             care: false,
             equipment: false,
             loot: false,
+            gold: false,
             flee_percent: default_flee(),
         }
     }
@@ -428,6 +433,7 @@ impl BehaviorPolicy {
             care: self.care,
             equipment: self.equipment,
             loot: self.loot,
+            gold: self.gold,
             flee_percent: self.flee_percent,
         }
     }

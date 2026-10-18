@@ -61,7 +61,7 @@ mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
 mod item_store;
 mod items;
-pub use items::{ItemClass, ItemSpec};
+pub use items::{CurrencyKind, ItemClass, ItemSpec};
 mod interactions;
 pub use interactions::{
     AnatomySpec, ConsumableSpec, EdibleSpec, EquipmentSlot, EquipmentSlotId, EquipmentSlotView,
@@ -81,6 +81,8 @@ mod navigation_map;
 mod observation;
 mod places;
 pub mod progression;
+pub mod quantity;
+pub mod theft;
 pub mod public_plan;
 pub mod resolution_diagnostics;
 pub mod resources;
@@ -472,6 +474,7 @@ pub struct Game {
     /// Internal continuation boundary, drained before engine admission. Not a
     /// client event or a serialized event queue.
     population_entry_boundary: Option<u64>,
+    preparation_region_boundary: Option<theft::PreparationRegionBoundary>,
     host_region_continuation: bool,
 }
 impl Clone for Game {
@@ -503,6 +506,7 @@ impl Clone for Game {
             floor_activation: self.floor_activation.clone(),
             unique_retrieval: self.unique_retrieval.clone(),
             population_entry_boundary: self.population_entry_boundary,
+            preparation_region_boundary: self.preparation_region_boundary.clone(),
             host_region_continuation: self.host_region_continuation,
         }
     }
@@ -649,6 +653,7 @@ impl Game {
             floor_activation: None,
             unique_retrieval: None,
             population_entry_boundary: None,
+            preparation_region_boundary: None,
             host_region_continuation: false,
         }
     }

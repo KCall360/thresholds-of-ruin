@@ -1,7 +1,8 @@
 # Items and character knowledge
 
 Items support quantity-aware pickup/drop, compatible stacking, character-owned
-identity knowledge, anatomy-based equipment and timed consumption with explicit edibility. Capacity, containers and
+identity knowledge, anatomy-based equipment, timed consumption with explicit edibility,
+and ordinary currency/theft transfers. Capacity, containers and
 ordinary identification actions remain deferred. NetHack informs the interaction style;
 these are this project's explicit rules, not a claim of exact NetHack behavior.
 
@@ -119,6 +120,79 @@ observations, deltas, checkpoints and replay. The validated
 `scenarios/tests/interactions` package and `test_interactions_process.py` cover
 starting gear, timing, disclosure, consumption and checkpoint restart.
 
+## Quantity expressions
+
+Shared quantity operands describe positive item units, independently of bounded
+combat dice. `QuantityExpr` has three strict tagged forms:
+
+- `{ kind = "fixed", quantity = 1 }`
+- `{ kind = "uniform", minimum = 2, maximum = 61 }`
+- `{ kind = "depth_scaled_uniform", minimum = 2, maximum_base = 51, per_depth = 10 }`
+
+The last form computes the inclusive upper bound as
+`maximum_base + per_depth * depth`, with checked u64 multiplication/addition. A compiled `QuantityRange`
+requires `1 <= minimum <= maximum`; reversed, zero or overflowing ranges reject.
+Rogue's gold expression is therefore uniform over `2..=51 + 10 * depth`.
+This is an item quantity, not a damage roll or a bounded dice-pool workaround.
+
+The consumer supplies context explicitly. Birth stock resolves at the birth floor's
+depth; theft resolves the current floor depth when preparation freezes its plan.
+A later transfer, pause or restart does not recalculate the captured range.
+Nongenerated contexts must supply an explicit fixed amount or bounded range;
+there is no floor-one, zero-depth or global-depth fallback. Resolving the range
+is separate from sampling it. A fixed range consumes no random word; random
+sampling and state changes belong to the consumer's atomic transaction.
+Population authoring also accepts an integer as fixed-quantity shorthand. That
+source convenience is not a compatibility reader or an alias for strict compiled
+and saved records. Ordinary materialized stacks retain one concrete u64 quantity.
+
+## Theft and gold
+
+`magical` and optional `currency` are explicit item capabilities.
+`currency = "gold"` marks ordinary stackable Gold units; the coin appearance class alone
+does not grant currency behavior. Gold uses normal pickup/drop, splitting,
+merging, inventory and death-drop authority, with no purse or second quantity
+ledger. Magical status is authored independently of class, name, modifiers and
+identity knowledge. Rogue's restore-strength potion and Amulet of Yendor are
+magical; its ordinary ring mail is not. These capabilities participate in
+compatible item definitions and remain private authoritative facts rather than
+new item-view fields.
+
+The shared theft effect is legal only as the sole effect of a checked rider.
+Primary effects, failure branches and item-consumable effects cannot contain it.
+Authoring may omit the optional relocation gate; canonical saved records require
+its nullable field explicitly, without a compatibility default.
+The source declares either a currency selector with an authored quantity
+expression or a single magical-unit selector. The Rogue Trickster talents use
+separate Cognitive checks:
+
+- TR1 Filch Gold samples one source-sized amount, then caps the transfer by all
+  eligible free carried Gold across the target's stacks. It does not multiply
+  the roll by stack count or reroll once per stack.
+- TR2 Filch Charm transfers one free unequipped magical unit, including the
+  unique Amulet when carried by the victim. It does not need the thief to know
+  the true identity and does not teach that identity after transfer. Concealment
+  and each actor's prior identity knowledge retain their ordinary meanings.
+- TR3 Vanish supplies the source's relocation gate. The compiled active flag is
+  captured when theft is prepared; changing the flag later does not rewrite the
+  frozen plan. Relocation is permitted only after a positive actual transfer and
+  only to a legal cell on the same floor. A failed check, empty candidate set or
+  zero transferred units cannot trigger it.
+
+Live resolution rechecks carried ownership, equipment and exact free units.
+Item-owned preparation reservations exclude held units from theft just as they do
+from ordinary transfer. Candidate planning cannot expose the victim's inventory
+or hidden item facts to the requesting actor. The transfer, any relocation,
+identity allocation, random state and resulting lifecycle updates share one
+atomic publication boundary; failure cannot leave a partial transfer or duplicate
+an item. Stolen gold and magic items become ordinary finite inventory and drop
+through normal death cleanup. There is no kill-time loot creation or restitution
+ledger. The unique objective's independent entry-relocation helper is unchanged.
+
+These contracts add no new command, client field, theft menu or 3D feature. See
+[status](../status.md) for the theft/gold batch's outstanding validation; existing
+item tests below do not by themselves qualify this new behavior.
+
 ## AI item decisions
 
 AI healing uses the acting actor's own identity knowledge. At half health or
@@ -150,7 +224,12 @@ Loot candidates must be visible and known: useful gear, or a positive restorativ
 when none is carried. They must lie within three remembered route steps. Distance
 then item ID orders candidates; both the destination and first step avoid visible
 hostile reach. Pickup takes one unit, preserves the remainder and reuses the
-existing route search. Unknown appearances never authorize these decisions.
+existing route search. Unknown appearances never authorize these useful-item
+decisions. An independently authored `gold` interest permits known reachable Gold pursuit and ordinary pickup,
+after self-preservation and retaliation and before idle exploration. It does not
+infer hidden currency from an appearance, imply general looting permission or
+change the actor's hostile acquisition and memory contracts. See
+[behavior defaults](scenario-packages.md#behavior-defaults-and-ai-overrides).
 
 ## Authoring and disclosure
 
@@ -168,7 +247,8 @@ These classes do not implement food, spells, tools or other item-use mechanics.
 
 Packages declare `quantity` (default 1), optional `stackable` overrides, and
 string-valued `properties` on item placements. Archetypes default to non-stackable
-and may declare `identity`, `appearance_pool`, `stackable`, and `properties`.
+and may declare `identity`, `appearance_pool`, `stackable`, `properties`,
+`magical` and `currency`.
 Instance properties override archetype properties by key. Non-stackable items
 must have quantity 1; specific objective item instances must be non-stackable.
 Properties are inert stack-compatibility metadata here; they do not activate item
@@ -176,7 +256,7 @@ effects, equipment, weight or capacity mechanics.
 
 `appearance_pools.<key>` contains `appearances` and optional `confounding` (default
 false). Archetypes sharing an identity must agree on its name, pool, physical
-class, equipment and effects.
+class, magical/currency capabilities, equipment and effects.
 Sorted identity keys receive appearances shuffled deterministically from the game
 seed, pool key, and appearance index with SHA-256. Ordinary pools require enough
 distinct appearances. Explicit confounding pools permit reuse. Assignment covers
@@ -202,7 +282,7 @@ An item view discloses its opaque `id`, `name`, `description`, physical `class`,
 `quantity`, `appearance`, `identified` status and optional `asset`. Ground views
 also locate disclosed occurrences and indicate reachability. Carried interaction
 views provide the owner’s affordances and permitted known equipment details; see
-the [wire reference](protocol.md). Hidden archetype/identity keys and properties are never
+the [wire reference](protocol.md). Hidden archetype/identity keys, properties and magical/currency capabilities are never
 wire fields. History and wizard summaries do not serialize authoritative specs.
 Items use the current protocol, save format, ruleset, and scenario validator;
 older prerelease saves are rejected without migration.

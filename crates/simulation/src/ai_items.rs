@@ -5,6 +5,31 @@ use crate::{
 use tor_world::Location;
 
 impl Game {
+    pub(crate) fn choose_known_gold(
+        &self,
+        actor: ActorId,
+        view: &Observation,
+        profile: &crate::ai::AiProfile,
+        route: &mut impl FnMut(Location) -> Option<Vec<TravelStep>>,
+    ) -> Option<Action> {
+        if !profile.gold { return None; }
+        view.ground_items.iter()
+            .filter(|item| item.known_currency == Some(crate::CurrencyKind::Gold))
+            .filter(|item| !self.exposed_to_visible_hostile(actor, item.location, view))
+            .filter_map(|item| {
+                if profile.idle == crate::behavior::IdleBehavior::Wait && item.location != view.location { return None; }
+                let path = if item.location == view.location { vec![] } else { route(item.location)? };
+                if path.len() > 3 { return None; }
+                let action = if let Some(step) = path.first() {
+                    let (at, _) = self.actor_translation(actor, step.direction)?;
+                    if self.exposed_to_visible_hostile(actor, at, view) { return None; }
+                    Action::Move(step.direction)
+                } else { Action::Take { item: item.id, quantity: Some(item.quantity) } };
+                (!self.condition_blocks_action(actor, &action)).then_some((path.len(), item.id, action))
+            })
+            .min_by_key(|(distance, id, _)| (*distance, *id)).map(|(_, _, action)| action)
+    }
+
     pub(crate) fn choose_nearby_loot(
         &self,
         actor: ActorId,

@@ -409,14 +409,21 @@ impl Regions {
         profile: bool,
     ) -> Result<TransitionWork, Failure> {
         let mut total = TransitionWork::default();
+        let mut preparation_boundaries = std::collections::BTreeSet::new();
         loop {
+            if let Some(boundary) = game.preparation_region_boundary().cloned() {
+                let missing = game.preparation_missing_regions(&boundary);
+                if missing.is_empty() || !preparation_boundaries.insert((boundary, missing)) {
+                    return Err(storage_failure());
+                }
+            }
             let pending_tick = game.population_entry_pending().then(|| game.tick());
-            let pending_before = pending_tick.map(|_| game.clone());
+            let pending_before = game.region_transition_pending().then(|| game.clone());
             let mut work = self.transition_staged(game, made, extra.clone(), profile)?;
             if work.before.is_none() {
                 work.before = pending_before;
             }
-            let continue_time = game.population_entry_pending() || !work.report.frozen.is_empty();
+            let continue_time = game.region_transition_pending() || !work.report.frozen.is_empty();
             // Residency is complete before continuation, including every bounded
             // member of an unactivated scope. A later physical entry yields
             // another internal boundary, never another command or receipt.
@@ -427,7 +434,7 @@ impl Regions {
                     })?;
             }
             total.absorb(work);
-            if !game.population_entry_pending() {
+            if !game.region_transition_pending() {
                 return Ok(total);
             }
             if pending_tick.is_some_and(|previous| game.tick() <= previous) {

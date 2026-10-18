@@ -86,6 +86,7 @@ pub struct ItemView {
     pub appearance: String,
     pub identified: bool,
     pub known_supply: Option<SupplyView>,
+    pub known_currency: Option<crate::CurrencyKind>,
     pub asset: Option<String>,
 }
 
@@ -100,6 +101,7 @@ pub struct GroundItemView {
     pub appearance: String,
     pub identified: bool,
     pub known_supply: Option<SupplyView>,
+    pub known_currency: Option<crate::CurrencyKind>,
     /// Disclosed physical contact, independent of private holds.
     pub supply_reachable: bool,
     pub location: Location,
@@ -283,6 +285,7 @@ impl Game {
                         supply_reachable: known_supply.is_some()
                             && self.touches_supply(id, location),
                         known_supply,
+                        known_currency: identified.then_some(item.spec.currency).flatten(),
                         location,
                         asset: item.spec.asset.clone(),
                     });
@@ -329,6 +332,7 @@ impl Game {
                         appearance: item.spec.appearance.clone(),
                         identified,
                         known_supply,
+                        known_currency: identified.then_some(item.spec.currency).flatten(),
                         asset: item.spec.asset.clone(),
                     });
                 }

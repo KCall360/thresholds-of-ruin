@@ -72,21 +72,22 @@ explicitly rejected in this transition. Bundled sources and golden save fixtures
 move together. Compiled rules, compiled regions and portable package metadata each
 have their own current-only envelope. Direct import must validate that envelope
 even when an outer archive or source certificate has a current identity.
-Nutrition and condition definitions change the rules-document and portable-package
-payloads: rules carry nutrition policy, triggers and condition semantics, while
-packages also carry actor recipes and edible definitions. Region inputs carry
-authored actor recipes with explicit nutrition requirements, so their independent
-envelope advances as well. Unchanged geometry and placement references do not
-waive validation of that complete region payload. Runtime region records carry
-mutable nutrition and condition state and follow the archive revision. Personal
-status disclosure follows the protocol revision; physical storage framing remains
-unchanged because its byte-level envelope has not changed.
-Rule-document serialization is a versioned compiled/save contract;
-a change to that vocabulary requires compatibility review even if a Rust derive
-would accept it automatically. The natural-melee source vocabulary and named
-strike/rider records advance the independent rules-input envelope. Typed natural
-source summaries and paged provenance advance the protocol separately. Physical
-storage framing remains unchanged. Historical inputs are rejected, not imported.
+Theft and quantity definitions change the rules-document and portable-package
+payloads. Rules carry checked rider selectors and source-owned relocation gates;
+packages also carry explicit item magical/currency capabilities, Gold-interest
+policy and room/item/birth-stock quantity expressions. The consumer resolves
+contextual quantities to checked positive u64 ranges before a prepared action
+can sample them; generated floor depth is an explicit argument, not a simulation
+dependency on a server generator. Source integer quantity shorthand lowers to one
+canonical form and does not permit older compiled or saved records.
+
+The independent region-input shape, ordinary disclosed protocol and physical
+storage framing are unchanged by this batch. Runtime item definitions, concrete
+AI policies and frozen theft plans still require the new strict logical save
+shape. Explicit nullable gates and currency capabilities cannot be filled in by a
+compatibility default. Rule-document serialization is a versioned compiled/save
+contract even when an unchecked Rust derive could accept a changed vocabulary.
+Historical inputs are rejected, not imported.
 
 Required evidence includes source-order/comment identity tests; bad references,
 unknown fields and path safety; integer overflow and work bounds; equal random

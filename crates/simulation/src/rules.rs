@@ -881,6 +881,7 @@ pub enum EffectRecipient {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    Theft { selection: crate::theft::TheftSelection, relocation: Option<crate::theft::RelocationGate> },
     ApplyLinkedHold {
         policy: crate::linked_hold::HoldPolicy,
     },
@@ -947,6 +948,7 @@ impl<'de> Deserialize<'de> for Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Theft { selection: crate::theft::TheftSelection, #[serde(deserialize_with = "crate::bounded::required_option")] relocation: Option<crate::theft::RelocationGate> },
             ApplyLinkedHold {
                 policy: crate::linked_hold::HoldPolicy,
             },
@@ -999,6 +1001,7 @@ impl<'de> Deserialize<'de> for Effect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Theft { selection, relocation } => Self::Theft { selection, relocation },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::HoldDamage {
                 category,
@@ -2175,6 +2178,10 @@ impl References<'_> {
         )?;
         for value in values {
             match value {
+                Effect::Theft { selection, relocation } => {
+                    if let crate::theft::TheftSelection::Currency { amount, .. } = selection { bound(amount.valid(), "theft_quantity")?; }
+                    if let Some(gate) = relocation { reference(self.flags, &gate.flag, "flag")?; gate.flag.intern(pool); }
+                }
                 Effect::ApplyLinkedHold { policy } => {
                     bound(policy.valid(), "hold_policy")?;
                     reference(self.flags, &policy.sustaining, "flag")?;
@@ -2617,6 +2624,7 @@ impl Ruleset {
         Ok(count)
     }
     pub fn validate_effects(&self, effects: &[Effect]) -> Result<(), RulesetError> {
+        bound(!effects.iter().any(|effect| matches!(effect, Effect::Theft { .. })), "theft_checked_rider")?;
         let abilities = self.indexes.abilities.keys().cloned().collect();
         let ability_tags = self.indexes.ability_tags.keys().cloned().collect();
         let types = self.indexes.creature_types.keys().cloned().collect();
@@ -2720,6 +2728,7 @@ impl Effect {
             }
         };
         match self {
+            Self::Theft { selection, .. } => match selection { crate::theft::TheftSelection::Currency { amount, .. } => amount.valid(), crate::theft::TheftSelection::MagicalUnit => true },
             Self::ApplyLinkedHold { policy } => policy.valid(),
             Self::HoldDamage { .. } => true,
             Self::StepSelfOneCell

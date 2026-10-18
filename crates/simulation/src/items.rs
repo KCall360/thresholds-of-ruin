@@ -23,11 +23,32 @@ pub enum ItemClass {
     Gem,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CurrencyKind {
+    Gold,
+}
+
+/// An uninterrupted candidate owns this plan. Exact witnesses prevent a stale
+/// merge identity, changed reservation, or allocator reuse from moving items.
+pub(crate) struct PreparedTransfer {
+    source: ItemId,
+    expected_source: Item,
+    result: ItemId,
+    expected_destination: Option<Item>,
+    destination: ItemLocation,
+    quantity: u64,
+    expected_next_item_id: u64,
+}
+
 /// Authoritative identity and physical stack properties. Never a client DTO.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct ItemSpec {
+    pub magical: bool,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub currency: Option<CurrencyKind>,
     pub equipment: Option<crate::EquipmentSpec>,
     pub consumable: Option<crate::ConsumableSpec>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -53,6 +74,9 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            magical: bool,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            currency: Option<CurrencyKind>,
             equipment: Option<crate::EquipmentSpec>,
             consumable: Option<crate::ConsumableSpec>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -72,6 +96,8 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            magical: fields.magical,
+            currency: fields.currency,
             equipment: fields.equipment,
             consumable: fields.consumable,
             edible: fields.edible,
@@ -99,6 +125,8 @@ impl Clone for ItemSpec {
     fn clone(&self) -> Self {
         ITEM_DEFINITION_COPIES.with(|copies| copies.set(copies.get() + 1));
         Self {
+            magical: self.magical,
+            currency: self.currency,
             equipment: self.equipment.clone(),
             consumable: self.consumable.clone(),
             edible: self.edible.clone(),
@@ -119,6 +147,8 @@ impl Clone for ItemSpec {
 impl ItemSpec {
     pub fn ordinary(name: String) -> Self {
         Self {
+            magical: false,
+            currency: None,
             equipment: None,
             consumable: None,
             edible: None,
@@ -169,7 +199,8 @@ impl ItemSpec {
         Ok(())
     }
     pub(crate) fn valid(&self) -> bool {
-        self.equipment.as_ref().is_none_or(|equipment| {
+        self.currency.is_none_or(|_| self.class == ItemClass::Coin && self.stackable && self.equipment.is_none() && self.consumable.is_none() && self.edible.is_none() && self.supply.is_none())
+        && self.equipment.as_ref().is_none_or(|equipment| {
             !self.stackable
                 && self.consumable.is_none()
                 && self.edible.is_none()
@@ -198,6 +229,32 @@ impl ItemSpec {
 }
 
 impl Game {
+    pub(crate) fn prepare_owned_transfer(&self, source: ItemId, owner: ActorId, recipient: ActorId, quantity: u64) -> Result<PreparedTransfer, GameError> {
+        if owner == recipient { return Err(GameError::ItemUnavailable); }
+        let actor = self.actors.get(&owner).ok_or(GameError::UnknownActor)?;
+        if !actor.alive() || self.actors.get(&recipient).is_none_or(|actor| !actor.alive()) || actor.equipment.values().any(|equipped| *equipped == source) { return Err(GameError::ItemUnavailable); }
+        let item = self.items.get(&source).filter(|item| item.location == ItemLocation::Carried(owner)).ok_or(GameError::ItemUnavailable)?;
+        if quantity == 0 || quantity > item.quantity { return Err(GameError::InvalidQuantity); }
+        if item.free_quantity(None).is_none_or(|free| free < quantity) { return Err(GameError::ItemUnavailable); }
+        let destination = ItemLocation::Carried(recipient);
+        let merge = item.spec.stackable.then(|| self.items.at(destination).find(|id| self.items[id].spec == item.spec)).flatten();
+        let result = if let Some(id) = merge {
+            self.items[&id].quantity.checked_add(quantity).ok_or(GameError::InvalidQuantity)?;
+            id
+        } else if quantity == item.quantity { source } else {
+            self.next_item_id.checked_add(1).ok_or(GameError::IdentityExhausted)?;
+            ItemId(self.next_item_id)
+        };
+        Ok(PreparedTransfer { source, expected_source: item.clone(), result, expected_destination: merge.map(|id| self.items[&id].clone()), destination, quantity, expected_next_item_id: self.next_item_id })
+    }
+
+    pub(crate) fn apply_owned_transfer(&mut self, plan: PreparedTransfer) -> Result<(), GameError> {
+        if self.next_item_id != plan.expected_next_item_id || self.items.get(&plan.source) != Some(&plan.expected_source)
+            || (plan.source != plan.result && self.items.get(&plan.result) != plan.expected_destination.as_ref()) { return Err(GameError::ItemUnavailable); }
+        let ItemLocation::Carried(owner) = plan.expected_source.location else { return Err(GameError::ItemUnavailable); };
+        if self.actors.get(&owner).is_none_or(|actor| actor.equipment.values().any(|id| *id == plan.source)) { return Err(GameError::ItemUnavailable); }
+        self.apply_transfer(plan.source, plan.result, plan.quantity, plan.destination)
+    }
     pub fn place_item_stack(
         &mut self,
         id: u64,

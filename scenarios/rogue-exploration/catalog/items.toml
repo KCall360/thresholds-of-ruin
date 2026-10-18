@@ -37,6 +37,7 @@ edible = { nutrition = { kind = "rolled", dice = { count = 1, sides = 400, bonus
 asset = "item.amulet"
 name = "Amulet of Yendor"
 identity = "rogue.amulet_of_yendor"
+magical = true
 class = "amulet"
 stackable = false
 
@@ -47,6 +48,7 @@ stackable = false
 asset = "item.potion"
 name = "potion of restore strength"
 identity = "rogue.restore_strength"
+magical = true
 class = "potion"
 stackable = true
 appearance_pool = "rogue.potions"
@@ -55,3 +57,13 @@ consumable = { effects = [{ kind = "restore_attribute", attribute = "strength", 
 [appearance_pools."rogue.potions"]
 asset = "item.potion"
 appearances = ["amber potion", "smoky potion", "violet potion"]
+
+# Ordinary recoverable stacks; neither a purse abstraction nor a supply item.
+[items."rogue.gold"]
+asset = "item.coin"
+name = "gold coin"
+identity = "rogue.gold"
+class = "coin"
+stackable = true
+currency = "gold"
+magical = false

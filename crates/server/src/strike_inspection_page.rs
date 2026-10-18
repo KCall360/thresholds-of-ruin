@@ -42,6 +42,7 @@ fn check_fields(check: &s::rules::CheckDef) -> usize {
 }
 fn effect_fields(effect: &s::rules::Effect) -> usize {
     match effect {
+        s::rules::Effect::Theft { .. } => 3,
         s::rules::Effect::ApplyLinkedHold { .. } => 4,
         s::rules::Effect::HoldDamage { .. } => 2,
         s::rules::Effect::Damage {
@@ -64,6 +65,19 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
 #[cfg(test)]
 mod linked_hold_effect_tests {
     use super::*;
+    #[test]
+    fn theft_source_inspection_has_exact_bounded_declared_fields() {
+        let rules = s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        for selection in [s::theft::TheftSelection::MagicalUnit, s::theft::TheftSelection::Currency {
+            currency: s::CurrencyKind::Gold,
+            amount: s::quantity::QuantityExpr::DepthScaledUniform { minimum: 2, maximum_base: 51, per_depth: 10 },
+        }] {
+            let effect = s::rules::Effect::Theft { selection, relocation: None };
+            assert_eq!(effect_fields(&effect), 3);
+            assert_eq!(effect_view(&effect, &rules).fields.len(), 3);
+        }
+    }
+
     #[test]
     fn linked_hold_source_fields_match_bounded_inspection_reservations() {
         let rules =

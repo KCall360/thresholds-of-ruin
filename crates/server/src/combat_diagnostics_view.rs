@@ -108,7 +108,8 @@ fn record(
                 .outcome
                 .effects
                 .iter()
-                .map(|effect| match effect {
+                .filter_map(|effect| Some(match effect {
+                    s::abilities::ResolvedEffect::Theft { .. } => return None,
                     s::abilities::ResolvedEffect::ApplyLinkedHold { .. } => {
                         p::DiagnosticEffect::LinkedHold {
                             target,
@@ -230,7 +231,7 @@ fn record(
                         source: p::ActorId(qualification.opponent.0),
                         duration: *duration,
                     },
-                })
+                }))
                 .collect(),
         },
         trace: p::CombatTraceView {

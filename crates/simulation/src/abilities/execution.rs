@@ -303,7 +303,23 @@ impl Game {
             resolve::resolve_batch(plan, &snapshot, &mut rng, &mut (), budget)
         }?;
         result.outcome.intention = intention;
-        let receipt = self.apply_resolved_outcome(result.outcome.clone(), site, activity)?;
+        let receipt = if let Some(theft) = result.deferred_theft.take() {
+            let transfer = self.transfer_theft(actor, target, &theft.selection, &mut rng)?;
+            if let Some(transfer) = transfer {
+                let event_start = self.event_log.len();
+                let relocation = theft.relocation.as_ref().map(|policy| self.relocate_after_theft(actor, policy, &transfer, &mut rng)).transpose()?.flatten();
+                let consequences = self.event_log.split_off(event_start);
+                result.outcome.effects.push(ResolvedEffect::Theft { quantity: transfer.quantity(), relocation });
+                result.outcome.result = result.outcome.canonical_result();
+                let receipt = self.apply_resolved_theft(result.outcome.clone(), site, activity, transfer)?;
+                self.event_log.extend(consequences);
+                receipt
+            } else {
+                self.apply_resolved_outcome(result.outcome.clone(), site, activity)?
+            }
+        } else {
+            self.apply_resolved_outcome(result.outcome.clone(), site, activity)?
+        };
         self.rules_rng = rng;
         Ok((result, receipt))
     }

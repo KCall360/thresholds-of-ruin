@@ -30,7 +30,7 @@ or route acceptance. Current route CI must still qualify the adapted fixture.
 New campaigns have distinct source fingerprints and cannot resume an earlier
 pilot with changed inputs. This is experimental input, not a historical save reader.
 The arm name remains unchanged when the bundled package
-selects eighteen species: it always names this historical comparator, never the
+selects twenty-one species: it always names this historical comparator, never the
 current production manifest. Its independent gameplay fixture is unchanged and lacks the
 complete Vampire catalog/rule closure needed as an eight-species generator source.
 The retained pilot candidate is a separately frozen eight-species E/S/H/I/Z/Q/U/V
@@ -285,8 +285,12 @@ snapshot contains `package/` and `source.json`, with a provenance reference,
 exact package hashes and rules dependency hashes. The same current compiler
 must resolve those pinned dependencies and compile both arms. Tests use the
 committed E/S fixture as the independent `production` arm and generate their
-candidate from the explicitly supplied current package; they need no Git history,
-network or environment overrides. The generator also accepts a retained complete
+candidate from an explicitly supplied supported source package; they need no Git
+history, network or environment overrides. The strict candidate generator still
+names its retained eighteen-species contract and does not accept the new 21-species
+production shape with room Gold. Current-format input adaptation and expansion
+need their own source fingerprints and qualification; an old compiler receipt
+cannot make a rejected package current. The generator also accepts a retained complete
 preactivation source closure. It does not use the independent E/S fixture to
 reconstruct missing Vampire content.
 
@@ -301,9 +305,12 @@ The new diagnostic inventory records observed `source_population_shape`
 package/tool/compiler-dependency hashes. Its `production_mutated = false` and
 diagnostic artifact purpose replace the obsolete global `production_activation`
 claim. See [generator contract](arena.md#rogue-roster-study-and-bounded-candidate-inputs).
-Newly generated candidates now use the eighteen-species population. The retained
-eight-species pilot remains old-source evidence, not acceptance of the later
-roster additions, flight, linked holds or ordinary restoration stock.
+The candidate generator's declared target remains the eighteen-species population.
+Its `canonical_eighteen_species` label is preserved rather than relabeled to match
+current 21-species production. The retained eight-species pilot remains old-source
+evidence, not acceptance of later roster additions, flight, linked holds,
+ordinary restoration stock, theft or Gold. Extending these studies to L/N/O and
+room Gold is separate from the production feature batch.
 These new results do not rewrite historical inventories, report schemas, cohort
 order or source identities. Resume an existing campaign from its retained sources
 and packages; never regenerate them from the current bundled package.

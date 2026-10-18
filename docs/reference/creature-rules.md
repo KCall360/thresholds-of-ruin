@@ -947,7 +947,7 @@ operands are checked again after each source/modifier fold, using the same autho
 rolled-component and natural-primary modifier scope as capture. Equipment and
 condition changes cannot turn a non-hostile ability into positive direct damage.
 Frozen plans validate their captured effects against the pinned interaction on
-admission and restore, without re-deriving today's equipment. Hit-die drain is
+admission and restore, without re-deriving today's equipment. Hit-die drain and theft are
 direct harm; restoring a drained die is not. Hostile intent does not guarantee an
 effect.
 
@@ -961,7 +961,7 @@ No new preparation cue or public provocation field bypasses paid plan inspection
 
 Species own `passive` or `mean` acquisition, `wait` or `explore` idle behavior,
 `memory_ticks` from zero through 1000000 inclusive, and defaults for door use,
-care, equipment, useful loot and fleeing. Omitted behavior resolves to passive
+care, equipment, useful loot, Gold interest and fleeing. Omitted behavior resolves to passive
 exploration without tool use and a 25% Health flee threshold. Named behavior
 records and the independent concrete saved policy enforce the same bounds;
 restoration does not use authoring fallbacks. Tactical profiles partially override
@@ -988,11 +988,14 @@ trigger. Source/controller changes cannot manufacture catch-up recovery.
 Allied targeting uses authored faction relationships and the requester's own
 engagement, never the other actor's private grudge. Directed faction edges still
 retain their authored meaning. Species defaults and partial AI profiles select
-generic door, care, equipment and useful-loot tactics; inventory ownership alone
+generic door, care, equipment, useful-loot and Gold-interest tactics; inventory ownership alone
 grants neither permission nor identity knowledge. Explicit Wait prevents idle
 movement and loot detours, but permits enabled useful underfoot actions. It does
 not change hostile acquisition, remembered pursuit or combat. Exploration and
-loot goals use only the actor's own senses and known routes/items.
+loot goals use only the actor's own senses and known routes/items. Gold pursuit
+has its own explicit policy: self-preservation and retaliation retain priority,
+then known reachable Gold takes precedence over ordinary idle behavior. It uses
+ordinary currency stacks, never unseen stock or an inferred purse.
 These reusable mechanisms do not activate the full Rogue roster or establish
 numerical balance. Owner-disposition inspection is a separate presentation pass.
 
@@ -1024,6 +1027,23 @@ resumes its original plan and holds after healing/escape obligations, without a
 new start charge. Expiry uses ordinary actor-active time; there is no maintenance
 timer. This policy makes eligible authored abilities usable by AI, but does not
 establish their numerical balance.
+
+### Trickster theft
+
+TR1 Filch Gold and TR2 Filch Charm use the shared hostile checked-rider effect,
+not a parallel species combat executor. The currency selector captures a checked
+positive quantity range; the magical selector captures the one-free-unequipped-
+unit policy. A theft effect must be the rider's sole payload and its separate
+Cognitive check must succeed. Theft is not permitted in a primary branch, failure
+branch or consumable effect.
+
+TR3 Vanish contributes an active source flag used to compile the optional
+same-floor relocation gate when the plan is captured. The frozen gate survives
+ordinary paid pause/recovery without consulting later source changes. Only a
+positive actual transfer permits relocation; an attempted theft is not enough.
+Eligibility, live inventory/held-unit validation, conservation, knowledge and
+ordinary death recovery are owned by [the item contract](items.md#theft-and-gold).
+No extra roll, item menu or disclosure rule is inferred from the talent's name.
 
 ### Finite supplies and universal care
 

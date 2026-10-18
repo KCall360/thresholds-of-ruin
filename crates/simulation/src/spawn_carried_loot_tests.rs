@@ -14,7 +14,7 @@ fn carried_plan(chance: [u32; 2]) -> PopulationPlan {
     let mut value = serde_json::to_value(plan(vec![])).unwrap();
     value["carried_item_pools"] = serde_json::json!({
         "supplies": {"version": 1, "choices": [{
-            "content": "marker", "weight": 1, "quantity": 3, "spec": marker()
+            "content": "marker", "weight": 1, "quantity": {"kind":"fixed","quantity":3}, "spec": marker()
         }]}
     });
     value["profiles"]["baseline"]["stages"] = serde_json::json!([{
@@ -211,7 +211,10 @@ fn birth_stock_policies_validate_unreachable_pools_and_all_exact_stack_constrain
                 .unwrap()
                 .choices
                 .clear(),
-            6 => plan.carried_item_pools.get_mut("supplies").unwrap().choices[0].quantity = 0,
+            6 => {
+                plan.carried_item_pools.get_mut("supplies").unwrap().choices[0].quantity =
+                    QuantityExpr::Fixed { quantity: 0 }
+            }
             7 => {
                 plan.carried_item_pools.get_mut("supplies").unwrap().choices[0]
                     .spec
@@ -364,6 +367,7 @@ fn carried_stock_seed_vectors_pin_independent_chance_and_content_domains() {
             profile,
             stage,
             ordinal: 0,
+            depth: Some(1),
         };
         assert_eq!(context.stream(choice, policy, None), chance_root);
         assert_eq!(
@@ -375,7 +379,10 @@ fn carried_stock_seed_vectors_pin_independent_chance_and_content_domains() {
             content_root
         );
         assert_eq!(
-            context.select(choice, &plan.carried_item_pools).is_some(),
+            context
+                .select(choice, &plan.carried_item_pools)
+                .unwrap()
+                .is_some(),
             carries
         );
     }
@@ -394,7 +401,8 @@ fn carried_stock_changes_cannot_perturb_actor_selection_placement_or_rules_rng()
             carrier_choice(&mut plan).carried_loot = None;
         }
         if case == 2 {
-            plan.carried_item_pools.get_mut("supplies").unwrap().choices[0].quantity = 99;
+            plan.carried_item_pools.get_mut("supplies").unwrap().choices[0].quantity =
+                QuantityExpr::Fixed { quantity: 99 };
         }
         if case == 3 {
             let pool = plan.carried_item_pools.get_mut("supplies").unwrap();
@@ -508,7 +516,7 @@ fn living_carrier_game(chance: [u32; 2], healing_stock: bool) -> Game {
         disposition: crate::behavior::Disposition::Passive,
         idle: crate::behavior::IdleBehavior::Wait,
         memory_ticks: 1000,
-            ..Default::default()
+        ..Default::default()
     };
     let content = crate::test_creatures::content_with(species.clone(), vec![]);
     let build = crate::test_creatures::build(species);
@@ -531,7 +539,7 @@ fn living_carrier_game(chance: [u32; 2], healing_stock: bool) -> Game {
         flee_percent: 0,
         idle: crate::behavior::IdleBehavior::Wait,
         doors: false,
-});
+    });
     if healing_stock {
         let spec = &mut plan.carried_item_pools.get_mut("supplies").unwrap().choices[0].spec;
         spec.class = crate::ItemClass::Potion;
@@ -596,7 +604,7 @@ fn maximum_birth_stock_pools_and_attempt_receipts_fit_the_unchanged_checkpoint_e
             .map(|index| {
                 let mut choice = template.choices[0].clone();
                 choice.content = format!("stock-{index}");
-                choice.quantity = u64::MAX;
+                choice.quantity = QuantityExpr::Fixed { quantity: u64::MAX };
                 choice
             })
             .collect();
@@ -734,7 +742,7 @@ fn invalid_runtime_birth_item_keeps_its_typed_error_and_discards_the_actor() {
                 Some(crate::content_ids::SupplyId::new("missing").unwrap());
             GameError::Rule(crate::abilities::RuleError::InvalidDefinition)
         } else {
-            pool.choices[0].quantity = 0;
+            pool.choices[0].quantity = QuantityExpr::Fixed { quantity: 0 };
             GameError::InvalidQuantity
         };
         let before = game.clone();

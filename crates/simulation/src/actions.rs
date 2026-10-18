@@ -704,7 +704,7 @@ impl Game {
             .get_mut(&id)
             .ok_or(GameError::UnknownActor)?
             .ready_at = ready_at;
-        if !matches!(kind, OutcomeKind::Escaped { .. }) {
+        if !matches!(kind, OutcomeKind::Escaped { .. }) && !self.region_transition_pending() {
             self.resolve_preparations()?;
             self.check_run_policy()?;
             self.advance_to_next_decision()?;
@@ -722,7 +722,7 @@ impl Game {
     /// Advance through timer changes, physics and attacks until an actor decides.
     pub(crate) fn advance_to_next_decision(&mut self) -> Result<(), GameError> {
         loop {
-            if self.population_entry_pending() {
+            if self.region_transition_pending() {
                 break;
             }
             self.reconcile_recovery_contexts()?;
@@ -739,7 +739,7 @@ impl Game {
                 .unwrap_or(self.tick);
             let previous_tick = self.tick;
             self.tick = self.advance_physics(next_tick)?;
-            if self.population_entry_pending() {
+            if self.region_transition_pending() {
                 break;
             }
             if self.tick != previous_tick {

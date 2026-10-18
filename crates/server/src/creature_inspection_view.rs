@@ -106,6 +106,25 @@ fn amount_text(value: &s::rules::AmountExpr) -> String {
 }
 fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep {
     let (id, fields) = match value {
+        s::rules::Effect::Theft { selection, relocation } => {
+            let (selection, amount) = match selection {
+                s::theft::TheftSelection::MagicalUnit => ("unequipped magical unit", "1".to_owned()),
+                s::theft::TheftSelection::Currency { currency, amount } => {
+                    let currency = match currency { s::CurrencyKind::Gold => "carried gold" };
+                    let amount = match amount {
+                        s::quantity::QuantityExpr::Fixed { quantity } => quantity.to_string(),
+                        s::quantity::QuantityExpr::Uniform { minimum, maximum } => format!("{minimum}..={maximum}"),
+                        s::quantity::QuantityExpr::DepthScaledUniform { minimum, maximum_base, per_depth } => format!("{minimum}..=({maximum_base}+{per_depth}*floor depth)"),
+                    };
+                    (currency, amount)
+                }
+            };
+            ("theft", vec![
+                text("selection", selection),
+                text("amount", amount),
+                text("relocation", relocation.as_ref().map_or_else(|| "None".into(), |gate| format!("Same floor after actual transfer; requires {}", gate.flag))),
+            ])
+        }
         s::rules::Effect::ApplyLinkedHold { policy } => (
             "apply_linked_hold",
             vec![

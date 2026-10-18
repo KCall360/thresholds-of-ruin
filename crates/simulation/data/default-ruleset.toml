@@ -1,5 +1,5 @@
 # Canonical rules content; initial starter values remain provisional until paired evaluation.
-id = "interactions-v40"
+id = "interactions-v41"
 
 constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_point_grants = [{ pool = "advancement", points = 1 }], duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee", "bind_wounds"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
 
@@ -916,4 +916,60 @@ modifiers = []
 [[flags]]
 id = "clutch"
 name = "Clutch sustaining capability"
+modifiers = []
+
+# Trickster capabilities are shared source-owned purchases. Amounts resolve from
+# the current generated floor at preparation; nongenerated authors must override
+# Filch Gold with an explicit fixed or uniform amount.
+[[abilities]]
+interaction = "hostile_to_target"
+id = "filch_gold"
+name = "Filch Gold"
+tags = ["attack"]
+basic_attack = false
+invocation = "actor_target"
+timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }
+reach = { kind = "melee" }
+strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "cognitive" }, effects = [{ kind = "theft", selection = { kind = "currency", currency = "gold", amount = { kind = "depth_scaled_uniform", minimum = 2, maximum_base = 51, per_depth = 10 } }, relocation = { flag = "theft_vanish", policy = "same_floor" } }], descriptors = [] }] }
+ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
+
+[[abilities]]
+interaction = "hostile_to_target"
+id = "filch_charm"
+name = "Filch Charm"
+tags = ["attack"]
+basic_attack = false
+invocation = "actor_target"
+timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }
+reach = { kind = "melee" }
+strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "cognitive" }, effects = [{ kind = "theft", selection = { kind = "magical_unit" }, relocation = { flag = "theft_vanish", policy = "same_floor" } }], descriptors = [] }] }
+ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
+
+[[talents]]
+id = "filch_gold"
+name = "Filch Gold"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "type_in", types = ["fey"] }] }
+form_choices = []
+modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "filch_gold" } }]
+
+[[talents]]
+id = "filch_charm"
+name = "Filch Charm"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "type_in", types = ["fey"] }] }
+form_choices = []
+modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "filch_charm" } }]
+
+[[talents]]
+id = "vanish"
+name = "Vanish"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 2 }, { kind = "type_in", types = ["fey"] }, { kind = "any", requirements = [{ kind = "owned_talent", talent = "filch_gold" }, { kind = "owned_talent", talent = "filch_charm" }] }] }
+form_choices = []
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "theft_vanish" } }]
+
+[[flags]]
+id = "theft_vanish"
+name = "Vanish after theft"
 modifiers = []

@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 45;
+pub(crate) const ARCHIVE_VERSION: u32 = 46;
 #[path = "action_resolution.rs"]
 mod action_resolution;
 #[path = "advancement_query.rs"]
@@ -1729,11 +1729,11 @@ impl Candidate {
         regions: Option<&mut crate::regions::Regions>,
         profile: Option<&mut CommandProfile>,
     ) -> Result<(), Failure> {
-        if !self.game.population_entry_pending() {
+        if !self.game.region_transition_pending() {
             return Ok(());
         }
         self.transition_with_observations(regions, BTreeSet::new(), profile, false)?;
-        if self.game.population_entry_pending() {
+        if self.game.region_transition_pending() {
             return Err(invalid_archive());
         }
         Ok(())
@@ -3605,7 +3605,7 @@ impl Engine {
         action_resolution: ActionResolution,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
-        if candidate.game.population_entry_pending() {
+        if candidate.game.region_transition_pending() {
             return Err(invalid_archive());
         }
         candidate
@@ -4917,7 +4917,7 @@ mod earned_growth_identity_tests {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
         assert_eq!(engine.archive.version, 45);
-        assert_eq!(engine.archive.ruleset, "interactions-v40");
+        assert_eq!(engine.archive.ruleset, "interactions-v41");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {
