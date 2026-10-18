@@ -46,9 +46,11 @@ class MaterialProcesses(ProcessTestCase):
         observer, _ = self.client(SPECTATOR_TOKEN)
         capture = self.save.parent / "door-rim.ppm"
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", capture])
-        self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
+        initial = self.ascii_frame(window, lambda f: f["state"] is not None
+                                   and not f["busy"] and f["can_admit_intention"])
+        self.assertTrue(initial["can_admit_intention"])
         for _ in range(3):
-            native = self.key(window, "right")
+            native = self.key(window, "right", wait_for_admission=True)
         for name, floor_x, wall_x in [("west", 2, 1), ("on-door", 1, 0), ("east", 0, -1)]:
             cells = {(c["position"]["x"], c["position"]["y"]): c
                      for c in native["state"]["observation"]["visible_cells"]
@@ -63,12 +65,12 @@ class MaterialProcesses(ProcessTestCase):
             if os.environ.get("TOR_RIM_CAPTURE_DIR"):
                 (Path(os.environ["TOR_RIM_CAPTURE_DIR"]) / ("rim-" + name + ".ppm")).write_bytes(read_capture(capture))
             if name != "east":
-                native = self.key(window, "right")
-        self.key(window, "close_door")
-        closed = self.key(window, "left")
+                native = self.key(window, "right", wait_for_admission=True)
+        self.key(window, "close_door", wait_for_admission=True)
+        closed = self.key(window, "left", wait_for_admission=True)
         self.assertNotIn("copper token", json.dumps(closed["state"]["observation"]["ground_items"]))
-        self.key(window, "open_door")
-        opened = self.key(window, "left")
+        self.key(window, "open_door", wait_for_admission=True)
+        opened = self.key(window, "left", wait_for_admission=True)
         self.assertIn("copper token", json.dumps(opened["state"]["observation"]["ground_items"]))
         self.key(window, "escape")
         self.assertEqual(window.child.wait(timeout=10), 0)

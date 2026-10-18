@@ -351,6 +351,7 @@ mod tests {
         let mut observation = tor_client_common::test_support::observation();
         observation.visible_cells = (0..remembered_cells)
             .map(|x| CellView {
+                lit: true,
                 key: format!("disclosed-{x}"),
                 position: Position { x, y: 0, z: 0 },
                 wall: false,

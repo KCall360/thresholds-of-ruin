@@ -28,6 +28,28 @@ class AsciiInputCompletion(unittest.TestCase):
         self.assertTrue(complete(dict(input_done="resume_intention", busy=False,
                                       intentions=[dict(phase="queued")])))
 
+    def test_sequential_input_waits_for_ordered_action_permission(self):
+        complete = ascii_input_completion("right", wait_for_admission=True)
+        # The CI doorway trace published completed movement and ready=True
+        # before its separate permission update. A second move then refused.
+        executed = dict(input_done="right", busy=False, intentions=[],
+                        can_admit_intention=False,
+                        state=dict(observation=dict(ready=True)))
+        self.assertFalse(complete(executed))
+        self.assertFalse(complete({**executed, "input_done": None}))
+        self.assertTrue(complete({**executed, "input_done": None,
+                                  "can_admit_intention": True}))
+
+    def test_admission_wait_requires_published_permission_and_input_acknowledgement(self):
+        complete = ascii_input_completion("right", wait_for_admission=True)
+        self.assertFalse(complete(dict(input_done=None, busy=False, intentions=[],
+                                       can_admit_intention=True)))
+        self.assertFalse(complete(dict(input_done="right", busy=False, intentions=[])))
+        self.assertFalse(complete(dict(input_done=None, busy=True, intentions=[],
+                                       can_admit_intention=True)))
+        self.assertTrue(complete(dict(input_done=None, busy=False, intentions=[],
+                                      can_admit_intention=True)))
+
 
 if __name__ == "__main__":
     unittest.main()

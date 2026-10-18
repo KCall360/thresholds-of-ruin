@@ -6,7 +6,7 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **46**, save format **43**, scenario format **17**, ruleset
+**Current formats:** protocol **47**, save format **44**, scenario format **17**, ruleset
 **`interactions-v39`**, scenario validator **`tor-scenario-29`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
@@ -19,7 +19,8 @@ formats remain unchanged. Current payloads require explicit nullable rider
 conditions, bounded sequence-hit/attempt progress, actor nutrition, condition
 semantics, exact periodic-regeneration nutrition rates/fractions and personal
 status alongside invocation and reply-context shapes, source-owned form choices,
-fall provenance and durable floor-activation records. Prior payload identities remain rejection-only.
+fall provenance, durable floor-activation records, explicit cell illumination and
+shared creature/corpse appearance. Prior payload identities remain rejection-only.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
 saved game. Returning to an explored neighborhood or opening a fresh client
@@ -374,8 +375,10 @@ and [authored idle policy](reference/scenario-packages.md#behavior-defaults-and-
 - Rogue actor/player/item appearances use existing asset fields and structural
   palette forecasts. Text and ASCII share a minimal keyed English vocabulary;
   ASCII map/look/inventory redraw on palette changes and recover safely.
-  Scenario overrides (including Rogue letters), trait variation, appearance
-  seeds, player choices and 3D rendering remain deferred. See the
+  Shared creature seeds and captured corpse appearance support the optional,
+  independently maintained [3D prototype](../crates/client-3d/README.md).
+  Scenario overrides (including Rogue letters), general trait specifications
+  and server-stored player choices remain deferred. See the
   [presentation plan](plans/presentation.md).
 - Saves can still require matching compiled bundles for unvisited authored inputs.
   Portable saved-game export/import and historical migration are not implemented.
@@ -454,7 +457,7 @@ Do not equate available framework types with all content being playable.
 - Reconcile suspend/resume file handling, portable export, stronger recovery,
   larger retained history, packaging and client launch workflows.
 - Treat remote authentication/encrypted deployment, multiplayer input policy and
-  an immersive 3D client as separate later milestones.
+  expansion of the 3D prototype beyond its accepted scope as separate later milestones.
 
 Planning approval does not authorize starting an implementation milestone or
 choosing a compatibility-breaking format. Follow [development practices](../CONTRIBUTING.md)

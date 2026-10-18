@@ -48,15 +48,15 @@
     }
   },
   "owner_blobs": {
-    "scripts/rogue_earned_route_process.py": "724fa797f15d8167243e27fc0b46472d8c804eef",
+    "scripts/rogue_earned_route_process.py": "05bb284c13d78fc17e324a78129689070e4ba02a",
     "scripts/test_rogue_earned_route_process.py": "cd0c9b94c6b3348d697ac2f76eb7b33f37796022",
     "scripts/test_rogue_route_budget_process.py": "dc67eeac33657a0e3384ea035b27415801b7853e",
     "scripts/process_work_budget.py": "d53bdeb14499ab68913882f76e79095173f925af",
     "scripts/arena_evaluation.py": "56c5e931afae031c4f9d9be4f229e6905bc3e2a5",
-    "scripts/process_harness.py": "2ec93588249e7b3393c7beea9bb10ebb4aeedd72",
+    "scripts/process_harness.py": "4c5e3f7f639ee96918ab70902e69c6313625ec94",
     "scripts/service_contract_ci.py": "d8fbe7f5e801e20bd41f3cf41a931353e75ab5f9",
     "scripts/service_contract_host.py": "709a15985f76e24773131c7852084e893bcc1feb",
-    "scripts/service_contract_tests.py": "8160576a0a637b21786649f8588850aa8528a9ee",
+    "scripts/service_contract_tests.py": "1f393315def12dafd763afa363e9a00cb5e66830",
     "crates/server/test_support/packages.rs": "855cace6f63151c82871130298b33f1d58f90ea4",
     "crates/simulation/tests/it/creature_state.rs": "f4c6b3b82e224809c4023a27b88642247c49dc70",
     "crates/server/src/storage.rs": "1563b8f092770401d1ede94cb17369470ae992dd",
@@ -67,7 +67,7 @@
   "import_blobs": {
     "scripts/arena_matrix.py": "a482095461c0aa83de08bc906b4218a13ef9db18",
     "scripts/ruleset_sources.py": "a092039ce09b15e0cc398a2bb6b31921f217d4db",
-    "scripts/process_harness.py": "2ec93588249e7b3393c7beea9bb10ebb4aeedd72",
+    "scripts/process_harness.py": "4c5e3f7f639ee96918ab70902e69c6313625ec94",
     "scripts/arena_evaluation.py": "56c5e931afae031c4f9d9be4f229e6905bc3e2a5",
     "scripts/scalar_wire.py": "0238e7122f7c7a90f46c923d89ecc464f835e69f",
     "scripts/process_rule_fixtures.py": "4e8534a0f337ae28ccaa1d3956d12805c423b183",

@@ -353,7 +353,7 @@ fn state() -> StateView {
         "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
-            "wall":false,"material":"stone","place_hint":x==1 || x==6,
+            "wall":false,"material":"stone","lit":true,"place_hint":x==1 || x==6,
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
@@ -383,6 +383,7 @@ fn east(mut s: StateView, steps: i32) -> StateView {
 
 fn figure(id: u64, name: &str, x: i32) -> ActorView {
     ActorView {
+        appearance_seed: None,
         name: name.into(),
         description: String::new(),
         id: super::actor_target(id),
@@ -619,6 +620,7 @@ async fn ability_goals_submit_once_from_the_current_position_and_tell_preparatio
             technique,
         ]));
         initial.observation.visible_actors.push(ActorView {
+            appearance_seed: None,
             asset: None,
             id: target,
             name: "goblin".into(),

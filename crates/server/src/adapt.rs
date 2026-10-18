@@ -403,6 +403,7 @@ pub fn observation(
         };
         let [floor, wall, door_asset] = terrain(cell.location.region);
         visible_cells.push(p::CellView {
+            lit: visible.lit,
             asset: if cell.wall { wall } else { floor },
             door: visible.door.map(|door| p::DoorView {
                 id: targets.door(door.id),
@@ -438,6 +439,10 @@ pub fn observation(
         {
             ground_items.push(p::GroundItemView {
                 item: p::ItemView {
+                    corpse: item.corpse.as_ref().map(|source| p::CreatureAppearance {
+                        seed: targets.appearance_seed(source.actor),
+                        asset: source.asset.clone(),
+                    }),
                     class: item_class(item.class),
                     quantity: item.quantity,
                     appearance: item.appearance.clone(),
@@ -463,6 +468,7 @@ pub fn observation(
         {
             visible_actors.push(p::ActorView {
                 name: actor.name.clone(),
+                appearance_seed: Some(targets.appearance_seed(actor.id)),
                 description: String::new(),
                 id: targets.actor(actor.id),
                 position: offset(cell.offset),
@@ -472,6 +478,7 @@ pub fn observation(
         if cell.location == view.location && cell.offset != (w::Position { x: 0, y: 0, z: 0 }) {
             visible_actors.push(p::ActorView {
                 name: String::new(),
+                appearance_seed: Some(targets.appearance_seed(view.actor)),
                 description: String::new(),
                 id: targets.actor(view.actor),
                 position: offset(cell.offset),
@@ -480,6 +487,10 @@ pub fn observation(
         }
     }
     p::Observation {
+        self_appearance: Some(p::CreatureAppearance {
+            seed: targets.appearance_seed(view.actor),
+            asset: view.asset.clone(),
+        }),
         interactions: view.interactions.map(|interaction| p::InteractionView {
             completed: interaction
                 .completed
@@ -590,6 +601,10 @@ pub fn observation(
             .inventory
             .into_iter()
             .map(|item| p::ItemView {
+                corpse: item.corpse.as_ref().map(|source| p::CreatureAppearance {
+                    seed: targets.appearance_seed(source.actor),
+                    asset: source.asset.clone(),
+                }),
                 class: item_class(item.class),
                 quantity: item.quantity,
                 appearance: item.appearance.clone(),

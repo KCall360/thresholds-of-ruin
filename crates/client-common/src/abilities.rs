@@ -497,6 +497,7 @@ mod supply_tests {
             supply_reachable: true,
             position: Position { x: 1, y: 0, z: 0 },
             item: ItemView {
+                corpse: None,
                 id: ItemTarget::from_digest([3; 32]),
                 name: "clean bandage".into(),
                 description: String::new(),

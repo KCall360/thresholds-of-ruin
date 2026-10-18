@@ -90,16 +90,29 @@ fn seen(engine: &Engine) -> tor_protocol::Observation {
     let scope = engine.target_scope(ActorId(1));
     let canonical =
         tor_server::wire_adapter::TargetScope::new(uuid::Uuid::nil(), tor_simulation::ActorId(1));
-    let actor = |reference| {
-        let identity = [tor_simulation::ActorId(1), tor_simulation::ActorId(2)]
+    let identity = |reference| {
+        [tor_simulation::ActorId(1), tor_simulation::ActorId(2)]
             .into_iter()
             .find(|id| scope.actor(*id) == reference)
-            .expect("a corridor disclosure must identify an authored actor in this scope");
-        canonical.actor(identity)
+            .expect("a corridor disclosure must identify an authored actor in this scope")
     };
+    let actor = |reference| canonical.actor(identity(reference));
+    let own_identity = identity(observation.self_target);
+    let appearance = observation
+        .self_appearance
+        .as_mut()
+        .expect("the character has an appearance");
+    assert_eq!(appearance.seed, scope.appearance_seed(own_identity));
+    appearance.seed = canonical.appearance_seed(own_identity);
     observation.self_target = actor(observation.self_target);
     for figure in &mut observation.visible_actors {
-        figure.id = actor(figure.id);
+        let identity = identity(figure.id);
+        assert_eq!(
+            figure.appearance_seed,
+            Some(scope.appearance_seed(identity))
+        );
+        figure.appearance_seed = Some(canonical.appearance_seed(identity));
+        figure.id = canonical.actor(identity);
     }
     if let Some(combat) = &mut observation.combat {
         for figure in &mut combat.actors {

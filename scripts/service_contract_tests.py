@@ -444,7 +444,7 @@ class CatalogServiceContracts(unittest.TestCase):
     def test_shared_wire_decoder_rejects_malformed_request_before_service(self):
         connection, _ = self.connect()
         before = self.host.call("audit", case=self.case, actor=1, user="wizard")
-        for message in ('not json', '{"type":"hello","protocol":45,"token":"x","frontend":"test"}',
+        for message in ('not json', '{"type":"hello","protocol":47,"token":"x","frontend":"test"}',
                         json.dumps({"type": "request", "request_id": "attach",
                             "request": {"type": "attach", "actor": 1}})):
             with self.subTest(message=message):

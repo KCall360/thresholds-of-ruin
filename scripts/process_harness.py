@@ -220,9 +220,12 @@ def settle_rogue_action(test, player, current, *, survive=True):
             return (not combat["preparation_active"] and len(pending) == 1
                     and pending[0]["phase"] == "paused"
                     and pending[0]["intention"] in frame["readiness"]["resume"])
-        # Observation, lifecycle and permission have distinct publication
-        # boundaries. Ready selects the actor; it does not finish preparation.
+        # Resolution can precede the final permission delta. Old cancel/resume
+        # targets still carry the previous input context, even with admission.
+        # Wait for that boundary before the walkthrough sends another query.
         return (view["ready"] and frame["readiness"]["admission"]
+                and not frame["readiness"]["resume"]
+                and not frame["readiness"]["cancel"]
                 and not any(row["phase"] in ("queued", "started")
                             for row in frame["intentions"]))
 
@@ -272,12 +275,15 @@ def headless_fight_completion(frame):
         and not readiness["resume"] and not readiness["cancel"])
 
 
-def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=False):
+def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=False,
+                           wait_for_admission=False):
     """Track acknowledgement, optionally through ordinary actor readiness.
 
     Most UI tests intentionally stop once a queued intention starts. Sequential
     gameplay input must also wait for that intention and recovery to settle.
     A paused intention or death remains observable instead of timing out here.
+    Sequential noncombat fixtures can additionally require the client's
+    authoritative admission permission, which may arrive after the effect.
     """
     acknowledged = False
 
@@ -286,6 +292,8 @@ def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=Fals
         acknowledged |= frame.get("input_done") == key
         phases = {status["phase"] for status in (frame.get("intentions") or [])}
         if not acknowledged or frame["busy"]:
+            return False
+        if wait_for_admission and frame.get("can_admit_intention") is not True:
             return False
         if wait_for_ready:
             observation = (frame.get("state") or {}).get("observation")
@@ -1059,11 +1067,12 @@ class ProcessTestCase(unittest.TestCase):
         """The next presented ASCII frame that satisfies `predicate`."""
         return self.frame(process, lambda f: f.get("type") == "frame" and predicate(f), seconds)
 
-    def key(self, process, key, *, wait_for_simulation=True):
+    def key(self, process, key, *, wait_for_simulation=True, wait_for_admission=False):
         """Inject an input event through the window's automation channel."""
         process.write(json.dumps({"type": "key", "key": key}))
         return self.ascii_frame(process, ascii_input_completion(
-            key, wait_for_simulation=wait_for_simulation))
+            key, wait_for_simulation=wait_for_simulation,
+            wait_for_admission=wait_for_admission))
 
     def native_press(self, process, native, name, reported, *, seconds=20,
                      wait_for_simulation=True, wait_for_ready=False):

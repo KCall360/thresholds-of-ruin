@@ -16,7 +16,7 @@ fn snapshot(revision: u64, shift: i32) -> Snapshot {
         .into_iter()
         .map(|(key, x, y)| {
             serde_json::json!({"key":key,"position":{"x":x+shift,"y":y+shift,"z":0},
-                "wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false})
+                "wall":false,"lit":true,"stairs_up":false,"stairs_down":false,"place_hint":false})
         })
         .collect::<Vec<_>>();
     serde_json::from_value(serde_json::json!({

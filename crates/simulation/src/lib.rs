@@ -92,7 +92,8 @@ mod travel;
 pub use travel::TravelStep;
 
 pub use observation::{
-    ActorView, CellView, ExitView, GroundItemView, ItemView, KnownPlace, Observation, SupplyView,
+    ActorView, CellView, CorpseAppearance, ExitView, GroundItemView, ItemView, KnownPlace,
+    Observation, SupplyView,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -382,6 +383,8 @@ enum ItemLocation {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 struct Item {
+    /// Captured at death; authored item properties cannot create this provenance.
+    corpse: Option<CorpseAppearance>,
     motion: MotionState,
     orientation: u8,
     spec: Shared<ItemSpec>,
@@ -395,6 +398,8 @@ impl<'de> serde::Deserialize<'de> for Item {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            corpse: Option<CorpseAppearance>,
             motion: MotionState,
             orientation: u8,
             spec: Shared<ItemSpec>,
@@ -405,6 +410,7 @@ impl<'de> serde::Deserialize<'de> for Item {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            corpse: fields.corpse,
             motion: fields.motion,
             orientation: fields.orientation,
             spec: fields.spec,
@@ -685,6 +691,7 @@ impl Game {
         self.items.insert(
             id,
             Item {
+                corpse: None,
                 holds: vec![],
                 motion: MotionState::default(),
                 orientation: 0,

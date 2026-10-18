@@ -20,7 +20,7 @@ fn state() -> StateView {
         "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
-            "wall":false,"material":"stone","place_hint":x==1 || x==6,
+            "wall":false,"material":"stone","lit":true,"place_hint":x==1 || x==6,
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
@@ -159,6 +159,7 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
     ]));
     let target = super::actor_target(42);
     s.observation.visible_actors.push(ActorView {
+        appearance_seed: None,
         asset: None,
         id: target,
         name: "goblin".into(),
@@ -299,6 +300,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     // Add player's own multi-cell body (ActorId(1), height 2, cells (0,0,0) and (0,0,1))
     s.observation.visible_actors.extend([
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own physical body.".into(),
@@ -306,6 +308,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
             asset: Some("creature.delver".into()),
         },
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own physical body.".into(),
@@ -316,6 +319,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     // Add 2-cell humanoid (ActorId(2), height 2, cells (3,0,0) and (3,0,1))
     s.observation.visible_actors.extend([
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(2),
             name: "scout".into(),
             description: "A nimble scout.".into(),
@@ -323,6 +327,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
             asset: Some("creature.scout".into()),
         },
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(2),
             name: "scout".into(),
             description: "A nimble scout.".into(),
@@ -333,6 +338,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     // Add 3-cell high giant (ActorId(3), height 3, cells at (5,0,0), (5,0,1), (5,0,2))
     s.observation.visible_actors.extend([
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(3),
             name: "giant".into(),
             description: "A huge giant.".into(),
@@ -340,6 +346,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
             asset: Some("creature.giant".into()),
         },
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(3),
             name: "giant".into(),
             description: "A huge giant.".into(),
@@ -347,6 +354,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
             asset: Some("creature.giant".into()),
         },
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(3),
             name: "giant".into(),
             description: "A huge giant.".into(),
@@ -357,6 +365,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     // Add 2-cell wide beast (ActorId(4), width 2, height 1, cells at (0,3,0) and (1,3,0))
     s.observation.visible_actors.extend([
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(4),
             name: "beast".into(),
             description: "A wide beast.".into(),
@@ -364,6 +373,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
             asset: Some("creature.beast".into()),
         },
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(4),
             name: "beast".into(),
             description: "A wide beast.".into(),
@@ -392,6 +402,7 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
     // Player local body cells at (0,0,0) and (0,0,1)
     s.observation.visible_actors.extend([
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own body.".into(),
@@ -399,6 +410,7 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
             asset: Some("creature.delver".into()),
         },
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own body.".into(),
@@ -409,6 +421,7 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
     // Portal self-observation cells seen at (4, 0, 0) and (4, 0, 1)
     s.observation.visible_actors.extend([
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(1),
             name: "delver".into(),
             description: "You recognize your own appearance from another angle.".into(),
@@ -416,6 +429,7 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
             asset: Some("creature.delver".into()),
         },
         ActorView {
+            appearance_seed: None,
             id: super::actor_target(1),
             name: "delver".into(),
             description: "You recognize your own appearance from another angle.".into(),
@@ -447,6 +461,7 @@ fn carrying(s: &mut StateView) {
         (13, "iron sword", "A sharp steel blade."),
     ] {
         s.observation.inventory.push(ItemView {
+            corpse: None,
             class: Default::default(),
             id: super::item_target(id),
             name: name.into(),
@@ -462,6 +477,7 @@ fn carrying(s: &mut StateView) {
 
 fn goblin(s: &mut StateView) {
     s.observation.visible_actors.push(ActorView {
+        appearance_seed: None,
         id: super::actor_target(42),
         name: "goblin sentry".into(),
         position: Position { x: 1, y: 0, z: 0 },
@@ -614,6 +630,7 @@ fn attacks_choose_figures_and_never_an_unseen_id() {
     let mut s = state();
     for id in [2, 3] {
         s.observation.visible_actors.push(ActorView {
+            appearance_seed: None,
             asset: None,
             id: super::actor_target(id),
             name: "ruin guard".into(),
@@ -645,6 +662,7 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
     let mut s = state();
     let here = s.observation.visible_cells[0].clone();
     let solid = |key: &str, position: Position, asset: &str| CellView {
+        lit: true,
         wall: true,
         key: key.into(),
         position,
@@ -671,6 +689,7 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
         ),
     ]);
     s.observation.visible_actors.push(ActorView {
+        appearance_seed: None,
         name: String::new(),
         description: String::new(),
         id: super::actor_target(2),
@@ -711,6 +730,7 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
 fn shared_asset_nouns_preserve_authored_names_and_parser_handles() {
     let mut s = state();
     s.observation.visible_actors.push(ActorView {
+        appearance_seed: None,
         name: String::new(),
         description: String::new(),
         id: super::actor_target(2),
@@ -973,7 +993,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
                     "position": {"x": x, "y": y, "z": z},
                     "wall": solid,
                     "material": "stone",
-                    "place_hint": false, "stairs_up": false, "stairs_down": false,
+                    "lit":true,"place_hint": false, "stairs_up": false, "stairs_down": false,
                     "door": (matches!(ch, '+' | '\'') && z == 0).then(|| serde_json::json!({
                         "id":super::door_target(9), "name": "oak door", "description": "",
                         "open": ch == '\'', "reachable": false, "approaches": []
@@ -1583,6 +1603,7 @@ fn an_arbitrary_disclosed_ability_needs_no_lexicon_entry() {
     ]));
     let target = super::actor_target(42);
     s.observation.visible_actors.push(ActorView {
+        appearance_seed: None,
         asset: None,
         id: target,
         name: "sentinel".into(),
@@ -1634,6 +1655,7 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
     let neutral = super::actor_target(43);
     for (id, name) in [(ally, "companion"), (neutral, "stranger")] {
         s.observation.visible_actors.push(ActorView {
+            appearance_seed: None,
             asset: None,
             id,
             name: name.into(),
@@ -1713,6 +1735,7 @@ fn phase5_using_clause_keeps_exact_ground_supply_through_both_text_modes() {
         supply_reachable: true,
         position: Position { x: 1, y: 0, z: 0 },
         item: ItemView {
+            corpse: None,
             id: item,
             name: "clean bandage".into(),
             description: String::new(),

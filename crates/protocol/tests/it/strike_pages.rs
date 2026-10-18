@@ -619,12 +619,14 @@ fn ordered_strikes_legitimate_large_snapshot_keeps_its_independent_32_mib_assemb
         wizard_game: false,
         revision: 1,
         observation: Observation {
+            self_appearance: None,
             actor: ActorId(1),
             self_target: ActorTarget::from_digest([1; 32]),
             tick: 1,
             position: Position { x: 0, y: 0, z: 0 },
             ready: true,
             visible_cells: vec![CellView {
+                lit: true,
                 asset: None,
                 door: None,
                 material: "stone".into(),

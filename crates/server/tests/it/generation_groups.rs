@@ -99,6 +99,15 @@ fn group_publication_and_saved_rows_are_independent_of_preparation_scheduling() 
         );
         assert_eq!(seen.self_target, scope.actor(tor_simulation::ActorId(1)));
         seen.self_target = canonical.actor(tor_simulation::ActorId(1));
+        let appearance = seen
+            .self_appearance
+            .as_mut()
+            .expect("the character has an appearance");
+        assert_eq!(
+            appearance.seed,
+            scope.appearance_seed(tor_simulation::ActorId(1))
+        );
+        appearance.seed = canonical.appearance_seed(tor_simulation::ActorId(1));
         assert!(seen.visible_actors.is_empty());
         assert!(seen.ground_items.is_empty());
         assert!(seen.inventory.is_empty());

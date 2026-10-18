@@ -419,7 +419,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
 
     def test_generated_comments_preserve_real_client_content_and_pinned_restart(self):
         observations, hashes, cell_keys = [], [], []
-        self_targets = []
+        self_targets, appearance_seeds = [], []
         for name, comment in [("original", ""), ("annotated", "# Author notes do not reroll content.\n")]:
             package = self.directory / name
             shutil.copytree(ROOT / "scenarios/tests/generated-filler", package)
@@ -439,6 +439,9 @@ class ScenarioPackageProcesses(ProcessTestCase):
             player, initial = self.client()
             observation = initial["state"]["observation"]
             self_targets.append(observation["self_target"])
+            appearance_seed = observation["self_appearance"]["seed"]
+            self.assertRegex(appearance_seed, r"^p_[0-9a-f]{64}$")
+            appearance_seeds.append(appearance_seed)
             cell_keys.append([cell["key"] for cell in observation["visible_cells"]])
             # Fresh saves have independent privacy salts; compare generated
             # content across them, but retain exact token equality on restart.
@@ -454,7 +457,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
                     return {key: normalize(child) for key, child in value.items()}
                 if isinstance(value, list):
                     return [normalize(child) for child in value]
-                if isinstance(value, str) and re.fullmatch(r"[aid]_[0-9a-f]{64}", value):
+                if isinstance(value, str) and re.fullmatch(r"[aidp]_[0-9a-f]{64}", value):
                     return targets.setdefault(value, f"{value[:2]}reference-{len(targets)}")
                 return value
 
@@ -471,6 +474,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         self.assertNotEqual(*hashes)
         self.assertNotEqual(*cell_keys)
         self.assertNotEqual(*self_targets)
+        self.assertNotEqual(*appearance_seeds)
         self.assertEqual(*observations)
 
     def test_validator_reports_construction_references_without_rewriting_package(self):

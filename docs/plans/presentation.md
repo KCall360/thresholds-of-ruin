@@ -228,7 +228,7 @@ missing-asset requests cover recovery.
 Each individual's varied traits are picked from its asset's variation spec by
 an appearance seed. Actor targets are observer-scoped, so they can't seed a
 look shared between clients; the server discloses a separate opaque appearance
-seed, derived from the actor's stable record identity and a package salt. The
+seed, derived from the actor's stable record identity and a saved archive salt. The
 seed:
 
 - is the same for every observer, session and reload;
@@ -236,6 +236,12 @@ seed:
 - reveals nothing new: it is attached only to disclosed things;
 - for a concealed item, comes from the appearance pool, never from the true
   item, so look-alikes stay alike.
+
+Creature seeds and captured corpse inheritance are implemented in the current
+protocol. The independent 3D client uses them for its procedural recipes,
+including the observer's own body. General variation specifications and
+server-stored player trait choices remain future work; the 3D bestiary's
+appearance selector is an offline preview control.
 
 ### Pre-building from the palette
 

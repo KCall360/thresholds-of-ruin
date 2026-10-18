@@ -1011,6 +1011,10 @@ impl Game {
         actor.equipment.clear();
         actor.motion.active_fall = None;
         let body = Item {
+            corpse: Some(crate::CorpseAppearance {
+                actor: outcome.id,
+                asset: actor.asset.clone(),
+            }),
             holds: vec![],
             spec: tor_world::Shared::new(spec),
             quantity: 1,
@@ -1639,6 +1643,42 @@ mod growth_tests {
             target_rider_participated: false,
             effects: vec![ResolvedEffect::Damage { amount: 1_000_000 }],
         }
+    }
+    #[test]
+    fn corpse_captures_appearance_before_the_actor_can_change() {
+        let mut game = game();
+        game.actors.get_mut(&ActorId(2)).unwrap().asset =
+            Some("creature.humanoid.sentinel.red".into());
+        game.apply(fatal(ActorId(1), ActorId(2))).unwrap();
+        game.actors.get_mut(&ActorId(2)).unwrap().asset =
+            Some("creature.humanoid.sentinel.blue".into());
+        let (corpse_id, corpse) = game
+            .items
+            .iter()
+            .find(|(_, item)| item.spec.class == crate::ItemClass::Corpse)
+            .map(|(id, item)| (*id, item))
+            .unwrap();
+        let value = serde_json::to_value(corpse).unwrap();
+        assert_eq!(value["corpse"], serde_json::json!({
+            "actor": 2, "asset": "creature.humanoid.sentinel.red"
+        }), "a corpse needs its captured source identity and appearance, independent of its name or the current actor record");
+        game.apply_transfer(corpse_id, corpse_id, 1, ItemLocation::Carried(ActorId(1)))
+            .unwrap();
+        let inventory = game.observe(ActorId(1)).unwrap().inventory;
+        let carried = inventory.iter().find(|item| item.id == corpse_id).unwrap();
+        assert_eq!(carried.corpse.as_ref().unwrap().actor, ActorId(2));
+        assert_eq!(
+            carried.corpse.as_ref().unwrap().asset.as_deref(),
+            Some("creature.humanoid.sentinel.red")
+        );
+        let mut shared = crate::checkpoint::SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        let shared = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
+        let restored = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
+        assert_eq!(
+            restored, game,
+            "captured appearance survives current checkpoint encoding and restoration"
+        );
     }
     fn growth_obstruction(build: &crate::creatures::CreatureBuild) -> Vec<crate::rules::Modifier> {
         let recovery = &build.ruleset().document().health_recovery;

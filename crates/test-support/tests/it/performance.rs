@@ -8,8 +8,8 @@ fn view() -> StateView {
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1;32]),
             "tick":"5","position":{"x":0,"y":0,"z":0},"places":[],
             "visible_cells":[
-                {"key":"origin","position":{"x":0,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false},
-                {"key":"east","position":{"x":1,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false}
+                {"key":"origin","position":{"x":0,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false},
+                {"key":"east","position":{"x":1,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false}
             ],"ground_items":[],"inventory":[],"visible_actors":[],"ready":true
         }
     })).unwrap()

@@ -26,7 +26,7 @@ fn sample_state() -> StateView {
                     "position": {"x": 0, "y": 0, "z": 0},
                     "wall": false,
                     "material": "stone",
-                    "place_hint": true,
+                    "lit":true,"place_hint": true,
                     "stairs_up": false,
                     "stairs_down": false,
                     "door": null
@@ -36,7 +36,7 @@ fn sample_state() -> StateView {
                     "position": {"x": 1, "y": 0, "z": 0},
                     "wall": false,
                     "material": "stone",
-                    "place_hint": false,
+                    "lit":true,"place_hint": false,
                     "stairs_up": false,
                     "stairs_down": false,
                     "door": {
@@ -53,7 +53,7 @@ fn sample_state() -> StateView {
                     "position": {"x": 2, "y": 0, "z": 0},
                     "wall": false,
                     "material": "stone",
-                    "place_hint": false,
+                    "lit":true,"place_hint": false,
                     "stairs_up": false,
                     "stairs_down": false,
                     "door": {

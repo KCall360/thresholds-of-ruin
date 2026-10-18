@@ -747,6 +747,7 @@ impl App {
                     targets.insert(
                         0,
                         ActorView {
+                            appearance_seed: None,
                             asset: None,
                             id: view.self_target,
                             name: "yourself".into(),

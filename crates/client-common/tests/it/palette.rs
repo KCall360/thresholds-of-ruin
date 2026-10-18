@@ -18,7 +18,7 @@ fn observation(revision: u64, assets: &[&str]) -> StateView {
         .enumerate()
         .map(|(x, asset)| {
             serde_json::json!({"key":format!("cell-{x}"),"stairs_up":false,"stairs_down":false,
-                "position":{"x":x,"y":0,"z":0},"wall":false,"place_hint":false,"asset":asset})
+                "position":{"x":x,"y":0,"z":0},"wall":false,"lit":true,"place_hint":false,"asset":asset})
         })
         .collect();
     serde_json::from_value(serde_json::json!({

@@ -33,6 +33,8 @@ pub struct CollectionEdit<T> {
 /// A state view expressed as cell changes and exact ordered collection edits.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateDelta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_appearance: Option<CreatureAppearance>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactions: Option<InteractionView>,
     /// Revision of the state this delta applies to.
@@ -154,6 +156,7 @@ impl StateDelta {
                     let (was, is) = (&old[i], &new[j]);
                     // Exhaustive so that a new cell field cannot be missed.
                     let CellView {
+                        lit,
                         door,
                         material,
                         key,
@@ -164,7 +167,8 @@ impl StateDelta {
                         place_hint,
                         asset,
                     } = was;
-                    if *key != is.key
+                    if *lit != is.lit
+                        || *key != is.key
                         || *asset != is.asset
                         || *door != is.door
                         || *material != is.material
@@ -195,6 +199,7 @@ impl StateDelta {
         // Shifting preserves order, so the merge above saw both lists sorted.
         let observation = &next.observation;
         Some(Self {
+            self_appearance: observation.self_appearance.clone(),
             interactions: observation.interactions.clone(),
             base_revision: base.revision,
             wizard_game: next.wizard_game,
@@ -290,6 +295,7 @@ impl StateDelta {
             wizard_game: self.wizard_game,
             revision: self.revision,
             observation: Observation {
+                self_appearance: self.self_appearance,
                 interactions: self.interactions,
                 combat: self.combat,
                 motion: self.motion,

@@ -2,7 +2,7 @@
 //! It never consults live world state, so receipts survive target removal.
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
-use tor_protocol::{ActorTarget, DoorTarget, ItemTarget};
+use tor_protocol::{ActorTarget, AppearanceSeed, DoorTarget, ItemTarget};
 use tor_simulation::{ActorId, ItemId};
 use uuid::Uuid;
 
@@ -11,6 +11,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct TargetScope {
     prefix: Hmac<Sha256>,
+    appearance: Hmac<Sha256>,
     observer: ActorId,
 }
 
@@ -21,7 +22,14 @@ impl TargetScope {
             .expect("HMAC accepts the fixed UUID key size");
         prefix.update(b"tor-interaction-target-v1\0");
         prefix.update(&observer.0.to_le_bytes());
-        Self { prefix, observer }
+        let mut appearance = Hmac::<Sha256>::new_from_slice(salt.as_bytes())
+            .expect("HMAC accepts the fixed UUID key size");
+        appearance.update(b"tor-appearance-seed-v1\0");
+        Self {
+            prefix,
+            appearance,
+            observer,
+        }
     }
 
     pub fn observer(&self) -> ActorId {
@@ -39,6 +47,14 @@ impl TargetScope {
         ActorTarget::from_digest(self.digest(b'a', identity.0))
     }
 
+    /// Cosmetic identity is shared across observers and survives reload. It is
+    /// domain-separated from interaction tokens and never uses simulation RNG.
+    pub fn appearance_seed(&self, identity: ActorId) -> AppearanceSeed {
+        let mut mac = self.appearance.clone();
+        mac.update(&identity.0.to_le_bytes());
+        AppearanceSeed::from_digest(mac.finalize().into_bytes().into())
+    }
+
     pub fn item(&self, identity: ItemId) -> ItemTarget {
         ItemTarget::from_digest(self.digest(b'i', identity.0))
     }
@@ -53,6 +69,40 @@ mod tests {
     use super::*;
     // Independent Python stdlib hmac/SHA-256 calculation of the declared byte layout.
     const VECTOR: &str = "a_7a23df737ca869f84c95d05f4f08f2bbc00d21675a207b468be8d127ebf821f8";
+
+    #[test]
+    fn appearance_is_shared_between_observers_but_private_to_each_save() {
+        let salt = Uuid::from_u128(1);
+        let owner = TargetScope::new(salt, ActorId(7));
+        let spectator = TargetScope::new(salt, ActorId(8));
+        let source = ActorId(11);
+        // Independent Python stdlib hmac/SHA-256 vector pins the byte layout.
+        assert_eq!(
+            owner.appearance_seed(source).to_string(),
+            "p_5b7a5f1f47c64d8e807cf83fb683a47f9d28b3b981d422132b89b73af9ee156a"
+        );
+        assert_ne!(owner.actor(source), spectator.actor(source));
+        assert_eq!(
+            owner.appearance_seed(source),
+            spectator.appearance_seed(source)
+        );
+        assert_ne!(
+            owner.appearance_seed(source),
+            owner.appearance_seed(ActorId(12))
+        );
+        assert_ne!(
+            owner.appearance_seed(source),
+            TargetScope::new(Uuid::from_u128(2), ActorId(7)).appearance_seed(source)
+        );
+        assert_ne!(
+            &owner.actor(source).to_string()[2..],
+            &owner.appearance_seed(source).to_string()[2..]
+        );
+        assert_eq!(
+            owner.appearance_seed(source),
+            TargetScope::new(salt, ActorId(7)).appearance_seed(source)
+        );
+    }
 
     #[test]
     fn saved_scope_reconstructs_identity_without_a_live_target_or_rng() {

@@ -1,6 +1,26 @@
 use std::sync::Arc;
 use tor_protocol::*;
 
+#[test]
+fn illumination_is_required_and_changes_without_changing_visibility() {
+    let base = room(5, 5, 1);
+    let mut next = base.clone();
+    next.revision += 1;
+    next.observation.visible_cells[0].lit = false;
+    let delta = round_trip(&base, &next);
+    assert_eq!(
+        delta.cells.changed,
+        vec![next.observation.visible_cells[0].clone()]
+    );
+    assert!(delta.cells.removed.is_empty());
+    let mut wire = serde_json::to_value(&next.observation.visible_cells[0]).unwrap();
+    assert_eq!(wire["lit"], false);
+    wire.as_object_mut().unwrap().remove("lit");
+    assert!(serde_json::from_value::<CellView>(wire.clone()).is_err());
+    wire["lit"] = serde_json::json!("false");
+    assert!(serde_json::from_value::<CellView>(wire).is_err());
+}
+
 fn equipment_slot(id: &str, requires_attack: bool) -> EquipmentSlot {
     EquipmentSlot {
         id: id.into(),
@@ -10,11 +30,48 @@ fn equipment_slot(id: &str, requires_attack: bool) -> EquipmentSlot {
     }
 }
 
+#[test]
+fn appearance_and_corpse_disclosures_survive_full_and_delta_round_trips() {
+    let base = room(5, 5, 1);
+    let mut next = base.clone();
+    next.revision += 1;
+    let appearance = CreatureAppearance {
+        seed: AppearanceSeed::from_digest([19; 32]),
+        asset: Some("creature.equine".into()),
+    };
+    next.observation.self_appearance = Some(appearance.clone());
+    next.observation.inventory.push(ItemView {
+        corpse: Some(appearance),
+        class: ItemClass::Corpse,
+        quantity: 1,
+        id: ItemTarget::from_digest([20; 32]),
+        name: "unrelated label".into(),
+        appearance: "body".into(),
+        identified: true,
+        description: String::new(),
+        asset: Some("item.corpse".into()),
+        known_supply: None,
+    });
+    round_trip(&base, &next);
+    let encoded = serde_json::to_value(&next).unwrap();
+    assert_eq!(serde_json::from_value::<StateView>(encoded).unwrap(), next);
+    let good = next.observation.inventory.last().unwrap().clone();
+    for (class, identified) in [(ItemClass::Weapon, true), (ItemClass::Corpse, false)] {
+        let mut bad = good.clone();
+        bad.class = class;
+        bad.identified = identified;
+        assert!(serde_json::from_value::<ItemView>(serde_json::to_value(&bad).unwrap()).is_err());
+        next.observation.inventory[0] = bad;
+        assert_eq!(next.validate(), Err(InvalidState::InvalidItem));
+    }
+}
+
 fn equipped_state(requires_attack: bool) -> StateView {
     let mut state = room(5, 5, 1);
     let slot = equipment_slot("fixture_wing", requires_attack);
     let item = ItemTarget::from_digest(synthetic_digest(3));
     state.observation.inventory = vec![ItemView {
+        corpse: None,
         id: item,
         name: "Wing fitting".into(),
         appearance: "a brass fitting".into(),
@@ -53,6 +110,7 @@ fn synthetic_digest(index: u64) -> [u8; 32] {
 
 fn cell(x: i32, y: i32, z: i32, key: &str) -> CellView {
     CellView {
+        lit: true,
         asset: None,
         door: None,
         material: "stone".into(),
@@ -81,6 +139,7 @@ fn room(ox: i32, oy: i32, revision: u64) -> StateView {
         wizard_game: false,
         revision,
         observation: Observation {
+            self_appearance: None,
             interactions: None,
             combat: None,
             motion: None,
@@ -648,6 +707,7 @@ fn collection_view(count: usize) -> StateView {
     let mut state = room(15, 15, 1);
     for index in 0..count {
         let item = ItemView {
+            corpse: None,
             class: Default::default(),
             quantity: 1,
             appearance: "disclosed appearance".repeat(4),
@@ -673,6 +733,7 @@ fn collection_view(count: usize) -> StateView {
             },
         });
         state.observation.visible_actors.push(ActorView {
+            appearance_seed: None,
             name: format!("actor {index}"),
             description: "disclosed actor appearance".repeat(4),
             id: ActorTarget::from_digest(synthetic_digest(index as u64 + 10)),
