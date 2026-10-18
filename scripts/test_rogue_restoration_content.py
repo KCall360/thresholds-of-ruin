@@ -109,7 +109,7 @@ class RogueRestorationContent(unittest.TestCase):
         bound = re.search(r"pub const DERIVED_ATTRIBUTE: u16 = (\d+);",
             (ROOT / "crates/simulation/src/limits.rs").read_text()).group(1)
         self.assertEqual(item, {"name": "potion of restore strength", "identity": POTION,
-            "class": "potion", "asset": "item.potion", "stackable": True,
+            "class": "potion", "asset": "item.potion", "stackable": True, "magical": True,
             "appearance_pool": "rogue.potions",
             "consumable": {"effects": [{"kind": "restore_attribute", "attribute": "strength",
                 "amount": {"kind": "fixed", "amount": int(bound)}}]}})
@@ -123,8 +123,8 @@ class RogueRestorationContent(unittest.TestCase):
     def test_rattlesnake_depth_edges_zero_carry_and_appended_finite_potion_stage(self):
         stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([row["id"] for row in stages], ["rogue.eight_species_foes", "rogue.bandages",
-            "rogue.rations", "rogue.restore_strength"])
-        self.assertEqual(stages[-1], {"id": "rogue.restore_strength", "version": 1, "kind": "items",
+            "rogue.rations", "rogue.restore_strength", "rogue.room_gold"])
+        self.assertEqual(stages[3], {"id": "rogue.restore_strength", "version": 1, "kind": "items",
             "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},
                 "choices": [{"archetype": POTION, "weight": 1}]}]})
         for origin, bands in (("source", stages[0]["bands"]), ("helper", conditional_bands())):

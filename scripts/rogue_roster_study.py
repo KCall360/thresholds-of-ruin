@@ -32,7 +32,7 @@ DEFAULT_SEEDS = ("0", "1")
 # The reconstructed production package has no explicit "normal" profile.
 PLAYABLE_AI_NAME = "study_general"
 PLAYABLE_AI = {"idle": "explore", "doors": True, "care": True, "equipment": True,
-               "loot": True, "flee_percent": 25}
+               "loot": True, "gold": False, "flee_percent": 25}
 AUTHORING_AI_SOURCE = "crates/server/src/scenario_authoring.rs"
 RUNTIME_AI_SOURCE = "crates/simulation/src/ai.rs"
 # Pin authoring's resolution semantics as well as the concrete runtime policy.
@@ -43,7 +43,8 @@ INPUTS = (
     PRODUCTION + "catalog/items.toml", DEFAULT_RULES,
     "scripts/rogue_roster_study.py", "scripts/rogue_roster_package.py",
     "scripts/arena_matrix.py", "scripts/arena_recipes.json",
-    "scripts/arena_evaluation.py", "scripts/ruleset_sources.py", *AI_SOURCES,
+    "scripts/arena_evaluation.py", "scripts/ruleset_sources.py",
+    "scripts/process_harness.py", "scripts/scalar_wire.py", *AI_SOURCES,
 )
 
 

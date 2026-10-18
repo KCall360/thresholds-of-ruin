@@ -1,14 +1,75 @@
 """Disclosed reach bounds for the production Rogue acceptance drivers."""
+import copy
 import unittest
 
 from rogue_test_support import (
-    cardinal_melee_candidate, disclosed_body_cells, disclosed_melee_candidate,
+    assert_room_gold_receipt, cardinal_melee_candidate, disclosed_body_cells, disclosed_melee_candidate,
     disclosed_sight_candidate, ground_sight_candidate,
 )
 
 
 def actor(x, y, z=0):
     return {"position": {"x": x, "y": y, "z": z}}
+
+
+class RogueRoomGoldAudit(unittest.TestCase):
+    def stage(self):
+        return {"id": "rogue.room_gold", "version": 1, "result": {
+            "kind": "rooms_evaluated", "rooms": [
+                {"room": 1, "result": {"kind": "chance_miss"}},
+                {"room": 2, "result": {"kind": "attempt", "decision": {
+                    "kind": "skipped", "content": "rogue.gold", "reason": "no_eligible_cell"}}},
+                {"room": 3, "result": {"kind": "attempt", "decision": {
+                    "kind": "placed", "content": "rogue.gold",
+                    "location": {"region": 3, "position": {"x": 1, "y": 1, "z": 0}},
+                    "entity": {"kind": "item", "id": 12, "quantity": 61}}}}]}}
+
+    def test_each_room_outcome_keeps_finite_gold_and_unique_identity(self):
+        stage = self.stage()
+        before = copy.deepcopy(stage)
+        self.assertEqual(assert_room_gold_receipt(self, stage, 1), [("item", 12)])
+        self.assertEqual(stage, before)
+
+    def test_wrong_shapes_aliases_duplicates_and_unbounded_gold_fail_closed(self):
+        for mutation in ("stage", "result", "duplicate_room", "content", "quantity",
+                         "bool_depth", "bool_version", "bool_room", "bool_item", "zero_room",
+                         "zero_item", "duplicate_item", "extra_decision", "extra_entity",
+                         "extra_location", "bool_coordinate"):
+            with self.subTest(mutation=mutation):
+                stage = self.stage()
+                rooms = stage["result"]["rooms"]
+                decision = rooms[-1]["result"]["decision"]
+                depth = 1
+                if mutation == "stage":
+                    stage["id"] = "unreviewed.gold"
+                elif mutation == "result":
+                    stage["result"]["kind"] = "evaluated"
+                elif mutation == "duplicate_room":
+                    rooms.append(copy.deepcopy(rooms[-1]))
+                elif mutation == "content":
+                    rooms[-1]["result"]["decision"]["content"] = "rogue.ration"
+                elif mutation == "quantity":
+                    decision["entity"]["quantity"] = 62
+                elif mutation == "bool_depth":
+                    depth = True
+                elif mutation == "bool_version":
+                    stage["version"] = True
+                elif mutation in ("bool_room", "zero_room"):
+                    rooms[0]["room"] = True if mutation == "bool_room" else 0
+                elif mutation in ("bool_item", "zero_item"):
+                    decision["entity"]["id"] = True if mutation == "bool_item" else 0
+                elif mutation == "duplicate_item":
+                    rooms.append({**copy.deepcopy(rooms[-1]), "room": 4})
+                elif mutation == "extra_decision":
+                    decision["extra"] = 1
+                elif mutation == "extra_entity":
+                    decision["entity"]["extra"] = 1
+                elif mutation == "extra_location":
+                    decision["location"]["extra"] = 1
+                else:
+                    decision["location"]["position"]["x"] = True
+                with self.assertRaises(AssertionError):
+                    assert_room_gold_receipt(self, stage, depth)
 
 
 class RogueReachChoices(unittest.TestCase):

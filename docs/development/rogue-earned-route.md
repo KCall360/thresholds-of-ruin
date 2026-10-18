@@ -286,13 +286,16 @@ exact package hashes and rules dependency hashes. The same current compiler
 must resolve those pinned dependencies and compile both arms. Tests use the
 committed E/S fixture as the independent `production` arm and generate their
 candidate from an explicitly supplied supported source package; they need no Git
-history, network or environment overrides. The strict candidate generator still
-names its retained eighteen-species contract and does not accept the new 21-species
-production shape with room Gold. Current-format input adaptation and expansion
-need their own source fingerprints and qualification; an old compiler receipt
-cannot make a rejected package current. The generator also accepts a retained complete
-preactivation source closure. It does not use the independent E/S fixture to
-reconstruct missing Vampire content.
+history, network or environment overrides. The strict candidate generator accepts
+the independently reviewed 21-species input with room Gold, then conditions it to
+the retained eighteen-species, four-stage diagnostic output without L/N/O, the
+Leprechaun birth-Gold pool or room-Gold stage. The oracle pins activation policy,
+not arbitrary supplied catalog/rules bytes; source closure and resolved package
+rules remain retained and fingerprinted. New generations have their own source
+fingerprints and qualification; an
+old compiler receipt cannot qualify them. The generator also accepts a retained
+complete preactivation or eighteen-species source closure. It does not use the
+independent E/S fixture to reconstruct missing Vampire content.
 
 ```sh
 python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-package SOURCE_PACKAGE --source-provenance '{"reference":"SOURCE_REVISION_OR_LABEL"}' --output NEW_CANDIDATE
@@ -301,14 +304,16 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 The corresponding create API requires `source_package` and `source_provenance`;
 provenance must be a nonempty JSON object with a nonempty string `reference`.
 The new diagnostic inventory records observed `source_population_shape`
-(`preactivation_es` or `canonical_eighteen_species`), package provenance and separate
-package/tool/compiler-dependency hashes. Its `production_mutated = false` and
+(`preactivation_es`, `canonical_eighteen_species` or
+`reviewed_twenty_one_species_input`), explicit input/output population scopes,
+package provenance and separate package/tool/compiler-dependency hashes, including
+the independent input oracle. Its `production_mutated = false` and
 diagnostic artifact purpose replace the obsolete global `production_activation`
 claim. See [generator contract](arena.md#rogue-roster-study-and-bounded-candidate-inputs).
 The candidate generator's declared target remains the eighteen-species population.
-Its `canonical_eighteen_species` label is preserved rather than relabeled to match
-current 21-species production. The retained eight-species pilot remains old-source
-evidence, not acceptance of later roster additions, flight, linked holds,
+Its retained output scope and historical input labels are preserved rather than
+relabeled to match current 21-species production. The retained eight-species pilot
+remains old-source evidence, not acceptance of later roster additions, flight, linked holds,
 ordinary restoration stock, theft or Gold. Extending these studies to L/N/O and
 room Gold is separate from the production feature batch.
 These new results do not rewrite historical inventories, report schemas, cohort

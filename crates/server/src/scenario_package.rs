@@ -4514,6 +4514,8 @@ mod tests {
             "consumable",
             "edible",
             "supply",
+            "magical",
+            "currency",
             "class",
             "body",
             "identity",

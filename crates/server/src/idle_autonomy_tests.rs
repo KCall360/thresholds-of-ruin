@@ -195,7 +195,7 @@ const ROGUE_DEFAULTS: [(&str, &str, &str, [bool; 4]); 15] = [
 
 fn expected_profile(idle: &str, tools: [bool; 4], flee: u32) -> Value {
     json!({"idle":idle,"doors":tools[0],"care":tools[1],
-        "equipment":tools[2],"loot":tools[3],"flee_percent":flee})
+        "equipment":tools[2],"loot":tools[3],"gold":false,"flee_percent":flee})
 }
 
 fn saved_ai(game: &Game) -> Value {
@@ -365,6 +365,15 @@ fn partial_profile_fields_override_independently_including_false_wait_and_zero()
         (
             json!({"loot":false}),
             expected_profile("explore", [true, true, true, false], 25),
+        ),
+        (json!({"gold":true}), {
+            let mut expected = expected_profile("explore", [true; 4], 25);
+            expected["gold"] = json!(true);
+            expected
+        }),
+        (
+            json!({"gold":false}),
+            expected_profile("explore", [true; 4], 25),
         ),
         (
             json!({"idle":"wait"}),

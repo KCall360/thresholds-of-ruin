@@ -50,7 +50,7 @@ class RoguePlayableContent(unittest.TestCase):
         ]
         for character in manifest["characters"]:
             self.assertEqual(character["loadout"], expected)
-            self.assertEqual(set(character["known_identities"]), set(items) - {"rogue.restore_strength"})
+            self.assertEqual(set(character["known_identities"]), set(items) - {"rogue.restore_strength", "rogue.gold"})
         self.assertEqual(items["rogue.mace"]["equipment"]["slot"], "weapon")
         self.assertEqual(items["rogue.ring_mail"]["equipment"]["slot"], "body_armor")
         for item, supply in [("rogue.clean_bandage", "bandage"), ("rogue.ration", "ration")]:
@@ -73,8 +73,9 @@ class RoguePlayableContent(unittest.TestCase):
         self.assertEqual(profile["version"], 1)
         stages = profile["stages"]
         self.assertEqual([row["id"] for row in stages],
-                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength"])
-        for stage, count in zip(stages, (4, 1, 1, 1), strict=True):
+                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations",
+                          "rogue.restore_strength", "rogue.room_gold"])
+        for stage, count in zip(stages[:4], (4, 1, 1, 1), strict=True):
             self.assertEqual(stage["version"], 1)
             self.assertEqual(stage["count"], [count, count])
         actor = stages[0]
@@ -83,7 +84,7 @@ class RoguePlayableContent(unittest.TestCase):
         self.assertTrue(actor["avoid_protagonist_sight"])
         self.assertEqual(actor["depth_growth"], {"kind": "racial_after", "depth": 26})
         self.assertNotIn("quantity", actor)
-        for stage, archetype, quantity in zip(stages[1:], (
+        for stage, archetype, quantity in zip(stages[1:4], (
                 "rogue.clean_bandage", "rogue.ration", "rogue.restore_strength"), (2, 1, 1), strict=True):
             self.assertEqual(stage["kind"], "items")
             self.assertEqual(stage["bands"], [{"depth": {"kind": "open", "minimum": 1},
@@ -97,7 +98,8 @@ class RoguePlayableContent(unittest.TestCase):
         species = source("catalog/creatures.toml")["creatures"]["species"]
         self.assertEqual(set(actors), {"rogue.emu", "rogue.snake", "rogue.rattlesnake", "rogue.hobgoblin",
                          "rogue.zombie", "rogue.quagga", "rogue.centaur", "rogue.yeti", "rogue.troll", "rogue.wraith",
-                         "rogue.black_unicorn", "rogue.ice_monster", "rogue.vampire", "rogue.jabberwock", "rogue.bat", "rogue.kestrel", "rogue.venus_flytrap", "rogue.griffin"})
+                         "rogue.black_unicorn", "rogue.ice_monster", "rogue.vampire", "rogue.jabberwock", "rogue.bat", "rogue.kestrel", "rogue.venus_flytrap", "rogue.griffin",
+                         "rogue.leprechaun", "rogue.nymph", "rogue.orc"})
         for identity, category, sides in [("rogue.emu", "impact", 2), ("rogue.snake", "keen", 3)]:
             with self.subTest(species=identity):
                 build = actors[identity]["creature"]

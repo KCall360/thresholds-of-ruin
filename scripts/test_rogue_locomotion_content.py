@@ -77,7 +77,8 @@ class RogueLocomotionContent(unittest.TestCase):
         manifest = source("scenario.toml")
         activation = manifest["floor_activation"]
         stages = activation["profiles"]["rogue.low_depth"]["stages"]
-        self.assertEqual([stage["id"] for stage in stages], ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength"])
+        self.assertEqual([stage["id"] for stage in stages], ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations",
+            "rogue.restore_strength", "rogue.room_gold"])
         self.assertEqual(stages[0]["count"], [4, 4])
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         bands = stages[0]["bands"]

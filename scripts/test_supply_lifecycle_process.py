@@ -101,6 +101,8 @@ class SupplyLifecycleProcesses(ProcessTestCase):
             if combat(current)["preparation_remaining"] is None:
                 return current
             self.assertTrue(combat(current)["preparation_active"])
+            # Resume and prior waits publish revisions across client connections.
+            self.assertIsNone(self.request(partner, {"type": "snapshot"})["error"])
             self.assertIsNone(self.act(partner, {"type": "wait"})["error"])
         self.fail("Ordinary partner waits did not finish care")
 
