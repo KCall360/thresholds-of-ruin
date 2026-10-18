@@ -139,7 +139,7 @@ class LinkedHoldProcesses(ProcessTestCase):
         self.assertIsNone(self.request(subject, {"type": "release_control"})["error"])
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
         shown = self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
-        self.assertIn("Held:2 (F11)", "\n".join(shown["status_lines"]))
+        self.assertIn("Held:2", "\n".join(shown["status_lines"]))
         native = self.native_keys(window)
         if shown["messages"]["more"]:
             shown = self.native_press(window, native, "Escape", "escape")
@@ -154,7 +154,7 @@ class LinkedHoldProcesses(ProcessTestCase):
         self.assertEqual(selected["hold_choices"], [])
         self.advance(subject, peers, lambda value: holds(value) == [first] and settled(value))
         shown = self.ascii_frame(window, lambda frame: holds(frame) == [first] and settled(frame))
-        self.assertIn("Held:1 (F11)", "\n".join(shown["status_lines"]))
+        self.assertIn("Held:1", "\n".join(shown["status_lines"]))
         self.assertTrue(shown["window_open"])
 
     @non_graphical

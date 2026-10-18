@@ -315,6 +315,11 @@ mod tests {
         };
         let hidden = project(observation.clone());
         assert_eq!(hidden.linked_holds[0].holder, None);
+        assert_eq!(
+            serde_json::to_value(&hidden.linked_holds).unwrap(),
+            serde_json::json!([{"target": scope.hold(sim::HoldId(7)), "holder": null}]),
+            "hidden offers disclose only an opaque relationship token, never holder identity"
+        );
         observation.visible_actors.push(sim::ActorView {
             id: sim::ActorId(99),
             name: "Ordinary disclosed holder".into(),

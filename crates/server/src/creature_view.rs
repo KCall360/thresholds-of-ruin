@@ -1231,12 +1231,15 @@ mod tests {
             })
         );
         let encoded = serde_json::to_string(&state).unwrap();
+        assert!(state.observation.linked_holds.is_empty());
         for private in [
             "item_payment",
             "cost_ordinal",
             "claimant",
             "free_quantity",
-            "holds",
+            // Item reservation holds are private; the distinct linked_holds
+            // projection is a public, observer-scoped relationship offer.
+            "\"holds\":",
         ] {
             assert!(
                 !encoded.contains(private),

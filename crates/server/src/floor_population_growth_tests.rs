@@ -324,9 +324,12 @@ fn assert_rogue_tail_actor(engine: &Engine, attempt: &Value, content: &str, hd: 
 
 #[test]
 fn rogue_mixed_tail_all_vampire_entry_at_274_publishes_exact_256_hd_and_replays() {
-    // Fixed seed 42 samples four Vampires from the unchanged V/J band. The
-    // presence of an over-cap Jabberwock recipe must not reject this valid entry.
-    let engine = Engine::memory(rogue_tail_entry_fixture(274, "up")).unwrap();
+    // Fixed seed 27 samples four Vampires from the production V/G/J band.
+    // Seed 42 now samples V/G/V/V, whose Griffin correctly exceeds the cap.
+    // Unselected over-cap Griffin/Jabberwock recipes must not reject this entry.
+    let mut scenario = rogue_tail_entry_fixture(274, "up");
+    scenario.seed = 27;
+    let engine = Engine::memory(scenario).unwrap();
     assert_eq!(
         engine
             .game
@@ -351,7 +354,7 @@ fn assert_rogue_tail_capacity(failure: Failure) {
             .contains("no movement or population was committed"),
         "the complete first entry must remain retryable: {failure:?}"
     );
-    for hidden in ["vampire", "jabberwock", "256", "257"] {
+    for hidden in ["vampire", "griffin", "jabberwock", "256", "257"] {
         assert!(!failure.message.contains(hidden), "{failure:?}");
     }
     assert_capacity(failure);
