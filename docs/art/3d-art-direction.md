@@ -25,7 +25,7 @@ must never imply an undisclosed weapon, condition, creature identity or result.
 ## Proportions: Bold Storybook
 
 Bold Storybook is the selected working direction from the
-[proportion comparison](proportion-study-v1.png). The former five-foot-cube
+[proportion comparison](proportion-study-rev1.png). The former five-foot-cube
 reference does not constrain the art. Favor a stronger character presence
 relative to the floor, a more compact body impression, larger expressive heads,
 broader hands and feet, and bolder garment and weapon masses. These proportions
@@ -348,11 +348,11 @@ concepts remain useful for anatomy, materials and the female fantasy direction.
 
 | View | Actual art preview | Generated direction |
 | --- | --- | --- |
-| Gameplay forms | [Working capture, ceilings omitted](storybook-gameplay-working-v15.png) | [Bold Storybook target](storybook-gameplay-target-v2.png) |
-| Brighter lighting | [Working capture](storybook-gameplay-working-v15.png) | [Bright foreground study](gameplay-bright-lighting-target-v1.png) |
-| Whole cast | [Working cast](storybook-cast-working-v11.png) | [Selected proportion comparison](proportion-study-v1.png), right panel |
-| Adult female Warrior | [Working capture](female-warrior-working-v11.png) | [Figure and outfit target](female-warrior-target-v1.png) |
-| Male and female Warrior builds | [Working lineup](warrior-builds-working-v14.png), [male profile](male-warrior-profile-working-v14.png) | Broad shallow male chest; preserve the female figure direction |
+| Gameplay forms | [Working capture, ceilings omitted](storybook-gameplay-working-rev15.png) | [Bold Storybook target](storybook-gameplay-target-rev2.png) |
+| Brighter lighting | [Working capture](storybook-gameplay-working-rev15.png) | [Bright foreground study](gameplay-bright-lighting-target-rev1.png) |
+| Whole cast | [Working cast](storybook-cast-working-rev11.png) | [Selected proportion comparison](proportion-study-rev1.png), right panel |
+| Adult female Warrior | [Working capture](female-warrior-working-rev11.png) | [Figure and outfit target](female-warrior-target-rev1.png) |
+| Male and female Warrior builds | [Working lineup](warrior-builds-working-rev14.png), [male profile](male-warrior-profile-working-rev14.png) | Broad shallow male chest; preserve the female figure direction |
 
 The current preview has stronger character scale, enlarged family-specific heads,
 hands and feet, richer teal cloth, more distinct matte/satin/metal materials,
@@ -406,8 +406,8 @@ Use open gameplay views for the current lighting direction. The bright foregroun
 study remains the lighting reference: it illustrates more luminous color and
 clearer shadow faces, while remaining a generated paintover.
 
-Actual walk recordings: [bipeds](people-walk-working-v7.webp) and
-[beasts](beasts-walk-working-v7.webp). These short loops preserve capture timing
+Actual walk recordings: [bipeds](people-walk-working-rev7.webp) and
+[beasts](beasts-walk-working-rev7.webp). These short loops preserve capture timing
 and show the movement before the subsequent supported-action and dark-palette
 pass. The loop boundary jumps back to the start; it is not an authored idle or
 animation transition. Current movement review found coherent support through
@@ -513,11 +513,11 @@ cloth penetrations, or replace the code tests deferred until PR preparation.
 
 | Study | Actual reference | Generated target |
 | --- | --- | --- |
-| Warrior anatomy | [Baseline](warrior-baseline.png) | [Sculptural target](warrior-target-v1.png) |
-| Early gameplay forms | [Baseline](gameplay-baseline.png) | [Cast target](gameplay-target-v1.png) |
-| Expressive color | [Gameplay baseline](gameplay-baseline.png) | [Richer color study](gameplay-color-study-v1.png) |
-| Bird construction | [Emu baseline](emu-baseline.png) | [Emu target](emu-target-v1.png) |
-| Female fantasy silhouette | [Baseline](female-warrior-baseline.png) | [Fitted figure and outfit](female-warrior-target-v1.png) |
+| Warrior anatomy | [Baseline](warrior-baseline.png) | [Sculptural target](warrior-target-rev1.png) |
+| Early gameplay forms | [Baseline](gameplay-baseline.png) | [Cast target](gameplay-target-rev1.png) |
+| Expressive color | [Gameplay baseline](gameplay-baseline.png) | [Richer color study](gameplay-color-study-rev1.png) |
+| Bird construction | [Emu baseline](emu-baseline.png) | [Emu target](emu-target-rev1.png) |
+| Female fantasy silhouette | [Baseline](female-warrior-baseline.png) | [Fitted figure and outfit](female-warrior-target-rev1.png) |
 
 Targets may alter framing, labels, cosmetic identity, equipment or small anatomy
 despite preservation instructions. They are art references, not camera, UI,
@@ -528,10 +528,10 @@ color relationships rather than copying those changes. The richer study's broad
 amber pool must not overpower neighboring actors. The bird concept's toes and
 joints require independent construction rather than literal copying.
 
-The latest reference round explores [adult female adventurers](female-adventurers-target-v2.png),
-[interchangeable female armor](female-armor-layering-target-v1.png),
-[male adventurers](male-adventurers-target-v1.png), and
-[creature families](creature-families-target-v1.png). Both female prompts explicitly
+The latest reference round explores [adult female adventurers](female-adventurers-target-rev2.png),
+[interchangeable female armor](female-armor-layering-target-rev1.png),
+[male adventurers](male-adventurers-target-rev1.png), and
+[creature families](creature-families-target-rev1.png). Both female prompts explicitly
 request adult women. Use the references for mature character appeal, fitted
 layering, materials and coherent species forms. Their taller humanoid proportions
 do not replace the selected compact Bold Storybook target. The armor study is an

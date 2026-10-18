@@ -5,13 +5,13 @@ not runtime models or screenshots of completed implementation.
 
 ## Bright foreground lighting v1
 
-Input: storybook-gameplay-working-v9.png
+Input: storybook-gameplay-working-rev9.png
 
 Use case: lighting-study. Asset: bright, readable gameplay LIGHTING target for this existing 3D fantasy roguelike. Use the supplied ACTUAL GAME SCREENSHOT as the exact composition and geometry reference. Preserve the camera, zoom, floor and cave shapes, creatures, positions, adult Bold Storybook body proportions, existing outfits and equipped weapons, UI, labels and minimap. Change illumination and material presentation only: the whole cast and usable objects need visibly brighter, colorful, beautifully readable lighting with plenty of soft fill. Faces, teal cloth, leather, ochre feathers and green undead skin must show their actual hue and sculpted forms even on shadow-facing planes. Keep convincing directional form shading, ground contact and controlled metal glints, avoid flat unlit cutouts or washed-out skin. Warm-neutral key, generous cool-neutral fill and subtle reflected color; a few existing cyan/violet crystal notes provide sparkle. Atmosphere comes mainly from quieter cool-violet enclosing cave walls, large background shapes and existing set design. Backgrounds may be lower contrast while the playable foreground stays bright and lively. More color and pop, no muddy brown/gray veil and no crushed dark costumes. Preserve the existing strongest light directions and disclosed illuminated areas; don't create light or detail in unknown space. No added objects, particles, creatures, props, textures, details, halos, invented equipment, glowing eyes or changed UI. Don't repaint the models into another style. This is an aspirational lighting paintover for a realtime game, not an implemented screenshot.
 
 ## Bold Storybook gameplay v2
 
-Inputs: storybook-gameplay-working-v6.png, proportion-study-v1.png
+Inputs: storybook-gameplay-working-rev6.png, proportion-study-rev1.png
 
 Use case: stylized-concept. Asset: full-scene target paintover for the 3D roguelike's selected BOLD STORYBOOK direction. Input image 1 is the latest actual game screenshot; image 2 is the proportion comparison, whose RIGHTMOST 'BOLD STORYBOOK' panel is the approved style reference. Produce one single game scene using image 1's exact camera, layout, creature positions, UI and dungeon geometry. Keep its current stronger character-to-world scale; do not enlarge every character again. Improve the whole cast together into coherent high-quality stylized game sculptures: broad deliberate planes, connected shoulders and hips, expressive adult heads, strong hands and feet, purposeful garments, convincing animal body masses. The teal-cloaked player has a tailored fitted leather-and-cloth fantasy outfit and a readable existing weapon; gaunt zombies have angular long hands and skulls, slim damaged silhouettes and distinct worn garments; hobgoblin is compact and heavy with a strong brow and broad hands; emu has flowing narrow feather clumps, expressive small head and credible articulated legs. Preserve each disclosed outfit and color identity while giving cloth, leather, skin, feathers and metal distinct material responses. More vivid teal, warm ochre/russet and selective cyan/violet crystal accents; cool blue-violet shadow faces, warm key light and well-grounded contact shadows. Preserve the existing light directions and major lit/shadow regions so the target is useful for a realtime implementation. Keep HUD and labels in their original places, no new objects, no added monsters, no glowing eyes or effects that weren't present. Avoid photoreal textures, excessive fine ornament, toy-plastic shine, disconnected primitive joints and a uniform saturation filter. This is an aspirational art target, not a claim of implemented rendering.
 
@@ -23,7 +23,7 @@ Use case: stylized-concept. Asset: target render for an existing procedural 3D r
 
 ## Gameplay v1
 
-Inputs: gameplay-baseline.png, warrior-target-v1.png
+Inputs: gameplay-baseline.png, warrior-target-rev1.png
 
 Use case stylized-concept. Produce a believable real-time gameplay target render by upgrading ONLY the character models in image 1, using image 2 as the warrior art direction. Preserve image 1 camera angle, zoom, cave geometry, floor, crystal positions, creature count and positions, all UI and labels exactly as presented. Warrior: integrated sleeve shoulders, coherent sculpted anatomy, tailored teal cloth and brown leather, readable sword. Zombies: distinct gaunt forward-hunched silhouettes, narrow ribcage, angular elbows, asymmetrical tattered garments, subdued sickly skin, convincing supported stances, no gore. Hobgoblin: heavier upper body and bent legs, readable broad skull and leather. Emu: anatomically credible large bird with compact feather mass, long neck and thin articulated legs. Ground every foot with contact shadows. Hand-carved dark fairytale miniature aesthetic, broad readable planes, matte cloth and leather contrasted with sharp metal highlights; restrained detail at this actual gameplay scale. No new objects, no new effects, no invented equipment, no camera changes, no photorealism. Aim for a consistent cast, visual clarity and physical presence in the existing game.
 
@@ -58,9 +58,9 @@ Generated with the built-in image generation tool, using the current v19 client 
 
 Use these for clothing fit, layered materials, mature faces, color, coherent creature anatomy, and reusable design vocabulary. The humanoid figures are taller than the compact Bold Storybook target: preserve the established in-game proportions rather than copying their leg length. The plate study also exaggerates breast contouring; a continuous convex chest shell remains the intended heavy-armor construction. Static sheets do not validate animation, equipment deformation, or collision clearance.
 
-### female-adventurers-target-v2.png
+### female-adventurers-target-rev2.png
 
-![female procedural art reference](female-adventurers-target-v2.png)
+![female procedural art reference](female-adventurers-target-rev2.png)
 
 Prompt transcription for publication:
 
@@ -77,9 +77,9 @@ Materials: distinct matte cloth, warm leather, small metallic accents; garments 
 Constraints: preserve mature adulthood and Bold Storybook proportions; no chibi, no childlike faces, no photoreal humans, no exaggerated balloon anatomy, no cloth/body clipping. No nudity, no text, no logos, no watermark, no UI. This is future art direction concept imagery, not a claim about an implemented feature.
 ```
 
-### female-armor-layering-target-v1.png
+### female-armor-layering-target-rev1.png
 
-![armor procedural art reference](female-armor-layering-target-v1.png)
+![armor procedural art reference](female-armor-layering-target-rev1.png)
 
 Prompt transcription for publication:
 
@@ -96,9 +96,9 @@ Lighting/backdrop: bright warm foreground light, soft cool fill, readable faces 
 Constraints: same identity, same body proportions and height in every version; distinct cloth/leather/mail/steel materials. No chibi or childlike faces, no nudity, no clipping, no overlong fashion proportions, no oversized armor masses, no UI, no watermark. Aspirational visual reference, not an implemented equipment-system screenshot.
 ```
 
-### male-adventurers-target-v1.png
+### male-adventurers-target-rev1.png
 
-![male procedural art reference](male-adventurers-target-v1.png)
+![male procedural art reference](male-adventurers-target-rev1.png)
 
 Prompt transcription for publication:
 
@@ -116,9 +116,9 @@ Materials: matte woven cloth, warm leather, restrained metal glints, natural hai
 Avoid: photorealism, grotesque anatomy, childlike faces, oversized breast-like chest forms, body/garment clipping, black shadowed faces, overbusy microdetail, text, UI, logos, watermark. Concept imagery only, not an implemented feature claim.
 ```
 
-### creature-families-target-v1.png
+### creature-families-target-rev1.png
 
-![creatures procedural art reference](creature-families-target-v1.png)
+![creatures procedural art reference](creature-families-target-rev1.png)
 
 Prompt transcription for publication:
 
