@@ -1,21 +1,22 @@
 # Play the Rogue starter slice
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
-authors Warrior and Mage presets, twenty-one depth-selected foe species, equipped
+authors Warrior and Mage presets, twenty-four depth-selected foe species, equipped
 starting gear, and finite bandage/ration supplies on persistent generated floors.
-The package selects the canonical K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/U/V/G/J population.
+The package selects the canonical K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/J population.
 The L/N/O theft/gold additions still need the qualification described below.
 Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
-five production species and the calibrated depth curve remain unfinished. The Amulet
+Aquator, dragon and the calibrated depth curve remain unfinished. The Amulet
 and intentional surface escape provide the retrieval/ascent objective. The default launch still selects the separate
 [first dungeon](gameplay.md).
 
 Creatures follow explicit species defaults before engaging a foe, using only
 their own senses and known surroundings. Most explore and prefer less-visited
-cells; the ice monster and stationary flytrap wait. Their separate door, care,
-equipment, useful-loot and Gold-interest permissions are listed below. Passive acquisition still requires ordinary hostile
-provocation, and mean acquisition still uses the existing seeded wake check.
+cells; the ice monster, stationary flytrap and guised xeroc wait. Their separate door, care,
+equipment, useful-loot and Gold-interest permissions are listed below. Passive
+acquisition requires ordinary hostile provocation, except Xeroc’s narrow adjacent
+guise ambush; mean acquisition uses the existing seeded wake check.
 Idle policy does not change remembered pursuit or combat. Rogue's NPC stair
 restriction remains in force.
 Only active creatures take turns, and waiting for player input still pauses the
@@ -23,20 +24,20 @@ adventure. Frozen floors do not accumulate missed roaming turns.
 
 ## Species idle policy
 
-These are provisional TOR choices for all twenty-two authored species, including
+These are provisional TOR choices for all twenty-five authored species, including
 the player species. They are not a claim of original Rogue behavioral parity or
 balanced encounter pressure. Human defaults apply only when a human is explicitly
 AI-controlled; they do not automate the selected player's turns.
 
 | Species | Idle | Doors | Care | Equipment | Useful loot | Gold interest |
 | --- | --- | --- | --- | --- | --- | --- |
-| Human, hobgoblin, centaur, troll, vampire | Explore | Yes | Yes | Yes | Yes | No |
+| Human, hobgoblin, centaur, troll, vampire, medusa | Explore | Yes | Yes | Yes | Yes | No |
 | Orc | Explore | Yes | Yes | Yes | Yes | Yes |
 | Leprechaun | Explore | Yes | No | No | No | Yes |
 | Nymph | Explore | Yes | No | No | No | No |
-| Bat, kestrel, griffin, emu, snake, rattlesnake, quagga, black unicorn, zombie, wraith, jabberwock | Explore | No | No | No | No | No |
+| Bat, kestrel, griffin, emu, snake, rattlesnake, quagga, black unicorn, zombie, wraith, jabberwock, phantom | Explore | No | No | No | No | No |
 | Yeti | Explore | No | Yes | No | Yes | No |
-| Ice monster, Venus flytrap | Wait | No | No | No | No | No |
+| Ice monster, Venus flytrap, xeroc | Wait | No | No | No | No | No |
 
 All keep their authored acquisition disposition and 1,000-tick actor-active
 memory. The shared `rogue_hostile` profile overrides only the flee threshold to
@@ -233,6 +234,38 @@ behaviors, not a calibrated survival curve or original Rogue timing. See
 [shared theft and Gold](../reference/items.md#theft-and-gold) for exact inventory
 and preparation contracts.
 
+## Gaze, invisibility and object guise
+
+Medusa (M) enters at depth 18 with eight monstrous-humanoid racial HD and the
+reptilian subtype. GZ1 Confusing Gaze is bought on HD 1; NA1 and NA2 on HD 2
+and HD 4 unlock its separate 3d4/3d4/2d5 natural strikes. Its existing
+Spellcasting skill binds to Presence. The gaze prepares and recovers for 100
+ticks each, requires mutual sight within four cells, and checks Spiritual
+with the ordinary 3d6 kernel. Success applies Confused for 300 active ticks,
+followed by 400 ticks of target-wide protection. A 700-tick caster cooldown
+starts at preparation. M is mean and has a 40% finite birth-stock chance.
+
+Phantom (P), at depths 15–24, has eight undead racial HD, the incorporeal
+subtype, one natural 4d4 strike, typed invisibility and the existing 1/5
+erratic movement chance. It retains passive acquisition and carries no birth
+stock. The incorporeal label grants neither immunity nor wall passing.
+
+Xeroc (X), at depths 16–25, has seven aberration racial HD and the shapechanger
+subtype. It buys MI1 Object Guise on HD 1 and MI2 Ambush From Guise on HD 6,
+with one natural 4d4 strike and a 30% finite birth-stock chance. Its initial
+stationary guise has the same disclosed name, description, class and asset as
+an ordinary food ration. Touch, adjacent Search, attack or movement breaks the
+guise globally; it cannot hide again. The purchased MI2 gives the first attack
+prepared from that guise advantage. Passive X can initiate only its narrow
+adjacent ambush against a foe it actually perceives. Search is an ordinary
+100-tick self ability; it reveals adjacent guises without revealing an
+invisible phantom. Shapechanger itself still grants no additional mechanics.
+
+M/X stock uses the same provisional equal ration/bandage pool as other carriers.
+Bodies, attributes, ranks, timing and AI priorities are provisional TOR tuning;
+these source contracts do not establish encounter or survival balance. This WIP
+cohort is source-only; its focused tests and compiler certification have not run.
+
 ## Floors keep their history
 
 Each first entry by the selected character evaluates five ordered stages:
@@ -244,15 +277,17 @@ provisional TOR availability, not Rogue's 13% subtype probability; legal placeme
 can still fail, so it does not guarantee a cure. The final independent
 `rogue.room_gold` stage makes the per-room Gold decisions described above; the earlier stage order and
 random streams are unchanged. The actor stage's authored depth bands
-select K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/U/V/G/J. Kestrel (K) is eligible at depths
+select K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/J. Kestrel (K) is eligible at depths
 1–6, bat (B) at 1–8, orc at 4–13, leprechaun at 6–15, centaur at 7–16,
 rattlesnake at 3–12, nymph at 10–19, yeti at 11–20,
-Venus flytrap (F) at 12–21, troll at 13–22 and wraith at 14–23. Griffin (G)
-enters at 20 and Jabberwock at 21. Depth 1 selects K/E/B/S/H equally; depth 27
-onward selects V/G/J, equal except 7:12:12 at 29 and 8:8:13 at 30. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
+Venus flytrap (F) at 12–21, troll at 13–22, wraith at 14–23, phantom at 15–24
+and xeroc at 16–25. Medusa enters at 18, Griffin (G) at 20 and Jabberwock at 21.
+Depth 1 selects K/E/B/S/H equally. The pinned upper-boundary redistribution
+keeps M eligible at every depth from 18 onward. Depth 27 onward selects
+M/V/G/J, equal except 6:11:11:11 at 28, 7:7:12:12 at 29 and 8:8:8:13 at 30. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
 owns the full band/weight table. The historical `rogue.eight_species_foes`
 and `rogue.vampire_supplies` IDs stay unchanged to preserve unrelated deterministic
-streams. Four-U, four-V, four-G and four-J draws are possible; these
+streams. Four-U, four-M, four-V, four-G and four-J draws are possible; these
 provisional counts and weights do not establish a safe or calibrated depth curve.
 Foe placement excludes your current sight, body occupancy and protected arrival
 cells. A stage can record a failed placement when legal space is unavailable;
@@ -270,8 +305,8 @@ HD per depth beyond 26, preserving its base rows, purchases and seeded per-HD
 Health rolls. New rows keep their ordinary unspent grants. J has 15 HD at depth
 26 and reaches 256 at 267; a sampled J requests 257 at 268 and refuses the whole
 entry atomically, without partial population or time advance. G reaches 256 HD
-at 269 and refuses at 270. All-V draws remain valid through depth 274, where V
-reaches 256 HD; at 275 all three tail recipes exceed capacity. Admission follows the actual sampled recipes, without
+at 269 and refuses at 270. All-M/V draws remain valid through depth 274, where each
+reaches 256 HD; at 275 all four tail recipes exceed capacity. Admission follows the actual sampled recipes, without
 clamping or replacing an over-cap choice. This is a current construction-capacity
 limit, not a designed HD plateau.
 
@@ -309,7 +344,7 @@ persistent terminal outcomes; restarting does not grant a new Amulet or victory.
 All starting stats, equipment bonuses, foe timing, quantities, XP policy and the
 depth-selected population are provisional TOR tuning. A successful seeded
 walkthrough is behavioral coverage, not evidence of balanced Warrior/Mage runs. Bow/arrows,
-the five remaining species, traps, wandering populations, calibrated food pressure and complete
+the two remaining species, aquator and dragon, traps, wandering populations, calibrated food pressure and complete
 run balancing remain in the [Rogue plan](../plans/rogue.md).
 
 Shared engine support and playable content have different acceptance boundaries.
@@ -379,7 +414,7 @@ capture, room-stream isolation, death recovery and strict current-format restore
 Changing documentation or extending the roster does not make an older run evidence
 for those contracts. No UI or 3D feature is added by this batch.
 The [earned-route pilot](../development/rogue-earned-route.md) retains its frozen
-eight-species inputs and adverse or censored outcomes; it is not twenty-one-species
+eight-species inputs and adverse or censored outcomes; it is not twenty-four-species
 acceptance. Reaching depth 27 records arrival, not
 Vampire combat survival. Broad integrated/native verification and final
 Windows/Linux CI remain required gates. These bounded cases do not close HD 1–6
@@ -388,7 +423,7 @@ play, pressured escape or numerical calibration. See [status](../status.md) and 
 
 ## Reconstructed roster and depth source checkpoint
 
-The selected K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/U/V/G/J recipes use the shared compiler and character-sheet
+The selected K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/J recipes use the shared compiler and character-sheet
 pipeline. Centaur owns four actual Warrior HD, with Second Strike purchased on
 HD 2 and Third Strike on HD 4; its natural sequence is 1d2/1d5/1d5. Yeti owns four
 actual racial HD, purchases Second Strike on HD 2 and uses 1d6/1d6; its cold

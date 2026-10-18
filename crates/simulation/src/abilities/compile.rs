@@ -387,8 +387,8 @@ impl Game {
         let caster = self.creature(actor).ok_or(GameError::UnknownActor)?;
         // The original reference domain is an admission operand, not a hint.
         // Validate it before touching hidden faction, health or private plans.
-        let disclosure = self.classified_actors(actor)?.get(&target).map(|row| row.disclosure);
-        if target != actor && disclosure.and_then(crate::perception::ActorDisclosure::reference) != Some(invocation.reference()) {
+        let disclosure = self.actor_disclosure(actor, target)?;
+        if target != actor && disclosure.reference() != Some(invocation.reference()) {
             return Err(GameError::Rule(RuleError::OutOfReach));
         }
         let defender = self.creature(target).ok_or(GameError::UnknownActor)?;
@@ -407,8 +407,9 @@ impl Game {
         }
         if matches!(invocation, super::AbilityInvocation::ContactTarget { .. })
             && (!matches!(definition.reach, crate::rules::Reach::Melee)
-                || !definition.ai.hostile
-                || !definition.basic_attack) {
+                || definition.interaction != crate::rules::Interaction::HostileToTarget
+                || !definition.basic_attack)
+        {
             return Err(GameError::Rule(RuleError::OutOfReach));
         }
         let step = invocation
@@ -560,6 +561,29 @@ impl Game {
                 }
             },
         }
+        // One source-owned claim augments only the first outgoing attack check.
+        // It is check-only: ordinary edge allocation still applies the three-die cap.
+        let ambush = if definition.basic_attack
+            && definition.interaction == crate::rules::Interaction::HostileToTarget
+            && matches!(reach, crate::rules::Reach::Melee)
+            && self.actors[&actor].guise.ambush_available()
+            && strikes
+                .first()
+                .and_then(|strike| strike.check.as_ref())
+                .is_some_and(|check| check.actor == CheckActor::User)
+        {
+            let site = CheckSite {
+                strike: 0,
+                check: CheckPhase::Primary {
+                    side: CheckSide::Initiating,
+                },
+            };
+            let check = strikes[0].check.as_mut().expect("first outgoing check");
+            check.edge = check.edge.checked_add(1).ok_or_else(invalid)?;
+            Some(site)
+        } else {
+            None
+        };
         for strike in &strikes {
             self.validate_hit_die_effect_admission(target, &strike.on_success)?;
             self.validate_hit_die_effect_admission(target, &strike.on_failure)?;
@@ -568,6 +592,7 @@ impl Game {
             }
         }
         let plan = Plan::Ability(tor_world::Shared::new(AbilityPlan {
+            ambush,
             actor,
             invocation,
             step,

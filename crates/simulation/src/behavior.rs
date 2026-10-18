@@ -246,17 +246,40 @@ impl Game {
             return Ok(());
         }
         let view = self.observe(outcome.target)?;
-        let licensed = view.combat.as_ref().is_some_and(|combat| combat.events.iter().any(|event| {
-            matches!(event, crate::combat::DisclosedCombatEvent::Ability { caster: Some(caster), target: Some(target), id, strike: Some(ordinal), .. }
-                if *caster == outcome.actor && *target == outcome.target && id == ability && *ordinal == strike)
-                || matches!(event, crate::combat::DisclosedCombatEvent::UnseenAbility { caster: Some(caster), target, .. }
-                    if *caster == outcome.actor && *target == outcome.target)
-        }));
+        let licensed = view.combat.as_ref().and_then(|combat| {
+            combat.events.iter().find_map(|event| match event {
+                crate::combat::DisclosedCombatEvent::Ability {
+                    caster: Some(caster),
+                    caster_reference,
+                    target: Some(target),
+                    id,
+                    strike: Some(ordinal),
+                    ..
+                } if *caster == outcome.actor
+                    && *target == outcome.target
+                    && id == ability
+                    && *ordinal == strike =>
+                {
+                    *caster_reference
+                }
+                crate::combat::DisclosedCombatEvent::UnseenAbility {
+                    caster: Some(caster),
+                    target,
+                    ..
+                } if *caster == outcome.actor && *target == outcome.target => {
+                    Some(crate::perception::ActorReferenceKind::Contact)
+                }
+                _ => None,
+            })
+        });
         let witness = view
             .visible_actors
             .iter()
             .find(|actor| actor.id == outcome.actor);
-        if let (true, Some(witness)) = (licensed, witness) {
+        if let (Some(reference), Some(witness)) = (licensed, witness) {
+            if witness.disclosure.reference() != Some(reference) {
+                return Ok(());
+            }
             let memory = self.actors[&outcome.target]
                 .behavior_policy()
                 .ok_or(GameError::UnknownActor)?
@@ -271,7 +294,10 @@ impl Game {
             let mut settled = self.settled_actor_outcome(outcome.target)?;
             settled.state.behavior.engagement = Some(Engagement {
                 target: outcome.actor,
-                reference: witness.disclosure.reference().expect("disclosed hostile contact"),
+                reference: witness
+                    .disclosure
+                    .reference()
+                    .expect("disclosed hostile contact"),
                 location,
                 last_seen: self.actor_clock(outcome.target),
             });

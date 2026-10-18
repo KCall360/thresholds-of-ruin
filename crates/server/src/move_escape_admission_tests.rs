@@ -130,8 +130,11 @@ fn held_move_admits_escape_against_oldest_hold_and_retains_raw_move_receipt() {
 
 #[test]
 fn single_hold_move_and_direct_act_match_explicit_escape_without_extra_rng_or_movement() {
-    for direct in [false, true] {
-        let mut engine = Engine::memory(scenario()).unwrap();
+    for (direct, confused) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut engine = Engine::memory(
+            super::linked_hold_boundary_tests::scenario_with_confusion(confused),
+        )
+        .unwrap();
         establish_with_holders(&mut engine, &[ActorId(2)]);
         let hold = engine.game.linked_holds(SimActor(1))[0].id;
         let at = engine.game.observe(SimActor(1)).unwrap().location;

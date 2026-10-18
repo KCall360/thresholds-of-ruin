@@ -726,6 +726,8 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
         .unwrap()
         .events
         .contains(&DisclosedCombatEvent::Ability {
+            caster_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
+            target_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
             strike: Some(0),
             caster: Some(actor),
             target: Some(target),
@@ -746,6 +748,8 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
         .unwrap()
         .events
         .contains(&DisclosedCombatEvent::Ability {
+            caster_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
+            target_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
             strike: Some(0),
             caster: None,
             target: Some(target),

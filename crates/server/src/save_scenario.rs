@@ -949,6 +949,7 @@ enum Effect {
         #[serde(with = "mapped")]
         amount: source::AmountExpr,
     },
+    SearchAdjacentGuises,
     ObservePublicPlan,
     ApplyQualifiedConditionToSource {
         condition: String,
@@ -1456,24 +1457,40 @@ enum ModifierOp {
     },
 }
 #[derive(Serialize, Deserialize)]
-#[serde(remote = "crate::creature_authoring::Perception", tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    remote = "crate::creature_authoring::Perception",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 enum Perception {
-    Invisible { enabled: bool },
-    SeeInvisible { enabled: bool },
-    Sight { enabled: bool },
+    Invisible {
+        enabled: bool,
+    },
+    SeeInvisible {
+        enabled: bool,
+    },
+    Sight {
+        enabled: bool,
+    },
     ObjectGuise {
         #[serde(with = "mapped")]
         appearance: Option<crate::creature_authoring::GuiseAppearance>,
     },
-    AmbushFromGuise { enabled: bool },
+    AmbushFromGuise {
+        enabled: bool,
+    },
 }
 #[derive(Serialize, Deserialize)]
-#[serde(remote = "crate::creature_authoring::GuiseAppearance", deny_unknown_fields)]
+#[serde(
+    remote = "crate::creature_authoring::GuiseAppearance",
+    deny_unknown_fields
+)]
 struct GuiseAppearance {
     name: String,
     description: String,
     #[serde(with = "mapped")]
-    class: crate::scenario_authoring::ItemClass,
+    class: crate::scenario_package::ItemClass,
     #[serde(with = "mapped")]
     asset: Option<String>,
 }
@@ -1492,6 +1509,10 @@ enum Locomotion {
         enabled: bool,
     },
     Erratic {
+        #[serde(with = "mapped")]
+        chance: Option<crate::creature_authoring::MovementChance>,
+    },
+    Confused {
         #[serde(with = "mapped")]
         chance: Option<crate::creature_authoring::MovementChance>,
     },
@@ -2728,6 +2749,9 @@ enum AbilityReach {
     Sight {
         range: u16,
     },
+    MutualSight {
+        range: u16,
+    },
     SelfOnly,
     SelfOrAlly {
         #[serde(with = "AllyRange")]
@@ -3362,6 +3386,8 @@ mod tests {
         use serde_json::json;
         type Value = crate::creature_authoring::Locomotion;
         for value in [
+            json!({"kind":"confused","chance":null}),
+            json!({"kind":"confused","chance":{"numerator":4,"denominator":5}}),
             json!({"kind":"erratic","chance":null}),
             json!({"kind":"erratic","chance":{"numerator":1,"denominator":5}}),
         ] {
@@ -3369,6 +3395,10 @@ mod tests {
             assert_eq!(serde_json::to_value(Borrowed(&decoded.0)).unwrap(), value);
         }
         for value in [
+            json!({"kind":"confused"}),
+            json!({"kind":"confused","chance":[4,5]}),
+            json!({"kind":"confused","chance":{"numerator":5,"denominator":4}}),
+            json!({"kind":"confused","chance":null,"enabled":true}),
             json!({"kind":"erratic"}),
             json!({"kind":"erratic","chance":[1,5]}),
             json!({"kind":"erratic","chance":{"numerator":2,"denominator":1}}),
@@ -3378,6 +3408,25 @@ mod tests {
             json!(["flying", true]),
         ] {
             assert!(serde_json::from_value::<Owned<Value>>(value).is_err());
+        }
+    }
+
+    #[test]
+    fn stored_mutual_sight_requires_exact_named_range() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Record {
+            #[serde(with = "super::AbilityReach")]
+            reach: tor_simulation::rules::Reach,
+        }
+        let good = serde_json::json!({"reach":{"kind":"mutual_sight","range":4}});
+        let decoded: Record = serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), good);
+        for reach in [
+            serde_json::json!({"kind":"mutual_sight"}),
+            serde_json::json!({"kind":"mutual_sight","range":4,"awareness":true}),
+            serde_json::json!(["mutual_sight", 4]),
+        ] {
+            assert!(serde_json::from_value::<Record>(serde_json::json!({"reach":reach})).is_err());
         }
     }
 
@@ -5213,6 +5262,7 @@ impl Effect {
                 #[serde(with = "mapped")]
                 amount: source::AmountExpr,
             },
+            SearchAdjacentGuises {},
             ObservePublicPlan {},
             ApplyQualifiedConditionToSource {
                 condition: String,
@@ -5263,6 +5313,7 @@ impl Effect {
                 duration,
             },
             Fields::Restore { resource, amount } => source::Effect::Restore { resource, amount },
+            Fields::SearchAdjacentGuises {} => source::Effect::SearchAdjacentGuises,
             Fields::ObservePublicPlan {} => source::Effect::ObservePublicPlan,
             Fields::ApplyQualifiedConditionToSource {
                 condition,

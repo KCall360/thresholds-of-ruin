@@ -1013,7 +1013,8 @@ fn collect_stats(
             | ModifierOp::Reduction { .. }
             | ModifierOp::TalentReduction { .. }
             | ModifierOp::GrantAbility { .. }
-            | ModifierOp::Locomotion { .. } | ModifierOp::Perception { .. } => {}
+            | ModifierOp::Locomotion { .. }
+            | ModifierOp::Perception { .. } => {}
         }
     }
     Ok(values)
@@ -1363,7 +1364,8 @@ fn fold(
                 ModifierOp::Add { .. }
                 | ModifierOp::Set { .. }
                 | ModifierOp::Flag { .. }
-                | ModifierOp::Locomotion { .. } | ModifierOp::Perception { .. } => {}
+                | ModifierOp::Locomotion { .. }
+                | ModifierOp::Perception { .. } => {}
             }
         }
     }
@@ -1485,6 +1487,15 @@ fn fold(
             crate::rules::StrikeSource::SelectedMelee => {}
         }
         let reach = match definition.reach {
+            crate::rules::Reach::MutualSight { range } => {
+                let range = i64::from(range) + i64::from(modifiers.range);
+                if !(1..=i64::from(crate::limits::SIGHT_RANGE)).contains(&range) {
+                    return Err(BuildError::DerivedLimit);
+                }
+                crate::rules::Reach::MutualSight {
+                    range: range as u16,
+                }
+            }
             crate::rules::Reach::Sight { range } => {
                 let range = i64::from(range) + i64::from(modifiers.range);
                 if !(1..=i64::from(crate::limits::SIGHT_RANGE)).contains(&range) {

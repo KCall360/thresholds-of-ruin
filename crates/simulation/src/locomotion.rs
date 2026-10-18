@@ -48,6 +48,7 @@ pub enum LocomotionValue {
     Stationary { enabled: bool },
     Flying { enabled: bool },
     Erratic { chance: Option<MovementChance> },
+    Confused { chance: Option<MovementChance> },
 }
 impl<'de> Deserialize<'de> for LocomotionValue {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -64,11 +65,16 @@ impl<'de> Deserialize<'de> for LocomotionValue {
                 #[serde(deserialize_with = "crate::bounded::required_option")]
                 chance: Option<MovementChance>,
             },
+            Confused {
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                chance: Option<MovementChance>,
+            },
         }
         Ok(match crate::bounded::named_map(d)? {
             Fields::Stationary { enabled } => Self::Stationary { enabled },
             Fields::Flying { enabled } => Self::Flying { enabled },
             Fields::Erratic { chance } => Self::Erratic { chance },
+            Fields::Confused { chance } => Self::Confused { chance },
         })
     }
 }
@@ -78,6 +84,8 @@ pub struct LocomotionCapabilities {
     pub stationary: bool,
     pub flying: bool,
     pub erratic: Option<MovementChance>,
+    /// Execution-only redirection of fresh ordinary horizontal movement.
+    pub confused: Option<MovementChance>,
 }
 impl LocomotionCapabilities {
     /// Grants combine by OR / strongest exact probability. Suppression wins
@@ -87,7 +95,8 @@ impl LocomotionCapabilities {
     ) -> Self {
         use crate::rules::{ModifierOp, Scope};
         let mut result = Self::default();
-        let (mut stationary_off, mut flying_off, mut erratic_off) = (false, false, false);
+        let (mut stationary_off, mut flying_off, mut erratic_off, mut confused_off) =
+            (false, false, false, false);
         for modifier in values.filter(|m| m.scope == Scope::Always) {
             if let ModifierOp::Locomotion { value } = modifier.op {
                 match value {
@@ -98,6 +107,17 @@ impl LocomotionCapabilities {
                     LocomotionValue::Flying { enabled } => {
                         result.flying |= enabled;
                         flying_off |= !enabled;
+                    }
+                    LocomotionValue::Confused { chance: None } => confused_off = true,
+                    LocomotionValue::Confused {
+                        chance: Some(chance),
+                    } => {
+                        if result.confused.is_none_or(|old| {
+                            u32::from(chance.numerator) * u32::from(old.denominator)
+                                > u32::from(old.numerator) * u32::from(chance.denominator)
+                        }) {
+                            result.confused = Some(chance.normalized());
+                        }
                     }
                     LocomotionValue::Erratic { chance: None } => erratic_off = true,
                     LocomotionValue::Erratic {
@@ -117,6 +137,9 @@ impl LocomotionCapabilities {
         result.flying &= !flying_off;
         if erratic_off {
             result.erratic = None;
+        }
+        if confused_off {
+            result.confused = None;
         }
         result
     }
@@ -148,3 +171,6 @@ impl crate::Game {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod confusion_tests;

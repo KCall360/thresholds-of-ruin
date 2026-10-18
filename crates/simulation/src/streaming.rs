@@ -2570,6 +2570,7 @@ mod tests {
         game.add_default_reference_points().unwrap();
         game.actors.get_mut(&watcher).unwrap().behavior.engagement =
             Some(crate::behavior::Engagement {
+                reference: crate::perception::ActorReferenceKind::Creature,
                 target: player,
                 location: at(1, 2),
                 last_seen: 0,
@@ -2611,6 +2612,7 @@ mod tests {
             .unwrap();
         game.actors.get_mut(&watcher).unwrap().behavior.engagement =
             Some(crate::behavior::Engagement {
+                reference: crate::perception::ActorReferenceKind::Creature,
                 target: player,
                 location: at(1, 2),
                 last_seen: 0,

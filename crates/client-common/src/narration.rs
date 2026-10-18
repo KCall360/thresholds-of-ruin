@@ -188,11 +188,16 @@ pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Obser
         None => "something".into(),
     };
     match event {
-        CombatEventView::UnseenAbility { target, outcome, .. } => {
+        CombatEventView::UnseenAbility {
+            target, outcome, ..
+        } => {
             let object = object(Some(*target));
-            if *outcome == AbilityOutcome::Miss { format!("Something attacks {object}, but misses.") }
-            else { format!("Something attacks {object}.") }
-        },
+            if *outcome == AbilityOutcome::Miss {
+                format!("Something attacks {object}, but misses.")
+            } else {
+                format!("Something attacks {object}.")
+            }
+        }
         CombatEventView::Ability {
             caster,
             target,

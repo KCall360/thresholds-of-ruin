@@ -2,7 +2,10 @@ use super::*;
 use crate::rules::{Modifier, ModifierOp, Scope};
 
 fn modifier(value: PerceptionValue) -> Modifier {
-    Modifier { scope: Scope::Always, op: ModifierOp::Perception { value } }
+    Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Perception { value },
+    }
 }
 
 fn guise(name: &str) -> GuiseAppearance {
@@ -19,7 +22,9 @@ fn capability_fold_is_order_independent_and_suppression_wins() {
     let mut sources = vec![
         modifier(PerceptionValue::Invisible { enabled: true }),
         modifier(PerceptionValue::SeeInvisible { enabled: true }),
-        modifier(PerceptionValue::ObjectGuise { appearance: Some(guise("chest")) }),
+        modifier(PerceptionValue::ObjectGuise {
+            appearance: Some(guise("chest")),
+        }),
         modifier(PerceptionValue::AmbushFromGuise { enabled: true }),
     ];
     let folded = PerceptionCapabilities::from_modifiers(sources.iter()).unwrap();
@@ -27,7 +32,10 @@ fn capability_fold_is_order_independent_and_suppression_wins() {
     assert!(folded.sight);
     assert_eq!(folded.object_guise, Some(guise("chest")));
     sources.reverse();
-    assert_eq!(PerceptionCapabilities::from_modifiers(sources.iter()).unwrap(), folded);
+    assert_eq!(
+        PerceptionCapabilities::from_modifiers(sources.iter()).unwrap(),
+        folded
+    );
     sources.extend([
         modifier(PerceptionValue::Invisible { enabled: false }),
         modifier(PerceptionValue::SeeInvisible { enabled: false }),
@@ -43,8 +51,12 @@ fn capability_fold_is_order_independent_and_suppression_wins() {
 #[test]
 fn contradictory_authored_guises_fail_in_either_source_order() {
     let mut sources = vec![
-        modifier(PerceptionValue::ObjectGuise { appearance: Some(guise("chest")) }),
-        modifier(PerceptionValue::ObjectGuise { appearance: Some(guise("urn")) }),
+        modifier(PerceptionValue::ObjectGuise {
+            appearance: Some(guise("chest")),
+        }),
+        modifier(PerceptionValue::ObjectGuise {
+            appearance: Some(guise("urn")),
+        }),
     ];
     assert!(PerceptionCapabilities::from_modifiers(sources.iter()).is_err());
     sources.reverse();
@@ -63,7 +75,11 @@ fn perception_source_records_reject_positional_extra_and_missing_nullable_fields
         assert!(serde_json::from_value::<PerceptionValue>(invalid).is_err());
     }
     let suppression = PerceptionValue::ObjectGuise { appearance: None };
-    assert_eq!(serde_json::from_value::<PerceptionValue>(serde_json::to_value(&suppression).unwrap()).unwrap(), suppression);
+    assert_eq!(
+        serde_json::from_value::<PerceptionValue>(serde_json::to_value(&suppression).unwrap())
+            .unwrap(),
+        suppression
+    );
     let mut invalid = modifier(PerceptionValue::Invisible { enabled: true });
     invalid.scope = Scope::VersusSource;
     assert!(crate::rules::validate_modifier_shapes(&[invalid]).is_err());
@@ -71,7 +87,11 @@ fn perception_source_records_reject_positional_extra_and_missing_nullable_fields
 
 #[test]
 fn guise_enters_once_and_source_loss_never_rearms_it() {
-    let source = PerceptionCapabilities { object_guise: Some(guise("chest")), ambush_from_guise: true, ..Default::default() };
+    let source = PerceptionCapabilities {
+        object_guise: Some(guise("chest")),
+        ambush_from_guise: true,
+        ..Default::default()
+    };
     let mut state = GuiseState::default();
     state.reconcile(&source, false);
     assert_eq!(state.appearance(), Some(&guise("chest")));
@@ -86,7 +106,10 @@ fn guise_enters_once_and_source_loss_never_rearms_it() {
 
 #[test]
 fn ordinary_later_ambush_grant_can_arm_only_the_unbroken_initial_guise() {
-    let mut source = PerceptionCapabilities { object_guise: Some(guise("chest")), ..Default::default() };
+    let mut source = PerceptionCapabilities {
+        object_guise: Some(guise("chest")),
+        ..Default::default()
+    };
     let mut state = GuiseState::default();
     state.reconcile(&source, false);
     assert!(!state.ambush_available());

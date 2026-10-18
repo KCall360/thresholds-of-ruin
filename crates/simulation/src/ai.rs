@@ -235,12 +235,37 @@ impl Game {
                 && self.preparation_still_available(preparation, Some(&snapshot.sight))
         });
         let committed = retained.filter(|preparation| preparation.has_prefix());
+        // An intact initial guise is stationary. Its only proactive hostility is
+        // this one owned adjacent known-foe ambush, never general mean aggression.
+        if actor.guise.appearance().is_some() && retained.is_none() {
+            if actor.guise.ambush_available() && self.condition_allows_voluntary_input(id) {
+                if let Some(foe) = view
+                    .visible_actors
+                    .iter()
+                    .filter(|other| {
+                        other.id != id
+                            && self.perceived_hostile(id, other.id, other.disclosure)
+                            && self.melee_reachable_in_scene(id, other.id, &snapshot.sight)
+                    })
+                    .min_by_key(|other| other.id)
+                {
+                    if let Some(plan) =
+                        self.choose_ai_ability(id, foe.id, &snapshot.sight, view, true)
+                    {
+                        return Some(AiDecision::ability(plan, ai, behavior));
+                    }
+                }
+            }
+            return Some(AiDecision::action(Action::Wait, ai, behavior));
+        }
         let mut search = self.route_search(id).ok();
         let mut route = |destination| search.as_mut()?.route(destination).ok();
         let candidate = view
             .visible_actors
             .iter()
-            .filter(|other| other.id != id && self.perceived_hostile(id, other.id, other.disclosure))
+            .filter(|other| {
+                other.id != id && self.perceived_hostile(id, other.id, other.disclosure)
+            })
             .min_by_key(|other| {
                 (
                     route(other.location).map_or(usize::MAX, |r| r.len()),
@@ -251,11 +276,10 @@ impl Game {
         // enemy, refresh memory or draw another wake chance.
         if retained.is_none() && self.condition_allows_voluntary_input(id) {
             if let Some(engagement) = behavior.engagement.as_mut() {
-                if let Some(visible) = view
-                    .visible_actors
-                    .iter()
-                    .find(|other| other.id == engagement.target && other.disclosure.reference() == Some(engagement.reference))
-                {
+                if let Some(visible) = view.visible_actors.iter().find(|other| {
+                    other.id == engagement.target
+                        && other.disclosure.reference() == Some(engagement.reference)
+                }) {
                     engagement.location = visible.location;
                     engagement.last_seen = self.actor_clock(id);
                 } else if view.location == engagement.location {
@@ -279,9 +303,9 @@ impl Game {
             }
         }
         let target = behavior.engagement.and_then(|entry| {
-            view.visible_actors
-                .iter()
-                .find(|other| other.id == entry.target && other.disclosure.reference() == Some(entry.reference))
+            view.visible_actors.iter().find(|other| {
+                other.id == entry.target && other.disclosure.reference() == Some(entry.reference)
+            })
         });
         let threat = behavior
             .engagement
@@ -433,7 +457,10 @@ impl Game {
         {
             // Remembered positions support pursuit, but only a currently
             // disclosed target can prompt a paid technique.
-            if ai.state != State::Flee && view.visible_actors.iter().any(|actor| actor.id == target && actor.disclosure.reference() == Some(reference))
+            if ai.state != State::Flee
+                && view.visible_actors.iter().any(|actor| {
+                    actor.id == target && actor.disclosure.reference() == Some(reference)
+                })
             {
                 if let Some(ability) =
                     self.choose_ai_ability(id, target, &snapshot.sight, view, false)
@@ -727,7 +754,8 @@ impl Game {
             direction: direction.try_into().ok()?,
         };
         let in_melee = view.visible_actors.iter().any(|other| {
-            self.perceived_hostile(actor, other.id, other.disclosure) && self.attack_available_in_scene(actor, other.id, sight)
+            self.perceived_hostile(actor, other.id, other.disclosure)
+                && self.attack_available_in_scene(actor, other.id, sight)
         });
         let eligible = |definition: &crate::rules::AbilityDef| {
             definition.invocation == InvocationKind::SelfStep
@@ -1066,6 +1094,7 @@ mod tests {
         let mut game = fixture();
         let AiDecision { ai, behavior, .. } = game.choose_ai(ActorId(2)).unwrap();
         let expected = Some(crate::behavior::Engagement {
+            reference: crate::perception::ActorReferenceKind::Creature,
             target: ActorId(1),
             location: at(1, 1, 1),
             last_seen: 0,
@@ -1800,6 +1829,7 @@ mod tests {
         )
         .unwrap();
         let engagement = Some(crate::behavior::Engagement {
+            reference: crate::perception::ActorReferenceKind::Creature,
             target: ActorId(1),
             location: at(1, 1, 1),
             last_seen: game.actor_clock(ActorId(2)),

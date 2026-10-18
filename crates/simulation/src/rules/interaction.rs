@@ -150,6 +150,7 @@ impl Ruleset {
                     | PlannedEffect::Restore { .. }
                     | PlannedEffect::RestoreAttribute { .. }
                     | PlannedEffect::RestoreMaximumHealth { .. }
+                    | PlannedEffect::SearchAdjacentGuises
                     | PlannedEffect::ObservePublicPlan
                     | PlannedEffect::ApplyQualifiedConditionToSource { .. } => false,
                 }),
@@ -204,6 +205,7 @@ impl Ruleset {
             | Effect::Restore { .. }
             | Effect::RestoreAttribute { .. }
             | Effect::RestoreMaximumHealth { .. }
+            | Effect::SearchAdjacentGuises
             | Effect::ObservePublicPlan
             | Effect::ApplyQualifiedConditionToSource { .. } => false,
         }
@@ -227,11 +229,15 @@ impl Ruleset {
         MODIFIER_VISITS.with(|visits| visits.set(visits.get() + modifiers.len()));
         // Catalog flag graphs and expansion sizes have already been validated.
         modifiers.iter().any(|modifier| match &modifier.op {
-            ModifierOp::Perception { value } => matches!(value,
+            ModifierOp::Perception { value } => matches!(
+                value,
                 crate::perception::PerceptionValue::Sight { enabled: false }
-                | crate::perception::PerceptionValue::SeeInvisible { enabled: false }
-                | crate::perception::PerceptionValue::Invisible { enabled: false }
+                    | crate::perception::PerceptionValue::SeeInvisible { enabled: false }
+                    | crate::perception::PerceptionValue::Invisible { enabled: false }
             ),
+            ModifierOp::Locomotion {
+                value: crate::locomotion::LocomotionValue::Confused { chance },
+            } => chance.is_some_and(|chance| chance.numerator > 0),
             ModifierOp::Locomotion { value } => matches!(
                 value,
                 crate::locomotion::LocomotionValue::Stationary { enabled: true }

@@ -16,6 +16,7 @@ use tor_simulation::{
 
 fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
     AbilityPlan {
+        ambush: None,
         actor: ActorId(1),
         invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
             target: ActorId(2),

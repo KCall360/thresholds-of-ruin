@@ -57,7 +57,7 @@ impl Game {
                     break;
                 }
                 if preparation.plan.work().item().is_some()
-                    && !self.visible_hostiles(id).is_subset(&preparation.threats)
+                    && !self.visible_threats(id).is_subset(&preparation.threats)
                 {
                     let mut outcome = self.actor_outcome(id)?;
                     outcome.interrupt(crate::lifecycle::Interruption::Suspend, self.tick)?;
@@ -179,11 +179,14 @@ impl Game {
                         }
                         self.finish_combat_diagnostic(diagnostic, outcome);
                         if next.is_none() {
-                            self.event_log.push(CombatEvent::SequenceEnded {
-                                actor: id,
-                                intention: resolved.intention,
-                                reason: SequenceEnd::Completed,
-                            });
+                            self.push_event(
+                                CombatEvent::SequenceEnded {
+                                    actor: id,
+                                    intention: resolved.intention,
+                                    reason: SequenceEnd::Completed,
+                                },
+                                None,
+                            )?;
                         }
                     }
                     Work::Drink { .. } if resolved.plan.on_success().is_empty() => {

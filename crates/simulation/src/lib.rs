@@ -33,6 +33,8 @@ pub mod attributes;
 pub mod behavior;
 mod bounded;
 pub mod combat;
+mod event_history;
+pub use event_history::{EventObservation, EventObservationWitness};
 pub mod conditions;
 pub mod cooldowns;
 pub mod costs;
@@ -165,6 +167,10 @@ pub enum Action {
         open: bool,
     },
     Move(Direction),
+    TouchApparentObject {
+        subject: ActorId,
+        quantity: Option<u64>,
+    },
     Take {
         item: ItemId,
         quantity: Option<u64>,
@@ -227,6 +233,11 @@ impl<'de> serde::Deserialize<'de> for Action {
                 open: bool,
             },
             Move(Direction),
+            TouchApparentObject {
+                subject: ActorId,
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                quantity: Option<u64>,
+            },
             Take {
                 item: ItemId,
                 quantity: Option<u64>,
@@ -267,6 +278,9 @@ impl<'de> serde::Deserialize<'de> for Action {
             },
             Fields::SetDoor { door, open } => Self::SetDoor { door, open },
             Fields::Move(direction) => Self::Move(direction),
+            Fields::TouchApparentObject { subject, quantity } => {
+                Self::TouchApparentObject { subject, quantity }
+            }
             Fields::Take { item, quantity } => Self::Take { item, quantity },
             Fields::Drop { item, quantity } => Self::Drop { item, quantity },
             Fields::Wait => Self::Wait,
@@ -307,6 +321,9 @@ pub enum GameError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    ApparentObjectTouched {
+        subject: ActorId,
+    },
     EscapeStarted {
         hold: linked_hold::HoldId,
     },
@@ -451,6 +468,8 @@ pub struct Game {
     combat: combat::CombatWorld,
     rules_rng: u64,
     event_log: Vec<combat::CombatEvent>,
+    event_receipts: event_history::EventReceipts,
+    event_origins: event_history::EventOrigins,
     /// Optional backend observations; deliberately excluded from checkpoints.
     combat_diagnostics: Option<Shared<resolution_diagnostics::CombatDiagnostics>>,
     survival_diagnostics: Option<Shared<survival_diagnostics::SurvivalBatch>>,
@@ -488,6 +507,8 @@ impl Clone for Game {
             combat: self.combat.clone(),
             rules_rng: self.rules_rng,
             event_log: self.event_log.clone(),
+            event_receipts: self.event_receipts.clone(),
+            event_origins: self.event_origins.clone(),
             combat_diagnostics: self.combat_diagnostics.clone(),
             survival_diagnostics: self.survival_diagnostics.clone(),
             physics: self.physics.clone(),
@@ -635,6 +656,8 @@ impl Game {
             combat: combat::CombatWorld::new(),
             rules_rng: seed,
             event_log: Vec::new(),
+            event_receipts: Default::default(),
+            event_origins: Default::default(),
             combat_diagnostics: None,
             survival_diagnostics: None,
             physics: physics::Physics::default(),

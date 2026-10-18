@@ -74,7 +74,9 @@ impl Game {
         }
         let (scene, sight) = self.scene_snapshot_at_placement(actor, placement)?;
         Ok(RecoveryContext::Known {
-            sensed_hostile: !self.hostiles_in_projection(actor, &scene, &sight, Some(placement)).is_empty(),
+            sensed_hostile: !self
+                .hostiles_in_projection(actor, &scene, &sight, Some(placement))
+                .is_empty(),
         })
     }
 

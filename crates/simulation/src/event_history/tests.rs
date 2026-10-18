@@ -1,0 +1,502 @@
+use super::*;
+use crate::abilities::{AttemptedParticipation, Outcome, OutcomeStatus, ResolvedEffect};
+use crate::content_ids::{AbilityId, TemplateId};
+use crate::perception::{ActorDisclosure, PerceptionValue};
+use crate::rules::{Modifier, ModifierOp, Scope};
+use tor_world::{Location, Position, RegionId};
+
+fn at(x: i32, y: i32) -> Location {
+    Location {
+        region: RegionId(1),
+        position: Position { x, y, z: 0 },
+    }
+}
+fn fixture() -> Game {
+    let species = crate::test_creatures::species();
+    let species_id = species.id.clone();
+    let mut invisible =
+        crate::creatures::Template::new(TemplateId::new("event_invisible").unwrap(), 0);
+    invisible.modifiers.push(Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Perception {
+            value: PerceptionValue::Invisible { enabled: true },
+        },
+    });
+    let mut detecting =
+        crate::creatures::Template::new(TemplateId::new("event_detecting").unwrap(), 0);
+    detecting.modifiers.push(Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Perception {
+            value: PerceptionValue::SeeInvisible { enabled: true },
+        },
+    });
+    let content = crate::creatures::Content::new(
+        crate::test_creatures::ruleset(),
+        crate::creatures::ScenarioCatalog {
+            species: [(species_id.clone(), species)].into(),
+            templates: [
+                (invisible.id.clone(), invisible),
+                (detecting.id.clone(), detecting),
+            ]
+            .into(),
+        },
+    )
+    .unwrap();
+    let build = crate::creatures::CreatureBuild::new(
+        content.clone(),
+        species_id,
+        crate::progression::HdLedger::seeded(vec![crate::progression::HdSource::Racial], 42)
+            .unwrap(),
+        crate::attributes::ManaBinding::Intellect,
+        [
+            crate::attributes::Skill::Deception,
+            crate::attributes::Skill::Persuasion,
+        ],
+    )
+    .unwrap();
+    let mut game = Game::two_room_in_stone(42, content);
+    for location in [at(1, 1), at(2, 1), at(2, 2)] {
+        let id = game
+            .spawn_actor(location, std::num::NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.configure_creature(
+            id,
+            crate::CreatureIdentity {
+                name: format!("actor {}", id.0),
+                faction: "neutral".into(),
+            },
+            build.clone(),
+        )
+        .unwrap();
+    }
+    game
+}
+fn template(game: &mut Game, actor: ActorId, name: Option<&str>) {
+    let mut build = game.creature(actor).unwrap().build().clone();
+    build
+        .set_templates(
+            name.map(|name| vec![TemplateId::new(name).unwrap()])
+                .unwrap_or_default(),
+        )
+        .unwrap();
+    game.rebuild_creature(actor, build).unwrap();
+}
+fn damage(actor: ActorId, target: ActorId, amount: u32) -> Outcome {
+    Outcome {
+        actor,
+        target,
+        ability: Some(AbilityId::new("basic_melee").unwrap()),
+        intention: None,
+        result: OutcomeStatus::Applied,
+        check: None,
+        participation: AttemptedParticipation::target(),
+        target_rider_participated: false,
+        effects: vec![ResolvedEffect::Damage { amount }],
+    }
+}
+fn events(game: &Game, actor: ActorId) -> Vec<DisclosedCombatEvent> {
+    game.observe(actor).unwrap().combat.unwrap().events
+}
+fn restored(game: &Game) -> Game {
+    let mut shared = crate::checkpoint::SharedState::default();
+    let snapshot = game.checkpoint(&mut shared);
+    let snapshot = serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap()
+}
+fn host_damage(game: &mut Game, amount: u32) {
+    game.host_region_continuation = true;
+    game.begin_event_batch().unwrap();
+    game.apply_outcome(damage(ActorId(1), ActorId(2), amount))
+        .unwrap();
+    game.seal_participant_events().unwrap();
+    game.host_region_continuation = false;
+}
+fn capture(game: &mut Game, actor: ActorId, witness: &EventObservationWitness) -> Observation {
+    let (mut view, _, proof) = game.observe_event_scene(actor).unwrap();
+    game.record_event_observation(witness, &proof, &mut view)
+        .unwrap();
+    view
+}
+
+#[test]
+fn missing_receipts_never_reclassify_on_free_reads_or_later_commit() {
+    let mut game = fixture();
+    host_damage(&mut game, 1);
+    let cold = game.clone();
+    for _ in 0..3 {
+        assert!(events(&game, ActorId(3)).is_empty());
+    }
+    assert_eq!(game, cold);
+    let witness = game.event_observation_witness();
+    assert!(!capture(&mut game, ActorId(3), &witness)
+        .combat
+        .unwrap()
+        .events
+        .is_empty());
+    game.seal_event_observations().unwrap();
+    let saved = events(&game, ActorId(3));
+    template(&mut game, ActorId(1), Some("event_invisible"));
+    assert_eq!(events(&game, ActorId(3)), saved);
+    assert_eq!(events(&restored(&game), ActorId(3)), saved);
+}
+
+#[test]
+fn same_generation_append_keeps_the_hidden_prefix_frozen() {
+    let mut game = fixture();
+    template(&mut game, ActorId(2), Some("event_invisible"));
+    game.apply(damage(ActorId(1), ActorId(2), 1)).unwrap();
+    let first = events(&game, ActorId(1));
+    assert!(matches!(
+        first[0],
+        DisclosedCombatEvent::Ability {
+            target_reference: Some(ActorReferenceKind::Contact),
+            ..
+        }
+    ));
+    let generation = game.event_receipts.generation;
+    template(&mut game, ActorId(1), Some("event_detecting"));
+    game.apply(damage(ActorId(1), ActorId(2), 1)).unwrap();
+    let after = events(&game, ActorId(1));
+    assert_eq!(game.event_receipts.generation, generation);
+    assert_eq!(after[0], first[0]);
+    assert!(matches!(
+        after[1],
+        DisclosedCombatEvent::Ability {
+            target_reference: Some(ActorReferenceKind::Creature),
+            ..
+        }
+    ));
+    assert_eq!(events(&restored(&game), ActorId(1)), after);
+}
+
+#[test]
+fn anonymous_lethal_hit_and_death_stay_anonymous_beside_visible_corpse() {
+    let mut game = fixture();
+    template(&mut game, ActorId(2), Some("event_invisible"));
+    game.apply(damage(ActorId(1), ActorId(2), 1_000_000))
+        .unwrap();
+    let view = game.observe(ActorId(1)).unwrap();
+    let history = &view.combat.as_ref().unwrap().events;
+    assert!(history.iter().any(|event| matches!(
+        event,
+        DisclosedCombatEvent::Ability {
+            target: Some(ActorId(2)),
+            target_reference: Some(ActorReferenceKind::Contact),
+            ..
+        }
+    )));
+    assert!(history.iter().any(|event| matches!(
+        event,
+        DisclosedCombatEvent::Died {
+            actor: ActorId(2),
+            reference: ActorReferenceKind::Contact
+        }
+    )));
+    assert!(view.ground_items.iter().any(|item| item
+        .corpse
+        .as_ref()
+        .is_some_and(|corpse| corpse.actor == ActorId(2))));
+    assert_eq!(events(&restored(&game), ActorId(1)), *history);
+}
+
+#[test]
+fn public_act_and_apply_seal_before_snapshot_and_keep_queries_pure() {
+    let mut game = fixture();
+    game.act(ActorId(1), crate::Action::Wait).unwrap();
+    game.apply(damage(ActorId(2), ActorId(1), 1)).unwrap();
+    let before = game.clone();
+    let rng = game.rules_rng;
+    let tick = game.tick();
+    let expected = events(&game, ActorId(1));
+    for _ in 0..3 {
+        assert_eq!(events(&game, ActorId(1)), expected);
+    }
+    assert_eq!(game, before);
+    assert_eq!((game.rules_rng, game.tick()), (rng, tick));
+    assert_eq!(events(&restored(&game), ActorId(1)), expected);
+    assert!(game.event_origins.entries.is_empty());
+}
+
+#[test]
+fn event_observer_proof_binds_owner_generation_and_visibility() {
+    let mut game = fixture();
+    host_damage(&mut game, 1);
+    let witness = game.event_observation_witness();
+    let (view, _, proof) = game.observe_event_scene(ActorId(3)).unwrap();
+    let mut wrong_owner = view.clone();
+    wrong_owner.actor = ActorId(1);
+    assert!(game
+        .record_event_observation(&witness, &proof, &mut wrong_owner)
+        .is_err());
+    let before = game.clone();
+    template(&mut game, ActorId(3), Some("event_detecting"));
+    assert!(game
+        .record_event_observation(&witness, &proof, &mut view.clone())
+        .is_err());
+    assert_eq!(game.event_receipts, before.event_receipts);
+}
+
+#[test]
+fn observer_capture_rollback_and_unchanged_reads_preserve_shared_receipts() {
+    let mut game = fixture();
+    host_damage(&mut game, 1);
+    let committed = game.clone();
+    let rows = game.event_receipts.observers.clone();
+    assert!(game.event_receipts.observers.shares_storage(&rows));
+    let mut candidate = game.clone();
+    let witness = candidate.event_observation_witness();
+    capture(&mut candidate, ActorId(3), &witness);
+    assert!(!candidate.event_receipts.observers.shares_storage(&rows));
+    assert!(game.event_receipts.observers.shares_storage(&rows));
+    drop(candidate); // A rejected host/storage candidate has no publication.
+    assert_eq!(game, committed);
+    let _ = game.observe(ActorId(3)).unwrap();
+    assert!(game.event_receipts.observers.shares_storage(&rows));
+}
+
+#[test]
+fn known_ability_and_death_only_batches_capture_without_extra_scenes() {
+    let mut game = fixture();
+    host_damage(&mut game, 1);
+    let witness = game.event_observation_witness();
+    let (mut view, _, proof) = game.observe_event_scene(ActorId(3)).unwrap();
+    let counts = crate::diagnostics::work_counts();
+    game.record_event_observation(&witness, &proof, &mut view)
+        .unwrap();
+    assert_eq!(
+        crate::diagnostics::work_counts().ordinary_scenes,
+        counts.ordinary_scenes
+    );
+    assert!(!view.combat.unwrap().events.is_empty());
+    game.seal_event_observations().unwrap();
+    game.host_region_continuation = true;
+    game.begin_event_batch().unwrap();
+    let origin = game.capture_event_origin(ActorId(1), ActorId(2));
+    game.push_event(CombatEvent::Died { actor: ActorId(2) }, Some(origin))
+        .unwrap();
+    game.seal_participant_events().unwrap();
+    game.host_region_continuation = false;
+    assert!(game.observation_knowledge_candidates().unwrap().is_empty());
+    let witness = game.event_observation_witness();
+    let (mut view, _, proof) = game.observe_event_scene(ActorId(3)).unwrap();
+    let counts = crate::diagnostics::work_counts();
+    game.record_event_observation(&witness, &proof, &mut view)
+        .unwrap();
+    assert_eq!(
+        crate::diagnostics::work_counts().ordinary_scenes,
+        counts.ordinary_scenes
+    );
+    assert!(matches!(
+        view.combat.unwrap().events.as_slice(),
+        [DisclosedCombatEvent::Died { .. }]
+    ));
+}
+
+#[test]
+fn restored_receipts_reject_stale_generation_kind_owner_and_watermark() {
+    let mut game = fixture();
+    game.apply(damage(ActorId(1), ActorId(2), 1)).unwrap();
+    let baseline = serde_json::to_value(&game.event_receipts).unwrap();
+    for field in [
+        "generation",
+        "through",
+        "kind",
+        "actor",
+        "participant",
+        "source",
+    ] {
+        let mut value = baseline.clone();
+        let row = &mut value["observers"]["1"];
+        match field {
+            "generation" => row["generation"] = serde_json::json!(99),
+            "through" => row["through"] = serde_json::json!(99),
+            "kind" => row["entries"][0]["key"]["kind"] = serde_json::json!("died"),
+            "actor" => row["entries"][0]["key"]["actor"] = serde_json::json!(3),
+            "participant" => row["entries"][0]["participant"] = serde_json::json!(false),
+            "source" => row["entries"][0]["source"] = serde_json::json!("contact"),
+            _ => unreachable!(),
+        }
+        let mut corrupt = game.clone();
+        corrupt.event_receipts = serde_json::from_value(value).unwrap();
+        assert!(!corrupt.event_receipts_valid(), "{field}");
+        let mut shared = crate::checkpoint::SharedState::default();
+        assert!(Game::restore_checkpoint(
+            corrupt.checkpoint(&mut shared),
+            &shared,
+            corrupt.content().clone()
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn short_or_missing_receipt_does_not_fall_back_to_current_visibility() {
+    let mut game = fixture();
+    game.apply(damage(ActorId(1), ActorId(2), 1)).unwrap();
+    assert_eq!(
+        game.actor_disclosure(ActorId(1), ActorId(2)).unwrap(),
+        ActorDisclosure::Creature
+    );
+    game.event_receipts
+        .observers
+        .get_mut(&ActorId(1))
+        .unwrap()
+        .through = 0;
+    assert!(events(&game, ActorId(1)).is_empty());
+    game.event_receipts.observers.remove(&ActorId(1));
+    assert!(events(&game, ActorId(1)).is_empty());
+}
+
+#[test]
+fn changed_visibility_omits_third_party_death_but_keeps_causal_participant() {
+    let mut game = fixture();
+    host_damage(&mut game, 1_000_000);
+    let witness = game.event_observation_witness();
+    let third = capture(&mut game, ActorId(3), &witness);
+    assert!(third.combat.unwrap().events.is_empty());
+    assert!(events(&game, ActorId(1)).iter().any(|event| matches!(
+        event,
+        DisclosedCombatEvent::Died {
+            actor: ActorId(2),
+            ..
+        }
+    )));
+    game.seal_event_observations().unwrap();
+    assert!(events(&restored(&game), ActorId(3)).is_empty());
+}
+
+#[test]
+fn frozen_prefix_cannot_be_removed_and_failed_receipt_capacity_is_atomic() {
+    let mut game = fixture();
+    game.apply(damage(ActorId(1), ActorId(2), 1)).unwrap();
+    let before = game.clone();
+    assert!(game.take_event_suffix(0).is_err());
+    assert_eq!(game, before);
+    game.event_receipts.bindings = crate::limits::EVENT_RECEIPTS;
+    let full = game.clone();
+    assert!(game.apply(damage(ActorId(1), ActorId(2), 1)).is_err());
+    assert_eq!(game, full);
+}
+
+#[test]
+fn ordinary_actor_visibility_epoch_ignores_receipt_and_knowledge_writes() {
+    let mut game = fixture();
+    assert!(game.actors.contextual_recovery_owners().next().is_none());
+    let before = game.actors.visibility_epoch();
+    game.actors
+        .get_mut(&ActorId(3))
+        .unwrap()
+        .knowledge
+        .insert("fixture_fact".into());
+    assert_eq!(game.actors.visibility_epoch(), before);
+    template(&mut game, ActorId(3), Some("event_detecting"));
+    assert_ne!(game.actors.visibility_epoch(), before);
+    host_damage(&mut game, 1);
+    let witness = game.event_observation_witness();
+    let before = game.actors.visibility_epoch();
+    capture(&mut game, ActorId(3), &witness);
+    assert_eq!(game.actors.visibility_epoch(), before);
+}
+
+#[test]
+fn cold_and_warm_free_queries_produce_identical_host_receipts() {
+    let base = fixture();
+    let mut cold = base.clone();
+    let mut warm = base;
+    for id in [ActorId(1), ActorId(2), ActorId(3)] {
+        warm.observe(id).unwrap();
+    }
+    for game in [&mut cold, &mut warm] {
+        host_damage(game, 1);
+        let witness = game.event_observation_witness();
+        for id in [ActorId(1), ActorId(2), ActorId(3)] {
+            capture(game, id, &witness);
+        }
+        game.seal_event_observations().unwrap();
+    }
+    assert_eq!(cold.event_receipts, warm.event_receipts);
+    assert_eq!(cold, warm);
+}
+
+#[test]
+fn own_condition_interruption_and_escape_feedback_need_no_counterpart_identity() {
+    let mut game = fixture();
+    template(&mut game, ActorId(2), Some("event_invisible"));
+    game.apply_effects(
+        ActorId(1),
+        &[crate::rules::Effect::ApplyCondition {
+            condition: crate::content_ids::ConditionId::new("readied").unwrap(),
+            duration: 100,
+        }],
+    )
+    .unwrap();
+    assert!(events(&game, ActorId(1))
+        .iter()
+        .any(|event| matches!(event, DisclosedCombatEvent::Condition { .. })));
+    game.push_event(
+        CombatEvent::Interrupted {
+            actor: ActorId(1),
+            intention: None,
+        },
+        None,
+    )
+    .unwrap();
+    game.push_event(
+        CombatEvent::EscapeResolved {
+            actor: ActorId(1),
+            hold: crate::linked_hold::HoldId(1),
+            success: true,
+            intention: None,
+        },
+        None,
+    )
+    .unwrap();
+    game.seal_participant_events().unwrap();
+    let history = events(&game, ActorId(1));
+    assert!(history.iter().any(|event| matches!(
+        event,
+        DisclosedCombatEvent::Interrupted { actor: ActorId(1) }
+    )));
+    assert!(history.iter().any(|event| matches!(
+        event,
+        DisclosedCombatEvent::EscapeResolved { success: true, .. }
+    )));
+    assert!(events(&game, ActorId(3)).is_empty());
+}
+
+#[test]
+fn participant_suffix_cost_does_not_rescan_or_copy_a_unique_retained_prefix() {
+    let mut game = fixture();
+    // Internal suffix publication avoids the deliberate public transaction COW.
+    // The completed prefix is immutable while the same generation grows.
+    for _ in 0..32 {
+        game.push_event(
+            CombatEvent::Interrupted {
+                actor: ActorId(1),
+                intention: None,
+            },
+            None,
+        )
+        .unwrap();
+        game.seal_participant_events().unwrap();
+    }
+    let counts = crate::diagnostics::work_counts();
+    game.push_event(
+        CombatEvent::Interrupted {
+            actor: ActorId(1),
+            intention: None,
+        },
+        None,
+    )
+    .unwrap();
+    game.seal_participant_events().unwrap();
+    let after = crate::diagnostics::work_counts();
+    assert_eq!(
+        after.event_receipt_cow_bindings,
+        counts.event_receipt_cow_bindings
+    );
+    assert!(
+        after.event_receipt_binding_inspections - counts.event_receipt_binding_inspections < 16
+    );
+    assert_eq!(game.event_receipts.observers[&ActorId(1)].entries.len(), 33);
+}

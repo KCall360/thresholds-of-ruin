@@ -52,7 +52,7 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
         | s::rules::Effect::Nourish { .. }
         | s::rules::Effect::LoseMaximumHealth { .. }
         | s::rules::Effect::RestoreMaximumHealth { .. } => 1,
-        s::rules::Effect::ObservePublicPlan
+        s::rules::Effect::SearchAdjacentGuises | s::rules::Effect::ObservePublicPlan
         | s::rules::Effect::StepSelfOneCell
         | s::rules::Effect::DrainLatestHitDie
         | s::rules::Effect::RestoreHitDie => 0,

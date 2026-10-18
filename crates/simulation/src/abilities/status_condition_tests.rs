@@ -794,7 +794,7 @@ fn boundary_membership_retains_explicit_ai_require_and_does_not_invent_prior_inp
 
     let (mut game, intention) = sequence(true);
     game.cancel_intention(ActorId(1), intention).unwrap();
-    game.begin_action_boundary(ActorId(1));
+    game.begin_action_boundary(ActorId(1)).unwrap();
     apply(&mut game, 200);
     assert!(!game.combat.input_boundaries.contains_key(&ActorId(1)));
     game.configure_ai(ActorId(1), crate::ai::AiProfile::general())

@@ -417,6 +417,8 @@ fn combat_views_carry_events_and_injury_as_data() {
         view.events,
         [
             DisclosedCombatEvent::Ability {
+                caster_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
+                target_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
                 strike: Some(0),
                 id: super::abilities::id("basic_melee"),
                 name: "Attack".into(),
@@ -472,6 +474,8 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
     .unwrap();
     let view = game.observe(ActorId(1)).unwrap().combat.unwrap();
     assert!(view.events.contains(&DisclosedCombatEvent::Ability {
+        caster_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
+        target_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
         strike: Some(0),
         id: super::abilities::id("basic_melee"),
         name: "Attack".into(),
@@ -480,6 +484,8 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
         outcome: OutcomeStatus::Unaffected,
     }));
     assert!(view.events.contains(&DisclosedCombatEvent::Ability {
+        caster_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
+        target_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
         strike: Some(0),
         id: super::abilities::id("basic_melee"),
         name: "Attack".into(),
@@ -496,6 +502,8 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
     assert!(!view.events.iter().any(|e| matches!(
         e,
         DisclosedCombatEvent::Ability {
+            caster_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
+            target_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
             strike: Some(0),
             outcome: OutcomeStatus::Unaffected,
             ..
@@ -529,6 +537,8 @@ fn a_death_is_an_event_naming_the_dead() {
         view.events,
         [
             DisclosedCombatEvent::Ability {
+                caster_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
+                target_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
                 strike: Some(0),
                 id: super::abilities::id("basic_melee"),
                 name: "Attack".into(),
@@ -536,7 +546,10 @@ fn a_death_is_an_event_naming_the_dead() {
                 target: Some(ActorId(1)),
                 outcome: OutcomeStatus::Applied,
             },
-            DisclosedCombatEvent::Died { actor: ActorId(1) },
+            DisclosedCombatEvent::Died {
+                actor: ActorId(1),
+                reference: tor_simulation::perception::ActorReferenceKind::Creature
+            },
         ]
     );
 }

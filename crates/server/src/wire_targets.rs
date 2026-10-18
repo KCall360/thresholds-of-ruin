@@ -50,7 +50,11 @@ impl TargetScope {
     pub fn contact(&self, identity: ActorId) -> ActorTarget {
         ActorTarget::from_digest(self.digest(b'c', identity.0))
     }
-    pub fn actor_reference(&self, identity: ActorId, kind: tor_simulation::perception::ActorReferenceKind) -> ActorTarget {
+    pub fn actor_reference(
+        &self,
+        identity: ActorId,
+        kind: tor_simulation::perception::ActorReferenceKind,
+    ) -> ActorTarget {
         match kind {
             tor_simulation::perception::ActorReferenceKind::Creature => self.actor(identity),
             tor_simulation::perception::ActorReferenceKind::Contact => self.contact(identity),
@@ -110,6 +114,50 @@ mod tests {
         );
         assert!(scope.hold(hold).to_string().parse::<ActorTarget>().is_err());
     }
+    #[test]
+    fn contact_and_apparent_domains_are_stable_unlinked_and_observer_scoped() {
+        let owner = TargetScope::new(Uuid::from_u128(1), ActorId(1));
+        let restored = TargetScope::new(Uuid::from_u128(1), ActorId(1));
+        let identity = ActorId(7);
+        let tokens = [
+            owner.actor(identity).to_string(),
+            owner.contact(identity).to_string(),
+            owner.apparent_object(identity).to_string(),
+            owner.item(ItemId(identity.0)).to_string(),
+            owner.appearance_seed(identity).to_string(),
+        ];
+        for (index, token) in tokens.iter().enumerate() {
+            for other in &tokens[index + 1..] {
+                assert_ne!(&token[2..], &other[2..]);
+            }
+        }
+        assert_eq!(owner.contact(identity), restored.contact(identity));
+        assert_eq!(
+            owner.apparent_object(identity),
+            restored.apparent_object(identity)
+        );
+        for other in [
+            TargetScope::new(Uuid::from_u128(1), ActorId(2)),
+            TargetScope::new(Uuid::from_u128(2), ActorId(1)),
+        ] {
+            assert_ne!(owner.contact(identity), other.contact(identity));
+            assert_ne!(
+                owner.apparent_object(identity),
+                other.apparent_object(identity)
+            );
+        }
+        assert_ne!(owner.contact(identity), owner.contact(ActorId(8)));
+        assert_ne!(
+            owner.apparent_object(identity),
+            owner.apparent_object(ActorId(8))
+        );
+        assert!(owner
+            .apparent_object(identity)
+            .to_string()
+            .parse::<ActorTarget>()
+            .is_err());
+    }
+
     // Independent Python stdlib hmac/SHA-256 calculation of the declared byte layout.
     const VECTOR: &str = "a_7a23df737ca869f84c95d05f4f08f2bbc00d21675a207b468be8d127ebf821f8";
 

@@ -40,3 +40,7 @@ pub const STRIKES: usize = 16;
 pub const RIDERS_PER_STRIKE: usize = 8;
 pub const EFFECTS_PER_SEQUENCE: usize = 256;
 pub const DESCRIPTORS_PER_SEQUENCE: usize = 256;
+
+/// Authoritative current-batch events and compact observer bindings.
+pub const EVENTS_PER_BATCH: usize = 65_536;
+pub const EVENT_RECEIPTS: usize = 262_144;

@@ -381,7 +381,7 @@ class RogueActivationSourceTests(unittest.TestCase):
         driver.directory, driver.bin, driver.suffix = Path("unused-output"), Path("compiler-bin"), ""
         manifest = encounter_sources()["manifest"]
         shape = population_shape(manifest)
-        self.assertEqual(shape, "reviewed_twenty_one_species_input")
+        self.assertEqual(shape, "reviewed_twenty_four_species_input")
 
         def candidate(output, compiler, **kwargs):
             return {"format": "tor-rogue-activation-inputs-v2",

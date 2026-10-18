@@ -30,7 +30,7 @@ or route acceptance. Current route CI must still qualify the adapted fixture.
 New campaigns have distinct source fingerprints and cannot resume an earlier
 pilot with changed inputs. This is experimental input, not a historical save reader.
 The arm name remains unchanged when the bundled package
-selects twenty-one species: it always names this historical comparator, never the
+selects twenty-four species: it always names this historical comparator, never the
 current production manifest. Its independent gameplay fixture is unchanged and lacks the
 complete Vampire catalog/rule closure needed as an eight-species generator source.
 The retained pilot candidate is a separately frozen eight-species E/S/H/I/Z/Q/U/V
@@ -287,9 +287,14 @@ must resolve those pinned dependencies and compile both arms. Tests use the
 committed E/S fixture as the independent `production` arm and generate their
 candidate from an explicitly supplied supported source package; they need no Git
 history, network or environment overrides. The strict candidate generator accepts
-the independently reviewed 21-species input with room Gold, then conditions it to
-the retained eighteen-species, four-stage diagnostic output without L/N/O, the
-Leprechaun birth-Gold pool or room-Gold stage. The oracle pins activation policy,
+the independently reviewed 21-species input with room Gold and a separate exact
+24-species input adding M/P/X. Both condition to the retained eighteen-species,
+four-stage diagnostic output without L/N/O or M/P/X, the Leprechaun birth-Gold
+pool or room-Gold stage. The 21-species oracle/result is unchanged. The new
+24-species oracle retains M's upper-clamp open tail, exact M/P/X birth policies
+and appended choice order; overlapping depth bands or policy drift reject.
+Accepting the new input does not qualify an expanded encounter study.
+Each oracle pins activation policy,
 not arbitrary supplied catalog/rules bytes; source closure and resolved package
 rules remain retained and fingerprinted. New generations have their own source
 fingerprints and qualification; an
@@ -304,18 +309,19 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 The corresponding create API requires `source_package` and `source_provenance`;
 provenance must be a nonempty JSON object with a nonempty string `reference`.
 The new diagnostic inventory records observed `source_population_shape`
-(`preactivation_es`, `canonical_eighteen_species` or
-`reviewed_twenty_one_species_input`), explicit input/output population scopes,
+(`preactivation_es`, `canonical_eighteen_species`,
+`reviewed_twenty_one_species_input` or `reviewed_twenty_four_species_input`),
+explicit input/output population scopes,
 package provenance and separate package/tool/compiler-dependency hashes, including
 the independent input oracle. Its `production_mutated = false` and
 diagnostic artifact purpose replace the obsolete global `production_activation`
 claim. See [generator contract](arena.md#rogue-roster-study-and-bounded-candidate-inputs).
 The candidate generator's declared target remains the eighteen-species population.
 Its retained output scope and historical input labels are preserved rather than
-relabeled to match current 21-species production. The retained eight-species pilot
+relabeled to match current 24-species production. The retained eight-species pilot
 remains old-source evidence, not acceptance of later roster additions, flight, linked holds,
-ordinary restoration stock, theft or Gold. Extending these studies to L/N/O and
-room Gold is separate from the production feature batch.
+ordinary restoration stock, theft, Gold or M/P/X perception. Extending these studies to L/N/O and
+room Gold and M/P/X is separate from the production feature batch.
 These new results do not rewrite historical inventories, report schemas, cohort
 order or source identities. Resume an existing campaign from its retained sources
 and packages; never regenerate them from the current bundled package.

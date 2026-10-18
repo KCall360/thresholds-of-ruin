@@ -246,6 +246,7 @@ impl Game {
             .map(|cell| cell.location)
             .collect::<BTreeSet<_>>();
         let visible = |location: Location| cells.contains(&location);
+        let eyes: BTreeSet<_> = sight.iter().map(|cell| cell.location).collect();
         let perceived = self.perception_projection(id, scene, sight)?;
         let door_base = |location: Location| {
             self.world
@@ -261,9 +262,20 @@ impl Game {
         let mut item_interactions = Vec::new();
         for (item_id, item) in self.items.perceived(id, &cells) {
             crate::diagnostics::item_view(item.spec.concealed);
-            let identified = !item.spec.concealed || actor.knowledge.contains(&item.spec.identity);
+            let identified = if item.corpse.is_some() {
+                actor.knowledge.contains(&item.spec.identity)
+                    || match item.location {
+                        ItemLocation::Carried(owner) => owner == id,
+                        ItemLocation::Ground(location) => eyes.contains(&location),
+                    }
+            } else {
+                !item.spec.concealed || actor.knowledge.contains(&item.spec.identity)
+            };
+            let anonymous_corpse = item.corpse.is_some() && !identified;
             let name = if identified {
                 &item.spec.name
+            } else if anonymous_corpse {
+                "corpse"
             } else {
                 &item.spec.appearance
             };
@@ -283,16 +295,22 @@ impl Game {
                         class: item.spec.class,
                         description: item_description(name),
                         id: item_id,
-                        name: name.clone(),
+                        name: name.to_owned(),
                         quantity: item.quantity,
-                        appearance: item.spec.appearance.clone(),
+                        appearance: if anonymous_corpse {
+                            "corpse".into()
+                        } else {
+                            item.spec.appearance.clone()
+                        },
                         identified,
                         supply_reachable: known_supply.is_some()
                             && self.touches_supply(id, location),
                         known_supply,
                         known_currency: identified.then_some(item.spec.currency).flatten(),
                         location,
-                        asset: item.spec.asset.clone(),
+                        asset: (!anonymous_corpse)
+                            .then(|| item.spec.asset.clone())
+                            .flatten(),
                     });
                 }
                 ItemLocation::Carried(owner) if owner == id => {
@@ -332,13 +350,19 @@ impl Game {
                         class: item.spec.class,
                         description: item_description(name),
                         id: item_id,
-                        name: name.clone(),
+                        name: name.to_owned(),
                         quantity: item.quantity,
-                        appearance: item.spec.appearance.clone(),
+                        appearance: if anonymous_corpse {
+                            "corpse".into()
+                        } else {
+                            item.spec.appearance.clone()
+                        },
                         identified,
                         known_supply,
                         known_currency: identified.then_some(item.spec.currency).flatten(),
-                        asset: item.spec.asset.clone(),
+                        asset: (!anonymous_corpse)
+                            .then(|| item.spec.asset.clone())
+                            .flatten(),
                     });
                 }
                 _ => {}
@@ -347,8 +371,11 @@ impl Game {
         let completed: Vec<_> = self
             .event_log
             .iter()
-            .filter_map(|event| match event {
-                crate::combat::CombatEvent::ItemCompleted { actor, work, .. } if *actor == id => {
+            .enumerate()
+            .filter_map(|(index, event)| match event {
+                crate::combat::CombatEvent::ItemCompleted { actor, work, .. }
+                    if *actor == id && self.owns_event_receipt(id, index) =>
+                {
                     Some(work.clone())
                 }
                 _ => None,
@@ -412,15 +439,22 @@ impl Game {
                 .ok_or(GameError::InvalidLocation)?
                 .clone(),
             ground_items,
-            apparent_objects: perceived.iter().filter_map(|(subject, perceived)| {
-                if perceived.disclosure != crate::perception::ActorDisclosure::ApparentObject || !self.actors[subject].alive() { return None; }
-                let state = &self.actors[subject];
-                visible(state.location).then(|| crate::perception::ApparentObjectView {
-                    subject: *subject,
-                    location: state.location,
-                    appearance: state.guise.appearance().expect("classified guise").clone(),
+            apparent_objects: perceived
+                .iter()
+                .filter_map(|(subject, perceived)| {
+                    if perceived.disclosure != crate::perception::ActorDisclosure::ApparentObject
+                        || !self.actors[subject].alive()
+                    {
+                        return None;
+                    }
+                    let state = &self.actors[subject];
+                    visible(state.location).then(|| crate::perception::ApparentObjectView {
+                        subject: *subject,
+                        location: state.location,
+                        appearance: state.guise.appearance().expect("classified guise").clone(),
+                    })
                 })
-            }).collect(),
+                .collect(),
             visible_cells: occurrences
                 .iter()
                 .map(|&(location, frame)| CellView {
@@ -449,21 +483,35 @@ impl Game {
             inventory,
             visible_actors: perceived
                 .iter()
-                .filter(|(other, perceived)| self.actors[other].alive() && perceived.disclosure.reference().is_some())
+                .filter(|(other, perceived)| {
+                    self.actors[other].alive() && perceived.disclosure.reference().is_some()
+                })
                 .flat_map(|(other_id, perceived)| {
                     let other_id = *other_id;
                     let other = &self.actors[&other_id];
                     let disclosure = perceived.disclosure;
-                    perceived.body.iter().copied()
-                        .filter(move |(at, _)| visible(*at) && (other_id != id || *at != actor.location))
+                    perceived
+                        .body
+                        .iter()
+                        .copied()
+                        .filter(move |(at, _)| {
+                            visible(*at) && (other_id != id || *at != actor.location)
+                        })
                         .map(move |(location, _)| ActorView {
                             disclosure,
-                            name: if disclosure == crate::perception::ActorDisclosure::Creature { projected_actor_name(actor, other).to_owned() } else { String::new() },
+                            name: if disclosure == crate::perception::ActorDisclosure::Creature {
+                                projected_actor_name(actor, other).to_owned()
+                            } else {
+                                String::new()
+                            },
                             id: other_id,
                             location,
-                            asset: (disclosure == crate::perception::ActorDisclosure::Creature).then(|| other.asset.clone()).flatten(),
+                            asset: (disclosure == crate::perception::ActorDisclosure::Creature)
+                                .then(|| other.asset.clone())
+                                .flatten(),
                         })
-                }).collect(),
+                })
+                .collect(),
             exits: cells
                 .iter()
                 .flat_map(|&location| {
@@ -612,12 +660,19 @@ impl Game {
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
         crate::diagnostics::ordinary_scene();
         let mut sight = Vec::new();
-        let scene = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells))?;
+        let scene = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| {
+            sight.extend_from_slice(cells)
+        })?;
         self.cache_scene(id, &scene, &sight)?;
         Ok(scene)
     }
 
-    fn cache_scene(&self, id: ActorId, scene: &[tor_world::SightCell], sight: &[tor_world::SightCell]) -> Result<(), GameError> {
+    fn cache_scene(
+        &self,
+        id: ActorId,
+        scene: &[tor_world::SightCell],
+        sight: &[tor_world::SightCell],
+    ) -> Result<(), GameError> {
         let witness = self.scene_witness(id)?;
         crate::diagnostics::scene_cells_copied(scene.len());
         self.insert_scene(
@@ -653,13 +708,27 @@ impl Game {
     }
 
     /// Geometry and exact eye sight share one cache witness and one computation.
-    pub(crate) fn scene_snapshot(&self, id: ActorId) -> Result<(Vec<tor_world::SightCell>, Vec<tor_world::SightCell>), GameError> {
+    pub(crate) fn scene_snapshot(
+        &self,
+        id: ActorId,
+    ) -> Result<(Vec<tor_world::SightCell>, Vec<tor_world::SightCell>), GameError> {
         let witness = self.scene_witness(id)?;
-        if let Some(cached) = self.lifecycle.scenes.0.lock().expect("actor scene cache").get(&id) {
-            if cached.witness == witness { return Ok((cached.cells.clone(), cached.sight.clone())); }
+        if let Some(cached) = self
+            .lifecycle
+            .scenes
+            .0
+            .lock()
+            .expect("actor scene cache")
+            .get(&id)
+        {
+            if cached.witness == witness {
+                return Ok((cached.cells.clone(), cached.sight.clone()));
+            }
         }
         let mut sight = Vec::new();
-        let scene = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells))?;
+        let scene = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| {
+            sight.extend_from_slice(cells)
+        })?;
         self.cache_scene(id, &scene, &sight)?;
         Ok((scene, sight))
     }
@@ -708,7 +777,9 @@ impl Game {
         // different witness; replace that derived entry from this Game's inputs.
         crate::diagnostics::ordinary_scene();
         let mut sight = Vec::new();
-        let cells = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells))?;
+        let cells = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| {
+            sight.extend_from_slice(cells)
+        })?;
         let mut cached = CachedScene {
             witness,
             cells,
@@ -729,25 +800,22 @@ impl Game {
         self.compute_scene_at(id, actor.location, actor.orientation, sight_observer)
     }
 
-    /// Ordinary perception at a provisional actor-local placement. Uses the same
-    /// eye, local-awareness and stair-landing paths; does not publish or cache it.
-    pub(crate) fn scene_at_placement(
+    pub(crate) fn scene_snapshot_at_placement(
         &self,
         id: ActorId,
         placement: crate::abilities::Placement,
-    ) -> Result<Vec<tor_world::SightCell>, GameError> {
+    ) -> Result<(Vec<tor_world::SightCell>, Vec<tor_world::SightCell>), GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         if actor.location == placement.location && actor.orientation == placement.orientation {
-            return self.streaming_scene(id);
+            return self.scene_snapshot(id);
         }
-        self.compute_scene_at(id, placement.location, placement.orientation, &mut |_| {})
-    }
-
-    pub(crate) fn scene_snapshot_at_placement(&self, id: ActorId, placement: crate::abilities::Placement) -> Result<(Vec<tor_world::SightCell>, Vec<tor_world::SightCell>), GameError> {
-        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        if actor.location == placement.location && actor.orientation == placement.orientation { return self.scene_snapshot(id); }
         let mut sight = Vec::new();
-        let scene = self.compute_scene_at(id, placement.location, placement.orientation, &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells))?;
+        let scene = self.compute_scene_at(
+            id,
+            placement.location,
+            placement.orientation,
+            &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells),
+        )?;
         Ok((scene, sight))
     }
     fn compute_scene_at(
@@ -770,8 +838,11 @@ impl Game {
         // eye-frame offsets are body-frame offsets from the eye cell.
         let [ex, ey, ez] = body.eye;
         let mut scene = if actor.perception().sight {
-            self.world.illuminated_eye_scene(eye, eye_frame, SIGHT_RANGE)
-        } else { Vec::new() };
+            self.world
+                .illuminated_eye_scene(eye, eye_frame, SIGHT_RANGE)
+        } else {
+            Vec::new()
+        };
         sight_observer(&scene);
         for cell in &mut scene {
             cell.offset.x += ex;

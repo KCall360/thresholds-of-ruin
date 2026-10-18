@@ -364,7 +364,13 @@ impl Game {
             return None;
         }
         let (scene, sight) = self.scene_snapshot(observer).ok()?;
-        if self.perception_projection(observer, &scene, &sight).ok()?.get(&subject)?.disclosure != crate::perception::ActorDisclosure::Creature {
+        if self
+            .perception_projection(observer, &scene, &sight)
+            .ok()?
+            .get(&subject)?
+            .disclosure
+            != crate::perception::ActorDisclosure::Creature
+        {
             return None;
         }
         // Classification grants disclosure; a timing helper alone never does.
@@ -430,7 +436,11 @@ impl Game {
         target: ActorId,
         sight: Option<&[SightCell]>,
     ) -> PublicAim {
-        if !self.classified_actors(actor).ok().and_then(|rows| rows.get(&target).map(|row| row.disclosure)).is_some_and(|class| class == crate::perception::ActorDisclosure::Creature) {
+        if !self
+            .actor_disclosure(actor, target)
+            .ok()
+            .is_some_and(|class| class == crate::perception::ActorDisclosure::Creature)
+        {
             return PublicAim::Unavailable;
         }
         let Some(target) = self.actors.get(&target) else {
@@ -512,6 +522,8 @@ mod tests {
             view.combat.as_mut().unwrap().events = if repeat_known_event {
                 vec![
                     crate::combat::DisclosedCombatEvent::Ability {
+                        caster_reference: Some(crate::perception::ActorReferenceKind::Creature),
+                        target_reference: Some(crate::perception::ActorReferenceKind::Creature),
                         caster: Some(actor),
                         target: Some(actor),
                         id: ability.clone(),
@@ -1164,12 +1176,14 @@ mod tests {
         let record = retained_record(&game, actor);
         retain_record(&mut game, actor, record.clone());
         let events = game.event_log.clone();
+        let receipts = game.event_receipts.clone();
         assert!(events
             .iter()
             .any(|event| matches!(event, crate::combat::CombatEvent::Resolved { .. })));
         game.act(actor, crate::Action::Wait).unwrap();
         assert!(game.tick() > record.observed_at);
         game.event_log = events;
+        game.event_receipts = receipts;
         assert!(
             restored(&game).is_ok(),
             "older retained outcomes remain historical"

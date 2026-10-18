@@ -441,7 +441,10 @@ impl Game {
         direction: tor_world::Direction,
     ) -> Option<MovementContext> {
         let state = self.actors.get(&actor)?;
-        let (to, next_orientation) = self.actor_translation(actor, direction)?;
+        let (to, next_orientation) = self.actor_translation(actor, direction).or_else(|| {
+            self.movement_guise_contacts(actor, direction)
+                .map(|(goal, _)| goal)
+        })?;
         Some(MovementContext {
             from: state.location,
             orientation: state.orientation,
@@ -598,6 +601,7 @@ impl Game {
             candidate.intentions.entries.remove(&actor);
         }
         candidate.discard_intention_preparation(actor, id)?;
+        candidate.seal_participant_events()?;
         *self = candidate;
         Ok(())
     }
@@ -620,7 +624,7 @@ impl Game {
             return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
         let mut candidate = self.clone();
-        candidate.begin_action_boundary(actor);
+        candidate.begin_action_boundary(actor)?;
         if candidate
             .pending_intention(actor)
             .is_some_and(|queued| Some(queued.id) == expected)
@@ -636,6 +640,7 @@ impl Game {
             candidate.reconcile_recovery_contexts()?;
         }
         let outcome = candidate.escape_step_in_transaction(actor, direction, movement_context)?;
+        candidate.seal_participant_events()?;
         *self = candidate;
         Ok(outcome)
     }
@@ -882,10 +887,12 @@ impl Game {
                                         crate::rules::Reach::SelfOnly => target == *actor,
                                         crate::rules::Reach::SelfOrAlly { .. } => true,
                                         crate::rules::Reach::Melee
-                                        | crate::rules::Reach::Sight { .. } => target != *actor,
+                                        | crate::rules::Reach::Sight { .. }
+                                        | crate::rules::Reach::MutualSight { .. } => target != *actor,
                                     }
                                 })
                         }
+                        IntentionWork::Action(Action::TouchApparentObject { subject, quantity }) => subject.0 > 0 && subject.0 < self.next_actor_id && quantity.is_none_or(|n| n == 1),
                         IntentionWork::Action(Action::Escape { hold }) => hold.0 > 0 && hold.0 < self.next_hold_id,
                         IntentionWork::Action(Action::SetDoor { door, .. }) => door != 0,
                         IntentionWork::Action(Action::Equip { item, slot }) => {

@@ -30,7 +30,7 @@ pub struct Preparation {
     pub plan: crate::abilities::Plan,
     pub progress: PreparationProgress,
     pub item_payment: crate::supplies::ItemPayment,
-    pub threats: BTreeSet<ActorId>,
+    pub threats: BTreeSet<crate::perception::PerceivedThreat>,
     pub remaining: u64,
     pub started: u64,
     pub active: bool,
@@ -49,7 +49,8 @@ impl<'de> serde::Deserialize<'de> for Preparation {
             plan: crate::abilities::Plan,
             progress: PreparationProgress,
             item_payment: crate::supplies::ItemPayment,
-            threats: BTreeSet<ActorId>,
+            #[serde(deserialize_with = "crate::perception::read_threats")]
+            threats: BTreeSet<crate::perception::PerceivedThreat>,
             remaining: u64,
             started: u64,
             active: bool,
@@ -396,82 +397,24 @@ impl Game {
         let a = self.actors.get(&id)?;
         let creature = self.creature(id)?;
         let timing = self.preparation_timing(id)?;
-        let actors = perceived.iter()
-            .filter(|(other, perceived)| **other != id && self.actors[other].alive() && perceived.disclosure == crate::perception::ActorDisclosure::Creature)
+        let actors = perceived
+            .iter()
+            .filter(|(other, perceived)| {
+                **other != id
+                    && self.actors[other].alive()
+                    && perceived.disclosure == crate::perception::ActorDisclosure::Creature
+            })
             .filter_map(|(other, perceived)| {
                 let c = self.actors[other].combat.as_ref()?;
-                Some((*other, self.perceived_hostile(id, *other, perceived.disclosure), self.allied(id, *other), Injury::from_health(c.hp(), c.creature().health().maximum())))
-            }).collect();
-        let reference = |subject| {
-            if subject == id { Some(crate::perception::ActorReferenceKind::Creature) }
-            else { perceived.get(&subject).and_then(|actor| actor.disclosure.reference()) }
-        };
-        let disclosed = |subject| reference(subject).is_some();
-        let seen = |subject| disclosed(subject).then_some(subject);
-        let events = self
-            .event_log
-            .iter()
-            .filter_map(|event| match event {
-                CombatEvent::Resolved { outcome, .. }
-                    if outcome.ability.is_none()
-                        && outcome.actor == id
-                        && outcome.target == id
-                        && outcome.result == crate::abilities::OutcomeStatus::Applied =>
-                {
-                    let crate::abilities::ResolvedEffect::ApplyCondition { id, .. } =
-                        outcome.effects.first()?
-                    else {
-                        return None;
-                    };
-                    let definition = self.content.rules.condition(id)?;
-                    Some(DisclosedCombatEvent::Condition {
-                        id: id.clone(),
-                        name: definition.name.clone(),
-                    })
-                }
-                CombatEvent::Resolved { outcome, strike }
-                    if (outcome.actor == id
-                        || (outcome.target == id && outcome.target_participated()))
-                        || (reference(outcome.actor) == Some(crate::perception::ActorReferenceKind::Creature) && reference(outcome.target) == Some(crate::perception::ActorReferenceKind::Creature)) =>
-                {
-                    let ability = outcome.ability.as_ref()?;
-                    let definition = self.content.rules.ability(ability)?;
-                    if outcome.actor != id && reference(outcome.actor) != Some(crate::perception::ActorReferenceKind::Creature) {
-                        return (outcome.target == id).then_some(DisclosedCombatEvent::UnseenAbility {
-                            caster: seen(outcome.actor),
-                            target: id,
-                            outcome: outcome.result,
-                        });
-                    }
-                    Some(DisclosedCombatEvent::Ability {
-                        caster: seen(outcome.actor),
-                        caster_reference: reference(outcome.actor),
-                        target: seen(outcome.target),
-                        target_reference: reference(outcome.target),
-                        id: ability.clone(),
-                        name: definition.name.clone(),
-                        outcome: outcome.result,
-                        strike: *strike,
-                    })
-                }
-                CombatEvent::EscapeResolved {
-                    actor,
-                    hold,
-                    success,
-                    ..
-                } if *actor == id => Some(DisclosedCombatEvent::EscapeResolved {
-                    hold: *hold,
-                    success: *success,
-                }),
-                CombatEvent::Interrupted { actor, .. } if *actor == id => {
-                    Some(DisclosedCombatEvent::Interrupted { actor: *actor })
-                }
-                CombatEvent::Died { actor } if disclosed(*actor) => {
-                    Some(DisclosedCombatEvent::Died { actor: *actor, reference: reference(*actor)? })
-                }
-                _ => None,
+                Some((
+                    *other,
+                    self.perceived_hostile(id, *other, perceived.disclosure),
+                    self.allied(id, *other),
+                    Injury::from_health(c.hp(), c.creature().health().maximum()),
+                ))
             })
             .collect();
+        let events = self.disclosed_event_history(id);
         Some(CombatView {
             own_stats: Some(creature.own_stats()),
             public_plan: a.public_plan.clone(),
@@ -627,7 +570,11 @@ impl Game {
                     .actors
                     .get(&actor)
                     .and_then(|owner| owner.engagement_at(self.actor_clock(actor)))
-                    .is_some_and(|engagement| engagement.target == target && engagement.reference == crate::perception::ActorReferenceKind::Creature))
+                    .is_some_and(|engagement| {
+                        engagement.target == target
+                            && engagement.reference
+                                == crate::perception::ActorReferenceKind::Creature
+                    }))
     }
 
     pub(crate) fn faction_hostile(&self, actor: ActorId, target: ActorId) -> bool {

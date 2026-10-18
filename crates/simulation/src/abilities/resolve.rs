@@ -291,6 +291,7 @@ pub enum ResolvedEffect {
         resource: Resource,
         amount: u32,
     },
+    SearchAdjacentGuises,
     ObservePublicPlan {
         observation: Shared<PublicPlanObservation>,
     },
@@ -303,7 +304,7 @@ pub enum ResolvedEffect {
 impl ResolvedEffect {
     pub(crate) fn recipient(&self) -> EffectRecipient {
         match self {
-            Self::ObservePublicPlan { .. } | Self::ApplyQualifiedConditionToSource { .. } => {
+            Self::SearchAdjacentGuises | Self::ObservePublicPlan { .. } | Self::ApplyQualifiedConditionToSource { .. } => {
                 EffectRecipient::Source
             }
             _ => EffectRecipient::Target,
@@ -325,7 +326,8 @@ impl ResolvedEffect {
             | Self::LoseMaximumHealth { amount }
             | Self::RestoreMaximumHealth { amount }
             | Self::Restore { amount, .. } => *amount > 0,
-            Self::ApplyLinkedHold { .. }
+            Self::SearchAdjacentGuises
+            | Self::ApplyLinkedHold { .. }
             | Self::ApplyCondition { .. }
             | Self::ObservePublicPlan { .. }
             | Self::ApplyQualifiedConditionToSource { .. } => true,
@@ -344,7 +346,7 @@ impl ResolvedEffect {
         }
         let applied = match self {
             Self::Theft { .. } => return Ok(None),
-            Self::ApplyLinkedHold { .. } => self.clone(),
+            Self::SearchAdjacentGuises | Self::ApplyLinkedHold { .. } => self.clone(),
             Self::Translate { mode, result } => {
                 if let super::MovementResult::Moved { from, to } = result {
                     let Some(placement) = state.placement.as_deref_mut() else {
@@ -951,6 +953,7 @@ pub(super) fn resolve_batch<'a>(
                 resource: *resource,
                 amount: amount.roll(rng),
             },
+            PlannedEffect::SearchAdjacentGuises => ResolvedEffect::SearchAdjacentGuises,
             PlannedEffect::ObservePublicPlan => ResolvedEffect::ObservePublicPlan {
                 observation: snapshot
                     .context
@@ -1075,6 +1078,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 resource: Resource,
                 amount: u32,
             },
+            SearchAdjacentGuises {},
             ObservePublicPlan {
                 observation: Shared<PublicPlanObservation>,
             },
@@ -1109,6 +1113,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::RestoreMaximumHealth { amount } => Self::RestoreMaximumHealth { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
+            Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
             Fields::ObservePublicPlan { observation } => Self::ObservePublicPlan { observation },
             Fields::ApplyQualifiedConditionToSource {
                 id,

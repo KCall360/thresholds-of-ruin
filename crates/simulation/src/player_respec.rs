@@ -307,7 +307,7 @@ impl Game {
         // Must finalize after Spend: death must not retain an already deleted ration.
         let finalized = self.prepare_actor_outcome(outcome)?;
         self.publish_actor_outcome(finalized)?;
-        self.event_log.push(completion);
+        self.push_event(completion, None)?;
         Ok(())
     }
 }

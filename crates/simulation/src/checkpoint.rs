@@ -65,7 +65,9 @@ impl std::error::Error for PersistError {}
 pub struct Snapshot {
     combat: crate::combat::CombatWorld,
     rules_rng: u64,
+    #[serde(deserialize_with = "read_events")]
     events: Vec<crate::combat::CombatEvent>,
+    event_receipts: crate::event_history::EventReceipts,
     physics: crate::physics::Physics,
     world: usize,
     navigation: BTreeMap<ActorId, usize>,
@@ -89,6 +91,12 @@ pub struct Snapshot {
     floor_activation: Option<usize>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     unique_retrieval: Option<RetrievalSnapshot>,
+}
+
+fn read_events<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<crate::combat::CombatEvent>, D::Error> {
+    Ok(crate::bounded::Bounded::<crate::combat::CombatEvent, { crate::limits::EVENTS_PER_BATCH }>::deserialize(d)?.0)
 }
 
 /// Mutable objective evidence stays small; neither visits nor policy changes
@@ -468,8 +476,10 @@ fn share_definition<T: Ord>(pool: &mut BTreeSet<Shared<T>>, definition: &mut Sha
 impl Game {
     pub fn checkpoint(&self, shared: &mut SharedState) -> Snapshot {
         assert!(
-            !self.region_transition_pending() && !self.host_region_continuation,
-            "a private host continuation must settle before checkpoint capture"
+            !self.region_transition_pending()
+                && !self.host_region_continuation
+                && !self.event_observations_open(),
+            "a private host candidate must settle and seal events before checkpoint capture"
         );
         let worlds = &mut shared.worlds;
         let world = worlds
@@ -503,6 +513,7 @@ impl Game {
             combat: self.combat.clone(),
             rules_rng: self.rules_rng,
             events: self.event_log.clone(),
+            event_receipts: self.event_receipts.clone(),
             physics: self.physics.clone(),
             world,
             navigation: self
@@ -612,6 +623,8 @@ impl Game {
             combat: snapshot.combat,
             rules_rng: snapshot.rules_rng,
             event_log: snapshot.events,
+            event_receipts: snapshot.event_receipts,
+            event_origins: Default::default(),
             combat_diagnostics: None,
             survival_diagnostics: None,
             physics: snapshot.physics,
@@ -720,6 +733,9 @@ impl Game {
         }) {
             return Err(PersistError::RunState);
         }
+        if !game.event_receipts_valid() {
+            return Err(PersistError::RunState);
+        }
         if !game.combat_valid() {
             return Err(PersistError::RunState);
         }
@@ -782,6 +798,9 @@ impl Game {
     /// attaching a stored region gives its actors the same.
     pub(crate) fn actor_state_valid(&self, id: ActorId, actor: &Actor) -> bool {
         id.0 != 0
+            && actor
+                .guise
+                .valid_for(&actor.perception(), actor.pending.as_ref(), actor.alive())
             && self.hold_actor_shape_valid(id, actor)
             && actor.active_since <= self.actor_clock(id)
             && actor.motion.active_fall.is_none_or(|fall| {

@@ -17,6 +17,9 @@ struct PreparedAction {
     at_tick: u64,
     kind: OutcomeKind,
     new_orientation: u8,
+    ordinary_movement: Option<tor_world::Direction>,
+    requested_destination: Option<(tor_world::Location, u8)>,
+    touches: Vec<ActorId>,
     ready_at: u64,
     plan: Option<crate::abilities::Plan>,
 }
@@ -36,16 +39,20 @@ impl PreparedAction {
         context: Option<crate::MovementContext>,
     ) -> Result<(), GameError> {
         if let Some(context) = context {
-            let matches = match self.kind {
-                OutcomeKind::Moved { from, to } => {
-                    context.matches(from, actor.orientation, to, self.new_orientation)
+            let matches = if let Some((to, orientation)) = self.requested_destination {
+                context.matches(actor.location, actor.orientation, to, orientation)
+            } else {
+                match self.kind {
+                    OutcomeKind::Moved { from, to } => {
+                        context.matches(from, actor.orientation, to, self.new_orientation)
+                    }
+                    _ => self
+                        .plan
+                        .as_ref()
+                        .and_then(|plan| plan.as_ability())
+                        .and_then(|plan| plan.step)
+                        .is_some_and(|step| step.context == context),
                 }
-                _ => self
-                    .plan
-                    .as_ref()
-                    .and_then(|plan| plan.as_ability())
-                    .and_then(|plan| plan.step)
-                    .is_some_and(|step| step.context == context),
             };
             if !matches {
                 return Err(GameError::InvalidLocation);
@@ -56,8 +63,9 @@ impl PreparedAction {
 }
 
 impl Game {
-    /// Apply one valid action atomically. Invalid requests and blocked movement
-    /// are free. Immediate actions apply effects before recovery; attacks commit
+    /// Apply one valid action atomically. Invalid original requests are free;
+    /// a confused stay or obstructed sample pays the validated movement cost.
+    /// Immediate actions apply effects before recovery; attacks commit
     /// wind-up progress. Recovery is not partially completed work and cannot resume.
     ///
     /// This low-level API does not issue an intention identity. Resource-paid
@@ -236,12 +244,13 @@ impl Game {
 
     fn commit_action(
         &mut self,
-        prepared: PreparedAction,
+        mut prepared: PreparedAction,
         ai: Option<(crate::ai::Ai, crate::behavior::Behavior)>,
     ) -> Result<ActionOutcome, GameError> {
         let mut candidate = self.clone();
         let id = prepared.actor;
-        candidate.begin_action_boundary(id);
+        candidate.begin_action_boundary(id)?;
+        candidate.redirect_confused_movement(&mut prepared);
         candidate.on_action_committed()?;
         candidate.apply_action_effect(&prepared)?;
         if let Some((ai, behavior)) = ai {
@@ -251,19 +260,84 @@ impl Game {
         }
         candidate.sync_actor_lifecycle(id)?;
         let outcome = candidate.finish_action(prepared)?;
+        candidate.seal_participant_events()?;
         *self = candidate;
         Ok(outcome)
     }
 
+    /// The original action and its admitted movement context have already been
+    /// validated. Draw only on the transaction candidate: any later failure
+    /// rolls back the sample together with the movement, time and other effects.
+    fn redirect_confused_movement(&mut self, prepared: &mut PreparedAction) {
+        use tor_world::Direction;
+        let Some(requested) = prepared.ordinary_movement else {
+            return;
+        };
+        if requested.delta().2 != 0 {
+            return;
+        }
+        let actor = &self.actors[&prepared.actor];
+        if self
+            .world
+            .is_stair(actor.location, requested.rotated(actor.orientation))
+        {
+            return;
+        }
+        let Some(chance) = actor
+            .locomotion()
+            .confused
+            .filter(|chance| chance.numerator > 0)
+        else {
+            return;
+        };
+        if crate::dice::die(&mut self.rules_rng, chance.denominator) > chance.numerator {
+            return;
+        }
+        // Fixed row-major actor-local 3x3, including stay. Geometry never changes
+        // this distribution, and a blocked sample receives no replacement draw.
+        const SAMPLES: [Option<Direction>; 9] = [
+            Some(Direction::NorthWest),
+            Some(Direction::North),
+            Some(Direction::NorthEast),
+            Some(Direction::West),
+            None,
+            Some(Direction::East),
+            Some(Direction::SouthWest),
+            Some(Direction::South),
+            Some(Direction::SouthEast),
+        ];
+        let selected = SAMPLES[usize::from(crate::dice::die(&mut self.rules_rng, 9) - 1)];
+        prepared.touches.clear();
+        let actor = &self.actors[&prepared.actor];
+        let from = actor.location;
+        let orientation = actor.orientation;
+        if let Some((to, orientation)) = selected
+            .and_then(|direction| self.actor_physical_translation(prepared.actor, direction))
+        {
+            prepared.kind = OutcomeKind::Moved { from, to };
+            prepared.new_orientation = orientation;
+        } else {
+            prepared.kind = OutcomeKind::Waited;
+            prepared.new_orientation = orientation;
+            if let Some((_, contacts)) = selected
+                .and_then(|direction| self.movement_guise_contacts(prepared.actor, direction))
+            {
+                prepared.touches = contacts;
+            }
+        }
+        // ready_at retains the requested normal move's cost, including its
+        // diagonal cost, even when the sample stays or cannot be traversed.
+    }
+
     /// Shared publication boundary for an ordinary action or one atomic escape.
-    pub(crate) fn begin_action_boundary(&mut self, actor: ActorId) {
+    pub(crate) fn begin_action_boundary(&mut self, actor: ActorId) -> Result<(), GameError> {
         if !self.host_region_continuation {
             self.begin_retrieval_transaction();
         }
         self.physics.impacts.clear();
         self.combat.input_boundaries.remove(&actor);
         self.physics.displaced.clear();
-        self.event_log.clear();
+        self.begin_event_batch()
     }
 
     /// Caller owns the cancellation transaction. Admission and effects are the
@@ -300,7 +374,12 @@ impl Game {
         intention: Option<crate::IntentionId>,
     ) -> Result<(), GameError> {
         if let Some(plan) = &prepared.plan {
-            if plan.needs_item_payment() && intention.is_none_or(|id| !self.intention_issued(id)) {
+            if (plan.needs_item_payment()
+                || plan
+                    .as_ability()
+                    .is_some_and(|ability| ability.ambush.is_some()))
+                && intention.is_none_or(|id| !self.intention_issued(id))
+            {
                 return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
             }
             if let Some(charge) = plan.cost() {
@@ -409,6 +488,8 @@ impl Game {
             return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
         }
         let mut planned = None;
+        let mut touches = Vec::new();
+        let mut requested_destination = None;
         let (kind, duration) = match action.clone() {
             Action::ChooseGrowthSource { basis, source } => {
                 self.preview_player_growth_source(id, &basis, &source)?;
@@ -550,27 +631,47 @@ impl Game {
                 0,
             ),
             Action::Move(direction) => {
-                let (to, _) = self.actor_translation(id, direction).ok_or_else(|| {
-                    if self
-                        .reach(actor.location, direction.rotated(actor.orientation))
-                        .is_some_and(|(at, _)| {
-                            self.actors
-                                .at(&self.world, at)
-                                .keys()
-                                .any(|other| *other != id)
-                        })
-                    {
-                        GameError::Occupied
-                    } else {
-                        GameError::Blocked
-                    }
-                })?;
+                if let Some((to, orientation)) = self.actor_translation(id, direction) {
+                    requested_destination = Some((to, orientation));
+                    (
+                        OutcomeKind::Moved {
+                            from: actor.location,
+                            to,
+                        },
+                        movement_cost(actor.turn_ticks.get(), direction)?,
+                    )
+                } else if let Some((destination, contacts)) =
+                    self.movement_guise_contacts(id, direction)
+                {
+                    requested_destination = Some(destination);
+                    touches = contacts;
+                    (
+                        OutcomeKind::Waited,
+                        movement_cost(actor.turn_ticks.get(), direction)?,
+                    )
+                } else {
+                    return Err(
+                        if self
+                            .reach(actor.location, direction.rotated(actor.orientation))
+                            .is_some_and(|(at, _)| {
+                                self.actors
+                                    .at(&self.world, at)
+                                    .keys()
+                                    .any(|other| *other != id)
+                            })
+                        {
+                            GameError::Occupied
+                        } else {
+                            GameError::Blocked
+                        },
+                    );
+                }
+            }
+            Action::TouchApparentObject { subject, quantity } => {
+                self.validate_apparent_touch(id, subject, quantity)?;
                 (
-                    OutcomeKind::Moved {
-                        from: actor.location,
-                        to,
-                    },
-                    movement_cost(actor.turn_ticks.get(), direction)?,
+                    OutcomeKind::ApparentObjectTouched { subject },
+                    actor.turn_ticks.get().div_ceil(2),
                 )
             }
             Action::Take { item, quantity } | Action::Drop { item, quantity } => {
@@ -584,7 +685,7 @@ impl Game {
         };
         let at_tick = self.tick;
         let new_orientation = match action {
-            Action::Move(_) if matches!(kind, OutcomeKind::Escaped { .. }) => actor.orientation,
+            Action::Move(_) if !matches!(kind, OutcomeKind::Moved { .. }) => actor.orientation,
             Action::Move(direction) => {
                 self.actor_translation(id, direction)
                     .ok_or(GameError::Blocked)?
@@ -596,6 +697,12 @@ impl Game {
             .checked_add(duration)
             .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
 
+        let ordinary_movement = match action {
+            Action::Move(direction) if !matches!(kind, OutcomeKind::Escaped { .. }) => {
+                Some(direction)
+            }
+            _ => None,
+        };
         Ok(PreparedAction {
             intention: None,
             actor: id,
@@ -604,6 +711,9 @@ impl Game {
             new_orientation,
             ready_at,
             plan: planned,
+            ordinary_movement,
+            requested_destination,
+            touches,
         })
     }
 
@@ -611,6 +721,9 @@ impl Game {
     fn apply_action_effect(&mut self, prepared: &PreparedAction) -> Result<(), GameError> {
         let id = prepared.actor;
         let kind = prepared.kind.clone();
+        for subject in &prepared.touches {
+            self.reveal_guise(*subject)?;
+        }
         if let OutcomeKind::Escaped { item } = kind {
             if self.prepare_terminal_escape(id, tor_world::Direction::Up)? != item {
                 return Err(GameError::ItemUnavailable);
@@ -630,14 +743,16 @@ impl Game {
         let mut outcome = self.actor_outcome(id)?;
         let actor = &mut outcome.state;
         actor.orientation = new_orientation;
-        if !matches!(
-            kind,
-            OutcomeKind::Waited
-                | OutcomeKind::AbilityStarted { .. }
-                | OutcomeKind::ItemStarted { .. }
-                | OutcomeKind::RespecStarted { .. }
-                | OutcomeKind::EscapeStarted { .. }
-        ) {
+        if prepared.ordinary_movement.is_some()
+            || !matches!(
+                kind,
+                OutcomeKind::Waited
+                    | OutcomeKind::AbilityStarted { .. }
+                    | OutcomeKind::ItemStarted { .. }
+                    | OutcomeKind::RespecStarted { .. }
+                    | OutcomeKind::EscapeStarted { .. }
+            )
+        {
             actor.cancel_preparation();
         }
         if let OutcomeKind::Moved { to, .. } = kind {
@@ -669,6 +784,9 @@ impl Game {
                 let affected = self.hold_geometry_candidates(self.world.door_cells(location));
                 self.world.set_door(location, open);
                 self.reconcile_holds_for_actors(affected)?;
+            }
+            OutcomeKind::ApparentObjectTouched { subject } => {
+                self.reveal_guise(subject)?;
             }
             OutcomeKind::Moved { .. } => {}
             OutcomeKind::Escaped { item } => self.commit_terminal_escape(id, item)?,

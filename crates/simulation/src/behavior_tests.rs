@@ -259,6 +259,7 @@ fn private_grudge_changes_only_the_requesters_relationships() {
         .unwrap()
         .behavior
         .engagement = Some(Engagement {
+        reference: crate::perception::ActorReferenceKind::Creature,
         target: ActorId(1),
         location: at(1),
         last_seen: 0,
@@ -310,6 +311,7 @@ fn behavior_records_require_named_fields_and_licensed_location() {
     let state = Behavior {
         rng: 0,
         engagement: Some(Engagement {
+            reference: crate::perception::ActorReferenceKind::Creature,
             target: ActorId(1),
             location: at(1),
             last_seen: 0,
@@ -637,6 +639,7 @@ fn memory_expiry_preserves_only_the_final_positive_nutrition_interval() {
             .unwrap()
             .behavior
             .engagement = Some(Engagement {
+            reference: crate::perception::ActorReferenceKind::Creature,
             target: ActorId(1),
             location: at(1),
             last_seen: 0,
@@ -766,6 +769,7 @@ fn engagement_expiry_segments_contextual_recovery_at_the_actor_active_boundary()
         .unwrap()
         .behavior
         .engagement = Some(Engagement {
+        reference: crate::perception::ActorReferenceKind::Creature,
         target: ActorId(1),
         location: at(1),
         last_seen: 0,
@@ -857,6 +861,7 @@ fn coincident_condition_and_engagement_expiry_rephase_earned_work_once() {
         .unwrap()
         .behavior
         .engagement = Some(Engagement {
+        reference: crate::perception::ActorReferenceKind::Creature,
         target: ActorId(1),
         location: at(1),
         last_seen: 0,
@@ -976,6 +981,7 @@ fn species_policy_changes_settle_old_memory_and_never_reset_rng_or_resurrect_eng
     game.actors.get_mut(&ActorId(2)).unwrap().behavior = Behavior {
         rng: 0,
         engagement: Some(Engagement {
+            reference: crate::perception::ActorReferenceKind::Creature,
             target: ActorId(1),
             location: at(1),
             last_seen: 0,
@@ -1065,6 +1071,7 @@ fn compiled_species_deadline_projection_does_not_read_raw_species() {
             .unwrap()
             .behavior
             .engagement = Some(Engagement {
+            reference: crate::perception::ActorReferenceKind::Creature,
             target: ActorId(1),
             location: at(1),
             last_seen: 0,

@@ -35,6 +35,7 @@ fn snapshot() -> Snapshot {
 }
 fn plan(effects: Vec<PlannedEffect>) -> AbilityPlan {
     AbilityPlan {
+        ambush: None,
         initial_hold: None,
         hold_damage_increment: 0,
         actor: ActorId(1),

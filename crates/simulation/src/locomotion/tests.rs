@@ -1,7 +1,7 @@
 use super::*;
 use crate::rules::{Modifier, ModifierOp, Scope};
 
-fn modifier(value: LocomotionValue) -> Modifier {
+pub(super) fn modifier(value: LocomotionValue) -> Modifier {
     Modifier {
         scope: Scope::Always,
         op: ModifierOp::Locomotion { value },
@@ -76,13 +76,13 @@ fn canonical_locomotion_is_strict_bounded_and_required_nullable() {
 
 use crate::{Action, ActorId, Game};
 use tor_world::{Direction, Extent, Location, Position, Region, RegionId, World};
-fn at(x: i32, z: i32) -> Location {
+pub(super) fn at(x: i32, z: i32) -> Location {
     Location {
         region: RegionId(1),
         position: Position { x, y: 2, z },
     }
 }
-fn fixture(values: &[LocomotionValue]) -> (Game, ActorId) {
+pub(super) fn fixture(values: &[LocomotionValue]) -> (Game, ActorId) {
     let mut species = crate::test_creatures::species();
     species
         .modifiers

@@ -767,6 +767,7 @@ mod intention_admission_tests {
                     supplies: Default::default(),
                 };
                 *event = crate::journal::Event::AbilityStarted {
+                    reference: tor_simulation::perception::ActorReferenceKind::Creature,
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                     name: "Attack".into(),
                     target: actor,
@@ -3378,6 +3379,7 @@ mod ordered_strikes_terminal_tests {
                         supplies: Default::default(),
                     },
                     event: crate::journal::Event::AbilityStarted {
+                        reference: tor_simulation::perception::ActorReferenceKind::Creature,
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         name: "Attack".into(),
                         target: ActorId(2),

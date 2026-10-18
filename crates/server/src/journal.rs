@@ -97,6 +97,7 @@ pub enum Event {
     Purchased,
     RespecStarted,
     AbilityStarted {
+        #[serde(with = "crate::storage::schema::actor_reference_kind")]
         reference: tor_simulation::perception::ActorReferenceKind,
         #[serde(with = "crate::storage::schema::ability_id")]
         id: tor_simulation::content_ids::AbilityId,

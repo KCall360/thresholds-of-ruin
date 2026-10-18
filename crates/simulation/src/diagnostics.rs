@@ -42,6 +42,14 @@ pub struct WorkCounts {
     pub scene_cells_copied: usize,
     pub item_candidates: usize,
     pub actor_candidates: usize,
+    /// Full observer-specific entity projection passes.
+    pub perception_projections: usize,
+    /// Individual body classifications, including bounded single-target checks.
+    pub actor_disclosures: usize,
+    /// Historical compact bindings actually inspected for committed disclosure.
+    pub event_receipt_binding_inspections: usize,
+    /// Compact binding entries copied because a shared receipt batch diverged.
+    pub event_receipt_cow_bindings: usize,
     pub route_searches: usize,
     pub stack_candidates: usize,
     pub knowledge_checks: usize,
@@ -60,7 +68,7 @@ pub struct WorkCounts {
     /// Visit entries copied when an idle decision changes its shared region bucket.
     pub ai_visit_entries_copied: usize,
 }
-thread_local! { static COUNTS: Cell<WorkCounts> = const { Cell::new(WorkCounts {creature_build_copies:0,permanent_creature_compiles:0,permanent_input_comparisons:0,dynamic_creature_folds:0,raw_hit_die_visits:0,raw_species_lookups:0,advancement_choice_visits:0,health_provenance_copies:0,perception_witness_captures:0,descriptor_lookups:0,game_clones:0,preparation_candidates:0,strike_resolutions:0,rider_resolutions:0,health_derivations:0,actor_table_copies:0,physics_steps:0,body_cells:0,observations:0,scenes:0,scene_membership_lookups:0,scene_membership_cells:0,scene_cells_copied:0,item_candidates:0,actor_candidates:0,route_searches:0,stack_candidates:0,knowledge_checks:0,timer_candidates:0,cooldown_deadline_candidates:0,cooldown_entries_advanced:0,cooldown_entries_copied:0,ability_plans:0,decision_scenes:0,ordinary_scenes:0,ai_precommit_ordinary_scenes:0,ai_defense_candidates:0,ai_defense_source_scans:0,ai_visit_entries_copied:0}) }; }
+thread_local! { static COUNTS: Cell<WorkCounts> = const { Cell::new(WorkCounts {creature_build_copies:0,permanent_creature_compiles:0,permanent_input_comparisons:0,dynamic_creature_folds:0,raw_hit_die_visits:0,raw_species_lookups:0,advancement_choice_visits:0,health_provenance_copies:0,perception_witness_captures:0,descriptor_lookups:0,game_clones:0,preparation_candidates:0,strike_resolutions:0,rider_resolutions:0,health_derivations:0,actor_table_copies:0,physics_steps:0,body_cells:0,observations:0,scenes:0,scene_membership_lookups:0,scene_membership_cells:0,scene_cells_copied:0,item_candidates:0,actor_candidates:0,perception_projections:0,actor_disclosures:0,event_receipt_binding_inspections:0,event_receipt_cow_bindings:0,route_searches:0,stack_candidates:0,knowledge_checks:0,timer_candidates:0,cooldown_deadline_candidates:0,cooldown_entries_advanced:0,cooldown_entries_copied:0,ability_plans:0,decision_scenes:0,ordinary_scenes:0,ai_precommit_ordinary_scenes:0,ai_defense_candidates:0,ai_defense_source_scans:0,ai_visit_entries_copied:0}) }; }
 
 pub(crate) fn cooldown_deadline_candidates(count: usize) {
     COUNTS.with(|c| {
@@ -365,6 +373,36 @@ pub(crate) fn ai_visit_entries_copied(count: usize) {
     COUNTS.with(|c| {
         let mut n = c.get();
         n.ai_visit_entries_copied += count;
+        c.set(n);
+    });
+}
+
+pub(crate) fn perception_projection() {
+    COUNTS.with(|c| {
+        let mut n = c.get();
+        n.perception_projections += 1;
+        c.set(n);
+    });
+}
+pub(crate) fn actor_disclosure() {
+    COUNTS.with(|c| {
+        let mut n = c.get();
+        n.actor_disclosures += 1;
+        c.set(n);
+    });
+}
+
+pub(crate) fn event_receipt_binding_inspections(count: usize) {
+    COUNTS.with(|c| {
+        let mut n = c.get();
+        n.event_receipt_binding_inspections += count;
+        c.set(n);
+    });
+}
+pub(crate) fn event_receipt_cow_bindings(count: usize) {
+    COUNTS.with(|c| {
+        let mut n = c.get();
+        n.event_receipt_cow_bindings += count;
         c.set(n);
     });
 }

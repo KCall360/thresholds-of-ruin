@@ -55,15 +55,24 @@ pub fn decode_action(
             let id = s::content_ids::AbilityId::new(id).map_err(|_| unavailable())?;
             let invocation = match invocation {
                 p::AbilityInvocation::ActorTarget { target } => {
-                    let (identity, reference) = std::iter::once((observation.actor, s::perception::ActorReferenceKind::Creature))
-                        .chain(observation.visible_actors.iter().filter_map(|actor| actor.disclosure.reference().map(|kind| (actor.id, kind))))
-                        .find(|(actor, kind)| scope.actor_reference(*actor, *kind) == *target)
-                        .ok_or_else(unavailable)?;
+                    let (identity, reference) = std::iter::once((
+                        observation.actor,
+                        s::perception::ActorReferenceKind::Creature,
+                    ))
+                    .chain(observation.visible_actors.iter().filter_map(|actor| {
+                        actor.disclosure.reference().map(|kind| (actor.id, kind))
+                    }))
+                    .find(|(actor, kind)| scope.actor_reference(*actor, *kind) == *target)
+                    .ok_or_else(unavailable)?;
                     match reference {
-                        s::perception::ActorReferenceKind::Creature => a::AbilityInvocation::ActorTarget { target: identity },
-                        s::perception::ActorReferenceKind::Contact => a::AbilityInvocation::ContactTarget { target: identity },
+                        s::perception::ActorReferenceKind::Creature => {
+                            a::AbilityInvocation::ActorTarget { target: identity }
+                        }
+                        s::perception::ActorReferenceKind::Contact => {
+                            a::AbilityInvocation::ContactTarget { target: identity }
+                        }
                     }
-                },
+                }
                 p::AbilityInvocation::SelfStep { direction } => a::AbilityInvocation::SelfStep {
                     direction: crate::adapt::requested_direction(*direction),
                 },
@@ -92,16 +101,25 @@ pub fn decode_action(
             direction: crate::adapt::requested_direction(*direction),
         },
         p::Action::Take { item, quantity } => {
-            let identity = observation
+            if let Some(candidate) = observation
                 .ground_items
                 .iter()
                 .find(|candidate| scope.item(candidate.id) == *item)
-                .ok_or_else(unavailable)?
-                .id
-                .0;
-            a::Action::Take {
-                item: identity,
-                quantity: *quantity,
+            {
+                a::Action::Take {
+                    item: candidate.id.0,
+                    quantity: *quantity,
+                }
+            } else {
+                let object = observation
+                    .apparent_objects
+                    .iter()
+                    .find(|candidate| scope.apparent_object(candidate.subject) == *item)
+                    .ok_or_else(unavailable)?;
+                a::Action::TouchApparentObject {
+                    subject: object.subject,
+                    quantity: *quantity,
+                }
             }
         }
         p::Action::Drop { item, quantity } => {
@@ -176,7 +194,11 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
                 a::AbilityInvocation::ActorTarget { target } => p::AbilityInvocation::ActorTarget {
                     target: scope.actor(*target),
                 },
-                a::AbilityInvocation::ContactTarget { target } => p::AbilityInvocation::ActorTarget { target: scope.contact(*target) },
+                a::AbilityInvocation::ContactTarget { target } => {
+                    p::AbilityInvocation::ActorTarget {
+                        target: scope.contact(*target),
+                    }
+                }
                 a::AbilityInvocation::SelfStep { direction } => p::AbilityInvocation::SelfStep {
                     direction: crate::adapt::wire_direction(*direction),
                 },
@@ -192,6 +214,10 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
         },
         a::Action::Take { item, quantity } => p::Action::Take {
             item: scope.item(s::ItemId(*item)),
+            quantity: *quantity,
+        },
+        a::Action::TouchApparentObject { subject, quantity } => p::Action::Take {
+            item: scope.apparent_object(*subject),
             quantity: *quantity,
         },
         a::Action::Drop { item, quantity } => p::Action::Drop {
@@ -670,7 +696,12 @@ pub fn disclose_entry(
                 Event::EscapeStarted { hold } => VisibleEvent::EscapeStarted {
                     hold: scope.hold(*hold),
                 },
-                Event::AbilityStarted { id, name, target, reference } => VisibleEvent::AbilityStarted {
+                Event::AbilityStarted {
+                    id,
+                    name,
+                    target,
+                    reference,
+                } => VisibleEvent::AbilityStarted {
                     ability: p::ContentRef {
                         id: id.to_string(),
                         name: name.clone(),
@@ -989,3 +1020,7 @@ mod retrieval_event_tests {
             .contains(&id.0.to_string()));
     }
 }
+
+#[cfg(test)]
+#[path = "perception_wire_tests.rs"]
+mod perception_wire_tests;

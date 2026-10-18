@@ -129,10 +129,20 @@ impl Game {
                 effects: vec![],
             };
             // An unavailable/dead/detached target has no mutation or RNG draw.
-            self.event_log.push(crate::combat::CombatEvent::Resolved {
-                outcome: outcome.clone(),
-                strike: Some(index as u16),
-            });
+            let mut origin = self.capture_event_origin(outcome.actor, outcome.target);
+            if matches!(
+                ability.invocation,
+                super::AbilityInvocation::ContactTarget { .. }
+            ) {
+                origin.cap_contact_target();
+            }
+            self.push_event(
+                crate::combat::CombatEvent::Resolved {
+                    outcome: outcome.clone(),
+                    strike: Some(index as u16),
+                },
+                Some(origin),
+            )?;
             return Ok(outcome);
         }
         let hold_damage = progress.hold_binding().and_then(|binding| {
@@ -251,6 +261,7 @@ impl Game {
                     self.merge_committed_rider_participation(primary_receipt, rider_receipt)?;
             }
         }
+        self.seal_participant_events()?;
         self.provoke_from_strike(&primary.outcome, index as u16)?;
         Ok(primary.outcome)
     }
@@ -275,6 +286,13 @@ impl Game {
             | ResolutionPlan::Rider { ability, .. } => (ability.actor, ability.target),
             ResolutionPlan::Effects { actor, target, .. } => (actor, target),
         };
+        let mut disclosure_origin = self.capture_event_origin(actor, target);
+        if matches!(plan,
+            ResolutionPlan::Ability(ability) | ResolutionPlan::Strike { ability, .. } | ResolutionPlan::Rider { ability, .. }
+                if matches!(ability.invocation, super::AbilityInvocation::ContactTarget { .. }))
+        {
+            disclosure_origin.cap_contact_target();
+        }
         let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
         let mut context = self.resolution_context(plan, actor, target)?;
         context.spatial = self.spatial_resolution_input(plan, facts.contact);
@@ -313,21 +331,36 @@ impl Game {
                     .map(|policy| self.relocate_after_theft(actor, policy, &transfer, &mut rng))
                     .transpose()?
                     .flatten();
-                let consequences = self.event_log.split_off(event_start);
+                let consequences = self.take_event_suffix(event_start)?;
                 result.outcome.effects.push(ResolvedEffect::Theft {
                     quantity: transfer.quantity(),
                     relocation,
                 });
                 result.outcome.result = result.outcome.canonical_result();
-                let receipt =
-                    self.apply_resolved_theft(result.outcome.clone(), site, activity, transfer)?;
-                self.event_log.extend(consequences);
+                let receipt = self.apply_resolved_theft(
+                    result.outcome.clone(),
+                    site,
+                    activity,
+                    transfer,
+                    disclosure_origin,
+                )?;
+                self.append_event_suffix(consequences.0, consequences.1)?;
                 receipt
             } else {
-                self.apply_resolved_outcome(result.outcome.clone(), site, activity)?
+                self.apply_resolved_with_disclosure(
+                    result.outcome.clone(),
+                    site,
+                    activity,
+                    disclosure_origin,
+                )?
             }
         } else {
-            self.apply_resolved_outcome(result.outcome.clone(), site, activity)?
+            self.apply_resolved_with_disclosure(
+                result.outcome.clone(),
+                site,
+                activity,
+                disclosure_origin,
+            )?
         };
         self.rules_rng = rng;
         Ok((result, receipt))
