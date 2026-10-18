@@ -129,6 +129,7 @@ pub enum PlannedEffect {
         resource: Resource,
         amount: PlannedAmount,
     },
+    SearchAdjacentGuises,
     ObservePublicPlan,
     ApplyQualifiedConditionToSource {
         id: ConditionId,
@@ -139,9 +140,9 @@ pub enum PlannedEffect {
 impl PlannedEffect {
     pub(crate) fn recipient(&self) -> crate::rules::EffectRecipient {
         match self {
-            Self::ObservePublicPlan | Self::ApplyQualifiedConditionToSource { .. } => {
-                crate::rules::EffectRecipient::Source
-            }
+            Self::SearchAdjacentGuises
+            | Self::ObservePublicPlan
+            | Self::ApplyQualifiedConditionToSource { .. } => crate::rules::EffectRecipient::Source,
             _ => crate::rules::EffectRecipient::Target,
         }
     }
@@ -226,6 +227,8 @@ pub enum Plan {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbilityPlan {
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub ambush: Option<super::CheckSite>,
     pub actor: ActorId,
     pub invocation: super::AbilityInvocation,
     #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -255,6 +258,8 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            ambush: Option<super::CheckSite>,
             actor: ActorId,
             invocation: super::AbilityInvocation,
             #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -281,6 +286,7 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            ambush: fields.ambush,
             actor: fields.actor,
             invocation: fields.invocation,
             step: fields.step,
@@ -483,7 +489,7 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 rules.condition(id).is_some()
                     && (1..=crate::limits::NUMERIC as u64).contains(duration)
             }
-            PlannedEffect::ObservePublicPlan => true,
+            PlannedEffect::SearchAdjacentGuises | PlannedEffect::ObservePublicPlan => true,
             PlannedEffect::ApplyQualifiedConditionToSource {
                 id,
                 duration,
@@ -633,7 +639,8 @@ pub(super) fn effects_match_definition_scoped(
                         && PlannedAmount::compile(expected)
                             .is_ok_and(|expected| &expected == actual)
                 }
-                (Effect::ObservePublicPlan, PlannedEffect::ObservePublicPlan) => true,
+                (Effect::SearchAdjacentGuises, PlannedEffect::SearchAdjacentGuises)
+                | (Effect::ObservePublicPlan, PlannedEffect::ObservePublicPlan) => true,
                 (
                     Effect::ApplyQualifiedConditionToSource {
                         condition,
@@ -792,45 +799,18 @@ impl Game {
                         |scene| self.attack_available_in_scene(actor, target, scene),
                     )
             }
-            Reach::Sight { range } => {
-                if actor == target {
-                    return false;
-                }
-                let Some(target_actor) = self.actors.get(&target) else {
-                    return false;
-                };
-                let Some(cells) = self.body_cells(
-                    target_actor.location,
-                    target_actor.orientation,
-                    &target_actor.body,
-                ) else {
-                    return false;
-                };
-                let targets: std::collections::BTreeSet<_> =
-                    cells.into_iter().map(|(at, _)| at).collect();
-                let Some((eye, frame)) = self.eye(actor) else {
-                    return false;
-                };
-                let Ok(range) = u8::try_from(*range) else {
-                    return false;
-                };
-                if let Some(scene) = sight {
-                    scene.iter().any(|cell| {
-                        targets.contains(&cell.location)
-                            && cell.offset.x.unsigned_abs()
-                                + cell.offset.y.unsigned_abs()
-                                + cell.offset.z.unsigned_abs()
-                                <= u32::from(range)
-                    })
-                } else {
-                    crate::diagnostics::ordinary_scene();
-                    crate::diagnostics::scene();
-                    self.world
-                        .illuminated_eye_scene(eye, frame, range)
-                        .iter()
-                        .any(|cell| targets.contains(&cell.location))
-                }
+            Reach::MutualSight { range } => {
+                actor != target
+                    && sight.map_or_else(
+                        || self.genuinely_sees_actor(actor, target, *range),
+                        |scene| self.genuinely_sees_actor_in_sight(actor, target, *range, scene),
+                    )
+                    && self.genuinely_sees_actor(target, actor, *range)
             }
+            Reach::Sight { range } => sight.map_or_else(
+                || self.genuinely_sees_actor(actor, target, *range),
+                |sight| self.genuinely_sees_actor_in_sight(actor, target, *range, sight),
+            ),
         }
     }
     pub fn ability_timing(
@@ -862,7 +842,19 @@ impl Game {
         target: ActorId,
         sight: &[tor_world::SightCell],
     ) -> Result<Plan, GameError> {
-        self.plan_ability(actor, ability, target, Some(sight))
+        let reference = self.actor_disclosure(actor, target)?.reference();
+        let invocation = if reference == Some(crate::perception::ActorReferenceKind::Contact) {
+            super::AbilityInvocation::ContactTarget { target }
+        } else {
+            super::AbilityInvocation::ActorTarget { target }
+        };
+        self.compile_strike_plan(
+            actor,
+            ability,
+            invocation,
+            Some(sight),
+            crate::supplies::SupplySelection::Carried,
+        )
     }
     fn plan_ability(
         &self,
@@ -947,6 +939,7 @@ impl Game {
                 Effect::PushTargetOneCell { direction } => Ok(PlannedEffect::PushTargetOneCell {
                     direction: *direction,
                 }),
+                Effect::SearchAdjacentGuises => Ok(PlannedEffect::SearchAdjacentGuises),
                 Effect::ObservePublicPlan => Ok(PlannedEffect::ObservePublicPlan),
                 Effect::ApplyQualifiedConditionToSource {
                     condition,
@@ -1122,6 +1115,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
                 resource: Resource,
                 amount: PlannedAmount,
             },
+            SearchAdjacentGuises {},
             ObservePublicPlan {},
             ApplyQualifiedConditionToSource {
                 id: ConditionId,
@@ -1156,6 +1150,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::RestoreMaximumHealth { amount } => Self::RestoreMaximumHealth { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
+            Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
             Fields::ObservePublicPlan {} => Self::ObservePublicPlan,
             Fields::ApplyQualifiedConditionToSource {
                 id,

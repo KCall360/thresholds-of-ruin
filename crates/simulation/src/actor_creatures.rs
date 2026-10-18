@@ -289,6 +289,30 @@ impl Game {
         identity: CreatureIdentity,
         build: CreatureBuild,
     ) -> Result<(), GameError> {
+        let outcome = self.prepare_creature_configuration(id, identity, build)?;
+        let prepared = self.prepare_actor_outcome(outcome)?;
+        self.publish_actor_effect(prepared, false)
+    }
+
+    /// An enclosing birth/entry transaction owns rollback and final receipts.
+    pub(crate) fn configure_creature_in_transaction(
+        &mut self,
+        id: ActorId,
+        identity: CreatureIdentity,
+        build: CreatureBuild,
+    ) -> Result<(), GameError> {
+        let outcome = self.prepare_creature_configuration(id, identity, build)?;
+        self.apply_outcome(outcome)?;
+        self.retire_settled_falls();
+        self.reconcile_recovery_contexts()
+    }
+
+    fn prepare_creature_configuration(
+        &self,
+        id: ActorId,
+        identity: CreatureIdentity,
+        build: CreatureBuild,
+    ) -> Result<crate::lifecycle::ActorOutcome, GameError> {
         if build.content().as_ref() != self.content.as_ref() {
             return Err(GameError::Rule(
                 crate::abilities::RuleError::InvalidDefinition,
@@ -315,11 +339,7 @@ impl Game {
         actor.anatomy = Shared::new(creature.derived().anatomy.clone());
         actor.combat = Some(CombatState::from_creature(identity, creature));
         actor.cancel_preparation();
-        let may_add = actor
-            .combat
-            .as_ref()
-            .is_some_and(|combat| combat.creature().derived().contextual_health_recovery());
-        self.with_recovery_transition(may_add, |candidate| candidate.apply_outcome(outcome))
+        Ok(outcome)
     }
     /// Project one loaded creature without committing time, preparation or RNG.
     /// Expired contextual memory may consult current perception and warm derived
@@ -357,16 +377,9 @@ impl Game {
         build: CreatureBuild,
     ) -> Result<RebuildOutcome, GameError> {
         let (application, mut outcome) = self.prepare_creature_rebuild(id, build)?;
-        let may_add = application
-            .state
-            .combat
-            .as_ref()
-            .is_some_and(|combat| combat.creature().derived().contextual_health_recovery());
-        self.with_recovery_transition(may_add, |candidate| {
-            let prepared = candidate.prepare_actor_outcome(application)?;
-            outcome.merge(prepared.rebuild_outcome().clone());
-            candidate.publish_actor_outcome(prepared)
-        })?;
+        let prepared = self.prepare_actor_outcome(application)?;
+        outcome.merge(prepared.rebuild_outcome().clone());
+        self.publish_actor_effect(prepared, false)?;
         Ok(outcome)
     }
 

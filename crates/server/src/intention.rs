@@ -190,6 +190,7 @@ pub(super) fn valid_travel_link(
         intention,
         journey,
         step,
+        destination,
         ..
     } = &admitted.content
     else {
@@ -201,8 +202,9 @@ pub(super) fn valid_travel_link(
         && step.checked_add(1) == Some(ordinal)
         && resolved.actor == actor
         && &resolved.branch == branch
-        && matches!(&resolved.content, JournalContent::IntentionStarted { admission, intention: id, .. }
-            if admission == &admitted.id && id == intention)
+        && matches!(&resolved.content, JournalContent::IntentionStarted {
+            admission, intention: id, event: crate::journal::Event::Moved { to, .. }, ..
+        } if admission == &admitted.id && id == intention && *to == crate::adapt::position(*destination))
         && resolved.intention_ends.iter().any(|end| {
             end.actor == actor
                 && end.intention == *intention

@@ -1,7 +1,7 @@
 use super::*;
 use crate::rules::{Modifier, ModifierOp, Scope};
 
-fn modifier(value: LocomotionValue) -> Modifier {
+pub(super) fn modifier(value: LocomotionValue) -> Modifier {
     Modifier {
         scope: Scope::Always,
         op: ModifierOp::Locomotion { value },
@@ -76,17 +76,29 @@ fn canonical_locomotion_is_strict_bounded_and_required_nullable() {
 
 use crate::{Action, ActorId, Game};
 use tor_world::{Direction, Extent, Location, Position, Region, RegionId, World};
-fn at(x: i32, z: i32) -> Location {
+pub(super) fn at(x: i32, z: i32) -> Location {
     Location {
         region: RegionId(1),
         position: Position { x, y: 2, z },
     }
 }
-fn fixture(values: &[LocomotionValue]) -> (Game, ActorId) {
+pub(super) fn fixture(values: &[LocomotionValue]) -> (Game, ActorId) {
+    fixture_with_perception(values, &[])
+}
+pub(super) fn fixture_with_perception(
+    values: &[LocomotionValue],
+    perception: &[crate::perception::PerceptionValue],
+) -> (Game, ActorId) {
     let mut species = crate::test_creatures::species();
     species
         .modifiers
         .extend(values.iter().copied().map(modifier));
+    species
+        .modifiers
+        .extend(perception.iter().cloned().map(|value| Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Perception { value },
+        }));
     let mut rules = crate::test_creatures::ruleset().document().clone();
     rules
         .conditions
@@ -211,7 +223,7 @@ fn erratic_preview_is_actor_owned_and_only_committed_move_advances_rng() {
     );
 }
 
-fn flight(game: &mut Game, actor: ActorId, duration: u64) {
+pub(super) fn flight(game: &mut Game, actor: ActorId, duration: u64) {
     game.apply_condition(
         actor,
         &crate::content_ids::ConditionId::new("braced").unwrap(),

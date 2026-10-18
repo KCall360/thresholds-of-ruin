@@ -118,11 +118,51 @@ pub(crate) enum Action {
         item: u64,
         quantity: Option<u64>,
     },
+    TouchApparentObject {
+        subject: u64,
+        #[serde(deserialize_with = "required_option")]
+        quantity: Option<u64>,
+    },
     Drop {
         item: u64,
         quantity: Option<u64>,
     },
     Wait,
+}
+
+fn required_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(deserializer)
+}
+
+/// Save-owned spelling: later simulation or transport serde changes cannot
+/// rewrite the historical identity domain attached to an accepted preparation.
+pub(crate) mod actor_reference_kind {
+    use serde::{Deserialize, Serialize};
+    use tor_simulation::perception::ActorReferenceKind;
+
+    pub(crate) fn serialize<S: serde::Serializer>(
+        kind: &ActorReferenceKind,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match kind {
+            ActorReferenceKind::Creature => "creature",
+            ActorReferenceKind::Contact => "contact",
+        }
+        .serialize(serializer)
+    }
+    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<ActorReferenceKind, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "creature" => Ok(ActorReferenceKind::Creature),
+            "contact" => Ok(ActorReferenceKind::Contact),
+            _ => Err(serde::de::Error::custom(
+                "invalid saved actor reference kind",
+            )),
+        }
+    }
 }
 
 /// A saved content reference, independent of frontend display data.
@@ -368,6 +408,10 @@ impl From<&crate::actions::Action> for Action {
                 item: *item,
                 quantity: *quantity,
             },
+            Backend::TouchApparentObject { subject, quantity } => Self::TouchApparentObject {
+                subject: subject.0,
+                quantity: *quantity,
+            },
             Backend::Drop { item, quantity } => Self::Drop {
                 item: *item,
                 quantity: *quantity,
@@ -414,6 +458,10 @@ impl From<Action> for crate::actions::Action {
                 direction: direction.into(),
             },
             Action::Take { item, quantity } => Self::Take { item, quantity },
+            Action::TouchApparentObject { subject, quantity } => Self::TouchApparentObject {
+                subject: tor_simulation::ActorId(subject),
+                quantity,
+            },
             Action::Drop { item, quantity } => Self::Drop { item, quantity },
             Action::Equip { item, slot } => Self::Equip { item, slot },
             Action::Unequip { item } => Self::Unequip { item },
@@ -586,6 +634,68 @@ mod tests {
         #[serde(with = "super::Action")]
         action: Action,
     }
+    #[test]
+    fn apparent_touch_saved_input_requires_exact_numeric_subject_and_nullable_quantity() {
+        for quantity in [None, Some(1), Some(0), Some(2), Some(u64::MAX)] {
+            let value = Stored {
+                action: Action::TouchApparentObject {
+                    subject: ActorId(u64::MAX),
+                    quantity,
+                },
+            };
+            let saved = serde_json::json!({"action": {
+                "type": "touch_apparent_object", "subject": u64::MAX, "quantity": quantity
+            }});
+            assert_eq!(serde_json::to_value(&value).unwrap(), saved);
+            assert_eq!(
+                crate::storage::codec::strict::<Stored>(&serde_json::to_vec(&saved).unwrap())
+                    .unwrap(),
+                value
+            );
+        }
+        for invalid in [
+            r#"{"action":{"type":"touch_apparent_object","subject":7}}"#,
+            r#"{"action":{"type":"touch_apparent_object","subject":"7","quantity":null}}"#,
+            r#"{"action":{"type":"touch_apparent_object","subject":7.0,"quantity":null}}"#,
+            r#"{"action":{"type":"touch_apparent_object","subject":7,"quantity":"1"}}"#,
+            r#"{"action":{"type":"touch_apparent_object","subject":7,"quantity":null,"item":7}}"#,
+            r#"{"action":{"type":"touch_apparent_object","subject":7,"quantity":null,"reference":"creature"}}"#,
+        ] {
+            assert!(
+                crate::storage::codec::strict::<Stored>(invalid.as_bytes()).is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn saved_ability_started_reference_is_required_and_save_owned() {
+        for reference in ["creature", "contact"] {
+            let saved = serde_json::json!({"type":"ability_started", "reference":reference,
+                "id":"basic_melee", "name":"Basic melee", "target":u64::MAX});
+            let restored: crate::journal::Event =
+                crate::storage::codec::strict(&serde_json::to_vec(&saved).unwrap()).unwrap();
+            assert_eq!(serde_json::to_value(restored).unwrap(), saved);
+        }
+        for reference in [
+            serde_json::Value::Null,
+            serde_json::json!("apparent_object"),
+            serde_json::json!({"contact":null}),
+            serde_json::json!(0),
+        ] {
+            let invalid = serde_json::json!({"type":"ability_started", "reference":reference,
+                "id":"basic_melee", "name":"Basic melee", "target":7});
+            assert!(crate::storage::codec::strict::<crate::journal::Event>(
+                &serde_json::to_vec(&invalid).unwrap()
+            )
+            .is_err());
+        }
+        assert!(crate::storage::codec::strict::<crate::journal::Event>(
+            br#"{"type":"ability_started","id":"basic_melee","name":"Basic melee","target":7}"#
+        )
+        .is_err());
+    }
+
     #[test]
     fn saved_escape_uses_exact_internal_numeric_identity_not_wire_tokens() {
         let value = Stored {
@@ -983,6 +1093,7 @@ mod tests {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum AbilityInvocation {
     ActorTarget { target: u64 },
+    ContactTarget { target: u64 },
     SelfStep { direction: Direction },
 }
 impl<'de> Deserialize<'de> for AbilityInvocation {
@@ -1003,6 +1114,9 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
             ActorTarget {
                 target: u64,
             },
+            ContactTarget {
+                target: u64,
+            },
             SelfStep {
                 #[serde(deserialize_with = "direction_token")]
                 direction: Direction,
@@ -1010,6 +1124,7 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
         }
         Ok(match named_map(deserializer)? {
             Fields::ActorTarget { target } => Self::ActorTarget { target },
+            Fields::ContactTarget { target } => Self::ContactTarget { target },
             Fields::SelfStep { direction } => Self::SelfStep { direction },
         })
     }
@@ -1019,6 +1134,9 @@ impl From<crate::actions::AbilityInvocation> for AbilityInvocation {
         match value {
             crate::actions::AbilityInvocation::ActorTarget { target } => {
                 Self::ActorTarget { target: target.0 }
+            }
+            crate::actions::AbilityInvocation::ContactTarget { target } => {
+                Self::ContactTarget { target: target.0 }
             }
             crate::actions::AbilityInvocation::SelfStep { direction } => Self::SelfStep {
                 direction: direction.into(),
@@ -1030,6 +1148,9 @@ impl From<AbilityInvocation> for crate::actions::AbilityInvocation {
     fn from(value: AbilityInvocation) -> Self {
         match value {
             AbilityInvocation::ActorTarget { target } => Self::ActorTarget {
+                target: tor_simulation::ActorId(target),
+            },
+            AbilityInvocation::ContactTarget { target } => Self::ContactTarget {
                 target: tor_simulation::ActorId(target),
             },
             AbilityInvocation::SelfStep { direction } => Self::SelfStep {

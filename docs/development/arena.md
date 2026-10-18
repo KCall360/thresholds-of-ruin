@@ -464,8 +464,8 @@ balances and applied-condition counts cannot fill them in.
 
 [`rogue_roster_study.py`](../../scripts/rogue_roster_study.py) prepares ordinary
 validated packages and paired runner plans for its declared eighteen-foe study
-selection. Production now selects 21 species; this study has not been expanded or
-qualified for L/N/O theft and Gold. Preparing inputs is separate from running
+selection. Production now selects 24 species; this study has not been expanded or
+qualified for L/N/O theft and Gold or M/P/X perception. Preparing inputs is separate from running
 encounters or establishing balance, and retained study identifiers remain tied
 to their original source fingerprints.
 
@@ -545,21 +545,28 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 The API likewise requires
 `create_candidate(output, compiler, source_package=package, source_provenance={"reference": reference})`.
 It accepts only the exact known preactivation E/S profile, canonical activated
-eighteen-species profile, or reviewed twenty-one-species input with L/N/O,
-Leprechaun birth Gold and the appended room-Gold stage. An independent pinned-selector
-oracle checks the latter's exact roster, ordering, weights, growth, stages and
-stock policies; unknown or partially modified activation rules reject. The oracle
+eighteen-species profile, reviewed twenty-one-species input with L/N/O and Gold,
+or reviewed twenty-four-species input adding M/P/X. The two reviewed profiles
+have distinct independent pinned-selector oracles and input labels. Their exact
+roster, ordering, weights, growth, stages and stock policies must match; unknown,
+partially modified, overlapping or reordered activation rules reject. The 24-species
+profile preserves M's upper-clamp open tail, M's 40% and X's 30% birth stock,
+and P's zero birth stock. It retains the same Leprechaun birth-Gold pool and
+appended room-Gold stage as the 21-species profile. The oracle
 pins population policy, not arbitrary supplied rules/catalog bytes. The full
 declared source closure, resolved package rules and dependency identities are
 separately retained and fingerprinted; the compiler owns content validation.
 All accepted inputs materialize the same eighteen-species, four-stage diagnostic
-output without L/N/O, the Leprechaun birth-Gold pool or room-Gold stage; this reduced
-output is not current production population. The shared C/Y/T/V/G/J pool is not
-duplicated. Existing output directories are never reused.
+output without L/N/O or M/P/X, the Leprechaun birth-Gold pool or room-Gold stage.
+This reduced output is not current 24-species production population. Accepting
+current production as an input does not expand or qualify the retained study.
+The exact reviewed21 adapter and its result remain unchanged; reviewed24 is a
+separate adapter. The shared C/Y/T/V/G/J pool is not duplicated. Existing output directories are never reused.
 
 New `tor-rogue-activation-inputs-v2` inventories record `source_population_shape`
-as `preactivation_es`, `canonical_eighteen_species` or
-`reviewed_twenty_one_species_input`, explicit package provenance, and separate
+as `preactivation_es`, `canonical_eighteen_species`,
+`reviewed_twenty_one_species_input` or `reviewed_twenty_four_species_input`,
+explicit package provenance, and separate
 `input_population_scope`/`output_population_scope` species, ordered stage IDs and
 pool IDs. Separate `source_package_inputs`, `tool_inputs` and
 `compiler_dependency_inputs` hashes cover each new generation, including the

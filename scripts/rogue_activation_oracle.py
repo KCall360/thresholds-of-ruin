@@ -1,4 +1,4 @@
-"""Independent exact oracle for the reviewed twenty-one-species activation input.
+"""Independent exact oracles for reviewed twenty-one- and twenty-four-species input.
 
 This is an input adapter contract, not a candidate population or a live-package
 loader. Expected selector mass, ordering and policies never come from supplied
@@ -90,3 +90,46 @@ def reviewed_twenty_one_activation():
                     {"archetype": "rogue.clean_bandage", "weight": 1, "quantity": 1}]},
                 "rogue.leprechaun_gold": {"version": 1, "choices": [
                     {"archetype": "rogue.gold", "weight": 1, "quantity": quantity}]}}}
+
+
+def reviewed_twenty_four_activation():
+    """Add M/P/X from the pinned selector, preserving the exact21 contract.
+
+    Only the independently authored policy above is reused, never a supplied
+    package. M is in the upper-clamp replacement set and retains its open tail.
+    """
+    activation = reviewed_twenty_one_activation()
+    stage = activation["profiles"]["rogue.low_depth"]["stages"][0]
+    order = (*ORDER, ("M", "medusa"), ("P", "phantom"), ("X", "xeroc"))
+    stock = {choice["archetype"]: copy.deepcopy(choice["carried_loot"])
+             for band in stage["bands"] for choice in band["choices"] if "carried_loot" in choice}
+    for name, numerator, denominator in (("medusa", 2, 5), ("xeroc", 3, 10)):
+        stock["rogue." + name] = {"version": 1, "pool": "rogue.vampire_supplies",
+                                  "chance": {"numerator": numerator, "denominator": denominator}}
+    bands = []
+    for depth in range(1, 32):
+        mass = dict.fromkeys((glyph for glyph, _ in order), 0)
+        for offset in range(10):
+            index = depth + offset - 6
+            indices = range(5) if index < 0 else range(21, 26) if index > 25 else (index,)
+            for selected in indices:
+                glyph = SELECTOR[selected]
+                if glyph in mass:
+                    mass[glyph] += 5 // len(indices)
+        divisor = math.gcd(*mass.values())
+        choices = []
+        for glyph, name in order:
+            if mass[glyph]:
+                identity = "rogue." + name
+                choice = {"archetype": identity, "weight": mass[glyph] // divisor}
+                if identity in stock:
+                    choice["carried_loot"] = copy.deepcopy(stock[identity])
+                choices.append(choice)
+        if depth < 31 and bands and bands[-1]["choices"] == choices:
+            bands[-1]["depth"]["maximum"] = depth
+        else:
+            bounds = ({"kind": "open", "minimum": depth} if depth == 31 else
+                      {"kind": "finite", "minimum": depth, "maximum": depth})
+            bands.append({"depth": bounds, "choices": choices})
+    stage["bands"] = bands
+    return activation

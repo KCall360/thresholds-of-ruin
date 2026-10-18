@@ -48,6 +48,12 @@ pub enum Action {
         item: u64,
         quantity: Option<u64>,
     },
+    /// Private identity resolved from the apparent-object token domain. The
+    /// original quantity is retained exactly for validation and receipt replay.
+    TouchApparentObject {
+        subject: tor_simulation::ActorId,
+        quantity: Option<u64>,
+    },
     Drop {
         item: u64,
         quantity: Option<u64>,
@@ -469,6 +475,7 @@ mod tests {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AbilityInvocation {
     ActorTarget { target: tor_simulation::ActorId },
+    ContactTarget { target: tor_simulation::ActorId },
     SelfStep { direction: Direction },
 }
 impl From<tor_simulation::ActorId> for AbilityInvocation {

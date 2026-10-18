@@ -1,4 +1,4 @@
-import = "interactions-v41"
+import = "interactions-v42"
 
 # Provisional TOR mapping of the pinned Rogue food reserve, not calibrated balance.
 [[overrides]]
@@ -95,3 +95,50 @@ op = "add"
 path = ["talents", "rogue.energy_drain"]
 value = { id = "rogue.energy_drain", name = "Energy Drain", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "type_in", types = ["undead"] }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rogue.energy_drain" } }] }
 
+
+# GZ1: repeatable gaze uses genuine reciprocal eye-sight and the existing
+# Presence-bound Spellcasting/Spiritual check. Durations are actor-active ticks.
+[[overrides]]
+op = "add"
+path = ["flags", "gaze_capable"]
+value = { id = "gaze_capable", name = "Gaze-capable", modifiers = [] }
+
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.confused"]
+value = { id = "rogue.confused", family = "rogue.confused", lifecycle = "timed", name = "Confused", modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "confused", chance = { numerator = 4, denominator = 5 } } } }], stacking = { kind = "keep" }, source_scoped = false, descriptors = ["mind_affecting"], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "protect", duration = 400 } }, restrictions = [], preparation = "preserve" }
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.confusing_gaze"]
+value = { id = "rogue.confusing_gaze", name = "Confusing Gaze", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, cooldown = 700, reach = { kind = "mutual_sight", range = 4 }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "named", skill = "spellcasting" }, against = { kind = "defense", defense = "spiritual" } }, on_success = [{ kind = "apply_condition", condition = "rogue.confused", duration = 300 }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["talents", "rogue.confusing_gaze"]
+value = { id = "rogue.confusing_gaze", name = "Confusing Gaze", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "flag", flag = "gaze_capable", present = true }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rogue.confusing_gaze" } }] }
+# MI1 grants one initial authored mundane appearance, lost globally on reveal.
+# MI2 owns only the generic first-attack-from-guise advantage capability.
+# The empty description exactly matches ordinary ground mace disclosure.
+
+[[overrides]]
+op = "add"
+path = ["talents", "rogue.object_guise"]
+value = { id = "rogue.object_guise", name = "Object Guise", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "subtype_in", subtypes = ["shapechanger"] }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "object_guise", appearance = { name = "mace", description = "", class = "weapon", asset = "item.weapon.mace" } } } }] }
+
+[[overrides]]
+op = "add"
+path = ["talents", "rogue.ambush_from_guise"]
+value = { id = "rogue.ambush_from_guise", name = "Ambush From Guise", prerequisites = ["rogue.object_guise"], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 6 }, { kind = "subtype_in", subtypes = ["shapechanger"] }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "ambush_from_guise", enabled = true } } }] }
+
+# Ordinary paid Search is available to every creature in this package. Discovery
+# is a guaranteed bounded physical-contact query, not a free observation mutation.
+[[overrides]]
+op = "set"
+path = ["constants", "default_abilities"]
+value = ["basic_melee", "bind_wounds", "rogue.search"]
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.search"]
+value = { id = "rogue.search", name = "Search", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 50, recover = 50 } }, reach = { kind = "self_only" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "search_adjacent_guises" }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }

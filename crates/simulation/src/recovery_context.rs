@@ -37,18 +37,8 @@ impl Game {
     }
 
     pub(crate) fn senses_faction_hostile(&self, actor: ActorId) -> Result<bool, GameError> {
-        let scene = self.streaming_scene(actor)?;
-        let cells = scene.iter().map(|cell| cell.location).collect();
-        Ok(self
-            .actors
-            .perceived(&self.world, &cells)
-            .into_iter()
-            .any(|(id, body)| {
-                id != actor
-                    && self.alive(id)
-                    && self.faction_hostile(actor, id)
-                    && body.iter().any(|(at, _)| cells.contains(at))
-            }))
+        // Safety knows personally provoked contacts, but never their hidden affiliation.
+        self.senses_hostile(actor)
     }
 
     /// A frozen owner has captured clock context, not permission to inspect the
@@ -82,9 +72,11 @@ impl Game {
         if self.actor_frozen(actor) {
             return self.recovery_source_context(actor);
         }
-        let scene = self.scene_at_placement(actor, placement)?;
+        let (scene, sight) = self.scene_snapshot_at_placement(actor, placement)?;
         Ok(RecoveryContext::Known {
-            sensed_hostile: !self.hostiles_in_scene(actor, &scene).is_empty(),
+            sensed_hostile: !self
+                .hostiles_in_projection(actor, &scene, &sight, Some(placement))
+                .is_empty(),
         })
     }
 
@@ -192,8 +184,9 @@ impl Game {
     }
     /// Public setup operations keep their original cheap path when no contextual
     /// owner can be affected and the mutation needs no independent rollback.
-    /// Otherwise the existing candidate transaction owns world mutation, all
-    /// settlements, and any defensive reconciliation error.
+    /// Callers must include finalized actor event emission in requires_candidate.
+    /// Otherwise the candidate owns world mutation, settlements, reconciliation
+    /// and receipt publication, including rollback on a late capacity error.
     pub(crate) fn with_recovery_transition<R>(
         &mut self,
         requires_candidate: bool,
@@ -204,12 +197,11 @@ impl Game {
             self.retire_settled_falls();
             return Ok(result);
         }
-        let mut candidate = self.clone();
-        let result = change(&mut candidate)?;
-        candidate.retire_settled_falls();
-        candidate.reconcile_recovery_contexts()?;
-        *self = candidate;
-        Ok(result)
+        self.with_effect_publication(|candidate| {
+            let result = change(candidate)?;
+            candidate.retire_settled_falls();
+            Ok(result)
+        })
     }
 
     /// Called only at authoritative mutation/time boundaries. Unchanged policy

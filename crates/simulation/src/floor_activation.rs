@@ -1164,6 +1164,7 @@ impl Game {
         at: Location,
     ) -> Result<(ActorId, Option<CarriedLootDecision>), GameError> {
         let mut candidate = self.clone();
+        candidate.begin_effect_publication()?;
         let plan = candidate
             .floor_activation
             .as_ref()
@@ -1219,6 +1220,7 @@ impl Game {
             },
             None => CarriedLootDecision::NotCarried,
         });
+        candidate.finish_effect_publication()?;
         *self = candidate;
         Ok((actor, stock))
     }
@@ -1378,9 +1380,11 @@ impl Game {
             return Ok(());
         }
         let mut candidate = self.clone();
+        candidate.begin_effect_publication()?;
         candidate.begin_retrieval_transaction();
         candidate.activate_entry(id, to, EntryCause::Initial)?;
         candidate.retrieval_initial_entry(id, to)?;
+        candidate.finish_effect_publication()?;
         *self = candidate;
         Ok(())
     }

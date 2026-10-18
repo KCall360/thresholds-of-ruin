@@ -48,13 +48,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v41";
-const VALIDATOR: &str = "tor-scenario-31";
+pub const RULESET: &str = "interactions-v42";
+const VALIDATOR: &str = "tor-scenario-32";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 19;
+pub const FORMAT: u32 = 20;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -4601,15 +4601,19 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-31");
-        assert_eq!(original.certificate.ruleset, "interactions-v41");
+        assert_eq!(original.certificate.validator, "tor-scenario-32");
+        assert_eq!(original.certificate.ruleset, "interactions-v42");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
             ("validator", "tor-scenario-28"),
             ("validator", "tor-scenario-29"),
+            ("validator", "tor-scenario-30"),
+            ("validator", "tor-scenario-31"),
             ("ruleset", "interactions-v38"),
             ("ruleset", "interactions-v39"),
+            ("ruleset", "interactions-v40"),
+            ("ruleset", "interactions-v41"),
         ] {
             let mut package = original.clone();
             if boundary == "validator" {
@@ -5719,7 +5723,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v41"
+        let source = r#"import = "interactions-v42"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

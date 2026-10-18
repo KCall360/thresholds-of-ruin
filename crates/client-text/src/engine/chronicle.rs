@@ -257,7 +257,8 @@ impl Chronicler {
                                 variant: self.blows,
                             }
                         }
-                        CombatEventView::EscapeResolved { .. } => {
+                        CombatEventView::UnseenAbility { .. }
+                        | CombatEventView::EscapeResolved { .. } => {
                             Beat::EscapeHold(tor_client_common::narration::combat_event(e, b, a))
                         }
                         CombatEventView::Condition { ref condition } => {

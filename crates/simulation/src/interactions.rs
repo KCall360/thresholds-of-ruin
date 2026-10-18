@@ -313,7 +313,9 @@ impl Work {
     pub fn target(&self) -> Option<ActorId> {
         match self {
             Self::UseAbility {
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                invocation:
+                    crate::abilities::AbilityInvocation::ActorTarget { target }
+                    | crate::abilities::AbilityInvocation::ContactTarget { target },
                 ..
             } => Some(*target),
             Self::UseAbility {
@@ -457,12 +459,8 @@ impl Game {
         equipment: BTreeMap<EquipmentSlotId, ItemId>,
     ) -> Result<(), GameError> {
         let outcome = self.equipment_candidate(actor, equipment)?;
-        let may_add = outcome
-            .state
-            .combat
-            .as_ref()
-            .is_some_and(|combat| combat.creature().derived().contextual_health_recovery());
-        self.with_recovery_transition(may_add, |candidate| candidate.apply_outcome(outcome))
+        let prepared = self.prepare_actor_outcome(outcome)?;
+        self.publish_actor_effect(prepared, false)
     }
     /// Recheck only live item references and socket eligibility. Captured effects,
     /// costs and timing remain owned by the original plan.
@@ -666,17 +664,51 @@ impl Game {
         actor: ActorId,
         scene: &[tor_world::SightCell],
     ) -> BTreeSet<ActorId> {
-        let cells = scene.iter().map(|cell| cell.location).collect();
-        self.actors
-            .perceived(&self.world, &cells)
+        let Ok((_, sight)) = self.scene_snapshot(actor) else {
+            return BTreeSet::new();
+        };
+        self.hostiles_in_projection(actor, scene, &sight, None)
+    }
+    pub(crate) fn hostiles_in_projection(
+        &self,
+        actor: ActorId,
+        scene: &[tor_world::SightCell],
+        sight: &[tor_world::SightCell],
+        placement: Option<crate::abilities::Placement>,
+    ) -> BTreeSet<ActorId> {
+        self.perception_projection_at(actor, scene, sight, placement)
+            .unwrap_or_default()
             .into_iter()
-            .filter(|(id, body)| {
+            .filter(|(id, row)| {
                 *id != actor
-                    && self.actors[id].alive()
-                    && self.hostile(actor, *id)
-                    && body.iter().any(|(at, _)| cells.contains(at))
+                    && self.alive(*id)
+                    && self.perceived_hostile(actor, *id, row.disclosure)
             })
             .map(|(id, _)| id)
+            .collect()
+    }
+
+    pub(crate) fn visible_threats(
+        &self,
+        actor: ActorId,
+    ) -> BTreeSet<crate::perception::PerceivedThreat> {
+        let Ok((scene, sight)) = self.scene_snapshot(actor) else {
+            return BTreeSet::new();
+        };
+        self.perception_projection(actor, &scene, &sight)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(id, row)| {
+                *id != actor
+                    && self.alive(*id)
+                    && self.perceived_hostile(actor, *id, row.disclosure)
+            })
+            .filter_map(|(actor, row)| {
+                Some(crate::perception::PerceivedThreat {
+                    actor,
+                    reference: row.disclosure.reference()?,
+                })
+            })
             .collect()
     }
     pub(crate) fn start_work(
@@ -746,10 +778,15 @@ impl Game {
             self.apply_outcome(holder)?;
         }
         let threats = if plan.work().item().is_some() {
-            self.visible_hostiles(actor)
+            self.visible_threats(actor)
         } else {
             BTreeSet::new()
         };
+        if threats.len() > crate::limits::PUBLIC_AIM_OCCURRENCES {
+            return Err(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition,
+            ));
+        }
         let mut outcome = self.actor_outcome(actor)?;
         let candidate = &mut outcome.state;
         if candidate
@@ -790,6 +827,25 @@ impl Game {
         }
         if !resuming {
             if let Some(ability) = plan.as_ability() {
+                if ability.ambush.is_some() {
+                    let owner = origin
+                        .ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
+                    if !candidate.guise.ambush_available() {
+                        return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
+                    }
+                    candidate.guise.ambush =
+                        crate::perception::AmbushState::Reserved { origin: owner };
+                }
+                if self
+                    .content
+                    .rules
+                    .ability(&ability.ability)
+                    .is_some_and(|definition| {
+                        definition.interaction == crate::rules::Interaction::HostileToTarget
+                    })
+                {
+                    candidate.guise.reveal();
+                }
                 if let Some(cooldown) = ability.cooldown {
                     candidate
                         .combat
@@ -831,11 +887,9 @@ impl Game {
         actor: ActorId,
         effects: &[crate::rules::Effect],
     ) -> Result<bool, GameError> {
-        let mut candidate = self.clone();
-        let observed = candidate.apply_effects_in_transaction(actor, effects)?;
-        candidate.reconcile_recovery_contexts()?;
-        *self = candidate;
-        Ok(observed)
+        self.with_effect_publication(|candidate| {
+            candidate.apply_effects_in_transaction(actor, effects)
+        })
     }
     fn apply_effects_in_transaction(
         &mut self,
@@ -942,6 +996,7 @@ impl Game {
             })
         });
         claims_valid
+            && state.guise.claim_valid(state.pending.as_ref())
             && state.combat.as_ref().is_none_or(|combat| {
                 combat.creature().conditions().instances().all(|entry| {
                     entry.qualification.as_ref().is_none_or(|qualification| {
@@ -1014,9 +1069,10 @@ impl Game {
                         || self.item_work_available(actor, &p.plan.work()))
                     && self.preparation_items_valid(p, true)
                     && p.schedule_valid(self.actor_clock(actor), a.ready_at)
+                    && p.threats.len() <= crate::limits::PUBLIC_AIM_OCCURRENCES
                     && p.threats
                         .iter()
-                        .all(|id| self.actors.contains_key(id) || self.detached_actor(*id))
+                        .all(|threat| threat.actor != actor && (self.actors.contains_key(&threat.actor) || self.detached_actor(threat.actor)))
             })
     }
 }

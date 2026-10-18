@@ -456,3 +456,86 @@ on_success = [{ kind = "damage", damage = { kind = "components", components = [{
 on_failure = []
 descriptors = []
 riders = []
+
+# M/P/X: exact approved racial rows, purchases and natural dice. Bodies,
+# attributes, skills and ordinary timing remain provisional TOR inputs.
+# Incorporeal/shapechanger labels grant no immunity, wall passing or re-hiding.
+
+[creatures.species."rogue.medusa"]
+behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, flee_percent = 25 }
+kind = "monstrous_humanoid"
+subtypes = ["reptilian"]
+attributes = { strength = 2, speed = 1, intellect = 1, willpower = 2, awareness = 1, presence = 2 }
+anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
+displacement = { size = "medium", anchored = false }
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "gaze_capable" } }, { scope = "always", op = { kind = "flag", flag = "natural_sequence" } }]
+[creatures.species."rogue.medusa".melee]
+skill = "heavy_weaponry"
+bonus = 0
+wind_up = 100
+recovery = 100
+[[creatures.species."rogue.medusa".melee.strikes]]
+offset = 0
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 3, sides = 4, bonus = 0 } } }] } }]
+on_failure = []
+descriptors = []
+riders = []
+[[creatures.species."rogue.medusa".melee.strikes]]
+offset = 0
+unlock = "second_strike"
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 3, sides = 4, bonus = 0 } } }] } }]
+on_failure = []
+descriptors = []
+riders = []
+[[creatures.species."rogue.medusa".melee.strikes]]
+offset = 0
+unlock = "third_strike"
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 2, sides = 5, bonus = 0 } } }] } }]
+on_failure = []
+descriptors = []
+riders = []
+
+[creatures.species."rogue.phantom"]
+behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
+kind = "undead"
+subtypes = ["incorporeal"]
+attributes = { strength = 2, speed = 2, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
+anatomy = { slots = [] }
+displacement = { size = "medium", anchored = false }
+modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "invisible", enabled = true } } }, { scope = "always", op = { kind = "locomotion", value = { kind = "erratic", chance = { numerator = 1, denominator = 5 } } } }]
+[creatures.species."rogue.phantom".melee]
+skill = "heavy_weaponry"
+bonus = 0
+wind_up = 100
+recovery = 100
+[[creatures.species."rogue.phantom".melee.strikes]]
+offset = 0
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 4, sides = 4, bonus = 0 } } }] } }]
+on_failure = []
+descriptors = []
+riders = []
+
+[creatures.species."rogue.xeroc"]
+behavior = { disposition = "passive", idle = "wait", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
+kind = "aberration"
+subtypes = ["shapechanger"]
+attributes = { strength = 2, speed = 1, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
+anatomy = { slots = [] }
+displacement = { size = "medium", anchored = false }
+modifiers = []
+[creatures.species."rogue.xeroc".melee]
+skill = "heavy_weaponry"
+bonus = 0
+wind_up = 100
+recovery = 100
+[[creatures.species."rogue.xeroc".melee.strikes]]
+offset = 0
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 4, sides = 4, bonus = 0 } } }] } }]
+on_failure = []
+descriptors = []
+riders = []

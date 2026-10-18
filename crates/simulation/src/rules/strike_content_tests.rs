@@ -367,3 +367,28 @@ fn natural_melee_source_repeated_riders_share_the_full_sequence_budget() {
     );
     assert!(append_natural_riders(&[row.clone(), row.clone(), row], &[extra]).is_err());
 }
+
+#[test]
+fn adjacent_search_is_only_a_non_hostile_self_ability() {
+    let mut row = strike(0);
+    row["on_success"] = json!([{"kind":"search_adjacent_guises"}]);
+    let mut valid = document_with(vec![row]);
+    valid["abilities"][0]["basic_attack"] = json!(false);
+    valid["abilities"][0]["interaction"] = json!("non_hostile");
+    valid["abilities"][0]["reach"] = json!({"kind":"self_only"});
+    assert!(decode(valid.clone()).is_ok());
+    for interaction in ["hostile_to_target", "hostile_area"] {
+        let mut invalid = valid.clone();
+        invalid["abilities"][0]["interaction"] = json!(interaction);
+        assert!(decode(invalid).is_err());
+    }
+    for reach in [
+        json!({"kind":"melee"}),
+        json!({"kind":"sight","range":4}),
+        json!({"kind":"self_or_ally","range":{"kind":"touch"}}),
+    ] {
+        let mut invalid = valid.clone();
+        invalid["abilities"][0]["reach"] = reach;
+        assert!(decode(invalid).is_err());
+    }
+}

@@ -1486,6 +1486,7 @@ fn actual_ability_plan_values() -> Vec<Value> {
     declared_field_values(
         &named,
         &[
+            "ambush",
             "actor",
             "invocation",
             "step",

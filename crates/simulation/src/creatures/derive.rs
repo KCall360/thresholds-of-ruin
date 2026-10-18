@@ -121,6 +121,7 @@ pub struct HitDiceSummary {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DerivedCreature {
+    pub perception: crate::perception::PerceptionCapabilities,
     pub locomotion: crate::locomotion::LocomotionCapabilities,
     pub kind: TypeId,
     pub subtypes: BTreeSet<SubtypeId>,
@@ -717,6 +718,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
     })?;
     let mut derived = DerivedCreature {
         locomotion: Default::default(),
+        perception: Default::default(),
         kind,
         subtypes,
         attributes,
@@ -1011,7 +1013,8 @@ fn collect_stats(
             | ModifierOp::Reduction { .. }
             | ModifierOp::TalentReduction { .. }
             | ModifierOp::GrantAbility { .. }
-            | ModifierOp::Locomotion { .. } => {}
+            | ModifierOp::Locomotion { .. }
+            | ModifierOp::Perception { .. } => {}
         }
     }
     Ok(values)
@@ -1300,6 +1303,9 @@ fn fold(
     derived.locomotion = crate::locomotion::LocomotionCapabilities::from_modifiers(
         derived.sources.values().flatten(),
     );
+    derived.perception = crate::perception::PerceptionCapabilities::from_modifiers(
+        derived.sources.values().flatten(),
+    )?;
     fold_attribute_dependents(derived, build, &values)?;
     derived.health_recovery_period = recovery_period(derived.base_health_recovery_period, &values)?;
     let mut quiet_values = values.clone();
@@ -1358,7 +1364,8 @@ fn fold(
                 ModifierOp::Add { .. }
                 | ModifierOp::Set { .. }
                 | ModifierOp::Flag { .. }
-                | ModifierOp::Locomotion { .. } => {}
+                | ModifierOp::Locomotion { .. }
+                | ModifierOp::Perception { .. } => {}
             }
         }
     }
@@ -1480,6 +1487,15 @@ fn fold(
             crate::rules::StrikeSource::SelectedMelee => {}
         }
         let reach = match definition.reach {
+            crate::rules::Reach::MutualSight { range } => {
+                let range = i64::from(range) + i64::from(modifiers.range);
+                if !(1..=i64::from(crate::limits::SIGHT_RANGE)).contains(&range) {
+                    return Err(BuildError::DerivedLimit);
+                }
+                crate::rules::Reach::MutualSight {
+                    range: range as u16,
+                }
+            }
             crate::rules::Reach::Sight { range } => {
                 let range = i64::from(range) + i64::from(modifiers.range);
                 if !(1..=i64::from(crate::limits::SIGHT_RANGE)).contains(&range) {

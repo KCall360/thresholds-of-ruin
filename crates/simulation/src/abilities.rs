@@ -61,3 +61,6 @@ mod hold_damage_tests;
 
 #[cfg(test)]
 mod theft_tests;
+
+#[cfg(test)]
+mod gaze_tests;

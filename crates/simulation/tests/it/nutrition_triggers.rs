@@ -202,6 +202,7 @@ fn behavior_memory_segmentation_preserves_the_final_time_depletion_trigger() {
         let mut game = edit(&game, |snapshot, pool| {
             let actors = snapshot["actors"].as_u64().unwrap() as usize;
             pool["actors"][actors]["2"]["behavior"]["engagement"] = json!({
+                "reference":"creature",
                 "target":1, "location":at(1), "last_seen":0});
         });
         let mut restored = edit(&game, |_, _| {});

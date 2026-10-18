@@ -245,6 +245,7 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
         s::rules::Effect::Nourish { amount } => {
             ("nourish", vec![text("amount", amount_text(amount))])
         }
+        s::rules::Effect::SearchAdjacentGuises => ("search_adjacent_guises", vec![]),
         s::rules::Effect::ObservePublicPlan => ("observe_public_plan", vec![]),
         s::rules::Effect::ApplyQualifiedConditionToSource {
             condition: id,
@@ -392,6 +393,24 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
         },
     )];
     let id = match &value.op {
+        ModifierOp::Perception { value } => {
+            use s::perception::PerceptionValue;
+            let (name, enabled) = match value {
+                PerceptionValue::Invisible { enabled } => ("invisible", *enabled),
+                PerceptionValue::SeeInvisible { enabled } => ("see_invisible", *enabled),
+                PerceptionValue::Sight { enabled } => ("sight", *enabled),
+                PerceptionValue::ObjectGuise { appearance } => {
+                    if let Some(appearance) = appearance {
+                        fields.push(text("appearance", &appearance.name));
+                    }
+                    ("object_guise", appearance.is_some())
+                }
+                PerceptionValue::AmbushFromGuise { enabled } => ("ambush_from_guise", *enabled),
+            };
+            fields.push(text("capability", name));
+            fields.push(text("enabled", if enabled { "true" } else { "false" }));
+            "perception"
+        }
         ModifierOp::Locomotion { value } => {
             use s::locomotion::LocomotionValue;
             match value {
@@ -406,8 +425,15 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
                     ));
                     fields.push(text("enabled", if *enabled { "true" } else { "false" }));
                 }
-                LocomotionValue::Erratic { chance } => {
-                    fields.push(text("capability", "erratic"));
+                LocomotionValue::Erratic { chance } | LocomotionValue::Confused { chance } => {
+                    fields.push(text(
+                        "capability",
+                        if matches!(value, LocomotionValue::Confused { .. }) {
+                            "confused"
+                        } else {
+                            "erratic"
+                        },
+                    ));
                     if let Some(chance) = chance {
                         fields.push(signed("numerator", i64::from(chance.numerator)));
                         fields.push(signed("denominator", i64::from(chance.denominator)));

@@ -151,7 +151,8 @@ impl StateView {
                             || strike.is_some_and(|ordinal| ordinal >= crate::MAX_SEQUENCE_STRIKES)
                     }
                     crate::CombatEventView::Condition { condition } => !condition.valid(),
-                    crate::CombatEventView::Interrupted { .. }
+                    crate::CombatEventView::UnseenAbility { .. }
+                    | crate::CombatEventView::Interrupted { .. }
                     | crate::CombatEventView::EscapeResolved { .. }
                     | crate::CombatEventView::Died { .. } => false,
                 })
