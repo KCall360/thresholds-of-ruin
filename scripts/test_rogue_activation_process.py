@@ -291,8 +291,9 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
 
     def test_depth_twenty_one_jabberwock_birth_has_owned_rows_stock_and_source_free_restart(self):
         output, manifest = self.production_anchor_package(1, 21)
+        # Fixed production streams select M/F/P/J; the J carries one ration.
         receipts = self.package_restart(output, 1, 21, 1, eligible_actors(manifest, 21),
-                                        seed=1, production_policy=True)
+                                        seed=2, production_policy=True)
         placed = [row for row in receipts[0]["decisions"][0]["result"]["attempts"]
                   if row["kind"] == "placed" and row["content"] == "rogue.jabberwock"]
         self.assertTrue(placed, "Fixed depth-21 production entry must actually construct J")
@@ -447,7 +448,7 @@ class RogueActivationSourceTests(unittest.TestCase):
             "content": "rogue.jabberwock", "entity": {"carried_loot": {
                 "kind": "carried", "content": "rogue.ration", "quantity": 1}}}]}}]}]
         self.check_production_anchor(
-            "test_depth_twenty_one_jabberwock_birth_has_owned_rows_stock_and_source_free_restart", 1, 21, 1,
+            "test_depth_twenty_one_jabberwock_birth_has_owned_rows_stock_and_source_free_restart", 1, 21, 2,
             receipt)
 
     def test_mixed_depth27_changes_only_production_mage_anchor(self):

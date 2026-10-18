@@ -161,6 +161,7 @@ fn frozen_strike(ordinal: u16, offset: u64) -> Value {
 
 fn frozen_plan(strikes: Vec<Value>) -> Value {
     json!({
+        "ambush": null,
         "actor": 1,
         "initial_hold": null,
         "hold_damage_increment": 0,
@@ -3292,9 +3293,15 @@ fn public_plan_review_unavailable_target_has_no_attempt_but_preserves_source_and
             seen_source, visible,
             "target visibility fixture must reach beyond local awareness"
         );
+        // This private resolver needs its enclosing unpublished host batch.
+        // Starting fresh history leaves the already paid gameplay prefix intact.
+        game.host_region_continuation = true;
+        game.begin_event_batch().unwrap();
         let rng = game.rules_rng;
         game.tick = 20;
         game.resolve_preparations().unwrap();
+        game.seal_participant_events().unwrap();
+        game.host_region_continuation = false;
         assert_eq!(game.rules_rng, rng);
         assert_eq!(game.health(ActorId(2)).unwrap().0, 97);
         assert_eq!(game.preparation(ActorId(1)).unwrap().next_strike(), Some(2));
@@ -3318,18 +3325,45 @@ fn public_plan_review_unavailable_target_has_no_attempt_but_preserves_source_and
                 reason: UnselectedReason::UnavailableTarget
             }
         );
-        for (actor, expected) in [(ActorId(1), true), (ActorId(2), visible)] {
+        for (actor, expected) in [(ActorId(1), true), (ActorId(2), false)] {
             let view = game.observe(actor).unwrap();
             assert_eq!(
                 view.combat.unwrap().events.iter().any(|event| matches!(
                     event,
                     DisclosedCombatEvent::Ability {
                         strike: Some(1),
+                        outcome: OutcomeStatus::Miss,
+                        ..
+                    }
+                )),
+                expected,
+                "ordinary reads retain own feedback without granting an observer receipt"
+            );
+        }
+        let witness = game.event_observation_witness();
+        let (mut view, _, proof) = game.observe_event_scene(ActorId(2)).unwrap();
+        assert_eq!(game.event_observation_pending(&proof), visible);
+        game.record_event_observation(&witness, &proof, &mut view)
+            .unwrap();
+        game.seal_event_observations().unwrap();
+        assert!(game.event_receipts_valid());
+        for (actor, expected) in [(ActorId(1), true), (ActorId(2), visible)] {
+            let view = game.observe(actor).unwrap();
+            let events = view.combat.unwrap().events;
+            assert_eq!(
+                events.iter().any(|event| matches!(
+                    event,
+                    DisclosedCombatEvent::Ability {
+                        strike: Some(1),
+                        outcome: OutcomeStatus::Miss,
                         ..
                     }
                 )),
                 expected
             );
+            assert!(!events
+                .iter()
+                .any(|event| matches!(event, DisclosedCombatEvent::UnseenAbility { .. })));
         }
         game.teleport(ActorId(2), home).unwrap();
         game.tick = 30;

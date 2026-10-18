@@ -4,7 +4,7 @@ use crate::combat::{CombatEvent, DisclosedCombatEvent};
 use crate::perception::ActorReferenceKind;
 use crate::{ActorId, Game, GameError, Observation};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use tor_world::Shared;
 
 type Reference = Option<ActorReferenceKind>;
@@ -111,6 +111,7 @@ pub(crate) struct EventOrigin {
     source_target: Reference,
     target_source: Reference,
     witness: EventObservationWitness,
+    frozen: [bool; 2],
 }
 impl EventOrigin {
     pub(crate) fn cap_contact_target(&mut self) {
@@ -284,14 +285,64 @@ impl Game {
         }
     }
 
+    /// A disclosed limb can place a body without identifying the source of a
+    /// historical event. Identity additionally needs the authoritative reference
+    /// cell in the same ordinary scene; anonymous contact remains body-based.
+    fn event_reference_in_scene(
+        &self,
+        observer: ActorId,
+        subject: ActorId,
+        classified: Reference,
+        contains: impl FnOnce(tor_world::Location) -> bool,
+    ) -> Reference {
+        if observer == subject {
+            return Some(ActorReferenceKind::Creature);
+        }
+        match classified {
+            Some(ActorReferenceKind::Contact) => Some(ActorReferenceKind::Contact),
+            Some(ActorReferenceKind::Creature) => self
+                .actors
+                .get(&subject)
+                .filter(|state| contains(state.location))
+                .map(|_| ActorReferenceKind::Creature),
+            None => None,
+        }
+    }
+
     pub(crate) fn capture_event_origin(&self, actor: ActorId, target: ActorId) -> EventOrigin {
         let reference = |observer, subject| {
             if observer == subject {
                 Some(ActorReferenceKind::Creature)
+            } else if self.actor_frozen(observer) {
+                // Crediting a frozen causal owner cannot acquire new senses or
+                // activate its floor. Its personal outcome still has a receipt.
+                None
             } else {
-                self.actor_disclosure(observer, subject)
-                    .ok()
-                    .and_then(|d| d.reference())
+                if self.actor_frozen(subject) {
+                    let owner = self.actors.get(&observer)?;
+                    let other = self.actors.get(&subject)?;
+                    // An active recipient may see a frozen source across a
+                    // physical link. Only an isolated observer region plus an
+                    // absent subject body proves Hidden without a scene.
+                    if self.world.linked_regions(owner.location.region).is_empty()
+                        && self
+                            .body_cells(other.location, other.orientation, &other.body)
+                            .is_none_or(|body| {
+                                body.iter()
+                                    .all(|(at, _)| at.region != owner.location.region)
+                            })
+                    {
+                        return None;
+                    }
+                }
+                let (scene, sight) = self.scene_snapshot(observer).ok()?;
+                let classified = self
+                    .actor_disclosure_in_scene(observer, subject, &scene, &sight)
+                    .ok()?
+                    .reference();
+                self.event_reference_in_scene(observer, subject, classified, |at| {
+                    scene.iter().any(|cell| cell.location == at)
+                })
             }
         };
         let mut source_target = reference(actor, target);
@@ -317,7 +368,33 @@ impl Game {
             source_target,
             target_source: reference(target, actor),
             witness: self.event_observation_witness(),
+            frozen: [self.actor_frozen(actor), self.actor_frozen(target)],
         }
+    }
+
+    /// Reuse only an unpublished origin with identical sensory inputs. Health
+    /// settlement alone does not invalidate these inputs, but a rider that
+    /// changes placement, life, guise or senses must capture its own new origin.
+    /// Appending a preceding event is allowed; every clone still binds to its
+    /// exact event key independently when published.
+    pub(crate) fn reuse_event_origin(
+        &self,
+        actor: ActorId,
+        target: ActorId,
+        previous: Option<&EventOrigin>,
+    ) -> EventOrigin {
+        previous
+            .filter(|origin| {
+                origin.event.is_none()
+                    && origin.actor == actor
+                    && origin.target == target
+                    && origin.witness.generation == self.event_receipts.generation
+                    && origin.witness.actors == self.actors.visibility_epoch()
+                    && origin.witness.world == self.world.perception_snapshot()
+                    && origin.frozen == [self.actor_frozen(actor), self.actor_frozen(target)]
+            })
+            .cloned()
+            .unwrap_or_else(|| self.capture_event_origin(actor, target))
     }
 
     pub(crate) fn begin_event_batch(&mut self) -> Result<(), GameError> {
@@ -597,16 +674,16 @@ impl Game {
         let mut proof = EventObservation::default();
         if self.event_origins.open {
             let witness = self.event_observation_witness();
+            let locations: BTreeSet<_> = scene.iter().map(|cell| cell.location).collect();
             let reference = |subject| {
-                if subject == observer {
-                    Some(ActorReferenceKind::Creature)
-                } else {
-                    observation
-                        .visible_actors
-                        .binary_search_by_key(&subject, |actor| actor.id)
-                        .ok()
-                        .and_then(|index| observation.visible_actors[index].disclosure.reference())
-                }
+                let classified = observation
+                    .visible_actors
+                    .binary_search_by_key(&subject, |actor| actor.id)
+                    .ok()
+                    .and_then(|index| observation.visible_actors[index].disclosure.reference());
+                self.event_reference_in_scene(observer, subject, classified, |at| {
+                    locations.contains(&at)
+                })
             };
             for (index, event) in self
                 .event_log

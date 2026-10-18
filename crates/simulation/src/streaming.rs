@@ -1385,6 +1385,10 @@ impl Game {
             return Err(TransitionError::ActiveNotLoaded(*region).into());
         }
         let mut next = self.clone();
+        if advance {
+            next.begin_effect_publication()?;
+        }
+        // Deferred host transitions retain the same unpublished event origins.
         // Regions the game doesn't know yet are declared from the store's
         // source, if it has them.
         for region in t.loaded.iter().chain(&t.active) {
@@ -1476,6 +1480,7 @@ impl Game {
             next.lifecycle_state_valid(),
             "transition kept lifecycle state valid"
         );
+        next.finish_effect_publication()?;
         for (id, record) in made {
             records.put(id, record);
         }

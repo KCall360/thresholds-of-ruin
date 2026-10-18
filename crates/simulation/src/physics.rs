@@ -313,22 +313,34 @@ impl Game {
         })
     }
     pub fn set_body(&mut self, id: ActorId, body: BodySpec) -> Result<(), GameError> {
+        self.validate_body_change(id, &body)?;
+        self.with_recovery_transition(false, |candidate| candidate.replace_body(id, body))
+    }
+    /// Birth construction already owns rollback and event publication.
+    pub(crate) fn set_body_in_transaction(
+        &mut self,
+        id: ActorId,
+        body: BodySpec,
+    ) -> Result<(), GameError> {
+        self.validate_body_change(id, &body)?;
+        self.replace_body(id, body)?;
+        self.retire_settled_falls();
+        self.reconcile_recovery_contexts()
+    }
+    fn validate_body_change(&self, id: ActorId, body: &BodySpec) -> Result<(), GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        if !body.valid() || !self.body_fits(id, actor.location, actor.orientation, &body) {
+        if !body.valid() || !self.body_fits(id, actor.location, actor.orientation, body) {
             return Err(GameError::Blocked);
         }
-        self.with_recovery_transition(false, |candidate| {
-            let mut actor = candidate
-                .actors
-                .get_mut(&id)
-                .ok_or(GameError::UnknownActor)?;
-            actor.body = tor_world::Shared::new(body);
-            actor.motion.acceleration_remainder = [0; 3];
-            actor.motion.active_fall = None;
-            drop(actor);
-            candidate.reconcile_holds_for_actor(id)?;
-            Ok(())
-        })
+        Ok(())
+    }
+    fn replace_body(&mut self, id: ActorId, body: BodySpec) -> Result<(), GameError> {
+        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        actor.body = tor_world::Shared::new(body);
+        actor.motion.acceleration_remainder = [0; 3];
+        actor.motion.active_fall = None;
+        drop(actor);
+        self.reconcile_holds_for_actor(id)
     }
     fn body_has_field(&self, at: Location, frame: u8, body: &BodySpec) -> bool {
         self.body_cells(at, frame, body).is_some_and(|cells| {
@@ -519,24 +531,22 @@ impl Game {
         }
         Some((to, next_frame))
     }
-    /// Voluntary movement checks each cardinal leg in the region/frame where
-    /// it occurs. Imposed motion deliberately continues to use translate_body.
+    /// Voluntary movement checks each resolved cardinal leg in its region's
+    /// coordinates, including actor-local confusion samples. Imposed motion
+    /// deliberately continues to use translate_body.
     fn voluntary_leg_allowed(
         &self,
         id: ActorId,
         from: Location,
         direction: Direction,
-        frame: u8,
         flying: bool,
         allow_stairs: bool,
     ) -> bool {
         if self.world.is_stair(from, direction) {
             return allow_stairs && self.can_use_abstract_stairs(id);
         }
-        !matches!(
-            direction.rotated(inverse_rotation(frame)),
-            Direction::Up | Direction::Down
-        ) || flying
+        !matches!(direction, Direction::Up | Direction::Down)
+            || flying
             || self.world.passage(from, direction).is_some()
     }
 
@@ -545,12 +555,11 @@ impl Game {
         id: ActorId,
         from: Location,
         direction: Direction,
-        frame: u8,
         flying: bool,
         allow_stairs: bool,
     ) -> Option<(Location, u8)> {
         let Some((a, b)) = direction.components() else {
-            if !self.voluntary_leg_allowed(id, from, direction, frame, flying, allow_stairs) {
+            if !self.voluntary_leg_allowed(id, from, direction, flying, allow_stairs) {
                 return None;
             }
             return self.reach(from, direction);
@@ -558,22 +567,23 @@ impl Game {
         // The same one-clear-side rule as World::diagonal_reach, with the
         // actor's movement permissions applied before either leg is admitted.
         let route = |first, second: Direction| {
-            if !self.voluntary_leg_allowed(id, from, first, frame, flying, allow_stairs) {
+            if !self.voluntary_leg_allowed(id, from, first, flying, allow_stairs) {
                 return None;
             }
             let (side, r1) = self.world.movement_neighbor(from, first)?;
-            if !self.world.walkable(side) || (side != from && self.occupied(side)) {
+            // A multi-cell contact may pass through the mover's own footprint.
+            // Other living actors still obstruct this ordering of the route.
+            if !self.world.walkable(side)
+                || self
+                    .actors
+                    .at(&self.world, side)
+                    .keys()
+                    .any(|other| *other != id && self.actors[other].alive())
+            {
                 return None;
             }
             let second = second.rotated(r1);
-            if !self.voluntary_leg_allowed(
-                id,
-                side,
-                second,
-                compose_rotation(frame, r1),
-                flying,
-                allow_stairs,
-            ) {
+            if !self.voluntary_leg_allowed(id, side, second, flying, allow_stairs) {
                 return None;
             }
             let (to, r2) = self.world.movement_neighbor(side, second)?;
@@ -615,14 +625,9 @@ impl Game {
         let local = direction.rotated(actor.orientation);
         if locomotion.stationary
             || self.world.is_stair(actor.location, local)
-            || !self.voluntary_leg_allowed(
-                id,
-                actor.location,
-                local,
-                actor.orientation,
-                locomotion.flying,
-                false,
-            )
+            || self
+                .voluntary_reach(id, actor.location, local, locomotion.flying, false)
+                .is_none()
             || (self.body_has_field(actor.location, actor.orientation, &actor.body)
                 && !locomotion.flying
                 && !self.supported(id))
@@ -665,14 +670,7 @@ impl Game {
             return None;
         }
         let local = direction.rotated(a.orientation);
-        if !self.voluntary_leg_allowed(
-            id,
-            a.location,
-            local,
-            a.orientation,
-            locomotion.flying,
-            allow_stairs,
-        ) {
+        if !self.voluntary_leg_allowed(id, a.location, local, locomotion.flying, allow_stairs) {
             return None;
         }
         if self.world.is_stair(a.location, local) {
@@ -689,14 +687,8 @@ impl Game {
         let (x, y, z) = direction.delta();
         if a.body.cells.len() == 1 && !physical {
             // Retain established beveled-corner walking for diagnostic fixtures.
-            let (to, r) = self.voluntary_reach(
-                id,
-                a.location,
-                local,
-                a.orientation,
-                locomotion.flying,
-                allow_stairs,
-            )?;
+            let (to, r) =
+                self.voluntary_reach(id, a.location, local, locomotion.flying, allow_stairs)?;
             let frame = compose_rotation(a.orientation, r);
             return self
                 .body_fits(id, to, frame, &a.body)
@@ -714,7 +706,6 @@ impl Game {
                     id,
                     a.location,
                     local,
-                    a.orientation,
                     locomotion.flying,
                     allow_stairs,
                 ) {
@@ -723,14 +714,7 @@ impl Game {
                 let (side, frame) =
                     self.translate_body(entity, a.location, a.orientation, &a.body, first)?;
                 let local = Direction::from_delta(rotate_vector(frame, second))?;
-                if !self.voluntary_leg_allowed(
-                    id,
-                    side,
-                    local,
-                    frame,
-                    locomotion.flying,
-                    allow_stairs,
-                ) {
+                if !self.voluntary_leg_allowed(id, side, local, locomotion.flying, allow_stairs) {
                     return None;
                 }
                 self.translate_body(entity, side, frame, &a.body, second)

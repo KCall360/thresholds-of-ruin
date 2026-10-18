@@ -719,6 +719,20 @@ mod tests {
         let checkpoint = game.checkpoint(&mut shared);
         Game::restore_checkpoint(checkpoint, &shared, game.content().clone())
     }
+    fn retain_unobserved_synthetic_event(game: &mut Game, event: crate::combat::CombatEvent) {
+        assert!(game.event_log.is_empty());
+        game.event_log.push(event);
+        // Deliberately synthetic history has a complete current envelope but no
+        // observer authority. This isolates outcome validation from receipt shape.
+        game.event_receipts = serde_json::from_value(serde_json::json!({
+            "generation": 1,
+            "sealed": game.event_log.len(),
+            "bindings": 0,
+            "observers": {},
+        }))
+        .unwrap();
+        assert!(game.event_receipts_valid());
+    }
     #[test]
     fn public_plan_restore_requires_knowledge_of_current_own_grants() {
         let (game, actor) = observer();
@@ -1256,12 +1270,13 @@ mod tests {
             let mut candidate = game.clone();
             assert!(candidate.apply(invalid.clone()).is_err());
             assert_eq!(candidate, game, "invalid evidence cannot publish any state");
-            candidate
-                .event_log
-                .push(crate::combat::CombatEvent::Resolved {
+            retain_unobserved_synthetic_event(
+                &mut candidate,
+                crate::combat::CombatEvent::Resolved {
                     outcome: invalid,
                     strike: None,
-                });
+                },
+            );
             assert!(
                 restored(&candidate).is_err(),
                 "typed in-memory checkpoint cannot bypass the byte reader"
@@ -1337,12 +1352,13 @@ mod tests {
             .into_iter()
             .filter_map(|(label, outcome)| {
                 let mut candidate = game.clone();
-                candidate
-                    .event_log
-                    .push(crate::combat::CombatEvent::Resolved {
+                retain_unobserved_synthetic_event(
+                    &mut candidate,
+                    crate::combat::CombatEvent::Resolved {
                         outcome,
                         strike: None,
-                    });
+                    },
+                );
                 restored(&candidate).is_ok().then_some(label)
             })
             .collect();
@@ -1358,14 +1374,15 @@ mod tests {
         let (game, actor) = observer();
         // With all effects erased, both are internally coherent historical facts.
         // Checkpoint restoration validates shape and consistency, not original intent.
+        // A coherent synthetic envelope still grants no historical observation.
         for participation in [
             AttemptedParticipation::source(),
             AttemptedParticipation::target(),
         ] {
             let mut candidate = game.clone();
-            candidate
-                .event_log
-                .push(crate::combat::CombatEvent::Resolved {
+            retain_unobserved_synthetic_event(
+                &mut candidate,
+                crate::combat::CombatEvent::Resolved {
                     outcome: Outcome {
                         actor,
                         target: actor,
@@ -1378,11 +1395,19 @@ mod tests {
                         effects: vec![],
                     },
                     strike: Some(0),
-                });
-            assert!(
-                restored(&candidate).is_ok(),
-                "coherent user-edited history is outside the existing authenticity guarantee"
+                },
             );
+            let restored = restored(&candidate).expect(
+                "coherent user-edited history is outside the existing authenticity guarantee",
+            );
+            assert_eq!(restored.combat_events(), candidate.combat_events());
+            assert!(restored
+                .observe(actor)
+                .unwrap()
+                .combat
+                .unwrap()
+                .events
+                .is_empty());
         }
     }
 
@@ -1403,12 +1428,13 @@ mod tests {
         };
         for strike in [None, Some(crate::limits::STRIKES as u16)] {
             let mut candidate = game.clone();
-            candidate
-                .event_log
-                .push(crate::combat::CombatEvent::Resolved {
+            retain_unobserved_synthetic_event(
+                &mut candidate,
+                crate::combat::CombatEvent::Resolved {
                     outcome: outcome.clone(),
                     strike,
-                });
+                },
+            );
             assert!(
                 restored(&candidate).is_err(),
                 "a rider summary requires a valid primary strike context"

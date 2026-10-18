@@ -30,13 +30,37 @@ fn fixture() -> Game {
             value: PerceptionValue::SeeInvisible { enabled: true },
         },
     });
+    let mut guised = crate::creatures::Template::new(TemplateId::new("event_guised").unwrap(), 0);
+    guised.modifiers.push(Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Perception {
+            value: PerceptionValue::ObjectGuise {
+                appearance: Some(crate::perception::GuiseAppearance {
+                    name: "closed chest".into(),
+                    description: "An ordinary chest.".into(),
+                    class: crate::ItemClass::Tool,
+                    asset: None,
+                }),
+            },
+        },
+    });
+    let mut rules = crate::test_creatures::ruleset().document().clone();
+    rules.conditions.push(serde_json::from_value(serde_json::json!({
+        "id":"event_detecting", "family":"event_detecting", "name":"Detecting",
+        "lifecycle":"timed", "timing":{"kind":"actor_active","on_expiry":{"kind":"remove"}},
+        "restrictions":[], "preparation":"preserve", "modifiers":[{
+            "scope":"always", "op":{"kind":"perception","value":{"kind":"see_invisible","enabled":true}}
+        }], "stacking":{"kind":"longest"}, "source_scoped":false,
+        "descriptors":[], "capacity":"reject"
+    })).unwrap());
     let content = crate::creatures::Content::new(
-        crate::test_creatures::ruleset(),
+        crate::rules::Ruleset::validate(rules).unwrap(),
         crate::creatures::ScenarioCatalog {
             species: [(species_id.clone(), species)].into(),
             templates: [
                 (invisible.id.clone(), invisible),
                 (detecting.id.clone(), detecting),
+                (guised.id.clone(), guised),
             ]
             .into(),
         },
@@ -116,6 +140,239 @@ fn capture(game: &mut Game, actor: ActorId, witness: &EventObservationWitness) -
     game.record_event_observation(witness, &proof, &mut view)
         .unwrap();
     view
+}
+
+#[test]
+fn unchanged_unbound_origins_reuse_work_but_changed_senses_and_bindings_do_not() {
+    let mut game = fixture();
+    let origin = game.capture_event_origin(ActorId(1), ActorId(2));
+    let before = crate::diagnostics::work_counts();
+    let reused = game.reuse_event_origin(ActorId(1), ActorId(2), Some(&origin));
+    let after = crate::diagnostics::work_counts();
+    assert_eq!(after.scenes, before.scenes);
+    assert_eq!(after.body_cells, before.body_cells);
+    assert_eq!(after.actor_disclosures, before.actor_disclosures);
+    assert_eq!(reused.source_target, Some(ActorReferenceKind::Creature));
+    template(&mut game, ActorId(2), Some("event_invisible"));
+    let refreshed = game.reuse_event_origin(ActorId(1), ActorId(2), Some(&reused));
+    assert_eq!(refreshed.source_target, Some(ActorReferenceKind::Contact));
+    assert_eq!(origin.source_target, Some(ActorReferenceKind::Creature));
+    let mut bound = refreshed;
+    bound.event = Some(EventKey::capture(&CombatEvent::Died { actor: ActorId(2) }));
+    let before = crate::diagnostics::work_counts();
+    let unbound = game.reuse_event_origin(ActorId(1), ActorId(2), Some(&bound));
+    assert!(unbound.event.is_none());
+    assert!(crate::diagnostics::work_counts().actor_disclosures > before.actor_disclosures);
+}
+
+#[test]
+fn active_recipient_retains_visible_or_unseen_feedback_from_a_frozen_source() {
+    for invisible in [false, true] {
+        let mut game = fixture();
+        game.teleport(
+            ActorId(1),
+            Location {
+                region: RegionId(2),
+                position: Position { x: 4, y: 1, z: 0 },
+            },
+        )
+        .unwrap();
+        game.teleport(ActorId(2), at(0, 1)).unwrap();
+        game.teleport(ActorId(3), at(0, 0)).unwrap();
+        if invisible {
+            template(&mut game, ActorId(1), Some("event_invisible"));
+        }
+        game.transition_regions(
+            &crate::RegionTransition {
+                active: [RegionId(1)].into(),
+                loaded: [RegionId(1), RegionId(2)].into(),
+            },
+            &mut crate::MemoryRecords::default(),
+        )
+        .unwrap();
+        assert!(game.actor_frozen(ActorId(1)));
+        assert!(!game.actor_frozen(ActorId(2)));
+        let origin = game.capture_event_origin(ActorId(1), ActorId(2));
+        assert_eq!(origin.source_target, None);
+        assert_eq!(
+            origin.target_source,
+            (!invisible).then_some(ActorReferenceKind::Creature)
+        );
+        game.apply(damage(ActorId(1), ActorId(2), 1)).unwrap();
+        let received = events(&game, ActorId(2));
+        if invisible {
+            assert!(received.iter().any(|event| matches!(
+                event,
+                DisclosedCombatEvent::UnseenAbility {
+                    caster: None,
+                    target: ActorId(2),
+                    ..
+                }
+            )));
+        } else {
+            assert!(received.iter().any(|event| matches!(
+                event,
+                DisclosedCombatEvent::Ability {
+                    caster: Some(ActorId(1)),
+                    caster_reference: Some(ActorReferenceKind::Creature),
+                    ..
+                }
+            )));
+        }
+        assert!(events(&game, ActorId(1)).iter().any(|event| matches!(
+            event,
+            DisclosedCombatEvent::Ability {
+                caster: Some(ActorId(1)),
+                target: None,
+                ..
+            }
+        )));
+    }
+}
+
+#[test]
+fn rider_refreshes_after_primary_reveal_without_upgrading_primary_or_contact_plan() {
+    for contact in [false, true] {
+        let mut game = fixture();
+        let plan = game
+            .ability_plan(
+                ActorId(1),
+                &AbilityId::new("basic_melee").unwrap(),
+                ActorId(2),
+            )
+            .unwrap();
+        let mut ability = plan.as_ability().unwrap().clone();
+        ability.strikes.truncate(1);
+        ability.strikes[0].check = None;
+        ability.strikes[0].on_success = vec![crate::abilities::PlannedEffect::Heal {
+            amount: crate::abilities::PlannedAmount::Fixed { amount: 1 },
+        }];
+        ability.strikes[0].on_failure.clear();
+        ability.strikes[0].riders = vec![crate::abilities::FrozenRider {
+            trigger: crate::rules::RiderTrigger::Success,
+            condition: None,
+            check: None,
+            effects: vec![crate::abilities::PlannedEffect::Damage {
+                damage: crate::damage::DamageSpec::new(
+                    vec![crate::damage::DamageComponent::fixed(
+                        crate::combat::DamageType::Impact,
+                        None,
+                        1_000_000,
+                    )],
+                    None,
+                )
+                .unwrap(),
+            }],
+            descriptors: vec![],
+        }];
+        if contact {
+            ability.invocation =
+                crate::abilities::AbilityInvocation::ContactTarget { target: ActorId(2) };
+        }
+        template(&mut game, ActorId(2), Some("event_guised"));
+        assert!(game.actors[&ActorId(2)].guise.appearance().is_some());
+        game.resolve_strike(
+            &ability,
+            0,
+            None,
+            &mut crate::combat::PreparationProgress::Ability {
+                next_strike: 1,
+                successful_primaries: 0,
+                attempted_riders: [0; 2],
+                linked_hold: None,
+            },
+        )
+        .unwrap();
+        assert!(game.actors[&ActorId(2)].guise.appearance().is_none());
+        let history = events(&game, ActorId(1));
+        let references: Vec<_> = game.event_receipts.observers[&ActorId(1)]
+            .entries
+            .iter()
+            .filter_map(|entry| match entry.key.kind {
+                EventKind::Resolved => Some(entry.target),
+                _ => None,
+            })
+            .collect();
+        let expected = if contact {
+            ActorReferenceKind::Contact
+        } else {
+            ActorReferenceKind::Creature
+        };
+        assert_eq!(references, vec![None, Some(expected)]);
+        assert!(history.iter().any(|event| matches!(
+            event,
+            DisclosedCombatEvent::Ability {
+                target: None,
+                target_reference: None,
+                ..
+            }
+        )));
+        assert!(
+            history.iter().any(|event| matches!(event,
+            DisclosedCombatEvent::Died { actor: ActorId(2), reference } if *reference == expected))
+        );
+    }
+}
+
+#[test]
+fn target_detection_between_primary_and_rider_refreshes_only_the_rider_source() {
+    let mut game = fixture();
+    template(&mut game, ActorId(1), Some("event_invisible"));
+    let plan = game
+        .ability_plan(
+            ActorId(1),
+            &AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    let mut ability = plan.as_ability().unwrap().clone();
+    ability.strikes.truncate(1);
+    ability.strikes[0].check = None;
+    ability.strikes[0].on_success = vec![crate::abilities::PlannedEffect::ApplyCondition {
+        id: crate::content_ids::ConditionId::new("event_detecting").unwrap(),
+        duration: 100,
+    }];
+    ability.strikes[0].on_failure.clear();
+    ability.strikes[0].riders = vec![crate::abilities::FrozenRider {
+        trigger: crate::rules::RiderTrigger::Success,
+        condition: None,
+        check: None,
+        effects: vec![crate::abilities::PlannedEffect::Heal {
+            amount: crate::abilities::PlannedAmount::Fixed { amount: 1 },
+        }],
+        descriptors: vec![],
+    }];
+    game.resolve_strike(
+        &ability,
+        0,
+        None,
+        &mut crate::combat::PreparationProgress::Ability {
+            next_strike: 1,
+            successful_primaries: 0,
+            attempted_riders: [0; 2],
+            linked_hold: None,
+        },
+    )
+    .unwrap();
+    let references: Vec<_> = game.event_receipts.observers[&ActorId(2)]
+        .entries
+        .iter()
+        .filter_map(|entry| (entry.key.kind == EventKind::Resolved).then_some(entry.source))
+        .collect();
+    assert_eq!(
+        references,
+        vec![
+            Some(ActorReferenceKind::Contact),
+            Some(ActorReferenceKind::Creature)
+        ]
+    );
+    assert!(events(&game, ActorId(2)).iter().any(|event| matches!(
+        event,
+        DisclosedCombatEvent::UnseenAbility {
+            caster: Some(ActorId(1)),
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -215,6 +472,65 @@ fn public_act_and_apply_seal_before_snapshot_and_keep_queries_pure() {
     assert_eq!((game.rules_rng, game.tick()), (rng, tick));
     assert_eq!(events(&restored(&game), ActorId(1)), expected);
     assert!(game.event_origins.entries.is_empty());
+}
+
+#[test]
+fn host_event_identity_requires_the_disclosed_reference_cell() {
+    for anchor_lit in [false, true] {
+        let mut game = fixture();
+        game.teleport(ActorId(2), at(4, 1)).unwrap();
+        game.teleport(ActorId(3), at(4, 2)).unwrap();
+        game.set_body(
+            ActorId(1),
+            crate::BodySpec {
+                cells: vec![[0, 0, 0], [1, 0, 0], [2, 0, 0]],
+                eye: [0, 0, 0],
+                mass: 100,
+            },
+        )
+        .unwrap();
+        game.set_cell_light(at(1, 1), anchor_lit).unwrap();
+        host_damage(&mut game, 1);
+        let witness = game.event_observation_witness();
+        let (mut view, scene, proof) = game.observe_event_scene(ActorId(3)).unwrap();
+        assert!(view.visible_actors.iter().any(|actor| {
+            actor.id == ActorId(1) && actor.disclosure == ActorDisclosure::Creature
+        }));
+        assert_eq!(
+            scene.iter().any(|cell| cell.location == at(1, 1)),
+            anchor_lit
+        );
+        let before = crate::diagnostics::work_counts();
+        game.record_event_observation(&witness, &proof, &mut view)
+            .unwrap();
+        assert_eq!(crate::diagnostics::work_counts().scenes, before.scenes);
+        let third_party = view.combat.unwrap().events;
+        if anchor_lit {
+            assert!(third_party.iter().any(|event| matches!(
+                event,
+                DisclosedCombatEvent::Ability {
+                    caster: Some(ActorId(1)),
+                    target: Some(ActorId(2)),
+                    ..
+                }
+            )));
+        } else {
+            assert!(third_party.is_empty());
+            assert!(events(&game, ActorId(2)).iter().any(|event| matches!(
+                event,
+                DisclosedCombatEvent::UnseenAbility {
+                    caster: None,
+                    target: ActorId(2),
+                    ..
+                }
+            )));
+        }
+        game.seal_event_observations().unwrap();
+        let reopened = restored(&game);
+        for observer in [ActorId(2), ActorId(3)] {
+            assert_eq!(events(&reopened, observer), events(&game, observer));
+        }
+    }
 }
 
 #[test]

@@ -158,6 +158,7 @@ impl Game {
     pub fn control_arena(&mut self, paused: bool, advance: u64) -> Result<(), crate::GameError> {
         use crate::run_policy::RunError;
         let mut candidate = self.clone();
+        candidate.begin_effect_publication()?;
         let run = candidate
             .combat
             .run
@@ -168,6 +169,7 @@ impl Game {
         if !paused || advance > 0 {
             candidate.advance_to_next_decision()?;
         }
+        candidate.finish_effect_publication()?;
         *self = candidate;
         Ok(())
     }

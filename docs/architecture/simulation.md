@@ -157,6 +157,20 @@ effects or event ordering; untriggered and skipped riders contribute nothing.
 An early-blocked primary creates no rider receipt. Executed immune attempts can
 still carry a genuine target check or selected payload.
 
+Current-batch observer receipts freeze disclosure at publication. Anonymous
+contact references never gain identity retrospectively, including after death or
+gaining See Invisible. Missing receipts disclose nothing; free observations do
+not reconstruct them from current senses. Pre-mutation participant references
+and unchanged visibility witnesses license bounded publication, while ordinary
+condition, damage, interruption and death feedback remains available to its owner.
+
+Successful public event-producing mutations finalize participant receipts before
+returning or writing detached records. Existing candidate transactions share this
+boundary; nested effect, rider and birth helpers remain unpublished until their
+owner finishes. Finalized actor outcomes identify eventless setup paths that need
+no additional Game clone. Host-only deferred transitions retain their observer
+extension until the enclosing host publication seals it.
+
 Named current plan/outcome readers reject missing, duplicate, unknown and
 positional fields. Pending-plan validation checks the frozen check fact against its source;
 publication and restoration reject internally contradictory outcome evidence.

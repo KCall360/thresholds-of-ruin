@@ -215,6 +215,13 @@ pub(crate) struct PreparedActorOutcome {
     rebuild: crate::creatures::RebuildOutcome,
 }
 impl PreparedActorOutcome {
+    /// Preparation can add interruptions or death cleanup after a caller has
+    /// finished changing its owned actor. Only this finalized value can prove
+    /// that publication will not append lifecycle events.
+    pub(crate) fn emits_events(&self) -> bool {
+        !self.outcome.events.is_empty() || self.death.is_some()
+    }
+
     pub(crate) fn rebuild_outcome(&self) -> &crate::creatures::RebuildOutcome {
         &self.rebuild
     }
@@ -338,15 +345,54 @@ impl Game {
     /// External effect application owns one transaction; internal lifecycle callers
     /// use the already existing action/physics transaction and actor-local snapshots.
     pub fn apply(&mut self, outcome: Outcome) -> Result<(), GameError> {
+        self.with_effect_publication(|candidate| candidate.apply_outcome(outcome))
+    }
+
+    /// Publish one complete public effect operation. Internal effect/rider work
+    /// stays on apply_outcome until its owning transaction finishes participation.
+    /// A host candidate retains its observer extension for the outer publication.
+    pub(crate) fn with_effect_publication<R>(
+        &mut self,
+        change: impl FnOnce(&mut Self) -> Result<R, GameError>,
+    ) -> Result<R, GameError> {
         let mut candidate = self.clone();
-        if !candidate.host_region_continuation {
-            candidate.seal_event_observations()?;
-        }
-        candidate.apply_outcome(outcome)?;
-        candidate.reconcile_recovery_contexts()?;
-        candidate.seal_participant_events()?;
+        candidate.begin_effect_publication()?;
+        let result = change(&mut candidate)?;
+        candidate.finish_effect_publication()?;
         *self = candidate;
+        Ok(result)
+    }
+
+    /// Existing private candidates share the same publication boundary without
+    /// nesting another whole-Game transaction.
+    pub(crate) fn begin_effect_publication(&mut self) -> Result<(), GameError> {
+        if !self.host_region_continuation {
+            self.seal_event_observations()?;
+        }
         Ok(())
+    }
+
+    pub(crate) fn finish_effect_publication(&mut self) -> Result<(), GameError> {
+        self.reconcile_recovery_contexts()?;
+        self.seal_participant_events()
+    }
+
+    /// Public actor mutations keep the cheap eventless setup path. Any finalized
+    /// lifecycle event, new contextual owner or caller-owned rollback need uses
+    /// the same atomic publication as a complete resolved effect operation.
+    pub(crate) fn publish_actor_effect(
+        &mut self,
+        prepared: PreparedActorOutcome,
+        requires_candidate: bool,
+    ) -> Result<(), GameError> {
+        let requires_candidate = requires_candidate
+            || prepared.emits_events()
+            || prepared
+                .creature()
+                .is_some_and(|creature| creature.derived().contextual_health_recovery());
+        self.with_recovery_transition(requires_candidate, |candidate| {
+            candidate.publish_actor_outcome(prepared)
+        })
     }
 
     pub(crate) fn apply_outcome(
@@ -541,8 +587,11 @@ impl Game {
                 self.commit_actor_outcome(transition)?;
                 events.extend(self.take_event_suffix(event_start)?.0);
                 let highwater = self.next_hold_id;
-                let applied =
-                    self.apply_linked_hold(outcome.actor, recipient_id, policy.clone())?;
+                let applied = self.apply_linked_hold_in_transaction(
+                    outcome.actor,
+                    recipient_id,
+                    policy.clone(),
+                )?;
                 if self.next_hold_id != highwater {
                     created_hold = created_hold.or(applied);
                 }

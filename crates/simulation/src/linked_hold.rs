@@ -341,6 +341,24 @@ impl Game {
         target: ActorId,
         policy: HoldPolicy,
     ) -> Result<Option<HoldId>, GameError> {
+        self.apply_linked_hold_with_publication(holder, target, policy, true)
+    }
+    /// Rider participation remains unpublished until its outer strike finishes.
+    pub(crate) fn apply_linked_hold_in_transaction(
+        &mut self,
+        holder: ActorId,
+        target: ActorId,
+        policy: HoldPolicy,
+    ) -> Result<Option<HoldId>, GameError> {
+        self.apply_linked_hold_with_publication(holder, target, policy, false)
+    }
+    fn apply_linked_hold_with_publication(
+        &mut self,
+        holder: ActorId,
+        target: ActorId,
+        policy: HoldPolicy,
+        publish: bool,
+    ) -> Result<Option<HoldId>, GameError> {
         if !policy.valid() {
             return Err(invalid());
         }
@@ -358,6 +376,9 @@ impl Game {
             .saturating_sub(target_state.active_since);
         if target_state.holds.incoming.iter().any(|slot| matches!(slot, HoldSlot::Protection { holder: owner, remaining } if *owner == holder && *remaining > elapsed)) { return Ok(None); }
         let mut candidate = self.clone();
+        if publish {
+            candidate.begin_effect_publication()?;
+        }
         candidate.settle_actor_time(holder)?;
         candidate.settle_actor_time(target)?;
         if !candidate.hold_endpoints_valid(holder, target, &policy) {
@@ -396,6 +417,9 @@ impl Game {
             .holds
             .outgoing
             .push(OutgoingHold { id, target });
+        if publish {
+            candidate.finish_effect_publication()?;
+        }
         *self = candidate;
         Ok(Some(id))
     }

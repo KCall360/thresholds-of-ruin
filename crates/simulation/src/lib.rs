@@ -853,11 +853,20 @@ impl Game {
         // inside the same candidate boundary as recovery reconciliation.
         let population_entry =
             self.population_participates_in_entry(id, location) || self.unique_retrieval.is_some();
-        self.with_recovery_transition(population_entry, |candidate| {
+        let prepared = self.prepare_actor_outcome(outcome)?;
+        let changes_lifecycle = self.actor_frozen(id)
+            != (self.region_state(location.region) == Some(RegionState::Frozen));
+        let requires_candidate = population_entry
+            || changes_lifecycle
+            || prepared.emits_events()
+            || prepared
+                .creature()
+                .is_some_and(|creature| creature.derived().contextual_health_recovery());
+        self.with_recovery_transition(requires_candidate, |candidate| {
             if !candidate.host_region_continuation {
                 candidate.begin_retrieval_transaction();
             }
-            candidate.apply_outcome(outcome)?;
+            candidate.publish_actor_outcome(prepared)?;
             candidate.sync_actor_lifecycle(id)
         })
     }

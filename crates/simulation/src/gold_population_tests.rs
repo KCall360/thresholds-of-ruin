@@ -325,6 +325,10 @@ fn contextual_birth_purse_is_finite_at_birth_and_drops_without_resampling() {
         )
         .unwrap();
         game.apply_damage(ActorId(2), &damage).unwrap();
+        // Complete the private damage fixture's outer publication before
+        // measuring an already-committed floor activation's idempotence.
+        game.seal_participant_events().unwrap();
+        assert!(game.event_receipts_valid());
         assert_eq!(
             game.items[&ItemId(1)].location,
             ItemLocation::Ground(at(1, 2, 1))

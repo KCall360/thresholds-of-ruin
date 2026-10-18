@@ -207,6 +207,7 @@ mod public_plan_record_tests {
             record
         );
         let fields = [
+            "guise",
             "holds",
             "behavior",
             "active_since",

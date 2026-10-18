@@ -83,10 +83,22 @@ pub(super) fn at(x: i32, z: i32) -> Location {
     }
 }
 pub(super) fn fixture(values: &[LocomotionValue]) -> (Game, ActorId) {
+    fixture_with_perception(values, &[])
+}
+pub(super) fn fixture_with_perception(
+    values: &[LocomotionValue],
+    perception: &[crate::perception::PerceptionValue],
+) -> (Game, ActorId) {
     let mut species = crate::test_creatures::species();
     species
         .modifiers
         .extend(values.iter().copied().map(modifier));
+    species
+        .modifiers
+        .extend(perception.iter().cloned().map(|value| Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Perception { value },
+        }));
     let mut rules = crate::test_creatures::ruleset().document().clone();
     rules
         .conditions
@@ -211,7 +223,7 @@ fn erratic_preview_is_actor_owned_and_only_committed_move_advances_rng() {
     );
 }
 
-fn flight(game: &mut Game, actor: ActorId, duration: u64) {
+pub(super) fn flight(game: &mut Game, actor: ActorId, duration: u64) {
     game.apply_condition(
         actor,
         &crate::content_ids::ConditionId::new("braced").unwrap(),

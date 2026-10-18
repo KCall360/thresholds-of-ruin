@@ -1560,18 +1560,32 @@ mod tests {
         assert_eq!(
             after.ai_precommit_ordinary_scenes - before.ai_precommit_ordinary_scenes,
             0,
-            "no ordinary scene request may occur before consuming the chosen plan"
+            "no ordinary scene may be built before consuming the chosen plan"
         );
-        // Commit/time advancement and completion availability make three reach
-        // scenes. Resolved hostile contact additionally constructs the target's
-        // ordinary event/body disclosure (two scene requests), after commitment.
-        // None is a second AI decision or a fresh capture of its paid plan.
-        assert_eq!(after.ordinary_scenes - before.ordinary_scenes, 5);
-        assert_eq!(after.scenes - before.scenes, 6);
+        // Stationary sight/reach and source-origin queries reuse the caster's
+        // decision scene. Only the teleported target's participant disclosure
+        // builds an ordinary scene, after commitment. Count actual builds,
+        // including cold snapshot misses, rather than cached scene requests.
+        assert_eq!(after.ordinary_scenes - before.ordinary_scenes, 1);
+        assert_eq!(after.scenes - before.scenes, 2);
         assert_eq!(
             after.scenes - before.scenes,
             (after.decision_scenes - before.decision_scenes)
                 + (after.ordinary_scenes - before.ordinary_scenes)
+        );
+        assert!(
+            game.disclosed_event_history(ActorId(1))
+                .iter()
+                .any(|event| {
+                    matches!(event, crate::combat::DisclosedCombatEvent::Ability {
+                caster: Some(ActorId(2)),
+                caster_reference: Some(crate::perception::ActorReferenceKind::Creature),
+                target: Some(ActorId(1)),
+                id,
+                ..
+            } if id.as_str() == "custom_arc")
+                }),
+            "the shared scenes retain the target's identified participant feedback"
         );
     }
 

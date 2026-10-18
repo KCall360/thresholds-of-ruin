@@ -1,5 +1,5 @@
 //! Confusion preserves admitted commands, physical geometry and paid work.
-use super::tests::{at, fixture, modifier};
+use super::tests::{at, fixture, fixture_with_perception, flight, modifier};
 use super::*;
 use crate::{Action, GameError, IntentionOrigin, OutcomeKind};
 use tor_world::{Direction, Location, Position};
@@ -232,8 +232,21 @@ fn confused_checkpoint_preserves_the_next_committed_draw_and_admitted_context() 
 
 #[test]
 fn confused_unsplit_and_rotated_physical_joins_share_samples_costs_and_frames() {
+    assert_confused_partition_equivalence(false);
+    assert_confused_partition_equivalence(true);
+}
+
+fn assert_confused_partition_equivalence(flying: bool) {
     use tor_world::{Extent, Passage, Region, RegionId, World};
-    let (template, actor) = confused(1);
+    let (template, actor) = fixture(&[
+        LocomotionValue::Confused {
+            chance: Some(MovementChance {
+                numerator: 4,
+                denominator: 5,
+            }),
+        },
+        LocomotionValue::Flying { enabled: flying },
+    ]);
     let build = template.creature(actor).unwrap().build().clone();
     let origin = Location {
         region: RegionId(1),
@@ -267,6 +280,16 @@ fn confused_unsplit_and_rotated_physical_joins_share_samples_costs_and_frames() 
         .unwrap(),
     );
     for rotation in 0..24 {
+        // Arbitrary-axis joins change which local legs require flight. Compare
+        // geometry with that capability, and retain the non-flying witnesses
+        // for every rotation that preserves the local horizontal plane.
+        if !flying
+            && Direction::HORIZONTAL
+                .into_iter()
+                .any(|direction| direction.rotated(rotation).delta().2 != 0)
+        {
+            continue;
+        }
         let normal = tor_world::rotate_vector(rotation, [1, 0, 0]);
         let mut center = [2, 2, 2];
         for axis in 0..3 {
@@ -444,21 +467,298 @@ fn confused_rotated_sample_cannot_choose_abstract_stairs_but_explicit_stairs_are
 }
 
 #[test]
-fn rotated_horizontal_intent_and_genuine_vertical_flight_gate_share_one_resolver() {
+fn rotated_requested_and_sampled_movement_keep_resolved_vertical_flight_gate() {
     for frame in 0..24 {
-        let (mut game, actor) = fixture(&[]);
-        game.actors.get_mut(&actor).unwrap().orientation = frame;
-        for direction in Direction::HORIZONTAL {
-            assert!(
-                game.actor_translation(actor, direction).is_some(),
-                "frame {frame}, {direction:?}"
-            );
+        for flying in [false, true] {
+            let (mut game, actor) = confused(3);
+            game.actors.get_mut(&actor).unwrap().orientation = frame;
+            if flying {
+                flight(&mut game, actor, 1_000);
+            }
+            for direction in Direction::HORIZONTAL
+                .into_iter()
+                .chain([Direction::Up, Direction::Down])
+            {
+                let allowed = flying || direction.rotated(frame).delta().2 == 0;
+                assert_eq!(
+                    game.actor_translation(actor, direction).is_some(),
+                    allowed,
+                    "requested: frame {frame}, {direction:?}, flying {flying}"
+                );
+                assert_eq!(
+                    game.actor_physical_translation(actor, direction).is_some(),
+                    allowed,
+                    "sampled: frame {frame}, {direction:?}, flying {flying}"
+                );
+                if !allowed {
+                    let mut rejected = game.clone();
+                    assert!(rejected.act(actor, Action::Move(direction)).is_err());
+                    assert_eq!(rejected, game, "invalid request must not draw or pay");
+                }
+            }
         }
-        for direction in [Direction::Up, Direction::Down] {
-            assert!(
-                game.actor_translation(actor, direction).is_none(),
-                "frame {frame}, {direction:?}"
-            );
+    }
+}
+
+#[test]
+fn confused_rotated_samples_pay_without_widening_vertical_capability() {
+    // Pinned seeds exercise every fixed actor-local sample, including stay.
+    let samples = [
+        (30, (-1, -1), 0x3c6ef372fe94f848),
+        (23, (0, -1), 0x3c6ef372fe94f841),
+        (8, (1, -1), 0x3c6ef372fe94f832),
+        (3, (-1, 0), 0x3c6ef372fe94f82d),
+        (4, (0, 0), 0x3c6ef372fe94f82e),
+        (2, (1, 0), 0x3c6ef372fe94f82c),
+        (7, (-1, 1), 0x3c6ef372fe94f831),
+        (1, (0, 1), 0x3c6ef372fe94f82b),
+        (21, (1, 1), 0x3c6ef372fe94f83f),
+    ];
+    for frame in 0..24 {
+        for flying in [false, true] {
+            for (seed, (x, y), after) in samples {
+                let (mut game, actor) = confused(seed);
+                game.actors.get_mut(&actor).unwrap().orientation = frame;
+                if flying {
+                    flight(&mut game, actor, 1_000);
+                }
+                let requested = [Direction::North, Direction::East]
+                    .into_iter()
+                    .find(|direction| direction.rotated(frame).delta().2 == 0)
+                    .unwrap();
+                assert!(game.actor_translation(actor, requested).is_some());
+                let from = game.actors[&actor].location;
+                let [dx, dy, dz] = tor_world::rotate_vector(frame, [x, y, 0]);
+                let moves = (x != 0 || y != 0) && (flying || dz == 0);
+                let expected = if moves {
+                    Location {
+                        position: Position {
+                            x: from.position.x + dx as i32,
+                            y: from.position.y + dy as i32,
+                            z: from.position.z + dz as i32,
+                        },
+                        ..from
+                    }
+                } else {
+                    from
+                };
+                let outcome = game.act(actor, Action::Move(requested)).unwrap();
+                assert_eq!(
+                    game.actors[&actor].location, expected,
+                    "frame {frame}, seed {seed}, flying {flying}"
+                );
+                assert_eq!(game.actors[&actor].orientation, frame);
+                assert_eq!(matches!(outcome.kind, OutcomeKind::Moved { .. }), moves);
+                assert_eq!(game.actors[&actor].ready_at, 100);
+                assert_eq!((outcome.at_tick, outcome.next_tick), (0, 100));
+                assert_eq!(
+                    game.rules_rng, after,
+                    "no replacement draw for a denied sample"
+                );
+            }
+        }
+    }
+}
+
+fn guised_fixture(values: &[LocomotionValue]) -> (crate::Game, crate::ActorId) {
+    fixture_with_perception(
+        values,
+        &[crate::perception::PerceptionValue::ObjectGuise {
+            appearance: Some(crate::perception::GuiseAppearance {
+                name: "chest".into(),
+                description: "A wooden chest.".into(),
+                class: crate::ItemClass::Tool,
+                asset: None,
+            }),
+        }],
+    )
+}
+
+fn spawn_matching_creature(
+    game: &mut crate::Game,
+    source: crate::ActorId,
+    location: Location,
+) -> crate::ActorId {
+    let build = game.creature(source).unwrap().build().clone();
+    let subject = game
+        .spawn_actor(location, std::num::NonZeroU64::new(100).unwrap())
+        .unwrap();
+    game.configure_creature(
+        subject,
+        crate::CreatureIdentity {
+            name: "subject".into(),
+            faction: "subject".into(),
+        },
+        build,
+    )
+    .unwrap();
+    subject
+}
+
+#[test]
+fn confused_vertical_guise_samples_cannot_bypass_cardinal_or_diagonal_flight_gates() {
+    for frame in 0..24 {
+        for (seed, selected, after) in [
+            (2, Direction::East, 0x3c6ef372fe94f82c),
+            (8, Direction::NorthEast, 0x3c6ef372fe94f832),
+        ] {
+            let (dx, dy, dz) = selected.rotated(frame).delta();
+            if dz == 0 {
+                continue;
+            }
+            for flying in [false, true] {
+                let (mut game, actor) = guised_fixture(&[
+                    LocomotionValue::Confused {
+                        chance: Some(MovementChance {
+                            numerator: 4,
+                            denominator: 5,
+                        }),
+                    },
+                    LocomotionValue::Flying { enabled: flying },
+                ]);
+                game.rules_rng = seed;
+                game.actors.get_mut(&actor).unwrap().orientation = frame;
+                let from = game.actors[&actor].location;
+                let target = Location {
+                    position: Position {
+                        x: from.position.x + dx,
+                        y: from.position.y + dy,
+                        z: from.position.z + dz,
+                    },
+                    ..from
+                };
+                let subject = spawn_matching_creature(&mut game, actor, target);
+                let health = game.health(subject);
+                assert_eq!(
+                    game.movement_guise_contacts(actor, selected).is_some(),
+                    flying,
+                    "frame {frame}, {selected:?}, flying {flying}"
+                );
+                if !flying {
+                    let mut rejected = game.clone();
+                    assert!(rejected.act(actor, Action::Move(selected)).is_err());
+                    assert_eq!(
+                        rejected, game,
+                        "guise fallback must not admit vertical work"
+                    );
+                }
+                let requested = [Direction::North, Direction::East]
+                    .into_iter()
+                    .find(|direction| direction.rotated(frame).delta().2 == 0)
+                    .unwrap();
+                assert!(game.actor_translation(actor, requested).is_some());
+                let outcome = game.act(actor, Action::Move(requested)).unwrap();
+                assert_eq!(outcome.kind, OutcomeKind::Waited);
+                assert_eq!(game.actors[&actor].location, from);
+                assert_eq!(game.actors[&actor].orientation, frame);
+                assert_eq!(game.actors[&actor].ready_at, 100);
+                assert_eq!(game.rules_rng, after);
+                assert_eq!(game.health(subject), health);
+                assert_eq!(game.actors[&subject].guise.appearance().is_none(), flying);
+            }
+        }
+    }
+}
+
+#[test]
+fn diagonal_guise_route_allows_own_body_overlap_but_not_other_actors_or_walls() {
+    for obstruction in [None, Some(false), Some(true)] {
+        let (mut game, actor) = guised_fixture(&[]);
+        let from = game.actors[&actor].location;
+        let east = Location {
+            position: Position {
+                x: 3,
+                ..from.position
+            },
+            ..from
+        };
+        let north = Location {
+            position: Position {
+                y: 1,
+                ..from.position
+            },
+            ..from
+        };
+        let target = Location {
+            position: Position {
+                x: 3,
+                y: 1,
+                ..from.position
+            },
+            ..from
+        };
+        game.set_body(
+            actor,
+            crate::BodySpec {
+                cells: vec![
+                    [0, 0, 0],
+                    if obstruction.is_none() {
+                        [1, 0, 0]
+                    } else {
+                        [0, 0, 1]
+                    },
+                ],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // The north ordering is always occupied. The east ordering must admit
+        // the mover's own overlapping cell, but no other actor or wall.
+        game.spawn_actor(north, std::num::NonZeroU64::new(100).unwrap())
+            .unwrap();
+        if let Some(wall) = obstruction {
+            if wall {
+                game.set_wall(east, true).unwrap();
+            } else {
+                game.spawn_actor(east, std::num::NonZeroU64::new(100).unwrap())
+                    .unwrap();
+            }
+        }
+        let subject = spawn_matching_creature(&mut game, actor, target);
+        let contacts = game.movement_guise_contacts(actor, Direction::NorthEast);
+        assert_eq!(contacts.is_some(), obstruction.is_none());
+        if let Some((_, contacts)) = contacts {
+            assert_eq!(contacts, vec![subject]);
+        }
+    }
+}
+
+#[test]
+fn guise_contact_keeps_vertical_physical_portals_and_rejects_abstract_stairs() {
+    for stairs in [false, true] {
+        let (mut game, actor) = guised_fixture(&[]);
+        let from = if stairs { at(2, 1) } else { at(2, 5) };
+        let to = if stairs {
+            at(4, 1)
+        } else {
+            game.add_region(tor_world::Region {
+                id: tor_world::RegionId(2),
+                name: "above".into(),
+                bounds: tor_world::Extent::new(8, 5, 6).unwrap(),
+            })
+            .unwrap();
+            Location {
+                region: tor_world::RegionId(2),
+                position: Position { x: 2, y: 2, z: 0 },
+            }
+        };
+        let passage = tor_world::Passage {
+            from,
+            direction: Direction::Up,
+            to,
+        };
+        if stairs {
+            game.connect(passage, 0).unwrap();
+        } else {
+            game.connect_portal_area(passage, 0, 1, 1).unwrap();
+        }
+        game.teleport(actor, from).unwrap();
+        let subject = spawn_matching_creature(&mut game, actor, to);
+        let contacts = game.movement_guise_contacts(actor, Direction::Up);
+        assert_eq!(contacts.is_some(), !stairs);
+        if let Some((destination, contacts)) = contacts {
+            assert_eq!(destination, (to, 0));
+            assert_eq!(contacts, vec![subject]);
         }
     }
 }
