@@ -126,6 +126,13 @@ The initial defense baseline remains the ruleset's base plus its paired
 attributes; arena measurements, rather than a numeric d20-probability conversion,
 provide evidence for tuning.
 
+Breath is an ordinary named skill (`breath`) governed by Willpower, independent of
+Mana binding. Its checks use the compiled sheet's Willpower and owned Breath rank;
+neither creature identity nor raw HD adds a separate runtime bonus. Choosing Breath
+as one of the two starting skills grants rank 1. Each later rank costs an ordinary
+advancement point and the combined rank remains capped at five. For example,
+Willpower 3 with starting Breath 1 and one purchased rank gives a +5 check bonus.
+
 Positive and negative sources cancel one-for-one. Up to three net check-edge
 units add that many d6: keep the highest three for advantage, or the lowest three
 for disadvantage. The check is bounded to six draws and allocates no heap memory.
@@ -622,9 +629,9 @@ are at most 16 grants and 256 total points per HD, with at most 256 total owned
 talents across all HD (active and dormant combined). Extra grants can remain
 unspent or buy ranks; granting points does not expand the ownership bound.
 Construction, authoring, purchase/replacement and saved current/authored builds
-enforce the same limit before producing an observation. Together with nineteen
+enforce the same limit before producing an observation. Together with twenty
 skills capped at rank five and two permanent starting ranks, this bounds paid
-purchases at 349 and per-HD pool disclosures at 4,096. Attribute opportunities remain
+purchases at 354 and per-HD pool disclosures at 4,096. Attribute opportunities remain
 separate, every four HD in the default rules.
 
 Creation explicitly records exactly two distinct rank-1 starting skills, outside

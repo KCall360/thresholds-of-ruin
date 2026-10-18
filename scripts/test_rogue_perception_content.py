@@ -140,7 +140,7 @@ class RoguePerceptionContent(unittest.TestCase):
         self.assertEqual(stages[0]["count"], [4, 4])
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         bands = stages[0]["bands"]
-        self.assertEqual(len({row["archetype"] for band in bands for row in band["choices"]}), 24)
+        self.assertEqual(len({row["archetype"] for band in bands for row in band["choices"]}), 26)
         for name, first, last, chance in (("medusa", 18, None, (2, 5)),
                                          ("phantom", 15, 24, None), ("xeroc", 16, 25, (3, 10))):
             for depth in (*range(1, 36), 267, 268, 275, 1_000_000):
@@ -155,24 +155,26 @@ class RoguePerceptionContent(unittest.TestCase):
                     stock = choices["rogue." + name].get("carried_loot")
                     self.assertEqual(stock, {"version": 1, "pool": "rogue.vampire_supplies", "chance": {
                         "numerator": chance[0], "denominator": chance[1]}} if chance else None)
-        # At depth 27 M still shares the upper-boundary mass of V/G/J equally.
+        # At depth 27 M shares the upper-boundary mass of V/G/J/D equally.
         band = next(row for row in bands if row["depth"]["minimum"] == 27)
         weights = {row["archetype"]: row["weight"] for row in band["choices"]}
         total = sum(weights.values())
         self.assertEqual({key: Fraction(value, total) for key, value in weights.items()}, {
-            "rogue.medusa": Fraction(1, 4), "rogue.vampire": Fraction(1, 4),
-            "rogue.griffin": Fraction(1, 4), "rogue.jabberwock": Fraction(1, 4)})
+            "rogue.medusa": Fraction(1, 5), "rogue.vampire": Fraction(1, 5),
+            "rogue.griffin": Fraction(1, 5), "rogue.jabberwock": Fraction(1, 5),
+            "rogue.dragon": Fraction(1, 5)})
 
 
     def test_medusa_retains_upper_clamp_mass_and_exact_shared_growth_boundary(self):
         bands = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]["bands"]
-        for depth, expected in ((27, (1, 1, 1, 1)), (28, (6, 11, 11, 11)),
-                                (29, (7, 7, 12, 12)), (30, (8, 8, 8, 13)),
-                                (31, (1, 1, 1, 1)), (274, (1, 1, 1, 1)), (275, (1, 1, 1, 1))):
+        for depth, expected in ((27, (1, 1, 1, 1, 1)), (28, (6, 11, 11, 11, 11)),
+                                (29, (7, 7, 12, 12, 12)), (30, (8, 8, 8, 13, 13)),
+                                (31, (9, 9, 9, 9, 14)), (32, (1, 1, 1, 1, 1)),
+                                (274, (1, 1, 1, 1, 1)), (275, (1, 1, 1, 1, 1))):
             band = next(row for row in bands if row["depth"]["minimum"] <= depth and
                         (row["depth"]["kind"] == "open" or depth <= row["depth"]["maximum"]))
             self.assertEqual({row["archetype"]: row["weight"] for row in band["choices"]},
-                             dict(zip(("rogue.medusa", "rogue.vampire", "rogue.griffin", "rogue.jabberwock"),
+                             dict(zip(("rogue.medusa", "rogue.vampire", "rogue.griffin", "rogue.jabberwock", "rogue.dragon"),
                                       expected, strict=True)))
         # The shared racial_after policy appends actual rows; no medusa cap/filter.
         build = source("catalog/actors.toml")["actors"]["rogue.medusa"]["creature"]

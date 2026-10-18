@@ -158,7 +158,7 @@ fn owner_host_all_preview_sections_are_read_only_and_exact_while_busy() {
         assert_eq!(page.query, q);
         totals.push(page.total);
     }
-    assert_eq!(totals, [1, 1, 1, 2, 19, 0, 0]);
+    assert_eq!(totals, [1, 1, 1, 2, 20, 0, 0]);
     assert_eq!(
         engine.game, original,
         "includes RNG, holds, actor-active clocks and knowledge"
@@ -676,7 +676,7 @@ fn owner_paging_constructible_maximum_ledger_and_dependent_refunds_are_fully_tra
             .iter()
             .map(|choice| choice.purchases.len())
             .sum::<usize>(),
-        349
+        354
     );
     assert_eq!(creature.derived().active_talents.len(), 256);
     assert!(s::attributes::Skill::ALL.into_iter().all(|skill| creature
@@ -688,7 +688,7 @@ fn owner_paging_constructible_maximum_ledger_and_dependent_refunds_are_fully_tra
     let points = overview(&engine).points;
     assert_eq!(
         (points.earned, points.spent, points.unspent),
-        (65536, 349, 65187)
+        (65536, 354, 65182)
     );
     let before = engine.game.clone();
     let work = s::diagnostics::work_counts();
@@ -755,7 +755,7 @@ fn owner_paging_constructible_maximum_ledger_and_dependent_refunds_are_fully_tra
             basis: b.clone(),
             offset,
         },
-        349,
+        354,
         &mut |entry| {
             let p::AdvancementEntry::Purchase { value } = entry else {
                 panic!("ledger row")
@@ -779,7 +779,7 @@ fn owner_paging_constructible_maximum_ledger_and_dependent_refunds_are_fully_tra
             spent += u64::from(value.spent);
         },
     );
-    assert_eq!((granted, spent), (65536, 349));
+    assert_eq!((granted, spent), (65536, 354));
     traverse(
         &|offset| p::AdvancementQuery::Catalog {
             basis: b.clone(),
@@ -838,10 +838,10 @@ fn owner_paging_constructible_maximum_ledger_and_dependent_refunds_are_fully_tra
             candidate_spent += u64::from(value.spent);
         },
     );
-    assert_eq!(candidate_spent, 93);
+    assert_eq!(candidate_spent, 98);
     traverse(
         &|offset| preview(p::AdvancementPreviewSection::Skills, offset),
-        19,
+        20,
         &mut |entry| {
             let p::AdvancementEntry::Skill { value } = entry else {
                 panic!("skill row")

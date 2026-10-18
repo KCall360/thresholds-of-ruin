@@ -599,7 +599,7 @@ fn owner_advancement_page_bounds_and_continuation_remain_structurally_exact() {
     assert!(decode_response(&full.to_string()).is_ok());
     assert!(decode_response(&ledger_page(33).to_string()).is_err());
     for (path, value) in [
-        ("/page/total", json!(352)),
+        ("/page/total", json!(357)),
         ("/page/next", json!(0)),
         ("/page/query/offset", json!(u16::MAX)),
         ("/page/basis/build_epoch", json!("8")),
@@ -612,7 +612,7 @@ fn owner_advancement_page_bounds_and_continuation_remain_structurally_exact() {
         );
     }
     let mut continuation = ledger_page(32);
-    continuation["page"]["total"] = json!(351);
+    continuation["page"]["total"] = json!(356);
     continuation["page"]["next"] = json!(32);
     assert!(decode_response(&continuation.to_string()).is_ok());
     continuation["page"]["next"] = json!(31);
@@ -629,6 +629,39 @@ fn owner_advancement_page_bounds_and_continuation_remain_structurally_exact() {
     let mut invalid = summary_page();
     invalid["page"]["entries"][0]["value"]["resources"]["focus"]["resource"]["id"] = json!("mana");
     assert!(decode_response(&invalid.to_string()).is_err());
+}
+
+#[test]
+fn owner_advancement_skill_pages_accept_twenty_rows_and_reject_twenty_one() {
+    for count in [20, 21] {
+        for preview in [false, true] {
+            let query = if preview {
+                json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"skills","offset":0})
+            } else {
+                json!({"kind":"catalog","basis":basis(),"catalog":"skill_rank","offset":0})
+            };
+            let rows = (0..count)
+                .map(|index| {
+                    let skill = if index == 19 { "breath".into() } else { format!("skill_{index}") };
+                    if preview {
+                        json!({"kind":"skill","value":{"skill":{"id":skill,"name":"Skill"},"rank":2}})
+                    } else {
+                        json!({"kind":"catalog","value":{"selection":{"kind":"skill_rank","skill":skill},"name":"Skill","form_choices":[]}})
+                    }
+                })
+                .collect::<Vec<_>>();
+            let value = response(query, json!(rows), count, None);
+            let decoded = decode_response(&value.to_string());
+            if count == 20 {
+                let decoded = decoded.unwrap();
+                assert_eq!(serde_json::to_value(&decoded).unwrap(), value);
+                let encoded = encode_response(&decoded, None, 32768).unwrap();
+                assert_eq!(decode_response(&encoded.text).unwrap(), decoded);
+            } else {
+                assert!(decoded.is_err());
+            }
+        }
+    }
 }
 
 #[test]

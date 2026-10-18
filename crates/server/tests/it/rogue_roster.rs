@@ -50,6 +50,8 @@ fn rogue_roster_actual_hd_seeds_choices_and_natural_rows_round_trip_without_sour
         ("leprechaun", 3, 1),
         ("nymph", 3, 1),
         ("orc", 1, 1),
+        ("aquator", 5, 1),
+        ("dragon", 10, 3),
     ] {
         let identity = format!("rogue.{name}");
         let recipe = catalog
@@ -1165,4 +1167,476 @@ fn rogue_flytrap_clutch_has_shared_policy_and_tightening_is_owned_at_hd_six() {
             "{ability}"
         );
     }
+}
+
+fn assert_dragon_breath(
+    sheet: &tor_simulation::creatures::DerivedCreature,
+    willpower: u16,
+    rank: u8,
+    bonus: i64,
+) {
+    use tor_simulation::attributes::{Attribute, Skill, SkillCheck};
+    assert_eq!(sheet.attributes.get(Attribute::Willpower), willpower);
+    assert_eq!(sheet.skills.get(Skill::Breath), rank);
+    assert_eq!(
+        SkillCheck {
+            skill: Skill::Breath,
+            binding: sheet.binding(),
+            modifier: 0,
+            threshold: 0,
+        }
+        .bonus(sheet.attributes, sheet.skills),
+        bonus
+    );
+}
+
+#[test]
+fn rogue_dragon_owns_ten_seeded_rows_separate_attributes_and_six_unspent_points() {
+    use tor_simulation::{
+        attributes::{Attribute, Skill},
+        creatures::{AdvancementPurchase, HdChoices, PurchaseSelection, RestorationPolicy},
+        progression::{HdLedger, HdSource},
+    };
+    let (catalog, manifest) = catalog();
+    let spec = manifest.archetypes["rogue.dragon"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let seed = actor_health_seed(42, 3);
+    let build = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
+    assert_eq!(
+        build.ledger(),
+        &HdLedger::seeded(vec![HdSource::Racial; 10], seed).unwrap()
+    );
+    assert_eq!(
+        build.starting_skills(),
+        &[Skill::HeavyWeaponry, Skill::Breath]
+    );
+    assert_eq!(build.initial_attributes().get(Attribute::Willpower), 1);
+    assert_eq!(build.unspent_points(), 6);
+    for (index, choices) in build.choices().iter().enumerate() {
+        let selection = match index {
+            1 => Some(PurchaseSelection::Talent(
+                TalentId::new("second_strike").unwrap(),
+            )),
+            3 => Some(PurchaseSelection::Talent(
+                TalentId::new("third_strike").unwrap(),
+            )),
+            5 => Some(PurchaseSelection::Talent(
+                TalentId::new("rogue.breath_weapon").unwrap(),
+            )),
+            7 => Some(PurchaseSelection::SkillRank(Skill::Breath)),
+            _ => None,
+        };
+        assert_eq!(
+            choices,
+            &HdChoices {
+                purchases: selection
+                    .into_iter()
+                    .map(|selection| AdvancementPurchase {
+                        pool: tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
+                        selection,
+                    })
+                    .collect(),
+                attribute: matches!(index, 3 | 7).then_some(Attribute::Willpower),
+            },
+            "HD{} owns exactly its authored choices",
+            index + 1
+        );
+        let balances = build
+            .point_balances(tor_simulation::HdIndex(index as u64))
+            .unwrap();
+        assert_eq!(
+            balances.iter().map(|balance| balance.granted).sum::<u16>(),
+            1
+        );
+        assert_eq!(
+            balances.iter().map(|balance| balance.spent).sum::<u16>(),
+            u16::from(matches!(index, 1 | 3 | 5 | 7))
+        );
+    }
+    let sheet = build.derive().unwrap();
+    assert_dragon_breath(&sheet, 3, 2, 5);
+    assert!(sheet.dormant_talents.is_empty());
+    assert_eq!(
+        sheet.active_talents,
+        ["second_strike", "third_strike", "rogue.breath_weapon"]
+            .into_iter()
+            .map(|id| TalentId::new(id).unwrap())
+            .collect()
+    );
+    assert!(sheet
+        .abilities
+        .contains(&AbilityId::new("rogue.breath_weapon").unwrap()));
+    let RestorationPolicy::Authored(plan) = build.restoration_policy() else {
+        panic!("authored Dragon restoration")
+    };
+    assert_eq!(plan.len(), 10);
+    for (index, row) in plan.iter().enumerate() {
+        assert_eq!(row.source, HdSource::Racial);
+        assert_eq!(row.choices, build.choices()[index]);
+    }
+
+    // Attribute opportunities are separate from the ordinary skill/talent pool.
+    let mut no_rank = spec.clone();
+    no_rank.hit_dice[7].purchases.clear();
+    let no_rank = catalog
+        .prepare(&no_rank)
+        .unwrap()
+        .instantiate(seed)
+        .unwrap();
+    assert_eq!(no_rank.ledger(), build.ledger());
+    assert_eq!(no_rank.unspent_points(), 7);
+    assert_dragon_breath(&no_rank.derive().unwrap(), 3, 1, 4);
+    let mut no_attribute = spec.clone();
+    no_attribute.hit_dice[7].attribute = None;
+    let no_attribute = catalog
+        .prepare(&no_attribute)
+        .unwrap()
+        .instantiate(seed)
+        .unwrap();
+    assert_eq!(no_attribute.unspent_points(), 6);
+    assert_dragon_breath(&no_attribute.derive().unwrap(), 2, 2, 4);
+    let mut wrong_attribute_owner = spec.clone();
+    wrong_attribute_owner.hit_dice.swap(6, 7);
+    assert!(catalog.prepare(&wrong_attribute_owner).is_err());
+}
+
+#[test]
+fn rogue_dragon_natural_unlocks_fire_subtype_and_ray_use_shared_compiled_rules() {
+    use tor_simulation::{
+        content_ids::{DescriptorId, SubtypeId},
+        creatures::SourceId,
+        rules::Selector,
+    };
+    let (catalog, manifest) = catalog();
+    let spec = manifest.archetypes["rogue.dragon"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let build = catalog.prepare(spec).unwrap().instantiate(42).unwrap();
+    let sheet = build.derive().unwrap();
+    let fire = Selector::Descriptor {
+        descriptor: DescriptorId::new("fire").unwrap(),
+    };
+    assert!(sheet.protection.has_immunity(&fire));
+    assert_eq!(
+        sheet.immunity_sources(&fire),
+        vec![SourceId::Subtype(SubtypeId::new("fire").unwrap())]
+    );
+    let source = &catalog.content().catalog().species[&SpeciesId::new("rogue.dragon").unwrap()];
+    let natural = serde_json::to_value(source.melee.strikes()).unwrap();
+    assert_eq!(natural.as_array().unwrap().len(), 3);
+    for (index, (count, sides, unlock)) in [
+        (1, 8, None),
+        (1, 8, Some("second_strike")),
+        (3, 10, Some("third_strike")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(
+            source.melee.strikes()[index]
+                .unlock
+                .as_ref()
+                .map(|id| id.as_str()),
+            unlock
+        );
+        assert_eq!(natural[index]["riders"], serde_json::json!([]));
+        assert_eq!(natural[index]["descriptors"], serde_json::json!([]));
+        assert_eq!(
+            natural[index]["on_success"][0]["damage"]["components"][0],
+            serde_json::json!({
+                "category":"keen", "descriptor":null,
+                "amount":{"kind":"rolled","dice":{"count":count,"sides":sides,"bonus":0}}
+            })
+        );
+    }
+    let breath = AbilityId::new("rogue.breath_weapon").unwrap();
+    let signature =
+        serde_json::to_value(catalog.content().rules().ability(&breath).unwrap()).unwrap();
+    assert_eq!(signature["invocation"], "directional_ray");
+    assert_eq!(
+        signature["reach"],
+        serde_json::json!({"kind":"sight", "range":6})
+    );
+    assert_eq!(
+        signature["timing"],
+        serde_json::json!({"source":{"kind":"fixed","prepare":100,"recover":100},"scaled_by":null})
+    );
+    assert_eq!(signature["cooldown"], 2000);
+    assert_eq!(
+        signature["strikes"],
+        serde_json::json!({"kind":"authored","strikes":[{
+            "offset":0,"unlock":null,
+            "check":{"actor":"target","skill":{"kind":"named","skill":"agility"},"against":{"kind":"opposed","skill":{"kind":"named","skill":"breath"}}},
+            "on_success":[],"on_failure":[{"kind":"damage","damage":{"kind":"components","components":[{
+                "category":"energy","descriptor":"fire","amount":{"kind":"rolled","dice":{"count":6,"sides":6,"bonus":0}}
+            }]}}],"descriptors":[],"riders":[]
+        }]})
+    );
+    // Generic directional-ray owners cover clear-cell visits, dodge continuation,
+    // interception and component-only immunity; this owns the production binding.
+    let mut no_breath = spec.clone();
+    no_breath.hit_dice[5].purchases.clear();
+    let no_breath = catalog
+        .prepare(&no_breath)
+        .unwrap()
+        .instantiate(42)
+        .unwrap();
+    assert!(!no_breath.derive().unwrap().abilities.contains(&breath));
+    assert_eq!(no_breath.unspent_points(), 7);
+    assert!(no_breath
+        .derive()
+        .unwrap()
+        .active_talents
+        .contains(&TalentId::new("third_strike").unwrap()));
+    let mut no_second = spec.clone();
+    no_second.hit_dice[1].purchases.clear();
+    assert!(catalog.prepare(&no_second).is_err());
+    let mut no_third = spec.clone();
+    no_third.hit_dice[3].purchases.clear();
+    assert!(!catalog
+        .prepare(&no_third)
+        .unwrap()
+        .instantiate(42)
+        .unwrap()
+        .derive()
+        .unwrap()
+        .active_talents
+        .contains(&TalentId::new("third_strike").unwrap()));
+    let mut too_early = spec.clone();
+    too_early.hit_dice.swap(4, 5);
+    too_early.hit_dice.truncate(5);
+    assert!(catalog.prepare(&too_early).is_err());
+
+    // A renamed species with the same ordinary type/subtype also qualifies.
+    // Removing either required property rejects BR1 without an identity branch.
+    let mut alias_spec = spec.clone();
+    alias_spec.species = "rogue.fire_dragon_alias".into();
+    for (kind, fire, eligible) in [
+        ("dragon", true, true),
+        ("animal", true, false),
+        ("dragon", false, false),
+    ] {
+        let mut source = manifest.creatures.clone();
+        let mut species = source.species["rogue.dragon"].clone();
+        species.kind = kind.into();
+        if !fire {
+            species.subtypes.clear();
+        }
+        source.species.insert(alias_spec.species.clone(), species);
+        let alias = source.compile(catalog.content().rules().clone()).unwrap();
+        let prepared = alias.prepare(&alias_spec);
+        assert_eq!(prepared.is_ok(), eligible, "kind={kind}, fire={fire}");
+        if eligible {
+            let aliased = prepared.unwrap().instantiate(42).unwrap().derive().unwrap();
+            assert!(aliased.abilities.contains(&breath));
+            assert_dragon_breath(&aliased, 3, 2, 5);
+        }
+    }
+}
+
+#[test]
+fn rogue_dragon_hd_eight_owned_rank_attribute_and_seed_survive_drain_save_restore() {
+    use tor_simulation::creatures::{record::CreatureRecord, CreatureState};
+    let (catalog, manifest) = catalog();
+    let spec = manifest.archetypes["rogue.dragon"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let build = catalog
+        .prepare(spec)
+        .unwrap()
+        .instantiate(actor_health_seed(42, 3))
+        .unwrap();
+    let mut state = CreatureState::new(build.clone()).unwrap();
+    for _ in 0..3 {
+        assert_eq!(state.drain_latest_hit_die().unwrap().applied, 1);
+    }
+    assert_eq!(state.build().ledger().total_hd().get(), 7);
+    assert_eq!(
+        state.build().ledger().entries(),
+        &build.ledger().entries()[..7]
+    );
+    assert_eq!(state.build().choices(), &build.choices()[..7]);
+    assert_eq!(state.build().unspent_points(), 4);
+    assert_dragon_breath(state.derived(), 2, 1, 3);
+    assert!(state
+        .derived()
+        .abilities
+        .contains(&AbilityId::new("rogue.breath_weapon").unwrap()));
+    let encoded = serde_json::to_vec(&CreatureRecord::capture(&state)).unwrap();
+    let record: CreatureRecord = serde_json::from_slice(&encoded).unwrap();
+    let mut restored = record.restore(catalog.content().clone(), vec![]).unwrap();
+    assert_eq!(restored, state);
+    assert_eq!(restored.restore_hit_die().unwrap().applied, 1);
+    assert_eq!(
+        restored.build().ledger().entries(),
+        &build.ledger().entries()[..8]
+    );
+    assert_eq!(restored.build().choices(), &build.choices()[..8]);
+    assert_eq!(restored.build().unspent_points(), 4);
+    assert_dragon_breath(restored.derived(), 3, 2, 5);
+    let encoded = serde_json::to_vec(&CreatureRecord::capture(&restored)).unwrap();
+    let record: CreatureRecord = serde_json::from_slice(&encoded).unwrap();
+    let mut reopened = record.restore(catalog.content().clone(), vec![]).unwrap();
+    assert_eq!(reopened, restored);
+    for _ in 0..2 {
+        assert_eq!(reopened.restore_hit_die().unwrap().applied, 1);
+    }
+    assert_eq!(reopened.build(), &build);
+    assert_eq!(reopened.restore_hit_die().unwrap().applied, 0);
+}
+
+#[test]
+fn rogue_dragon_future_breath_purchases_are_ordinal_owned_capped_and_restorable() {
+    use tor_server::scenario_package::PopulationStage;
+    use tor_simulation::{
+        attributes::Skill,
+        creatures::{
+            record::CreatureRecord, BuildError, CreatureState, HdChoices, RestorationPolicy,
+        },
+        prepared_spawn::{OrdinalAdvancement, PopulationCapacity, PreparedSpawnError},
+        progression::{HdLedger, HdSource},
+        HdCount, HdIndex,
+    };
+    let (catalog, manifest) = catalog();
+    let spec = manifest.archetypes["rogue.dragon"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let seed = actor_health_seed(42, 3);
+    let base = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
+    let authored: Vec<_> = manifest
+        .floor_activation
+        .as_ref()
+        .unwrap()
+        .profiles
+        .values()
+        .flat_map(|profile| &profile.stages)
+        .filter_map(|stage| match stage {
+            PopulationStage::Actors { bands, .. } => Some(bands),
+            _ => None,
+        })
+        .flatten()
+        .flat_map(|band| &band.choices)
+        .filter(|choice| choice.archetype == "rogue.dragon")
+        .collect();
+    assert_eq!(authored.len(), 11);
+    let first = &authored[0].advancement;
+    assert_eq!(
+        first.iter().map(|entry| entry.ordinal).collect::<Vec<_>>(),
+        [15, 20, 25]
+    );
+    for choice in &authored {
+        assert_eq!(
+            serde_json::to_value(&choice.advancement).unwrap(),
+            serde_json::to_value(first).unwrap()
+        );
+    }
+    // Compile source-owned future choices through the ordinary creature recipe
+    // boundary, which uses the same compile_choices adapter as population setup.
+    let mut complete = spec.clone();
+    complete.hit_dice.resize(25, spec.hit_dice[0].clone());
+    for entry in first {
+        complete.hit_dice[entry.ordinal as usize - 1].purchases = entry.purchases.clone();
+        complete.hit_dice[entry.ordinal as usize - 1].attribute = entry.attribute.clone();
+    }
+    let compiled = catalog
+        .prepare(&complete)
+        .unwrap()
+        .instantiate(seed)
+        .unwrap();
+    let schedule: Vec<_> = first
+        .iter()
+        .map(|entry| OrdinalAdvancement {
+            ordinal: HdCount(entry.ordinal),
+            choices: compiled.choices()[entry.ordinal as usize - 1].clone(),
+        })
+        .collect();
+    for entry in &schedule {
+        assert_eq!(entry.choices.attribute, None);
+        assert_eq!(entry.choices.purchases.len(), 1);
+        assert_eq!(entry.choices.purchases[0].pool.as_str(), "advancement");
+        assert_eq!(entry.choices.skills().collect::<Vec<_>>(), [Skill::Breath]);
+    }
+    for (depth, hd, rank) in [
+        (26u32, 10usize, 2u8),
+        (27, 11, 2),
+        (30, 14, 2),
+        (31, 15, 3),
+        (35, 19, 3),
+        (36, 20, 4),
+        (40, 24, 4),
+        (41, 25, 5),
+        (272, 256, 5),
+    ] {
+        let grown = base
+            .instantiate_seeded_racial_with_advancement(seed, u64::from(depth - 26), &schedule)
+            .unwrap();
+        assert_eq!(
+            grown.ledger(),
+            &HdLedger::seeded(vec![HdSource::Racial; hd], seed).unwrap()
+        );
+        assert_eq!(&grown.ledger().entries()[..10], base.ledger().entries());
+        assert_eq!(&grown.choices()[..10], base.choices());
+        assert_eq!(grown.unspent_points(), hd as u64 - 4 - u64::from(rank - 2));
+        assert_dragon_breath(&grown.derive().unwrap(), 3, rank, 3 + i64::from(rank));
+        for (index, choice) in grown.choices().iter().enumerate().skip(10) {
+            assert_eq!(
+                choice,
+                &schedule
+                    .iter()
+                    .find(|entry| entry.ordinal.get() == index as u64 + 1)
+                    .map(|entry| entry.choices.clone())
+                    .unwrap_or_default()
+            );
+        }
+        let RestorationPolicy::Authored(plan) = grown.restoration_policy() else {
+            panic!("authored Dragon growth restoration")
+        };
+        assert_eq!(plan.len(), hd);
+        for (index, row) in plan.iter().enumerate() {
+            assert_eq!(row.source, HdSource::Racial);
+            assert_eq!(row.choices, grown.choices()[index]);
+        }
+        let encoded = serde_json::to_vec(&BuildRecord::capture(&grown)).unwrap();
+        let record: BuildRecord = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(record.restore(catalog.content().clone()).unwrap(), grown);
+        if [15, 20, 25].contains(&hd) {
+            let mut state = CreatureState::new(grown.clone()).unwrap();
+            assert_eq!(state.drain_latest_hit_die().unwrap().applied, 1);
+            assert_dragon_breath(state.derived(), 3, rank - 1, 2 + i64::from(rank));
+            let encoded = serde_json::to_vec(&CreatureRecord::capture(&state)).unwrap();
+            let record: CreatureRecord = serde_json::from_slice(&encoded).unwrap();
+            let mut restored = record.restore(catalog.content().clone(), vec![]).unwrap();
+            assert_eq!(restored, state);
+            assert_eq!(restored.restore_hit_die().unwrap().applied, 1);
+            assert_eq!(restored.build(), &grown);
+            assert_dragon_breath(restored.derived(), 3, rank, 3 + i64::from(rank));
+        }
+    }
+    let mut capped = base
+        .instantiate_seeded_racial_with_advancement(seed, 246, &schedule)
+        .unwrap();
+    let before = capped.clone();
+    assert_eq!(
+        capped.train(HdIndex(255), Skill::Breath),
+        Err(BuildError::RankCap)
+    );
+    assert_eq!(capped, before);
+    // Extra racial HD alone grants no rank or attack bonus.
+    let untrained = base.instantiate_seeded_racial(seed, 246).unwrap();
+    assert_dragon_breath(&untrained.derive().unwrap(), 3, 2, 5);
+    assert!(untrained.choices()[10..]
+        .iter()
+        .all(|choice| *choice == HdChoices::default()));
+    assert_eq!(
+        base.instantiate_seeded_racial_with_advancement(seed, 247, &schedule),
+        Err(PreparedSpawnError::Capacity(PopulationCapacity::HitDice {
+            requested: 257,
+            maximum: 256
+        }))
+    );
 }

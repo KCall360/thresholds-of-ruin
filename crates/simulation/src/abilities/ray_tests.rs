@@ -889,6 +889,46 @@ fn failed_dodge_takes_the_full_frozen_six_dice_then_ordinary_live_protection() {
 }
 
 #[test]
+fn failed_dodge_against_fire_component_immunity_still_checks_and_intercepts() {
+    let mut game = fixture_with(|_, ray, species| {
+        let StrikeSource::Authored { strikes } = &mut ray.strikes else {
+            unreachable!()
+        };
+        let Effect::Damage {
+            damage: DamageExpr::Components { components },
+        } = &mut strikes[0].on_failure[0]
+        else {
+            unreachable!()
+        };
+        components[0].descriptor = Some(crate::content_ids::DescriptorId::new("fire").unwrap());
+        species.modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Immunity {
+                selector: Selector::Descriptor {
+                    descriptor: crate::content_ids::DescriptorId::new("fire").unwrap(),
+                },
+            },
+        });
+    });
+    buff(&mut game, ActorId(1), "ray_strong", ActorId(1));
+    game.world.set_wall(at(4), true).unwrap();
+    let captured = plan(&game);
+    game.resolve_ray(captured.as_ray().unwrap(), None).unwrap();
+    let actual = outcomes(&game);
+    assert_eq!(
+        actual.len(),
+        1,
+        "failed dodge intercepts before a wall return"
+    );
+    assert_eq!(actual[0].target, ActorId(2));
+    assert!(
+        !actual[0].check.unwrap().success,
+        "component immunity never skips Agility"
+    );
+    assert_eq!(game.health(ActorId(2)).unwrap().0, 100);
+}
+
+#[test]
 fn a_door_changed_after_preparation_changes_live_ray_geometry() {
     let mut game = fixture();
     buff(&mut game, ActorId(1), "ray_strong", ActorId(1));

@@ -51,7 +51,7 @@ class RogueRosterContent(unittest.TestCase):
 
     def test_every_rogue_species_owns_explicit_reference_disposition(self):
         species = source("catalog/creatures.toml")["creatures"]["species"]
-        mean = {"kestrel", "venus_flytrap", "griffin", "emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire", "medusa"}
+        mean = {"kestrel", "venus_flytrap", "griffin", "emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire", "medusa", "aquator", "dragon"}
         passive = {"bat", "human", "ice_monster", "centaur", "yeti", "wraith", "jabberwock", "leprechaun", "nymph", "orc", "phantom", "xeroc"}
         tool_users = {"human", "hobgoblin", "centaur", "troll", "vampire", "orc", "medusa"}
         care_and_loot = tool_users | {"yeti"}
@@ -356,7 +356,7 @@ class RogueRosterContent(unittest.TestCase):
                 self.assertEqual(len(fixture["characters"][0]["creature"]["hit_dice"]), 16)
                 self.assertEqual(fixture["characters"][0]["loadout"], manifest["characters"][0]["loadout"])
 
-    def test_production_population_selects_twenty_four_species_and_preserves_stock_order(self):
+    def test_production_population_selects_twenty_six_species_and_preserves_stock_order(self):
         manifest = source("scenario.toml")
         activation = manifest["floor_activation"]
         profile = activation["profiles"]["rogue.low_depth"]
@@ -372,11 +372,11 @@ class RogueRosterContent(unittest.TestCase):
         self.assertTrue(actor["avoid_protagonist_sight"])
         self.assertEqual(actor["depth_growth"], {"kind": "racial_after", "depth": 26})
         # Exact band coverage, normalized weights and endpoints belong to the
-        # independent pinned-selector oracle in test_rogue_activation_candidate.
+        # independent pinned-selector oracle in test_rogue_population_content.
         self.assertEqual({row["archetype"] for band in actor["bands"] for row in band["choices"]},
                          {"rogue." + name for name in (
-                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "wraith", "black_unicorn", "vampire", "jabberwock", "bat", "kestrel", "venus_flytrap", "griffin", "leprechaun", "nymph", "orc", "medusa", "phantom", "xeroc")})
-        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.griffin": (1, 5), "rogue.jabberwock": (7, 10), "rogue.medusa": (2, 5), "rogue.xeroc": (3, 10)}
+                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "wraith", "black_unicorn", "vampire", "jabberwock", "bat", "kestrel", "venus_flytrap", "griffin", "leprechaun", "nymph", "orc", "medusa", "phantom", "xeroc", "aquator", "dragon")})
+        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.griffin": (1, 5), "rogue.jabberwock": (7, 10), "rogue.medusa": (2, 5), "rogue.xeroc": (3, 10), "rogue.dragon": (1, 1)}
         for band in actor["bands"]:
             for row in band["choices"]:
                 if row["archetype"] in chances:

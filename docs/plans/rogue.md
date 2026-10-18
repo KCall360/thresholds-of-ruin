@@ -71,7 +71,7 @@ per-group, graph-query, validation and preparation budgets still apply.
 Room lighting is depth-dependent and corridors are dark; the graph may include
 extra connections. The [starter slice](../play/rogue.md) adds explicit Warrior/Mage
 presets, an equipped mace and ring mail, finite bandages/rations, and ordinary
-K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/J builds selected by the twenty-four-species population policy. The
+all 26 Rogue species selected by the complete authored population policy. The
 initial HD point remains unspent and future growth explicitly
 selects the matching class. Floor profiles are separate from geometry preparation:
 first successful selected-character entry evaluates each finite stage once, and
@@ -117,13 +117,12 @@ TR3(2), natural zero damage and depths 10–19. O has one humanoid Warrior HD,
 W02(1), natural 1d8 and depths 4–13. Source-owned quantity expressions resolve
 checked positive u64 ranges using explicit birth/preparation depth. The appended
 50% per-present-room Gold stage preserves earlier stage ordering and random
-streams. Together with M/P/X, production selects 24 species, with aquator and
-dragon remaining. The [perception cohort](../play/rogue.md#gaze-invisibility-and-object-guise)
+streams. Together with M/P/X and A/D, production selects all 26 species. The [perception cohort](../play/rogue.md#gaze-invisibility-and-object-guise)
 owns Presence-bound GZ1, typed invisibility and one initial purchased object
 guise/ambush. M participates in the pinned upper-boundary redistribution and
 remains eligible from depth 18 onward; P/X retain finite depth bands 15–24
-and 16–25. M/P/X source and runtime qualification are pending for this WIP
-checkpoint; earlier test evidence does not qualify these additions.
+and 16–25. M/P/X qualification landed with PR #168; the current A/D additions
+retain their own focused checks and required complete cross-platform CI.
 The unique objective helper is unchanged. Focused simulation, strict saved-input,
 source-free load-only recovery, catalog, Service and ordinary-process witnesses
 cover the mechanics. The process uses a labeled synthetic victim and ordinary
@@ -176,7 +175,7 @@ source-granted defenses, stacking and active-time recovery across freeze/replay.
 
 The shared foundation covers nutrition, eating, starvation and authored stochastic
 condition triggers through the shared status gate. The Rogue package now explicitly
-enrolls Warrior/Mage, keeps all twenty-four selected foe recipes exempt, and makes its
+enrolls Warrior/Mage, keeps all 26 selected foe recipes exempt, and makes its
 existing ration edible.
 Its layered acceptance contracts do not establish complete-run survival,
 production balance or final Rogue configuration. A creature requiring nutrition must use an authored shared rules
@@ -262,14 +261,26 @@ rider; ordinary restoration removes recorded Strength deficit. Jabberwock enters
 at depth 21 with fifteen aberration racial HD, NA1(2), NA3(8), a heavy 2d12/2d4
 sequence, passive acquisition and 70% finite birth stock. Its purchased shared
 Rending Pair attempts one 1d6 rider after two qualifying hits in that sequence.
-Aquator now has an authored five-HD recipe and one-contact CO1 ability using the
-shared item-owned armor-reduction loss. It is not selected in the population yet.
+Aquator selects at depths 9–18 with five actual racial HD, CO1 on HD 1,
+one zero-damage contact and no stock. Its shared corrosion reduces the selected
+armor item's Impact/Keen damage reduction by one to zero; it does not change
+Physical defense. Dragon selects from depth 22 onward with ten actual racial HD,
+NA1(2), NA2(4), BR1(6), fire immunity, 1d8/1d8/3d10 natural strikes and one
+finite birth-pool item. Its separate HD 4/8 attribute choices raise baseline
+Willpower 1 to 3; starting Breath rank 1 plus the HD 8 skill purchase gives the
+approved +5 check. The bounded authored birth schedule purchases Breath ranks
+3/4/5 at HD 15/20/25; that spacing is provisional tuning, with the ordinary cap
+of five and no runtime HD-derived bonus.
+
 Shared directional rays support one frozen opposed source roll, live recipient
-checks, continued travel after a dodge, and repeat-encounter disadvantage.
-Dragon content and the combined 26-species population update remain unfinished.
-The Breath skill attribute, starting build and bounded later rank purchases await
-confirmation; these are separate from the accepted Energy/fire damage and
-Agility-dodge behavior. Complete trapdoor, arrow,
+Speed + Agility checks, zero damage and continued travel on a dodge (including
+ties), and cumulative repeat-encounter disadvantage after leaving/re-entering a
+body. BR1 deals 6d6 Energy/fire damage on a failed dodge and intercepts there;
+its provisional unscaled preparation/recovery is 100/100, cooldown 2000.
+The full population preserves exact pinned redistribution: depth 31 has
+M/V/G/J weight 9 each and D weight 14; the uniform five-species tail starts at 32.
+Focused A/D mechanism, owned-progression and source-free process checks pass;
+complete cross-platform CI remains required before merging this checkpoint. Complete trapdoor, arrow,
 sleeping gas, bear trap, teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
 must respect destination generation/loading and geometry. Existing hobgoblins
 roam using personal visible surroundings and visit counts, including reachable
@@ -284,10 +295,10 @@ through TOR mechanics; all specials work via ordinary actions/physics; inactive
 floors neither spawn nor accumulate catch-up spawning.
 
 Difficulty continues beyond the goal's eligibility depth within the current
-256-HD capacity, which is accepted for functional Rogue. The selected mixed M/V/G/J
+256-HD capacity, which is accepted for functional Rogue. The selected mixed M/V/G/J/D
 tail reaches J's limit at depth 267; a sampled J at 268 or deeper refuses the
-whole entry atomically. G reaches its limit at 269 and refuses at 270;
-all-M/V draws can remain valid through 274. Admission
+whole entry atomically. G reaches its limit at 269 and refuses at 270; D reaches its limit at 272
+and refuses at 273; all-M/V draws can remain valid through 274. Admission
 checks the sampled recipe and never clamps or replaces it. This explicit
 operational refusal is not a terminal objective. Work beyond that capacity is
 deferred below. Preserve every actual per-HD record and its seeded Health for both PCs and monsters. Compile

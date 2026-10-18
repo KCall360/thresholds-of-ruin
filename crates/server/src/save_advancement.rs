@@ -305,6 +305,34 @@ pub(super) fn read_respec<'de, D: serde::Deserializer<'de>>(
 #[cfg(test)]
 mod tests {
     use super::super::Action;
+    #[test]
+    fn stored_breath_purchase_and_replacement_preserve_the_exact_skill() {
+        use serde_json::json;
+        let selection = json!({"kind":"skill_rank","skill":"breath"});
+        let basis =
+            json!({"actor":1,"branch":"branch","stream":"stream","reset":0,"build_epoch":1});
+        for control in [
+            json!({"type":"purchase","basis":basis,"purchase":{"owner":7,"pool":"advancement","selection":selection}}),
+            json!({"type":"respec","basis":basis,"replacement":{"source":{"owner":7,"index":0},"replacement":{"pool":"advancement","selection":selection}},"supplies":{"kind":"carried"}}),
+        ] {
+            let decoded: Action =
+                serde_json::from_slice(&serde_json::to_vec(&control).unwrap()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), control);
+            let path = if control["type"] == "purchase" {
+                "/purchase/selection/skill"
+            } else {
+                "/replacement/replacement/selection/skill"
+            };
+            for unknown in ["Breath", "breath_weapon", "breath ", "missing"] {
+                let mut bad = control.clone();
+                *bad.pointer_mut(path).unwrap() = json!(unknown);
+                assert!(
+                    serde_json::from_slice::<Action>(&serde_json::to_vec(&bad).unwrap()).is_err()
+                );
+            }
+        }
+    }
+
     // Future raw save-codec hardening tests. Install after host3 positive controls.
     #[test]
     fn advancement_boundary_saved_actions_require_complete_named_operands_at_byte_decode() {

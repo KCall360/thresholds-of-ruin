@@ -162,7 +162,7 @@ mod tests {
                 "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
                 "kind": {"id":"undead","name":"Undead"}, "subtypes": [{"id":"augmented","name":"Augmented"}], "hit_dice": {"total":"2","sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"1"},{"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":"1"}]},
                 "attributes": {"strength": 3, "speed": 0, "intellect": 2, "willpower": 1, "awareness": 1, "presence": 0},
-                "skills": [{"skill": {"id":"spellcasting","name":"Spellcasting"}, "rank": 2}],
+                "skills": [{"skill": {"id":"spellcasting","name":"Spellcasting"}, "rank": 2}, {"skill": {"id":"breath","name":"Breath"}, "rank": 2}],
                 "defenses": {"physical": 13, "cognitive": 13, "spiritual": 11},
                 "binding": {"id":"awareness","name":"Awareness"}, "resources": [{"resource": {"id":"mana","name":"Mana"}, "balance": 2, "maximum": 3, "available": 1, "reserved": 1}],
                 "active_talents": [{"id":"hardiness","name":"Hardiness"}], "dormant_talents": [{"id":"fear","name":"Fear"}], "abilities": [{"cooldown_remaining":"0","supply_costs":[],"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true}, {"cooldown_remaining":"0","supply_costs":[],"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false}]
@@ -177,6 +177,7 @@ mod tests {
             "Hit dice: 2 (1 Mage, 1 Racial)",
             "Strength 3",
             "Spellcasting: 2",
+            "Breath: 2",
             "Mana bound to Awareness",
             "Mana: 2/3 (1 available, 1 reserved)",
             "Active talents:\n  Hardiness",

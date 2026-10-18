@@ -229,7 +229,7 @@ safety at both preparation and replacement commitment.
 The simulation purchase/replacement kernels, shared finite-ration lifecycle,
 owner-controlled host query/action boundary, independent strict saved operands,
 durable receipt/replay and atomic Store rollback are implemented. Complete
-preview paging includes a compiler-admitted 349-purchase/4,096-balance/4,096-catalog
+preview paging includes a compiler-admitted 354-purchase/4,096-balance/4,096-catalog
 fixture and 256 dependent refunds; metadata capacity still constrains combinations
 of source maxima. Shared text/headless/ASCII controls preserve exact proposals,
 controller-only pages and explicit paused-work resume. Actual Text and headless

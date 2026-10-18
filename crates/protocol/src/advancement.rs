@@ -5,12 +5,12 @@ use serde::{Deserialize, Serialize};
 
 pub const MAX_ADVANCEMENT_PAGE_ENTRIES: usize = 32;
 pub const MAX_ADVANCEMENT_PAGE_BYTES: usize = 32 * 1024;
-/// Conservative capacity; two free starting ranks make the attainable ledger 349.
-pub const MAX_ADVANCEMENT_LEDGER_ROWS: usize = 351;
+/// Conservative capacity; two free starting ranks make the attainable ledger 354.
+pub const MAX_ADVANCEMENT_LEDGER_ROWS: usize = 356;
 pub const MAX_ADVANCEMENT_BALANCE_ROWS: usize = 4096;
 pub const MAX_ADVANCEMENT_CATALOG_ROWS: usize = 4096;
 pub const MAX_ADVANCEMENT_FORM_OPTIONS: usize = 16;
-pub const MAX_ADVANCEMENT_SKILL_ROWS: usize = 19;
+pub const MAX_ADVANCEMENT_SKILL_ROWS: usize = 20;
 pub const MAX_ADVANCEMENT_TALENT_ROWS: usize = 256;
 pub const MAX_ADVANCEMENT_CONDITION_ROWS: usize = 128;
 

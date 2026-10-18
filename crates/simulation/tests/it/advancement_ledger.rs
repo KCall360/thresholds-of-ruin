@@ -268,36 +268,100 @@ fn grant_limits_bound_the_combined_points_and_pool_count_for_every_hd_source() {
 
 #[test]
 fn starting_ranks_survive_drain_multiclassing_and_cap_purchased_ranks_at_five() {
-    let mut build = defaults(5);
-    for owner in 0..4 {
+    for skill in [Skill::HeavyWeaponry, Skill::Breath] {
+        let mut build = fixture::with_starting_skills(defaults(5), [skill, Skill::Spellcasting]);
+        for owner in 0..4 {
+            build
+                .train(tor_simulation::HdIndex::from_usize(owner).unwrap(), skill)
+                .unwrap();
+        }
+        assert_eq!(build.derive().unwrap().skills.get(skill), 5);
+        let before = build.clone();
+        assert_eq!(
+            build.train(tor_simulation::HdIndex(4), skill),
+            Err(BuildError::RankCap)
+        );
+        assert_eq!(build, before);
+        while build.remove_latest().is_some() {}
+        assert_eq!(*build.starting_skills(), [skill, Skill::Spellcasting]);
         build
-            .train(
-                tor_simulation::HdIndex::from_usize(owner).unwrap(),
-                Skill::HeavyWeaponry,
-            )
+            .add_hit_die(HdSource::Class(ClassId::new("mage").unwrap()), 42)
             .unwrap();
+        build
+            .add_hit_die(HdSource::Class(ClassId::new("warrior").unwrap()), 42)
+            .unwrap();
+        assert_eq!(build.derive().unwrap().skills.get(skill), 1);
+        assert_eq!(build.derive().unwrap().skills.get(Skill::Spellcasting), 1);
+        assert_eq!(build.unspent_points(), 2);
     }
-    assert_eq!(build.derive().unwrap().skills.get(Skill::HeavyWeaponry), 5);
-    let before = build.clone();
-    assert_eq!(
-        build.train(tor_simulation::HdIndex(4), Skill::HeavyWeaponry),
-        Err(BuildError::RankCap)
-    );
-    assert_eq!(build, before);
-    while build.remove_latest().is_some() {}
-    assert_eq!(
-        *build.starting_skills(),
-        [Skill::HeavyWeaponry, Skill::Spellcasting]
-    );
+}
+
+#[test]
+fn breath_starting_rank_and_hd_eight_purchase_compile_to_five_and_restore_exactly() {
+    use tor_simulation::attributes::{Attribute, Attributes, ByAttribute, SkillCheck};
+    let mut build =
+        fixture::with_starting_skills(defaults(8), [Skill::HeavyWeaponry, Skill::Breath]);
     build
-        .add_hit_die(HdSource::Class(ClassId::new("mage").unwrap()), 42)
+        .set_initial_attributes(
+            Attributes::new(ByAttribute {
+                willpower: 3,
+                ..ByAttribute::default()
+            })
+            .unwrap(),
+        )
         .unwrap();
+    assert_eq!(build.unspent_points(), 8);
+    assert_eq!(build.derive().unwrap().skills.get(Skill::Breath), 1);
+    assert!(build
+        .choices()
+        .iter()
+        .all(|choice| choice.purchases.is_empty()));
     build
-        .add_hit_die(HdSource::Class(ClassId::new("warrior").unwrap()), 42)
+        .train(tor_simulation::HdIndex(7), Skill::Breath)
         .unwrap();
-    assert_eq!(build.derive().unwrap().skills.get(Skill::HeavyWeaponry), 1);
-    assert_eq!(build.derive().unwrap().skills.get(Skill::Spellcasting), 1);
-    assert_eq!(build.unspent_points(), 2);
+    assert_eq!(build.unspent_points(), 7);
+    assert_eq!(build.choices()[7].purchases.len(), 1);
+    assert_eq!(
+        build.choices()[7].purchases[0].selection,
+        PurchaseSelection::SkillRank(Skill::Breath)
+    );
+    let complete = authored(build);
+    let record = BuildRecord::capture(&complete);
+    let encoded = serde_json::to_vec(&record).unwrap();
+    let record: BuildRecord = serde_json::from_slice(&encoded).unwrap();
+    let mut restored = record.restore(complete.content().clone()).unwrap();
+    assert_eq!(restored, complete);
+    let creature = CreatureState::new(restored.clone()).unwrap();
+    let check = SkillCheck {
+        skill: Skill::Breath,
+        binding: creature.derived().binding(),
+        modifier: 0,
+        threshold: 0,
+    };
+    let before = tor_simulation::diagnostics::work_counts();
+    for _ in 0..4 {
+        let sheet = creature.derived();
+        assert_eq!(sheet.attributes.get(Attribute::Willpower), 3);
+        assert_eq!(sheet.skills.get(Skill::Breath), 2);
+        assert_eq!(check.bonus(sheet.attributes, sheet.skills), 5);
+    }
+    let after = tor_simulation::diagnostics::work_counts();
+    assert_eq!(after.raw_species_lookups, before.raw_species_lookups);
+    assert_eq!(after.raw_hit_die_visits, before.raw_hit_die_visits);
+    assert_eq!(
+        after.advancement_choice_visits,
+        before.advancement_choice_visits
+    );
+    assert_eq!(
+        after.permanent_creature_compiles,
+        before.permanent_creature_compiles
+    );
+    restored.remove_latest().unwrap();
+    assert_eq!(restored.derive().unwrap().skills.get(Skill::Breath), 1);
+    restored.restore_hit_die(42).unwrap();
+    assert_eq!(restored, complete);
+    restored.add_hit_die(HdSource::Racial, 42).unwrap();
+    assert_eq!(restored.derive().unwrap().skills.get(Skill::Breath), 2);
 }
 #[test]
 fn saved_creation_rejects_duplicate_starting_skills_and_forged_purchases() {

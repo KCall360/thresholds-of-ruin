@@ -595,10 +595,19 @@ Eligibility: dragon type with an elemental subtype.
 | BR1 | Breath Weapon | 6 | — | Telegraphed ray, 6d6 Energy damage with the subtype descriptor (fire for the Rogue dragon); target Agility dodge takes no damage and the ray continues; failed dodge takes full damage and intercepts; cooldown 2000 | X13 |
 | BR2 | Lingering Breath | 12 | BR1 | Ray leaves a short-lived hazard zone | X13 X3 |
 
-The opposed Breath skill mapping and Dragon starting purchases are still pending.
-The current proposal is Strength 3 plus Breath rank 2, with rank 1 at creation
-and the second rank purchased at HD 8. Later ranks must use explicit, budgeted
-HD purchases and the ordinary rank cap, rather than a raw-HD check bonus.
+Breath is a Willpower skill. The Rogue Dragon starts with Willpower 1, takes
+its separate attribute increases at HD 4 and 8, and owns Breath rank 1 at
+creation plus the rank-2 purchase at HD 8. Its compiled Willpower 3 + Breath 2
+therefore rolls 3d6 + 5 once per ray. Each encountered creature rolls current
+Speed + Agility; ties dodge. A contiguous body pass makes one check, while
+leaving and re-entering adds disadvantage for each prior check against that
+ray. Positive edge cancels the full repeat count before the ordinary three-extra-
+dice cap. New rays reset that count.
+
+Preparation/recovery are provisionally 100/100 ticks without Speed scaling;
+2000 ticks is the cooldown. Later ranks are explicit, budgeted population-birth
+purchases at racial HD 15/20/25 for ranks 3/4/5. These spacing values are provisional
+tuning. The normal rank cap stays five; no runtime raw-HD bonus is added.
 
 #### Gaze tree
 

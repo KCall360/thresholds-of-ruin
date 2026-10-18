@@ -43,5 +43,49 @@ class RogueCorrosionRayContent(unittest.TestCase):
             "effects":[{"kind":"corrode_armor", "slot":"body_armor", "amount":1}], "descriptors":[]}])
 
 
+    def test_dragon_owns_budgeted_willpower_breath_and_energy_fire_ray(self):
+        package = ROOT / "scenarios/rogue-exploration"
+        actors = tomllib.loads((package / "catalog/actors.toml").read_text())["actors"]
+        species = tomllib.loads((package / "catalog/creatures.toml").read_text())["creatures"]["species"]
+        self.assertIn("rogue.dragon", actors)
+        creature = actors["rogue.dragon"]["creature"]
+        definition = species["rogue.dragon"]
+        self.assertEqual((definition["kind"], definition["subtypes"]), ("dragon", ["fire"]))
+        self.assertEqual(definition["attributes"]["willpower"], 1)
+        self.assertEqual(definition["behavior"]["disposition"], "mean")
+        self.assertEqual(creature["starting_skills"], ["heavy_weaponry", "breath"])
+        rows = creature["hit_dice"]
+        self.assertEqual(len(rows), 10)
+        self.assertEqual([row.get("attribute") for row in rows],
+                         [None, None, None, "willpower", None, None, None, "willpower", None, None])
+        expected = {2: {"kind":"talent", "talent":"second_strike"},
+                    4: {"kind":"talent", "talent":"third_strike"},
+                    6: {"kind":"talent", "talent":"rogue.breath_weapon"},
+                    8: {"kind":"skill_rank", "skill":"breath"}}
+        for ordinal, row in enumerate(rows, 1):
+            self.assertEqual(row["source"], "racial")
+            self.assertEqual(row["purchases"], [{"pool":"advancement", "selection":expected[ordinal]}]
+                             if ordinal in expected else [])
+        strikes = definition["melee"]["strikes"]
+        self.assertEqual([row.get("unlock") for row in strikes], [None, "second_strike", "third_strike"])
+        self.assertEqual([row["on_success"][0]["damage"]["components"][0]["amount"]["dice"]
+                          for row in strikes], [{"count":1,"sides":8,"bonus":0},
+                                               {"count":1,"sides":8,"bonus":0},
+                                               {"count":3,"sides":10,"bonus":0}])
+        overrides = tomllib.loads((package / "rules.toml").read_text())["overrides"]
+        ray = next(row["value"] for row in overrides if row["path"] == ["abilities","rogue.breath_weapon"])
+        self.assertEqual(ray["invocation"], "directional_ray")
+        self.assertEqual(ray["reach"], {"kind":"sight", "range":6})
+        self.assertEqual(ray["timing"], {"source":{"kind":"fixed", "prepare":100, "recover":100}})
+        self.assertEqual(ray["cooldown"], 2000)
+        strike, = ray["strikes"]["strikes"]
+        self.assertEqual(strike["check"], {"actor":"target", "skill":{"kind":"named", "skill":"agility"},
+                         "against":{"kind":"opposed", "skill":{"kind":"named", "skill":"breath"}}})
+        self.assertEqual(strike["on_success"], [])
+        self.assertEqual(strike["descriptors"], [])
+        self.assertEqual(strike["on_failure"], [{"kind":"damage", "damage":{"kind":"components", "components":[{
+            "category":"energy", "descriptor":"fire", "amount":{"kind":"rolled", "dice":{"count":6,"sides":6,"bonus":0}}}]}}])
+
+
 if __name__ == "__main__":
     unittest.main()
