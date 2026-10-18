@@ -1,5 +1,4 @@
-//! Confusion contracts, authored before implementation. First-red execution is
-//! pending: the shared build lane is owned by the dependency qualification task.
+//! Confusion preserves admitted commands, physical geometry and paid work.
 use super::tests::{at, fixture, modifier};
 use super::*;
 use crate::{Action, GameError, IntentionOrigin, OutcomeKind};
@@ -462,4 +461,85 @@ fn rotated_horizontal_intent_and_genuine_vertical_flight_gate_share_one_resolver
             );
         }
     }
+}
+
+#[test]
+fn confused_held_simulation_move_rejects_before_rng_and_explicit_escape_stays_usable() {
+    let mut species = crate::test_creatures::species();
+    let sustaining = crate::content_ids::FlagId::new("magical").unwrap();
+    species.modifiers.extend([
+        modifier(LocomotionValue::Confused {
+            chance: Some(MovementChance {
+                numerator: 4,
+                denominator: 5,
+            }),
+        }),
+        crate::rules::Modifier {
+            scope: crate::rules::Scope::Always,
+            op: crate::rules::ModifierOp::Flag {
+                flag: sustaining.clone(),
+            },
+        },
+    ]);
+    let build = crate::test_creatures::build(species);
+    let mut game = crate::Game::two_room_in_stone(42, build.content().clone());
+    let mut actors = Vec::new();
+    for x in [1, 2] {
+        let actor = game
+            .spawn_actor(
+                Location {
+                    region: tor_world::RegionId(1),
+                    position: Position { x, y: 1, z: 0 },
+                },
+                std::num::NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        game.configure_creature(
+            actor,
+            crate::CreatureIdentity {
+                name: "fixture actor".into(),
+                faction: "neutral".into(),
+            },
+            build.clone(),
+        )
+        .unwrap();
+        actors.push(actor);
+    }
+    let hold = game
+        .apply_linked_hold(
+            actors[1],
+            actors[0],
+            crate::linked_hold::HoldPolicy {
+                sustaining,
+                preparation: 100,
+                recovery: 100,
+                protection: 400,
+            },
+        )
+        .unwrap()
+        .unwrap();
+    let before = game.clone();
+    let rng = game.rules_rng;
+    assert_eq!(
+        game.act(actors[0], Action::Move(Direction::North)),
+        Err(GameError::ActorBusy)
+    );
+    assert_eq!(
+        game, before,
+        "server-owned Move-to-Escape admission is not a simulation rewrite"
+    );
+    let outcome = game.act(actors[0], Action::Escape { hold }).unwrap();
+    assert_eq!(outcome.kind, OutcomeKind::EscapeStarted { hold });
+    assert_eq!(
+        game.rules_rng, rng,
+        "preparing Escape does not sample confusion"
+    );
+    assert!(matches!(
+        game.preparation(actors[0]).unwrap().plan,
+        crate::abilities::Plan::Escape(_)
+    ));
+    assert_eq!(
+        game.actors[&actors[0]].location,
+        before.actors[&actors[0]].location
+    );
 }

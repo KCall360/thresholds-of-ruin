@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **48**, save format **46**, scenario format **19**, ruleset
-**`interactions-v41`**, scenario validator **`tor-scenario-31`**. Unsupported
+**Current formats:** protocol **49**, save format **47**, scenario format **20**, ruleset
+**`interactions-v42`**, scenario validator **`tor-scenario-32`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **14**, ContentPackage **16** and
+The independent compiled inputs use RulesInput **15**, ContentPackage **17** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search

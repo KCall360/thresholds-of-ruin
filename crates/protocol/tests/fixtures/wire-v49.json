@@ -2,7 +2,7 @@
  "client": [
   {
    "frontend": "headless",
-   "protocol": 48,
+   "protocol": 49,
    "token": "a-sample-credential",
    "type": "hello"
   },
@@ -897,7 +897,7 @@
    "type": "request"
   }
  ],
- "protocol": 48,
+ "protocol": 49,
  "server": [
   {
    "context": {
@@ -6621,7 +6621,7 @@
     "max_retained_state_bytes": 16777216,
     "max_snapshot_bytes": 33554432
    },
-   "protocol": 48,
+   "protocol": 49,
    "role": "player",
    "type": "welcome",
    "user": "sample-user"

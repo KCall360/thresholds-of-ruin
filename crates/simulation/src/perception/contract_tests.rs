@@ -1080,6 +1080,9 @@ fn item_preparation_keeps_known_threat_reference_domains_separate() {
             apply(&mut game, OWNER, "fixture_detection", 1000);
         }
         game.resolve_preparations().unwrap();
+        // This internal resolution fixture owns the same final publication step
+        // as the public action transaction before checkpointing the interruption.
+        game.seal_participant_events().unwrap();
         assert!(
             !game.preparation(OWNER).unwrap().active,
             "a new disclosure domain is not the prior known threat"

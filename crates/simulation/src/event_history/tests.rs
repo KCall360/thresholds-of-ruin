@@ -297,6 +297,13 @@ fn restored_receipts_reject_stale_generation_kind_owner_and_watermark() {
     let mut game = fixture();
     game.apply(damage(ActorId(1), ActorId(2), 1)).unwrap();
     let baseline = serde_json::to_value(&game.event_receipts).unwrap();
+    let mut alternative_kind = baseline.clone();
+    alternative_kind["observers"]["1"]["entries"][0]["key"]["kind"] =
+        serde_json::json!({"resolved": null});
+    assert!(
+        serde_json::from_value::<EventReceipts>(alternative_kind).is_err(),
+        "event kind must use its canonical string operand, never an externally tagged object"
+    );
     for field in [
         "generation",
         "through",
@@ -499,4 +506,97 @@ fn participant_suffix_cost_does_not_rescan_or_copy_a_unique_retained_prefix() {
         after.event_receipt_binding_inspections - counts.event_receipt_binding_inspections < 16
     );
     assert_eq!(game.event_receipts.observers[&ActorId(1)].entries.len(), 33);
+}
+
+/// Publish through the real primary/rider/seal/provocation path while keeping
+/// both participants alive. A real check (hit or miss) witnesses participation;
+/// no damage or secondary rider can obscure the source-domain boundary.
+fn provoke_with_zero_damage_primary(game: &mut Game) {
+    let plan = game
+        .ability_plan(
+            ActorId(1),
+            &AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    let mut ability = plan.as_ability().unwrap().clone();
+    ability.strikes.truncate(1);
+    assert!(ability.strikes[0].check.is_some());
+    ability.strikes[0].on_success.clear();
+    ability.strikes[0].on_failure.clear();
+    ability.strikes[0].riders.clear();
+    game.resolve_strike(
+        &ability,
+        0,
+        None,
+        &mut crate::combat::PreparationProgress::Ability {
+            next_strike: 1,
+            successful_primaries: 0,
+            attempted_riders: [0; 2],
+            linked_hold: None,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn same_batch_reused_strike_ordinal_provokes_only_its_own_reference_domain() {
+    use crate::perception::ActorReferenceKind::{Contact, Creature};
+    // Both transitions need independent event identity. Same-domain cases are
+    // positive controls, including two anonymous events with no public ordinal.
+    for (first, second) in [
+        (Contact, Creature),
+        (Creature, Contact),
+        (Contact, Contact),
+        (Creature, Creature),
+    ] {
+        let mut game = fixture();
+        let conceal = |game: &mut Game, reference| {
+            template(
+                game,
+                ActorId(1),
+                (reference == Contact).then_some("event_invisible"),
+            );
+        };
+        conceal(&mut game, first);
+        provoke_with_zero_damage_primary(&mut game);
+        assert_eq!(
+            game.actors[&ActorId(2)]
+                .behavior
+                .engagement
+                .unwrap()
+                .reference,
+            first
+        );
+        let generation = game.event_receipts.generation;
+        let prefix = game.event_log.clone();
+        conceal(&mut game, second);
+        // A subsequent receipt must independently license a new engagement; an
+        // old Contact may neither suppress a Creature nor license the reverse.
+        game.actors
+            .get_mut(&ActorId(2))
+            .unwrap()
+            .behavior
+            .engagement = None;
+        provoke_with_zero_damage_primary(&mut game);
+        assert_eq!(game.event_receipts.generation, generation);
+        assert_eq!(&game.event_log[..prefix.len()], prefix.as_slice());
+        assert_eq!(game.event_log.len(), prefix.len() + 1);
+        assert_eq!(game.actors[&ActorId(2)].behavior.engagement.map(|entry| entry.reference),
+            Some(second), "{first:?} -> {second:?} must use the current published event, not a matching earlier strike");
+        assert_eq!(
+            game.event_log
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    CombatEvent::Resolved {
+                        strike: Some(0),
+                        ..
+                    }
+                ))
+                .count(),
+            2,
+            "separate primary publications intentionally reuse ordinal zero"
+        );
+    }
 }

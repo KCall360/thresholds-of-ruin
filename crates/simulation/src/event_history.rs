@@ -13,7 +13,7 @@ fn invalid() -> GameError {
     GameError::Rule(crate::abilities::RuleError::InvalidPlan)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum EventKind {
     Resolved,
@@ -23,6 +23,21 @@ enum EventKind {
     Item,
     Interrupted,
     Died,
+}
+
+impl<'de> Deserialize<'de> for EventKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "resolved" => Ok(Self::Resolved),
+            "escape" => Ok(Self::Escape),
+            "respec" => Ok(Self::Respec),
+            "sequence" => Ok(Self::Sequence),
+            "item" => Ok(Self::Item),
+            "interrupted" => Ok(Self::Interrupted),
+            "died" => Ok(Self::Died),
+            _ => Err(serde::de::Error::custom("invalid event kind")),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -737,6 +752,39 @@ impl Game {
         receipt.participant
             && receipt.key.actor == observer
             && self.event_log.get(index).map(EventKey::capture) == Some(receipt.key)
+    }
+
+    /// Exact causal reference for the actual recipient of one sealed resolved
+    /// event. A projected batch search cannot distinguish anonymous primaries
+    /// or separate publications that legitimately reuse the same strike ordinal.
+    pub(crate) fn event_target_source_reference(
+        &self,
+        observer: ActorId,
+        index: usize,
+    ) -> Reference {
+        if index >= self.event_receipts.sealed {
+            return None;
+        }
+        let row = self.event_receipts.observers.get(&observer).filter(|row| {
+            row.generation == self.event_receipts.generation
+                && index < row.through
+                && row.through <= self.event_log.len()
+        })?;
+        let position = row
+            .entries
+            .binary_search_by_key(&index, |entry| {
+                crate::diagnostics::event_receipt_binding_inspections(1);
+                entry.index
+            })
+            .ok()?;
+        let receipt = row.entries[position];
+        (receipt.participant
+            && receipt.key.kind == EventKind::Resolved
+            && receipt.key.target == observer
+            && receipt.key.participated
+            && self.event_log.get(index).map(EventKey::capture) == Some(receipt.key))
+        .then_some(receipt.source)
+        .flatten()
     }
 
     pub(crate) fn disclosed_event_history(&self, observer: ActorId) -> Vec<DisclosedCombatEvent> {

@@ -551,10 +551,13 @@ fn apparent_mundane_mace_matches_ordinary_ground_mace_except_opaque_identity() {
             ("asset", json!("item.weapon.mace")),
             ("identified", json!(true)),
             ("known_supply", Value::Null),
-            ("corpse", Value::Null),
         ] {
             assert_eq!(row["item"].get(field), Some(&expected), "{field}");
         }
+        assert!(
+            row["item"].get("corpse").is_none(),
+            "ordinary non-corpse metadata is omitted"
+        );
         assert_eq!(row.get("reachable"), Some(&json!(true)));
         assert_eq!(row.get("supply_reachable"), Some(&json!(false)));
     }

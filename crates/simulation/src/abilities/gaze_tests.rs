@@ -1,5 +1,5 @@
 //! Mutual sight and confusion use ordinary checked abilities and active timers.
-//! First-red and all executable checks remain unrun while the build lane is held.
+//! Fixtures make existing personal hostility explicit; choices cannot read foe conditions.
 use super::*;
 use crate::attributes::{ManaBinding, Skill};
 use crate::content_ids::{AbilityId, ConditionId};
@@ -335,6 +335,18 @@ fn gaze_ai_does_not_inspect_hidden_target_confusion_or_protection() {
     let mut game = fixture();
     game.configure_ai(ActorId(1), crate::ai::AiProfile::default())
         .unwrap();
+    // Isolate ability selection from independent mean-creature acquisition and
+    // wake rolls: the target is already personally known in the creature domain.
+    game.actors
+        .get_mut(&ActorId(1))
+        .unwrap()
+        .behavior
+        .engagement = Some(crate::behavior::Engagement {
+        reference: crate::perception::ActorReferenceKind::Creature,
+        target: ActorId(2),
+        location: game.actors[&ActorId(2)].location,
+        last_seen: 0,
+    });
     let clear = game.next_ai_action().unwrap();
     assert_eq!(clear.1, gaze());
     game.apply_condition(ActorId(2), &condition().id, ActorId(1), 300)

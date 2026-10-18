@@ -224,8 +224,9 @@ impl Game {
     pub(crate) fn provoke_from_strike(
         &mut self,
         outcome: &crate::abilities::Outcome,
-        strike: u16,
+        publication: crate::lifecycle::PublishedResolution,
     ) -> Result<(), GameError> {
+        let event = self.published_primary_event(publication, outcome)?;
         if outcome.actor == outcome.target
             || !outcome.target_participated()
             || !self.alive(outcome.target)
@@ -245,38 +246,15 @@ impl Game {
         {
             return Ok(());
         }
+        let Some(reference) = self.event_target_source_reference(outcome.target, event) else {
+            return Ok(());
+        };
         let view = self.observe(outcome.target)?;
-        let licensed = view.combat.as_ref().and_then(|combat| {
-            combat.events.iter().find_map(|event| match event {
-                crate::combat::DisclosedCombatEvent::Ability {
-                    caster: Some(caster),
-                    caster_reference,
-                    target: Some(target),
-                    id,
-                    strike: Some(ordinal),
-                    ..
-                } if *caster == outcome.actor
-                    && *target == outcome.target
-                    && id == ability
-                    && *ordinal == strike =>
-                {
-                    *caster_reference
-                }
-                crate::combat::DisclosedCombatEvent::UnseenAbility {
-                    caster: Some(caster),
-                    target,
-                    ..
-                } if *caster == outcome.actor && *target == outcome.target => {
-                    Some(crate::perception::ActorReferenceKind::Contact)
-                }
-                _ => None,
-            })
-        });
         let witness = view
             .visible_actors
             .iter()
             .find(|actor| actor.id == outcome.actor);
-        if let (Some(reference), Some(witness)) = (licensed, witness) {
+        if let Some(witness) = witness {
             if witness.disclosure.reference() != Some(reference) {
                 return Ok(());
             }

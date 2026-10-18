@@ -1,0 +1,26 @@
+{
+  "current_rules_dependencies": {
+    "interactions-v42": "0aa3e236c006bea28c3757f56f01a505ada16b4ab6aa3abb7ab9f37e8b9afabf"
+  },
+  "current_ruleset": "interactions-v42",
+  "current_scenario_format": 20,
+  "current_snapshot": "rogue-earned-baseline-v11",
+  "format": 1,
+  "only_transformation": "Change only package/scenario.toml format 19 to 20 and package/rules.toml bundled import interactions-v41 to interactions-v42. All other authored package input bytes remain unchanged. Shared rules add typed perception, gaze and object guise; this is a new experiment input, not identical outcomes or a requalified pilot. This receipt records source bytes only; current compiler validation, certificates and route qualification remain separate requirements.",
+  "previous_package_inputs": {
+    "catalog/actors.toml": "9aa3f2ae65a5b5370ca624a89a0ba2fad02aa94b244655c2c9314fcb57132abd",
+    "catalog/creatures.toml": "78381188c7c320f0744db68a440febe3444f96776eda7e45a4496efa958f835c",
+    "catalog/items.toml": "f3c2bf4a9e6ef56725dfaf6da486db0095f70eede4eb8d7e28ee84b152c6ec7c",
+    "rules.toml": "130fc02531ba3edbfa7d3f273bd512eec3972bed63e3cbfd8c232cf4b74389ac",
+    "scenario.toml": "a825322dac6c7c22df7c61ad241fa299d55629a0f1ed2b54a1cbe34ae8f76b6b"
+  },
+  "previous_reference": "8d09063840c51aa4189b146c287829102856b279:scenarios/rogue-exploration (current-format preactivation E/S source; certificates regenerated); current scenario 15 format-only adaptation; transition-sha256:24eb0c424f1e33d370bcb758560f950556f71671234da145327ecf829317da4c; current wide-scalar rules identity adaptation; transition-sha256:ca89c547beda7a895b46937516700d4871f017ae00cce2ad4e51cba9770f82d9; source-only sequence-rider format-forward adaptation (compiler and route qualification pending); transition-sha256:c2b887c926e4821307cf95e0ddadb9156ac36959a891623672b5187ce2750f4c; source-only complete-idle AI scenario-format adaptation (compiler and route qualification pending); transition-sha256:57338c27cdc8f70f2f0c889f19696e97011a83c29ee56eb8844d22de9cd12119; source-only locomotion/linked-hold format-forward adaptation (compiler and route qualification pending); transition-sha256:3846185d5e8743c789c47e193a1bc9437590440a1db5cda34c9e970b34a3681a; source-only theft and room-gold format-forward adaptation (compiler and route qualification pending); transition-sha256:758e6f2630373b99827db84eb61982930ba93c06d9892be9c74454acac2b9131",
+  "previous_rules_dependencies": {
+    "interactions-v41": "caf5a513d619f587dd6145b46f932a3d345a5ded4d99e78c85df4eb0d7f93631"
+  },
+  "previous_ruleset": "interactions-v41",
+  "previous_scenario_format": 19,
+  "previous_snapshot": "rogue-earned-baseline-v10",
+  "previous_source_sha256": "67dece1fa1c71476869d30af63c43fd16fed63cccbf5b9ff1bc5b8eebdf12e9a",
+  "retained_fixture_reference": "2e5ac75afd1301158865d8d49c25a7696caa6e18:scripts/fixtures/rogue-earned-baseline-v10"
+}

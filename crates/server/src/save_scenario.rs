@@ -3202,7 +3202,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 14;
+const RULES_INPUT_FORMAT: u32 = 15;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -3302,7 +3302,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 16;
+const CONTENT_PACKAGE_FORMAT: u32 = 17;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -3521,14 +3521,14 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (46, 19, "interactions-v41", 14, 5, 16, "tor-arena-run-v5")
+            (47, 20, "interactions-v42", 15, 5, 17, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn combined_movement_and_presentation_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 48);
-        assert_eq!(super::RULES_INPUT_FORMAT, 14);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 49);
+        assert_eq!(super::RULES_INPUT_FORMAT, 15);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Locomotion and linked-hold operands advance saved and compiled inputs;
         // presentation metadata also advances the public protocol. None of these

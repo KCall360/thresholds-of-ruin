@@ -262,7 +262,7 @@ impl Game {
             }
         }
         self.seal_participant_events()?;
-        self.provoke_from_strike(&primary.outcome, index as u16)?;
+        self.provoke_from_strike(&primary.outcome, primary_receipt)?;
         Ok(primary.outcome)
     }
     fn resolve_batch_in_transaction(

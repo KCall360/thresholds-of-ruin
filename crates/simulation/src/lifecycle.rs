@@ -753,6 +753,22 @@ impl Game {
         Ok(receipt)
     }
 
+    /// The private publication receipt is the causal selector. Validate the
+    /// exact final primary outcome, including rider participation, before any
+    /// consumer uses its event index; ordinals alone are not event identities.
+    pub(crate) fn published_primary_event(
+        &self,
+        receipt: PublishedResolution,
+        outcome: &Outcome,
+    ) -> Result<usize, GameError> {
+        if !matches!(receipt.role, PublishedRole::Primary { .. })
+            || self.published_resolution(receipt)? != outcome
+        {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        }
+        Ok(receipt.event)
+    }
+
     fn published_resolution(&self, receipt: PublishedResolution) -> Result<&Outcome, GameError> {
         let Some(CombatEvent::Resolved { outcome, strike }) = self.event_log.get(receipt.event)
         else {

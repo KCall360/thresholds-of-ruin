@@ -959,4 +959,33 @@ mod tests {
             ));
         }
     }
+
+    #[test]
+    fn unseen_attack_history_never_acquires_a_later_visible_name() {
+        let before = crate::test_support::observation();
+        let mut after = before.clone();
+        after.visible_actors[0].name = "identified phantom".into();
+        for caster in [None, Some(after.visible_actors[0].id)] {
+            for (outcome, expected) in [
+                (AbilityOutcome::Applied, "Something attacks you."),
+                (AbilityOutcome::Unaffected, "Something attacks you."),
+                (
+                    AbilityOutcome::Miss,
+                    "Something attacks you, but misses.",
+                ),
+            ] {
+                let event = CombatEventView::UnseenAbility {
+                    caster,
+                    target: after.self_target,
+                    outcome,
+                };
+                after.combat.as_mut().unwrap().events = vec![event.clone()];
+                assert_eq!(combat_event(&event, &before, &after), expected);
+                let lines = observation_lines(&before, &after, None);
+                assert!(lines.iter().any(|line| {
+                    line.topic == Topic::Combat(event.clone()) && line.text == expected
+                }));
+            }
+        }
+    }
 }
