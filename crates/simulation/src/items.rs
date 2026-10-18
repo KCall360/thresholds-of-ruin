@@ -1000,7 +1000,8 @@ mod tests {
         let mut value = serde_json::to_value(ItemSpec::ordinary("bandage shield".into())).unwrap();
         value["class"] = serde_json::json!("armor");
         value["supply"] = serde_json::json!("bandage");
-        value["equipment"] = serde_json::json!({"slot":"shield", "attack":null, "modifiers":[]});
+        value["equipment"] =
+            serde_json::json!({"slot":"shield", "armor":null, "attack":null, "modifiers":[]});
         let spec: ItemSpec = serde_json::from_value(value).unwrap();
         assert!(!spec.valid());
         assert!(spec.validate_rules(rules.rules()).is_err());

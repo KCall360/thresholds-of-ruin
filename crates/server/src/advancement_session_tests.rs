@@ -1931,10 +1931,28 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
         if actual_hd == 1 {
             assert!(events.iter().any(|event| matches!(event,
                 CombatEventView::Ability { caster: Some(caster), target: Some(target), ability,
-                    outcome: AbilityOutcome::Applied, strike: Some(0) }
+                    outcome: AbilityOutcome::Unaffected, strike: Some(0) }
                     if *caster == w_target && *target == owner_view.self_target && ability.id == DRAIN)),
-                "actual rider loss also needs its real applied primary contact");
+                "ring mail absorbs this contact's damage without preventing its rider");
             let drained = progress(&case.service, 160, 0, 1);
+            let primary: Vec<_> = drained["game"]["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|event| event.get("Resolved"))
+                .filter(|event| {
+                    event["strike"] == 0
+                        && event["outcome"]["actor"] == WRAITH.0
+                        && event["outcome"]["target"] == OWNER.0
+                        && event["outcome"]["ability"] == DRAIN
+                })
+                .collect();
+            assert_eq!(primary.len(), 1, "one real primary, not an immunity bypass");
+            assert_eq!(primary[0]["outcome"]["check"]["success"], true);
+            assert_eq!(
+                primary[0]["outcome"]["effects"],
+                json!([{"kind":"damage","amount":0}])
+            );
             let build = &creature(&drained, OWNER)["build"];
             assert_eq!(build["hd"], json!([paid["hd"][0]]));
             assert_eq!(build["choices"], json!([paid["choices"][0]]));

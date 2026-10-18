@@ -1460,6 +1460,7 @@ fn phase5_container_checkpoint_rejects_positional_held_item() {
         item,
         &[
             "corpse",
+            "condition",
             "motion",
             "orientation",
             "spec",

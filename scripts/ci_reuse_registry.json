@@ -49,8 +49,8 @@
   },
   "owner_blobs": {
     "scripts/rogue_earned_route_process.py": "05bb284c13d78fc17e324a78129689070e4ba02a",
-    "scripts/test_rogue_earned_route_process.py": "db7da0f06d806518c69f7e2e2d93fd68bb364376",
-    "scripts/test_rogue_route_budget_process.py": "b367554aaeefc70283605589f0bd4e6195365ee8",
+    "scripts/test_rogue_earned_route_process.py": "77b34159e6d4ddbbb04e509d2ef8e72fdfbff094",
+    "scripts/test_rogue_route_budget_process.py": "9cd3554f6075d683fd19ea6c5c2b0fbb25dca2e8",
     "scripts/process_work_budget.py": "d53bdeb14499ab68913882f76e79095173f925af",
     "scripts/arena_evaluation.py": "56c5e931afae031c4f9d9be4f229e6905bc3e2a5",
     "scripts/process_harness.py": "1bd038590a0580fca1d437a93bdd59ec0d93315f",
@@ -65,7 +65,7 @@
     "crates/server/examples/latency_bench.rs": "349e19745576f7f769db64e4b4961f2c209a0f34"
   },
   "import_blobs": {
-    "scripts/arena_matrix.py": "3ddff3e2d0f562a83833d8ed43ffa6f3489cdb22",
+    "scripts/arena_matrix.py": "39e5955ffd2b9776503dec2c673ba6898888292a",
     "scripts/ruleset_sources.py": "a092039ce09b15e0cc398a2bb6b31921f217d4db",
     "scripts/process_harness.py": "1bd038590a0580fca1d437a93bdd59ec0d93315f",
     "scripts/arena_evaluation.py": "56c5e931afae031c4f9d9be4f229e6905bc3e2a5",
