@@ -37,18 +37,8 @@ impl Game {
     }
 
     pub(crate) fn senses_faction_hostile(&self, actor: ActorId) -> Result<bool, GameError> {
-        let scene = self.streaming_scene(actor)?;
-        let cells = scene.iter().map(|cell| cell.location).collect();
-        Ok(self
-            .actors
-            .perceived(&self.world, &cells)
-            .into_iter()
-            .any(|(id, body)| {
-                id != actor
-                    && self.alive(id)
-                    && self.faction_hostile(actor, id)
-                    && body.iter().any(|(at, _)| cells.contains(at))
-            }))
+        // Safety knows personally provoked contacts, but never their hidden affiliation.
+        self.senses_hostile(actor)
     }
 
     /// A frozen owner has captured clock context, not permission to inspect the
@@ -82,9 +72,9 @@ impl Game {
         if self.actor_frozen(actor) {
             return self.recovery_source_context(actor);
         }
-        let scene = self.scene_at_placement(actor, placement)?;
+        let (scene, sight) = self.scene_snapshot_at_placement(actor, placement)?;
         Ok(RecoveryContext::Known {
-            sensed_hostile: !self.hostiles_in_scene(actor, &scene).is_empty(),
+            sensed_hostile: !self.hostiles_in_projection(actor, &scene, &sight, Some(placement)).is_empty(),
         })
     }
 

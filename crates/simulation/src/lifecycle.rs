@@ -933,6 +933,8 @@ impl Game {
         let from = self.actors[&id].location;
         let to = outcome.state.location;
         let entry_cause = outcome.entry_cause;
+        let perception = outcome.state.perception();
+        outcome.state.guise.reconcile(&perception, from != to);
         let previous_items = self.actors[&id]
             .pending
             .as_ref()

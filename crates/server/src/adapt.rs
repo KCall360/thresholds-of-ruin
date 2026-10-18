@@ -132,6 +132,7 @@ pub fn action(action: &a::Action) -> s::Action {
                 a::AbilityInvocation::ActorTarget { target } => {
                     s::abilities::AbilityInvocation::ActorTarget { target: *target }
                 }
+                a::AbilityInvocation::ContactTarget { target } => s::abilities::AbilityInvocation::ContactTarget { target: *target },
                 a::AbilityInvocation::SelfStep { direction } => {
                     s::abilities::AbilityInvocation::SelfStep {
                         direction: match direction {
@@ -282,6 +283,7 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
                 s::abilities::AbilityInvocation::ActorTarget { target } => {
                     a::AbilityInvocation::ActorTarget { target }
                 }
+                s::abilities::AbilityInvocation::ContactTarget { target } => a::AbilityInvocation::ContactTarget { target },
                 s::abilities::AbilityInvocation::SelfStep { direction } => {
                     a::AbilityInvocation::SelfStep {
                         direction: match direction {
@@ -327,8 +329,9 @@ pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
         s::OutcomeKind::GrowthSourceChosen { .. } => crate::journal::Event::GrowthSourceChosen,
         s::OutcomeKind::Purchased { .. } => crate::journal::Event::Purchased,
         s::OutcomeKind::RespecStarted { .. } => crate::journal::Event::RespecStarted,
-        s::OutcomeKind::AbilityStarted { id, name, target } => {
+        s::OutcomeKind::AbilityStarted { id, name, target, reference } => {
             crate::journal::Event::AbilityStarted {
+                reference,
                 id,
                 name,
                 target: p::ActorId(target.0),
@@ -465,6 +468,25 @@ pub fn observation(
                 supply_reachable: item.supply_reachable,
             });
         }
+        for object in view.apparent_objects.iter().filter(|object| object.location == cell.location) {
+            ground_items.push(p::GroundItemView {
+                item: p::ItemView {
+                    corpse: None,
+                    class: item_class(object.appearance.class),
+                    quantity: 1,
+                    appearance: object.appearance.name.clone(),
+                    identified: false,
+                    known_supply: None,
+                    description: object.appearance.description.clone(),
+                    id: targets.apparent_object(object.subject),
+                    name: object.appearance.name.clone(),
+                    asset: object.appearance.asset.clone(),
+                },
+                position: offset(cell.offset),
+                reachable: object.location == view.location,
+                supply_reachable: false,
+            });
+        }
         for actor in view
             .visible_actors
             .iter()
@@ -472,9 +494,9 @@ pub fn observation(
         {
             visible_actors.push(p::ActorView {
                 name: actor.name.clone(),
-                appearance_seed: Some(targets.appearance_seed(actor.id)),
+                appearance_seed: (actor.disclosure == s::perception::ActorDisclosure::Creature).then(|| targets.appearance_seed(actor.id)),
                 description: String::new(),
-                id: targets.actor(actor.id),
+                id: targets.actor_reference(actor.id, actor.disclosure.reference().expect("selectable actor disclosure")),
                 position: offset(cell.offset),
                 asset: actor.asset.clone(),
             });
@@ -662,20 +684,27 @@ fn combat_event_view(
     use s::combat::DisclosedCombatEvent as E;
     let id = |actor: s::ActorId| targets.actor(actor);
     match event {
+        E::UnseenAbility { caster, target, outcome } => p::CombatEventView::UnseenAbility {
+            caster: caster.map(|actor| targets.contact(actor)),
+            target: targets.actor(target),
+            outcome: crate::creature_view::outcome_status(outcome),
+        },
         E::EscapeResolved { hold, success } => p::CombatEventView::EscapeResolved {
             hold: targets.hold(hold),
             success,
         },
         E::Ability {
             caster,
+            caster_reference,
             target,
+            target_reference,
             id: ability_id,
             name,
             outcome,
             strike,
         } => p::CombatEventView::Ability {
-            caster: caster.map(id),
-            target: target.map(id),
+            caster: caster.zip(caster_reference).map(|(actor, kind)| targets.actor_reference(actor, kind)),
+            target: target.zip(target_reference).map(|(actor, kind)| targets.actor_reference(actor, kind)),
             ability: p::ContentRef {
                 id: ability_id.to_string(),
                 name,
@@ -690,7 +719,7 @@ fn combat_event_view(
             },
         },
         E::Interrupted { actor } => p::CombatEventView::Interrupted { actor: id(actor) },
-        E::Died { actor } => p::CombatEventView::Died { actor: id(actor) },
+        E::Died { actor, reference } => p::CombatEventView::Died { actor: targets.actor_reference(actor, reference) },
     }
 }
 
@@ -765,6 +794,7 @@ mod ability_journal_tests {
         assert_eq!(
             event,
             crate::journal::Event::AbilityStarted {
+                reference,
                 id,
                 name: "Fixture Ability".into(),
                 target: tor_protocol::ActorId(2)
@@ -784,7 +814,9 @@ mod ordered_strike_privacy_tests {
             let view = combat_event_view(
                 s::combat::DisclosedCombatEvent::Ability {
                     caster,
+                    caster_reference: caster.map(|_| s::perception::ActorReferenceKind::Creature),
                     target: Some(s::ActorId(1)),
+                    target_reference: Some(s::perception::ActorReferenceKind::Creature),
                     id: s::content_ids::AbilityId::new("triple_strike").unwrap(),
                     name: "Triple Strike".into(),
                     outcome: s::abilities::OutcomeStatus::Miss,

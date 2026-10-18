@@ -392,6 +392,22 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
         },
     )];
     let id = match &value.op {
+        ModifierOp::Perception { value } => {
+            use s::perception::PerceptionValue;
+            let (name, enabled) = match value {
+                PerceptionValue::Invisible { enabled } => ("invisible", *enabled),
+                PerceptionValue::SeeInvisible { enabled } => ("see_invisible", *enabled),
+                PerceptionValue::Sight { enabled } => ("sight", *enabled),
+                PerceptionValue::ObjectGuise { appearance } => {
+                    if let Some(appearance) = appearance { fields.push(text("appearance", &appearance.name)); }
+                    ("object_guise", appearance.is_some())
+                },
+                PerceptionValue::AmbushFromGuise { enabled } => ("ambush_from_guise", *enabled),
+            };
+            fields.push(text("capability", name));
+            fields.push(text("enabled", if enabled { "true" } else { "false" }));
+            "perception"
+        },
         ModifierOp::Locomotion { value } => {
             use s::locomotion::LocomotionValue;
             match value {

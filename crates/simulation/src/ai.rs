@@ -240,7 +240,7 @@ impl Game {
         let candidate = view
             .visible_actors
             .iter()
-            .filter(|other| other.id != id && self.hostile(id, other.id))
+            .filter(|other| other.id != id && self.perceived_hostile(id, other.id, other.disclosure))
             .min_by_key(|other| {
                 (
                     route(other.location).map_or(usize::MAX, |r| r.len()),
@@ -254,7 +254,7 @@ impl Game {
                 if let Some(visible) = view
                     .visible_actors
                     .iter()
-                    .find(|other| other.id == engagement.target)
+                    .find(|other| other.id == engagement.target && other.disclosure.reference() == Some(engagement.reference))
                 {
                     engagement.location = visible.location;
                     engagement.last_seen = self.actor_clock(id);
@@ -270,6 +270,7 @@ impl Game {
                     if behavior.wakes() {
                         behavior.engagement = Some(crate::behavior::Engagement {
                             target: visible.id,
+                            reference: visible.disclosure.reference().expect("disclosed foe"),
                             location: visible.location,
                             last_seen: self.actor_clock(id),
                         });
@@ -280,7 +281,7 @@ impl Game {
         let target = behavior.engagement.and_then(|entry| {
             view.visible_actors
                 .iter()
-                .find(|other| other.id == entry.target)
+                .find(|other| other.id == entry.target && other.disclosure.reference() == Some(entry.reference))
         });
         let threat = behavior
             .engagement
@@ -425,13 +426,14 @@ impl Game {
         }
         if let Some(crate::behavior::Engagement {
             target,
+            reference,
             location: at,
             ..
         }) = behavior.engagement
         {
             // Remembered positions support pursuit, but only a currently
             // disclosed target can prompt a paid technique.
-            if ai.state != State::Flee && view.visible_actors.iter().any(|actor| actor.id == target)
+            if ai.state != State::Flee && view.visible_actors.iter().any(|actor| actor.id == target && actor.disclosure.reference() == Some(reference))
             {
                 if let Some(ability) =
                     self.choose_ai_ability(id, target, &snapshot.sight, view, false)
@@ -725,7 +727,7 @@ impl Game {
             direction: direction.try_into().ok()?,
         };
         let in_melee = view.visible_actors.iter().any(|other| {
-            self.hostile(actor, other.id) && self.attack_available_in_scene(actor, other.id, sight)
+            self.perceived_hostile(actor, other.id, other.disclosure) && self.attack_available_in_scene(actor, other.id, sight)
         });
         let eligible = |definition: &crate::rules::AbilityDef| {
             definition.invocation == InvocationKind::SelfStep

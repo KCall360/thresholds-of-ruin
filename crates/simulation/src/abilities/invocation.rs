@@ -15,6 +15,7 @@ pub enum InvocationKind {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AbilityInvocation {
     ActorTarget { target: ActorId },
+    ContactTarget { target: ActorId },
     SelfStep { direction: StepDirection },
 }
 impl<'de> Deserialize<'de> for AbilityInvocation {
@@ -23,10 +24,12 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             ActorTarget { target: ActorId },
+            ContactTarget { target: ActorId },
             SelfStep { direction: StepDirection },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::ActorTarget { target } => Self::ActorTarget { target },
+            Fields::ContactTarget { target } => Self::ContactTarget { target },
             Fields::SelfStep { direction } => Self::SelfStep { direction },
         })
     }
@@ -34,20 +37,26 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
 impl AbilityInvocation {
     pub fn target(self, actor: ActorId) -> ActorId {
         match self {
-            Self::ActorTarget { target } => target,
+            Self::ActorTarget { target } | Self::ContactTarget { target } => target,
             Self::SelfStep { .. } => actor,
+        }
+    }
+    pub fn reference(self) -> crate::perception::ActorReferenceKind {
+        match self {
+            Self::ContactTarget { .. } => crate::perception::ActorReferenceKind::Contact,
+            _ => crate::perception::ActorReferenceKind::Creature,
         }
     }
     pub fn kind(self) -> InvocationKind {
         match self {
-            Self::ActorTarget { .. } => InvocationKind::ActorTarget,
+            Self::ActorTarget { .. } | Self::ContactTarget { .. } => InvocationKind::ActorTarget,
             Self::SelfStep { .. } => InvocationKind::SelfStep,
         }
     }
     pub fn step(self) -> Option<StepDirection> {
         match self {
             Self::SelfStep { direction } => Some(direction),
-            Self::ActorTarget { .. } => None,
+            Self::ActorTarget { .. } | Self::ContactTarget { .. } => None,
         }
     }
 }

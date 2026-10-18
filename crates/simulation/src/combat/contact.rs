@@ -21,11 +21,15 @@ struct ContactBody {
 }
 impl ContactBody {
     fn capture(game: &Game, id: ActorId) -> Option<Self> {
+        Self::capture_at(game, id, None)
+    }
+    fn capture_at(game: &Game, id: ActorId, placement: Option<crate::abilities::Placement>) -> Option<Self> {
         let actor = game.actors.get(&id)?;
+        let (location, orientation) = placement.map_or((actor.location, actor.orientation), |at| (at.location, at.orientation));
         if actor.combat.as_ref().is_none_or(|combat| combat.hp() == 0) {
             return None;
         }
-        let resolved = game.body_cells(actor.location, actor.orientation, &actor.body)?;
+        let resolved = game.body_cells(location, orientation, &actor.body)?;
         let mut cells: Vec<_> = actor
             .body
             .cells
@@ -41,8 +45,8 @@ impl ContactBody {
         cells.sort_unstable_by_key(|cell| cell.offset);
         Some(Self {
             actor: id,
-            location: actor.location,
-            frame: actor.orientation,
+            location,
+            frame: orientation,
             cells,
         })
     }
@@ -171,14 +175,16 @@ impl<'a> ContactQuery<'a> {
         target: ActorId,
         scene: &[SightCell],
     ) -> Option<Self> {
-        if source == target {
-            return None;
-        }
-        let source_body = ContactBody::capture(game, source)?;
+        Self::capture_at(game, source, target, scene, None)
+    }
+    fn capture_at(game: &'a Game, source: ActorId, target: ActorId, scene: &[SightCell], placement: Option<crate::abilities::Placement>) -> Option<Self> {
+        if source == target { return None; }
+        let source_body = ContactBody::capture_at(game, source, placement)?;
         let target_body = ContactBody::capture(game, target)?;
         // Preserve physical-location membership, including local awareness.
         // Different unfolded sight occurrences are not separate hit candidates.
-        let awareness = game.local_awareness(source);
+        let owner = game.actors.get(&source)?;
+        let awareness = placement.map_or_else(|| game.local_awareness(source), |at| game.local_awareness_at(at.location, at.orientation, &owner.body));
         let target_locations: BTreeSet<_> =
             target_body.cells.iter().map(|cell| cell.location).collect();
         let visible: BTreeSet<_> = scene
@@ -272,6 +278,9 @@ impl Game {
         scene: &[SightCell],
     ) -> bool {
         ContactQuery::capture(self, source, target, scene).is_some_and(|query| query.reachable())
+    }
+    pub(crate) fn melee_reachable_at_placement(&self, source: ActorId, target: ActorId, scene: &[SightCell], placement: Option<crate::abilities::Placement>) -> bool {
+        ContactQuery::capture_at(self, source, target, scene, placement).is_some_and(|query| query.reachable())
     }
     pub(crate) fn melee_contact_in_scene(
         &self,

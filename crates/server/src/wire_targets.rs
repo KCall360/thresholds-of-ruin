@@ -47,6 +47,21 @@ impl TargetScope {
         ActorTarget::from_digest(self.digest(b'a', identity.0))
     }
 
+    pub fn contact(&self, identity: ActorId) -> ActorTarget {
+        ActorTarget::from_digest(self.digest(b'c', identity.0))
+    }
+    pub fn actor_reference(&self, identity: ActorId, kind: tor_simulation::perception::ActorReferenceKind) -> ActorTarget {
+        match kind {
+            tor_simulation::perception::ActorReferenceKind::Creature => self.actor(identity),
+            tor_simulation::perception::ActorReferenceKind::Contact => self.contact(identity),
+        }
+    }
+    /// One lifetime guise per never-reused actor incarnation, separate from
+    /// both physical item identity and recognized/anonymous actor handles.
+    pub fn apparent_object(&self, identity: ActorId) -> ItemTarget {
+        ItemTarget::from_digest(self.digest(b'g', identity.0))
+    }
+
     /// Cosmetic identity is shared across observers and survives reload. It is
     /// domain-separated from interaction tokens and never uses simulation RNG.
     pub fn appearance_seed(&self, identity: ActorId) -> AppearanceSeed {

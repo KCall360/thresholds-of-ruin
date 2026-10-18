@@ -244,7 +244,7 @@ impl Game {
     ) -> bool {
         view.visible_actors
             .iter()
-            .filter(|other| self.hostile(actor, other.id))
+            .filter(|other| self.perceived_hostile(actor, other.id, other.disclosure))
             .any(|other| {
                 other.location == at
                     || (-1..=1).any(|x| {

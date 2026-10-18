@@ -540,7 +540,7 @@ impl Protection {
             | ModifierOp::Set { .. }
             | ModifierOp::Flag { .. }
             | ModifierOp::GrantAbility { .. }
-            | ModifierOp::Locomotion { .. } => {}
+            | ModifierOp::Locomotion { .. } | ModifierOp::Perception { .. } => {}
         }
         Ok(())
     }

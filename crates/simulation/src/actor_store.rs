@@ -26,6 +26,8 @@ fn fresh_perception_revision() -> u64 {
 /// Every actor input used by sensed-hostile recovery. Future sensory capabilities
 /// must update this witness together with observation::SceneWitness.
 struct PerceptionInputs {
+    perception: crate::perception::PerceptionCapabilities,
+    guise: crate::perception::GuiseState,
     location: Location,
     orientation: u8,
     body: Shared<BodySpec>,
@@ -39,6 +41,8 @@ impl PerceptionInputs {
     fn capture(actor: &Actor) -> Self {
         crate::diagnostics::perception_witness_capture();
         Self {
+            perception: actor.perception(),
+            guise: actor.guise.clone(),
             location: actor.location,
             orientation: actor.orientation,
             body: actor.body.clone(),
@@ -53,7 +57,9 @@ impl PerceptionInputs {
         }
     }
     fn matches(&self, actor: &Actor) -> bool {
-        self.location == actor.location
+        self.perception == actor.perception()
+            && self.guise == actor.guise
+            && self.location == actor.location
             && self.orientation == actor.orientation
             && self.body == actor.body
             && self.alive == actor.alive()

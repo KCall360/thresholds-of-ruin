@@ -54,11 +54,15 @@ pub fn decode_action(
         } => {
             let id = s::content_ids::AbilityId::new(id).map_err(|_| unavailable())?;
             let invocation = match invocation {
-                p::AbilityInvocation::ActorTarget { target } => a::AbilityInvocation::ActorTarget {
-                    target: std::iter::once(observation.actor)
-                        .chain(observation.visible_actors.iter().map(|actor| actor.id))
-                        .find(|actor| scope.actor(*actor) == *target)
-                        .ok_or_else(unavailable)?,
+                p::AbilityInvocation::ActorTarget { target } => {
+                    let (identity, reference) = std::iter::once((observation.actor, s::perception::ActorReferenceKind::Creature))
+                        .chain(observation.visible_actors.iter().filter_map(|actor| actor.disclosure.reference().map(|kind| (actor.id, kind))))
+                        .find(|(actor, kind)| scope.actor_reference(*actor, *kind) == *target)
+                        .ok_or_else(unavailable)?;
+                    match reference {
+                        s::perception::ActorReferenceKind::Creature => a::AbilityInvocation::ActorTarget { target: identity },
+                        s::perception::ActorReferenceKind::Contact => a::AbilityInvocation::ContactTarget { target: identity },
+                    }
                 },
                 p::AbilityInvocation::SelfStep { direction } => a::AbilityInvocation::SelfStep {
                     direction: crate::adapt::requested_direction(*direction),
@@ -172,6 +176,7 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
                 a::AbilityInvocation::ActorTarget { target } => p::AbilityInvocation::ActorTarget {
                     target: scope.actor(*target),
                 },
+                a::AbilityInvocation::ContactTarget { target } => p::AbilityInvocation::ActorTarget { target: scope.contact(*target) },
                 a::AbilityInvocation::SelfStep { direction } => p::AbilityInvocation::SelfStep {
                     direction: crate::adapt::wire_direction(*direction),
                 },
@@ -665,12 +670,12 @@ pub fn disclose_entry(
                 Event::EscapeStarted { hold } => VisibleEvent::EscapeStarted {
                     hold: scope.hold(*hold),
                 },
-                Event::AbilityStarted { id, name, target } => VisibleEvent::AbilityStarted {
+                Event::AbilityStarted { id, name, target, reference } => VisibleEvent::AbilityStarted {
                     ability: p::ContentRef {
                         id: id.to_string(),
                         name: name.clone(),
                     },
-                    target: scope.actor(s::ActorId(target.0)),
+                    target: scope.actor_reference(s::ActorId(target.0), *reference),
                 },
                 Event::ItemStarted { action } => VisibleEvent::ItemStarted {
                     action: encode_action(action, scope),

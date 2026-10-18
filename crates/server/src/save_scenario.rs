@@ -1417,6 +1417,10 @@ enum ModifierScope {
     deny_unknown_fields
 )]
 enum ModifierOp {
+    Perception {
+        #[serde(with = "mapped")]
+        value: crate::creature_authoring::Perception,
+    },
     Locomotion {
         #[serde(with = "mapped")]
         value: crate::creature_authoring::Locomotion,
@@ -1450,6 +1454,28 @@ enum ModifierOp {
     GrantAbility {
         ability: String,
     },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Perception", tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum Perception {
+    Invisible { enabled: bool },
+    SeeInvisible { enabled: bool },
+    Sight { enabled: bool },
+    ObjectGuise {
+        #[serde(with = "mapped")]
+        appearance: Option<crate::creature_authoring::GuiseAppearance>,
+    },
+    AmbushFromGuise { enabled: bool },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::GuiseAppearance", deny_unknown_fields)]
+struct GuiseAppearance {
+    name: String,
+    description: String,
+    #[serde(with = "mapped")]
+    class: crate::scenario_authoring::ItemClass,
+    #[serde(with = "mapped")]
+    asset: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
@@ -2937,6 +2963,8 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    Perception => crate::creature_authoring::Perception,
+    GuiseAppearance => crate::creature_authoring::GuiseAppearance,
     Locomotion => crate::creature_authoring::Locomotion,
     Rider => crate::creature_authoring::Rider,
     RiderCondition => crate::creature_authoring::RiderCondition,

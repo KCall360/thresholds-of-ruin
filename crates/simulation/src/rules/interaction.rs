@@ -227,6 +227,11 @@ impl Ruleset {
         MODIFIER_VISITS.with(|visits| visits.set(visits.get() + modifiers.len()));
         // Catalog flag graphs and expansion sizes have already been validated.
         modifiers.iter().any(|modifier| match &modifier.op {
+            ModifierOp::Perception { value } => matches!(value,
+                crate::perception::PerceptionValue::Sight { enabled: false }
+                | crate::perception::PerceptionValue::SeeInvisible { enabled: false }
+                | crate::perception::PerceptionValue::Invisible { enabled: false }
+            ),
             ModifierOp::Locomotion { value } => matches!(
                 value,
                 crate::locomotion::LocomotionValue::Stationary { enabled: true }

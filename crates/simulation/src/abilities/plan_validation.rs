@@ -95,7 +95,7 @@ impl AbilityPlan {
         if self.invocation.kind() != definition.invocation
             || self.invocation.target(self.actor) != self.target
             || match (self.invocation, self.step) {
-                (AbilityInvocation::ActorTarget { .. }, None) => false,
+                (AbilityInvocation::ActorTarget { .. } | AbilityInvocation::ContactTarget { .. }, None) => false,
                 (AbilityInvocation::SelfStep { direction }, Some(step)) => {
                     direction != step.direction || !step.valid()
                 }

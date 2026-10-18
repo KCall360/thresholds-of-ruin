@@ -96,6 +96,7 @@ pub enum Scope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Op {
+    Perception { value: Perception },
     Locomotion { value: Locomotion },
     Add { stat: Stat, value: i64 },
     Set { stat: Stat, value: i64 },
@@ -105,6 +106,25 @@ pub enum Op {
     TalentReduction { category: String, amount: u32 },
     GrantAbility { ability: String },
 }
+/// Authoring and stored schemas remain independent of simulation capabilities.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Perception {
+    Invisible { enabled: bool },
+    SeeInvisible { enabled: bool },
+    Sight { enabled: bool },
+    ObjectGuise { appearance: Option<GuiseAppearance> },
+    AmbushFromGuise { enabled: bool },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuiseAppearance {
+    pub name: String,
+    pub description: String,
+    pub class: crate::scenario_authoring::ItemClass,
+    pub asset: Option<String>,
+}
+
 // Authoring alone permits omitted erratic chance as suppression (TOML has no null).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

@@ -10,6 +10,7 @@ struct SceneWitness {
     orientation: u8,
     body: tor_world::Shared<crate::BodySpec>,
     disclosed: bool,
+    sight: bool,
 }
 
 /// Derived actor scenes for observations and streaming pins. Shared across
@@ -18,6 +19,7 @@ struct SceneWitness {
 struct CachedScene {
     witness: SceneWitness,
     cells: Vec<tor_world::SightCell>,
+    sight: Vec<tor_world::SightCell>,
     // Lazy: streaming and observations do not pay for an unused supply index.
     locations: Option<BTreeSet<Location>>,
 }
@@ -116,6 +118,7 @@ pub struct KnownPlace {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorView {
+    pub disclosure: crate::perception::ActorDisclosure,
     /// Empty when nothing names it.
     pub name: String,
     pub id: ActorId,
@@ -184,6 +187,7 @@ pub struct Observation {
     pub asset: Option<String>,
     pub visible_cells: Vec<CellView>,
     pub ground_items: Vec<GroundItemView>,
+    pub apparent_objects: Vec<crate::perception::ApparentObjectView>,
     pub inventory: Vec<ItemView>,
     pub visible_actors: Vec<ActorView>,
     pub exits: Vec<ExitView>,
@@ -204,8 +208,8 @@ impl Game {
         let disclosed = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| {
             sight.extend_from_slice(cells)
         })?;
-        let view = self.observe_in_scene(id, &disclosed)?;
-        self.cache_scene(id, &disclosed)?;
+        let view = self.observe_in_scene(id, &disclosed, &sight)?;
+        self.cache_scene(id, &disclosed, &sight)?;
         Ok(DecisionSnapshot { view, sight })
     }
 
@@ -224,8 +228,8 @@ impl Game {
     ) -> Result<(Observation, Vec<tor_world::SightCell>), GameError> {
         // Residency planning may already have resolved this exact geometry
         // and actor chart. Entity/readiness disclosure is still rebuilt below.
-        let scene = self.streaming_scene(id)?;
-        let view = self.observe_in_scene(id, &scene)?;
+        let (scene, sight) = self.scene_snapshot(id)?;
+        let view = self.observe_in_scene(id, &scene, &sight)?;
         Ok((view, scene))
     }
 
@@ -233,6 +237,7 @@ impl Game {
         &self,
         id: ActorId,
         scene: &[tor_world::SightCell],
+        sight: &[tor_world::SightCell],
     ) -> Result<Observation, GameError> {
         crate::diagnostics::observation();
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
@@ -241,7 +246,7 @@ impl Game {
             .map(|cell| cell.location)
             .collect::<BTreeSet<_>>();
         let visible = |location: Location| cells.contains(&location);
-        let perceived = self.actors.perceived(&self.world, &cells);
+        let perceived = self.perception_projection(id, scene, sight)?;
         let door_base = |location: Location| {
             self.world
                 .door(location)
@@ -387,7 +392,7 @@ impl Game {
                 }),
                 inventory: item_interactions,
             }),
-            combat: self.combat_view(id, &visible, &perceived),
+            combat: self.combat_view(id, &perceived),
             motion: self.motion_view_active(id).then_some(MotionView {
                 velocity: actor.motion.velocity,
                 displaced: self.physics.displaced.contains(&id),
@@ -407,6 +412,15 @@ impl Game {
                 .ok_or(GameError::InvalidLocation)?
                 .clone(),
             ground_items,
+            apparent_objects: perceived.iter().filter_map(|(subject, perceived)| {
+                if perceived.disclosure != crate::perception::ActorDisclosure::ApparentObject || !self.actors[subject].alive() { return None; }
+                let state = &self.actors[subject];
+                visible(state.location).then(|| crate::perception::ApparentObjectView {
+                    subject: *subject,
+                    location: state.location,
+                    appearance: state.guise.appearance().expect("classified guise").clone(),
+                })
+            }).collect(),
             visible_cells: occurrences
                 .iter()
                 .map(|&(location, frame)| CellView {
@@ -435,23 +449,21 @@ impl Game {
             inventory,
             visible_actors: perceived
                 .iter()
-                .filter(|(other_id, _)| self.actors[other_id].alive())
-                .flat_map(|(other_id, body)| {
+                .filter(|(other, perceived)| self.actors[other].alive() && perceived.disclosure.reference().is_some())
+                .flat_map(|(other_id, perceived)| {
                     let other_id = *other_id;
                     let other = &self.actors[&other_id];
-                    body.iter()
-                        .copied()
-                        .filter(move |(at, _)| {
-                            visible(*at) && (other_id != id || *at != actor.location)
-                        })
+                    let disclosure = perceived.disclosure;
+                    perceived.body.iter().copied()
+                        .filter(move |(at, _)| visible(*at) && (other_id != id || *at != actor.location))
                         .map(move |(location, _)| ActorView {
-                            name: projected_actor_name(actor, other).to_owned(),
+                            disclosure,
+                            name: if disclosure == crate::perception::ActorDisclosure::Creature { projected_actor_name(actor, other).to_owned() } else { String::new() },
                             id: other_id,
                             location,
-                            asset: other.asset.clone(),
+                            asset: (disclosure == crate::perception::ActorDisclosure::Creature).then(|| other.asset.clone()).flatten(),
                         })
-                })
-                .collect(),
+                }).collect(),
             exits: cells
                 .iter()
                 .flat_map(|&location| {
@@ -599,12 +611,13 @@ impl Game {
     /// relative to the actor's reference cell in its body frame.
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
         crate::diagnostics::ordinary_scene();
-        let scene = self.compute_scene(id, &mut |_| {})?;
-        self.cache_scene(id, &scene)?;
+        let mut sight = Vec::new();
+        let scene = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells))?;
+        self.cache_scene(id, &scene, &sight)?;
         Ok(scene)
     }
 
-    fn cache_scene(&self, id: ActorId, scene: &[tor_world::SightCell]) -> Result<(), GameError> {
+    fn cache_scene(&self, id: ActorId, scene: &[tor_world::SightCell], sight: &[tor_world::SightCell]) -> Result<(), GameError> {
         let witness = self.scene_witness(id)?;
         crate::diagnostics::scene_cells_copied(scene.len());
         self.insert_scene(
@@ -612,6 +625,7 @@ impl Game {
             CachedScene {
                 witness,
                 cells: scene.to_vec(),
+                sight: sight.to_vec(),
                 locations: None,
             },
         );
@@ -634,7 +648,20 @@ impl Game {
             orientation: actor.orientation,
             body: actor.body.clone(),
             disclosed: self.alive(id) || self.combat.selected == Some(id),
+            sight: actor.perception().sight,
         })
+    }
+
+    /// Geometry and exact eye sight share one cache witness and one computation.
+    pub(crate) fn scene_snapshot(&self, id: ActorId) -> Result<(Vec<tor_world::SightCell>, Vec<tor_world::SightCell>), GameError> {
+        let witness = self.scene_witness(id)?;
+        if let Some(cached) = self.lifecycle.scenes.0.lock().expect("actor scene cache").get(&id) {
+            if cached.witness == witness { return Ok((cached.cells.clone(), cached.sight.clone())); }
+        }
+        let mut sight = Vec::new();
+        let scene = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells))?;
+        self.cache_scene(id, &scene, &sight)?;
+        Ok((scene, sight))
     }
 
     /// Streaming consumes the same result as observations, without requesting
@@ -680,9 +707,12 @@ impl Game {
         // A rejected candidate may have populated this shared cache with a
         // different witness; replace that derived entry from this Game's inputs.
         crate::diagnostics::ordinary_scene();
+        let mut sight = Vec::new();
+        let cells = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells))?;
         let mut cached = CachedScene {
             witness,
-            cells: self.compute_scene(id, &mut |_| {})?,
+            cells,
+            sight,
             locations: None,
         };
         let contains = cached.contains(at);
@@ -713,6 +743,13 @@ impl Game {
         self.compute_scene_at(id, placement.location, placement.orientation, &mut |_| {})
     }
 
+    pub(crate) fn scene_snapshot_at_placement(&self, id: ActorId, placement: crate::abilities::Placement) -> Result<(Vec<tor_world::SightCell>, Vec<tor_world::SightCell>), GameError> {
+        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
+        if actor.location == placement.location && actor.orientation == placement.orientation { return self.scene_snapshot(id); }
+        let mut sight = Vec::new();
+        let scene = self.compute_scene_at(id, placement.location, placement.orientation, &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells))?;
+        Ok((scene, sight))
+    }
     fn compute_scene_at(
         &self,
         id: ActorId,
@@ -732,9 +769,9 @@ impl Game {
         // The body frame is carried across any portal inside the body, so
         // eye-frame offsets are body-frame offsets from the eye cell.
         let [ex, ey, ez] = body.eye;
-        let mut scene = self
-            .world
-            .illuminated_eye_scene(eye, eye_frame, SIGHT_RANGE);
+        let mut scene = if actor.perception().sight {
+            self.world.illuminated_eye_scene(eye, eye_frame, SIGHT_RANGE)
+        } else { Vec::new() };
         sight_observer(&scene);
         for cell in &mut scene {
             cell.offset.x += ex;
@@ -776,7 +813,7 @@ impl Game {
         self.local_awareness_at(actor.location, actor.orientation, &actor.body)
     }
 
-    fn local_awareness_at(
+    pub(crate) fn local_awareness_at(
         &self,
         location: Location,
         orientation: u8,
@@ -1056,7 +1093,7 @@ mod tests {
         let mut duplicate = repeated[0];
         duplicate.offset.x += 100;
         repeated.push(duplicate);
-        game.cache_scene(actor, &repeated).unwrap();
+        game.cache_scene(actor, &repeated, &[]).unwrap();
         for cell in &repeated {
             assert!(game.scene_contains(actor, cell.location).unwrap());
         }

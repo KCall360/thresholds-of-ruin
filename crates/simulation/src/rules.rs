@@ -410,6 +410,7 @@ pub enum Selector {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModifierOp {
+    Perception { value: crate::perception::PerceptionValue },
     Locomotion {
         value: crate::locomotion::LocomotionValue,
     },
@@ -447,6 +448,7 @@ impl<'de> Deserialize<'de> for ModifierOp {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Perception { value: crate::perception::PerceptionValue },
             Locomotion {
                 value: crate::locomotion::LocomotionValue,
             },
@@ -478,6 +480,7 @@ impl<'de> Deserialize<'de> for ModifierOp {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Perception { value } => Self::Perception { value },
             Fields::Locomotion { value } => Self::Locomotion { value },
             Fields::Add { stat, value } => Self::Add { stat, value },
             Fields::Set { stat, value } => Self::Set { stat, value },
@@ -1865,7 +1868,7 @@ impl Ruleset {
                             | ModifierOp::Reduction { .. }
                             | ModifierOp::TalentReduction { .. }
                             | ModifierOp::GrantAbility { .. }
-                            | ModifierOp::Locomotion { .. } => None,
+                            | ModifierOp::Locomotion { .. } | ModifierOp::Perception { .. } => None,
                         })
                         .collect(),
                 )
@@ -2100,7 +2103,7 @@ impl References<'_> {
                 }
                 ModifierOp::Immunity { selector } => self.selector(selector, pool)?,
                 ModifierOp::Reduction { selector, .. } => self.selector(selector, pool)?,
-                ModifierOp::TalentReduction { .. } | ModifierOp::Locomotion { .. } => {}
+                ModifierOp::TalentReduction { .. } | ModifierOp::Locomotion { .. } | ModifierOp::Perception { .. } => {}
                 ModifierOp::GrantAbility { ability } => {
                     reference(self.abilities, ability, "ability")?;
                     ability.intern(pool);
@@ -2354,7 +2357,9 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
                         chance: Some(chance),
                     },
             } => bound(chance.valid(), "movement_chance")?,
-            ModifierOp::Locomotion { .. }
+            ModifierOp::Perception { value: crate::perception::PerceptionValue::ObjectGuise { appearance: Some(appearance) } } => bound(appearance.valid(), "guise_appearance")?,
+            ModifierOp::Perception { .. }
+            | ModifierOp::Locomotion { .. }
             | ModifierOp::Flag { .. }
             | ModifierOp::Immunity { .. }
             | ModifierOp::GrantAbility { .. } => {}

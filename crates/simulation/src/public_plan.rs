@@ -363,14 +363,8 @@ impl Game {
         if observer == subject || !actor.alive() || !owner.alive() {
             return None;
         }
-        let scene = self.scene(observer).ok()?;
-        let cells = scene.iter().map(|cell| cell.location).collect();
-        if !self
-            .actors
-            .perceived(&self.world, &cells)
-            .iter()
-            .any(|(id, _)| *id == subject)
-        {
+        let (scene, sight) = self.scene_snapshot(observer).ok()?;
+        if self.perception_projection(observer, &scene, &sight).ok()?.get(&subject)?.disclosure != crate::perception::ActorDisclosure::Creature {
             return None;
         }
         // Classification grants disclosure; a timing helper alone never does.
@@ -436,6 +430,9 @@ impl Game {
         target: ActorId,
         sight: Option<&[SightCell]>,
     ) -> PublicAim {
+        if !self.classified_actors(actor).ok().and_then(|rows| rows.get(&target).map(|row| row.disclosure)).is_some_and(|class| class == crate::perception::ActorDisclosure::Creature) {
+            return PublicAim::Unavailable;
+        }
         let Some(target) = self.actors.get(&target) else {
             return PublicAim::Unavailable;
         };

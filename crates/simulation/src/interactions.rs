@@ -313,7 +313,7 @@ impl Work {
     pub fn target(&self) -> Option<ActorId> {
         match self {
             Self::UseAbility {
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target } | crate::abilities::AbilityInvocation::ContactTarget { target },
                 ..
             } => Some(*target),
             Self::UseAbility {
@@ -666,19 +666,18 @@ impl Game {
         actor: ActorId,
         scene: &[tor_world::SightCell],
     ) -> BTreeSet<ActorId> {
-        let cells = scene.iter().map(|cell| cell.location).collect();
-        self.actors
-            .perceived(&self.world, &cells)
-            .into_iter()
-            .filter(|(id, body)| {
-                *id != actor
-                    && self.actors[id].alive()
-                    && self.hostile(actor, *id)
-                    && body.iter().any(|(at, _)| cells.contains(at))
-            })
-            .map(|(id, _)| id)
-            .collect()
+        let Ok((_, sight)) = self.scene_snapshot(actor) else { return BTreeSet::new(); };
+        self.hostiles_in_projection(actor, scene, &sight, None)
     }
+    pub(crate) fn hostiles_in_projection(
+        &self, actor: ActorId, scene: &[tor_world::SightCell], sight: &[tor_world::SightCell],
+        placement: Option<crate::abilities::Placement>,
+    ) -> BTreeSet<ActorId> {
+        self.perception_projection_at(actor, scene, sight, placement).unwrap_or_default().into_iter()
+            .filter(|(id, row)| *id != actor && self.alive(*id) && self.perceived_hostile(actor, *id, row.disclosure))
+            .map(|(id, _)| id).collect()
+    }
+
     pub(crate) fn start_work(
         &mut self,
         plan: crate::abilities::Plan,

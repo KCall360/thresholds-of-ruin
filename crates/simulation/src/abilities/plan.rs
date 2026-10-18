@@ -792,45 +792,10 @@ impl Game {
                         |scene| self.attack_available_in_scene(actor, target, scene),
                     )
             }
-            Reach::Sight { range } => {
-                if actor == target {
-                    return false;
-                }
-                let Some(target_actor) = self.actors.get(&target) else {
-                    return false;
-                };
-                let Some(cells) = self.body_cells(
-                    target_actor.location,
-                    target_actor.orientation,
-                    &target_actor.body,
-                ) else {
-                    return false;
-                };
-                let targets: std::collections::BTreeSet<_> =
-                    cells.into_iter().map(|(at, _)| at).collect();
-                let Some((eye, frame)) = self.eye(actor) else {
-                    return false;
-                };
-                let Ok(range) = u8::try_from(*range) else {
-                    return false;
-                };
-                if let Some(scene) = sight {
-                    scene.iter().any(|cell| {
-                        targets.contains(&cell.location)
-                            && cell.offset.x.unsigned_abs()
-                                + cell.offset.y.unsigned_abs()
-                                + cell.offset.z.unsigned_abs()
-                                <= u32::from(range)
-                    })
-                } else {
-                    crate::diagnostics::ordinary_scene();
-                    crate::diagnostics::scene();
-                    self.world
-                        .illuminated_eye_scene(eye, frame, range)
-                        .iter()
-                        .any(|cell| targets.contains(&cell.location))
-                }
-            }
+            Reach::Sight { range } => sight.map_or_else(
+                || self.genuinely_sees_actor(actor, target, *range),
+                |sight| self.genuinely_sees_actor_in_sight(actor, target, *range, sight),
+            ),
         }
     }
     pub fn ability_timing(
@@ -862,7 +827,11 @@ impl Game {
         target: ActorId,
         sight: &[tor_world::SightCell],
     ) -> Result<Plan, GameError> {
-        self.plan_ability(actor, ability, target, Some(sight))
+        let reference = self.classified_actors(actor)?.get(&target).and_then(|row| row.disclosure.reference());
+        let invocation = if reference == Some(crate::perception::ActorReferenceKind::Contact) {
+            super::AbilityInvocation::ContactTarget { target }
+        } else { super::AbilityInvocation::ActorTarget { target } };
+        self.compile_strike_plan(actor, ability, invocation, Some(sight), crate::supplies::SupplySelection::Carried)
     }
     fn plan_ability(
         &self,

@@ -469,6 +469,7 @@ mod tests {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AbilityInvocation {
     ActorTarget { target: tor_simulation::ActorId },
+    ContactTarget { target: tor_simulation::ActorId },
     SelfStep { direction: Direction },
 }
 impl From<tor_simulation::ActorId> for AbilityInvocation {

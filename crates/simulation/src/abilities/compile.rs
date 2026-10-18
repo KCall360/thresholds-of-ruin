@@ -385,6 +385,12 @@ impl Game {
         crate::diagnostics::ability_plan();
         let target = invocation.target(actor);
         let caster = self.creature(actor).ok_or(GameError::UnknownActor)?;
+        // The original reference domain is an admission operand, not a hint.
+        // Validate it before touching hidden faction, health or private plans.
+        let disclosure = self.classified_actors(actor)?.get(&target).map(|row| row.disclosure);
+        if target != actor && disclosure.and_then(crate::perception::ActorDisclosure::reference) != Some(invocation.reference()) {
+            return Err(GameError::Rule(RuleError::OutOfReach));
+        }
         let defender = self.creature(target).ok_or(GameError::UnknownActor)?;
         if caster.health().dead() || defender.health().dead() {
             return Err(GameError::Rule(RuleError::Dead));
@@ -398,6 +404,12 @@ impl Game {
         }
         if definition.invocation != invocation.kind() {
             return Err(invalid());
+        }
+        if matches!(invocation, super::AbilityInvocation::ContactTarget { .. })
+            && (!matches!(definition.reach, crate::rules::Reach::Melee)
+                || !definition.ai.hostile
+                || !definition.basic_attack) {
+            return Err(GameError::Rule(RuleError::OutOfReach));
         }
         let step = invocation
             .step()

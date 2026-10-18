@@ -57,6 +57,7 @@ pub use intention::{
     TerminalExitContext,
 };
 pub mod locomotion;
+pub mod perception;
 mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
 mod item_store;
@@ -322,6 +323,7 @@ pub enum OutcomeKind {
         purchase: player_advancement::PurchaseOperation,
     },
     AbilityStarted {
+        reference: perception::ActorReferenceKind,
         id: content_ids::AbilityId,
         name: String,
         target: ActorId,
@@ -371,6 +373,7 @@ pub struct ActionOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Actor {
+    guise: perception::GuiseState,
     holds: linked_hold::HoldBook,
     behavior: behavior::Behavior,
     active_since: u64,
@@ -679,6 +682,7 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                guise: perception::GuiseState::default(),
                 holds: linked_hold::HoldBook::default(),
                 behavior: behavior::Behavior::new(self.seed, id),
                 active_since: self.tick,

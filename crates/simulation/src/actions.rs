@@ -498,9 +498,10 @@ impl Game {
                     },
                     crate::Work::UseAbility {
                         id: ability,
-                        invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                        invocation,
                         ..
-                    } => OutcomeKind::AbilityStarted {
+                    } if invocation.step().is_none() => OutcomeKind::AbilityStarted {
+                        reference: invocation.reference(),
                         id: ability.clone(),
                         name: self
                             .content
@@ -509,7 +510,7 @@ impl Game {
                             .ok_or(GameError::Rule(crate::abilities::RuleError::UnknownAbility))?
                             .name
                             .clone(),
-                        target: *target,
+                        target: invocation.target(id),
                     },
                     _ => OutcomeKind::ItemStarted { work: work.clone() },
                 };

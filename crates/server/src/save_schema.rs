@@ -983,6 +983,7 @@ mod tests {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum AbilityInvocation {
     ActorTarget { target: u64 },
+    ContactTarget { target: u64 },
     SelfStep { direction: Direction },
 }
 impl<'de> Deserialize<'de> for AbilityInvocation {
@@ -1003,6 +1004,7 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
             ActorTarget {
                 target: u64,
             },
+            ContactTarget { target: u64 },
             SelfStep {
                 #[serde(deserialize_with = "direction_token")]
                 direction: Direction,
@@ -1010,6 +1012,7 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
         }
         Ok(match named_map(deserializer)? {
             Fields::ActorTarget { target } => Self::ActorTarget { target },
+            Fields::ContactTarget { target } => Self::ContactTarget { target },
             Fields::SelfStep { direction } => Self::SelfStep { direction },
         })
     }
@@ -1020,6 +1023,7 @@ impl From<crate::actions::AbilityInvocation> for AbilityInvocation {
             crate::actions::AbilityInvocation::ActorTarget { target } => {
                 Self::ActorTarget { target: target.0 }
             }
+            crate::actions::AbilityInvocation::ContactTarget { target } => Self::ContactTarget { target: target.0 },
             crate::actions::AbilityInvocation::SelfStep { direction } => Self::SelfStep {
                 direction: direction.into(),
             },
@@ -1032,6 +1036,7 @@ impl From<AbilityInvocation> for crate::actions::AbilityInvocation {
             AbilityInvocation::ActorTarget { target } => Self::ActorTarget {
                 target: tor_simulation::ActorId(target),
             },
+            AbilityInvocation::ContactTarget { target } => Self::ContactTarget { target: tor_simulation::ActorId(target) },
             AbilityInvocation::SelfStep { direction } => Self::SelfStep {
                 direction: direction.into(),
             },
