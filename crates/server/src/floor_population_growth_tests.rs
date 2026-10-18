@@ -324,8 +324,8 @@ fn assert_rogue_tail_actor(engine: &Engine, attempt: &Value, content: &str, hd: 
 
 #[test]
 fn rogue_mixed_tail_all_vampire_entry_at_274_publishes_exact_256_hd_and_replays() {
-    // Fixed seed 27 samples four Vampires from the production V/G/J band.
-    // Seed 42 now samples V/G/V/V, whose Griffin correctly exceeds the cap.
+    // Fixed seed 27 samples four Vampires from the production V/G/J/M band.
+    // Seed 42 samples G/G/V/V, whose Griffins correctly exceed the cap.
     // Unselected over-cap Griffin/Jabberwock recipes must not reject this entry.
     let mut scenario = rogue_tail_entry_fixture(274, "up");
     scenario.seed = 27;
@@ -362,7 +362,10 @@ fn assert_rogue_tail_capacity(failure: Failure) {
 
 #[test]
 fn rogue_mixed_tail_sampled_jabberwock_at_268_refuses_whole_entry_and_replays() {
-    let scenario = rogue_tail_entry_fixture(267, "down");
+    let mut scenario = rogue_tail_entry_fixture(267, "down");
+    // The production content stream samples G/J/J/M at 267 and V/V/J/V at 268,
+    // preserving legal 256-HD Jabberwocks before the selected 257-HD refusal.
+    scenario.seed = 4906;
     let original = scenario.package.as_ref().unwrap();
     let mut source = serde_json::to_value(&original.manifest).unwrap();
     let cutoff = &mut source["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]

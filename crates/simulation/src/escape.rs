@@ -222,13 +222,15 @@ impl Game {
             .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
         self.apply_outcome(completion)?;
         self.rules_rng = rng;
-        self.event_log
-            .push(crate::combat::CombatEvent::EscapeResolved {
+        self.push_event(
+            crate::combat::CombatEvent::EscapeResolved {
                 actor: plan.actor,
                 hold: plan.hold,
                 success,
                 intention: preparation.intention,
-            });
+            },
+            None,
+        )?;
         Ok(())
     }
 }

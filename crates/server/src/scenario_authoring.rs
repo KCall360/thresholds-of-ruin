@@ -254,6 +254,7 @@ pub enum Effect {
         resource: String,
         amount: AmountExpr,
     },
+    SearchAdjacentGuises,
     ObservePublicPlan,
     ApplyQualifiedConditionToSource {
         condition: String,
@@ -501,6 +502,7 @@ impl<'de> Deserialize<'de> for Effect {
                 resource: String,
                 amount: AmountExpr,
             },
+            SearchAdjacentGuises {},
             ObservePublicPlan {},
             ApplyQualifiedConditionToSource {
                 condition: String,
@@ -557,6 +559,7 @@ impl<'de> Deserialize<'de> for Effect {
                 duration,
             },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
+            Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
             Fields::ObservePublicPlan {} => Self::ObservePublicPlan,
             Fields::ApplyQualifiedConditionToSource {
                 condition,

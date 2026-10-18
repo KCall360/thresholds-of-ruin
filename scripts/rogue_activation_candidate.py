@@ -5,8 +5,9 @@ the eligible recipes, with Vampire/Griffin/Jabberwock in the explicit mixed tail
 racial growth still refuses beyond current construction/storage capacity. Inputs
 are not balance recommendations or earned progression evidence. Run only in the
 qualified coordinator lane; the ordinary compiler creates candidate certificates.
-Reviewed twenty-one-species input is conditioned to the same eighteen-species
-diagnostic output; it does not reproduce current production population or Gold.
+Reviewed twenty-one- and twenty-four-species inputs are conditioned to the same
+eighteen-species diagnostic output; neither reproduces current production population
+or its Gold and perception encounters.
 """
 import argparse
 import copy
@@ -20,7 +21,7 @@ import tomllib
 from arena_evaluation import MAX_BYTES, digest, files, write_json
 from arena_matrix import toml_source
 from ruleset_sources import resolve_with_dependencies
-from rogue_activation_oracle import reviewed_twenty_one_activation
+from rogue_activation_oracle import reviewed_twenty_four_activation, reviewed_twenty_one_activation
 
 
 REFERENCE = "c7c119f893bd2f8255f2ad78d58a32664ddb9a97"
@@ -155,6 +156,8 @@ def population_shape(source):
         return "canonical_eighteen_species"
     if exact(activation) == exact(reviewed_twenty_one_activation()):
         return "reviewed_twenty_one_species_input"
+    if exact(activation) == exact(reviewed_twenty_four_activation()):
+        return "reviewed_twenty_four_species_input"
     raise ValueError("Review changed population profile or carried-item pool before generating a candidate")
 
 
@@ -258,6 +261,11 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
                      "unchanged item stages retain their own streams, subject to changed occupancy",
                      "later-floor starts are receipt diagnostics, not earned progression"],
                  "package": "package", "validated_packages": 0}
+    if shape == "reviewed_twenty_four_species_input":
+        inventory["limitations"][0] = (
+            "eighteen-species diagnostic output is not current twenty-four-species production; "
+            "Leprechaun, Nymph, Orc, Medusa, Phantom, Xeroc, the Leprechaun birth-Gold pool "
+            "and room-Gold stage are omitted")
     write_json(output / "partial.json", inventory)
     try:
         for group, values in (("package", snapshot), ("tools", tools), ("compiler", compiler_inputs)):

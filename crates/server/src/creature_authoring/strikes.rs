@@ -392,6 +392,7 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 Effect::Nourish { amount: value } => s::rules::Effect::Nourish {
                     amount: amount(value),
                 },
+                Effect::SearchAdjacentGuises => s::rules::Effect::SearchAdjacentGuises,
                 Effect::ObservePublicPlan => s::rules::Effect::ObservePublicPlan,
                 Effect::ApplyQualifiedConditionToSource {
                     condition,

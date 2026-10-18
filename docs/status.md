@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **48**, save format **46**, scenario format **19**, ruleset
-**`interactions-v41`**, scenario validator **`tor-scenario-31`**. Unsupported
+**Current formats:** protocol **49**, save format **47**, scenario format **20**, ruleset
+**`interactions-v42`**, scenario validator **`tor-scenario-32`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **14**, ContentPackage **16** and
+The independent compiled inputs use RulesInput **15**, ContentPackage **17** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -95,7 +95,7 @@ flows remain unavailable. See [measurement limits](development/performance.md#pr
 | Region lifecycle | Lazy authored/generated content, active/frozen/detached regions, deterministic preparation, independent persistence and asset palettes | [Streaming](architecture/streaming.md) |
 | Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |
 | Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, bounded declared-depth character starts, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
-| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, twenty-one-species depth-selected population, finite care and Centaur/Yeti/Troll/Vampire/Griffin/Jabberwock birth stock and finite Leprechaun gold, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
+| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, twenty-four-species depth-selected population, finite care and Centaur/Yeti/Troll/Medusa/Xeroc/Vampire/Griffin/Jabberwock birth stock and finite Leprechaun gold, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
 | Tools | JSON-lines headless client with opt-in omission of diagnostic map memory, privileged inspection/setup/rewind, bounded context-bound strike detail pages, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
 
 Development supports [fast local Rust feedback](development/testing.md#fast-local-rust-feedback)
@@ -130,8 +130,8 @@ prerequisite does not establish support for more than 256 actual HD.
 
 Rogue roster study tools retain their eighteen-foe exact-kit Warrior/Mage selection
 with explicit per-arm identities, pinned inputs and a disclosed generic AI proxy.
-They have not been expanded or qualified for the L/N/O theft/gold additions. The
-bundled package selects the canonical K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/U/V/G/J policy:
+They have not been expanded or qualified for L/N/O theft/gold or M/P/X perception additions. The
+bundled package selects the canonical K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/J policy:
 one four-attempt actor stage with authored depth bands, exact `racial_after`
 depth-26 growth, unchanged finite bandage/ration stages and an appended ordinary
 restore-strength potion stage, followed by an independent per-room gold stage.
@@ -283,7 +283,7 @@ Required nutrition keeps its exact policy through runtime-preserving rebuilds;
 standalone cross-policy replacements reject atomically.
 The current format tuple includes these nutrition operands and the shared status
 clock/protection records. The shared bundled policy remains disabled, while
-Rogue explicitly enrolls Warrior/Mage, keeps its twenty-one selected foe recipes
+Rogue explicitly enrolls Warrior/Mage, keeps its twenty-four selected foe recipes
 exempt and shares its finite ration between eating and respec. Authored bounded empty-depletion triggers
 now use ordinary shared status effects and indexed actor deadlines; personal
 condition facts and events reach ordinary Text/ASCII views. Status restrictions,
@@ -370,8 +370,8 @@ ordinary stack capability, not a separate purse. Quantity expressions resolve to
 checked positive u64 ranges using the relevant birth or preparation depth, with
 no guessed depth in nongenerated contexts. See [theft and gold](reference/items.md#theft-and-gold).
 
-Rogue now selects L/N/O alongside the earlier eighteen foes, for 21 production
-species and five remaining. L uses three fey HD, TR1(1), TR3(2), natural 1d1,
+Rogue now selects L/N/O and M/P/X alongside the earlier eighteen foes, for 24
+production species and two remaining. L uses three fey HD, TR1(1), TR3(2), natural 1d1,
 depths 6–15 and finite birth gold. N uses three fey HD, TR2(1), TR3(2), zero
 natural damage and depths 10–19. O uses one humanoid Warrior HD, W02(1), natural
 1d8 and depths 4–13. Gold-interested AI prioritizes self-preservation and
@@ -387,6 +387,25 @@ and strengthened equipped recovery damage; production L/N/O builds and AI are
 unchanged. This proves ownership, disclosure and recoverability, not pursuit or
 survival balance. Complete Windows/Linux debug/release CI remains required before
 merge.
+
+The M/P/X cohort adds Medusa's eight monstrous-humanoid/reptilian
+HD with GZ1(1), NA1(2), NA2(4), Presence-bound Spellcasting and 3d4/3d4/2d5
+natural strikes; Phantom's eight undead/incorporeal HD with typed invisibility,
+1/5 erratic movement and 4d4 natural damage; and Xeroc's seven aberration/
+shapechanger HD with MI1(1), MI2(6), one mundane mace guise and 4d4 natural
+damage. M remains eligible at every depth from 18 through the pinned selector's
+upper-boundary redistribution, with shared exact racial growth beyond 26.
+P/X bands are 15–24 and 16–25; M/P/X birth chances are 40%/0%/30%.
+The subtype labels grant no immunity, wall passing or extra shapechanging.
+See [perception cohort](play/rogue.md#gaze-invisibility-and-object-guise).
+Focused simulation, encoded Service, source-free persistence and bounded
+ordinary-process witnesses pass for these contracts. The five-arm process
+witness retains production M/P/X builds and real checks, with explicitly
+synthetic room geometry, external foe control and a durable living observer;
+it establishes mechanisms, not autonomous pursuit or survival balance.
+Current scenario certificates, save fixtures and actual wire recordings are
+regenerated, including the separate 3D menagerie certificate. These focused
+checks do not replace complete Windows/Linux debug/release CI before merge.
 
 ## Important limitations
 
@@ -405,8 +424,8 @@ merge.
 - The 3d6 kernel keeps the existing initial defense/bonus values; this is not
   a claim of balanced Rogue builds. The point economy, Health recovery and the
   initial authored talent values still require content calibration.
-- The Rogue starter slice selects twenty-one-species depth-selected population,
-  finite starting/floor supplies and Centaur/Yeti/Troll/Vampire/Griffin/Jabberwock birth stock and finite Leprechaun gold, alongside
+- The Rogue starter slice selects twenty-four-species depth-selected population,
+  finite starting/floor supplies and Centaur/Yeti/Troll/Medusa/Xeroc/Vampire/Griffin/Jabberwock birth stock and finite Leprechaun gold, alongside
   authored hunger/fainting/starvation and ration eating. The full 26-species roster,
   calibrated food pressure, complete item catalog, traps, wandering population,
   calibrated depth curve and complete run balancing remain unfinished. The Amulet
@@ -485,7 +504,7 @@ recreate them. Its
 ongoing performance acceptance, including persistence tails, is distinct from
 whether floor generation exists. Add omitted rooms, mazes, secrets and traps as
 shared support arrives. Extend shared survival, items, ranged/perception and
-species behavior; extend the selected twenty-one-species roster to all 26 species and
+species behavior; extend the selected twenty-four-species roster to all 26 species and
 qualify complete pressured runs. Work beyond the accepted 256-HD guard, including
 exact-row deep storage and disclosure paging, is deferred rather than a
 prerequisite for functional Rogue.

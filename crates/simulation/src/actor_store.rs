@@ -26,6 +26,8 @@ fn fresh_perception_revision() -> u64 {
 /// Every actor input used by sensed-hostile recovery. Future sensory capabilities
 /// must update this witness together with observation::SceneWitness.
 struct PerceptionInputs {
+    perception: crate::perception::PerceptionCapabilities,
+    guise: crate::perception::GuiseState,
     location: Location,
     orientation: u8,
     body: Shared<BodySpec>,
@@ -39,6 +41,8 @@ impl PerceptionInputs {
     fn capture(actor: &Actor) -> Self {
         crate::diagnostics::perception_witness_capture();
         Self {
+            perception: actor.perception(),
+            guise: actor.guise.clone(),
             location: actor.location,
             orientation: actor.orientation,
             body: actor.body.clone(),
@@ -53,7 +57,9 @@ impl PerceptionInputs {
         }
     }
     fn matches(&self, actor: &Actor) -> bool {
-        self.location == actor.location
+        self.perception == actor.perception()
+            && self.guise == actor.guise
+            && self.location == actor.location
             && self.orientation == actor.orientation
             && self.body == actor.body
             && self.alive == actor.alive()
@@ -65,6 +71,38 @@ impl PerceptionInputs {
             && self.recovery_owner == watches_recovery(actor)
             && self.engagement == actor.behavior.engagement
             && self.behavior_policy == actor.behavior_policy()
+    }
+}
+
+/// Compact always-on visibility inputs. Knowledge, health amounts and clocks
+/// do not invalidate event-time geometry; life and effective senses do.
+#[derive(PartialEq, Eq)]
+struct VisibilityInputs {
+    invisible: bool,
+    see_invisible: bool,
+    sight: bool,
+    guised: bool,
+    location: Location,
+    orientation: u8,
+    body: Shared<BodySpec>,
+    alive: bool,
+}
+impl VisibilityInputs {
+    fn capture(actor: &Actor) -> Self {
+        let perception = actor
+            .combat
+            .as_ref()
+            .map(|combat| &combat.creature().derived().perception);
+        Self {
+            invisible: perception.is_some_and(|p| p.invisible),
+            see_invisible: perception.is_some_and(|p| p.see_invisible),
+            sight: perception.is_none_or(|p| p.sight),
+            guised: actor.guise.appearance().is_some(),
+            location: actor.location,
+            orientation: actor.orientation,
+            body: actor.body.clone(),
+            alive: actor.alive(),
+        }
     }
 }
 
@@ -171,6 +209,7 @@ pub(crate) struct ActorStore {
     contextual_recovery: Shared<BTreeSet<ActorId>>,
     active_falls: Shared<BTreeSet<ActorId>>,
     perception_revision: u64,
+    visibility_epoch: u64,
     bodies: Mutex<Bodies>,
 }
 
@@ -185,6 +224,7 @@ impl Clone for ActorStore {
             contextual_recovery: self.contextual_recovery.clone(),
             active_falls: self.active_falls.clone(),
             perception_revision: self.perception_revision,
+            visibility_epoch: self.visibility_epoch,
             bodies: Mutex::new(
                 self.bodies
                     .lock()
@@ -248,6 +288,7 @@ impl ActorStore {
             contextual_recovery: Shared::new(contextual_recovery),
             active_falls: Shared::new(active_falls),
             perception_revision: fresh_perception_revision(),
+            visibility_epoch: fresh_perception_revision(),
             bodies: Mutex::default(),
         }
     }
@@ -296,6 +337,10 @@ impl ActorStore {
     /// Derived lookup over only actors carrying one unsettled causal episode.
     pub fn active_fall_owners(&self) -> impl Iterator<Item = ActorId> + '_ {
         self.active_falls.iter().copied()
+    }
+
+    pub(crate) fn visibility_epoch(&self) -> u64 {
+        self.visibility_epoch
     }
 
     pub fn perception_revision(&self) -> u64 {
@@ -375,6 +420,13 @@ impl ActorStore {
     }
 
     pub fn insert(&mut self, id: ActorId, actor: Actor) -> Option<Actor> {
+        if self
+            .entries
+            .get(&id)
+            .is_none_or(|old| VisibilityInputs::capture(old) != VisibilityInputs::capture(&actor))
+        {
+            self.visibility_epoch = fresh_perception_revision();
+        }
         let changed = if self.contextual_recovery.is_empty() {
             // No retained witness can remain valid when the first owner arrives.
             // Ordinary no-owner mutations allocate no faction/body snapshot.
@@ -429,6 +481,7 @@ impl ActorStore {
 
     pub fn remove(&mut self, id: &ActorId) -> Option<Actor> {
         let old = self.entries.remove(id)?;
+        self.visibility_epoch = fresh_perception_revision();
         if !self.contextual_recovery.is_empty() {
             self.perception_revision = fresh_perception_revision();
         }
@@ -475,6 +528,8 @@ impl ActorStore {
             before: actor.location.region,
             before_held: actor.holds.has_links(),
             before_deadline,
+            before_visibility: VisibilityInputs::capture(actor),
+            visibility_epoch: &mut self.visibility_epoch,
             before_perception: (!self.contextual_recovery.is_empty())
                 .then(|| PerceptionInputs::capture(actor)),
             perception_revision: &mut self.perception_revision,
@@ -494,6 +549,8 @@ pub(crate) struct ActorEdit<'a> {
     before: RegionId,
     before_held: bool,
     before_deadline: Option<u64>,
+    before_visibility: VisibilityInputs,
+    visibility_epoch: &'a mut u64,
     before_perception: Option<PerceptionInputs>,
     perception_revision: &'a mut u64,
     timer_active: bool,
@@ -517,6 +574,9 @@ impl DerefMut for ActorEdit<'_> {
 }
 impl Drop for ActorEdit<'_> {
     fn drop(&mut self) {
+        if self.before_visibility != VisibilityInputs::capture(self.actor) {
+            *self.visibility_epoch = fresh_perception_revision();
+        }
         let changed = self.before_perception.as_ref().map_or_else(
             || watches_recovery(self.actor),
             |before| !before.matches(self.actor),

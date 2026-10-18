@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 46;
+pub(crate) const ARCHIVE_VERSION: u32 = 47;
 #[path = "action_resolution.rs"]
 mod action_resolution;
 #[path = "advancement_query.rs"]
@@ -34,6 +34,9 @@ mod checkpoint;
 #[path = "command_request.rs"]
 mod command_request;
 use action_resolution::ActionResolution;
+#[cfg(test)]
+#[path = "event_history_boundary_tests.rs"]
+mod event_history_boundary_tests;
 #[path = "floor_activation_audit.rs"]
 mod floor_activation_audit;
 #[cfg(test)]
@@ -61,6 +64,9 @@ mod move_escape_admission_tests;
 #[cfg(test)]
 #[path = "package_invariant_tests.rs"]
 mod package_invariant_tests;
+#[cfg(test)]
+#[path = "perception_persistence_tests.rs"]
+mod perception_persistence_tests;
 #[cfg(test)]
 #[path = "engine_region_count_tests.rs"]
 mod region_count_tests;
@@ -1609,37 +1615,64 @@ impl Candidate {
         &mut self,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<(), Failure> {
+        // Eligibility comes from this semantic knowledge pass, not free-read
+        // cache warmth. The ordinary action revision pass has captured its own
+        // observers already, including known-ability and death-only events.
+        let witness = self.game.event_observation_witness();
         let candidates = self
             .game
             .observation_knowledge_candidates()
             .map_err(|_| invalid_archive())?;
-        if candidates.is_empty() {
-            return Ok(());
-        }
-        for actor in self.actors() {
-            if !self
-                .game
-                .may_add_observation_knowledge(SimActor(actor.0), &candidates)
-            {
-                continue;
-            }
-            let view = match self.observations.get(&actor) {
-                Some(view) => view.clone(),
-                None => {
-                    let started = Instant::now();
-                    let view = Arc::new(self.revision_view(actor)?);
-                    if let Some(profile) = profile.as_deref_mut() {
-                        profile.perception += started.elapsed();
-                        profile.actors_observed += 1;
-                    }
-                    self.observations.insert(actor, view.clone());
-                    view
+        if !candidates.is_empty() {
+            for actor in self.actors() {
+                if !self
+                    .game
+                    .may_add_observation_knowledge(SimActor(actor.0), &candidates)
+                {
+                    continue;
                 }
-            };
-            self.game
-                .record_observation_knowledge(&view.observation)
-                .map_err(|_| invalid_archive())?;
+                let view = match self.observations.get(&actor) {
+                    Some(view) if self.game.event_observation_pending(&view.event_proof) => {
+                        let mut updated = (**view).clone();
+                        self.game
+                            .record_event_observation(
+                                &witness,
+                                &updated.event_proof,
+                                &mut updated.observation,
+                            )
+                            .map_err(|_| invalid_archive())?;
+                        let updated = Arc::new(updated);
+                        self.observations.insert(actor, updated.clone());
+                        updated
+                    }
+                    Some(view) => view.clone(),
+                    None => {
+                        let started = Instant::now();
+                        let mut view = self.revision_view(actor)?;
+                        self.game
+                            .record_event_observation(
+                                &witness,
+                                &view.event_proof,
+                                &mut view.observation,
+                            )
+                            .map_err(|_| invalid_archive())?;
+                        let view = Arc::new(view);
+                        if let Some(profile) = profile.as_deref_mut() {
+                            profile.perception += started.elapsed();
+                            profile.actors_observed += 1;
+                        }
+                        self.observations.insert(actor, view.clone());
+                        view
+                    }
+                };
+                self.game
+                    .record_observation_knowledge(&view.observation)
+                    .map_err(|_| invalid_archive())?;
+            }
         }
+        self.game
+            .seal_event_observations()
+            .map_err(|_| invalid_archive())?;
         Ok(())
     }
     /// Publish, then ask the preloader for what the next transitions are
@@ -1810,6 +1843,7 @@ impl Candidate {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RevisionView {
     observation: tor_simulation::Observation,
+    event_proof: tor_simulation::EventObservation,
     scene: Vec<tor_world::SightCell>,
     ready: bool,
 }
@@ -1849,11 +1883,12 @@ impl ObservationCache {
 }
 
 fn revision_view(game: &Game, actor: ActorId) -> Result<RevisionView, Failure> {
-    let (view, scene) = game
-        .observe_scene(SimActor(actor.0))
+    let (view, scene, event_proof) = game
+        .observe_event_scene(SimActor(actor.0))
         .map_err(|_| invalid_archive())?;
     Ok(RevisionView {
         observation: view,
+        event_proof,
         scene,
         ready: game.next_actor() == Some(SimActor(actor.0)),
     })
@@ -3165,6 +3200,7 @@ impl Engine {
             | Action::Eat { .. }
             | Action::SetDoor { .. }
             | Action::Take { .. }
+            | Action::TouchApparentObject { .. }
             | Action::Drop { .. } => true,
         };
         let before: BTreeMap<_, _> = self
@@ -3203,6 +3239,7 @@ impl Engine {
         };
         outcome.next_tick = candidate.game.tick();
         outcome.next_actor = candidate.game.next_actor();
+        let event_witness = candidate.game.event_observation_witness();
         // Stationary waits usually change only tick/readiness. Capability
         // expiry can change disclosed traversal without any geometry change.
         if !perception_changed {
@@ -3230,7 +3267,15 @@ impl Engine {
             }
             for observer in capability_changes {
                 let started = Instant::now();
-                let after = candidate.revision_view(observer)?;
+                let mut after = candidate.revision_view(observer)?;
+                candidate
+                    .game
+                    .record_event_observation(
+                        &event_witness,
+                        &after.event_proof,
+                        &mut after.observation,
+                    )
+                    .map_err(|_| invalid_archive())?;
                 if let Some(profile) = profile.as_deref_mut() {
                     profile.perception += started.elapsed();
                     profile.actors_observed += 1;
@@ -3255,7 +3300,15 @@ impl Engine {
                 continue;
             }
             let perception_started = Instant::now();
-            let after = candidate.revision_view(actor)?;
+            let mut after = candidate.revision_view(actor)?;
+            candidate
+                .game
+                .record_event_observation(
+                    &event_witness,
+                    &after.event_proof,
+                    &mut after.observation,
+                )
+                .map_err(|_| invalid_archive())?;
             if let Some(profile) = profile.as_deref_mut() {
                 profile.perception += perception_started.elapsed();
                 profile.actors_observed += 1;
@@ -4916,8 +4969,8 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 46);
-        assert_eq!(engine.archive.ruleset, "interactions-v41");
+        assert_eq!(engine.archive.version, 47);
+        assert_eq!(engine.archive.ruleset, "interactions-v42");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {

@@ -597,7 +597,7 @@ Eligibility: dragon type with an elemental subtype.
 
 #### Gaze tree
 
-Eligibility: `gaze` flag.
+Eligibility: `gaze_capable` flag.
 
 | ID | Node | HD | Parents | Effect | Needs |
 | --- | --- | ---: | --- | --- | --- |
@@ -606,7 +606,10 @@ Eligibility: `gaze` flag.
 
 #### Mimic tree
 
-Eligibility: shapechanger subtype.
+Eligibility: shapechanger subtype. The authored M/P/X slice uses one initial
+mundane mace guise; touch, adjacent Search, attack or movement reveals it
+globally with no re-hide. MI2 is a source-granted first-attack capability; the
+subtype alone grants neither guise nor general shapechanging.
 
 | ID | Node | HD | Parents | Effect | Needs |
 | --- | --- | ---: | --- | --- | --- |

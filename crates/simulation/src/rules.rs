@@ -410,6 +410,9 @@ pub enum Selector {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModifierOp {
+    Perception {
+        value: crate::perception::PerceptionValue,
+    },
     Locomotion {
         value: crate::locomotion::LocomotionValue,
     },
@@ -447,6 +450,9 @@ impl<'de> Deserialize<'de> for ModifierOp {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Perception {
+                value: crate::perception::PerceptionValue,
+            },
             Locomotion {
                 value: crate::locomotion::LocomotionValue,
             },
@@ -478,6 +484,7 @@ impl<'de> Deserialize<'de> for ModifierOp {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Perception { value } => Self::Perception { value },
             Fields::Locomotion { value } => Self::Locomotion { value },
             Fields::Add { stat, value } => Self::Add { stat, value },
             Fields::Set { stat, value } => Self::Set { stat, value },
@@ -720,6 +727,7 @@ pub enum TimingSource {
 pub enum Reach {
     Melee,
     Sight { range: u16 },
+    MutualSight { range: u16 },
     SelfOnly,
     SelfOrAlly { range: AllyRange },
 }
@@ -730,12 +738,14 @@ impl<'de> Deserialize<'de> for Reach {
         enum Fields {
             Melee,
             Sight { range: u16 },
+            MutualSight { range: u16 },
             SelfOnly,
             SelfOrAlly { range: AllyRange },
         }
         Ok(match crate::bounded::named_map(d)? {
             Fields::Melee => Self::Melee,
             Fields::Sight { range } => Self::Sight { range },
+            Fields::MutualSight { range } => Self::MutualSight { range },
             Fields::SelfOnly => Self::SelfOnly,
             Fields::SelfOrAlly { range } => Self::SelfOrAlly { range },
         })
@@ -929,6 +939,7 @@ pub enum Effect {
         resource: Resource,
         amount: AmountExpr,
     },
+    SearchAdjacentGuises,
     ObservePublicPlan,
     ApplyQualifiedConditionToSource {
         condition: ConditionId,
@@ -939,9 +950,9 @@ pub enum Effect {
 impl Effect {
     pub fn recipient(&self) -> EffectRecipient {
         match self {
-            Self::ObservePublicPlan | Self::ApplyQualifiedConditionToSource { .. } => {
-                EffectRecipient::Source
-            }
+            Self::SearchAdjacentGuises
+            | Self::ObservePublicPlan
+            | Self::ApplyQualifiedConditionToSource { .. } => EffectRecipient::Source,
             _ => EffectRecipient::Target,
         }
     }
@@ -1000,6 +1011,7 @@ impl<'de> Deserialize<'de> for Effect {
                 resource: Resource,
                 amount: AmountExpr,
             },
+            SearchAdjacentGuises {},
             ObservePublicPlan {},
             ApplyQualifiedConditionToSource {
                 condition: ConditionId,
@@ -1046,6 +1058,7 @@ impl<'de> Deserialize<'de> for Effect {
                 duration,
             },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
+            Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
             Fields::ObservePublicPlan {} => Self::ObservePublicPlan,
             Fields::ApplyQualifiedConditionToSource {
                 condition,
@@ -1662,14 +1675,25 @@ impl Ruleset {
                 "condition_pause_scope",
             )?;
             // Protected operations cannot be removed by capacity/reconciliation
-            // pressure. Keep their modifier fold empty so the existing bounded
-            // reconciliation loop always has an ordinary evictable source.
+            // pressure. Only the bounded confusion probability is also safe:
+            // it cannot invalidate numeric stats, reach, grants or interactions.
+            // Other modifier folds still require an ordinary evictable source.
             bound(
                 !d.protected_lifecycle()
                     || (d.lifecycle == ConditionLifecycle::Timed
                         && !d.source_scoped
                         && d.stacking == Stacking::Keep
-                        && d.modifiers.is_empty()),
+                        && d.modifiers.iter().all(|modifier| {
+                            matches!(
+                                modifier,
+                                Modifier {
+                                    scope: Scope::Always,
+                                    op: ModifierOp::Locomotion {
+                                        value: crate::locomotion::LocomotionValue::Confused { .. }
+                                    }
+                                }
+                            )
+                        })),
                 "protected_condition_shape",
             )?;
             bound(
@@ -1734,6 +1758,26 @@ impl Ruleset {
         )?;
         for d in &mut document.abilities {
             bound(d.spatial_shape_valid(), "ability_spatial_shape")?;
+            let searches = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes.iter().any(|strike| {
+                    strike
+                        .on_success
+                        .iter()
+                        .chain(&strike.on_failure)
+                        .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                        .any(|effect| matches!(effect, Effect::SearchAdjacentGuises))
+                }),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|rider| &rider.effects)
+                    .any(|effect| matches!(effect, Effect::SearchAdjacentGuises)),
+                StrikeSource::SelectedMelee => false,
+            };
+            bound(
+                !searches
+                    || (d.reach == Reach::SelfOnly && d.interaction == Interaction::NonHostile),
+                "search_self_only",
+            )?;
             if let StrikeSource::Authored { strikes } = &d.strikes {
                 bound(
                     !strikes.iter().any(|strike| {
@@ -1816,6 +1860,7 @@ impl Ruleset {
                 )?;
             }
             if let Reach::Sight { range }
+            | Reach::MutualSight { range }
             | Reach::SelfOrAlly {
                 range: AllyRange::Sight { range },
             } = d.reach
@@ -1865,7 +1910,8 @@ impl Ruleset {
                             | ModifierOp::Reduction { .. }
                             | ModifierOp::TalentReduction { .. }
                             | ModifierOp::GrantAbility { .. }
-                            | ModifierOp::Locomotion { .. } => None,
+                            | ModifierOp::Locomotion { .. }
+                            | ModifierOp::Perception { .. } => None,
                         })
                         .collect(),
                 )
@@ -2100,7 +2146,9 @@ impl References<'_> {
                 }
                 ModifierOp::Immunity { selector } => self.selector(selector, pool)?,
                 ModifierOp::Reduction { selector, .. } => self.selector(selector, pool)?,
-                ModifierOp::TalentReduction { .. } | ModifierOp::Locomotion { .. } => {}
+                ModifierOp::TalentReduction { .. }
+                | ModifierOp::Locomotion { .. }
+                | ModifierOp::Perception { .. } => {}
                 ModifierOp::GrantAbility { ability } => {
                     reference(self.abilities, ability, "ability")?;
                     ability.intern(pool);
@@ -2288,7 +2336,10 @@ impl References<'_> {
                         "condition_duration",
                     )?;
                 }
-                Effect::ObservePublicPlan | Effect::DrainLatestHitDie | Effect::RestoreHitDie => {}
+                Effect::SearchAdjacentGuises
+                | Effect::ObservePublicPlan
+                | Effect::DrainLatestHitDie
+                | Effect::RestoreHitDie => {}
             }
             if let Effect::ApplyQualifiedConditionToSource {
                 condition,
@@ -2352,9 +2403,19 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
                 value:
                     crate::locomotion::LocomotionValue::Erratic {
                         chance: Some(chance),
+                    }
+                    | crate::locomotion::LocomotionValue::Confused {
+                        chance: Some(chance),
                     },
             } => bound(chance.valid(), "movement_chance")?,
-            ModifierOp::Locomotion { .. }
+            ModifierOp::Perception {
+                value:
+                    crate::perception::PerceptionValue::ObjectGuise {
+                        appearance: Some(appearance),
+                    },
+            } => bound(appearance.valid(), "guise_appearance")?,
+            ModifierOp::Perception { .. }
+            | ModifierOp::Locomotion { .. }
             | ModifierOp::Flag { .. }
             | ModifierOp::Immunity { .. }
             | ModifierOp::GrantAbility { .. } => {}
@@ -2775,7 +2836,7 @@ impl Effect {
             | Self::ApplyQualifiedConditionToSource { duration, .. } => {
                 (1..=crate::limits::NUMERIC as u64).contains(duration)
             }
-            Self::ObservePublicPlan => true,
+            Self::SearchAdjacentGuises | Self::ObservePublicPlan => true,
             Self::Damage { damage } => match damage {
                 DamageExpr::SelectedWeapon { impact_bonus } => {
                     *impact_bonus <= crate::limits::NUMERIC as u32
@@ -3088,8 +3149,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v41\"",
-                "id = \"interactions-v41\"\nunknown = true"
+                "id = \"interactions-v42\"",
+                "id = \"interactions-v42\"\nunknown = true"
             ))
             .is_err()
         );

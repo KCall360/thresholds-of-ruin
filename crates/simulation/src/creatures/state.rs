@@ -1253,8 +1253,9 @@ impl CreatureState {
                         .conditions
                         .evict_for_reconciliation(self.build.ruleset())
                     {
-                        // Protected entries and reserved tombstones cannot modify
-                        // the independently validated condition-free baseline.
+                        // Protected entries and reserved tombstones cannot
+                        // invalidate the independently validated baseline. Their
+                        // bounded confusion capability cannot cause fold failure.
                         return Ok((*self.baseline).clone());
                     }
                 }

@@ -279,7 +279,9 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                 }),
                 reach: match stats.ability_reaches[&def.id] {
                     s::rules::Reach::Melee => p::AbilityReach::Melee,
-                    s::rules::Reach::Sight { range } => p::AbilityReach::Sight { range },
+                    s::rules::Reach::Sight { range } | s::rules::Reach::MutualSight { range } => {
+                        p::AbilityReach::Sight { range }
+                    }
                     s::rules::Reach::SelfOnly => p::AbilityReach::SelfOnly,
                     s::rules::Reach::SelfOrAlly { range } => p::AbilityReach::SelfOrAlly {
                         range: match range {
@@ -296,9 +298,9 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                     match def.reach {
                         s::rules::Reach::SelfOnly => p::AbilityTargetKind::SelfOnly,
                         s::rules::Reach::SelfOrAlly { .. } => p::AbilityTargetKind::SelfOrAlly,
-                        s::rules::Reach::Melee | s::rules::Reach::Sight { .. } => {
-                            p::AbilityTargetKind::Actor
-                        }
+                        s::rules::Reach::Melee
+                        | s::rules::Reach::Sight { .. }
+                        | s::rules::Reach::MutualSight { .. } => p::AbilityTargetKind::Actor,
                     }
                 },
             })

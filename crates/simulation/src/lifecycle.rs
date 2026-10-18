@@ -99,6 +99,7 @@ pub(crate) struct ActorOutcome {
     pub(crate) nutrition_empty_depletion: bool,
     pub(crate) survival: crate::survival_diagnostics::SurvivalFlows,
     events: Vec<CombatEvent>,
+    disclosure_origin: Option<crate::event_history::EventOrigin>,
     input: InputBoundary,
     fatal_cause: Option<crate::earned_growth::FatalCause>,
 }
@@ -214,6 +215,13 @@ pub(crate) struct PreparedActorOutcome {
     rebuild: crate::creatures::RebuildOutcome,
 }
 impl PreparedActorOutcome {
+    /// Preparation can add interruptions or death cleanup after a caller has
+    /// finished changing its owned actor. Only this finalized value can prove
+    /// that publication will not append lifecycle events.
+    pub(crate) fn emits_events(&self) -> bool {
+        !self.outcome.events.is_empty() || self.death.is_some()
+    }
+
     pub(crate) fn rebuild_outcome(&self) -> &crate::creatures::RebuildOutcome {
         &self.rebuild
     }
@@ -248,6 +256,7 @@ impl Game {
             nutrition_empty_depletion: false,
             survival: Default::default(),
             events: vec![],
+            disclosure_origin: None,
             input: InputBoundary::Preserve,
             fatal_cause: None,
             entry_cause: crate::floor_activation::EntryCause::Movement,
@@ -336,11 +345,54 @@ impl Game {
     /// External effect application owns one transaction; internal lifecycle callers
     /// use the already existing action/physics transaction and actor-local snapshots.
     pub fn apply(&mut self, outcome: Outcome) -> Result<(), GameError> {
+        self.with_effect_publication(|candidate| candidate.apply_outcome(outcome))
+    }
+
+    /// Publish one complete public effect operation. Internal effect/rider work
+    /// stays on apply_outcome until its owning transaction finishes participation.
+    /// A host candidate retains its observer extension for the outer publication.
+    pub(crate) fn with_effect_publication<R>(
+        &mut self,
+        change: impl FnOnce(&mut Self) -> Result<R, GameError>,
+    ) -> Result<R, GameError> {
         let mut candidate = self.clone();
-        candidate.apply_outcome(outcome)?;
-        candidate.reconcile_recovery_contexts()?;
+        candidate.begin_effect_publication()?;
+        let result = change(&mut candidate)?;
+        candidate.finish_effect_publication()?;
         *self = candidate;
+        Ok(result)
+    }
+
+    /// Existing private candidates share the same publication boundary without
+    /// nesting another whole-Game transaction.
+    pub(crate) fn begin_effect_publication(&mut self) -> Result<(), GameError> {
+        if !self.host_region_continuation {
+            self.seal_event_observations()?;
+        }
         Ok(())
+    }
+
+    pub(crate) fn finish_effect_publication(&mut self) -> Result<(), GameError> {
+        self.reconcile_recovery_contexts()?;
+        self.seal_participant_events()
+    }
+
+    /// Public actor mutations keep the cheap eventless setup path. Any finalized
+    /// lifecycle event, new contextual owner or caller-owned rollback need uses
+    /// the same atomic publication as a complete resolved effect operation.
+    pub(crate) fn publish_actor_effect(
+        &mut self,
+        prepared: PreparedActorOutcome,
+        requires_candidate: bool,
+    ) -> Result<(), GameError> {
+        let requires_candidate = requires_candidate
+            || prepared.emits_events()
+            || prepared
+                .creature()
+                .is_some_and(|creature| creature.derived().contextual_health_recovery());
+        self.with_recovery_transition(requires_candidate, |candidate| {
+            candidate.publish_actor_outcome(prepared)
+        })
     }
 
     pub(crate) fn apply_outcome(
@@ -356,11 +408,14 @@ impl Game {
             }
             ApplicationOutcome::Actor(outcome) => self.commit_actor_outcome(outcome)?,
             ApplicationOutcome::Item(outcome) => {
-                self.event_log.push(CombatEvent::ItemCompleted {
-                    actor: outcome.actor,
-                    work: outcome.work,
-                    intention: outcome.intention,
-                });
+                self.push_event(
+                    CombatEvent::ItemCompleted {
+                        actor: outcome.actor,
+                        work: outcome.work,
+                        intention: outcome.intention,
+                    },
+                    None,
+                )?;
                 match outcome.change {
                     ItemChange::Equipment(actor) => self.commit_actor_outcome(actor)?,
                     ItemChange::Consumed { actor } => self.commit_actor_outcome(actor)?,
@@ -391,7 +446,24 @@ impl Game {
         activity: &mut DamageActivityGuard,
         origin: Option<crate::earned_growth::FatalOrigin>,
     ) -> Result<PublishedResolution, GameError> {
-        self.apply_resolved_outcome_with_transfer(outcome, site, activity, origin, None)
+        self.apply_resolved_outcome_with_transfer(outcome, site, activity, origin, None, None)
+    }
+
+    pub(crate) fn apply_resolved_with_disclosure(
+        &mut self,
+        outcome: Outcome,
+        site: ResolutionPublication,
+        activity: &mut DamageActivityGuard,
+        disclosure_origin: crate::event_history::EventOrigin,
+    ) -> Result<PublishedResolution, GameError> {
+        self.apply_resolved_outcome_with_transfer(
+            outcome,
+            site,
+            activity,
+            None,
+            None,
+            Some(disclosure_origin),
+        )
     }
 
     pub(crate) fn apply_resolved_theft(
@@ -400,8 +472,16 @@ impl Game {
         site: ResolutionPublication,
         activity: &mut DamageActivityGuard,
         receipt: crate::theft::TransferReceipt,
+        disclosure_origin: crate::event_history::EventOrigin,
     ) -> Result<PublishedResolution, GameError> {
-        self.apply_resolved_outcome_with_transfer(outcome, site, activity, None, Some(receipt))
+        self.apply_resolved_outcome_with_transfer(
+            outcome,
+            site,
+            activity,
+            None,
+            Some(receipt),
+            Some(disclosure_origin),
+        )
     }
 
     fn apply_resolved_outcome_with_transfer(
@@ -411,7 +491,10 @@ impl Game {
         activity: &mut DamageActivityGuard,
         origin: Option<crate::earned_growth::FatalOrigin>,
         transfer: Option<crate::theft::TransferReceipt>,
+        disclosure_origin: Option<crate::event_history::EventOrigin>,
     ) -> Result<PublishedResolution, GameError> {
+        let disclosure_origin = disclosure_origin
+            .unwrap_or_else(|| self.capture_event_origin(outcome.actor, outcome.target));
         let recorded_transfer = outcome.effects.iter().find_map(|effect| match effect {
             ResolvedEffect::Theft { quantity, .. } => Some(*quantity),
             _ => None,
@@ -437,6 +520,25 @@ impl Game {
             return Err(GameError::Rule(RuleError::InvalidPlan));
         }
         let role = self.publication_role(&outcome, site)?;
+        if outcome.actor != outcome.target
+            && outcome.target_participated()
+            && outcome
+                .ability
+                .as_ref()
+                .and_then(|ability| self.content.rules.ability(ability))
+                .is_some_and(|ability| {
+                    ability.interaction == crate::rules::Interaction::HostileToTarget
+                })
+            && self
+                .actors
+                .get(&outcome.target)
+                .is_some_and(|actor| actor.guise.appearance().is_some())
+        {
+            // The attack breaks a newly acquired guise, but its historical
+            // reference ceiling was captured before this reveal.
+            self.reveal_guise(outcome.target)?;
+        }
+
         let strike = match role {
             PublishedRole::Primary { strike } => Some(strike),
             PublishedRole::Standalone | PublishedRole::Rider { .. } => None,
@@ -450,6 +552,7 @@ impl Game {
             crate::abilities::EffectRecipient::Source => outcome.actor,
         };
         let mut transition = self.settled_actor_outcome(recipient_id)?;
+        transition.disclosure_origin = Some(disclosure_origin.clone());
         let mut placement = crate::abilities::Placement {
             location: transition.state.location,
             orientation: transition.state.orientation,
@@ -461,6 +564,15 @@ impl Game {
         let mut created_hold = None;
         for index in 0..outcome.effects.len() {
             let effect = &outcome.effects[index];
+            if matches!(effect, ResolvedEffect::SearchAdjacentGuises) {
+                if recipient_id != outcome.actor || outcome.actor != outcome.target {
+                    return Err(GameError::Rule(RuleError::InvalidPlan));
+                }
+                self.reveal_adjacent_guises(outcome.actor)?;
+                outcome.effects[applied_count] = effect.clone();
+                applied_count += 1;
+                continue;
+            }
             if matches!(effect, ResolvedEffect::Theft { .. }) {
                 outcome.effects[applied_count] = effect.clone();
                 applied_count += 1;
@@ -473,14 +585,18 @@ impl Game {
                 let mut events = std::mem::take(&mut transition.events);
                 let event_start = self.event_log.len();
                 self.commit_actor_outcome(transition)?;
-                events.extend(self.event_log.split_off(event_start));
+                events.extend(self.take_event_suffix(event_start)?.0);
                 let highwater = self.next_hold_id;
-                let applied =
-                    self.apply_linked_hold(outcome.actor, recipient_id, policy.clone())?;
+                let applied = self.apply_linked_hold_in_transaction(
+                    outcome.actor,
+                    recipient_id,
+                    policy.clone(),
+                )?;
                 if self.next_hold_id != highwater {
                     created_hold = created_hold.or(applied);
                 }
                 transition = self.actor_outcome(recipient_id)?;
+                transition.disclosure_origin = Some(disclosure_origin.clone());
                 transition.events.extend(events);
                 if applied.is_some() {
                     outcome.effects[applied_count] = effect.clone();
@@ -613,8 +729,9 @@ impl Game {
                 let entry_cause = transition.entry_cause;
                 let event_start = self.event_log.len();
                 self.commit_actor_outcome(transition)?;
-                let events = self.event_log.split_off(event_start);
+                let events = self.take_event_suffix(event_start)?.0;
                 transition = self.actor_outcome(recipient_id)?;
+                transition.disclosure_origin = Some(disclosure_origin.clone());
                 transition.entry_cause = entry_cause;
                 // Publication can emit interruption/sequence consequences.
                 // Keep them behind this batch's one original Resolved event,
@@ -683,6 +800,22 @@ impl Game {
         }
         self.published_resolution(receipt)?;
         Ok(receipt)
+    }
+
+    /// The private publication receipt is the causal selector. Validate the
+    /// exact final primary outcome, including rider participation, before any
+    /// consumer uses its event index; ordinals alone are not event identities.
+    pub(crate) fn published_primary_event(
+        &self,
+        receipt: PublishedResolution,
+        outcome: &Outcome,
+    ) -> Result<usize, GameError> {
+        if !matches!(receipt.role, PublishedRole::Primary { .. })
+            || self.published_resolution(receipt)? != outcome
+        {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        }
+        Ok(receipt.event)
     }
 
     fn published_resolution(&self, receipt: PublishedResolution) -> Result<&Outcome, GameError> {
@@ -757,6 +890,9 @@ impl Game {
         primary: PublishedResolution,
         rider: PublishedResolution,
     ) -> Result<bool, GameError> {
+        if self.event_is_sealed(primary.event) {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        }
         let PublishedRole::Primary { strike } = primary.role else {
             return Err(GameError::Rule(RuleError::InvalidPlan));
         };
@@ -783,6 +919,7 @@ impl Game {
             unreachable!("validated primary receipt")
         };
         outcome.target_rider_participated = participated;
+        self.bind_event_participation(primary.event)?;
         Ok(participated)
     }
 
@@ -933,6 +1070,19 @@ impl Game {
         let from = self.actors[&id].location;
         let to = outcome.state.location;
         let entry_cause = outcome.entry_cause;
+        let disclosure_origin = outcome
+            .disclosure_origin
+            .take()
+            .or_else(|| (!outcome.events.is_empty()).then(|| self.capture_event_origin(id, id)));
+        let perception = outcome.state.perception();
+        outcome
+            .state
+            .guise
+            .reconcile(&perception, from != to || !outcome.state.alive());
+        outcome
+            .state
+            .guise
+            .retire_claim(outcome.state.pending.as_ref());
         let previous_items = self.actors[&id]
             .pending
             .as_ref()
@@ -1027,7 +1177,9 @@ impl Game {
                 .input_boundaries
                 .insert(id, self.actor_input_eligibility(id));
         }
-        self.event_log.extend(outcome.events);
+        for event in outcome.events {
+            self.push_event(event, disclosure_origin.clone())?;
+        }
         if let Some(death) = death {
             self.combat.input_boundaries.remove(&id);
             for item in death.inventory {

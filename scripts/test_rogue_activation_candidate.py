@@ -15,6 +15,7 @@ from unittest.mock import patch
 from arena_matrix import toml_source
 from rogue_activation_candidate import (COMPILER_DEPENDENCY_INPUTS, TOOL_INPUTS,
     candidate_manifest, conditional_bands, create_candidate, population_shape)
+from rogue_activation_oracle import reviewed_twenty_four_activation, reviewed_twenty_one_activation
 from rogue_roster_study import DEFAULT_RULES, PLAYABLE_SPECIES, PRODUCTION, ROOT, encounter_sources
 
 
@@ -39,6 +40,13 @@ def preactivation_source():
     return source
 
 
+def twenty_one_source():
+    """Synthetic historical activation, explicitly separate from live production."""
+    source = encounter_sources()["manifest"]
+    source["floor_activation"] = reviewed_twenty_one_activation()
+    return source
+
+
 def synthetic_eighteen_source(destination):
     """Explicit helper fixture, not a frozen measured production baseline."""
     shutil.copytree(ROOT / PRODUCTION, destination, ignore=shutil.ignore_patterns(".compiled"))
@@ -57,7 +65,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             "source_provenance": {"reference": "synthetic:eighteen-species-unit-fixture"}}
 
     def test_reviewed_twenty_one_input_preserves_eighteen_species_diagnostic_output(self):
-        source = encounter_sources()["manifest"]
+        source = twenty_one_source()
         original = copy.deepcopy(source)
         self.assertEqual(population_shape(source), "reviewed_twenty_one_species_input")
         candidate = candidate_manifest(source)
@@ -73,6 +81,12 @@ class RogueActivationCandidateTests(unittest.TestCase):
                          {"rogue." + name for name in PLAYABLE_SPECIES})
 
     def test_reviewed_twenty_one_input_rejects_unknown_or_mismatched_activation_rules(self):
+        self.assert_reviewed_input_rejects_changes(twenty_one_source)
+
+    def test_reviewed_twenty_four_input_rejects_unknown_or_mismatched_activation_rules(self):
+        self.assert_reviewed_input_rejects_changes(lambda: encounter_sources()["manifest"])
+
+    def assert_reviewed_input_rejects_changes(self, source_factory):
         def stages(activation):
             return activation["profiles"]["rogue.low_depth"]["stages"]
         def leprechaun(activation):
@@ -103,19 +117,28 @@ class RogueActivationCandidateTests(unittest.TestCase):
         }
         for name, mutate in mutations.items():
             with self.subTest(mutation=name):
-                source = encounter_sources()["manifest"]
+                source = source_factory()
                 mutate(source["floor_activation"])
                 with self.assertRaisesRegex(ValueError, "Review changed population profile"):
                     candidate_manifest(source)
 
     def test_reviewed_twenty_one_materialization_records_input_output_and_fresh_source_closure(self):
+        self.assert_reviewed_materialization(twenty_one_source(), "twenty_one", "twenty-one",
+                                            ("leprechaun", "nymph", "orc"))
+
+    def test_reviewed_twenty_four_materialization_records_input_output_and_fresh_source_closure(self):
+        self.assert_reviewed_materialization(encounter_sources()["manifest"], "twenty_four", "twenty-four",
+                                            ("leprechaun", "nymph", "orc", "medusa", "phantom", "xeroc"))
+
+    def assert_reviewed_materialization(self, source, shape, label, omitted):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
         dependencies = {imported: hashlib.sha256(
             (ROOT / DEFAULT_RULES).read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            supplied = root / "explicit-twenty-one-source"
+            supplied = root / ("explicit-" + label + "-source")
             shutil.copytree(ROOT / PRODUCTION, supplied, ignore=shutil.ignore_patterns(".compiled"))
+            (supplied / "scenario.toml").write_text(toml_source(source), encoding="utf-8")
             compiler = root / "compiler"
             compiler.write_bytes(b"test compiler")
             output = root / "candidate"
@@ -123,7 +146,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             def without_live_production(path, *args, **kwargs):
                 self.assertFalse(path.is_relative_to(ROOT / PRODUCTION))
                 return original_open(path, *args, **kwargs)
-            provenance = {"kind": "retained_snapshot", "reference": "synthetic:reviewed-twenty-one"}
+            provenance = {"kind": "retained_snapshot", "reference": "synthetic:reviewed-" + label}
             with patch.object(Path, "open", without_live_production), patch(
                     "rogue_activation_candidate.resolve_with_dependencies",
                     return_value=({"id": "test-rules"}, dependencies)), patch(
@@ -131,21 +154,25 @@ class RogueActivationCandidateTests(unittest.TestCase):
                     return_value=subprocess.CompletedProcess([], 0, "", "")):
                 result = create_candidate(output, compiler, source_package=supplied,
                                           source_provenance=provenance)
-            self.assertEqual(result["source_population_shape"], "reviewed_twenty_one_species_input")
+            self.assertEqual(result["source_population_shape"], "reviewed_" + shape + "_species_input")
             self.assertEqual(result["source_provenance"], provenance)
             species = sorted("rogue." + name for name in PLAYABLE_SPECIES)
             stages = ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength"]
             self.assertEqual(result["input_population_scope"], {
-                "species": sorted([*species, "rogue.leprechaun", "rogue.nymph", "rogue.orc"]),
+                "species": sorted([*species, *("rogue." + name for name in omitted)]),
                 "stage_ids": [*stages, "rogue.room_gold"],
                 "carried_item_pools": ["rogue.leprechaun_gold", "rogue.vampire_supplies"]})
             self.assertEqual(result["output_population_scope"], {
                 "species": species, "stage_ids": stages, "carried_item_pools": ["rogue.vampire_supplies"]})
             self.assertEqual(result["population_scope"],
                              "conditional_eighteen_species_with_open_vampire_griffin_jabberwock_tail")
-            for exclusion in ("not current twenty-one-species production",
-                              "Leprechaun birth-Gold pool", "room-Gold stage"):
+            for exclusion in ("not current " + label + "-species production",
+                              "Leprechaun birth-Gold pool", "room-Gold stage", *(name.title() for name in omitted)):
                 self.assertIn(exclusion, " ".join(result["limitations"]))
+            for relative, fingerprint in result["source_package_inputs"].items():
+                raw = (supplied / relative).read_bytes()
+                self.assertEqual(fingerprint, hashlib.sha256(raw).hexdigest())
+                self.assertEqual((output / "sources/package" / relative).read_bytes(), raw)
             self.assertIn("scripts/rogue_activation_oracle.py", TOOL_INPUTS)
             self.assertIn("scripts/scalar_wire.py", TOOL_INPUTS)
             for relative in TOOL_INPUTS:
@@ -155,7 +182,64 @@ class RogueActivationCandidateTests(unittest.TestCase):
             manifest = tomllib.loads((output / "package/scenario.toml").read_text())
             self.assertEqual(manifest, candidate_manifest(preactivation_source()))
 
-    def assert_pinned_source_mass(self, bands, *, production=False):
+    def test_current_twenty_four_input_preserves_eighteen_species_diagnostic_output(self):
+        source = encounter_sources()["manifest"]
+        original = copy.deepcopy(source)
+        self.assertEqual(population_shape(source), "reviewed_twenty_four_species_input")
+        self.assertEqual(source["floor_activation"], reviewed_twenty_four_activation())
+        candidate = candidate_manifest(source)
+        self.assertEqual(candidate, candidate_manifest(preactivation_source()))
+        self.assertEqual(source, original)
+        stages = candidate["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
+        self.assertEqual(len(stages), 4)
+        self.assertEqual({choice["archetype"] for band in stages[0]["bands"] for choice in band["choices"]},
+                         {"rogue." + name for name in PLAYABLE_SPECIES})
+
+    def test_reviewed_oracles_are_independent_fresh_values_with_distinct_rosters(self):
+        before = reviewed_twenty_one_activation()
+        current = reviewed_twenty_four_activation()
+        self.assertNotEqual(before, current)
+        current["profiles"]["rogue.low_depth"]["stages"][0]["bands"][-1]["choices"][-1]["carried_loot"]["chance"]["numerator"] = 99
+        current["carried_item_pools"]["rogue.vampire_supplies"]["choices"][0]["weight"] = 99
+        self.assertEqual(reviewed_twenty_one_activation(), before)
+        self.assertEqual(reviewed_twenty_four_activation(), encounter_sources()["manifest"]["floor_activation"])
+        bands = before["profiles"]["rogue.low_depth"]["stages"][0]["bands"]
+        self.assert_pinned_source_mass(bands, roster_size=21)
+
+    def test_twenty_four_rejects_perception_stock_boundary_order_and_open_tail_drift(self):
+        def bands(activation):
+            return activation["profiles"]["rogue.low_depth"]["stages"][0]["bands"]
+        def band(activation, depth):
+            return next(row for row in bands(activation) if row["depth"]["minimum"] <= depth and
+                        (row["depth"]["kind"] == "open" or depth <= row["depth"]["maximum"]))
+        def choice(activation, depth, name):
+            return next(row for row in band(activation, depth)["choices"] if row["archetype"] == "rogue." + name)
+        def remove_deep_medusas(activation):
+            for row in bands(activation):
+                if row["depth"]["minimum"] >= 28:
+                    row["choices"] = [entry for entry in row["choices"] if entry["archetype"] != "rogue.medusa"]
+        mutations = {
+            "medusa_carry": lambda a: choice(a, 18, "medusa")["carried_loot"]["chance"].update(numerator=1),
+            "xeroc_carry": lambda a: choice(a, 16, "xeroc")["carried_loot"]["chance"].update(denominator=5),
+            "phantom_stock": lambda a: choice(a, 15, "phantom").update(carried_loot=copy.deepcopy(choice(a, 18, "medusa")["carried_loot"])),
+            "duplicate_depth16": lambda a: bands(a).insert(15, copy.deepcopy(band(a, 16))),
+            "overlap_depth16": lambda a: band(a, 15)["depth"].update(maximum=16),
+            "missing_phantom": lambda a: band(a, 15)["choices"].pop(),
+            "xeroc_too_early": lambda a: band(a, 15)["choices"].append(copy.deepcopy(choice(a, 16, "xeroc"))),
+            "medusa_finite_cutoff": remove_deep_medusas,
+            "deep_medusa_weight": lambda a: choice(a, 28, "medusa").update(weight=1),
+            "deep_choice_order": lambda a: band(a, 31)["choices"].reverse(),
+            "partial_twenty_three": lambda a: [row.update(choices=[entry for entry in row["choices"]
+                if entry["archetype"] != "rogue.phantom"]) for row in bands(a)],
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(mutation=name):
+                source = encounter_sources()["manifest"]
+                mutate(source["floor_activation"])
+                with self.assertRaisesRegex(ValueError, "Review changed population profile"):
+                    population_shape(source)
+
+    def assert_pinned_source_mass(self, bands, *, roster_size=18):
         # Independent exact enumeration of the pinned ten-way selector and its
         # five-way boundary redistribution, not the helper's embedded table.
         ladder = "KEBSHIROZLCQANYFTWPXUMVGJD"
@@ -164,8 +248,11 @@ class RogueActivationCandidateTests(unittest.TestCase):
                                        "wraith", "black_unicorn", "vampire", "jabberwock"), strict=True))
         names.update(K="kestrel", B="bat", F="venus_flytrap", G="griffin")
         self.assertEqual(set(names.values()), set(PLAYABLE_SPECIES))
-        if production:
+        self.assertIn(roster_size, (18, 21, 24))
+        if roster_size >= 21:
             names.update(L="leprechaun", N="nymph", O="orc")
+        if roster_size == 24:
+            names.update(M="medusa", P="phantom", X="xeroc")
         self.assertTrue(all(math.gcd(*(choice["weight"] for choice in band["choices"])) == 1
                             for band in bands))
         for depth in (*range(1, 36), 267, 268, 274, 275, 1_000_000):
@@ -187,7 +274,8 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertEqual({key: value / total_mass for key, value in eligible.items()},
                              {key: Fraction(value, total_weight) for key, value in authored.items()}, depth)
         self.assertEqual(bands[-1]["depth"], {"kind": "open", "minimum": 31})
-        self.assertEqual([row["archetype"] for row in bands[-1]["choices"]], ["rogue.vampire", "rogue.griffin", "rogue.jabberwock"])
+        self.assertEqual([row["archetype"] for row in bands[-1]["choices"]],
+                         ["rogue.vampire", "rogue.griffin", "rogue.jabberwock"] + (["rogue.medusa"] if roster_size == 24 else []))
         self.assertTrue(all(row["depth"]["kind"] == "finite" for row in bands[:-1]))
         self.assertEqual([row["depth"]["maximum"] + 1 for row in bands[:-1]],
                          [row["depth"]["minimum"] for row in bands[1:]])
@@ -198,7 +286,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
     def test_production_bands_match_independent_pinned_selector(self):
         manifest = encounter_sources()["manifest"]
         stages = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
-        self.assert_pinned_source_mass(stages[0]["bands"], production=True)
+        self.assert_pinned_source_mass(stages[0]["bands"], roster_size=24)
 
     def test_centaur_yeti_have_exact_pinned_selector_boundaries(self):
         production = encounter_sources()["manifest"]["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]["bands"]
@@ -251,8 +339,12 @@ class RogueActivationCandidateTests(unittest.TestCase):
                             "chance": {"numerator": 7, "denominator": 10}})
                     if depth >= 27:
                         expected = (7, 12, 12) if depth == 29 else (8, 8, 13) if depth == 30 else (1, 1, 1)
-                        self.assertEqual({key: value["weight"] for key, value in choices.items()},
-                                         dict(zip(("rogue.vampire", "rogue.griffin", "rogue.jabberwock"), expected, strict=True)))
+                        if origin == "production" and depth == 28:
+                            expected = (11, 11, 11)
+                        weights = dict(zip(("rogue.vampire", "rogue.griffin", "rogue.jabberwock"), expected, strict=True))
+                        if origin == "production":
+                            weights["rogue.medusa"] = {28: 6, 29: 7, 30: 8}.get(depth, 1)
+                        self.assertEqual({key: value["weight"] for key, value in choices.items()}, weights)
 
     def test_explicit_source_is_independent_of_live_production(self):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
@@ -297,7 +389,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
 
     def test_population_policy_rejects_boolean_numeric_aliases(self):
         for original in (preactivation_source(), candidate_manifest(preactivation_source()),
-                         encounter_sources()["manifest"]):
+                         twenty_one_source(), encounter_sources()["manifest"]):
             source = copy.deepcopy(original)
             source["floor_activation"]["version"] = True
             with self.assertRaises(ValueError):

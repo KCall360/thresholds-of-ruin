@@ -321,6 +321,7 @@ mod tests {
             "hidden offers disclose only an opaque relationship token, never holder identity"
         );
         observation.visible_actors.push(sim::ActorView {
+            disclosure: sim::perception::ActorDisclosure::Creature,
             id: sim::ActorId(99),
             name: "Ordinary disclosed holder".into(),
             location: observation.location,

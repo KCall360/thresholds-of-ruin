@@ -703,7 +703,7 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
 }
 
 #[test]
-fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
+fn ability_history_preserves_event_time_identity_without_licensing_late_observers() {
     use tor_simulation::abilities::OutcomeStatus;
     use tor_simulation::combat::DisclosedCombatEvent;
     let (mut game, actor, target) = game_with_seed(4);
@@ -719,20 +719,17 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
     .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     game.act(target, Action::Wait).unwrap();
-    assert!(game
-        .observe(target)
-        .unwrap()
-        .combat
-        .unwrap()
-        .events
-        .contains(&DisclosedCombatEvent::Ability {
-            strike: Some(0),
-            caster: Some(actor),
-            target: Some(target),
-            id: ability_id("fixture_mana_ray"),
-            name: "Fixture Mana ray".into(),
-            outcome: OutcomeStatus::Applied,
-        }));
+    let historical = game.observe(target).unwrap().combat.unwrap().events;
+    assert!(historical.contains(&DisclosedCombatEvent::Ability {
+        caster_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
+        target_reference: Some(tor_simulation::perception::ActorReferenceKind::Creature),
+        strike: Some(0),
+        caster: Some(actor),
+        target: Some(target),
+        id: ability_id("fixture_mana_ray"),
+        name: "Fixture Mana ray".into(),
+        outcome: OutcomeStatus::Applied,
+    }));
     let at = |x| Location {
         region: RegionId(1),
         position: Position { x, y: 1, z: 0 },
@@ -741,18 +738,7 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
     game.set_wall(at(3), true).unwrap();
     let observed = game.observe(target).unwrap();
     assert!(observed.visible_actors.iter().all(|seen| seen.id != actor));
-    assert!(observed
-        .combat
-        .unwrap()
-        .events
-        .contains(&DisclosedCombatEvent::Ability {
-            strike: Some(0),
-            caster: None,
-            target: Some(target),
-            id: ability_id("fixture_mana_ray"),
-            name: "Fixture Mana ray".into(),
-            outcome: OutcomeStatus::Applied,
-        }));
+    assert_eq!(observed.combat.unwrap().events, historical);
     let other = game
         .spawn_actor(at(1), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -765,14 +751,23 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
         game.creature(actor).unwrap().build().clone(),
     )
     .unwrap();
-    assert!(game
-        .observe(other)
-        .unwrap()
-        .combat
-        .unwrap()
-        .events
-        .iter()
-        .all(|event| !matches!(event, DisclosedCombatEvent::Ability { .. })));
+    let mut shared = tor_simulation::checkpoint::SharedState::default();
+    let checkpoint = serde_json::to_value((game.checkpoint(&mut shared), shared)).unwrap();
+    let (snapshot, shared) = serde_json::from_value(checkpoint).unwrap();
+    let reopened = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
+    for state in [&game, &reopened] {
+        assert_eq!(
+            state.observe(target).unwrap().combat.unwrap().events,
+            historical
+        );
+        assert!(state
+            .observe(other)
+            .unwrap()
+            .combat
+            .unwrap()
+            .events
+            .is_empty());
+    }
 }
 
 #[test]

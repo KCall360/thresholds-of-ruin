@@ -1093,3 +1093,44 @@ fn paused_arena_announces_waiting_after_step_budget_finishes() {
         }
     }
 }
+
+#[test]
+fn travel_stays_and_redirected_commits_stop_without_advancing_the_frozen_route() {
+    // This boundary consumes the committed event; simulation owns the random
+    // selection. A matching movement is the positive control for route progress.
+    for mode in ["matching", "stay", "redirected"] {
+        let (mut service, mut client) = fixture();
+        start(&mut service, &mut client, 5);
+        let actor = ActorId(1);
+        assert!(matches!(service.step(), Step::Progress));
+        let mut committed = service.engine.execute_next_intention().unwrap().unwrap();
+        let crate::journal::JournalContent::IntentionStarted { event, .. } =
+            &mut committed.entry.content
+        else {
+            panic!("ordinary admitted movement");
+        };
+        match mode {
+            "stay" => *event = crate::journal::Event::Waited,
+            "redirected" => {
+                let crate::journal::Event::Moved { to, .. } = event else {
+                    panic!("moved control");
+                };
+                to.x += 1;
+            }
+            _ => {}
+        }
+        let result = service.commit_travel_progress(actor, &committed).unwrap();
+        service.finish_travel_execution(actor, result);
+        let status = &service.travel_status[&actor];
+        if mode == "matching" {
+            assert_eq!(status.completed_steps, 1);
+            assert_eq!(status.phase, TravelPhase::Active);
+            assert!(service.travels.contains_key(&actor));
+        } else {
+            assert_eq!(status.completed_steps, 0);
+            assert_eq!(status.phase, TravelPhase::DecisionRequired);
+            assert!(!service.travels.contains_key(&actor));
+            assert!(service.engine.next_intention_actor().is_none());
+        }
+    }
+}

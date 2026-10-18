@@ -16,7 +16,9 @@ ORDINARY = {"emu": (1, [(1, 2)]), "snake": (1, [(1, 3)]), "rattlesnake": (2, [(1
             "troll": (6, [(1, 8), (1, 8), (2, 6)]),
             "black_unicorn": (7, [(1, 9), (1, 9), (2, 9)]),
             "wraith": (5, [(1, 6)]),
-            "vampire": (8, [(1, 10)]), "jabberwock": (15, [(2, 12), (2, 4)])}
+            "vampire": (8, [(1, 10)]), "jabberwock": (15, [(2, 12), (2, 4)]),
+            "medusa": (8, [(3, 4), (3, 4), (2, 5)]), "phantom": (8, [(4, 4)]),
+            "xeroc": (7, [(4, 4)])}
 
 
 def source(name):
@@ -49,16 +51,16 @@ class RogueRosterContent(unittest.TestCase):
 
     def test_every_rogue_species_owns_explicit_reference_disposition(self):
         species = source("catalog/creatures.toml")["creatures"]["species"]
-        mean = {"kestrel", "venus_flytrap", "griffin", "emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire"}
-        passive = {"bat", "human", "ice_monster", "centaur", "yeti", "wraith", "jabberwock", "leprechaun", "nymph", "orc"}
-        tool_users = {"human", "hobgoblin", "centaur", "troll", "vampire", "orc"}
+        mean = {"kestrel", "venus_flytrap", "griffin", "emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire", "medusa"}
+        passive = {"bat", "human", "ice_monster", "centaur", "yeti", "wraith", "jabberwock", "leprechaun", "nymph", "orc", "phantom", "xeroc"}
+        tool_users = {"human", "hobgoblin", "centaur", "troll", "vampire", "orc", "medusa"}
         care_and_loot = tool_users | {"yeti"}
         self.assertEqual(set(species), {"rogue." + name for name in mean | passive})
         for name in mean | passive:
             with self.subTest(species=name):
                 expected = {
                     "disposition": "mean" if name in mean else "passive",
-                    "idle": "wait" if name in ("ice_monster", "venus_flytrap") else "explore", "memory_ticks": 1000,
+                    "idle": "wait" if name in ("ice_monster", "venus_flytrap", "xeroc") else "explore", "memory_ticks": 1000,
                     "doors": name in tool_users | {"leprechaun", "nymph"}, "care": name in care_and_loot,
                     "equipment": name in tool_users, "loot": name in care_and_loot,
                     "flee_percent": 25,
@@ -354,7 +356,7 @@ class RogueRosterContent(unittest.TestCase):
                 self.assertEqual(len(fixture["characters"][0]["creature"]["hit_dice"]), 16)
                 self.assertEqual(fixture["characters"][0]["loadout"], manifest["characters"][0]["loadout"])
 
-    def test_production_population_selects_twenty_one_species_and_preserves_stock_order(self):
+    def test_production_population_selects_twenty_four_species_and_preserves_stock_order(self):
         manifest = source("scenario.toml")
         activation = manifest["floor_activation"]
         profile = activation["profiles"]["rogue.low_depth"]
@@ -373,8 +375,8 @@ class RogueRosterContent(unittest.TestCase):
         # independent pinned-selector oracle in test_rogue_activation_candidate.
         self.assertEqual({row["archetype"] for band in actor["bands"] for row in band["choices"]},
                          {"rogue." + name for name in (
-                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "wraith", "black_unicorn", "vampire", "jabberwock", "bat", "kestrel", "venus_flytrap", "griffin", "leprechaun", "nymph", "orc")})
-        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.griffin": (1, 5), "rogue.jabberwock": (7, 10)}
+                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "wraith", "black_unicorn", "vampire", "jabberwock", "bat", "kestrel", "venus_flytrap", "griffin", "leprechaun", "nymph", "orc", "medusa", "phantom", "xeroc")})
+        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.griffin": (1, 5), "rogue.jabberwock": (7, 10), "rogue.medusa": (2, 5), "rogue.xeroc": (3, 10)}
         for band in actor["bands"]:
             for row in band["choices"]:
                 if row["archetype"] in chances:

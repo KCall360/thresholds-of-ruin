@@ -96,6 +96,7 @@ pub enum Scope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Op {
+    Perception { value: Perception },
     Locomotion { value: Locomotion },
     Add { stat: Stat, value: i64 },
     Set { stat: Stat, value: i64 },
@@ -105,13 +106,33 @@ pub enum Op {
     TalentReduction { category: String, amount: u32 },
     GrantAbility { ability: String },
 }
-// Authoring alone permits omitted erratic chance as suppression (TOML has no null).
+/// Authoring and stored schemas remain independent of simulation capabilities.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Perception {
+    Invisible { enabled: bool },
+    SeeInvisible { enabled: bool },
+    Sight { enabled: bool },
+    ObjectGuise { appearance: Option<GuiseAppearance> },
+    AmbushFromGuise { enabled: bool },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuiseAppearance {
+    pub name: String,
+    pub description: String,
+    pub class: crate::scenario_package::ItemClass,
+    pub asset: Option<String>,
+}
+
+// Authoring alone permits omitted movement chance as suppression (TOML has no null).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Locomotion {
     Stationary { enabled: bool },
     Flying { enabled: bool },
     Erratic { chance: Option<MovementChance> },
+    Confused { chance: Option<MovementChance> },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1297,6 +1318,21 @@ impl DisplacementProfile {
 #[cfg(test)]
 mod locomotion_authoring_tests {
     use super::*;
+    #[test]
+    fn omitted_confused_chance_is_authoring_only_suppression() {
+        let authored: Modifier = toml::from_str(
+            "scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'confused' } }",
+        )
+        .unwrap();
+        assert_eq!(
+            authored.compile().unwrap().op,
+            s::rules::ModifierOp::Locomotion {
+                value: s::locomotion::LocomotionValue::Confused { chance: None }
+            }
+        );
+        let bad: Modifier = toml::from_str("scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'confused', chance = { numerator = 5, denominator = 4 } } }").unwrap();
+        assert!(bad.compile().is_err());
+    }
     #[test]
     fn omitted_erratic_chance_is_authoring_only_suppression() {
         let authored: Modifier = toml::from_str(

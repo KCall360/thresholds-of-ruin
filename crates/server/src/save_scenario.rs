@@ -949,6 +949,7 @@ enum Effect {
         #[serde(with = "mapped")]
         amount: source::AmountExpr,
     },
+    SearchAdjacentGuises,
     ObservePublicPlan,
     ApplyQualifiedConditionToSource {
         condition: String,
@@ -1417,6 +1418,10 @@ enum ModifierScope {
     deny_unknown_fields
 )]
 enum ModifierOp {
+    Perception {
+        #[serde(with = "mapped")]
+        value: crate::creature_authoring::Perception,
+    },
     Locomotion {
         #[serde(with = "mapped")]
         value: crate::creature_authoring::Locomotion,
@@ -1453,6 +1458,44 @@ enum ModifierOp {
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
+    remote = "crate::creature_authoring::Perception",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum Perception {
+    Invisible {
+        enabled: bool,
+    },
+    SeeInvisible {
+        enabled: bool,
+    },
+    Sight {
+        enabled: bool,
+    },
+    ObjectGuise {
+        #[serde(with = "mapped")]
+        appearance: Option<crate::creature_authoring::GuiseAppearance>,
+    },
+    AmbushFromGuise {
+        enabled: bool,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::GuiseAppearance",
+    deny_unknown_fields
+)]
+struct GuiseAppearance {
+    name: String,
+    description: String,
+    #[serde(with = "mapped")]
+    class: crate::scenario_package::ItemClass,
+    #[serde(with = "mapped")]
+    asset: Option<String>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
     remote = "crate::creature_authoring::Locomotion",
     tag = "kind",
     rename_all = "snake_case",
@@ -1466,6 +1509,10 @@ enum Locomotion {
         enabled: bool,
     },
     Erratic {
+        #[serde(with = "mapped")]
+        chance: Option<crate::creature_authoring::MovementChance>,
+    },
+    Confused {
         #[serde(with = "mapped")]
         chance: Option<crate::creature_authoring::MovementChance>,
     },
@@ -2690,7 +2737,7 @@ impl OutgoingEdgePolicy {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(
     remote = "tor_simulation::rules::Reach",
     tag = "kind",
@@ -2702,11 +2749,43 @@ enum AbilityReach {
     Sight {
         range: u16,
     },
+    MutualSight {
+        range: u16,
+    },
     SelfOnly,
     SelfOrAlly {
         #[serde(with = "AllyRange")]
         range: tor_simulation::rules::AllyRange,
     },
+}
+impl AbilityReach {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::Reach, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Melee {},
+            Sight {
+                range: u16,
+            },
+            MutualSight {
+                range: u16,
+            },
+            SelfOnly {},
+            SelfOrAlly {
+                #[serde(with = "AllyRange")]
+                range: tor_simulation::rules::AllyRange,
+            },
+        }
+        Ok(match super::named_map(deserializer)? {
+            Fields::Melee {} => tor_simulation::rules::Reach::Melee,
+            Fields::Sight { range } => tor_simulation::rules::Reach::Sight { range },
+            Fields::MutualSight { range } => tor_simulation::rules::Reach::MutualSight { range },
+            Fields::SelfOnly {} => tor_simulation::rules::Reach::SelfOnly,
+            Fields::SelfOrAlly { range } => tor_simulation::rules::Reach::SelfOrAlly { range },
+        })
+    }
 }
 #[derive(Serialize)]
 #[serde(
@@ -2730,7 +2809,7 @@ impl AllyRange {
             Touch {},
             Sight { range: u16 },
         }
-        Ok(match Fields::deserialize(deserializer)? {
+        Ok(match super::named_map(deserializer)? {
             Fields::Touch {} => tor_simulation::rules::AllyRange::Touch,
             Fields::Sight { range } => tor_simulation::rules::AllyRange::Sight { range },
         })
@@ -2937,6 +3016,8 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    Perception => crate::creature_authoring::Perception,
+    GuiseAppearance => crate::creature_authoring::GuiseAppearance,
     Locomotion => crate::creature_authoring::Locomotion,
     Rider => crate::creature_authoring::Rider,
     RiderCondition => crate::creature_authoring::RiderCondition,
@@ -3150,7 +3231,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 14;
+const RULES_INPUT_FORMAT: u32 = 15;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -3250,7 +3331,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 16;
+const CONTENT_PACKAGE_FORMAT: u32 = 17;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -3334,6 +3415,8 @@ mod tests {
         use serde_json::json;
         type Value = crate::creature_authoring::Locomotion;
         for value in [
+            json!({"kind":"confused","chance":null}),
+            json!({"kind":"confused","chance":{"numerator":4,"denominator":5}}),
             json!({"kind":"erratic","chance":null}),
             json!({"kind":"erratic","chance":{"numerator":1,"denominator":5}}),
         ] {
@@ -3341,6 +3424,10 @@ mod tests {
             assert_eq!(serde_json::to_value(Borrowed(&decoded.0)).unwrap(), value);
         }
         for value in [
+            json!({"kind":"confused"}),
+            json!({"kind":"confused","chance":[4,5]}),
+            json!({"kind":"confused","chance":{"numerator":5,"denominator":4}}),
+            json!({"kind":"confused","chance":null,"enabled":true}),
             json!({"kind":"erratic"}),
             json!({"kind":"erratic","chance":[1,5]}),
             json!({"kind":"erratic","chance":{"numerator":2,"denominator":1}}),
@@ -3350,6 +3437,49 @@ mod tests {
             json!(["flying", true]),
         ] {
             assert!(serde_json::from_value::<Owned<Value>>(value).is_err());
+        }
+    }
+
+    #[test]
+    fn stored_mutual_sight_requires_exact_named_range() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Record {
+            #[serde(with = "super::AbilityReach")]
+            reach: tor_simulation::rules::Reach,
+        }
+        for reach in [
+            serde_json::json!({"kind":"melee"}),
+            serde_json::json!({"kind":"sight","range":6}),
+            serde_json::json!({"kind":"mutual_sight","range":4}),
+            serde_json::json!({"kind":"self_only"}),
+            serde_json::json!({"kind":"self_or_ally","range":{"kind":"touch"}}),
+            serde_json::json!({"kind":"self_or_ally","range":{"kind":"sight","range":3}}),
+        ] {
+            let good = serde_json::json!({"reach":reach});
+            let decoded: Record = serde_json::from_value(good.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), good);
+        }
+        for reach in [
+            serde_json::json!({"kind":"mutual_sight"}),
+            serde_json::json!({"kind":"mutual_sight","range":4,"awareness":true}),
+            serde_json::json!(["mutual_sight", 4]),
+            serde_json::json!(["melee"]),
+            serde_json::json!(["sight", 6]),
+            serde_json::json!(["self_only"]),
+            serde_json::json!(["self_or_ally", {"kind":"touch"}]),
+            serde_json::json!({"kind":"melee","range":1}),
+            serde_json::json!({"kind":"self_only","range":0}),
+            serde_json::json!({"kind":"sight"}),
+            serde_json::json!({"kind":"self_or_ally"}),
+            serde_json::json!({"kind":"self_or_ally","range":["touch"]}),
+            serde_json::json!({"kind":"self_or_ally","range":["sight",3]}),
+            serde_json::json!({"kind":"self_or_ally","range":{"kind":"touch","range":1}}),
+            serde_json::json!({"kind":"self_or_ally","range":{"kind":"sight"}}),
+        ] {
+            assert!(
+                serde_json::from_value::<Record>(serde_json::json!({"reach":reach})).is_err(),
+                "malformed stored reach accepted: {reach}"
+            );
         }
     }
 
@@ -3444,14 +3574,14 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (46, 19, "interactions-v41", 14, 5, 16, "tor-arena-run-v5")
+            (47, 20, "interactions-v42", 15, 5, 17, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn combined_movement_and_presentation_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 48);
-        assert_eq!(super::RULES_INPUT_FORMAT, 14);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 49);
+        assert_eq!(super::RULES_INPUT_FORMAT, 15);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Locomotion and linked-hold operands advance saved and compiled inputs;
         // presentation metadata also advances the public protocol. None of these
@@ -5185,6 +5315,7 @@ impl Effect {
                 #[serde(with = "mapped")]
                 amount: source::AmountExpr,
             },
+            SearchAdjacentGuises {},
             ObservePublicPlan {},
             ApplyQualifiedConditionToSource {
                 condition: String,
@@ -5235,6 +5366,7 @@ impl Effect {
                 duration,
             },
             Fields::Restore { resource, amount } => source::Effect::Restore { resource, amount },
+            Fields::SearchAdjacentGuises {} => source::Effect::SearchAdjacentGuises,
             Fields::ObservePublicPlan {} => source::Effect::ObservePublicPlan,
             Fields::ApplyQualifiedConditionToSource {
                 condition,

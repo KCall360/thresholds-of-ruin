@@ -363,13 +363,13 @@ impl Game {
         if observer == subject || !actor.alive() || !owner.alive() {
             return None;
         }
-        let scene = self.scene(observer).ok()?;
-        let cells = scene.iter().map(|cell| cell.location).collect();
-        if !self
-            .actors
-            .perceived(&self.world, &cells)
-            .iter()
-            .any(|(id, _)| *id == subject)
+        let (scene, sight) = self.scene_snapshot(observer).ok()?;
+        if self
+            .perception_projection(observer, &scene, &sight)
+            .ok()?
+            .get(&subject)?
+            .disclosure
+            != crate::perception::ActorDisclosure::Creature
         {
             return None;
         }
@@ -436,6 +436,13 @@ impl Game {
         target: ActorId,
         sight: Option<&[SightCell]>,
     ) -> PublicAim {
+        if !self
+            .actor_disclosure(actor, target)
+            .ok()
+            .is_some_and(|class| class == crate::perception::ActorDisclosure::Creature)
+        {
+            return PublicAim::Unavailable;
+        }
         let Some(target) = self.actors.get(&target) else {
             return PublicAim::Unavailable;
         };
@@ -515,6 +522,8 @@ mod tests {
             view.combat.as_mut().unwrap().events = if repeat_known_event {
                 vec![
                     crate::combat::DisclosedCombatEvent::Ability {
+                        caster_reference: Some(crate::perception::ActorReferenceKind::Creature),
+                        target_reference: Some(crate::perception::ActorReferenceKind::Creature),
                         caster: Some(actor),
                         target: Some(actor),
                         id: ability.clone(),
@@ -709,6 +718,20 @@ mod tests {
         let mut shared = crate::checkpoint::SharedState::default();
         let checkpoint = game.checkpoint(&mut shared);
         Game::restore_checkpoint(checkpoint, &shared, game.content().clone())
+    }
+    fn retain_unobserved_synthetic_event(game: &mut Game, event: crate::combat::CombatEvent) {
+        assert!(game.event_log.is_empty());
+        game.event_log.push(event);
+        // Deliberately synthetic history has a complete current envelope but no
+        // observer authority. This isolates outcome validation from receipt shape.
+        game.event_receipts = serde_json::from_value(serde_json::json!({
+            "generation": 1,
+            "sealed": game.event_log.len(),
+            "bindings": 0,
+            "observers": {},
+        }))
+        .unwrap();
+        assert!(game.event_receipts_valid());
     }
     #[test]
     fn public_plan_restore_requires_knowledge_of_current_own_grants() {
@@ -1167,12 +1190,14 @@ mod tests {
         let record = retained_record(&game, actor);
         retain_record(&mut game, actor, record.clone());
         let events = game.event_log.clone();
+        let receipts = game.event_receipts.clone();
         assert!(events
             .iter()
             .any(|event| matches!(event, crate::combat::CombatEvent::Resolved { .. })));
         game.act(actor, crate::Action::Wait).unwrap();
         assert!(game.tick() > record.observed_at);
         game.event_log = events;
+        game.event_receipts = receipts;
         assert!(
             restored(&game).is_ok(),
             "older retained outcomes remain historical"
@@ -1245,12 +1270,13 @@ mod tests {
             let mut candidate = game.clone();
             assert!(candidate.apply(invalid.clone()).is_err());
             assert_eq!(candidate, game, "invalid evidence cannot publish any state");
-            candidate
-                .event_log
-                .push(crate::combat::CombatEvent::Resolved {
+            retain_unobserved_synthetic_event(
+                &mut candidate,
+                crate::combat::CombatEvent::Resolved {
                     outcome: invalid,
                     strike: None,
-                });
+                },
+            );
             assert!(
                 restored(&candidate).is_err(),
                 "typed in-memory checkpoint cannot bypass the byte reader"
@@ -1326,12 +1352,13 @@ mod tests {
             .into_iter()
             .filter_map(|(label, outcome)| {
                 let mut candidate = game.clone();
-                candidate
-                    .event_log
-                    .push(crate::combat::CombatEvent::Resolved {
+                retain_unobserved_synthetic_event(
+                    &mut candidate,
+                    crate::combat::CombatEvent::Resolved {
                         outcome,
                         strike: None,
-                    });
+                    },
+                );
                 restored(&candidate).is_ok().then_some(label)
             })
             .collect();
@@ -1347,14 +1374,15 @@ mod tests {
         let (game, actor) = observer();
         // With all effects erased, both are internally coherent historical facts.
         // Checkpoint restoration validates shape and consistency, not original intent.
+        // A coherent synthetic envelope still grants no historical observation.
         for participation in [
             AttemptedParticipation::source(),
             AttemptedParticipation::target(),
         ] {
             let mut candidate = game.clone();
-            candidate
-                .event_log
-                .push(crate::combat::CombatEvent::Resolved {
+            retain_unobserved_synthetic_event(
+                &mut candidate,
+                crate::combat::CombatEvent::Resolved {
                     outcome: Outcome {
                         actor,
                         target: actor,
@@ -1367,11 +1395,19 @@ mod tests {
                         effects: vec![],
                     },
                     strike: Some(0),
-                });
-            assert!(
-                restored(&candidate).is_ok(),
-                "coherent user-edited history is outside the existing authenticity guarantee"
+                },
             );
+            let restored = restored(&candidate).expect(
+                "coherent user-edited history is outside the existing authenticity guarantee",
+            );
+            assert_eq!(restored.combat_events(), candidate.combat_events());
+            assert!(restored
+                .observe(actor)
+                .unwrap()
+                .combat
+                .unwrap()
+                .events
+                .is_empty());
         }
     }
 
@@ -1392,12 +1428,13 @@ mod tests {
         };
         for strike in [None, Some(crate::limits::STRIKES as u16)] {
             let mut candidate = game.clone();
-            candidate
-                .event_log
-                .push(crate::combat::CombatEvent::Resolved {
+            retain_unobserved_synthetic_event(
+                &mut candidate,
+                crate::combat::CombatEvent::Resolved {
                     outcome: outcome.clone(),
                     strike,
-                });
+                },
+            );
             assert!(
                 restored(&candidate).is_err(),
                 "a rider summary requires a valid primary strike context"

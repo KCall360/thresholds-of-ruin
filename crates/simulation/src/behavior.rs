@@ -105,6 +105,7 @@ impl BehaviorPolicy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Engagement {
+    pub reference: crate::perception::ActorReferenceKind,
     pub target: ActorId,
     pub location: Location,
     pub last_seen: u64,
@@ -114,6 +115,7 @@ impl<'de> Deserialize<'de> for Engagement {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            reference: crate::perception::ActorReferenceKind,
             target: ActorId,
             #[serde(deserialize_with = "crate::public_plan::read_location")]
             location: Location,
@@ -121,6 +123,7 @@ impl<'de> Deserialize<'de> for Engagement {
         }
         let fields: Fields = crate::bounded::named_map(d)?;
         Ok(Self {
+            reference: fields.reference,
             target: fields.target,
             location: fields.location,
             last_seen: fields.last_seen,
@@ -221,8 +224,9 @@ impl Game {
     pub(crate) fn provoke_from_strike(
         &mut self,
         outcome: &crate::abilities::Outcome,
-        strike: u16,
+        publication: crate::lifecycle::PublishedResolution,
     ) -> Result<(), GameError> {
+        let event = self.published_primary_event(publication, outcome)?;
         if outcome.actor == outcome.target
             || !outcome.target_participated()
             || !self.alive(outcome.target)
@@ -242,16 +246,18 @@ impl Game {
         {
             return Ok(());
         }
+        let Some(reference) = self.event_target_source_reference(outcome.target, event) else {
+            return Ok(());
+        };
         let view = self.observe(outcome.target)?;
-        let licensed = view.combat.as_ref().is_some_and(|combat| combat.events.iter().any(|event| {
-            matches!(event, crate::combat::DisclosedCombatEvent::Ability { caster: Some(caster), target: Some(target), id, strike: Some(ordinal), .. }
-                if *caster == outcome.actor && *target == outcome.target && id == ability && *ordinal == strike)
-        }));
         let witness = view
             .visible_actors
             .iter()
             .find(|actor| actor.id == outcome.actor);
-        if let (true, Some(witness)) = (licensed, witness) {
+        if let Some(witness) = witness {
+            if witness.disclosure.reference() != Some(reference) {
+                return Ok(());
+            }
             let memory = self.actors[&outcome.target]
                 .behavior_policy()
                 .ok_or(GameError::UnknownActor)?
@@ -266,6 +272,10 @@ impl Game {
             let mut settled = self.settled_actor_outcome(outcome.target)?;
             settled.state.behavior.engagement = Some(Engagement {
                 target: outcome.actor,
+                reference: witness
+                    .disclosure
+                    .reference()
+                    .expect("disclosed hostile contact"),
                 location,
                 last_seen: self.actor_clock(outcome.target),
             });

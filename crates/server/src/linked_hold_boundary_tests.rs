@@ -4,6 +4,10 @@ use super::*;
 use serde_json::{json, Value};
 
 pub(super) fn scenario() -> crate::Scenario {
+    scenario_with_confusion(false)
+}
+
+pub(super) fn scenario_with_confusion(confused: bool) -> crate::Scenario {
     let manifest: crate::scenario_package::Manifest =
         toml::from_str(include_str!("../../../scenarios/two-room/scenario.toml")).unwrap();
     let mut manifest = serde_json::to_value(manifest).unwrap();
@@ -32,6 +36,13 @@ pub(super) fn scenario() -> crate::Scenario {
         {"scope":"always","op":{"kind":"grant_ability","ability":"fixture_linked_hold"}},
         {"scope":"always","op":{"kind":"add","stat":{"kind":"health"},"value":200}}]});
     let mut subject = holder.clone();
+    if confused {
+        subject["modifiers"].as_array_mut().unwrap().push(json!({
+            "scope":"always","op":{"kind":"locomotion","value":{
+                "kind":"confused","chance":{"numerator":4,"denominator":5}
+            }}
+        }));
+    }
     subject["modifiers"]
         .as_array_mut()
         .unwrap()

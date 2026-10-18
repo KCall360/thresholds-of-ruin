@@ -92,10 +92,31 @@ impl AbilityPlan {
                 start: cost.start,
                 resolution: cost.resolution,
             });
-        if self.invocation.kind() != definition.invocation
+        if self.ambush.is_some_and(|site| {
+            site != (super::CheckSite {
+                strike: 0,
+                check: super::CheckPhase::Primary {
+                    side: super::CheckSide::Initiating,
+                },
+            }) || !definition.basic_attack
+                || definition.interaction != crate::rules::Interaction::HostileToTarget
+                || !matches!(self.reach, Reach::Melee)
+                || self
+                    .strikes
+                    .first()
+                    .and_then(|strike| strike.check.as_ref())
+                    .is_none_or(|check| check.actor != crate::rules::CheckActor::User)
+        }) || matches!(self.invocation, AbilityInvocation::ContactTarget { .. })
+            && (!definition.basic_attack
+                || definition.interaction != crate::rules::Interaction::HostileToTarget
+                || !matches!(self.reach, Reach::Melee))
+            || self.invocation.kind() != definition.invocation
             || self.invocation.target(self.actor) != self.target
             || match (self.invocation, self.step) {
-                (AbilityInvocation::ActorTarget { .. }, None) => false,
+                (
+                    AbilityInvocation::ActorTarget { .. } | AbilityInvocation::ContactTarget { .. },
+                    None,
+                ) => false,
                 (AbilityInvocation::SelfStep { direction }, Some(step)) => {
                     direction != step.direction || !step.valid()
                 }
@@ -207,7 +228,8 @@ impl AbilityPlan {
                 },
             ) => (1..=crate::limits::SIGHT_RANGE).contains(range),
             (Reach::Melee, Reach::Melee) => self.actor != self.target,
-            (Reach::Sight { .. }, Reach::Sight { range }) => {
+            (Reach::Sight { .. }, Reach::Sight { range })
+            | (Reach::MutualSight { .. }, Reach::MutualSight { range }) => {
                 self.actor != self.target && (1..=crate::limits::SIGHT_RANGE).contains(range)
             }
             _ => false,

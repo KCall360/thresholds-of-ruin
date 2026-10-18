@@ -30,7 +30,7 @@ pub struct Preparation {
     pub plan: crate::abilities::Plan,
     pub progress: PreparationProgress,
     pub item_payment: crate::supplies::ItemPayment,
-    pub threats: BTreeSet<ActorId>,
+    pub threats: BTreeSet<crate::perception::PerceivedThreat>,
     pub remaining: u64,
     pub started: u64,
     pub active: bool,
@@ -49,7 +49,8 @@ impl<'de> serde::Deserialize<'de> for Preparation {
             plan: crate::abilities::Plan,
             progress: PreparationProgress,
             item_payment: crate::supplies::ItemPayment,
-            threats: BTreeSet<ActorId>,
+            #[serde(deserialize_with = "crate::perception::read_threats")]
+            threats: BTreeSet<crate::perception::PerceivedThreat>,
             remaining: u64,
             started: u64,
             active: bool,
@@ -221,13 +222,21 @@ pub enum ObjectiveKind {
 /// One disclosed event for every data-defined ability, including the basic attack.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DisclosedCombatEvent {
+    /// Personally experienced activity whose source identity/technique is hidden.
+    UnseenAbility {
+        caster: Option<ActorId>,
+        target: ActorId,
+        outcome: crate::abilities::OutcomeStatus,
+    },
     EscapeResolved {
         hold: crate::linked_hold::HoldId,
         success: bool,
     },
     Ability {
         caster: Option<ActorId>,
+        caster_reference: Option<crate::perception::ActorReferenceKind>,
         target: Option<ActorId>,
+        target_reference: Option<crate::perception::ActorReferenceKind>,
         id: crate::content_ids::AbilityId,
         name: String,
         outcome: crate::abilities::OutcomeStatus,
@@ -243,6 +252,7 @@ pub enum DisclosedCombatEvent {
     },
     Died {
         actor: ActorId,
+        reference: crate::perception::ActorReferenceKind,
     },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -382,88 +392,29 @@ impl Game {
     pub(crate) fn combat_view(
         &self,
         id: ActorId,
-        visible: &impl Fn(tor_world::Location) -> bool,
-        perceived: &[(ActorId, crate::actor_store::BodyCells)],
+        perceived: &crate::perception::PerceptionProjection,
     ) -> Option<CombatView> {
         let a = self.actors.get(&id)?;
         let creature = self.creature(id)?;
         let timing = self.preparation_timing(id)?;
         let actors = perceived
             .iter()
-            .filter(|(other, body)| {
-                *other != id && self.actors[other].alive() && body.iter().any(|(p, _)| visible(*p))
+            .filter(|(other, perceived)| {
+                **other != id
+                    && self.actors[other].alive()
+                    && perceived.disclosure == crate::perception::ActorDisclosure::Creature
             })
-            .filter_map(|(other, _)| {
-                let a = &self.actors[other];
-                let c = a.combat.as_ref()?;
-                let injury = Injury::from_health(c.hp(), c.creature().health().maximum());
+            .filter_map(|(other, perceived)| {
+                let c = self.actors[other].combat.as_ref()?;
                 Some((
                     *other,
-                    self.hostile(id, *other),
+                    self.perceived_hostile(id, *other, perceived.disclosure),
                     self.allied(id, *other),
-                    injury,
+                    Injury::from_health(c.hp(), c.creature().health().maximum()),
                 ))
             })
             .collect();
-        // Personal sensations are always safe; third-party events require both participants visible.
-        let disclosed =
-            |actor| actor == id || self.actors.get(&actor).is_some_and(|a| visible(a.location));
-        let seen = |actor| disclosed(actor).then_some(actor);
-        let events = self
-            .event_log
-            .iter()
-            .filter_map(|event| match event {
-                CombatEvent::Resolved { outcome, .. }
-                    if outcome.ability.is_none()
-                        && outcome.actor == id
-                        && outcome.target == id
-                        && outcome.result == crate::abilities::OutcomeStatus::Applied =>
-                {
-                    let crate::abilities::ResolvedEffect::ApplyCondition { id, .. } =
-                        outcome.effects.first()?
-                    else {
-                        return None;
-                    };
-                    let definition = self.content.rules.condition(id)?;
-                    Some(DisclosedCombatEvent::Condition {
-                        id: id.clone(),
-                        name: definition.name.clone(),
-                    })
-                }
-                CombatEvent::Resolved { outcome, strike }
-                    if (outcome.actor == id
-                        || (outcome.target == id && outcome.target_participated()))
-                        || (disclosed(outcome.actor) && disclosed(outcome.target)) =>
-                {
-                    let ability = outcome.ability.as_ref()?;
-                    let definition = self.content.rules.ability(ability)?;
-                    Some(DisclosedCombatEvent::Ability {
-                        caster: seen(outcome.actor),
-                        target: seen(outcome.target),
-                        id: ability.clone(),
-                        name: definition.name.clone(),
-                        outcome: outcome.result,
-                        strike: *strike,
-                    })
-                }
-                CombatEvent::EscapeResolved {
-                    actor,
-                    hold,
-                    success,
-                    ..
-                } if *actor == id => Some(DisclosedCombatEvent::EscapeResolved {
-                    hold: *hold,
-                    success: *success,
-                }),
-                CombatEvent::Interrupted { actor, .. } if *actor == id => {
-                    Some(DisclosedCombatEvent::Interrupted { actor: *actor })
-                }
-                CombatEvent::Died { actor } if disclosed(*actor) => {
-                    Some(DisclosedCombatEvent::Died { actor: *actor })
-                }
-                _ => None,
-            })
-            .collect();
+        let events = self.disclosed_event_history(id);
         Some(CombatView {
             own_stats: Some(creature.own_stats()),
             public_plan: a.public_plan.clone(),
@@ -584,6 +535,7 @@ impl Game {
             return Err(GameError::UnknownActor);
         }
         let mut candidate = self.clone();
+        candidate.begin_effect_publication()?;
         candidate.combat.run = run;
         candidate.combat.selected = Some(selected);
         candidate.combat.input_boundaries.clear();
@@ -595,6 +547,7 @@ impl Game {
         candidate.combat.hostility = hostility;
         candidate.reconcile_recovery_contexts()?;
         candidate.check_run_policy()?;
+        candidate.finish_effect_publication()?;
         *self = candidate;
         Ok(())
     }
@@ -619,7 +572,11 @@ impl Game {
                     .actors
                     .get(&actor)
                     .and_then(|owner| owner.engagement_at(self.actor_clock(actor)))
-                    .is_some_and(|engagement| engagement.target == target))
+                    .is_some_and(|engagement| {
+                        engagement.target == target
+                            && engagement.reference
+                                == crate::perception::ActorReferenceKind::Creature
+                    }))
     }
 
     pub(crate) fn faction_hostile(&self, actor: ActorId, target: ActorId) -> bool {
@@ -733,7 +690,8 @@ impl Game {
     pub fn pause_preparation(&mut self, actor: ActorId) -> Option<crate::Work> {
         let mut outcome = self.actor_outcome(actor).ok()?;
         let work = outcome.pause(self.actor_clock(actor))?;
-        self.apply_outcome(outcome).ok()?;
+        let prepared = self.prepare_actor_outcome(outcome).ok()?;
+        self.publish_actor_effect(prepared, false).ok()?;
         Some(work)
     }
 

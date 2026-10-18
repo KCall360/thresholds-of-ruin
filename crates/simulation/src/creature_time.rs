@@ -154,6 +154,26 @@ impl Game {
         id: ActorId,
         requirement: crate::nutrition::NutritionRequirement,
     ) -> Result<(), GameError> {
+        let outcome = self.prepare_nutrition_configuration(id, requirement)?;
+        let prepared = self.prepare_actor_outcome(outcome)?;
+        self.publish_actor_effect(prepared, false)
+    }
+
+    /// Birth construction is already inside its enclosing publication candidate.
+    pub(crate) fn configure_nutrition_in_transaction(
+        &mut self,
+        id: ActorId,
+        requirement: crate::nutrition::NutritionRequirement,
+    ) -> Result<(), GameError> {
+        let outcome = self.prepare_nutrition_configuration(id, requirement)?;
+        self.apply_outcome(outcome)
+    }
+
+    fn prepare_nutrition_configuration(
+        &self,
+        id: ActorId,
+        requirement: crate::nutrition::NutritionRequirement,
+    ) -> Result<crate::lifecycle::ActorOutcome, GameError> {
         let mut outcome = self.settled_actor_outcome(id)?;
         let combat = outcome.state.combat.as_mut().ok_or(GameError::Rule(
             crate::abilities::RuleError::InvalidDefinition,
@@ -166,7 +186,7 @@ impl Game {
                 .checked_add(interval)
                 .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
         }
-        self.apply_outcome(outcome)
+        Ok(outcome)
     }
 
     /// Settle earned active work under the old nutrition policy, then rephase
@@ -183,7 +203,8 @@ impl Game {
         combat
             .set_recovery_nutrition(nutrition)
             .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidDefinition))?;
-        self.with_recovery_transition(false, |candidate| candidate.apply_outcome(outcome))
+        let prepared = self.prepare_actor_outcome(outcome)?;
+        self.publish_actor_effect(prepared, false)
     }
 
     pub fn restore_resource(
@@ -200,7 +221,8 @@ impl Game {
             crate::abilities::RuleError::InvalidDefinition,
         ))?;
         let restored = combat.restore_resource(resource, amount);
-        self.apply_outcome(outcome)?;
+        let prepared = self.prepare_actor_outcome(outcome)?;
+        self.publish_actor_effect(prepared, false)?;
         Ok(restored)
     }
 
@@ -225,9 +247,8 @@ impl Game {
         ))?;
         let context = self.condition_recovery_context(actor, condition)?;
         let update = combat.apply_condition(condition, source, duration, context)?;
-        self.with_recovery_transition(context.is_some(), |candidate| {
-            candidate.apply_outcome(outcome)
-        })?;
+        let prepared = self.prepare_actor_outcome(outcome)?;
+        self.publish_actor_effect(prepared, false)?;
         Ok(update)
     }
 }
@@ -945,6 +966,9 @@ mod tests {
             game.actors.get_mut(&actor).unwrap().ready_at = 10;
         }
         game.check_arena_policy().unwrap();
+        // This fixture invokes private settlement without the action publisher.
+        game.seal_event_observations().unwrap();
+        assert!(game.event_receipts_valid());
         assert_eq!(
             game.arena_run().unwrap().stop(),
             Some(&crate::arena::ArenaStop::Elimination {

@@ -20,7 +20,7 @@ class FloorActivationProcess(ProcessTestCase):
         # the product receiving the playable starter and population.
         with (package / "scenario.toml").open("w", encoding="utf-8") as output:
             output.write('''
-format = 19
+format = 20
 id = "floor-activation"
 version = "1.0"
 ruleset = "rules.toml"

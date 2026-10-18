@@ -4,7 +4,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 48;
+pub const PROTOCOL_VERSION: u32 = 49;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -816,6 +816,13 @@ pub enum ObjectiveKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CombatEventView {
+    /// A personal sensation. The source may be a local anonymous contact;
+    /// no ability identity, species, strike ordinal or private plan is disclosed.
+    UnseenAbility {
+        caster: Option<ActorTarget>,
+        target: ActorTarget,
+        outcome: AbilityOutcome,
+    },
     /// The observer's own Escape result, with no hidden holder details.
     EscapeResolved {
         hold: HoldTarget,

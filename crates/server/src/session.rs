@@ -209,6 +209,7 @@ impl TravelJob {
 enum TravelExecution {
     Moved,
     Blocked,
+    Redirected,
 }
 
 /// Serialized session operations keep snapshots and streamed updates consistent.
@@ -1563,8 +1564,19 @@ impl Service {
     ) -> Option<TravelExecution> {
         let job = self.travels.get_mut(&actor)?;
         let (admission, outcome) = match &result.entry.content {
-            crate::journal::JournalContent::IntentionStarted { admission, .. } => {
-                (admission, TravelExecution::Moved)
+            crate::journal::JournalContent::IntentionStarted {
+                admission, event, ..
+            } => {
+                let matched = matches!(event, crate::journal::Event::Moved { to, .. }
+                    if job.steps.front().is_some_and(|step| *to == crate::adapt::position(step.destination)));
+                (
+                    admission,
+                    if matched {
+                        TravelExecution::Moved
+                    } else {
+                        TravelExecution::Redirected
+                    },
+                )
             }
             crate::journal::JournalContent::IntentionFailed { admission, .. } => {
                 (admission, TravelExecution::Blocked)
@@ -1590,8 +1602,18 @@ impl Service {
         let Some(job) = self.travels.get(&actor) else {
             return;
         };
-        if matches!(outcome, TravelExecution::Blocked) {
-            self.stop_travel(actor, TravelPhase::Blocked);
+        if matches!(
+            outcome,
+            TravelExecution::Blocked | TravelExecution::Redirected
+        ) {
+            self.stop_travel(
+                actor,
+                if matches!(outcome, TravelExecution::Redirected) {
+                    TravelPhase::DecisionRequired
+                } else {
+                    TravelPhase::Blocked
+                },
+            );
             return;
         }
         let observation = match self.travel_observation(actor) {
@@ -4153,3 +4175,7 @@ mod public_plan_observation_tests;
 #[cfg(test)]
 #[path = "locomotion_session_tests.rs"]
 mod locomotion_tests;
+
+#[cfg(test)]
+#[path = "perception_session_tests.rs"]
+mod perception_tests;
