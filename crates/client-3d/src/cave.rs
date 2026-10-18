@@ -8,12 +8,18 @@
 //! carries ambient occlusion and the dimming of remembered cells.
 use bevy::{
     asset::weak_handle,
-    pbr::{ExtendedMaterial, MaterialExtension},
+    pbr::{
+        ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
+        MeshPipelineKey,
+    },
     prelude::*,
     render::{
-        mesh::{Indices, PrimitiveTopology},
+        mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology},
         render_asset::RenderAssetUsages,
-        render_resource::{AsBindGroup, ShaderRef},
+        render_resource::{
+            AsBindGroup, FragmentState, RenderPipelineDescriptor, ShaderDefVal, ShaderRef,
+            SpecializedMeshPipelineError,
+        },
     },
 };
 use std::collections::{HashMap, HashSet};
@@ -39,6 +45,43 @@ pub use uniform::CaveParams;
 impl MaterialExtension for CaveExtension {
     fn fragment_shader() -> ShaderRef {
         ShaderRef::Handle(SHADER)
+    }
+
+    fn prepass_fragment_shader() -> ShaderRef {
+        // The camera depth/normal pass must dissolve exactly the same rock as
+        // the colour pass, or an invisible ceiling still hides every creature.
+        ShaderRef::Handle(SHADER)
+    }
+
+    fn specialize(
+        _pipeline: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayoutRef,
+        key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        let prepass = descriptor.vertex.shader_defs.iter().any(|definition| {
+            matches!(definition, ShaderDefVal::Bool(name, true) if name == "PREPASS_PIPELINE")
+        });
+        let depth_only = key.mesh_key.contains(MeshPipelineKey::DEPTH_PREPASS)
+            && !key.mesh_key.intersects(
+                MeshPipelineKey::NORMAL_PREPASS
+                    | MeshPipelineKey::MOTION_VECTOR_PREPASS
+                    | MeshPipelineKey::DEFERRED_PREPASS,
+            );
+        if prepass && depth_only {
+            // Opaque shadow views normally omit fragment processing altogether.
+            // Run only the presentation cutaway, not the cave's material shader,
+            // so the artistic key can enter the opening shown by the camera.
+            let mut shader_defs = descriptor.vertex.shader_defs.clone();
+            shader_defs.push("CAVE_SHADOW_PASS".into());
+            descriptor.fragment = Some(FragmentState {
+                shader: SHADER,
+                shader_defs,
+                entry_point: "fragment".into(),
+                targets: Vec::new(),
+            });
+        }
+        Ok(())
     }
 }
 

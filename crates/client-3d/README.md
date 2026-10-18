@@ -5,6 +5,10 @@ with procedural scenery, creatures, and items. Its gameplay scope remains the
 prototype's exploration, combat, and basic item interactions. It has its own
 workspace, lockfile, tests, and verification gate.
 
+Live play currently omits disclosed terrain two or more levels above the
+character's feet, keeping the overhead view open. Nearby walls retain their
+camera cutaway. There is no ceiling display toggle.
+
 Windows defaults to Direct3D 12 for live play and both offline showcases.
 All three modes use single-sample rendering and Bevy's built-in FXAA.
 New shader pipelines compile before drawing, so a ready scene does not briefly
@@ -18,14 +22,28 @@ environment variable can select another backend explicitly. Capture diagnostics
 identify the actual adapter, backend and driver; verification receipts also
 record renderer and compiler configuration without session credentials.
 
+For faster Windows shader compilation, an optional matching `dxcompiler.dll`
+and `dxil.dll` pair can be placed beside the actual client executable. The client
+selects that pair by absolute path, independently of the launcher's working
+directory. Without the pair it uses the built-in FXC compiler. Explicit
+`WGPU_DX12_COMPILER` choices remain authoritative; `WGPU_DX12_COMPILER=fxc`
+selects FXC even when the pair is present. Startup logs report the requested
+compiler and selected paths. `RUST_LOG=info,wgpu_hal::dx12::instance=debug`
+also reports which compiler the native renderer loaded.
+
 ## Run
 
 Build the release server once from the repository root, then run the client:
 
 ```
 cargo build --release -p tor-server
-cargo run --manifest-path crates/client-3d/Cargo.toml -- --seed 42
+cargo run --release --manifest-path crates/client-3d/Cargo.toml -- --seed 42
 ```
+
+Use an optimized client for art review and launch-time comparisons; procedural
+sculpting is substantially more expensive in an unoptimized development build.
+Offline review modes run without a server. Create the destination directory
+before using `--capture DIR`; the screenshot writer expects it to exist.
 
 With no `--connect`, the client starts a private `tor-server` (default scenario
 `scenarios/rogue-exploration`) with a fresh save under `.local/client-3d/saves/`
@@ -44,12 +62,40 @@ and stops it on exit. Other options:
 - `--bored` starts a game as though the player had been away nearly a minute
 - `--appearance woman|man[:N]` chooses the offline bestiary's Warrior preview; `N`
   picks among that sex's hair, skin and build
+- `--azimuth DEGREES` orbits offline bestiary/gallery cameras relative to their
+  usual view: `90` and `270` show the flanks, `180` the rear. It applies to
+  portraits, photos, lineups and the prop tour; live gameplay retains Q/E.
+  The stage wall cuts away when needed for the selected review angle.
+- `--capture-warmup SECS` delays the offline bestiary timeline, including lineups,
+  by 0–60 seconds while the renderer warms up; `12` helps when early captures
+  are blank
+- `--capture-every SECS` also works in the offline bestiary for time-stamped
+  motion frames; `--quit-after SECS` bounds its timeline after warm-up
+- `--travel-study` runs two 35-second offline groups through slow curves, a
+  3.2-cell/s shuttle, sharp turns, abrupt stops/restarts, and action, hurt, dodge
+  and death interruptions. Everyone shares an offset within 0.9 cells of home.
+  Try `--travel-study --capture DIR --capture-warmup 12 --capture-every 0.1`,
+  then repeat with `--azimuth 90` to inspect feet and profiles. The study clock
+  slows during render stalls to preserve the animation's time step; capture
+  timestamps and `--quit-after` use that clock. It exits after 70 study seconds
+  and pending captures finish. This mode cannot combine with gallery, lineups,
+  idles/antics or portraits/photos.
 - `--lineups` (with `--capture DIR`) shows five individuals of each creature
   side by side, women and men alternating among people, with a close-up
+- `--fallen-lineups` shows the same five generated individuals in settled
+  death poses, with a full lineup and two close views framed around the fallen
+  bodies, clothing and held props. For manual corpse review, use
+  `--fallen-lineups --capture DIR --capture-warmup 12`; repeat with
+  `--azimuth 90` for another angle. Captures have `fallen-` in their names.
+  This mode cannot combine with gallery, travel-study, idles/antics or
+  portraits/photos.
 - `scenarios/menagerie` (in this crate) is a lit hall holding its supported
   creature recipes, wandering at peace except an emu and a snake that fight, with
   items on the floor: `--scenario crates/client-3d/scenarios/menagerie`
 - `TOR_3D_CURSORS=DIR` saves the cursor icons, enlarged, for inspection
+- `TOR_3D_PROFILE_BUILD=1` enables local startup timings for model cache misses
+  and scene construction phases, plus live/idle model-cache payload and evictions;
+  ordinary runs keep this profiling disabled
 - `--demo-hunt` explores and fights whatever it finds
 - `--gallery` shows every prop on a stretch of cave floor, no server needed
 - `--demo-interact` runs a scripted pass over pick up, drop, equip, remove,
@@ -108,6 +154,10 @@ state cues.
 
 ## Independent maintenance
 
+The [continuation plan](../../docs/plans/3d-art-continuation.md) records the
+implemented art foundations, reviewed behavior, remaining challenges and next
+shared modeling work. Art targets do not establish runtime equipment support.
+
 Run its checks explicitly from the repository root:
 
 ```
@@ -135,8 +185,8 @@ server and client binaries from the same checkout.
 
 WASD, arrows or numpad move relative to the camera (two keys make a diagonal;
 holding repeats). Q/E turn the camera in 45-degree steps, the mouse wheel zooms.
-Space waits, R/F (or `<`/`>`, PageUp/PageDown) climb and descend, C toggles the
-ceiling cutaway, M shows or hides the mini-map, Tab takes control, Esc closes
+Space waits, R/F (or `<`/`>`, PageUp/PageDown) climb and descend, M shows or
+hides the mini-map, Tab takes control, Esc closes
 the pack or quits. Stepping into
 a hostile creature attacks it, as in the ASCII client.
 
@@ -186,39 +236,54 @@ Objects:
 
 - Props (`props.rs`) share the cave's art direction: chunky, flat-faceted
   forms in one small palette (wood, leather, cloth, bone, iron, steel, bronze,
-  gold), with a glowing accent only on magical or valuable things, in the
+  gold). Painted mesh palettes use sRGB and convert to linear color at upload;
+  overbright eye glints and material emissive energy keep their linear range.
+  Sculpt occlusion multiplies decoded linear pigment, independently of its hue;
+  runtime lights supply directional shade.
+  A glowing accent appears only on magical or valuable things, in the
   crystals' teal, violet and amber. Models are built in code and cached:
   mace, greatsword and shorter blades, ring mail, bandage, ration, corpses
   tinted by creature, the dawn seal, copper/silver/iron tokens, the stone
   tablet, and fallbacks for every item class (potion, ring, amulet, scroll,
   spellbook, wand, gem, tool, pouch). Items are matched by name, then class.
+  The shared model cache retains live handles and reuses idle models within a
+  128 MiB raw-mesh-payload budget and 1,024-key limit. Periodic pruning releases
+  the least recently used idle handles; these limits do not bound live geometry,
+  renderer staging or total GPU residency.
 - Doors are stone doorways two cells high with an amber lamp, turned to fit
   the walls beside them; the plank leaf swings when the door opens or closes.
   Stairs up spiral around a pillar inside a teal rune ring; stairs down are a
   dark shaft ringed by stone and a cold blue rune. The equipped weapon hangs at
   the player's side, and every item on the floor carries a small glint.
 
-- Scale uses cells as an art-direction reference. Proportions may be stylized
-  to improve silhouettes, readability, and visual appeal at gameplay distance.
-- Creatures (`creatures.rs`) are jointed figures with soft shading: smooth
-  swept tubes for torsos, necks, limbs, tails and mane locks; painted coat
-  patterns (the quagga's stripes); leaf-shaped layered feathers; cartoon eyes
-  with whites, iris, pupil and catchlight. They were previously faceted in the
-  cave's style,
-  posed in code every frame. Five body plans cover the scenarios: bipeds (the
+- Scale follows the selected [Bold Storybook art direction](../../docs/art/3d-art-direction.md):
+  stronger character presence, expressive heads, hands and feet, and deliberate
+  family silhouettes. Cells retain their movement and support meaning.
+- Creatures (`creatures.rs`) are cached jointed figures with sculpted connected
+  masses, thin draped garments, flowing feather clumps and inset expressive eyes.
+  Painted patterns preserve individual variation, including quagga stripes.
+  Seven body plans cover the scenarios: bipeds (the
   player, sentinels, arcanists and mages, the ruin scout, stone guardian,
   hobgoblin, zombie, vampire and yeti), a bird (emu), quadrupeds (quagga,
   black unicorn), the centaur, a serpent (snake) and floaters (ember wisp,
   ice monster). Gameplay recipes come from disclosed asset IDs and their
   supported parents. The player holds the disclosed equipped weapon.
+  Biped dimensions and limb shapes resolve once in `creatures/anatomy.rs` and
+  feed mesh generation, joint placement, garment fitting and support motion.
+  Slender and sturdy organic builds link shoulder, waist, hip and muscle shape;
+  average bodies, vertical bone lengths and terminal sizes remain the anchors.
+  Guardian and Yeti retain their separate mass recipes. These fitting rules are
+  foundations for equipment composition; interchangeable worn armor and general
+  data-driven creature authoring remain future integration work.
 - Idles: at rest everyone breathes, shifts weight and looks about, with a
   fidget of their own every few seconds: the hero checks the blade, casters
   study a raised palm, sentinels settle the shield, the scout flips the dagger,
   the hobgoblin taps its club, the zombie sways, the yeti beats its chest, the
   emu pecks, horses graze and stamp, the snake rears to taste the air.
-- Animation: walk cycles paced to the distance moved (a
-  zombie drags a leg, a guardian or yeti lumbers, the emu's head pumps, horses
-  move diagonal pairs, the snake travels on a wave, floaters bob with orbiting
+- Animation: walk cycles paced to the distance moved use separate support and
+  swing paths. A zombie drags a leg, a guardian or yeti lumbers, the emu stabilizes
+  its head, horses change from a four-beat walk to diagonal trot, the snake
+  travels on a wave, floaters bob with orbiting
   motes), turning to face movement and targets. The server's combat events
   pick the move for each ability by name: a strike with wind-up and
   follow-through, a heavy overhead smash with a shockwave (Rattling Blow), a
@@ -228,9 +293,12 @@ Objects:
   the blow landing; beasts rear and stamp or peck, the centaur thrusts.
 - Faces and torsos are sculpted (`src/sdf.rs`): signed-distance shapes for cranium, jaw,
   cheekbones, brow, nose, lips, chin and ears blend into one surface, with
-  carved eye sockets and mouth line, meshed by surface nets per individual.
-- Lighting follows the art direction: a warm key from the upper left, a cool
-  blue-violet fill from the right and a soft back light that rims figures.
+  carved eye sockets, meshed by surface nets per individual. Narrow mouth
+  contours follow the actual face surface as separate fitted accents so their
+  edges remain legible below the face mesh's sampling scale.
+- Lighting follows the art direction: a dominant shadow-casting warm key,
+  weaker cool fill and rim, contact shading, and localized magical accents.
+  Matte cloth, satin leather and metal have distinct material responses.
 - Variety: every individual is rolled from the server's opaque shared
   appearance seed, independent of observer or interaction target. Corpses retain
   the captured creature recipe and seed across reloads. Live player appearance
@@ -240,8 +308,9 @@ Objects:
   tones, sculpted hair (men swept, cropped, tousled, slicked or tied back,
   some bearded; women long, ponytail, bun, braid or bob) in six colours and
   varied eye colour, their own clothing shades and, for casters and scouts,
-  hood up or down. Women are shaped differently: narrower shoulders and
-  waist, fuller hips. Sentinels bear one of four emblems (sun, star, crescent
+  hood up or down. Adult women use a defined waist, fuller bust and hips, strong
+  legs, fitted garments and shaped fantasy armor appropriate to each role.
+  Sentinels bear one of four emblems (sun, star, crescent
   or flame) on tabard and shield. Helmeted sentinels show a braid; hooded casters show
   locks framing the face. Beasts vary in coat, stripes, bands, fur or stone,
   and size.

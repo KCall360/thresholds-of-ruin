@@ -58,7 +58,7 @@ use tor_protocol::{ActorId, ActorTarget, Direction, ItemClass, Position};
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 const HELP: &str = "WASD/arrows: move   Q/E: turn   wheel: zoom   click: act   G: pick up   \
-X: door   I: pack   Space: wait   R/F: up/down   C: ceilings   M: map   Tab: control   Esc: close/quit";
+X: door   I: pack   Space: wait   R/F: up/down   M: map   Tab: control   Esc: close/quit";
 
 pub fn run() -> Result<(), Error> {
     let mut connect: Option<SocketAddr> = None;
@@ -92,12 +92,30 @@ pub fn run() -> Result<(), Error> {
             "--seed" => seed = Some(value()?.parse()?),
             "--server-bin" => server_bin = PathBuf::from(value()?),
             "--capture" => diagnostics.capture = Some(PathBuf::from(value()?)),
+            "--capture-warmup" => {
+                let seconds: f32 = value()?.parse()?;
+                if !seconds.is_finite() || !(0.0..=60.0).contains(&seconds) {
+                    return Err("--capture-warmup must be between 0 and 60 seconds".into());
+                }
+                diagnostics.capture_warmup = seconds;
+            }
             "--demo" => diagnostics.demo = true,
             "--quit-after" => diagnostics.quit_after = Some(value()?.parse()?),
             "--capture-every" => diagnostics.capture_every = Some(value()?.parse()?),
             "--distance" => diagnostics.distance = Some(value()?.parse()?),
+            "--azimuth" => {
+                let degrees: f32 = value()?.parse()?;
+                if !degrees.is_finite() {
+                    return Err("--azimuth must be a finite number of degrees".into());
+                }
+                diagnostics.azimuth = Some(degrees.rem_euclid(360.0).to_radians());
+            }
             "--gallery" => gallery = true,
             "--bestiary" => bestiary = true,
+            "--travel-study" => {
+                bestiary = true;
+                diagnostics.travel_study = true;
+            }
             "--portraits" => {
                 bestiary = true;
                 diagnostics.portraits = true;
@@ -120,6 +138,11 @@ pub fn run() -> Result<(), Error> {
                 bestiary = true;
                 diagnostics.lineups = true;
             }
+            "--fallen-lineups" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.fallen_lineups = true;
+            }
             "--photos" => {
                 bestiary = true;
                 diagnostics.portraits = true;
@@ -140,11 +163,33 @@ pub fn run() -> Result<(), Error> {
                 println!(
                     "tor-client-3d [--scenario DIR] [--save FILE | --save-root DIR] [--seed N] [--server-bin EXE]\n\
                      tor-client-3d --connect 127.0.0.1:PORT [--actor 1] [--observe]  (token from TOR_SERVER_TOKEN)\n\
+                     Offline: --bestiary or --gallery [--azimuth DEGREES]\n\
+                     Model review: --lineups or --fallen-lineups [--capture DIR]\n\
+                     Motion review: --travel-study [--capture DIR --capture-every SECS]\n\
                      Without --connect it starts a private server with a fresh save.\n{HELP}"
                 );
                 return Ok(());
             }
         }
+    }
+    if diagnostics.azimuth.is_some() && !gallery && !bestiary {
+        return Err("--azimuth is available only with --bestiary or --gallery".into());
+    }
+    if diagnostics.fallen_lineups
+        && (gallery || diagnostics.travel_study || diagnostics.idles || diagnostics.portraits)
+    {
+        return Err(
+            "--fallen-lineups cannot be combined with --gallery, --travel-study, --idles, --antics, --portraits or --photos"
+                .into(),
+        );
+    }
+    if diagnostics.travel_study
+        && (gallery || diagnostics.lineups || diagnostics.idles || diagnostics.portraits)
+    {
+        return Err(
+            "--travel-study cannot be combined with --gallery, --lineups, --fallen-lineups, --idles, --antics, --portraits or --photos"
+                .into(),
+        );
     }
     if creatures::PLAYER_LOOK.get().is_some() && (gallery || !bestiary) {
         return Err(
@@ -190,8 +235,8 @@ pub fn run() -> Result<(), Error> {
     .add_plugins(MaterialPlugin::<CaveMaterial>::default())
     .insert_resource(ClearColor(FOG))
     .insert_resource(AmbientLight {
-        color: Color::srgb(0.62, 0.64, 0.78),
-        brightness: 480.0,
+        color: Color::srgb(0.5, 0.6, 0.85),
+        brightness: 190.0,
         ..default()
     })
     .insert_resource(Net(network.clone()))
@@ -262,7 +307,7 @@ pub fn run() -> Result<(), Error> {
             cursor::update,
         ),
     )
-    .add_systems(Last, shutdown_on_exit);
+    .add_systems(Last, (props::maintain_cache, shutdown_on_exit));
     load_internal_asset!(app, cave::SHADER, "cave.wgsl", Shader::from_wgsl);
     let exit = app.run();
     let network_result = network.lock().unwrap().shutdown();
@@ -286,10 +331,14 @@ pub(crate) struct Diagnostics {
     demo: bool,
     quit_after: Option<f32>,
     distance: Option<f32>,
+    /// Offline camera orbit, in radians relative to the standard showcase view.
+    azimuth: Option<f32>,
     /// Seconds between screenshots with --capture.
     capture_every: Option<f32>,
     /// In the bestiary, go straight to the close-ups.
     portraits: bool,
+    /// Let offline bestiary shaders warm up before starting its capture clock.
+    capture_warmup: f32,
     /// In the bestiary, show everyone standing at rest.
     idles: bool,
     /// Start as though the player had been away a while, for the antics.
@@ -298,12 +347,40 @@ pub(crate) struct Diagnostics {
     photos: bool,
     /// In the bestiary, line up several individuals of each creature in turn.
     lineups: bool,
+    /// Use the same generated lineup individuals in their settled death poses.
+    fallen_lineups: bool,
+    /// Offline travel, fast gait transitions, and interrupted contact recovery.
+    travel_study: bool,
     shots: u32,
     next_shot: f32,
     pending_shots: u32,
     capture_failed: bool,
     next_step: f32,
     heading: usize,
+}
+
+impl Diagnostics {
+    /// Keep offline orbit views and the cave's camera cutaway in agreement.
+    fn preview_camera(
+        &self,
+        focus: Vec3,
+        offset: Vec3,
+        cave_materials: &mut Assets<CaveMaterial>,
+    ) -> Transform {
+        let offset = self
+            .azimuth
+            .map_or(offset, |angle| Quat::from_rotation_y(angle) * offset);
+        let eye = focus + offset;
+        if self.azimuth.is_some() {
+            // Rear views can cross the stage's back wall. Reuse the normal
+            // presentation cutaway, leaving known geometry and shadows intact.
+            for (_, material) in cave_materials.iter_mut() {
+                material.extension.params.player = (focus + Vec3::Y * 0.1).extend(-0.5);
+                material.extension.params.camera = eye.extend(1.55);
+            }
+        }
+        Transform::from_translation(eye).looking_at(focus, Vec3::Y)
+    }
 }
 
 #[derive(Resource)]
@@ -343,7 +420,6 @@ struct Game {
     status: String,
     busy: bool,
     fatal: bool,
-    cutaway: bool,
     since_send: f32,
     /// Seconds of red torchlight left after taking a wound.
     hurt: f32,

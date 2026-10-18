@@ -13,7 +13,11 @@ use bevy::{
         render_asset::RenderAssetUsages,
     },
 };
-use std::{collections::HashMap, f32::consts::TAU};
+use std::{collections::HashMap, f32::consts::TAU, sync::Arc};
+
+#[cfg(test)]
+#[path = "props_art_tests.rs"]
+mod art_contract_tests;
 
 // The shared palette.
 const WOOD: Vec3 = Vec3::new(0.45, 0.29, 0.16);
@@ -73,7 +77,9 @@ impl Accent {
     }
 }
 
-/// The few materials every prop shares.
+/// Surface families shared by props and the entire creature cast.
+/// Keep broad diffuse colour on cloth, hide and feathers; reserve the tighter
+/// highlights for leather and metal so material reads survive gameplay distance.
 pub struct PropMaterials {
     matte: Handle<StandardMaterial>,
     /// Leather and other surfaces with a soft sheen.
@@ -125,20 +131,21 @@ impl PropMaterials {
         Self {
             matte: materials.add(StandardMaterial {
                 base_color: Color::WHITE,
-                perceptual_roughness: 0.82,
+                perceptual_roughness: 0.92,
+                reflectance: 0.28,
                 ..default()
             }),
             satin: materials.add(StandardMaterial {
                 base_color: Color::WHITE,
-                perceptual_roughness: 0.5,
-                reflectance: 0.45,
+                perceptual_roughness: 0.46,
+                reflectance: 0.42,
                 ..default()
             }),
             metal: materials.add(StandardMaterial {
                 base_color: Color::WHITE,
-                metallic: 0.6,
-                perceptual_roughness: 0.32,
-                reflectance: 0.6,
+                metallic: 0.78,
+                perceptual_roughness: 0.27,
+                reflectance: 0.5,
                 ..default()
             }),
             glow,
@@ -170,8 +177,17 @@ pub struct Model(pub Vec<(Handle<Mesh>, Handle<StandardMaterial>)>);
 impl Model {
     /// Spawn the model's meshes as children of an entity.
     pub fn attach(&self, parent: &mut ChildSpawnerCommands) {
+        self.attach_scaled(parent, Vec3::ONE);
+    }
+
+    /// Art-directed mesh proportions without changing the rig's joint lengths.
+    pub(crate) fn attach_scaled(&self, parent: &mut ChildSpawnerCommands, scale: Vec3) {
         for (mesh, material) in &self.0 {
-            parent.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone())));
+            parent.spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_scale(scale),
+            ));
         }
     }
 }
@@ -226,11 +242,54 @@ impl Parts {
     }
 }
 
-/// Builds models on first use and keeps them.
+// Live models are retained regardless of size. These limits apply only to
+// unused models kept warm for reuse; the count also bounds empty model keys.
+const WARM_PAYLOAD_LIMIT: usize = 128 * 1024 * 1024;
+const WARM_MODEL_LIMIT: usize = 1024;
+
+struct CachedModel {
+    model: Model,
+    payload_bytes: usize,
+    last_used: u64,
+}
+
+impl CachedModel {
+    fn is_live(&self) -> bool {
+        // Parts::finish creates a unique strong handle for each mesh. The
+        // cache owns one clone; entities and queued spawns own the others.
+        // Render extraction retains mesh IDs/data, not another handle clone.
+        self.model.0.iter().any(|(mesh, _)| match mesh {
+            Handle::Strong(owner) => Arc::strong_count(owner) > 1,
+            Handle::Weak(_) => false,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct CacheUsage {
+    live_models: usize,
+    live_payload_bytes: usize,
+    warm_models: usize,
+    warm_payload_bytes: usize,
+    evicted_models: usize,
+}
+
+/// Reuses live models and a bounded set of recently used idle models.
 #[derive(Resource)]
 pub struct PropLibrary {
     pub materials: PropMaterials,
-    cache: HashMap<String, Model>,
+    cache: HashMap<String, CachedModel>,
+    payload_bytes: usize,
+    clock: u64,
+    evicted_models: usize,
+    last_report: Option<CacheUsage>,
+}
+
+/// Optional local startup profiling; read the environment once for the process.
+pub(crate) fn profile_builds() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED
+        .get_or_init(|| std::env::var_os("TOR_3D_PROFILE_BUILD").is_some_and(|value| value == "1"))
 }
 
 impl PropLibrary {
@@ -238,6 +297,10 @@ impl PropLibrary {
         Self {
             materials,
             cache: HashMap::new(),
+            payload_bytes: 0,
+            clock: 0,
+            evicted_models: 0,
+            last_report: None,
         }
     }
 
@@ -247,12 +310,95 @@ impl PropLibrary {
         meshes: &mut Assets<Mesh>,
         build: impl FnOnce() -> Parts,
     ) -> Model {
-        if let Some(model) = self.cache.get(&key) {
-            return model.clone();
+        self.clock += 1;
+        if let Some(entry) = self.cache.get_mut(&key) {
+            entry.last_used = self.clock;
+            return entry.model.clone();
         }
-        let model = build().finish(meshes, &self.materials);
-        self.cache.insert(key, model.clone());
+        let started = profile_builds().then(std::time::Instant::now);
+        let parts = build();
+        let parts_ms = started.map(|time| time.elapsed().as_secs_f64() * 1000.0);
+        let model = parts.finish(meshes, &self.materials);
+        // Measure while the newly added meshes are still in main-world Assets.
+        // RENDER_WORLD-only meshes leave that collection after extraction.
+        let payload_bytes = model
+            .0
+            .iter()
+            .map(|(handle, _)| {
+                let mesh = meshes.get(handle).expect("newly built model mesh");
+                mesh.get_vertex_buffer_size() + mesh.get_index_buffer_bytes().map_or(0, <[u8]>::len)
+            })
+            .sum();
+        if let Some(started) = started {
+            let total_ms = started.elapsed().as_secs_f64() * 1000.0;
+            eprintln!(
+                "3d_model_build key={key:?} ms={total_ms:.3} parts_ms={:.3} finish_ms={:.3} cache={}",
+                parts_ms.unwrap_or(0.0),
+                total_ms - parts_ms.unwrap_or(0.0),
+                self.cache.len() + 1,
+            );
+        }
+        self.cache.insert(
+            key,
+            CachedModel {
+                model: model.clone(),
+                payload_bytes,
+                last_used: self.clock,
+            },
+        );
+        self.payload_bytes += payload_bytes;
+        // Below these total bounds the idle subset cannot exceed its budget.
+        // Avoid scanning the growing cache on every ordinary startup insertion.
+        if self.payload_bytes > WARM_PAYLOAD_LIMIT || self.cache.len() > WARM_MODEL_LIMIT {
+            self.trim();
+        }
         model
+    }
+
+    fn trim(&mut self) -> CacheUsage {
+        self.clock += 1;
+        let mut usage = CacheUsage {
+            evicted_models: self.evicted_models,
+            ..default()
+        };
+        for entry in self.cache.values_mut() {
+            if entry.is_live() {
+                // A long-lived actor enters the warm cache as recently used
+                // when it disappears, rather than retaining its spawn age.
+                entry.last_used = self.clock;
+                usage.live_models += 1;
+                usage.live_payload_bytes += entry.payload_bytes;
+            } else {
+                usage.warm_models += 1;
+                usage.warm_payload_bytes += entry.payload_bytes;
+            }
+        }
+        if usage.warm_payload_bytes > WARM_PAYLOAD_LIMIT || usage.warm_models > WARM_MODEL_LIMIT {
+            let mut idle: Vec<_> = self
+                .cache
+                .iter()
+                .filter(|(_, entry)| entry.last_used != self.clock)
+                .map(|(key, entry)| (entry.last_used, key.clone()))
+                .collect();
+            idle.sort_unstable();
+            for (_, key) in idle {
+                if usage.warm_payload_bytes <= WARM_PAYLOAD_LIMIT
+                    && usage.warm_models <= WARM_MODEL_LIMIT
+                {
+                    break;
+                }
+                if let Some(entry) = self.cache.remove(&key) {
+                    usage.warm_models -= 1;
+                    usage.warm_payload_bytes -= entry.payload_bytes;
+                    self.payload_bytes -= entry.payload_bytes;
+                    self.evicted_models += 1;
+                }
+                // Dropping handles lets Bevy release unused render assets.
+                // Never remove an asset directly while an entity may own it.
+            }
+        }
+        usage.evicted_models = self.evicted_models;
+        usage
     }
 
     /// Build a resolved cosmetic recipe; names never select geometry.
@@ -323,6 +469,33 @@ impl PropLibrary {
             }
             p
         })
+    }
+}
+
+/// Sweep after actor despawns even when no new model is requested.
+pub(crate) fn maintain_cache(
+    time: Res<Time<Real>>,
+    mut library: ResMut<PropLibrary>,
+    mut next_sweep: Local<f64>,
+) {
+    let now = time.elapsed_secs_f64();
+    if now < *next_sweep {
+        return;
+    }
+    *next_sweep = now + 1.0;
+    let usage = library.trim();
+    if profile_builds() && library.last_report != Some(usage) {
+        eprintln!(
+            "3d_model_cache live={} live_bytes={} warm={} warm_bytes={} evicted={} warm_limit_bytes={} warm_limit_models={}",
+            usage.live_models,
+            usage.live_payload_bytes,
+            usage.warm_models,
+            usage.warm_payload_bytes,
+            usage.evicted_models,
+            WARM_PAYLOAD_LIMIT,
+            WARM_MODEL_LIMIT,
+        );
+        library.last_report = Some(usage);
     }
 }
 
@@ -1273,11 +1446,14 @@ pub fn rand(key: u64, i: u32) -> f32 {
     (h >> 40) as f32 / (1u64 << 24) as f32
 }
 
-/// Flat-shaded triangles with per-vertex colour.
+/// Triangles with artist-authored sRGB per-vertex colour.
+/// Convert to Bevy's linear PBR colour space only when uploading the mesh.
 pub(crate) struct Builder {
     positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
     colors: Vec<[f32; 4]>,
+    /// Baked sculpt occlusion, applied after decoding the sRGB pigment.
+    shades: Vec<f32>,
     xf: Affine3A,
     /// Latitude and longitude steps of a blob.
     pub res: (usize, usize),
@@ -1293,6 +1469,7 @@ impl Default for Builder {
             positions: Vec::new(),
             normals: Vec::new(),
             colors: Vec::new(),
+            shades: Vec::new(),
             xf: Affine3A::IDENTITY,
             res: (5, 8),
             sides_mul: 1,
@@ -1318,21 +1495,44 @@ impl Builder {
         }
         let faces: Vec<Vec3> = self.normals.iter().map(|n| Vec3::from_array(*n)).collect();
         let crease = 0.55;
+        let mut softened: Vec<([u32; 3], [f32; 3])> = Vec::with_capacity(8);
         for members in groups.values() {
+            softened.clear();
             for &i in members {
                 let own = faces[i];
+                let bits = own.to_array().map(f32::to_bits);
+                if let Some((_, normal)) = softened.iter().find(|(input, _)| *input == bits) {
+                    self.normals[i] = *normal;
+                    continue;
+                }
+                // Repeated triangle corners have identical input normals.
+                // Retain the original ordered sum for each distinct input;
+                // weighting duplicates would change float accumulation.
                 let sum: Vec3 = members
                     .iter()
                     .map(|&j| faces[j])
                     .filter(|n| n.dot(own) > crease)
                     .sum();
-                self.normals[i] = sum.normalize_or(own).to_array();
+                let normal = sum.normalize_or(own).to_array();
+                softened.push((bits, normal));
+                self.normals[i] = normal;
             }
         }
     }
 
     /// A triangle with its own vertex normals, for sculpted surfaces.
     pub(crate) fn tri_smooth(&mut self, p: [Vec3; 3], n: [Vec3; 3], colors: [Vec3; 3]) {
+        self.tri_smooth_shaded(p, n, colors, [1.0; 3]);
+    }
+
+    /// Keep artist-authored pigment separate from a linear occlusion factor.
+    pub(crate) fn tri_smooth_shaded(
+        &mut self,
+        p: [Vec3; 3],
+        n: [Vec3; 3],
+        colors: [Vec3; 3],
+        shades: [f32; 3],
+    ) {
         let normal = self.xf.matrix3.inverse().transpose();
         for k in 0..3 {
             let v = self.xf.transform_point3(p[k]);
@@ -1341,6 +1541,7 @@ impl Builder {
             self.normals.push(m.to_array());
             self.colors
                 .push([colors[k].x, colors[k].y, colors[k].z, 1.0]);
+            self.shades.push(shades[k]);
         }
     }
 
@@ -1358,6 +1559,7 @@ impl Builder {
             self.positions.push(v.to_array());
             self.normals.push(n.to_array());
             self.colors.push([c.x, c.y, c.z, 1.0]);
+            self.shades.push(1.0);
         }
     }
 
@@ -1789,19 +1991,93 @@ impl Builder {
         if self.positions.is_empty() {
             return None;
         }
+        let started = profile_builds().then(std::time::Instant::now);
         if self.smooth {
             self.soften();
         }
-        let count = self.positions.len() as u32;
-        Some(
-            Mesh::new(
-                PrimitiveTopology::TriangleList,
-                RenderAssetUsages::RENDER_WORLD,
-            )
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.positions)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, self.colors)
-            .with_inserted_indices(Indices::U32((0..count).collect())),
+        let soften_ms = started.map(|time| time.elapsed().as_secs_f64() * 1000.0);
+        // Palette constants and their painted variations are sRGB, just like
+        // Color::srgb on StandardMaterial. Vertex colours bypass that material
+        // conversion, so decode them here before linear lighting/interpolation.
+        // Eye glints use overbright white (1.5/1.6): preserve the linear excess
+        // above display white. Apply sculpt occlusion in linear space, rather
+        // than darkening pigment before gamma decoding. Alpha and material
+        // emissive HDR stay unchanged.
+        for (color, shade) in self.colors.iter_mut().zip(&self.shades) {
+            let rgb = Vec3::new(color[0], color[1], color[2]);
+            let display = rgb.min(Vec3::ONE);
+            let excess = rgb - display;
+            let linear = Color::srgb(display.x, display.y, display.z).to_linear();
+            *color = [
+                (linear.red + excess.x) * shade,
+                (linear.green + excess.y) * shade,
+                (linear.blue + excess.z) * shade,
+                color[3],
+            ];
+        }
+        let color_done_ms = started.map(|time| time.elapsed().as_secs_f64() * 1000.0);
+        // Share only complete, bit-identical final vertices. Position alone
+        // cannot identify a vertex: creases and painted edges need distinct
+        // normals or colours even when they occupy the same point.
+        let count = self.positions.len();
+        let mut unique: HashMap<[u32; 10], u32> = HashMap::with_capacity(count / 3);
+        let mut indices = Vec::with_capacity(count);
+        let mut unique_count = 0usize;
+        for i in 0..count {
+            let position = self.positions[i];
+            let normal = self.normals[i];
+            let color = self.colors[i];
+            let bits = [
+                position[0].to_bits(),
+                position[1].to_bits(),
+                position[2].to_bits(),
+                normal[0].to_bits(),
+                normal[1].to_bits(),
+                normal[2].to_bits(),
+                color[0].to_bits(),
+                color[1].to_bits(),
+                color[2].to_bits(),
+                color[3].to_bits(),
+            ];
+            let index = *unique.entry(bits).or_insert_with(|| {
+                let index = unique_count as u32;
+                // First occurrences retain their original order. Compact in
+                // place; this slot never reaches ahead of the read cursor.
+                self.positions[unique_count] = position;
+                self.normals[unique_count] = normal;
+                self.colors[unique_count] = color;
+                unique_count += 1;
+                index
+            });
+            indices.push(index);
+        }
+        drop(unique);
+        self.positions.truncate(unique_count);
+        self.normals.truncate(unique_count);
+        self.colors.truncate(unique_count);
+        self.positions.shrink_to_fit();
+        self.normals.shrink_to_fit();
+        self.colors.shrink_to_fit();
+        let reuse_ms = started
+            .map(|time| time.elapsed().as_secs_f64() * 1000.0 - color_done_ms.unwrap_or(0.0));
+        let mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::RENDER_WORLD,
         )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, self.colors)
+        .with_inserted_indices(Indices::U32(indices));
+        if let Some(started) = started {
+            let total_ms = started.elapsed().as_secs_f64() * 1000.0;
+            eprintln!(
+                "3d_mesh_finish vertices={count} unique_vertices={unique_count} smooth={} ms={total_ms:.3} soften_ms={:.3} reuse_ms={:.3} color_mesh_ms={:.3}",
+                self.smooth,
+                soften_ms.unwrap_or(0.0),
+                reuse_ms.unwrap_or(0.0),
+                total_ms - soften_ms.unwrap_or(0.0) - reuse_ms.unwrap_or(0.0),
+            );
+        }
+        Some(mesh)
     }
 }

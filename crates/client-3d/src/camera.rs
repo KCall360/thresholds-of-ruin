@@ -21,15 +21,6 @@ pub(super) fn input(
     for event in wheel.read() {
         rig.distance = (rig.distance - event.y * 0.8).clamp(4.0, 32.0);
     }
-    if keys.just_pressed(KeyCode::KeyC) {
-        game.cutaway = !game.cutaway;
-        game.status = if game.cutaway {
-            "Showing ceilings."
-        } else {
-            "Ceilings cut away."
-        }
-        .into();
-    }
     game.since_send += time.delta_secs();
     if game.busy || game.fatal {
         return;
