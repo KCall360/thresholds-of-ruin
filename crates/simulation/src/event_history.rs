@@ -4,7 +4,7 @@ use crate::combat::{CombatEvent, DisclosedCombatEvent};
 use crate::perception::ActorReferenceKind;
 use crate::{ActorId, Game, GameError, Observation};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use tor_world::Shared;
 
 type Reference = Option<ActorReferenceKind>;
@@ -285,6 +285,30 @@ impl Game {
         }
     }
 
+    /// A disclosed limb can place a body without identifying the source of a
+    /// historical event. Identity additionally needs the authoritative reference
+    /// cell in the same ordinary scene; anonymous contact remains body-based.
+    fn event_reference_in_scene(
+        &self,
+        observer: ActorId,
+        subject: ActorId,
+        classified: Reference,
+        contains: impl FnOnce(tor_world::Location) -> bool,
+    ) -> Reference {
+        if observer == subject {
+            return Some(ActorReferenceKind::Creature);
+        }
+        match classified {
+            Some(ActorReferenceKind::Contact) => Some(ActorReferenceKind::Contact),
+            Some(ActorReferenceKind::Creature) => self
+                .actors
+                .get(&subject)
+                .filter(|state| contains(state.location))
+                .map(|_| ActorReferenceKind::Creature),
+            None => None,
+        }
+    }
+
     pub(crate) fn capture_event_origin(&self, actor: ActorId, target: ActorId) -> EventOrigin {
         let reference = |observer, subject| {
             if observer == subject {
@@ -311,9 +335,14 @@ impl Game {
                         return None;
                     }
                 }
-                self.actor_disclosure(observer, subject)
-                    .ok()
-                    .and_then(|d| d.reference())
+                let (scene, sight) = self.scene_snapshot(observer).ok()?;
+                let classified = self
+                    .actor_disclosure_in_scene(observer, subject, &scene, &sight)
+                    .ok()?
+                    .reference();
+                self.event_reference_in_scene(observer, subject, classified, |at| {
+                    scene.iter().any(|cell| cell.location == at)
+                })
             }
         };
         let mut source_target = reference(actor, target);
@@ -645,16 +674,16 @@ impl Game {
         let mut proof = EventObservation::default();
         if self.event_origins.open {
             let witness = self.event_observation_witness();
+            let locations: BTreeSet<_> = scene.iter().map(|cell| cell.location).collect();
             let reference = |subject| {
-                if subject == observer {
-                    Some(ActorReferenceKind::Creature)
-                } else {
-                    observation
-                        .visible_actors
-                        .binary_search_by_key(&subject, |actor| actor.id)
-                        .ok()
-                        .and_then(|index| observation.visible_actors[index].disclosure.reference())
-                }
+                let classified = observation
+                    .visible_actors
+                    .binary_search_by_key(&subject, |actor| actor.id)
+                    .ok()
+                    .and_then(|index| observation.visible_actors[index].disclosure.reference());
+                self.event_reference_in_scene(observer, subject, classified, |at| {
+                    locations.contains(&at)
+                })
             };
             for (index, event) in self
                 .event_log

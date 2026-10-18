@@ -663,43 +663,67 @@ fn memory_expiry_preserves_only_the_final_positive_nutrition_interval() {
 }
 
 #[test]
-fn partial_attacker_body_without_disclosed_caster_grants_no_identity() {
-    let mut game = fixture(Disposition::Passive, 500);
-    game.teleport(ActorId(2), at(4)).unwrap();
-    game.set_body(
-        ActorId(1),
-        crate::BodySpec {
-            cells: vec![[0, 0, 0], [1, 0, 0], [2, 0, 0]],
-            eye: [0, 0, 0],
-            mass: 100,
-        },
-    )
-    .unwrap();
-    game.set_cell_light(at(1), false).unwrap();
-    let view = game.observe(ActorId(2)).unwrap();
-    assert!(view
-        .visible_actors
-        .iter()
-        .any(|actor| actor.id == ActorId(1)));
-    assert!(view
-        .visible_actors
-        .iter()
-        .all(|actor| actor.id != ActorId(1) || actor.location != at(1)));
-    let outcome = commit_strike(&mut game, ActorId(1), ActorId(2));
-    assert!(outcome.target_participated());
-    let events = game.observe(ActorId(2)).unwrap().combat.unwrap().events;
-    assert!(events.iter().any(|event| matches!(
-        event,
-        crate::combat::DisclosedCombatEvent::UnseenAbility {
-            caster: None,
-            target: ActorId(2),
-            outcome: result,
-        } if *result == outcome.result
-    )));
-    assert!(!events
-        .iter()
-        .any(|event| matches!(event, crate::combat::DisclosedCombatEvent::Ability { .. })));
-    assert!(game.actors[&ActorId(2)].behavior.engagement.is_none());
+fn partial_attacker_body_requires_disclosed_caster_for_historical_identity() {
+    for anchor_lit in [false, true] {
+        let mut game = fixture(Disposition::Passive, 500);
+        game.teleport(ActorId(2), at(4)).unwrap();
+        game.set_body(
+            ActorId(1),
+            crate::BodySpec {
+                cells: vec![[0, 0, 0], [1, 0, 0], [2, 0, 0]],
+                eye: [0, 0, 0],
+                mass: 100,
+            },
+        )
+        .unwrap();
+        game.set_cell_light(at(1), anchor_lit).unwrap();
+        let view = game.observe(ActorId(2)).unwrap();
+        let projected = view
+            .visible_actors
+            .iter()
+            .find(|actor| actor.id == ActorId(1))
+            .unwrap();
+        assert_eq!(
+            projected.disclosure,
+            crate::perception::ActorDisclosure::Creature
+        );
+        assert_eq!(
+            view.visible_actors
+                .iter()
+                .any(|actor| actor.id == ActorId(1) && actor.location == at(1)),
+            anchor_lit
+        );
+        let outcome = commit_strike(&mut game, ActorId(1), ActorId(2));
+        assert!(outcome.target_participated());
+        let events = game.observe(ActorId(2)).unwrap().combat.unwrap().events;
+        if anchor_lit {
+            assert!(events.iter().any(|event| matches!(
+                event,
+                crate::combat::DisclosedCombatEvent::Ability {
+                    caster: Some(ActorId(1)),
+                    target: Some(ActorId(2)),
+                    ..
+                }
+            )));
+            assert_eq!(
+                game.actors[&ActorId(2)].behavior.engagement.unwrap().target,
+                ActorId(1)
+            );
+        } else {
+            assert!(events.iter().any(|event| matches!(
+                event,
+                crate::combat::DisclosedCombatEvent::UnseenAbility {
+                    caster: None,
+                    target: ActorId(2),
+                    outcome: result,
+                } if *result == outcome.result
+            )));
+            assert!(!events
+                .iter()
+                .any(|event| matches!(event, crate::combat::DisclosedCombatEvent::Ability { .. })));
+            assert!(game.actors[&ActorId(2)].behavior.engagement.is_none());
+        }
+    }
 }
 
 #[test]

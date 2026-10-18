@@ -313,22 +313,34 @@ impl Game {
         })
     }
     pub fn set_body(&mut self, id: ActorId, body: BodySpec) -> Result<(), GameError> {
+        self.validate_body_change(id, &body)?;
+        self.with_recovery_transition(false, |candidate| candidate.replace_body(id, body))
+    }
+    /// Birth construction already owns rollback and event publication.
+    pub(crate) fn set_body_in_transaction(
+        &mut self,
+        id: ActorId,
+        body: BodySpec,
+    ) -> Result<(), GameError> {
+        self.validate_body_change(id, &body)?;
+        self.replace_body(id, body)?;
+        self.retire_settled_falls();
+        self.reconcile_recovery_contexts()
+    }
+    fn validate_body_change(&self, id: ActorId, body: &BodySpec) -> Result<(), GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        if !body.valid() || !self.body_fits(id, actor.location, actor.orientation, &body) {
+        if !body.valid() || !self.body_fits(id, actor.location, actor.orientation, body) {
             return Err(GameError::Blocked);
         }
-        self.with_recovery_transition(false, |candidate| {
-            let mut actor = candidate
-                .actors
-                .get_mut(&id)
-                .ok_or(GameError::UnknownActor)?;
-            actor.body = tor_world::Shared::new(body);
-            actor.motion.acceleration_remainder = [0; 3];
-            actor.motion.active_fall = None;
-            drop(actor);
-            candidate.reconcile_holds_for_actor(id)?;
-            Ok(())
-        })
+        Ok(())
+    }
+    fn replace_body(&mut self, id: ActorId, body: BodySpec) -> Result<(), GameError> {
+        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        actor.body = tor_world::Shared::new(body);
+        actor.motion.acceleration_remainder = [0; 3];
+        actor.motion.active_fall = None;
+        drop(actor);
+        self.reconcile_holds_for_actor(id)
     }
     fn body_has_field(&self, at: Location, frame: u8, body: &BodySpec) -> bool {
         self.body_cells(at, frame, body).is_some_and(|cells| {

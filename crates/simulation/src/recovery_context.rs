@@ -184,8 +184,9 @@ impl Game {
     }
     /// Public setup operations keep their original cheap path when no contextual
     /// owner can be affected and the mutation needs no independent rollback.
-    /// Otherwise the existing candidate transaction owns world mutation, all
-    /// settlements, and any defensive reconciliation error.
+    /// Callers must include finalized actor event emission in requires_candidate.
+    /// Otherwise the candidate owns world mutation, settlements, reconciliation
+    /// and receipt publication, including rollback on a late capacity error.
     pub(crate) fn with_recovery_transition<R>(
         &mut self,
         requires_candidate: bool,
@@ -196,12 +197,11 @@ impl Game {
             self.retire_settled_falls();
             return Ok(result);
         }
-        let mut candidate = self.clone();
-        let result = change(&mut candidate)?;
-        candidate.retire_settled_falls();
-        candidate.reconcile_recovery_contexts()?;
-        *self = candidate;
-        Ok(result)
+        self.with_effect_publication(|candidate| {
+            let result = change(candidate)?;
+            candidate.retire_settled_falls();
+            Ok(result)
+        })
     }
 
     /// Called only at authoritative mutation/time boundaries. Unchanged policy

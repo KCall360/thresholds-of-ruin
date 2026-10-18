@@ -364,9 +364,9 @@ impl Game {
                 .identity
                 .clone()
                 .ok_or(PreparedSpawnError::Build(BuildError::InvalidDefinition))?;
-            self.configure_creature(id, identity, build)
+            self.configure_creature_in_transaction(id, identity, build)
                 .map_err(PreparedSpawnError::Creature)?;
-            self.configure_nutrition(id, definition.nutrition)
+            self.configure_nutrition_in_transaction(id, definition.nutrition)
                 .map_err(PreparedSpawnError::Nutrition)?;
         }
         if let Some(ai) = &definition.ai {
@@ -374,7 +374,7 @@ impl Game {
                 .map_err(PreparedSpawnError::Ai)?;
         }
         if let Some(body) = &definition.body {
-            self.set_body(id, body.clone())
+            self.set_body_in_transaction(id, body.clone())
                 .map_err(PreparedSpawnError::Body)?;
         }
         if let Some(velocity) = definition.velocity {
@@ -423,8 +423,10 @@ impl Game {
             .instantiate_build(self.content.clone(), seed, DepthGrowth::Fixed {}, 1)
             .map_err(GameError::from)?;
         let mut candidate = self.clone();
+        candidate.begin_effect_publication()?;
         let (actor, _) =
             candidate.spawn_prepared_actor_in_candidate(definition, at, turn_ticks, build, None)?;
+        candidate.finish_effect_publication()?;
         *self = candidate;
         Ok(actor)
     }

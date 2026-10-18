@@ -459,12 +459,8 @@ impl Game {
         equipment: BTreeMap<EquipmentSlotId, ItemId>,
     ) -> Result<(), GameError> {
         let outcome = self.equipment_candidate(actor, equipment)?;
-        let may_add = outcome
-            .state
-            .combat
-            .as_ref()
-            .is_some_and(|combat| combat.creature().derived().contextual_health_recovery());
-        self.with_recovery_transition(may_add, |candidate| candidate.apply_outcome(outcome))
+        let prepared = self.prepare_actor_outcome(outcome)?;
+        self.publish_actor_effect(prepared, false)
     }
     /// Recheck only live item references and socket eligibility. Captured effects,
     /// costs and timing remain owned by the original plan.
@@ -891,15 +887,9 @@ impl Game {
         actor: ActorId,
         effects: &[crate::rules::Effect],
     ) -> Result<bool, GameError> {
-        let mut candidate = self.clone();
-        if !candidate.host_region_continuation {
-            candidate.seal_event_observations()?;
-        }
-        let observed = candidate.apply_effects_in_transaction(actor, effects)?;
-        candidate.reconcile_recovery_contexts()?;
-        candidate.seal_participant_events()?;
-        *self = candidate;
-        Ok(observed)
+        self.with_effect_publication(|candidate| {
+            candidate.apply_effects_in_transaction(actor, effects)
+        })
     }
     fn apply_effects_in_transaction(
         &mut self,

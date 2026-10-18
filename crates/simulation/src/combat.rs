@@ -535,6 +535,7 @@ impl Game {
             return Err(GameError::UnknownActor);
         }
         let mut candidate = self.clone();
+        candidate.begin_effect_publication()?;
         candidate.combat.run = run;
         candidate.combat.selected = Some(selected);
         candidate.combat.input_boundaries.clear();
@@ -546,6 +547,7 @@ impl Game {
         candidate.combat.hostility = hostility;
         candidate.reconcile_recovery_contexts()?;
         candidate.check_run_policy()?;
+        candidate.finish_effect_publication()?;
         *self = candidate;
         Ok(())
     }
@@ -688,7 +690,8 @@ impl Game {
     pub fn pause_preparation(&mut self, actor: ActorId) -> Option<crate::Work> {
         let mut outcome = self.actor_outcome(actor).ok()?;
         let work = outcome.pause(self.actor_clock(actor))?;
-        self.apply_outcome(outcome).ok()?;
+        let prepared = self.prepare_actor_outcome(outcome).ok()?;
+        self.publish_actor_effect(prepared, false).ok()?;
         Some(work)
     }
 

@@ -38,6 +38,68 @@ fn sequence_restricting(
     )
 }
 
+fn expiring_resource_sequence() -> (Game, crate::IntentionId) {
+    use crate::rules::{ConditionDef, Eviction, Modifier, ModifierOp, Scope, Stacking, Stat};
+    let borrowed = ConditionId::new("fixture_borrowed_mana").unwrap();
+    super::strike_tests::sequence_game_on_world_configured(
+        &[0, 100, 200],
+        |ability| {
+            ability.cost = Some(crate::rules::Cost {
+                resource: crate::resources::Resource::Mana,
+                start: 1,
+                resolution: 1,
+            });
+        },
+        |rules, species| {
+            species.modifiers.push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Flag {
+                    flag: crate::content_ids::FlagId::new("magical").unwrap(),
+                },
+            });
+            let mana = rules
+                .resources
+                .iter_mut()
+                .find(|resource| resource.resource == crate::resources::Resource::Mana)
+                .unwrap();
+            mana.capacity.base = 0;
+            mana.capacity.required_flag = None;
+            rules.conditions.push(ConditionDef {
+                id: borrowed.clone(),
+                family: crate::content_ids::ConditionFamilyId::new(borrowed.as_str()).unwrap(),
+                lifecycle: crate::rules::ConditionLifecycle::Timed,
+                timing: crate::rules::ConditionTiming::expiring(),
+                restrictions: vec![],
+                preparation: crate::rules::ConditionPreparation::Preserve,
+                name: "Borrowed mana".into(),
+                modifiers: vec![Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Add {
+                        stat: Stat::ResourceMax {
+                            resource: crate::resources::Resource::Mana,
+                        },
+                        value: 2,
+                    },
+                }],
+                stacking: Stacking::Keep,
+                source_scoped: false,
+                descriptors: vec![],
+                capacity: Eviction::Reject,
+            });
+        },
+        None,
+        |game| {
+            game.apply_condition(ActorId(1), &borrowed, ActorId(1), 5)
+                .unwrap();
+            game.restore_resource(ActorId(1), crate::resources::Resource::Mana, 2)
+                .unwrap();
+        },
+    )
+}
+
+#[path = "publication_boundary_tests.rs"]
+mod publication_boundary_tests;
+
 #[test]
 fn held_movement_and_stronger_movement_ability_restrictions_are_distinct_operations() {
     for strong in [false, true] {
@@ -224,6 +286,154 @@ fn public_condition_application_rolls_back_failed_event_publication() {
         assert!(game.event_observations_open());
         assert!(game.preparation(ActorId(1)).unwrap().active);
     }
+}
+
+#[test]
+fn public_actor_mutations_publish_settlement_interruptions_once_before_reopen() {
+    for operation in ["nutrition", "recovery", "resource", "rebuild"] {
+        for host in [false, true] {
+            let (mut game, _) = expiring_resource_sequence();
+            game.tick = 5;
+            ready_peer_for_snapshot(&mut game);
+            game.host_region_continuation = host;
+            game.begin_event_batch().unwrap();
+            match operation {
+                "nutrition" => game
+                    .configure_nutrition(ActorId(1), crate::nutrition::NutritionRequirement::Exempt)
+                    .unwrap(),
+                "recovery" => game
+                    .set_recovery_nutrition(
+                        ActorId(1),
+                        crate::health_recovery::RecoveryNutrition::Normal,
+                    )
+                    .unwrap(),
+                "resource" => {
+                    game.restore_resource(ActorId(1), crate::resources::Resource::Stamina, 0)
+                        .unwrap();
+                }
+                "rebuild" => {
+                    let build = game.creature(ActorId(1)).unwrap().build().clone();
+                    game.rebuild_creature(ActorId(1), build).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            assert!(game.preparation(ActorId(1)).is_none(), "{operation}");
+            let feedback = game.observe(ActorId(1)).unwrap().combat.unwrap().events;
+            assert_eq!(
+                feedback
+                    .iter()
+                    .filter(|event| matches!(
+                        event,
+                        crate::combat::DisclosedCombatEvent::Interrupted { actor: ActorId(1) }
+                    ))
+                    .count(),
+                1,
+                "{operation}, host={host}"
+            );
+            assert_eq!(game.event_observations_open(), host);
+            if host {
+                game.host_region_continuation = false;
+                game.seal_event_observations().unwrap();
+            }
+            let reopened = round_trip(&game);
+            assert_eq!(reopened, game, "{operation}, host={host}");
+            assert_eq!(
+                reopened.observe(ActorId(1)).unwrap().combat.unwrap().events,
+                feedback,
+                "{operation}, host={host}"
+            );
+        }
+    }
+}
+
+#[test]
+fn eventless_public_actor_setup_keeps_its_no_clone_no_scene_path() {
+    let (mut game, _) = sequence_restricting(false, &["ordinary_movement"], "preserve");
+    let build = game.creature(ActorId(1)).unwrap().build().clone();
+    let before = crate::diagnostics::work_counts();
+    game.configure_nutrition(ActorId(1), crate::nutrition::NutritionRequirement::Exempt)
+        .unwrap();
+    game.set_recovery_nutrition(
+        ActorId(1),
+        crate::health_recovery::RecoveryNutrition::Normal,
+    )
+    .unwrap();
+    game.restore_resource(ActorId(1), crate::resources::Resource::Stamina, 0)
+        .unwrap();
+    apply(&mut game, 200);
+    game.rebuild_creature(ActorId(1), build).unwrap();
+    game.pause_preparation(ActorId(1)).unwrap();
+    let after = crate::diagnostics::work_counts();
+    assert_eq!(after.game_clones, before.game_clones);
+    assert_eq!(after.ordinary_scenes, before.ordinary_scenes);
+    assert!(game.combat_events().is_empty());
+    assert_eq!(round_trip(&game), game);
+}
+
+#[test]
+fn candidate_birth_setup_preserves_unfinished_event_suffix_without_nested_clones() {
+    let (mut game, intention) = super::strike_tests::sequence_game_custom(
+        &[0, 100, 200],
+        |_| {},
+        |_, species| {
+            species.modifiers.push(crate::rules::Modifier {
+                scope: crate::rules::Scope::WhileNoSensedHostile,
+                op: crate::rules::ModifierOp::Add {
+                    stat: crate::rules::Stat::HealthRecoveryPeriodPercent,
+                    value: -25,
+                },
+            });
+        },
+    );
+    let build = game.creature(ActorId(1)).unwrap().build().clone();
+    let actor = game
+        .spawn_actor(
+            tor_world::Location {
+                region: tor_world::RegionId(1),
+                position: tor_world::Position { x: 3, y: 1, z: 0 },
+            },
+            std::num::NonZeroU64::new(100).unwrap(),
+        )
+        .unwrap();
+    let body = (*game.actors[&actor].body).clone();
+    game.host_region_continuation = true;
+    game.begin_event_batch().unwrap();
+    game.push_event(
+        crate::combat::CombatEvent::Interrupted {
+            actor: ActorId(1),
+            intention: Some(intention),
+        },
+        None,
+    )
+    .unwrap();
+    // Region acquisition owns an unpublished candidate between host segments.
+    // Its ownership persists even when no host action is currently executing.
+    game.host_region_continuation = false;
+    let before = crate::diagnostics::work_counts();
+    game.configure_creature_in_transaction(
+        actor,
+        crate::CreatureIdentity {
+            name: "new subject".into(),
+            faction: "neutral".into(),
+        },
+        build,
+    )
+    .unwrap();
+    game.configure_nutrition_in_transaction(actor, crate::nutrition::NutritionRequirement::Exempt)
+        .unwrap();
+    game.set_body_in_transaction(actor, body).unwrap();
+    assert_eq!(
+        crate::diagnostics::work_counts().game_clones,
+        before.game_clones
+    );
+    assert!(game.event_observations_open());
+    assert!(!game.event_is_sealed(0));
+    let (events, origins) = game.take_event_suffix(0).unwrap();
+    game.append_event_suffix(events, origins).unwrap();
+    game.finish_effect_publication().unwrap();
+    assert!(game.event_observations_open());
+    game.seal_event_observations().unwrap();
+    assert_eq!(round_trip(&game), game);
 }
 
 #[test]

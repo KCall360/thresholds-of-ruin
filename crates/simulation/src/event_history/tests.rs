@@ -475,6 +475,65 @@ fn public_act_and_apply_seal_before_snapshot_and_keep_queries_pure() {
 }
 
 #[test]
+fn host_event_identity_requires_the_disclosed_reference_cell() {
+    for anchor_lit in [false, true] {
+        let mut game = fixture();
+        game.teleport(ActorId(2), at(4, 1)).unwrap();
+        game.teleport(ActorId(3), at(4, 2)).unwrap();
+        game.set_body(
+            ActorId(1),
+            crate::BodySpec {
+                cells: vec![[0, 0, 0], [1, 0, 0], [2, 0, 0]],
+                eye: [0, 0, 0],
+                mass: 100,
+            },
+        )
+        .unwrap();
+        game.set_cell_light(at(1, 1), anchor_lit).unwrap();
+        host_damage(&mut game, 1);
+        let witness = game.event_observation_witness();
+        let (mut view, scene, proof) = game.observe_event_scene(ActorId(3)).unwrap();
+        assert!(view.visible_actors.iter().any(|actor| {
+            actor.id == ActorId(1) && actor.disclosure == ActorDisclosure::Creature
+        }));
+        assert_eq!(
+            scene.iter().any(|cell| cell.location == at(1, 1)),
+            anchor_lit
+        );
+        let before = crate::diagnostics::work_counts();
+        game.record_event_observation(&witness, &proof, &mut view)
+            .unwrap();
+        assert_eq!(crate::diagnostics::work_counts().scenes, before.scenes);
+        let third_party = view.combat.unwrap().events;
+        if anchor_lit {
+            assert!(third_party.iter().any(|event| matches!(
+                event,
+                DisclosedCombatEvent::Ability {
+                    caster: Some(ActorId(1)),
+                    target: Some(ActorId(2)),
+                    ..
+                }
+            )));
+        } else {
+            assert!(third_party.is_empty());
+            assert!(events(&game, ActorId(2)).iter().any(|event| matches!(
+                event,
+                DisclosedCombatEvent::UnseenAbility {
+                    caster: None,
+                    target: ActorId(2),
+                    ..
+                }
+            )));
+        }
+        game.seal_event_observations().unwrap();
+        let reopened = restored(&game);
+        for observer in [ActorId(2), ActorId(3)] {
+            assert_eq!(events(&reopened, observer), events(&game, observer));
+        }
+    }
+}
+
+#[test]
 fn event_observer_proof_binds_owner_generation_and_visibility() {
     let mut game = fixture();
     host_damage(&mut game, 1);
