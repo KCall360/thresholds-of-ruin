@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from arena_search_sampling import initial_state, next_proposal, append_result
+from arena_search_sampling import initial_state, next_proposal, append_result, hash_json
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -30,6 +30,16 @@ class SearchSamplingProcesses(unittest.TestCase):
             self.assertEqual(json.loads(first.stdout), next_proposal(state))
             self.assertEqual(verify().stdout, first.stdout)
             self.assertEqual(path.read_bytes(), original)
+            old = copy.deepcopy(state)
+            old["environment"]["packages"]["numpy"] = "2.5.3"
+            old["header_sha256"] = hash_json({key: old[key] for key in
+                                             ("format", "seed", "space", "environment")})
+            path.write_text(json.dumps(old), encoding="utf-8")
+            historical = path.read_bytes()
+            rejected = verify()
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn("environment differs from retained history", rejected.stderr)
+            self.assertEqual(path.read_bytes(), historical)
             bad = copy.deepcopy(state)
             bad["records"][-1]["value"] = 100
             path.write_text(json.dumps(bad), encoding="utf-8")
