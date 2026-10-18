@@ -12,7 +12,7 @@ from pathlib import Path
 from arena_evaluation import read_json, seed
 
 FORMAT = "tor-arena-search-sampling-v1"
-PINNED = {"optuna": "5.0.0", "alembic": "1.20.0", "colorlog": "6.12.0", "numpy": "2.5.3",
+PINNED = {"optuna": "5.0.0", "alembic": "1.20.0", "colorlog": "6.12.0", "numpy": "2.5.4",
           "packaging": "26.3", "sqlalchemy": "2.1.4", "tqdm": "4.70.1", "PyYAML": "6.0.3",
           "Mako": "1.4.3", "MarkupSafe": "3.0.4", "typing-extensions": "4.16.0", "colorama": "0.4.6"}
 NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")

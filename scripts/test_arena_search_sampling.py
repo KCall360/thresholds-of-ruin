@@ -1,14 +1,41 @@
 """Seeded TPE history can be reconstructed without private sampler state."""
 import copy
 import json
+from pathlib import Path
+import re
 import unittest
-from arena_search_sampling import initial_state, next_proposal, append_result, verify_state, seed_schedule, hash_json
+from unittest.mock import patch
+from arena_search_sampling import initial_state, next_proposal, append_result, verify_state, validate_state, seed_schedule, hash_json, environment, PINNED
 
 SPACE = {"strength": {"type": "integer", "low": 0, "high": 5},
          "style": {"type": "categorical", "choices": ["heavy", "light"]}}
 
 
 class SearchSamplingTests(unittest.TestCase):
+    def test_dependency_allowlist_matches_hash_pinned_requirements(self):
+        source = (Path(__file__).resolve().parents[1] / ".github/requirements-arena-search.txt").read_text(encoding="utf-8")
+        normalize = lambda name: re.sub(r"[-_.]+", "-", name).lower()
+        locked = {normalize(name): version for name, version in
+                  re.findall(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", source, re.MULTILINE)}
+        self.assertEqual({normalize(name): version for name, version in PINNED.items()}, locked)
+
+    def test_environment_rejects_old_numpy_before_loading_the_sampler(self):
+        old = {**PINNED, "numpy": "2.5.3"}
+        with patch("arena_search_sampling.importlib.metadata.version", side_effect=old.__getitem__):
+            with self.assertRaisesRegex(ValueError, "pinned environment"):
+                environment()
+
+    def test_history_rejects_old_numpy_even_with_valid_integrity_hash(self):
+        with patch("arena_search_sampling.importlib.metadata.version", side_effect=PINNED.__getitem__):
+            state = initial_state(SPACE, "42")
+            state["environment"]["packages"]["numpy"] = "2.5.3"
+            state["header_sha256"] = hash_json({key: state[key] for key in
+                                               ("format", "seed", "space", "environment")})
+            original = copy.deepcopy(state)
+            with self.assertRaisesRegex(ValueError, "environment differs from retained history"):
+                validate_state(state)
+            self.assertEqual(state, original)
+
     def test_json_continuation_after_tpe_startup_and_history_integrity(self):
         state = initial_state(SPACE, "42")
         saved = None
