@@ -22,6 +22,9 @@ use bevy::{
 };
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
+mod tests;
+
 const PEOPLE: [&str; 10] = [
     "Warrior",
     "Mage",
@@ -727,6 +730,7 @@ fn perform(
 /// individuals in their settled corpse poses.
 #[derive(Resource, Default)]
 struct Lineup {
+    elapsed: f32,
     shown: Option<usize>,
     group: Vec<Entity>,
     shot: usize,
@@ -736,11 +740,13 @@ struct Lineup {
 
 /// Seconds each line-up stands before the next.
 const LINEUP: f32 = 4.0;
+const LINEUP_SHOTS: [(f32, &str, usize); 3] =
+    [(1.9, "line", 0), (2.8, "close-a", 1), (3.8, "close-b", 2)];
 
 #[allow(clippy::too_many_arguments)]
 fn lineup(
     mut commands: Commands,
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     diagnostics: Res<Diagnostics>,
     mut state: ResMut<Lineup>,
     mut library: ResMut<PropLibrary>,
@@ -756,8 +762,27 @@ fn lineup(
         return;
     }
     let names = everyone();
-    let now = (time.elapsed_secs() - diagnostics.capture_warmup).max(0.0);
-    let index = (now / LINEUP) as usize;
+    // Preview deadlines use real time: animation time clamps slow frames to
+    // 250 ms, making a four-second capture take minutes on software DX12.
+    // Stop at each view and family boundary so a long frame cannot skip a
+    // pose, capture a replacement family, or queue several readbacks at once.
+    let next_family = state.shot / LINEUP_SHOTS.len();
+    let changing_family = state.shown.is_some_and(|shown| next_family > shown);
+    let next_moment = if changing_family {
+        0.0
+    } else {
+        LINEUP_SHOTS[state.shot % LINEUP_SHOTS.len()].0
+    };
+    let deadline = diagnostics.capture_warmup + next_family as f32 * LINEUP + next_moment;
+    if pending.is_empty() {
+        state.elapsed = (state.elapsed + time.delta_secs()).min(deadline);
+    }
+    let index = if changing_family && state.elapsed >= deadline {
+        next_family
+    } else {
+        state.shown.unwrap_or(0)
+    };
+    let now = (state.elapsed - diagnostics.capture_warmup).max(0.0);
     if index >= names.len() {
         if pending.is_empty() {
             exit.write(AppExit::Success);
@@ -847,9 +872,10 @@ fn lineup(
         };
         *transform = diagnostics.preview_camera(focus, offset, &mut cave_materials);
     }
-    for (when, tag, step) in [(1.9, "line", 0), (2.8, "close-a", 1), (3.8, "close-b", 2)] {
-        let wanted = index * 3 + step;
-        if t >= when && state.shot <= wanted {
+    for (when, tag, step) in LINEUP_SHOTS {
+        let wanted = index * LINEUP_SHOTS.len() + step;
+        let due = diagnostics.capture_warmup + index as f32 * LINEUP + when;
+        if state.elapsed >= due && state.shot <= wanted {
             state.shot = wanted + 1;
             if let Some(dir) = diagnostics.capture.clone() {
                 let mode = if diagnostics.fallen_lineups {
@@ -862,6 +888,10 @@ fn lineup(
                     index,
                     name.replace(' ', "_")
                 ));
+                info!(
+                    "Lineup capture family={name} view={tag} real_secs={:.3}",
+                    time.elapsed_secs()
+                );
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(save_to_disk(path));

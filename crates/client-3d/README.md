@@ -81,7 +81,11 @@ and stops it on exit. Other options:
   and pending captures finish. This mode cannot combine with gallery, lineups,
   idles/antics or portraits/photos.
 - `--lineups` (with `--capture DIR`) shows five individuals of each creature
-  side by side, women and men alternating among people, with a close-up
+  side by side, women and men alternating among people, with close-ups of
+  the first two individuals.
+  Lineup capture deadlines use real time and wait for each GPU readback.
+  Slow frames stop at each camera and family boundary so no view is skipped;
+  creature animation retains its capped timestep.
 - `--fallen-lineups` shows the same five generated individuals in settled
   death poses, with a full lineup and two close views framed around the fallen
   bodies, clothing and held props. For manual corpse review, use
