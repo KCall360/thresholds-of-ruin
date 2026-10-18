@@ -778,7 +778,7 @@ fn ordered_strikes_checkpoint_tail_roundtrips_and_rejects_impossible_cursor_or_h
     for (field, value) in [
         (
             "progress",
-            json!({"kind":"ability","next_strike":3,"successful_primaries":0,"attempted_riders":[0,0]}),
+            json!({"kind":"ability","next_strike":3,"successful_primaries":0,"attempted_riders":[0,0],"linked_hold":null}),
         ),
         ("progress", json!({"kind":"item"})),
         ("hold", json!(1)),
@@ -788,9 +788,8 @@ fn ordered_strikes_checkpoint_tail_roundtrips_and_rejects_impossible_cursor_or_h
         let mut forged = serde_json::to_value(&shared).unwrap();
         forged["actors"][snapshot["actors"].as_u64().unwrap() as usize]["1"]["pending"][field] =
             value;
-        let Ok(forged) = serde_json::from_value::<SharedState>(forged) else {
-            continue;
-        };
+        let forged = serde_json::from_value::<SharedState>(forged)
+            .expect("current, structurally valid mutation must reach checkpoint admission");
         assert!(crate::Game::restore_checkpoint(
             serde_json::from_value(snapshot.clone()).unwrap(),
             &forged,

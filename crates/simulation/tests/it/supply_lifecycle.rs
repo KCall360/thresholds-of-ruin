@@ -1490,6 +1490,8 @@ fn actual_ability_plan_values() -> Vec<Value> {
             "invocation",
             "step",
             "target",
+            "initial_hold",
+            "hold_damage_increment",
             "public_aim",
             "ability",
             "preparation",

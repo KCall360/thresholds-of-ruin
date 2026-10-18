@@ -202,6 +202,8 @@ mod public_plan_record_tests {
             record
         );
         let fields = [
+            "holds",
+            "behavior",
             "active_since",
             "anatomy",
             "equipment",
@@ -219,8 +221,25 @@ mod public_plan_record_tests {
             "public_plan",
             "asset",
         ];
+        let mut named = value.clone();
+        named
+            .as_object_mut()
+            .unwrap()
+            .entry("asset")
+            .or_insert(serde_json::Value::Null);
+        assert_eq!(
+            serde_json::from_value::<ActorRecord>(named.clone()).unwrap(),
+            record
+        );
+        let object = named.as_object().unwrap();
+        assert_eq!(
+            object.len(),
+            fields.len(),
+            "positional probe must contain every current field"
+        );
+        assert!(fields.iter().all(|key| object.contains_key(*key)));
         let positional =
-            serde_json::Value::Array(fields.iter().map(|key| value[*key].clone()).collect());
+            serde_json::Value::Array(fields.iter().map(|key| object[*key].clone()).collect());
         assert!(
             serde_json::from_slice::<ActorRecord>(&serde_json::to_vec(&positional).unwrap())
                 .is_err(),
