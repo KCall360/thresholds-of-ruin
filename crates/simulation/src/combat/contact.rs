@@ -288,13 +288,50 @@ fn deltas(shell: i64) -> impl Iterator<Item = [i64; 3]> {
 }
 
 impl Game {
+    /// Observer-local physical touch endpoints, shared across concealed bodies.
+    /// Keep the ordinary contact query's disclosure-membership gate; rendering
+    /// geometry alone is not authority to reach through corners or portals.
+    pub(crate) fn melee_contact_locations_in_scene(
+        &self,
+        source: ActorId,
+        scene: &[SightCell],
+        placement: Option<crate::abilities::Placement>,
+    ) -> BTreeSet<Location> {
+        crate::diagnostics::contact_neighborhood();
+        let Some(body) = ContactBody::capture_at(self, source, placement) else {
+            return BTreeSet::new();
+        };
+        let owner = &self.actors[&source];
+        let awareness = placement.map_or_else(
+            || self.local_awareness(source),
+            |at| self.local_awareness_at(at.location, at.orientation, &owner.body),
+        );
+        let disclosed: BTreeSet<_> = scene
+            .iter()
+            .chain(&awareness)
+            .map(|cell| cell.location)
+            .collect();
+        let mut reachable = BTreeSet::new();
+        for source in body.cells {
+            for delta in (1..=3).flat_map(deltas) {
+                crate::diagnostics::contact_route_probe();
+                if let Some((location, _)) = self.melee_neighbor_frame(source.location, delta) {
+                    if disclosed.contains(&location) {
+                        reachable.insert(location);
+                    }
+                }
+            }
+        }
+        reachable
+    }
+
     pub(crate) fn melee_reachable_in_scene(
         &self,
         source: ActorId,
         target: ActorId,
         scene: &[SightCell],
     ) -> bool {
-        ContactQuery::capture(self, source, target, scene).is_some_and(|query| query.reachable())
+        self.melee_reachable_at_placement(source, target, scene, None)
     }
     pub(crate) fn melee_reachable_at_placement(
         &self,

@@ -4175,3 +4175,7 @@ mod public_plan_observation_tests;
 #[cfg(test)]
 #[path = "locomotion_session_tests.rs"]
 mod locomotion_tests;
+
+#[cfg(test)]
+#[path = "perception_session_tests.rs"]
+mod perception_tests;

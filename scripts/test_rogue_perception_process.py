@@ -116,11 +116,16 @@ class RoguePerceptionProcesses(ProcessTestCase):
         super().setUp()
         # One non-resetting diagnostic budget across M, P and all three X arms.
         # These are work/output guards, not production performance thresholds.
+        # Retain raw protocol snapshots: 500 requests at 256 KiB/request plus
+        # 3 MiB shared startup allowance gives a fixed 128 MiB aggregate guard.
+        # This is an output allowance, not a claimed maximum frame/request size.
         self.work_budget = ProcessWorkBudget(requests=500, actor_ticks=12000,
-                                             transcript_bytes=32 * 1024 * 1024)
+                                             transcript_bytes=128 * 1024 * 1024)
+        self.arm_reports = []
 
     def tearDown(self):
         report = self.work_budget.report()
+        report["arms"] = self.arm_reports
         (self.directory / "work-budget.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print("Perception process budget: " + json.dumps(report, sort_keys=True), flush=True)
         if not self._failed():
@@ -332,11 +337,27 @@ class RoguePerceptionProcesses(ProcessTestCase):
         for process in (*clients, server):
             process.stop()
 
+    def run_arm(self, name, contract, *args):
+        before = self.work_budget.usage()
+        completed = False
+        try:
+            contract(*args)
+            completed = True
+        finally:
+            # Report the failing arm too, without resetting any shared limit or
+            # masking the original failure if output measurement itself fails.
+            after = self.work_budget.report()
+            report = {"arm": name, "completed": completed,
+                      "used": {key: after["used"][key] - before[key] for key in before},
+                      "measurement_error": after["measurement_error"]}
+            self.arm_reports.append(report)
+            print("Perception arm: " + json.dumps(report, sort_keys=True), flush=True)
+
     def test_production_m_p_x_preserve_perception_and_paid_lifecycles(self):
-        self.medusa_contract()
-        self.phantom_contract()
+        self.run_arm("medusa", self.medusa_contract)
+        self.run_arm("phantom", self.phantom_contract)
         for probe in ("take", "search", "attack"):
-            self.xeroc_contract(probe)
+            self.run_arm("xeroc-" + probe, self.xeroc_contract, probe)
 
 
 if __name__ == "__main__":

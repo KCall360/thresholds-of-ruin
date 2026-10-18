@@ -4,6 +4,7 @@
 //! for identity, targeting, affiliation and public-plan projection.
 use crate::{ActorId, Game, GameError, ItemClass};
 use serde::{Deserialize, Serialize};
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 use tor_world::{Location, SightCell};
 
@@ -408,6 +409,7 @@ struct DisclosureInputs<'a> {
     eyes: &'a BTreeSet<Location>,
     capabilities: &'a PerceptionCapabilities,
     placement: Option<crate::abilities::Placement>,
+    contact: &'a OnceCell<BTreeSet<Location>>,
 }
 pub(crate) type PerceptionProjection = BTreeMap<ActorId, PerceivedActor>;
 
@@ -595,12 +597,14 @@ impl Game {
         }
         let eyes = sight.iter().map(|cell| cell.location).collect();
         let capabilities = owner.perception();
+        let contact = OnceCell::new();
         let inputs = DisclosureInputs {
             observer,
             scene,
             eyes: &eyes,
             capabilities: &capabilities,
             placement: None,
+            contact: &contact,
         };
         Ok(self.classify_body(subject, &body, &inputs))
     }
@@ -613,10 +617,9 @@ impl Game {
     ) -> ActorDisclosure {
         let DisclosureInputs {
             observer,
-            scene,
             eyes,
             capabilities,
-            placement,
+            ..
         } = *inputs;
         crate::diagnostics::actor_disclosure();
         let state = &self.actors[&subject];
@@ -626,7 +629,11 @@ impl Game {
         } else if !state.alive() {
             ActorDisclosure::Hidden
         } else if state.perception().invisible && !(capabilities.see_invisible && eye_visible) {
-            if self.melee_reachable_at_placement(observer, subject, scene, placement) {
+            if state.combat.as_ref().is_some_and(|combat| combat.hp() > 0)
+                && body
+                    .iter()
+                    .any(|(at, _)| self.contact_locations(inputs).contains(at))
+            {
                 ActorDisclosure::AnonymousContact
             } else {
                 ActorDisclosure::Hidden
@@ -636,6 +643,12 @@ impl Game {
         } else {
             ActorDisclosure::Creature
         }
+    }
+
+    fn contact_locations<'a>(&self, inputs: &DisclosureInputs<'a>) -> &'a BTreeSet<Location> {
+        inputs.contact.get_or_init(|| {
+            self.melee_contact_locations_in_scene(inputs.observer, inputs.scene, inputs.placement)
+        })
     }
 
     pub(crate) fn perception_projection(
@@ -657,6 +670,7 @@ impl Game {
         let capabilities = owner.perception();
         let cells: BTreeSet<_> = scene.iter().map(|cell| cell.location).collect();
         let eyes: BTreeSet<_> = sight.iter().map(|cell| cell.location).collect();
+        let contact = OnceCell::new();
         crate::diagnostics::perception_projection();
         Ok(self
             .actors
@@ -669,8 +683,19 @@ impl Game {
                     eyes: &eyes,
                     capabilities: &capabilities,
                     placement,
+                    contact: &contact,
                 };
                 let disclosure = self.classify_body(subject, &body, &inputs);
+                let body = if disclosure == ActorDisclosure::AnonymousContact {
+                    tor_world::Shared::new(
+                        body.iter()
+                            .copied()
+                            .filter(|(at, _)| self.contact_locations(&inputs).contains(at))
+                            .collect(),
+                    )
+                } else {
+                    body
+                };
                 (subject, PerceivedActor { disclosure, body })
             })
             .collect())

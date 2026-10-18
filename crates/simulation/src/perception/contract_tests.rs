@@ -125,6 +125,45 @@ fn one_observation_classifies_each_local_actor_once_for_all_projections() {
 }
 
 #[test]
+fn anonymous_contact_discloses_only_individually_reachable_body_cells() {
+    for (extension, blocked_corner) in [([1, 0, 0], false), ([0, 1, 0], true)] {
+        let mut game = fixture(&[], &[invisible()]);
+        game.set_body(
+            SUBJECT,
+            crate::BodySpec {
+                cells: vec![[0, 0, 0], extension],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        if blocked_corner {
+            game.set_wall(at(1, 2, 3), true).unwrap();
+        }
+        let projected = |game: &Game| {
+            game.observe(OWNER)
+                .unwrap()
+                .visible_actors
+                .into_iter()
+                .filter(|actor| actor.id == SUBJECT)
+                .map(|actor| actor.location)
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(projected(&game), BTreeSet::from([at(1, 3, 2)]));
+        assert!(game
+            .ability_plan_with_supplies(
+                OWNER,
+                &id("basic_melee"),
+                AbilityInvocation::ContactTarget { target: SUBJECT },
+                Default::default()
+            )
+            .is_ok());
+        apply(&mut game, OWNER, "fixture_detection", 1000);
+        assert_eq!(disclosure(&game, OWNER, SUBJECT), ActorDisclosure::Creature);
+        assert_eq!(projected(&game).len(), 2);
+    }
+}
+
+#[test]
 fn anonymous_contact_allows_only_ordinary_basic_melee_in_its_own_domain() {
     let mut game = fixture(&[], &[invisible()]);
     assert_eq!(
@@ -1094,3 +1133,6 @@ fn item_preparation_keeps_known_threat_reference_domains_separate() {
         );
     }
 }
+
+#[path = "contact_tests.rs"]
+mod contact_topology_contracts;

@@ -969,10 +969,7 @@ mod tests {
             for (outcome, expected) in [
                 (AbilityOutcome::Applied, "Something attacks you."),
                 (AbilityOutcome::Unaffected, "Something attacks you."),
-                (
-                    AbilityOutcome::Miss,
-                    "Something attacks you, but misses.",
-                ),
+                (AbilityOutcome::Miss, "Something attacks you, but misses."),
             ] {
                 let event = CombatEventView::UnseenAbility {
                     caster,

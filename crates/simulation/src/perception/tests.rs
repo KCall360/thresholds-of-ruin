@@ -50,7 +50,7 @@ fn capability_fold_is_order_independent_and_suppression_wins() {
 
 #[test]
 fn contradictory_authored_guises_fail_in_either_source_order() {
-    let mut sources = vec![
+    let mut sources = [
         modifier(PerceptionValue::ObjectGuise {
             appearance: Some(guise("chest")),
         }),

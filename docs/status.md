@@ -388,7 +388,7 @@ unchanged. This proves ownership, disclosure and recoverability, not pursuit or
 survival balance. Complete Windows/Linux debug/release CI remains required before
 merge.
 
-The source-stage M/P/X cohort adds Medusa's eight monstrous-humanoid/reptilian
+The M/P/X cohort adds Medusa's eight monstrous-humanoid/reptilian
 HD with GZ1(1), NA1(2), NA2(4), Presence-bound Spellcasting and 3d4/3d4/2d5
 natural strikes; Phantom's eight undead/incorporeal HD with typed invisibility,
 1/5 erratic movement and 4d4 natural damage; and Xeroc's seven aberration/
@@ -398,8 +398,14 @@ upper-boundary redistribution, with shared exact racial growth beyond 26.
 P/X bands are 15–24 and 16–25; M/P/X birth chances are 40%/0%/30%.
 The subtype labels grant no immunity, wall passing or extra shapechanging.
 See [perception cohort](play/rogue.md#gaze-invisibility-and-object-guise).
-This WIP checkpoint is source-only: focused tests, full certificate regeneration,
-aggregate gates and cross-platform qualification have not run for M/P/X.
+Focused simulation, encoded Service, source-free persistence and bounded
+ordinary-process witnesses pass for these contracts. The five-arm process
+witness retains production M/P/X builds and real checks, with explicitly
+synthetic room geometry, external foe control and a durable living observer;
+it establishes mechanisms, not autonomous pursuit or survival balance.
+Current scenario certificates, save fixtures and actual wire recordings are
+regenerated, including the separate 3D menagerie certificate. These focused
+checks do not replace complete Windows/Linux debug/release CI before merge.
 
 ## Important limitations
 

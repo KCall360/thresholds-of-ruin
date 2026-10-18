@@ -304,9 +304,9 @@ pub enum ResolvedEffect {
 impl ResolvedEffect {
     pub(crate) fn recipient(&self) -> EffectRecipient {
         match self {
-            Self::SearchAdjacentGuises | Self::ObservePublicPlan { .. } | Self::ApplyQualifiedConditionToSource { .. } => {
-                EffectRecipient::Source
-            }
+            Self::SearchAdjacentGuises
+            | Self::ObservePublicPlan { .. }
+            | Self::ApplyQualifiedConditionToSource { .. } => EffectRecipient::Source,
             _ => EffectRecipient::Target,
         }
     }

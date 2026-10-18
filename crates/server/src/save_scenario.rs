@@ -2737,7 +2737,7 @@ impl OutgoingEdgePolicy {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(
     remote = "tor_simulation::rules::Reach",
     tag = "kind",
@@ -2757,6 +2757,35 @@ enum AbilityReach {
         #[serde(with = "AllyRange")]
         range: tor_simulation::rules::AllyRange,
     },
+}
+impl AbilityReach {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::Reach, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Melee {},
+            Sight {
+                range: u16,
+            },
+            MutualSight {
+                range: u16,
+            },
+            SelfOnly {},
+            SelfOrAlly {
+                #[serde(with = "AllyRange")]
+                range: tor_simulation::rules::AllyRange,
+            },
+        }
+        Ok(match super::named_map(deserializer)? {
+            Fields::Melee {} => tor_simulation::rules::Reach::Melee,
+            Fields::Sight { range } => tor_simulation::rules::Reach::Sight { range },
+            Fields::MutualSight { range } => tor_simulation::rules::Reach::MutualSight { range },
+            Fields::SelfOnly {} => tor_simulation::rules::Reach::SelfOnly,
+            Fields::SelfOrAlly { range } => tor_simulation::rules::Reach::SelfOrAlly { range },
+        })
+    }
 }
 #[derive(Serialize)]
 #[serde(
@@ -2780,7 +2809,7 @@ impl AllyRange {
             Touch {},
             Sight { range: u16 },
         }
-        Ok(match Fields::deserialize(deserializer)? {
+        Ok(match super::named_map(deserializer)? {
             Fields::Touch {} => tor_simulation::rules::AllyRange::Touch,
             Fields::Sight { range } => tor_simulation::rules::AllyRange::Sight { range },
         })
@@ -3418,15 +3447,39 @@ mod tests {
             #[serde(with = "super::AbilityReach")]
             reach: tor_simulation::rules::Reach,
         }
-        let good = serde_json::json!({"reach":{"kind":"mutual_sight","range":4}});
-        let decoded: Record = serde_json::from_value(good.clone()).unwrap();
-        assert_eq!(serde_json::to_value(decoded).unwrap(), good);
+        for reach in [
+            serde_json::json!({"kind":"melee"}),
+            serde_json::json!({"kind":"sight","range":6}),
+            serde_json::json!({"kind":"mutual_sight","range":4}),
+            serde_json::json!({"kind":"self_only"}),
+            serde_json::json!({"kind":"self_or_ally","range":{"kind":"touch"}}),
+            serde_json::json!({"kind":"self_or_ally","range":{"kind":"sight","range":3}}),
+        ] {
+            let good = serde_json::json!({"reach":reach});
+            let decoded: Record = serde_json::from_value(good.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), good);
+        }
         for reach in [
             serde_json::json!({"kind":"mutual_sight"}),
             serde_json::json!({"kind":"mutual_sight","range":4,"awareness":true}),
             serde_json::json!(["mutual_sight", 4]),
+            serde_json::json!(["melee"]),
+            serde_json::json!(["sight", 6]),
+            serde_json::json!(["self_only"]),
+            serde_json::json!(["self_or_ally", {"kind":"touch"}]),
+            serde_json::json!({"kind":"melee","range":1}),
+            serde_json::json!({"kind":"self_only","range":0}),
+            serde_json::json!({"kind":"sight"}),
+            serde_json::json!({"kind":"self_or_ally"}),
+            serde_json::json!({"kind":"self_or_ally","range":["touch"]}),
+            serde_json::json!({"kind":"self_or_ally","range":["sight",3]}),
+            serde_json::json!({"kind":"self_or_ally","range":{"kind":"touch","range":1}}),
+            serde_json::json!({"kind":"self_or_ally","range":{"kind":"sight"}}),
         ] {
-            assert!(serde_json::from_value::<Record>(serde_json::json!({"reach":reach})).is_err());
+            assert!(
+                serde_json::from_value::<Record>(serde_json::json!({"reach":reach})).is_err(),
+                "malformed stored reach accepted: {reach}"
+            );
         }
     }
 
