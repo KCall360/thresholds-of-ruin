@@ -163,6 +163,7 @@ pub struct PreparedItemChoice {
 pub struct PreparedActorChoice {
     pub carried_loot: Option<CarriedLoot>,
     pub depth_growth: DepthGrowth,
+    pub advancement: Vec<crate::prepared_spawn::OrdinalAdvancement>,
     pub content: String,
     pub weight: u32,
     pub turn_ticks: u64,
@@ -455,6 +456,10 @@ impl<'de> Deserialize<'de> for PreparedActorChoice {
         #[serde(deny_unknown_fields)]
         struct Fields {
             depth_growth: DepthGrowth,
+            advancement: crate::bounded::Bounded<
+                crate::prepared_spawn::OrdinalAdvancement,
+                { crate::limits::HIT_DICE },
+            >,
             content: String,
             weight: u32,
             turn_ticks: u64,
@@ -465,6 +470,7 @@ impl<'de> Deserialize<'de> for PreparedActorChoice {
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             depth_growth: fields.depth_growth,
+            advancement: fields.advancement.0,
             content: fields.content,
             weight: fields.weight,
             turn_ticks: fields.turn_ticks,
@@ -763,6 +769,7 @@ impl PreparedActorChoice {
         self.content == other.content
             && self.turn_ticks == other.turn_ticks
             && self.depth_growth == other.depth_growth
+            && self.advancement == other.advancement
             && self.carried_loot == other.carried_loot
             && self.actor == other.actor
     }
@@ -851,9 +858,10 @@ impl PopulationPlan {
                                                 policy.valid(&self.carried_item_pools)
                                             })
                                             && c.actor
-                                                .validate_depth_growth(
+                                                .validate_birth_advancement(
                                                     game.content.clone(),
                                                     c.depth_growth,
+                                                    &c.advancement,
                                                 )
                                                 .is_ok()
                                     },
@@ -1193,6 +1201,7 @@ impl Game {
                     DepthGrowth::Fixed {}
                 },
                 depth.unwrap_or(1),
+                &choice.advancement,
             )
             .map_err(GameError::from)?;
         let stock = BirthStockContext {
@@ -1264,6 +1273,7 @@ impl Game {
                     DepthGrowth::Fixed {}
                 },
                 depth.unwrap_or(1),
+                &choice.advancement,
             )
             .map_err(GameError::from)?;
         let stock = BirthStockContext {
@@ -1662,6 +1672,7 @@ impl Game {
                                         seed,
                                         choice.depth_growth,
                                         scope.depth,
+                                        &choice.advancement,
                                     )
                                     .map_err(GameError::from)?;
                                 let stock = BirthStockContext {
@@ -2089,6 +2100,7 @@ impl Game {
                                             seed,
                                             choice.depth_growth,
                                             depth,
+                                            &choice.advancement,
                                         )
                                         .map_err(|_| invalid())?;
                                 }
@@ -2588,6 +2600,7 @@ mod tests {
                     bands: vec![DepthBand {
                         depth: DepthInterval::Open { minimum: 2 },
                         choices: vec![PreparedActorChoice {
+                            advancement: vec![],
                             carried_loot: None,
                             depth_growth: crate::prepared_spawn::DepthGrowth::Fixed {},
                             content: "ordinary actor".into(),

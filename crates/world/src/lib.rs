@@ -3,6 +3,8 @@
 pub mod checkpoint_map;
 mod geometry;
 pub use geometry::Adjacency;
+mod ray;
+pub use ray::RayStep;
 mod lighting;
 mod scene;
 mod shadowcasting;

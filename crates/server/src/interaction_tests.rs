@@ -22,7 +22,7 @@ fn fixture() -> Engine {
     manifest.archetypes.insert(
         "mail".into(),
         toml::from_str(
-            "class = 'armor'\nname = 'mail'\nequipment = { slot = 'body_armor', modifiers = [{ scope = 'always', op = { kind = 'add', stat = { kind = 'defense', defense = 'physical' }, value = 3 } }] }",
+            "class = 'armor'\nname = 'mail'\nequipment = { slot = 'body_armor', armor = { physical_reduction = 3, material = 'metal', rustproof = false }, modifiers = [] }",
         )
         .unwrap(),
     );

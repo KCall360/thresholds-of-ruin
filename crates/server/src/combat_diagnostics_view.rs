@@ -111,6 +111,12 @@ fn record(
                 .filter_map(|effect| {
                     Some(match effect {
                         s::abilities::ResolvedEffect::Theft { .. } => return None,
+                        s::abilities::ResolvedEffect::CorrodeArmor { amount, .. } => {
+                            p::DiagnosticEffect::CorrodeArmor {
+                                target,
+                                amount: *amount,
+                            }
+                        }
                         s::abilities::ResolvedEffect::ApplyLinkedHold { .. } => {
                             p::DiagnosticEffect::LinkedHold {
                                 target,

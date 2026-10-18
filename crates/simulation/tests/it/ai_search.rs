@@ -74,8 +74,8 @@ fn autonomous_healing_intention_survives_checkpoint_and_consumes_only_on_complet
 #[test]
 fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_upgrade() {
     use tor_simulation::{
-        checkpoint::SharedState, AnatomySpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec,
-        ItemClass, ItemId, ItemSpec,
+        checkpoint::SharedState, AnatomySpec, EquipmentSlot, EquipmentSlotId, ItemClass, ItemId,
+        ItemSpec,
     };
     let mut species = super::creature_fixture::species();
     species.anatomy = AnatomySpec {
@@ -100,18 +100,15 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
     for (id, defense) in [(10, 1), (11, 3)] {
         let mut item = ItemSpec::ordinary(format!("mail {id}"));
         item.class = ItemClass::Armor;
-        item.equipment = Some(EquipmentSpec {
-            slot: EquipmentSlot::new("body_armor").unwrap(),
+        item.equipment = Some(tor_simulation::EquipmentSpec {
+            armor: Some(tor_simulation::ArmorSpec {
+                physical_reduction: defense as u32,
+                material: tor_simulation::ArmorMaterial::Metal,
+                rustproof: false,
+            }),
+            slot: tor_simulation::EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
-            modifiers: vec![tor_simulation::rules::Modifier {
-                scope: tor_simulation::rules::Scope::Always,
-                op: tor_simulation::rules::ModifierOp::Add {
-                    stat: tor_simulation::rules::Stat::Defense {
-                        defense: tor_simulation::rules::DefenseKind::Physical,
-                    },
-                    value: defense,
-                },
-            }],
+            modifiers: vec![],
         });
         game.place_item_stack(id, at(2), Some(ai), 1, item).unwrap();
     }

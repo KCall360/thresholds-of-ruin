@@ -169,7 +169,7 @@ impl ActorOutcome {
         let ended =
             preparation
                 .plan
-                .as_ability()
+                .ability_id()
                 .map(|_| crate::combat::CombatEvent::SequenceEnded {
                     actor: self.id,
                     intention: preparation.intention,
@@ -578,6 +578,17 @@ impl Game {
                 applied_count += 1;
                 continue;
             }
+            if let ResolvedEffect::CorrodeArmor { slot, amount } = effect {
+                let applied = self.corrode_armor_in_outcome(&mut transition, slot, *amount)?;
+                if applied != 0 {
+                    outcome.effects[applied_count] = ResolvedEffect::CorrodeArmor {
+                        slot: slot.clone(),
+                        amount: applied,
+                    };
+                    applied_count += 1;
+                }
+                continue;
+            }
             if let ResolvedEffect::ApplyLinkedHold { policy } = effect {
                 // Earlier effects become authoritative before testing contact/capability.
                 transition.state.location = placement.location;
@@ -982,12 +993,12 @@ impl Game {
                     .hold
                     .is_some_and(|owner| combat.creature().costs().reservation(owner).is_none())
                     || matches!(&pending.plan,crate::abilities::Plan::Respec(plan) if plan.basis.build_epoch!=combat.creature().build_epoch())
-                    || pending.plan.as_ability().is_some_and(|plan| {
+                    || pending.plan.ability_id().is_some_and(|ability| {
                         !combat
                             .creature()
                             .derived()
                             .abilities
-                            .contains(&plan.ability)
+                            .contains(ability)
                     })
             })
         });
@@ -1233,7 +1244,7 @@ impl Game {
         spec.properties
             .insert("death_tick".into(), self.tick.to_string());
         if let Some(preparation) = actor.cancel_preparation() {
-            if preparation.plan.as_ability().is_some() {
+            if preparation.plan.ability_id().is_some() {
                 outcome.events.push(CombatEvent::SequenceEnded {
                     actor: outcome.id,
                     intention: preparation.intention,
@@ -1244,6 +1255,7 @@ impl Game {
         actor.equipment.clear();
         actor.motion.active_fall = None;
         let body = Item {
+            condition: crate::armor::ItemCondition::default(),
             corpse: Some(crate::CorpseAppearance {
                 actor: outcome.id,
                 asset: actor.asset.clone(),

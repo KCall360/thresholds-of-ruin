@@ -205,6 +205,11 @@ impl Plan {
                 selection: &plan.supplies,
                 spend_at: SupplySpendAt::FirstResolution,
             },
+            Self::Ray(plan) => ItemContract::Supplies {
+                costs: &plan.supply_costs,
+                selection: &plan.supplies,
+                spend_at: SupplySpendAt::FirstResolution,
+            },
             Self::Respec(plan) => ItemContract::Supplies {
                 costs: std::slice::from_ref(&plan.ration),
                 selection: &plan.supplies,
@@ -495,9 +500,13 @@ impl Game {
         if self.physical_item_allocation(&plan).is_ok() {
             return Some(plan);
         }
-        let ability = plan.as_ability()?;
+        let actor = plan.actor();
+        let costs = match plan.item_contract() {
+            ItemContract::Supplies { costs, .. } => costs,
+            _ => return None,
+        };
         let mut selected = Vec::new();
-        for (ordinal, cost) in ability.supply_costs.iter().enumerate() {
+        for (ordinal, cost) in costs.iter().enumerate() {
             let mut need = cost.quantity;
             let mut carried = view.inventory.iter().map(|item| item.id).peekable();
             let mut ground = view.ground_items.iter().map(|item| item.id).peekable();
@@ -512,9 +521,9 @@ impl Game {
                     break;
                 };
                 let item = self.items.get(&id)?;
-                if !self.known_supply(ability.actor, item)
+                if !self.known_supply(actor, item)
                     || item.spec.supply.as_ref() != Some(&cost.supply)
-                    || !self.supply_access(ability.actor, item, &cost.access)
+                    || !self.supply_access(actor, item, &cost.access)
                 {
                     continue;
                 }
@@ -538,10 +547,13 @@ impl Game {
                 return None;
             }
         }
-        let Plan::Ability(ability) = &mut plan else {
-            return None;
-        };
-        ability.supplies = SupplySelection::Explicit { items: selected };
+        match &mut plan {
+            Plan::Ability(ability) => {
+                ability.supplies = SupplySelection::Explicit { items: selected }
+            }
+            Plan::Ray(ray) => ray.supplies = SupplySelection::Explicit { items: selected },
+            _ => return None,
+        }
         self.physical_item_allocation(&plan).ok()?;
         Some(plan)
     }

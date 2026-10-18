@@ -618,7 +618,7 @@ impl Game {
     ) -> Result<crate::ActionOutcome, GameError> {
         if self.actor_frozen(actor)
             || !self.preparation(actor).is_some_and(|pending| {
-                pending.intention == expected && pending.plan.as_ability().is_some()
+                pending.intention == expected && pending.plan.ability_id().is_some()
             })
         {
             return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
@@ -874,13 +874,17 @@ impl Game {
                             invocation,
                             supplies,
                         }) => {
-                            let target = invocation.target(*actor);
-                            target.0 != 0
-                                && target.0 < self.next_actor_id
-                                && self.content.rules.ability(&id).is_some_and(|definition| {
+                            self.content.rules.ability(&id).is_some_and(|definition| {
                                     if invocation.kind() != definition.invocation
                                         || !supplies.valid(definition.supply_costs.len())
                                     {
+                                        return false;
+                                    }
+                                    if matches!(invocation, crate::abilities::AbilityInvocation::DirectionalRay { .. }) {
+                                        return matches!(definition.reach, crate::rules::Reach::Sight { .. });
+                                    }
+                                    let target = invocation.target(*actor);
+                                    if target.0 == 0 || target.0 >= self.next_actor_id {
                                         return false;
                                     }
                                     match definition.reach {

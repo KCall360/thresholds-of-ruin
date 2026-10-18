@@ -1189,8 +1189,48 @@ Catalog availability does not establish useful choices, class parity or complete
 Rogue content. Shared ordinary retreat and paid cancel-and-step provide escape
 authority for both classes; there is no extra Mage movement node.
 
-Starting timed preparation freezes one bounded ordered strike plan. Earlier
-queue admission stores the request, not the plan. Each ability authors strikes
+A `directional_ray` invocation selects one of the ten ordinary movement directions,
+with no actor target, destination or predicted collision path. Its bounded `sight`
+range supplies the clear-visit budget. Preparation captures the source's reference
+cell, body frame, selected direction, source skill/check/effect operands, token
+bindings, costs and timing. Release discovers recipients through current geometry;
+recipient skill, protection and eligibility are live when an encounter occurs.
+Source-side outgoing folds use unconditional and ability-qualified source modifiers
+and exclude opponent-qualified condition sources, retaining ordinary family and
+talent cancellation. A future recipient never becomes a substitute launch target
+for `versus_source` or watched-context source bonuses. Source-side incoming
+modifiers are captured separately; their `versus_source` predicate is evaluated
+against each actual recipient. A launch performs one frozen named-skill roll.
+Every live recipient performs the authored named-skill check against that same
+total; ties succeed. The only supported shape is one target-owned opposed named
+check, no success effects, and explicit component damage on failure. There are no
+riders, unlocks or selected-weapon payloads in this invocation.
+
+Each clear physical cell spends one range visit. A solid wall or closed door
+reverses the whole direction without spending a visit; an open door passes.
+Unavailable or ambiguous physical continuations stop the ray. Independent limits
+of 64 probes and 32 reversals terminate no-progress geometry. Physical portal
+rotations rotate the direction; sight-only images and abstract stair links do not
+carry rays. The source's frozen launching footprint is suppressed until the ray
+exits it, after which a returning ray can hit the source. A contiguous pass through
+a multi-cell body performs one check. Exiting and re-entering permits another;
+each previous actual check by that recipient against this release adds one
+Disadvantage before ordinary edge cancellation and the three-extra-die cap.
+Success deals no damage and continues; failure applies the full frozen damage
+through ordinary current protection and intercepts. Repeat counts are bounded
+release-local state, not persistent identities.
+
+Preparation holds applicable source tokens; a source incoming one-use token
+contributes to the first actual recipient check. Live recipient tokens are chosen
+and spent atomically only when their check occurs. The common preparation
+transaction owns payment, supplies, cooldown, recovery, all rolls and effects.
+Public historical aim discloses only an observer-frame direction, and AI chooses
+from disclosed exact directional alignment without previewing collision. Optional
+combat diagnostics attach the shared launch receipt to each real recipient
+encounter; an empty traversal has no fabricated recipient diagnostic.
+
+Actor-target and self-step preparation freezes one bounded ordered strike plan.
+Earlier queue admission stores the request, not the plan. Each ability authors strikes
 or selects the current melee source. Both authored abilities and natural sources
 may unlock later rows through active owned talents. A dormant owned unlock omits
 its row from a new preparation without changing the remaining authored ordinals.
@@ -1233,7 +1273,7 @@ attacker rolls against a captured defense and have no independent timing, cost,
 retargeting or recursive riders.
 
 A success rider may author `condition = { kind = "sequence_successful_hits", minimum = 2 }`,
-with a minimum from 2 through 16. It counts only executed, successful user-rolled
+with a minimum from 1 through 16. A minimum of 1 is the generic once-after-any-hit contract. It counts only executed, successful user-rolled
 primary checks that structurally involve this preparation's target. Component
 protection reducing damage to zero still qualifies; misses, unavailable targets,
 whole-primary immunity, checkless/personal-difficulty checks, target saves and

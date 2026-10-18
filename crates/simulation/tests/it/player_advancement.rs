@@ -914,6 +914,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
     spec.concealed = true;
     spec.appearance = "unmarked ring".into();
     spec.equipment = Some(tor_simulation::EquipmentSpec {
+        armor: None,
         slot: tor_simulation::EquipmentSlot::new("ring").unwrap(),
         attack: None,
         modifiers: vec![

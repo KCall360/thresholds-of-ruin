@@ -103,7 +103,11 @@ pub fn match_disclosed_sentence(
     };
     if let Some((ability, noun)) = matched {
         let (noun, supplies) = tor_client_common::abilities::split_supply_clause(&noun)?;
-        if ability.target_kind == tor_protocol::AbilityTargetKind::SelfStep {
+        if matches!(
+            ability.target_kind,
+            tor_protocol::AbilityTargetKind::SelfStep
+                | tor_protocol::AbilityTargetKind::DirectionalRay
+        ) {
             if noun.is_empty() {
                 return Ok(ParsedCommand::Orphan {
                     prompt: format!("Which way do you want to use {}?", ability.name),
@@ -115,7 +119,12 @@ pub fn match_disclosed_sentence(
                 .ok_or("Choose a direction for that ability.")?;
             return Ok(ParsedCommand::Ability {
                 id: ability.id.clone(),
-                selection: grammar::AbilitySelection::SelfStep { direction },
+                selection: if ability.target_kind == tor_protocol::AbilityTargetKind::DirectionalRay
+                {
+                    grammar::AbilitySelection::DirectionalRay { direction }
+                } else {
+                    grammar::AbilitySelection::SelfStep { direction }
+                },
                 supplies: supplies.map(str::to_owned),
             });
         }

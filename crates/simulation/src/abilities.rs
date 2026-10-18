@@ -6,7 +6,9 @@ mod participation;
 pub use invocation::{AbilityInvocation, InvocationKind, PushDirection, StepDirection};
 mod plan;
 mod plan_validation;
+mod ray;
 mod resolve;
+pub use ray::{RayIncomingOwner, RayIncomingSource, RayPlan};
 mod spatial;
 mod strikes;
 pub use spatial::{MovementMode, MovementResult, Placement, SpatialInput, StepCommitment};
@@ -64,3 +66,9 @@ mod theft_tests;
 
 #[cfg(test)]
 mod gaze_tests;
+
+#[cfg(test)]
+mod corrosion_tests;
+
+#[cfg(test)]
+mod ray_tests;

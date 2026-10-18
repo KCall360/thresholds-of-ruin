@@ -327,3 +327,49 @@ fn restorable_loss_diagnostics_reject_positional_duplicate_and_missing_attribute
     }];
     assert!(view.validate().is_err());
 }
+
+#[test]
+fn corrosion_diagnostics_are_closed_bounded_and_roundtrip_actual_loss() {
+    for amount in [0, 1, 1_000_000] {
+        let value = serde_json::json!({"type":"corrode_armor","target":"2","amount":amount});
+        let effect: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&effect).unwrap(), value);
+        let mut view = report();
+        view.records[0].outcome.effects = vec![effect];
+        view.validate().unwrap();
+        let encoded = serde_json::to_string(&view).unwrap();
+        assert_eq!(
+            serde_json::from_str::<CombatDiagnosticsView>(&encoded).unwrap(),
+            view
+        );
+        for field in ["target", "amount"] {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<DiagnosticEffect>(missing).is_err());
+        }
+        let mut leaked = value;
+        leaked["item"] = "17".into();
+        assert!(serde_json::from_value::<DiagnosticEffect>(leaked).is_err());
+    }
+    for (target, amount) in [(0, 1), (2, 1_000_001), (2, u32::MAX)] {
+        let mut view = report();
+        view.records[0].outcome.effects = vec![DiagnosticEffect::CorrodeArmor {
+            target: ActorId(target),
+            amount,
+        }];
+        assert!(view.validate().is_err());
+    }
+    for raw in [
+        r#"["corrode_armor","2",1]"#,
+        r#"{"type":"corrode_armor","target":"2","amount":1,"amount":2}"#,
+        r#"{"type":"corrode_armor","target":"2","target":"3","amount":1}"#,
+        r#"{"type":"corrode_armor","type":"damage","target":"2","amount":1}"#,
+        r#"{"type":"corrode_armor","target":"2","amount":-1}"#,
+        r#"{"type":"corrode_armor","target":"2","amount":4294967296}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<DiagnosticEffect>(raw).is_err(),
+            "{raw}"
+        );
+    }
+}

@@ -390,13 +390,13 @@ pub enum InspectionRiderCondition {
 impl InspectionRiderCondition {
     pub fn valid(&self) -> bool {
         match self {
-            Self::SequenceSuccessfulHits { minimum } => (2..=16).contains(minimum),
+            Self::SequenceSuccessfulHits { minimum } => (1..=16).contains(minimum),
         }
     }
 }
 fn hit_minimum<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
     let minimum = u16::deserialize(d)?;
-    if !(2..=16).contains(&minimum) {
+    if !(1..=16).contains(&minimum) {
         return Err(serde::de::Error::custom("invalid sequence hit minimum"));
     }
     Ok(minimum)

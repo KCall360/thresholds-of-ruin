@@ -167,7 +167,7 @@ fn sequence_rider_hit_miss_table_counts_only_successful_primaries_and_attempts_o
 
 #[test]
 fn sequence_rider_authored_minimum_is_not_hardcoded_to_two() {
-    for (minimum, count) in [(3, 5), (16, 16)] {
+    for (minimum, count) in [(1, 1), (1, 4), (3, 5), (16, 16)] {
         let mut game = natural_game(
             (0..count).map(|index| strike(index, true)).collect(),
             vec![rider(Some(minimum), 7)],

@@ -43,6 +43,7 @@ fn check_fields(check: &s::rules::CheckDef) -> usize {
 fn effect_fields(effect: &s::rules::Effect) -> usize {
     match effect {
         s::rules::Effect::Theft { .. } => 3,
+        s::rules::Effect::CorrodeArmor { .. } => 2,
         s::rules::Effect::ApplyLinkedHold { .. } => 4,
         s::rules::Effect::HoldDamage { .. } => 2,
         s::rules::Effect::Damage {
@@ -824,7 +825,7 @@ mod sequence_rider_condition_tests {
         let rules =
             s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
                 .unwrap();
-        for minimum in [None, Some(2), Some(16)] {
+        for minimum in [None, Some(1), Some(2), Some(16)] {
             let condition = minimum.map(
                 |minimum| serde_json::json!({"kind":"sequence_successful_hits","minimum":minimum}),
             );

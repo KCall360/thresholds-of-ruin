@@ -104,9 +104,14 @@ fn armor(game: &mut Game, actor: ActorId) {
     let mut spec = ItemSpec::ordinary("mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(EquipmentSpec {
+        armor: Some(tor_simulation::ArmorSpec {
+            physical_reduction: 3,
+            material: tor_simulation::ArmorMaterial::Metal,
+            rustproof: false,
+        }),
         slot: EquipmentSlot::new("body_armor").unwrap(),
         attack: None,
-        modifiers: defense(3),
+        modifiers: vec![],
     });
     game.place_item_stack(10, at(1), Some(actor), 1, spec)
         .unwrap();
@@ -224,9 +229,11 @@ fn damage_pauses_item_work_and_saved_resume_keeps_original_intention() {
             .creature(actor)
             .unwrap()
             .derived()
-            .defenses
-            .physical,
-        13
+            .protection
+            .reduction(&Selector::Category {
+                category: DamageType::Impact
+            }),
+        3
     );
 }
 
@@ -236,6 +243,7 @@ fn duplicate_ring_slots_are_distinct_and_a_slot_must_match_the_item() {
     let mut spec = ItemSpec::ordinary("ring".into());
     spec.class = ItemClass::Ring;
     spec.equipment = Some(EquipmentSpec {
+        armor: None,
         slot: EquipmentSlot::new("ring").unwrap(),
         attack: None,
         modifiers: defense(0),
@@ -398,13 +406,25 @@ fn armor_protects_until_removal_finishes_and_death_drops_it_once() {
     game.act(actor, Action::Unequip { item: ItemId(10) })
         .unwrap();
     assert_eq!(
-        game.creature(actor).unwrap().derived().defenses.physical,
-        13
+        game.creature(actor)
+            .unwrap()
+            .derived()
+            .protection
+            .reduction(&Selector::Category {
+                category: DamageType::Impact
+            }),
+        3
     );
     finish(&mut game, actor);
     assert_eq!(
-        game.creature(actor).unwrap().derived().defenses.physical,
-        10
+        game.creature(actor)
+            .unwrap()
+            .derived()
+            .protection
+            .reduction(&Selector::Category {
+                category: DamageType::Impact
+            }),
+        0
     );
     game.equip_authored(actor, ItemId(10), EquipmentSlotId(0))
         .unwrap();
@@ -436,6 +456,7 @@ fn concealed_equipment_discloses_its_slot_but_stats_require_actor_knowledge() {
     spec.concealed = true;
     spec.appearance = "silver ring".into();
     spec.equipment = Some(EquipmentSpec {
+        armor: None,
         slot: EquipmentSlot::new("ring").unwrap(),
         attack: None,
         modifiers: defense(3),
@@ -536,6 +557,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     )
     .unwrap();
     weapon.equipment = Some(EquipmentSpec {
+        armor: None,
         slot: EquipmentSlot::new("weapon").unwrap(),
         attack: Some(attack.clone()),
         modifiers: defense(0),
@@ -553,27 +575,28 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     let mut armor = ItemSpec::ordinary("armor".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
+        armor: Some(tor_simulation::ArmorSpec {
+            physical_reduction: 3,
+            material: tor_simulation::ArmorMaterial::Metal,
+            rustproof: false,
+        }),
         slot: EquipmentSlot::new("body_armor").unwrap(),
         attack: None,
-        modifiers: {
-            let mut modifiers = defense(3);
-            modifiers.push(Modifier {
-                scope: Scope::Always,
-                op: ModifierOp::Reduction {
-                    selector: Selector::Category {
-                        category: DamageType::Impact,
-                    },
-                    amount: 2,
+        modifiers: vec![Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Reduction {
+                selector: Selector::Category {
+                    category: DamageType::Impact,
                 },
-            });
-            modifiers
-        },
+                amount: 2,
+            },
+        }],
     });
     game.place_item_stack(31, at(1), Some(actor), 1, armor)
         .unwrap();
     game.equip_authored(actor, ItemId(31), EquipmentSlotId(1))
         .unwrap();
-    game.apply_effects(actor, &[super::abilities::damage(5, DamageType::Impact)])
+    game.apply_effects(actor, &[super::abilities::damage(8, DamageType::Impact)])
         .unwrap();
     assert_eq!(game.health(actor).unwrap().0, 27);
     let mut build = game.creature(actor).unwrap().build().clone();
@@ -592,7 +615,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     assert_eq!(game.selected_melee_attack(actor), Some(&natural_attack));
     assert_eq!(
         game.creature(actor).unwrap().derived().defenses.physical,
-        13
+        10
     );
 }
 
@@ -747,6 +770,7 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
             ItemClass::Armor
         };
         item.equipment = Some(EquipmentSpec {
+            armor: None,
             slot,
             attack: None,
             modifiers: vec![],
@@ -833,6 +857,7 @@ fn custom_slot_capability_timing_and_checkpoint_use_rules_data() {
     let mut item = ItemSpec::ordinary("grasped tool".into());
     item.class = ItemClass::Tool;
     item.equipment = Some(EquipmentSpec {
+        armor: None,
         slot: slot.clone(),
         attack: Some(super::creature_fixture::melee(7, 60, DamageType::Impact, 9)),
         modifiers: vec![],

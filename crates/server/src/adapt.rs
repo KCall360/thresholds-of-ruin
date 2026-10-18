@@ -151,6 +151,22 @@ pub fn action(action: &a::Action) -> s::Action {
                         },
                     }
                 }
+                a::AbilityInvocation::DirectionalRay { direction } => {
+                    s::abilities::AbilityInvocation::DirectionalRay {
+                        direction: match direction {
+                            a::Direction::North => s::abilities::StepDirection::North,
+                            a::Direction::East => s::abilities::StepDirection::East,
+                            a::Direction::South => s::abilities::StepDirection::South,
+                            a::Direction::West => s::abilities::StepDirection::West,
+                            a::Direction::NorthEast => s::abilities::StepDirection::NorthEast,
+                            a::Direction::SouthEast => s::abilities::StepDirection::SouthEast,
+                            a::Direction::SouthWest => s::abilities::StepDirection::SouthWest,
+                            a::Direction::NorthWest => s::abilities::StepDirection::NorthWest,
+                            a::Direction::Up => s::abilities::StepDirection::Up,
+                            a::Direction::Down => s::abilities::StepDirection::Down,
+                        },
+                    }
+                }
             },
             supplies: simulation_supplies(supplies),
         },
@@ -295,6 +311,22 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
                 }
                 s::abilities::AbilityInvocation::SelfStep { direction } => {
                     a::AbilityInvocation::SelfStep {
+                        direction: match direction {
+                            s::abilities::StepDirection::North => a::Direction::North,
+                            s::abilities::StepDirection::East => a::Direction::East,
+                            s::abilities::StepDirection::South => a::Direction::South,
+                            s::abilities::StepDirection::West => a::Direction::West,
+                            s::abilities::StepDirection::NorthEast => a::Direction::NorthEast,
+                            s::abilities::StepDirection::SouthEast => a::Direction::SouthEast,
+                            s::abilities::StepDirection::SouthWest => a::Direction::SouthWest,
+                            s::abilities::StepDirection::NorthWest => a::Direction::NorthWest,
+                            s::abilities::StepDirection::Up => a::Direction::Up,
+                            s::abilities::StepDirection::Down => a::Direction::Down,
+                        },
+                    }
+                }
+                s::abilities::AbilityInvocation::DirectionalRay { direction } => {
+                    a::AbilityInvocation::DirectionalRay {
                         direction: match direction {
                             s::abilities::StepDirection::North => a::Direction::North,
                             s::abilities::StepDirection::East => a::Direction::East,

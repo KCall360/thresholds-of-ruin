@@ -301,15 +301,7 @@ impl Game {
         equipment.insert(slot, item);
         let sources = equipment
             .iter()
-            .map(|(socket, id)| {
-                let equipment = candidate.items.get(id)?.spec.equipment.as_ref()?;
-                Some(crate::creatures::EquipmentSource {
-                    item: *id,
-                    socket: *socket,
-                    modifiers: equipment.modifiers.clone(),
-                    attack: equipment.attack.clone(),
-                })
-            })
+            .map(|(socket, id)| candidate.items.get(id)?.equipment_source(*id, *socket))
             .collect::<Option<Vec<_>>>()?;
         let context = candidate.equipment_recovery_context(actor, &sources).ok()?;
         let mut owner = candidate.actors.get_mut(&actor)?;
@@ -830,7 +822,7 @@ mod tests {
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Defense {
-                    defense: DefenseKind::Physical,
+                    defense: DefenseKind::Cognitive,
                 },
                 value,
             },
@@ -861,6 +853,7 @@ mod tests {
         );
         let primary = component.key();
         EquipmentSpec {
+            armor: None,
             slot: EquipmentSlot::new("weapon").unwrap(),
             attack: Some(
                 crate::attacks::MeleeAttack::new(
@@ -942,6 +935,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    armor: None,
                     slot: EquipmentSlot::new("head_armor").unwrap(),
                     attack: None,
                     modifiers,
@@ -967,6 +961,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    armor: None,
                     slot: EquipmentSlot::new("head_armor").unwrap(),
                     attack: None,
                     modifiers: vec![Modifier {
@@ -1003,6 +998,7 @@ mod tests {
                     at,
                     20,
                     EquipmentSpec {
+                        armor: None,
                         slot: EquipmentSlot::new("body_armor").unwrap(),
                         attack: None,
                         modifiers: vec![Modifier {
@@ -1023,6 +1019,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    armor: None,
                     slot: EquipmentSlot::new("head_armor").unwrap(),
                     attack: None,
                     modifiers: vec![

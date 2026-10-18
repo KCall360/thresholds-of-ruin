@@ -104,3 +104,17 @@ fn public_plan_narration_announces_new_paid_records_once_and_preserves_occluded_
         1
     );
 }
+
+#[test]
+fn public_ray_aim_presents_frozen_direction_without_destination_or_target() {
+    let mut record = record();
+    record.state = PublicPlanStateView::Preparing {
+        ability: None,
+        aim: ObservedAimView::Direction {
+            direction: tor_protocol::Position { x: 1, y: 0, z: -1 },
+        },
+        remaining_work: 200,
+    };
+    assert_eq!(tor_client_common::public_plan::line(&record),
+        "Observed at tick 100: guard was preparing; ability undisclosed; aim direction (1,0,-1) in your frame at that time; 200 work remaining.");
+}

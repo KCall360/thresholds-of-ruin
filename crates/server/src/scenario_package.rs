@@ -23,9 +23,9 @@ mod population;
 mod retrieval;
 pub use population::{
     ActorPopulationBand, ActorPopulationChoice, CarriedItemChoice, CarriedItemPool, CarriedLoot,
-    CarryChance, CharacterLoadout, FloorActivation, PopulationBand, PopulationChoice,
-    PopulationDepth, PopulationDepthGrowth, PopulationProfile, PopulationQuantityExpr,
-    PopulationStage, Protagonist, QuantityExpression, ScenarioCapabilities,
+    CarryChance, CharacterLoadout, FloorActivation, PopulationAdvancement, PopulationBand,
+    PopulationChoice, PopulationDepth, PopulationDepthGrowth, PopulationProfile,
+    PopulationQuantityExpr, PopulationStage, Protagonist, QuantityExpression, ScenarioCapabilities,
 };
 pub use retrieval::UniqueRetrieval;
 #[path = "scenario_rules.rs"]
@@ -35,9 +35,10 @@ pub use rules_source::{resolve_rules_source, ResolvedRules};
 #[path = "scenario_source.rs"]
 mod source;
 pub use authoring::{
-    AiProfile, AmountExpr, AnatomySpec, BodySpec, ConsumableSpec, CurrencyKind,
-    DamageComponentExpr, DamageExpr, DamageType, DiceExpr, Effect, EquipmentSlot, EquipmentSpec,
-    HoldPolicy, ItemClass, PushDirection, RelocationGate, RelocationPolicy, TheftSelection,
+    AiProfile, AmountExpr, AnatomySpec, ArmorMaterial, ArmorSpec, BodySpec, ConsumableSpec,
+    CurrencyKind, DamageComponentExpr, DamageExpr, DamageType, DiceExpr, Effect, EquipmentSlot,
+    EquipmentSpec, HoldPolicy, ItemClass, PushDirection, RelocationGate, RelocationPolicy,
+    TheftSelection,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -48,13 +49,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v42";
-const VALIDATOR: &str = "tor-scenario-32";
+pub const RULESET: &str = "interactions-v43";
+const VALIDATOR: &str = "tor-scenario-33";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 20;
+pub const FORMAT: u32 = 21;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -4601,8 +4602,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-32");
-        assert_eq!(original.certificate.ruleset, "interactions-v42");
+        assert_eq!(original.certificate.validator, "tor-scenario-33");
+        assert_eq!(original.certificate.ruleset, "interactions-v43");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -4610,10 +4611,12 @@ mod tests {
             ("validator", "tor-scenario-29"),
             ("validator", "tor-scenario-30"),
             ("validator", "tor-scenario-31"),
+            ("validator", "tor-scenario-32"),
             ("ruleset", "interactions-v38"),
             ("ruleset", "interactions-v39"),
             ("ruleset", "interactions-v40"),
             ("ruleset", "interactions-v41"),
+            ("ruleset", "interactions-v42"),
         ] {
             let mut package = original.clone();
             if boundary == "validator" {
@@ -5723,7 +5726,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v42"
+        let source = r#"import = "interactions-v43"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

@@ -539,3 +539,26 @@ on_success = [{ kind = "damage", damage = { kind = "components", components = [{
 on_failure = []
 descriptors = []
 riders = []
+
+# A: one admitted zero-damage contact; the purchased CO1 owns corrosion.
+# Body, attributes and timing are provisional TOR inputs.
+[creatures.species."rogue.aquator"]
+behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
+kind = "aberration"
+subtypes = ["aquatic"]
+attributes = { strength = 2, speed = 1, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
+anatomy = { slots = [] }
+displacement = { size = "medium", anchored = false }
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "corrosive" } }]
+[creatures.species."rogue.aquator".melee]
+skill = "heavy_weaponry"
+bonus = 0
+wind_up = 100
+recovery = 100
+[[creatures.species."rogue.aquator".melee.strikes]]
+offset = 0
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 0 } }] } }]
+on_failure = []
+descriptors = []
+riders = []

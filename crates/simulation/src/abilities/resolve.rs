@@ -88,6 +88,11 @@ pub enum ResolutionPlan<'a> {
         rider: &'a FrozenRider,
         ordinal: u16,
     },
+    RayEncounter {
+        ray: &'a super::RayPlan,
+        target: ActorId,
+        check: &'a PlannedCheck,
+    },
     Effects {
         actor: ActorId,
         target: ActorId,
@@ -191,6 +196,16 @@ impl<'a> ResolutionPlan<'a> {
                 descriptors: &rider.descriptors,
                 shared_owner: None,
             },
+            Self::RayEncounter { ray, target, check } => ResolutionInput {
+                actor: ray.actor,
+                target,
+                ability: Some(&ray.ability),
+                check: Some(check),
+                on_success: &[],
+                on_failure: &ray.effects,
+                descriptors: &ray.descriptors,
+                shared_owner: None,
+            },
             Self::Effects {
                 actor,
                 target,
@@ -246,6 +261,10 @@ pub enum ResolvedEffect {
     Theft {
         quantity: u64,
         relocation: Option<super::Placement>,
+    },
+    CorrodeArmor {
+        slot: crate::EquipmentSlot,
+        amount: u32,
     },
     ApplyLinkedHold {
         policy: crate::linked_hold::HoldPolicy,
@@ -316,7 +335,8 @@ impl ResolvedEffect {
         match self {
             Self::Theft { quantity, .. } => *quantity > 0,
             Self::Translate { result, .. } => result.changed(),
-            Self::Damage { amount }
+            Self::CorrodeArmor { amount, .. }
+            | Self::Damage { amount }
             | Self::Heal { amount }
             | Self::Nourish { amount }
             | Self::LoseAttribute { amount, .. }
@@ -346,7 +366,9 @@ impl ResolvedEffect {
         }
         let applied = match self {
             Self::Theft { .. } => return Ok(None),
-            Self::SearchAdjacentGuises | Self::ApplyLinkedHold { .. } => self.clone(),
+            Self::SearchAdjacentGuises
+            | Self::ApplyLinkedHold { .. }
+            | Self::CorrodeArmor { .. } => self.clone(),
             Self::Translate { mode, result } => {
                 if let super::MovementResult::Moved { from, to } = result {
                     let Some(placement) = state.placement.as_deref_mut() else {
@@ -590,13 +612,50 @@ impl StrikeBudget {
             remaining: edge(strike.edge - check_debit),
         }
     }
-    fn effects() -> Self {
+    pub(super) fn ray(ray: &super::RayPlan) -> Self {
+        let debit = ray.effect_edge.clamp(
+            -i64::from(CHECK_EDGE_CAPACITY),
+            i64::from(CHECK_EDGE_CAPACITY),
+        );
+        Self {
+            check_debit: debit,
+            owner: None,
+            remaining: edge(ray.effect_edge - debit),
+        }
+    }
+    pub(super) fn effects() -> Self {
         Self {
             check_debit: 0,
             owner: None,
             remaining: Edge::default(),
         }
     }
+}
+/// One frozen launch operand is sampled once per release, before any recipient.
+pub(super) fn resolve_ray_launch(
+    ray: &super::RayPlan,
+    rng: &mut u64,
+    observer: &mut dyn ResolutionObserver,
+) -> i64 {
+    let mut remaining = edge(ray.source_edge);
+    let allocated = remaining.take(CHECK_EDGE_CAPACITY);
+    let before = *rng;
+    let rolled = roll_check(rng, allocated);
+    let total = i64::from(rolled.kept) + ray.source_bonus;
+    observer.record(ResolutionStep {
+        id: "ray_launch_check",
+        fields: &[
+            dice("rolled", rolled.rolled()),
+            dice("retained", rolled.retained()),
+            signed("bonus", ray.source_bonus),
+            signed("input_edge", ray.source_edge),
+            signed("edge", allocated.balance()),
+            signed("total", total),
+            unsigned("rng_before", before),
+            unsigned("rng_after", *rng),
+        ],
+    });
+    total
 }
 /// Resolve a generic opposed check through the same kernel as ordinary abilities.
 pub(crate) fn resolve_escape_check(check: &PlannedCheck, rng: &mut u64) -> bool {
@@ -731,6 +790,7 @@ fn resolve_payload<'a>(
     let mut budget = match plan {
         ResolutionPlan::Ability(ability) => StrikeBudget::new(&ability.strikes[0]),
         ResolutionPlan::Strike { strike, .. } => StrikeBudget::new(strike),
+        ResolutionPlan::RayEncounter { ray, .. } => StrikeBudget::ray(ray),
         ResolutionPlan::Rider { .. } | ResolutionPlan::Effects { .. } => StrikeBudget::effects(),
     };
     resolve_batch(plan, snapshot, rng, observer, &mut budget)
@@ -810,7 +870,8 @@ pub(super) fn resolve_batch<'a>(
     outcome.check = check.map(|check| ResolvedCheck {
         actor: check.actor,
         success,
-        opposed: matches!(check.threshold, CheckThreshold::Opposed { .. }),
+        opposed: matches!(check.threshold, CheckThreshold::Opposed { .. })
+            || matches!(plan, ResolutionPlan::RayEncounter { .. }),
     });
     let effects = if success { on_success } else { on_failure };
     outcome.participation = AttemptedParticipation::selected(check, effects);
@@ -877,6 +938,10 @@ pub(super) fn resolve_batch<'a>(
                     .map_or(super::MovementResult::Blocked, |input| input.result);
                 ResolvedEffect::Translate { mode, result }
             }
+            PlannedEffect::CorrodeArmor { slot, amount } => ResolvedEffect::CorrodeArmor {
+                slot: slot.clone(),
+                amount: *amount,
+            },
             PlannedEffect::ApplyLinkedHold { policy } => ResolvedEffect::ApplyLinkedHold {
                 policy: policy.clone(),
             },
@@ -1034,6 +1099,11 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 #[serde(deserialize_with = "crate::bounded::required_option")]
                 relocation: Option<super::Placement>,
             },
+            CorrodeArmor {
+                slot: crate::EquipmentSlot,
+                #[serde(deserialize_with = "crate::armor::read_corrosion_amount")]
+                amount: u32,
+            },
             ApplyLinkedHold {
                 policy: crate::linked_hold::HoldPolicy,
             },
@@ -1096,6 +1166,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 quantity,
                 relocation,
             },
+            Fields::CorrodeArmor { slot, amount } => Self::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Damage { amount } => Self::Damage { amount },
@@ -1127,6 +1198,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
         };
         let valid_amount = match effect {
             Self::Theft { quantity, .. } => quantity > 0,
+            Self::CorrodeArmor { amount, .. } => {
+                (1..=crate::limits::NUMERIC as u32).contains(&amount)
+            }
             Self::DrainLatestHitDie { amount } | Self::RestoreHitDie { amount } => amount <= 1,
             Self::LoseAttribute { amount, .. } | Self::RestoreAttribute { amount, .. } => {
                 amount <= u32::from(crate::limits::DERIVED_ATTRIBUTE)

@@ -409,3 +409,25 @@ hit_dice = [
   { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.ambush_from_guise" } }] },
   { source = "racial", purchases = [] },
 ]
+
+# A keeps the accepted TOR single-contact mapping; CO1 grants no free NA1.
+[actors."rogue.aquator"]
+asset = "creature.aquator"
+turn_ticks = 100
+body = { cells = [[0, 0, 0]], eye = [0, 0, 0], mass = 40 }
+[actors."rogue.aquator".creature]
+species = "rogue.aquator"
+name = "aquator"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "athletics"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.corrode" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]

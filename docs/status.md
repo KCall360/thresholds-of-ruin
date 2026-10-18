@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **49**, save format **47**, scenario format **20**, ruleset
-**`interactions-v42`**, scenario validator **`tor-scenario-32`**. Unsupported
+**Current formats:** protocol **50**, save format **48**, scenario format **21**, ruleset
+**`interactions-v43`**, scenario validator **`tor-scenario-33`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **15**, ContentPackage **17** and
+The independent compiled inputs use RulesInput **16**, ContentPackage **18** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -24,8 +24,9 @@ linked-hold identities, frozen Escape plans, exact private Move-to-Escape
 admission bindings, durable floor-activation records,
 explicit cell illumination and shared creature/corpse appearance. Current payloads
 also retain explicit item magical/currency capability, checked quantity ranges and
-frozen theft/relocation plans. Prior payload identities remain rejection-only.
-The theft/gold change leaves protocol, RegionInput and physical framing unchanged.
+frozen theft/relocation plans, item-owned armor corrosion, frozen directional-ray
+plans and bounded future birth-advancement schedules. Prior payload identities
+remain rejection-only. RegionInput and physical framing remain unchanged.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
 saved game. Returning to an explored neighborhood or opening a fresh client

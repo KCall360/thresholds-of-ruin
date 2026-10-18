@@ -724,6 +724,37 @@ mod tests {
         }
     }
     #[test]
+    fn saved_directional_ray_has_no_actor_or_predicted_path_operand() {
+        for direction in [
+            "north",
+            "east",
+            "south",
+            "west",
+            "north_east",
+            "south_east",
+            "south_west",
+            "north_west",
+            "up",
+            "down",
+        ] {
+            let value = format!(
+                r#"{{"action":{{"type":"use_ability","id":"fixture_ray","invocation":{{"kind":"directional_ray","direction":"{direction}"}},"supplies":{{"kind":"carried"}}}}}}"#
+            );
+            check_stored::<Stored>(&value);
+            for extra in [
+                r#", "target":null"#,
+                r#", "path":[]"#,
+                r#", "destination":null"#,
+            ] {
+                let forged = value.replace(
+                    &format!(r#""direction":"{direction}""#),
+                    &format!(r#""direction":"{direction}"{extra}"#),
+                );
+                assert!(crate::storage::codec::strict::<Stored>(forged.as_bytes()).is_err());
+            }
+        }
+    }
+    #[test]
     fn saved_invocations_keep_each_direction_and_numeric_actor_independently_of_wire() {
         use crate::actions::AbilityInvocation;
         let id = tor_simulation::content_ids::AbilityId::new("arbitrary_authored_name").unwrap();
@@ -1095,6 +1126,7 @@ pub(crate) enum AbilityInvocation {
     ActorTarget { target: u64 },
     ContactTarget { target: u64 },
     SelfStep { direction: Direction },
+    DirectionalRay { direction: Direction },
 }
 impl<'de> Deserialize<'de> for AbilityInvocation {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -1121,11 +1153,16 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
                 #[serde(deserialize_with = "direction_token")]
                 direction: Direction,
             },
+            DirectionalRay {
+                #[serde(deserialize_with = "direction_token")]
+                direction: Direction,
+            },
         }
         Ok(match named_map(deserializer)? {
             Fields::ActorTarget { target } => Self::ActorTarget { target },
             Fields::ContactTarget { target } => Self::ContactTarget { target },
             Fields::SelfStep { direction } => Self::SelfStep { direction },
+            Fields::DirectionalRay { direction } => Self::DirectionalRay { direction },
         })
     }
 }
@@ -1141,6 +1178,11 @@ impl From<crate::actions::AbilityInvocation> for AbilityInvocation {
             crate::actions::AbilityInvocation::SelfStep { direction } => Self::SelfStep {
                 direction: direction.into(),
             },
+            crate::actions::AbilityInvocation::DirectionalRay { direction } => {
+                Self::DirectionalRay {
+                    direction: direction.into(),
+                }
+            }
         }
     }
 }
@@ -1154,6 +1196,9 @@ impl From<AbilityInvocation> for crate::actions::AbilityInvocation {
                 target: tor_simulation::ActorId(target),
             },
             AbilityInvocation::SelfStep { direction } => Self::SelfStep {
+                direction: direction.into(),
+            },
+            AbilityInvocation::DirectionalRay { direction } => Self::DirectionalRay {
                 direction: direction.into(),
             },
         }

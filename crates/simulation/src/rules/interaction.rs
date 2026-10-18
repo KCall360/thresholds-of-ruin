@@ -133,7 +133,8 @@ impl Ruleset {
         bound(
             interaction != Interaction::NonHostile
                 || !effects.any(|effect| match effect {
-                    PlannedEffect::Theft { .. }
+                    PlannedEffect::CorrodeArmor { .. }
+                    | PlannedEffect::Theft { .. }
                     | PlannedEffect::ApplyLinkedHold { .. }
                     | PlannedEffect::HoldDamage { .. } => true,
                     PlannedEffect::Damage { damage } => damage.can_harm(),
@@ -180,9 +181,10 @@ impl Ruleset {
     }
     fn effect_directly_harms(&self, effect: &Effect) -> bool {
         match effect {
-            Effect::Theft { .. } | Effect::ApplyLinkedHold { .. } | Effect::HoldDamage { .. } => {
-                true
-            }
+            Effect::CorrodeArmor { .. }
+            | Effect::Theft { .. }
+            | Effect::ApplyLinkedHold { .. }
+            | Effect::HoldDamage { .. } => true,
             Effect::Damage {
                 damage: DamageExpr::SelectedWeapon { .. },
             }

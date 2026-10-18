@@ -674,6 +674,16 @@ of the current build/test checkpoint. Other workers can review or prepare patche
 outside the checked inputs meanwhile. Do not duplicate full target builds across
 workers, including in separate target directories, for the same checkpoint.
 
+If a disk-bounded environment explicitly hands a shared warm target between
+worktrees, retain the outgoing source-input manifest and compare it with the
+receiving checkout before reuse. Cargo can otherwise mark an older workspace
+variant fresh when the receiving files predate the cached artifacts. Refresh
+only changed local input mtimes (including an owning crate input when a source
+file was removed), preserving before/after content hashes and protected binary
+copies. Confirm that Cargo rebuilds the affected crate/dependency boundary. Do
+not broadly delete warm caches or substitute a full test run for this freshness
+guard; qualify the changed contracts through their normal focused checks.
+
 Determine run status from the owned process session and saved completion/exit-code
 receipts. A process list from another shell or container may be isolated; absence
 from `ps` proves neither completion nor failure and does not justify a replacement

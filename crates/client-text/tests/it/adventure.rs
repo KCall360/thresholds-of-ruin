@@ -1883,3 +1883,52 @@ fn view_limit_referents_and_ambiguity_labels_do_not_claim_darkness() {
         assert!(!prose.contains("dark"), "{prose}");
     }
 }
+
+#[test]
+fn disclosed_ray_sentence_builds_a_directional_goal_and_prompts_for_direction() {
+    let mut state = StateView {
+        wizard_game: false,
+        revision: 0,
+        observation: tor_client_common::test_support::observation(),
+    };
+    let mut ability = tor_client_common::test_support::ability("arbitrary_ray");
+    ability.name = "Arbitrary Ray".into();
+    ability.target_kind = AbilityTargetKind::DirectionalRay;
+    ability.reach = AbilityReach::Sight { range: 6 };
+    state
+        .observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities = vec![ability];
+    state.observation.visible_actors.clear();
+    let before = state.clone();
+    assert_eq!(
+        goals("arbitrary ray west", &state),
+        vec![Goal::UseAbility {
+            ability: "arbitrary_ray".into(),
+            invocation: AbilityInvocation::DirectionalRay {
+                direction: Direction::West
+            },
+            supplies: SupplySelection::Carried,
+        }]
+    );
+    let line = "arbitrary ray";
+    assert!(
+        matches!(tor_client_text::parser::match_disclosed_sentence(&tokenize(line), line, &state.observation).unwrap(),
+        tor_client_text::parser::grammar::ParsedCommand::Orphan { prompt, .. } if prompt.contains("Which way"))
+    );
+    for noun in ["self", "guard", "west guard"] {
+        let line = format!("arbitrary ray {noun}");
+        assert!(tor_client_text::parser::match_disclosed_sentence(
+            &tokenize(&line),
+            &line,
+            &state.observation
+        )
+        .is_err());
+    }
+    assert_eq!(state, before);
+}

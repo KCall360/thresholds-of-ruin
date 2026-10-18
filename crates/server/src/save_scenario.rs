@@ -541,6 +541,25 @@ struct ActorPopulationChoice {
     weight: u32,
     #[serde(with = "mapped")]
     carried_loot: Option<source::CarriedLoot>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, source::PopulationAdvancement, 256>"
+    )]
+    advancement: Vec<source::PopulationAdvancement>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::PopulationAdvancement", deny_unknown_fields)]
+struct PopulationAdvancement {
+    #[serde(deserialize_with = "stored_birth_ordinal")]
+    ordinal: u64,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, crate::creature_authoring::Purchase, 256>"
+    )]
+    purchases: Vec<crate::creature_authoring::Purchase>,
+    #[serde(deserialize_with = "required_option")]
+    attribute: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -792,9 +811,26 @@ struct AnatomySpec {
     slots: Vec<String>,
 }
 #[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ArmorMaterial", rename_all = "snake_case")]
+enum ArmorMaterial {
+    Metal,
+    Nonmetal,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ArmorSpec", deny_unknown_fields)]
+struct ArmorSpec {
+    #[serde(deserialize_with = "stored_armor_reduction")]
+    physical_reduction: u32,
+    #[serde(with = "mapped")]
+    material: source::ArmorMaterial,
+    rustproof: bool,
+}
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "source::EquipmentSpec", deny_unknown_fields)]
 struct EquipmentSpec {
     slot: String,
+    #[serde(with = "mapped")]
+    armor: Option<source::ArmorSpec>,
     #[serde(with = "mapped")]
     attack: Option<crate::creature_authoring::Melee>,
     #[serde(with = "mapped")]
@@ -893,6 +929,10 @@ enum Effect {
         selection: source::TheftSelection,
         #[serde(with = "mapped")]
         relocation: Option<source::RelocationGate>,
+    },
+    CorrodeArmor {
+        slot: String,
+        amount: u32,
     },
     ApplyLinkedHold {
         #[serde(with = "mapped")]
@@ -1275,7 +1315,7 @@ enum RiderCondition {
 }
 fn sequence_minimum<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
     let minimum = u16::deserialize(d)?;
-    if !(2..=tor_simulation::limits::STRIKES as u16).contains(&minimum) {
+    if !(1..=tor_simulation::limits::STRIKES as u16).contains(&minimum) {
         return Err(serde::de::Error::custom(
             "invalid stored sequence hit minimum",
         ));
@@ -3016,6 +3056,9 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    Purchase => crate::creature_authoring::Purchase,
+    EquipmentSpec => source::EquipmentSpec,
+    ArmorSpec => source::ArmorSpec,
     Perception => crate::creature_authoring::Perception,
     GuiseAppearance => crate::creature_authoring::GuiseAppearance,
     Locomotion => crate::creature_authoring::Locomotion,
@@ -3058,6 +3101,7 @@ named_remote!(
     PopulationChoice => source::PopulationChoice,
     ActorPopulationBand => source::ActorPopulationBand,
     ActorPopulationChoice => source::ActorPopulationChoice,
+    PopulationAdvancement => source::PopulationAdvancement,
     CarriedItemPool => source::CarriedItemPool,
     CarriedItemChoice => source::CarriedItemChoice,
     CarriedLoot => source::CarriedLoot,
@@ -3080,6 +3124,7 @@ macro_rules! string_remote {
     )+};
 }
 string_remote!(
+    ArmorMaterial => source::ArmorMaterial,
     BehaviorDisposition => crate::creature_authoring::Disposition,
     BehaviorIdle => crate::creature_authoring::IdleBehavior,
     AbilityInteraction => tor_simulation::rules::Interaction,
@@ -3136,7 +3181,6 @@ remote!(
     Character => source::Character,
     Objective => source::Objective,
     AnatomySpec => source::AnatomySpec,
-    EquipmentSpec => source::EquipmentSpec,
     DiceExpr => source::DiceExpr,
     AmountExpr => source::AmountExpr,
     DamageComponentExpr => source::DamageComponentExpr,
@@ -3164,7 +3208,6 @@ remote!(
     ModifierStat => crate::creature_authoring::Stat,
     ModifierSelector => crate::creature_authoring::Selector,
     Advancement => crate::creature_authoring::Advancement,
-    Purchase => crate::creature_authoring::Purchase,
     PurchaseSelection => crate::creature_authoring::PurchaseSelection,
     Restoration => crate::creature_authoring::Restoration,
     ConsumableSpec => source::ConsumableSpec,
@@ -3231,7 +3274,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 15;
+const RULES_INPUT_FORMAT: u32 = 16;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -3331,7 +3374,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 17;
+const CONTENT_PACKAGE_FORMAT: u32 = 18;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -3514,7 +3557,7 @@ mod tests {
         ]
         .into_iter()
         .chain(
-            [0, 1, 17, 65536]
+            [0, 17, 65536]
                 .map(|minimum| json!({"kind":"sequence_successful_hits","minimum":minimum})),
         ) {
             let mut bad = good.clone();
@@ -3563,7 +3606,7 @@ mod tests {
     }
 
     #[test]
-    fn idle_ai_format_revisions_match_independent_payload_boundaries() {
+    fn corrosion_and_ray_formats_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -3574,18 +3617,18 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (47, 20, "interactions-v42", 15, 5, 17, "tor-arena-run-v5")
+            (48, 21, "interactions-v43", 16, 5, 18, "tor-arena-run-v5")
         );
     }
 
     #[test]
-    fn combined_movement_and_presentation_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 49);
-        assert_eq!(super::RULES_INPUT_FORMAT, 15);
+    fn corrosion_and_ray_formats_preserve_physical_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 50);
+        assert_eq!(super::RULES_INPUT_FORMAT, 16);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
-        // Locomotion and linked-hold operands advance saved and compiled inputs;
-        // presentation metadata also advances the public protocol. None of these
-        // semantic payload changes alters the physical framing.
+        // Corrosion, directional rays and birth schedules advance their owning
+        // semantic payloads without changing compiled region inputs or physical
+        // framing.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&base[..6], b"TORB\x06\x00");
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
@@ -5246,6 +5289,29 @@ mod public_plan_stored_effect_tests {
         }
     }
 }
+fn stored_birth_ordinal<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    let ordinal = u64::deserialize(d)?;
+    if !(1..=tor_simulation::limits::HIT_DICE as u64).contains(&ordinal) {
+        return Err(serde::de::Error::custom(
+            "invalid stored birth advancement ordinal",
+        ));
+    }
+    Ok(ordinal)
+}
+fn stored_armor_reduction<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    let reduction = u32::deserialize(d)?;
+    if reduction > tor_simulation::limits::NUMERIC as u32 {
+        return Err(serde::de::Error::custom("invalid stored armor reduction"));
+    }
+    Ok(reduction)
+}
+fn stored_corrosion_amount<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    let amount = u32::deserialize(d)?;
+    if !(1..=tor_simulation::limits::NUMERIC as u32).contains(&amount) {
+        return Err(serde::de::Error::custom("invalid stored corrosion amount"));
+    }
+    Ok(amount)
+}
 impl Effect {
     fn deserialize<'de, D: serde::Deserializer<'de>>(
         deserializer: D,
@@ -5258,6 +5324,11 @@ impl Effect {
                 selection: source::TheftSelection,
                 #[serde(with = "mapped")]
                 relocation: Option<source::RelocationGate>,
+            },
+            CorrodeArmor {
+                slot: String,
+                #[serde(deserialize_with = "stored_corrosion_amount")]
+                amount: u32,
             },
             ApplyLinkedHold {
                 #[serde(with = "mapped")]
@@ -5331,6 +5402,7 @@ impl Effect {
                 selection,
                 relocation,
             },
+            Fields::CorrodeArmor { slot, amount } => source::Effect::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => source::Effect::ApplyLinkedHold { policy },
             Fields::HoldDamage {
                 category,
@@ -5531,6 +5603,7 @@ impl DisplacementProfile {
 enum InvocationKind {
     ActorTarget,
     SelfStep,
+    DirectionalRay,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -6889,5 +6962,93 @@ mod theft_gold_schema_tests {
             positional["selection"] = json!(["magical_unit"]);
             assert!(serde_json::from_value::<Owned<source::Effect>>(positional).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod armor_record_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn stored_armor_has_independent_named_required_current_shapes() {
+        let good = json!({"slot":"body_armor", "armor":{
+            "physical_reduction":2,"material":"metal","rustproof":false},
+            "attack":null,"modifiers":[]});
+        let value: Owned<source::EquipmentSpec> = serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&value.0)).unwrap(), good);
+        let mut bad = vec![json!(["body_armor", null, null, []])];
+        for field in ["armor", "attack", "modifiers"] {
+            let mut omitted = good.clone();
+            omitted.as_object_mut().unwrap().remove(field);
+            bad.push(omitted);
+        }
+        for armor in [
+            json!([2, "metal", false]),
+            json!({"physical_reduction":2,"material":"metal"}),
+            json!({"physical_reduction":2,"material":"metal","rustproof":false,"extra":0}),
+        ] {
+            let mut value = good.clone();
+            value["armor"] = armor;
+            bad.push(value);
+        }
+        for value in bad {
+            assert!(serde_json::from_value::<Owned<source::EquipmentSpec>>(value).is_err());
+        }
+        for value in [
+            json!({"kind":"corrode_armor","amount":1}),
+            json!({"kind":"corrode_armor","slot":"body_armor"}),
+            json!({"kind":"corrode_armor","slot":"body_armor","amount":0}),
+            json!({"kind":"corrode_armor","slot":"body_armor","amount":1_000_001}),
+            json!({"kind":"corrode_armor","slot":"body_armor","amount":1,"item":42}),
+            json!(["corrode_armor", "body_armor", 1]),
+        ] {
+            assert!(serde_json::from_value::<Owned<source::Effect>>(value).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod birth_advancement_record_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn stored_future_ordinal_choices_are_named_required_and_bounded() {
+        let author: source::ActorPopulationChoice = serde_json::from_value(json!({"archetype":"subject","weight":1,"advancement":[{"ordinal":3,"purchases":[{"pool":"advancement","selection":{"kind":"skill_rank","skill":"athletics"}}]}]})).unwrap();
+        let good = serde_json::to_value(Borrowed(&author)).unwrap();
+        assert_eq!(good["advancement"][0]["attribute"], json!(null));
+        let restored: Owned<source::ActorPopulationChoice> =
+            serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+        let mut missing = good.clone();
+        missing.as_object_mut().unwrap().remove("advancement");
+        assert!(serde_json::from_value::<Owned<source::ActorPopulationChoice>>(missing).is_err());
+        for field in ["ordinal", "purchases", "attribute"] {
+            let mut missing = good.clone();
+            missing["advancement"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                serde_json::from_value::<Owned<source::ActorPopulationChoice>>(missing).is_err()
+            );
+        }
+        for malformed in [
+            json!([3, [], null]),
+            json!({"ordinal":3,"purchases":[],"attribute":null,"unknown":0}),
+        ] {
+            let mut bad = good.clone();
+            bad["advancement"][0] = malformed;
+            assert!(serde_json::from_value::<Owned<source::ActorPopulationChoice>>(bad).is_err());
+        }
+        let mut positional = good.clone();
+        positional["advancement"][0]["purchases"][0] =
+            json!(["advancement",{"kind":"skill_rank","skill":"athletics"}]);
+        assert!(
+            serde_json::from_value::<Owned<source::ActorPopulationChoice>>(positional).is_err()
+        );
+        let mut oversized = good.clone();
+        oversized["advancement"] = json!(vec![good["advancement"][0].clone(); 257]);
+        assert!(serde_json::from_value::<Owned<source::ActorPopulationChoice>>(oversized).is_err());
     }
 }

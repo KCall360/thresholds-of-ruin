@@ -152,6 +152,25 @@ pub struct ActorPopulationChoice {
     pub archetype: String,
     pub weight: u32,
     pub carried_loot: Option<CarriedLoot>,
+    #[serde(
+        default,
+        deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, PopulationAdvancement, 256>"
+    )]
+    pub advancement: Vec<PopulationAdvancement>,
+}
+
+/// Birth-only choices for exact future racial ordinals, not a live HD formula.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PopulationAdvancement {
+    #[serde(deserialize_with = "read_birth_ordinal")]
+    pub ordinal: u64,
+    #[serde(
+        default,
+        deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, crate::creature_authoring::Purchase, 256>"
+    )]
+    pub purchases: Vec<crate::creature_authoring::Purchase>,
+    pub attribute: Option<crate::creature_authoring::Attribute>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -159,6 +178,16 @@ pub struct ActorPopulationChoice {
 pub struct CarriedItemPool {
     pub version: u32,
     pub choices: Vec<CarriedItemChoice>,
+}
+
+fn read_birth_ordinal<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    let ordinal = u64::deserialize(d)?;
+    if !(1..=tor_simulation::limits::HIT_DICE as u64).contains(&ordinal) {
+        return Err(serde::de::Error::custom(
+            "invalid birth advancement ordinal",
+        ));
+    }
+    Ok(ordinal)
 }
 
 /// Source convenience is separate from the canonical tagged compiled/save form.
@@ -656,8 +685,14 @@ impl Package {
                                                         .as_ref()
                                                         .map(CarriedLoot::compiled);
                                                     prepared.depth_growth = depth_growth.compiled();
-                                                    prepared.actor.validate_depth_growth(
-                                                        index.creature_catalog().content().clone(), prepared.depth_growth,
+                                                    prepared.advancement = choice.advancement.iter().map(|entry| {
+                                                        Ok(tor_simulation::prepared_spawn::OrdinalAdvancement {
+                                                            ordinal: tor_simulation::HdCount(entry.ordinal),
+                                                            choices: crate::creature_authoring::compile_choices(&entry.purchases, entry.attribute.as_ref(), index.creature_catalog().content().rules())?,
+                                                        })
+                                                    }).collect::<Result<_, Failure>>()?;
+                                                    prepared.actor.validate_birth_advancement(
+                                                        index.creature_catalog().content().clone(), prepared.depth_growth, &prepared.advancement,
                                                     ).map_err(|error| fail(format!("Invalid population depth-growth prototype: {error:?}")))?;
                                                     Ok(prepared)
                                                 })

@@ -31,16 +31,46 @@ impl AnatomySpec {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EquipmentSpec {
     pub slot: EquipmentSlot,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub armor: Option<crate::ArmorSpec>,
     pub attack: Option<crate::attacks::MeleeAttack>,
     pub modifiers: Vec<crate::rules::Modifier>,
 }
+impl<'de> Deserialize<'de> for EquipmentSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            slot: EquipmentSlot,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            armor: Option<crate::ArmorSpec>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            attack: Option<crate::attacks::MeleeAttack>,
+            modifiers: Vec<crate::rules::Modifier>,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        let equipment = Self {
+            slot: fields.slot,
+            armor: fields.armor,
+            attack: fields.attack,
+            modifiers: fields.modifiers,
+        };
+        if !equipment.valid_shape() {
+            return Err(serde::de::Error::custom("invalid equipment"));
+        }
+        Ok(equipment)
+    }
+}
 impl EquipmentSpec {
     pub fn valid_shape(&self) -> bool {
-        crate::rules::validate_modifier_shapes(&self.modifiers).is_ok()
+        self.armor.is_none_or(crate::ArmorSpec::valid)
+            && self
+                .modifiers_with_armor(0)
+                .is_some_and(|modifiers| crate::rules::validate_modifier_shapes(&modifiers).is_ok())
     }
     pub fn validate_rules(
         &self,
@@ -53,14 +83,21 @@ impl EquipmentSpec {
                 id: self.slot.to_string(),
             }
         })?;
-        if !slot.compatible_classes.contains(&class)
+        if self
+            .armor
+            .is_some_and(|armor| !armor.valid() || class != ItemClass::Armor)
+            || !slot.compatible_classes.contains(&class)
             || slot.requires_attack != self.attack.is_some()
         {
             return Err(crate::rules::RulesetError::Bound {
                 field: "equipment_capability".into(),
             });
         }
-        rules.validate_modifiers(&self.modifiers)?;
+        rules.validate_modifiers(&self.modifiers_with_armor(0).ok_or_else(|| {
+            crate::rules::RulesetError::Bound {
+                field: "armor_reduction".into(),
+            }
+        })?)?;
         if let Some(attack) = &self.attack {
             rules.validate_damage(attack.damage())?;
         }
@@ -319,7 +356,9 @@ impl Work {
                 ..
             } => Some(*target),
             Self::UseAbility {
-                invocation: crate::abilities::AbilityInvocation::SelfStep { .. },
+                invocation:
+                    crate::abilities::AbilityInvocation::SelfStep { .. }
+                    | crate::abilities::AbilityInvocation::DirectionalRay { .. },
                 ..
             }
             | Self::Escape { .. }
@@ -426,17 +465,8 @@ impl Game {
                 .iter()
                 .map(|(socket, id)| {
                     let item = self.items.get(id).ok_or(GameError::ItemUnavailable)?;
-                    let equipment = item
-                        .spec
-                        .equipment
-                        .as_ref()
-                        .ok_or(GameError::ItemUnavailable)?;
-                    Ok(crate::creatures::EquipmentSource {
-                        item: *id,
-                        socket: *socket,
-                        modifiers: equipment.modifiers.clone(),
-                        attack: equipment.attack.clone(),
-                    })
+                    item.equipment_source(*id, *socket)
+                        .ok_or(GameError::ItemUnavailable)
                 })
                 .collect::<Result<Vec<_>, GameError>>()?;
             let context = self.equipment_recovery_context(actor, &sources)?;
@@ -836,22 +866,24 @@ impl Game {
                     candidate.guise.ambush =
                         crate::perception::AmbushState::Reserved { origin: owner };
                 }
+            }
+            if let Some(ability) = plan.ability_id() {
                 if self
                     .content
                     .rules
-                    .ability(&ability.ability)
+                    .ability(ability)
                     .is_some_and(|definition| {
                         definition.interaction == crate::rules::Interaction::HostileToTarget
                     })
                 {
                     candidate.guise.reveal();
                 }
-                if let Some(cooldown) = ability.cooldown {
+                if let Some(cooldown) = plan.ability_cooldown() {
                     candidate
                         .combat
                         .as_mut()
                         .ok_or(GameError::UnknownActor)?
-                        .start_preparation_cooldown(&ability.ability, cooldown.get())?;
+                        .start_preparation_cooldown(ability, cooldown.get())?;
                 }
             }
         }

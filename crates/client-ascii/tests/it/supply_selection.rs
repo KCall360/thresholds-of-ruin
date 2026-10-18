@@ -145,3 +145,60 @@ fn phase5_supply_picker_bounds_exact_checked_rows_and_clears_on_revision_change(
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     assert!(app.supply_selection.is_none());
 }
+
+#[test]
+fn ray_menu_selects_all_ten_directions_and_preserves_supply_selection_without_targets() {
+    for (key, direction) in [
+        (Key::Up, Direction::North),
+        (Key::Right, Direction::East),
+        (Key::Down, Direction::South),
+        (Key::Left, Direction::West),
+        (Key::NorthEast, Direction::NorthEast),
+        (Key::SouthEast, Direction::SouthEast),
+        (Key::SouthWest, Direction::SouthWest),
+        (Key::NorthWest, Direction::NorthWest),
+        (Key::Ascend, Direction::Up),
+        (Key::Descend, Direction::Down),
+    ] {
+        let mut app = app();
+        let mut snapshot = app.state.as_ref().unwrap().snapshot();
+        let mut state = snapshot.state.as_ref().clone();
+        let ability = &mut state
+            .observation
+            .combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .abilities[0];
+        ability.target_kind = AbilityTargetKind::DirectionalRay;
+        ability.reach = AbilityReach::Sight { range: 6 };
+        state.observation.visible_actors.clear();
+        snapshot.state = state.into();
+        app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+        app.ready();
+        app.messages.skip();
+        let before = app.state.as_ref().unwrap().snapshot();
+        assert_eq!(
+            app.input(Input::Key {
+                key: Key::Abilities
+            }),
+            Effect::None
+        );
+        assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+        assert!(app.status.contains("Choose a direction"));
+        assert!(app.attack_targets.is_empty());
+        assert!(app.supply_selection.is_none());
+        assert_eq!(app.input(Input::Key { key }), Effect::None);
+        assert!(app.supply_selection.is_some());
+        assert!(
+            matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command {
+            command: Command::Act { action: Action::UseAbility {
+                invocation: AbilityInvocation::DirectionalRay { direction: selected }, supplies: SupplySelection::Carried, ..
+            }, .. }, ..
+        }) if selected == direction)
+        );
+        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    }
+}

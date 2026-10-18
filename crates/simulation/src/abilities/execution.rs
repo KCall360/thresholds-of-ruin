@@ -25,8 +25,8 @@ impl Game {
                             _ => true,
                         }
                         && plan
-                            .as_ability()
-                            .is_none_or(|plan| creature.derived().abilities.contains(&plan.ability))
+                            .ability_id()
+                            .is_none_or(|ability| creature.derived().abilities.contains(ability))
                 },
             )
     }
@@ -35,6 +35,7 @@ impl Game {
             && match plan {
                 Plan::Escape(plan) => self.escape_plan_available(plan),
                 Plan::Respec(plan) => self.respec_environment_safe(plan.basis.actor),
+                Plan::Ray(_) => true,
                 Plan::Ability(ability) => self.target_in_reach_snapshot(
                     ability.actor,
                     ability.target,
@@ -288,6 +289,7 @@ impl Game {
             ResolutionPlan::Ability(ability)
             | ResolutionPlan::Strike { ability, .. }
             | ResolutionPlan::Rider { ability, .. } => (ability.actor, ability.target),
+            ResolutionPlan::RayEncounter { ray, target, .. } => (ray.actor, target),
             ResolutionPlan::Effects { actor, target, .. } => (actor, target),
         };
         let mut disclosure_origin =
@@ -371,6 +373,89 @@ impl Game {
         self.rules_rng = rng;
         Ok((result, receipt))
     }
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn resolve_ray_encounter(
+        &mut self,
+        ray: &RayPlan,
+        target: crate::ActorId,
+        previous_checks: u16,
+        threshold: i64,
+        first_actual_check: bool,
+        intention: Option<crate::IntentionId>,
+        budget: &mut resolve::StrikeBudget,
+        activity: &mut crate::lifecycle::DamageActivityGuard,
+    ) -> Result<Outcome, GameError> {
+        crate::diagnostics::strike_resolution();
+        self.settle_actor_time(target)?;
+        let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
+        let rules = &self.content.rules;
+        let selected = creature
+            .conditions()
+            .qualifying_tokens(rules, target, false);
+        let edge = creature
+            .derived()
+            .ray_recipient_edge(
+                rules,
+                target,
+                ray.actor,
+                &ray.ability,
+                &ray.incoming,
+                first_actual_check,
+                &selected,
+            )
+            .map_err(|_| GameError::Rule(RuleError::InvalidPlan))?
+            .checked_sub(i64::from(previous_checks))
+            .ok_or(GameError::Rule(RuleError::InvalidPlan))?;
+        let check = PlannedCheck {
+            actor: crate::rules::CheckActor::Target,
+            target_participates: true,
+            bonus: super::ray::named_bonus(creature.derived(), ray.target_skill),
+            threshold: CheckThreshold::Fixed { value: threshold },
+            edge,
+        };
+        let plan = ResolutionPlan::RayEncounter {
+            ray,
+            target,
+            check: &check,
+        };
+        let snapshot = Snapshot::capture(&creature)
+            .with_context(self.resolution_context(plan, ray.actor, target)?);
+        let mut rng = self.rules_rng;
+        let mut result = if let Some(observer) = self
+            .combat_diagnostics
+            .as_mut()
+            .and_then(|d| d.active.as_mut())
+        {
+            resolve::resolve_batch(plan, &snapshot, &mut rng, observer, budget)
+        } else {
+            resolve::resolve_batch(plan, &snapshot, &mut rng, &mut (), budget)
+        }?;
+        result.outcome.intention = intention;
+        // Whole-payload immunity does not perform a check and cannot spend a
+        // recipient's next-check token or increase this ray's repeat count.
+        if result.outcome.check.is_some() && !selected.is_empty() {
+            let mut holder = self.actor_outcome(target)?;
+            let combat = holder
+                .state
+                .combat
+                .as_mut()
+                .ok_or(GameError::UnknownActor)?;
+            combat.reserve_tokens(&selected, ray.actor)?;
+            combat.consume_tokens(&selected, ray.actor);
+            self.apply_outcome(holder)?;
+        }
+        let origin = self.capture_event_origin(ray.actor, target);
+        let receipt = self.apply_resolved_with_disclosure(
+            result.outcome.clone(),
+            crate::lifecycle::ResolutionPublication::Primary { strike: 0 },
+            activity,
+            origin,
+        )?;
+        self.rules_rng = rng;
+        self.seal_participant_events()?;
+        self.provoke_from_strike(&result.outcome, receipt)?;
+        Ok(result.outcome)
+    }
     pub(crate) fn resolution_context(
         &self,
         plan: ResolutionPlan<'_>,
@@ -426,7 +511,7 @@ impl Game {
             ResolutionPlan::Ability(ability)
             | ResolutionPlan::Strike { ability, .. }
             | ResolutionPlan::Rider { ability, .. } => Some(ability),
-            ResolutionPlan::Effects { .. } => None,
+            ResolutionPlan::RayEncounter { .. } | ResolutionPlan::Effects { .. } => None,
         };
         let spatial = ability.and_then(|ability| match plan.spatial_effect()? {
             PlannedEffect::StepSelfOneCell => self.step_input(ability),

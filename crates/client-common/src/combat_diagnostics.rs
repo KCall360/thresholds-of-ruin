@@ -106,6 +106,9 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                     mode,
                     result,
                 } => format!("  Actor {}: {:?} movement, {:?}", target.0, mode, result),
+                DiagnosticEffect::CorrodeArmor { target, amount } => {
+                    format!("  Actor {}: armor protection reduced by {amount}", target.0)
+                }
                 DiagnosticEffect::Damage { target, amount } => {
                     format!("  Actor {}: {amount} damage", target.0)
                 }

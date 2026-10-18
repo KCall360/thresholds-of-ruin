@@ -337,6 +337,35 @@ mod tests {
                 adapt::recorded_action(sim::Action::Move(native)),
                 Some(action)
             );
+            let id = sim::content_ids::AbilityId::new("unowned_content_ray").unwrap();
+            let ray = Action::UseAbility {
+                id: id.clone(),
+                invocation: AbilityInvocation::DirectionalRay { direction: backend },
+                supplies: Default::default(),
+            };
+            let native_ray = sim::Action::UseAbility {
+                id,
+                invocation: sim::abilities::AbilityInvocation::DirectionalRay {
+                    direction: native.try_into().unwrap(),
+                },
+                supplies: Default::default(),
+            };
+            assert_eq!(adapt::action(&ray), native_ray);
+            assert_eq!(adapt::recorded_action(native_ray), Some(ray.clone()));
+            let encoded = engine.encode_action(actor, &ray);
+            assert!(matches!(encoded, wire::Action::UseAbility {
+                invocation: wire::AbilityInvocation::DirectionalRay { direction }, ..
+            } if direction == wire));
+            // Decoding never requires or resolves a creature in the selected ray.
+            assert_eq!(engine.decode_action(actor, &encoded).unwrap(), ray.clone());
+            let command = crate::journal::Command::AdmitIntention {
+                expected_revision: u64::MAX,
+                action: ray,
+            };
+            let encoded = engine.encode_command(actor, command.clone()).unwrap();
+            assert!(crate::wire_adapter::decode_command(&encoded)
+                .unwrap()
+                .matches(&command, &engine.target_scope(actor)));
         }
         for direction in [
             world::Direction::EastUp,
@@ -477,6 +506,7 @@ pub enum AbilityInvocation {
     ActorTarget { target: tor_simulation::ActorId },
     ContactTarget { target: tor_simulation::ActorId },
     SelfStep { direction: Direction },
+    DirectionalRay { direction: Direction },
 }
 impl From<tor_simulation::ActorId> for AbilityInvocation {
     fn from(target: tor_simulation::ActorId) -> Self {

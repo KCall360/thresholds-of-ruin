@@ -613,6 +613,11 @@ impl Game {
                 .ok_or(GameError::ItemUnavailable)?;
             return Ok(());
         }
+        let condition = self
+            .items
+            .get(&source)
+            .ok_or(GameError::ItemUnavailable)?
+            .condition;
         let spec = self
             .items
             .get(&source)
@@ -641,6 +646,7 @@ impl Game {
             self.items.insert(
                 result,
                 Item {
+                    condition,
                     corpse: None,
                     holds: vec![],
                     motion,
@@ -836,6 +842,7 @@ mod tests {
                 4 => entry.spec.identity.clear(),
                 5 => {
                     entry.spec.equipment = Some(crate::EquipmentSpec {
+                        armor: None,
                         slot: crate::content_ids::EquipmentSlot::new("shield").unwrap(),
                         attack: None,
                         modifiers: vec![],

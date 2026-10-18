@@ -13,7 +13,7 @@ asset = "item.armor.mail"
 name = "ring mail"
 identity = "rogue.ring_mail"
 class = "armor"
-equipment = { slot = "body_armor", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 2 } }] }
+equipment = { slot = "body_armor", armor = { physical_reduction = 2, material = "metal", rustproof = false }, modifiers = [] }
 
 [items."rogue.clean_bandage"]
 asset = "item.bandage"

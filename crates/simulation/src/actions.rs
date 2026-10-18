@@ -581,18 +581,22 @@ impl Game {
                         id: ability,
                         invocation,
                         ..
-                    } if invocation.step().is_none() => OutcomeKind::AbilityStarted {
-                        reference: invocation.reference(),
-                        id: ability.clone(),
-                        name: self
-                            .content
-                            .rules
-                            .ability(ability)
-                            .ok_or(GameError::Rule(crate::abilities::RuleError::UnknownAbility))?
-                            .name
-                            .clone(),
-                        target: invocation.target(id),
-                    },
+                    } if invocation.kind() == crate::abilities::InvocationKind::ActorTarget => {
+                        OutcomeKind::AbilityStarted {
+                            reference: invocation.reference(),
+                            id: ability.clone(),
+                            name: self
+                                .content
+                                .rules
+                                .ability(ability)
+                                .ok_or(GameError::Rule(
+                                    crate::abilities::RuleError::UnknownAbility,
+                                ))?
+                                .name
+                                .clone(),
+                            target: invocation.target(id),
+                        }
+                    }
                     _ => OutcomeKind::ItemStarted { work: work.clone() },
                 };
                 planned = Some(plan);

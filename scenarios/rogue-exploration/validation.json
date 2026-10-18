@@ -1,20 +1,20 @@
 {
-  "validator": "tor-scenario-32",
-  "ruleset": "interactions-v42",
-  "ruleset_hash": "74df80c920d69f938d17463a2003de6ac192d243a479bb4d484522660bba795f",
+  "validator": "tor-scenario-33",
+  "ruleset": "interactions-v43",
+  "ruleset_hash": "6457908180e161650258c96d4ffe78176d14d065b7e97b894bb1cfed72b0ef9b",
   "ruleset_dependencies": {
-    "interactions-v42": "0aa3e236c006bea28c3757f56f01a505ada16b4ab6aa3abb7ab9f37e8b9afabf"
+    "interactions-v43": "cd62c9429fb9b024f99cb7bae341f04712b00e1e69df7e3102958aa3ff26616e"
   },
-  "content_hash": "63fc9d5977cd26689af1b3864cbcbe7d8ea0bfaae3fdc2dd4a82350e88d2f77c",
+  "content_hash": "81671f3827315a46b2b7f034afba8fe63474463e5198a333543bb0b550542a3f",
   "files": {
-    "catalog/actors.toml": "0a4f5e54bc70913be84fa328a64fbd57b9dc68ec909cde83449c709fb0f34b18",
-    "catalog/creatures.toml": "62f7ce289da320c43c5ffbeecc3e3eb14242e7c7785ac4c630c4b72fa9edd261",
-    "catalog/items.toml": "f4648ccabbe8fabcf30951fe631fcdb164e7c297c7526a50aaceecd6fa99cba3",
+    "catalog/actors.toml": "918112f3b17b6729c523b9b4ead64433f0affa035b7353ca9e9268887b5b3ffa",
+    "catalog/creatures.toml": "4f6b8a09f3ac96f6773c25cb96c5a675da1aa7bb5b0a0777390c82810e1798ba",
+    "catalog/items.toml": "e2130cce1fc3593a6ddf2df9e12eb0ffbb6d4b1f42b24fb6cc517d052ff8bfd2",
     "index.json": "9bcdcd8e7340350480abf05c4edbe9b8a8ef04e77258d462167b598589354902",
-    "rules.toml": "e7017767b5e83010cedf1accf100d209f5bf716be62d4e783557f3ff33557baf",
-    "scenario.toml": "8fc53a5701e6e28d547a6c1cd0475142653986d340d39573ce0b20e68e1a7ad2"
+    "rules.toml": "b35b3f4e51242a215237cbfca059ef65bf06353f9096a3ea0d01224b8be2c1d7",
+    "scenario.toml": "4fd626ecc9d888c0f6154da740cca9a1ae29af4091c302dec601881853ff005f"
   },
   "regions": 0,
-  "model_hash": "163c83e2dfff7f99bfc63030b30334aa7a1ac958ff93cd5422ea60d3d27f7957",
+  "model_hash": "dca11304849d6efac65931620fb30285073df92cda56faea71a73ac5655e19e5",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }

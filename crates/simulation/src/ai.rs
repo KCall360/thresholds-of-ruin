@@ -595,23 +595,31 @@ impl Game {
             .preparation(actor)
             .filter(|preparation| !preparation.active)
         {
-            if let crate::Work::UseAbility {
-                id,
-                invocation:
-                    crate::abilities::AbilityInvocation::ActorTarget {
-                        target: prepared_target,
-                    },
-                ..
-            } = &preparation.plan.work()
-            {
-                let eligible = rules.ability(id).is_some_and(|definition| {
+            if let crate::Work::UseAbility { id, invocation, .. } = &preparation.plan.work() {
+                if let Some(definition) = rules.ability(id).filter(|definition| {
                     definition.ai.hostile && (!basic_only || definition.basic_attack)
-                });
-                if *prepared_target == target
-                    && eligible
-                    && self.preparation_still_available(preparation, Some(sight))
-                {
-                    return Some(preparation.plan.clone());
+                }) {
+                    let selected = match invocation {
+                        crate::abilities::AbilityInvocation::ActorTarget {
+                            target: prepared_target,
+                        } => *prepared_target == target,
+                        crate::abilities::AbilityInvocation::DirectionalRay { direction } => {
+                            let crate::rules::Reach::Sight { range } = definition.reach else {
+                                return None;
+                            };
+                            disclosed_ray_direction(
+                                target,
+                                sight,
+                                view,
+                                self.actors.get(&actor)?.body.eye,
+                                range,
+                            ) == Some(*direction)
+                        }
+                        _ => false,
+                    };
+                    if selected && self.preparation_still_available(preparation, Some(sight)) {
+                        return Some(preparation.plan.clone());
+                    }
                 }
             }
         }
@@ -648,7 +656,27 @@ impl Game {
                     continue;
                 }
             }
-            let Ok(plan) = self.ability_plan_in_scene(actor, id, target, sight) else {
+            let definition = rules.ability(id)?;
+            let invocation =
+                if definition.invocation == crate::abilities::InvocationKind::DirectionalRay {
+                    let crate::rules::Reach::Sight { range } = definition.reach else {
+                        continue;
+                    };
+                    let Some(direction) = disclosed_ray_direction(
+                        target,
+                        sight,
+                        view,
+                        self.actors.get(&actor)?.body.eye,
+                        range,
+                    ) else {
+                        continue;
+                    };
+                    crate::abilities::AbilityInvocation::DirectionalRay { direction }
+                } else {
+                    crate::abilities::AbilityInvocation::ActorTarget { target }
+                };
+            let Ok(plan) = self.ability_invocation_plan_in_scene(actor, id, invocation, sight)
+            else {
                 continue;
             };
             if let Some(plan) = self.physical_ai_plan(plan, view) {
@@ -810,6 +838,44 @@ impl Game {
         }
         None
     }
+}
+
+/// Choose solely from disclosed physical occurrences. Neither first-hit bodies,
+/// terrain collision, hidden defenses nor a ray trace participates in this choice.
+fn disclosed_ray_direction(
+    target: ActorId,
+    sight: &[tor_world::SightCell],
+    view: &crate::Observation,
+    eye: [i32; 3],
+    range: u16,
+) -> Option<crate::abilities::StepDirection> {
+    let target = view.visible_actors.iter().find(|other| {
+        other.id == target && other.disclosure == crate::perception::ActorDisclosure::Creature
+    })?;
+    sight
+        .iter()
+        .filter(|cell| cell.physical && !cell.wall && cell.location == target.location)
+        .filter_map(|cell| {
+            let offset = [
+                cell.offset.x.checked_add(eye[0])?,
+                cell.offset.y.checked_add(eye[1])?,
+                cell.offset.z.checked_add(eye[2])?,
+            ];
+            let distance = offset.iter().map(|value| value.unsigned_abs()).max()?;
+            if distance == 0
+                || distance > u32::from(range)
+                || offset
+                    .iter()
+                    .any(|value| *value != 0 && value.unsigned_abs() != distance)
+            {
+                return None;
+            }
+            let direction = Direction::from_delta(offset.map(|value| i64::from(value.signum())))?;
+            let direction = crate::abilities::StepDirection::try_from(direction).ok()?;
+            Some((distance, direction))
+        })
+        .min()
+        .map(|(_, direction)| direction)
 }
 
 #[path = "ai_defense.rs"]
@@ -1139,6 +1205,7 @@ mod tests {
         spec.concealed = concealed;
         spec.appearance = "silver ring".into();
         spec.equipment = Some(crate::EquipmentSpec {
+            armor: None,
             slot: crate::EquipmentSlot::new("ring").unwrap(),
             attack: None,
             modifiers: vec![crate::rules::Modifier {
@@ -1781,6 +1848,7 @@ mod tests {
         let mut item = crate::ItemSpec::ordinary("private armor".into());
         item.class = crate::ItemClass::Armor;
         item.equipment = Some(crate::EquipmentSpec {
+            armor: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
             modifiers: vec![],
@@ -1910,3 +1978,7 @@ mod wide_scalar_ratio_tests {
 #[cfg(test)]
 #[path = "ai_idle_tests.rs"]
 mod idle_tests;
+
+#[cfg(test)]
+#[path = "ai_ray_tests.rs"]
+mod ray_tests;

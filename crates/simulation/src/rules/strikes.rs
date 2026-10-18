@@ -201,7 +201,7 @@ pub enum RiderCondition {
 }
 fn sequence_minimum<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
     let minimum = u16::deserialize(d)?;
-    if !(2..=crate::limits::STRIKES as u16).contains(&minimum) {
+    if !(1..=crate::limits::STRIKES as u16).contains(&minimum) {
         return Err(serde::de::Error::custom("invalid sequence hit minimum"));
     }
     Ok(minimum)
@@ -210,7 +210,7 @@ impl RiderCondition {
     pub fn valid(self) -> bool {
         match self {
             Self::SequenceSuccessfulHits { minimum } => {
-                (2..=crate::limits::STRIKES as u16).contains(&minimum)
+                (1..=crate::limits::STRIKES as u16).contains(&minimum)
             }
         }
     }

@@ -131,16 +131,10 @@ impl ActorRecord {
             .equipment
             .iter()
             .map(|(socket, id)| {
-                let equipment = items
+                items
                     .get(id)
-                    .and_then(|item| item.spec.equipment.as_ref())
-                    .ok_or(crate::checkpoint::PersistError::Equipment { actor, item: *id })?;
-                Ok(crate::creatures::EquipmentSource {
-                    item: *id,
-                    socket: *socket,
-                    modifiers: equipment.modifiers.clone(),
-                    attack: equipment.attack.clone(),
-                })
+                    .and_then(|item| item.equipment_source(*id, *socket))
+                    .ok_or(crate::checkpoint::PersistError::Equipment { actor, item: *id })
             })
             .collect::<Result<Vec<_>, crate::checkpoint::PersistError>>()?;
         Ok(Actor {

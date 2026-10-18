@@ -22,7 +22,7 @@ fn carried_plan(chance: [u32; 2]) -> PopulationPlan {
         "population": {"kind": "actors", "avoid_protagonist_sight": false,
             "bands": [{"depth": {"kind": "open", "minimum": 1}, "choices": [{
                 "content": "carrier", "weight": 1, "turn_ticks": 100, "actor": actor,
-                "depth_growth": {"kind": "fixed"},
+                "depth_growth": {"kind": "fixed"}, "advancement":[],
                 "carried_loot": {"version": 1, "pool": "supplies", "chance": {
                     "numerator": chance[0], "denominator": chance[1]
                 }}

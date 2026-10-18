@@ -88,17 +88,14 @@ fn loot_respects_care_and_equipment_overrides_independently() {
     let mut armor = ItemSpec::ordinary("known armor".into());
     armor.class = crate::ItemClass::Armor;
     armor.equipment = Some(crate::EquipmentSpec {
+        armor: Some(crate::ArmorSpec {
+            physical_reduction: 2,
+            material: crate::ArmorMaterial::Metal,
+            rustproof: false,
+        }),
         slot: crate::EquipmentSlot::new("body_armor").unwrap(),
         attack: None,
-        modifiers: vec![crate::rules::Modifier {
-            scope: crate::rules::Scope::Always,
-            op: crate::rules::ModifierOp::Add {
-                stat: crate::rules::Stat::Defense {
-                    defense: crate::rules::DefenseKind::Physical,
-                },
-                value: 2,
-            },
-        }],
+        modifiers: vec![],
     });
     game.place_item_stack(21, at(1, 2, 1), None, 1, armor)
         .unwrap();

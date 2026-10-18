@@ -294,6 +294,8 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                 },
                 target_kind: if def.invocation == s::abilities::InvocationKind::SelfStep {
                     p::AbilityTargetKind::SelfStep
+                } else if def.invocation == s::abilities::InvocationKind::DirectionalRay {
+                    p::AbilityTargetKind::DirectionalRay
                 } else {
                     match def.reach {
                         s::rules::Reach::SelfOnly => p::AbilityTargetKind::SelfOnly,

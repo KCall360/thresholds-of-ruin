@@ -24,6 +24,13 @@ pub(crate) fn view(
                 }),
                 aim: match aim {
                     ObservedAim::Unavailable => p::ObservedAimView::Unavailable,
+                    ObservedAim::Direction { direction } => p::ObservedAimView::Direction {
+                        direction: p::Position {
+                            x: direction.x,
+                            y: direction.y,
+                            z: direction.z,
+                        },
+                    },
                     ObservedAim::Disclosed {
                         location,
                         occurrences,

@@ -369,6 +369,7 @@ fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
             let mut spec = ItemSpec::ordinary(format!("gear {item}"));
             spec.class = class;
             spec.equipment = Some(EquipmentSpec {
+                armor: None,
                 slot,
                 attack: None,
                 modifiers: vec![tor_simulation::rules::Modifier {

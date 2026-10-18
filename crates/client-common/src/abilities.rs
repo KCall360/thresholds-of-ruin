@@ -58,6 +58,11 @@ pub fn invocation_action(
         {
             return Err("That ability does not select a step.".into());
         }
+        AbilityInvocation::DirectionalRay { .. }
+            if ability.target_kind != AbilityTargetKind::DirectionalRay =>
+        {
+            return Err("That ability does not select a ray direction.".into());
+        }
         _ => {}
     }
     if !supplies.valid() {
@@ -281,7 +286,7 @@ pub fn ability_label(ability: &AbilityView) -> String {
 pub fn target_eligible(view: &Observation, ability: &AbilityView, target: ActorTarget) -> bool {
     let visible = || view.visible_actors.iter().any(|actor| actor.id == target);
     match ability.target_kind {
-        AbilityTargetKind::SelfStep => false,
+        AbilityTargetKind::SelfStep | AbilityTargetKind::DirectionalRay => false,
         AbilityTargetKind::SelfOnly => target == view.self_target,
         AbilityTargetKind::Actor => target != view.self_target && visible(),
         AbilityTargetKind::SelfOrAlly => {
@@ -743,6 +748,127 @@ mod supply_tests {
             &supplied,
             &id,
             AbilityInvocation::SelfStep {
+                direction: tor_protocol::Direction::West
+            },
+            selection
+        )
+        .is_ok());
+    }
+    #[test]
+    fn typed_ray_selection_uses_disclosed_metadata_without_actor_or_collision_preview() {
+        let mut view = crate::test_support::observation();
+        let mut ability = crate::test_support::ability("unrelated_content_name");
+        ability.reach = tor_protocol::AbilityReach::Sight { range: 6 };
+        ability.target_kind = AbilityTargetKind::DirectionalRay;
+        view.combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .abilities
+            .push(ability.clone());
+        let before = view.clone();
+        for direction in [
+            tor_protocol::Direction::North,
+            tor_protocol::Direction::East,
+            tor_protocol::Direction::South,
+            tor_protocol::Direction::West,
+            tor_protocol::Direction::NorthEast,
+            tor_protocol::Direction::SouthEast,
+            tor_protocol::Direction::SouthWest,
+            tor_protocol::Direction::NorthWest,
+            tor_protocol::Direction::Up,
+            tor_protocol::Direction::Down,
+        ] {
+            let invocation = AbilityInvocation::DirectionalRay { direction };
+            assert_eq!(
+                invocation_action(&view, &ability.id, invocation, SupplySelection::Carried)
+                    .unwrap(),
+                Action::UseAbility {
+                    id: ability.id.clone(),
+                    invocation,
+                    supplies: SupplySelection::Carried
+                }
+            );
+        }
+        assert!(action(&view, &ability.id, view.self_target).is_err());
+        assert!(invocation_action(
+            &view,
+            "missing",
+            AbilityInvocation::DirectionalRay {
+                direction: tor_protocol::Direction::North
+            },
+            SupplySelection::Carried
+        )
+        .is_err());
+        assert!(invocation_action(
+            &view,
+            &ability.id,
+            AbilityInvocation::SelfStep {
+                direction: tor_protocol::Direction::North
+            },
+            SupplySelection::Carried
+        )
+        .is_err());
+        for target_kind in [AbilityTargetKind::Actor, AbilityTargetKind::SelfStep] {
+            let mut other = view.clone();
+            other
+                .combat
+                .as_mut()
+                .unwrap()
+                .own_stats
+                .as_mut()
+                .unwrap()
+                .abilities
+                .last_mut()
+                .unwrap()
+                .target_kind = target_kind;
+            assert!(invocation_action(
+                &other,
+                &ability.id,
+                AbilityInvocation::DirectionalRay {
+                    direction: tor_protocol::Direction::North
+                },
+                SupplySelection::Carried
+            )
+            .is_err());
+        }
+        // Direction selection is available even without a disclosed creature or
+        // path; clients cannot predict the first authoritative collision.
+        view.visible_actors.clear();
+        view.visible_cells.clear();
+        assert!(invocation_action(
+            &view,
+            &ability.id,
+            AbilityInvocation::DirectionalRay {
+                direction: tor_protocol::Direction::North
+            },
+            SupplySelection::Carried
+        )
+        .is_ok());
+        assert_eq!(before.combat, view.combat);
+        let mut supplied = fixture();
+        let supplied_ability = supplied
+            .combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .abilities
+            .last_mut()
+            .unwrap();
+        supplied_ability.target_kind = AbilityTargetKind::DirectionalRay;
+        let id = supplied_ability.id.clone();
+        let supply = supplied.ground_items.last().unwrap().item.id;
+        let selection =
+            selection_from_items(&supplied, available(&supplied).last().unwrap(), &[supply])
+                .unwrap();
+        assert!(invocation_action(
+            &supplied,
+            &id,
+            AbilityInvocation::DirectionalRay {
                 direction: tor_protocol::Direction::West
             },
             selection

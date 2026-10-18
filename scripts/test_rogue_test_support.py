@@ -1,15 +1,40 @@
 """Disclosed reach bounds for the production Rogue acceptance drivers."""
 import copy
+import json
+from types import SimpleNamespace
 import unittest
 
 from rogue_test_support import (
     assert_room_gold_receipt, cardinal_melee_candidate, disclosed_body_cells, disclosed_melee_candidate,
-    disclosed_sight_candidate, ground_sight_candidate,
+    disclosed_sight_candidate, ground_sight_candidate, disclosed_frames, resolved_events,
 )
 
 
 def actor(x, y, z=0):
     return {"position": {"x": x, "y": y, "z": z}}
+
+
+class DisclosedAbilityReceipts(unittest.TestCase):
+    def test_transient_receipts_exclude_stale_and_unrelated_events(self):
+        event = {"type": "ability", "ability": {"id": "rust"}, "caster": "caster",
+                 "target": "target", "strike": 0, "outcome": "applied"}
+        before = {"state": {"revision": "4", "observation": {"self_target": "caster"}}}
+        def frame(revision, events):
+            return {"state": {"revision": str(revision), "observation": {
+                "combat": {"events": events}}}}
+        others = []
+        for key, value in (("target", "other"), ("caster", "other"), ("strike", 1),
+                           ("ability", {"id": "other"})):
+            other = copy.deepcopy(event)
+            other[key] = value
+            others.append(other)
+        current = frame(5, others + [event])
+        player = SimpleNamespace(transcript=["ignored prefix", json.dumps(frame(4, [event])),
+                                             "log", "{}", json.dumps(current),
+                                             json.dumps(frame(6, []))])
+        frames = list(disclosed_frames(player, 1))
+        self.assertEqual(len(frames), 3)
+        self.assertEqual(list(resolved_events(frames, before, "rust", "target")), [event])
 
 
 class RogueRoomGoldAudit(unittest.TestCase):

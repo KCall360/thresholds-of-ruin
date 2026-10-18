@@ -262,7 +262,14 @@ rider; ordinary restoration removes recorded Strength deficit. Jabberwock enters
 at depth 21 with fifteen aberration racial HD, NA1(2), NA3(8), a heavy 2d12/2d4
 sequence, passive acquisition and 70% finite birth stock. Its purchased shared
 Rending Pair attempts one 1d6 rider after two qualifying hits in that sequence.
-The two remaining production species are aquator and dragon. Complete trapdoor, arrow,
+Aquator now has an authored five-HD recipe and one-contact CO1 ability using the
+shared item-owned armor-reduction loss. It is not selected in the population yet.
+Shared directional rays support one frozen opposed source roll, live recipient
+checks, continued travel after a dodge, and repeat-encounter disadvantage.
+Dragon content and the combined 26-species population update remain unfinished.
+The Breath skill attribute, starting build and bounded later rank purchases await
+confirmation; these are separate from the accepted Energy/fire damage and
+Agility-dodge behavior. Complete trapdoor, arrow,
 sleeping gas, bear trap, teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
 must respect destination generation/loading and geometry. Existing hobgoblins
 roam using personal visible surroundings and visit counts, including reachable

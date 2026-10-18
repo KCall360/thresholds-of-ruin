@@ -1,4 +1,4 @@
-import = "interactions-v42"
+import = "interactions-v43"
 
 # Provisional TOR mapping of the pinned Rogue food reserve, not calibrated balance.
 [[overrides]]
@@ -142,3 +142,20 @@ value = ["basic_melee", "bind_wounds", "rogue.search"]
 op = "add"
 path = ["abilities", "rogue.search"]
 value = { id = "rogue.search", name = "Search", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 50, recover = 50 } }, reach = { kind = "self_only" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "search_adjacent_guises" }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }
+
+# CO1 changes the worn item's Physical armor reduction once after any successful
+# natural contact. The zero-damage primary still qualifies; no extra check.
+[[overrides]]
+op = "add"
+path = ["flags", "corrosive"]
+value = { id = "corrosive", name = "Corrosive", modifiers = [] }
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.corrode"]
+value = { id = "rogue.corrode", name = "Corrode", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", condition = { kind = "sequence_successful_hits", minimum = 1 }, effects = [{ kind = "corrode_armor", slot = "body_armor", amount = 1 }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["talents", "rogue.corrode"]
+value = { id = "rogue.corrode", name = "Corrode", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "flag", flag = "corrosive", present = true }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rogue.corrode" } }] }

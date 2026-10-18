@@ -554,7 +554,9 @@ fn object(goal: &Goal, scene: &Scene) -> String {
             ..
         } => named(Key::Actor(*target)),
         Goal::UseAbility {
-            invocation: AbilityInvocation::SelfStep { direction },
+            invocation:
+                AbilityInvocation::SelfStep { direction }
+                | AbilityInvocation::DirectionalRay { direction },
             ..
         } => Some(direction_name(*direction).to_owned()),
         Goal::Approach { target } => named(*target),

@@ -85,6 +85,10 @@ pub enum PlannedEffect {
     Theft {
         theft: crate::theft::PlannedTheft,
     },
+    CorrodeArmor {
+        slot: crate::EquipmentSlot,
+        amount: u32,
+    },
     ApplyLinkedHold {
         policy: crate::linked_hold::HoldPolicy,
     },
@@ -198,6 +202,7 @@ impl PlannedAmount {
 pub enum Plan {
     Escape(tor_world::Shared<crate::escape::EscapePlan>),
     Ability(tor_world::Shared<AbilityPlan>),
+    Ray(tor_world::Shared<super::RayPlan>),
     Respec(tor_world::Shared<crate::player_respec::RespecPlan>),
     Equip {
         actor: ActorId,
@@ -314,6 +319,7 @@ impl Plan {
     ) -> impl ExactSizeIterator<Item = &crate::conditions::TokenReservation> + Clone {
         match self {
             Self::Ability(plan) => plan.tokens.as_slice(),
+            Self::Ray(plan) => plan.tokens.as_slice(),
             Self::Escape(plan) => plan.tokens.as_slice(),
             _ => &[],
         }
@@ -324,6 +330,7 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.actor,
             Self::Ability(plan) => plan.actor,
+            Self::Ray(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
@@ -335,6 +342,8 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.holder,
             Self::Ability(plan) => plan.target,
+            // Legacy actor-local bookkeeping only; a ray has no persisted target.
+            Self::Ray(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
@@ -348,6 +357,13 @@ impl Plan {
             Self::Respec(plan) => Work::Respec {
                 basis: plan.basis.clone(),
                 replacement: plan.replacement.clone(),
+                supplies: plan.supplies.clone(),
+            },
+            Self::Ray(plan) => Work::UseAbility {
+                id: plan.ability.clone(),
+                invocation: super::AbilityInvocation::DirectionalRay {
+                    direction: plan.direction,
+                },
                 supplies: plan.supplies.clone(),
             },
             Self::Ability(plan) => Work::UseAbility {
@@ -368,6 +384,7 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.preparation,
             Self::Ability(plan) => plan.preparation,
+            Self::Ray(plan) => plan.preparation,
             Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
             | Self::Unequip { preparation, .. }
@@ -379,6 +396,7 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.recovery,
             Self::Ability(plan) => plan.recovery + plan.step.map_or(0, |step| step.duration),
+            Self::Ray(plan) => plan.recovery,
             Self::Respec(plan) => plan.recovery,
             Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => 0,
         }
@@ -386,6 +404,7 @@ impl Plan {
     pub fn cost(&self) -> Option<ResourceCost> {
         match self {
             Self::Ability(plan) => plan.cost,
+            Self::Ray(plan) => plan.cost,
             Self::Escape(_) | Self::Respec(_) => None,
             Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => {
                 None
@@ -399,16 +418,40 @@ impl Plan {
                 .first()
                 .map_or(&[], |strike| strike.on_success.as_slice()),
             Self::Drink { effects, .. } | Self::Eat { effects, .. } => effects,
-            Self::Escape(_) | Self::Respec(_) | Self::Equip { .. } | Self::Unequip { .. } => &[],
+            Self::Ray(_)
+            | Self::Escape(_)
+            | Self::Respec(_)
+            | Self::Equip { .. }
+            | Self::Unequip { .. } => &[],
         }
     }
     pub fn as_ability(&self) -> Option<&AbilityPlan> {
         match self {
             Self::Ability(plan) => Some(plan),
-            Self::Escape(_) | Self::Respec(_) => None,
+            Self::Ray(_) | Self::Escape(_) | Self::Respec(_) => None,
             Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => {
                 None
             }
+        }
+    }
+    pub fn as_ray(&self) -> Option<&super::RayPlan> {
+        match self {
+            Self::Ray(plan) => Some(plan),
+            _ => None,
+        }
+    }
+    pub(crate) fn ability_id(&self) -> Option<&AbilityId> {
+        match self {
+            Self::Ability(plan) => Some(&plan.ability),
+            Self::Ray(plan) => Some(&plan.ability),
+            _ => None,
+        }
+    }
+    pub(crate) fn ability_cooldown(&self) -> Option<std::num::NonZeroU64> {
+        match self {
+            Self::Ability(plan) => plan.cooldown,
+            Self::Ray(plan) => plan.cooldown,
+            _ => None,
         }
     }
     /// Borrows frozen operands without constructing a second owned plan.
@@ -422,7 +465,11 @@ impl Plan {
                     effects,
                 })
             }
-            Self::Escape(_) | Self::Respec(_) | Self::Equip { .. } | Self::Unequip { .. } => None,
+            Self::Ray(_)
+            | Self::Escape(_)
+            | Self::Respec(_)
+            | Self::Equip { .. }
+            | Self::Unequip { .. } => None,
         }
     }
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
@@ -431,6 +478,7 @@ impl Plan {
             && match self {
                 Self::Escape(plan) => plan.valid(rules),
                 Self::Ability(plan) => plan.valid(rules),
+                Self::Ray(plan) => plan.valid(rules),
                 Self::Respec(plan) => plan.valid(rules),
                 Self::Equip { item, slot, .. } => {
                     valid_item(*item) && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
@@ -456,6 +504,10 @@ fn valid_item(id: ItemId) -> bool {
 }
 pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Ruleset) -> bool {
     effects.len() <= crate::limits::EFFECTS_PER_BRANCH
+        && (effects.len() == 1
+            || !effects
+                .iter()
+                .any(|effect| matches!(effect, PlannedEffect::CorrodeArmor { .. })))
         && effects.iter().skip(1).all(|effect| !effect.spatial())
         && effects.first().is_none_or(|first| {
             effects
@@ -464,6 +516,10 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
         })
         && effects.iter().all(|effect| match effect {
             PlannedEffect::Theft { theft } => theft.valid(),
+            PlannedEffect::CorrodeArmor { slot, amount } => {
+                rules.equipment_slot(slot).is_some()
+                    && (1..=crate::limits::NUMERIC as u32).contains(amount)
+            }
             PlannedEffect::StepSelfOneCell
             | PlannedEffect::PushTargetOneCell { .. }
             | PlannedEffect::DrainLatestHitDie
@@ -576,6 +632,13 @@ pub(super) fn effects_match_definition_scoped(
                     },
                     PlannedEffect::Theft { theft },
                 ) => theft.matches(selection, relocation.as_ref()),
+                (
+                    Effect::CorrodeArmor {
+                        slot: expected_slot,
+                        amount: expected_amount,
+                    },
+                    PlannedEffect::CorrodeArmor { slot, amount },
+                ) => expected_slot == slot && expected_amount == amount,
                 (
                     Effect::ApplyLinkedHold { policy: expected },
                     PlannedEffect::ApplyLinkedHold { policy: actual },
@@ -923,6 +986,10 @@ impl Game {
                 } => Ok(PlannedEffect::Theft {
                     theft: self.compile_theft(actor, selection, relocation.as_ref())?,
                 }),
+                Effect::CorrodeArmor { slot, amount } => Ok(PlannedEffect::CorrodeArmor {
+                    slot: slot.clone(),
+                    amount: *amount,
+                }),
                 Effect::ApplyLinkedHold { policy } => Ok(PlannedEffect::ApplyLinkedHold {
                     policy: policy.clone(),
                 }),
@@ -1070,6 +1137,11 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Theft {
                 theft: crate::theft::PlannedTheft,
             },
+            CorrodeArmor {
+                slot: crate::EquipmentSlot,
+                #[serde(deserialize_with = "crate::armor::read_corrosion_amount")]
+                amount: u32,
+            },
             ApplyLinkedHold {
                 policy: crate::linked_hold::HoldPolicy,
             },
@@ -1125,6 +1197,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::Theft { theft } => Self::Theft { theft },
+            Fields::CorrodeArmor { slot, amount } => Self::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::HoldDamage {
                 category,

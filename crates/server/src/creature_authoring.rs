@@ -585,6 +585,43 @@ pub enum PurchaseSelection {
     Talent { talent: Talent },
     TalentForm { talent: Talent, form: String },
 }
+pub(crate) fn compile_choices(
+    purchases: &[Purchase],
+    selected_attribute: Option<&Attribute>,
+    rules: &s::rules::Ruleset,
+) -> Result<s::creatures::HdChoices, Failure> {
+    Ok(s::creatures::HdChoices {
+        purchases: purchases
+            .iter()
+            .map(|purchase| {
+                Ok(s::creatures::AdvancementPurchase {
+                    pool: PointPoolId::new(&purchase.pool)
+                        .map_err(|_| invalid("Invalid point pool ID"))?,
+                    selection: match &purchase.selection {
+                        PurchaseSelection::SkillRank { skill: value } => {
+                            s::creatures::PurchaseSelection::SkillRank(skill(value)?)
+                        }
+                        PurchaseSelection::Talent { talent: value } => {
+                            s::creatures::PurchaseSelection::Talent(talent(value, rules)?)
+                        }
+                        PurchaseSelection::TalentForm {
+                            talent: value,
+                            form,
+                        } => s::creatures::PurchaseSelection::TalentForm {
+                            talent: talent(value, rules)?,
+                            form: s::content_ids::FormId::new(form)
+                                .map_err(|_| invalid("Invalid form ID"))?,
+                        },
+                    },
+                })
+            })
+            .collect::<Result<_, Failure>>()?,
+        attribute: selected_attribute
+            .map(|value| attribute(value))
+            .transpose()?,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Restoration {
@@ -860,42 +897,11 @@ impl CompiledCatalog {
             .hit_dice
             .iter()
             .map(|entry| {
-                Ok(s::creatures::HdChoices {
-                    purchases: entry
-                        .purchases
-                        .iter()
-                        .map(|purchase| {
-                            Ok(s::creatures::AdvancementPurchase {
-                                pool: PointPoolId::new(&purchase.pool)
-                                    .map_err(|_| invalid("Invalid point pool ID"))?,
-                                selection: match &purchase.selection {
-                                    PurchaseSelection::SkillRank { skill: value } => {
-                                        s::creatures::PurchaseSelection::SkillRank(skill(value)?)
-                                    }
-                                    PurchaseSelection::Talent { talent: value } => {
-                                        s::creatures::PurchaseSelection::Talent(talent(
-                                            value,
-                                            self.content.rules(),
-                                        )?)
-                                    }
-                                    PurchaseSelection::TalentForm {
-                                        talent: value,
-                                        form,
-                                    } => s::creatures::PurchaseSelection::TalentForm {
-                                        talent: talent(value, self.content.rules())?,
-                                        form: s::content_ids::FormId::new(form)
-                                            .map_err(|_| invalid("Invalid form ID"))?,
-                                    },
-                                },
-                            })
-                        })
-                        .collect::<Result<_, Failure>>()?,
-                    attribute: entry
-                        .attribute
-                        .as_ref()
-                        .map(|value| attribute(value))
-                        .transpose()?,
-                })
+                compile_choices(
+                    &entry.purchases,
+                    entry.attribute.as_ref(),
+                    self.content.rules(),
+                )
             })
             .collect::<Result<Vec<_>, Failure>>()?;
         let mut prototype = s::creatures::CreatureBuild::from_recorded(
@@ -1079,7 +1085,7 @@ mod ordered_strike_authoring_tests {
     }
     #[test]
     fn sequence_rider_authoring_maps_optional_source_gate_without_weakening_bounds() {
-        for minimum in [None, Some(2), Some(16)] {
+        for minimum in [None, Some(1), Some(2), Some(16)] {
             let mut value = source();
             let row = &mut value["species"]["sequence_test"]["melee"]["strikes"][0];
             row["riders"] = json!([{"trigger":"success","effects":[],"descriptors":[]}]);
@@ -1103,7 +1109,7 @@ mod ordered_strike_authoring_tests {
                 compiled.content.catalog()
             );
         }
-        for minimum in [0, 1, 17, u16::MAX] {
+        for minimum in [0, 17, u16::MAX] {
             let mut value = source();
             value["species"]["sequence_test"]["melee"]["strikes"][0]["riders"] = json!([{
                 "trigger":"success","condition":{"kind":"sequence_successful_hits","minimum":minimum},

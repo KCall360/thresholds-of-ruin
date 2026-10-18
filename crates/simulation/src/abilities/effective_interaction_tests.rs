@@ -164,6 +164,7 @@ fn effective_interaction_frozen_plan_rejects_positive_harm_without_current_equip
     let mut weapon = crate::ItemSpec::ordinary("later weapon".into());
     weapon.class = crate::ItemClass::Weapon;
     weapon.equipment = Some(crate::EquipmentSpec {
+        armor: None,
         slot: crate::EquipmentSlot::new("weapon").unwrap(),
         attack: Some(crate::test_creatures::melee(
             99,

@@ -341,3 +341,44 @@ fn wizard_creature_catalog_is_discoverable_in_text_help() {
     assert!(tor_client_text::HELP.contains("wizard creature list"));
     assert!(tor_client_text::engine::verbs::SESSION_HELP.contains("wizard creature list"));
 }
+
+#[test]
+fn directional_ray_commands_select_direction_without_a_visible_creature() {
+    let mut state = StateView {
+        wizard_game: false,
+        revision: 0,
+        observation: tor_client_common::test_support::observation(),
+    };
+    let mut ability = tor_client_common::test_support::ability("arbitrary_ray");
+    ability.name = "Arbitrary Ray".into();
+    ability.target_kind = AbilityTargetKind::DirectionalRay;
+    ability.reach = AbilityReach::Sight { range: 6 };
+    state
+        .observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities = vec![ability];
+    state.observation.visible_actors.clear();
+    state.observation.visible_cells.clear();
+    let before = state.clone();
+    for (token, direction) in [
+        ("north", Direction::North),
+        ("southeast", Direction::SouthEast),
+        ("up", Direction::Up),
+        ("down", Direction::Down),
+    ] {
+        assert!(
+            matches!(parse(&format!("arbitrary ray {token}"), &state).unwrap(), Input::Command(Command::Act {
+            action: Action::UseAbility { invocation: AbilityInvocation::DirectionalRay { direction: selected }, supplies: SupplySelection::Carried, .. }, ..
+        }) if selected == direction)
+        );
+    }
+    for noun in ["", "me", "goblin", "north goblin", "north up"] {
+        assert!(parse(&format!("arbitrary ray {noun}"), &state).is_err());
+    }
+    assert_eq!(state, before);
+}
