@@ -179,7 +179,10 @@ fn report_loss(writer: &mut impl Write, loss: &Loss) -> io::Result<()> {
     Ok(())
 }
 
-fn drain(mut writer: impl Write, receiver: mpsc::Receiver<Pending>, loss: Arc<Loss>) {
+fn drain(writer: impl Write, receiver: mpsc::Receiver<Pending>, loss: Arc<Loss>) {
+    // Coalesce serde's small JSON fragments on the worker, not the producer.
+    // Keep memory bounded and flush every record so readers can observe barriers.
+    let mut writer = io::BufWriter::with_capacity(8 * 1024, writer);
     while let Ok(mut pending) = receiver.recv() {
         let written = (|| -> io::Result<()> {
             report_loss(&mut writer, &loss)?;
@@ -199,6 +202,9 @@ fn drain(mut writer: impl Write, receiver: mpsc::Receiver<Pending>, loss: Arc<Lo
         })();
         if written.is_err() {
             loss.failed.store(true, Ordering::Relaxed);
+            // BufWriter's destructor retries buffered writes. Once failed, do
+            // not publish an unobserved tail or make a second I/O attempt.
+            let _ = writer.into_parts();
             return;
         }
         pending.delivered = true;
@@ -208,6 +214,7 @@ fn drain(mut writer: impl Write, receiver: mpsc::Receiver<Pending>, loss: Arc<Lo
         .is_err()
     {
         loss.failed.store(true, Ordering::Relaxed);
+        let _ = writer.into_parts();
     }
 }
 
@@ -378,6 +385,190 @@ mod tests {
         text.lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[derive(Default)]
+    struct WriteObservations {
+        bytes: Vec<u8>,
+        writes: usize,
+        flushed_lengths: Vec<usize>,
+    }
+
+    #[derive(Clone, Default)]
+    struct ObservedWriter(Arc<Mutex<WriteObservations>>);
+
+    impl Write for ObservedWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let mut observed = self.0.lock().unwrap();
+            observed.writes += 1;
+            observed.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            let mut observed = self.0.lock().unwrap();
+            let length = observed.bytes.len();
+            observed.flushed_lengths.push(length);
+            Ok(())
+        }
+    }
+
+    fn queued_survival_records(count: usize) -> (mpsc::Receiver<Pending>, Arc<Loss>) {
+        let (sender, receiver) = mpsc::sync_channel(count);
+        let loss = Arc::new(Loss::default());
+        let sink = Diagnostics {
+            sender,
+            loss: loss.clone(),
+        };
+        for sequence in 0..count {
+            let mut record = survival_record("survival.commit");
+            record["sequence"] = sequence.into();
+            // Many escaped JSON fragments, still smaller than the bounded
+            // writer buffer. A direct File writer makes each fragment a syscall.
+            record["details"] = serde_json::json!(["quote\"slash\\\n".repeat(128)]);
+            assert!(sink.survival(record));
+        }
+        drop(sink);
+        (receiver, loss)
+    }
+
+    #[test]
+    fn survival_burst_coalesces_fragments_and_flushes_every_complete_record() {
+        let writer = ObservedWriter::default();
+        let (receiver, loss) = queued_survival_records(16);
+        drain(writer.clone(), receiver, loss.clone());
+        assert!(!loss.failed.load(Ordering::Relaxed));
+        assert_eq!(loss.total.load(Ordering::Relaxed), 0);
+        let observed = writer.0.lock().unwrap();
+        let rows: Vec<_> = observed
+            .bytes
+            .split_inclusive(|byte| *byte == b'\n')
+            .collect();
+        assert_eq!(rows.len(), 16);
+        let mut length = 0;
+        for (sequence, row) in rows.iter().enumerate() {
+            let value: serde_json::Value = serde_json::from_slice(row).unwrap();
+            assert_eq!(value["sequence"], sequence);
+            assert_eq!(value["diagnostic_dropped"], 0);
+            assert_eq!(value["diagnostic_incomplete"], false);
+            length += row.len();
+            assert_eq!(observed.flushed_lengths[sequence], length);
+        }
+        assert_eq!(
+            observed.writes, 16,
+            "one underlying write per small JSON record"
+        );
+        assert_eq!(observed.flushed_lengths.len(), 17);
+        assert_eq!(observed.flushed_lengths.last(), Some(&observed.bytes.len()));
+    }
+
+    #[test]
+    fn final_loss_marker_is_flushed_when_the_queue_closes_empty() {
+        let writer = ObservedWriter::default();
+        let (receiver, loss) = queued_survival_records(0);
+        loss.record(3);
+        drain(writer.clone(), receiver, loss.clone());
+        let observed = writer.0.lock().unwrap();
+        let row: serde_json::Value = serde_json::from_slice(&observed.bytes).unwrap();
+        assert_eq!(row["event"], "server_diagnostics_dropped");
+        assert_eq!(row["dropped"], 3);
+        assert!(observed.bytes.ends_with(b"\n"));
+        assert_eq!(observed.writes, 1);
+        assert_eq!(observed.flushed_lengths, [observed.bytes.len()]);
+        assert!(!loss.failed.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn survival_record_larger_than_the_buffer_retains_exact_json() {
+        let writer = ObservedWriter::default();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let loss = Arc::new(Loss::default());
+        let sink = Diagnostics {
+            sender,
+            loss: loss.clone(),
+        };
+        let mut record = survival_record("survival.commit");
+        record["details"] = "quote\"slash\\\n".repeat(4096).into();
+        assert!(sink.survival(record.clone()));
+        drop(sink);
+        drain(writer.clone(), receiver, loss.clone());
+        record["diagnostic_dropped"] = 0.into();
+        record["diagnostic_incomplete"] = false.into();
+        let observed = writer.0.lock().unwrap();
+        let decoded: serde_json::Value = serde_json::from_slice(&observed.bytes).unwrap();
+        assert_eq!(decoded, record);
+        assert!(observed.bytes.ends_with(b"\n"));
+        assert!(observed.writes > 1 && observed.writes < 16);
+        assert_eq!(observed.flushed_lengths, [observed.bytes.len(); 2]);
+        assert!(!loss.failed.load(Ordering::Relaxed));
+        assert_eq!(loss.total.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn record_flush_failure_counts_inflight_and_queued_records() {
+        struct FlushFailure(ObservedWriter);
+        impl Write for FlushFailure {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.write(bytes)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.0.flush()?;
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+        }
+        let writer = ObservedWriter::default();
+        let (receiver, loss) = queued_survival_records(3);
+        drain(FlushFailure(writer.clone()), receiver, loss.clone());
+        assert!(loss.failed.load(Ordering::Relaxed));
+        assert_eq!(loss.total.load(Ordering::Relaxed), 3);
+        let observed = writer.0.lock().unwrap();
+        assert_eq!(observed.writes, 1);
+        assert_eq!(observed.flushed_lengths, [observed.bytes.len()]);
+        let row: serde_json::Value = serde_json::from_slice(&observed.bytes).unwrap();
+        assert_eq!(row["sequence"], 0);
+    }
+
+    #[test]
+    fn partial_record_or_final_loss_write_failure_does_not_retry_buffered_bytes_on_drop() {
+        struct FailOnceAfterPrefix {
+            output: ObservedWriter,
+            attempted: Arc<AtomicU64>,
+        }
+        impl Write for FailOnceAfterPrefix {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                match self.attempted.fetch_add(1, Ordering::Relaxed) {
+                    0 => self.output.write(&bytes[..bytes.len().min(10)]),
+                    1 => Err(io::ErrorKind::Interrupted.into()),
+                    2 => Err(io::ErrorKind::BrokenPipe.into()),
+                    _ => self.output.write(bytes),
+                }
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.output.flush()
+            }
+        }
+        for count in [0, 3] {
+            let writer = ObservedWriter::default();
+            let attempted = Arc::new(AtomicU64::new(0));
+            let (receiver, loss) = queued_survival_records(count);
+            if count == 0 {
+                loss.record(1);
+            }
+            drain(
+                FailOnceAfterPrefix {
+                    output: writer.clone(),
+                    attempted: attempted.clone(),
+                },
+                receiver,
+                loss.clone(),
+            );
+            assert!(loss.failed.load(Ordering::Relaxed));
+            assert_eq!(loss.total.load(Ordering::Relaxed), count.max(1) as u64);
+            assert_eq!(attempted.load(Ordering::Relaxed), 3);
+            let observed = writer.0.lock().unwrap();
+            assert_eq!(observed.bytes.len(), 10);
+            assert!(observed.flushed_lengths.is_empty());
+        }
     }
 
     #[test]

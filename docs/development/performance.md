@@ -134,6 +134,10 @@ Missing/malformed rows, sequence gaps, duplicate entries, divergent restart
 anchors, counter overflow, queue loss and incomplete batches invalidate a sample.
 The bounded best-effort writer never blocks or rejects gameplay on diagnostic
 failure. Wait for the matching final diagnostic barrier before reading a sample.
+Its worker coalesces JSON fragments in a fixed 8 KiB buffer and flushes each
+complete record, avoiding one file write per fragment. The 16-record survival
+queue remains bounded and nonblocking; slow or failed I/O can still invalidate
+evidence. A write or flush failure discards the remaining buffer without retry.
 
 Per-actor fields aggregate every settled segment within one committed entry,
 retaining exact total active ticks and the first/last nutrition fractions. They
