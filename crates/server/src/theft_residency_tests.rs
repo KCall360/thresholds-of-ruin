@@ -6,6 +6,8 @@ use tor_simulation::{content_ids::AbilityId, RegionState, RegionTransition};
 const SENTINEL: u64 = 2;
 const THIEF: u64 = 3;
 const BLOCKER: u64 = 4;
+// Beyond both sight-activated regions and their ordinary neighbor load pins.
+const DISTANT_MEMBER: u64 = 5;
 
 fn scenario() -> Scenario {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
@@ -26,7 +28,7 @@ fn scenario() -> Scenario {
         "room_height":[5,5],"extra_connections":[0,0]
     }});
     source["procedural_worlds"] = json!({"dungeon":{
-        "kind":"grid_chain","version":1,"base_region":1,"grid":[2,1],
+        "kind":"grid_chain","version":1,"base_region":1,"grid":[5,1],
         "size":[9,7,2],"recipe":"room","domain":{"kind":"open","max_depth":100}
     }});
     source["archetypes"]["marker"] = json!({"name":"residency marker"});
@@ -75,7 +77,7 @@ fn setup(engine: &mut Engine) {
     let sentinel = wizard(
         engine,
         WizardOperation::SpawnActor {
-            position: position(2, 4),
+            position: position(DISTANT_MEMBER, 4),
             turn_ticks: 100,
         },
     );
@@ -125,7 +127,7 @@ fn setup(engine: &mut Engine) {
     act(engine, 1, "yield-to-thief", Action::Wait);
     assert_eq!(engine.next_actor(), Some(ActorId(THIEF)));
     assert_eq!(
-        engine.game.region_state(RegionId(2)),
+        engine.game.region_state(RegionId(DISTANT_MEMBER)),
         Some(RegionState::Detached)
     );
     assert!(!engine
@@ -152,12 +154,17 @@ fn act(engine: &mut Engine, actor: u64, request: &str, action: Action) {
 
 /// Test-only cache setup/readback: attach already-published records frozen. It
 /// creates no action, active region, population entry, RNG roll or elapsed time.
+/// Only the distant member is added to the existing ordinary load closure.
 /// The cold arm does not call this before ordinary theft admission.
 fn attach_frozen_member(engine: &mut Engine) {
     let before = engine.game.tick();
     let proposed = RegionTransition {
         active: BTreeSet::from([RegionId(1)]),
-        loaded: BTreeSet::from([RegionId(1), RegionId(2)]),
+        loaded: engine
+            .game
+            .loaded_regions()
+            .chain(std::iter::once(RegionId(DISTANT_MEMBER)))
+            .collect(),
     };
     engine
         .game
@@ -165,7 +172,7 @@ fn attach_frozen_member(engine: &mut Engine) {
         .unwrap();
     assert_eq!(engine.game.tick(), before);
     assert_eq!(
-        engine.game.region_state(RegionId(2)),
+        engine.game.region_state(RegionId(DISTANT_MEMBER)),
         Some(RegionState::Frozen)
     );
 }
@@ -175,7 +182,14 @@ fn actor_state(engine: &Engine, actor: u64) -> Value {
     let pool = saved["game"]["actors"].as_u64().unwrap() as usize;
     let state = saved["shared"]["actors"][pool][actor.to_string()].clone();
     assert!(state.is_object(), "positive control: actor is loaded");
-    json!({"actor":state, "preparation":engine.game.preparation(SimActor(actor))})
+    let lifecycle = saved["game"]["lifecycle"].as_u64().unwrap() as usize;
+    let stamp = &saved["shared"]["lifecycles"][lifecycle]["stamps"][actor.to_string()];
+    assert!(
+        stamp.is_u64(),
+        "positive control: unrelated actor is frozen"
+    );
+    json!({"actor":state, "freeze_stamp":stamp,
+        "preparation":engine.game.preparation(SimActor(actor))})
 }
 
 fn entry_receipts(engine: &Engine) -> Value {
@@ -214,7 +228,7 @@ fn start_theft(engine: &mut Engine) -> Value {
         "admission does not resolve checks"
     );
     assert_eq!(
-        engine.game.region_state(RegionId(2)),
+        engine.game.region_state(RegionId(DISTANT_MEMBER)),
         Some(RegionState::Frozen)
     );
     assert_eq!(engine.next_actor(), Some(ActorId(BLOCKER)));
@@ -273,10 +287,23 @@ fn paid_theft_matches_warm_and_evicted_floor_after_source_free_checkpoint_reopen
     assert_eq!(entry_receipts(&warm), receipts);
     attach_frozen_member(&mut warm);
     let sentinel = actor_state(&warm, SENTINEL);
+    assert!(
+        !cold
+            .game
+            .loaded_regions()
+            .any(|region| region == RegionId(DISTANT_MEMBER)),
+        "ordinary neighbor residency must not prewarm the distant cold member"
+    );
     assert_eq!(
         start_theft(&mut warm),
         start_theft(&mut cold),
         "immutable paid plan and progress are independent of cache residency"
+    );
+    assert!(
+        cold.game
+            .loaded_regions()
+            .any(|region| region == RegionId(DISTANT_MEMBER)),
+        "ordinary paid admission must newly load the distant member"
     );
     assert_eq!(actor_state(&warm, SENTINEL), sentinel);
     assert_eq!(

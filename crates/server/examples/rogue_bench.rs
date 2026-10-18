@@ -217,7 +217,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &source.manifest.generation_recipes[&group.recipe],
                 defs,
                 seed,
-            )?;
+            )?
+            .regions;
             let elapsed = start.elapsed();
             assert_eq!(generated.len(), 9);
             println!(

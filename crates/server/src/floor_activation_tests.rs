@@ -284,6 +284,7 @@ fn walk_to_port(engine: &mut Engine, depth: u32, port: &str) {
         (at.position.x + slot % 3 * 26, at.position.y + slot / 3 * 7)
     };
     let (owner, at) = defs
+        .regions
         .iter()
         .find_map(|(id, def)| def.anchors.get(port).map(|at| (*id, *at)))
         .unwrap();
@@ -297,7 +298,7 @@ fn walk_to_port(engine: &mut Engine, depth: u32, port: &str) {
     });
     let start = coordinate(engine.game.observe(SimActor(1)).unwrap().location);
     let mut open = BTreeSet::new();
-    for (id, def) in &defs {
+    for (id, def) in &defs.regions {
         for y in 0..7 {
             for x in 0..26 {
                 if !def.walls.contains(&[x, y, 0]) {

@@ -1493,8 +1493,8 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
                 "bands":[{"depth":{"kind":"open","minimum":1},"choices":[{"archetype":"marker","weight":1}]}]
             }]);
         }).unwrap();
-        let bytes = crate::save_scenario::encode_content_package(&package).unwrap();
-        let restored = crate::save_scenario::decode_content_package(&bytes).unwrap();
+        let bytes = crate::storage::schema::scenario::encode_content_package(&package).unwrap();
+        let restored = crate::storage::schema::scenario::decode_content_package(&bytes).unwrap();
         assert!(restored.directory.is_none());
         assert!(restored.rules_source.is_empty());
         let mut warm = package.build(42, false).unwrap();
@@ -1536,7 +1536,7 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
         rooms.remove(0);
         assert!(!configuration.valid_record(&missing_room));
         assert_eq!(
-            crate::save_scenario::encode_content_package(&restored).unwrap(),
+            crate::storage::schema::scenario::encode_content_package(&restored).unwrap(),
             bytes
         );
     }

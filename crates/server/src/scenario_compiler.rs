@@ -1325,6 +1325,8 @@ mod tests {
                 consumable: None,
                 edible: None,
                 supply: None,
+                magical: false,
+                currency: None,
                 class: Default::default(),
                 body: Some(BodySpec {
                     cells: vec![[0, 0, 0]],

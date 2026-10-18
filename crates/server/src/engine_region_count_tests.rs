@@ -102,7 +102,7 @@ fn descriptor_region_counts_follow_materialized_lifecycle_and_survive_restart() 
             42,
         )
         .unwrap();
-        let def = &definitions[&group.members[0]];
+        let def = &definitions.regions[&group.members[0]];
         let position = (1..def.size[1] - 1)
             .flat_map(|y| (1..def.size[0] - 1).map(move |x| [x, y, 0]))
             .find(|at| !def.walls.contains(at))

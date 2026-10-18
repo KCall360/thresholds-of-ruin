@@ -41,6 +41,12 @@ pub(crate) struct PreparedTransfer {
     expected_next_item_id: u64,
 }
 
+impl PreparedTransfer {
+    pub(crate) fn result(&self) -> ItemId {
+        self.result
+    }
+}
+
 /// Authoritative identity and physical stack properties. Never a client DTO.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[cfg_attr(not(test), derive(Clone))]
@@ -242,6 +248,46 @@ impl Game {
         recipient: ActorId,
         quantity: u64,
     ) -> Result<PreparedTransfer, GameError> {
+        self.prepare_owned_transfer_selecting(
+            source,
+            owner,
+            recipient,
+            quantity,
+            |game, item, at| {
+                item.spec
+                    .stackable
+                    .then(|| {
+                        game.items.at(at).find(|id| {
+                            crate::diagnostics::stack_candidate();
+                            game.items[id].spec == item.spec
+                        })
+                    })
+                    .flatten()
+            },
+        )
+    }
+
+    /// A candidate-local index may select the merge identity, but it cannot
+    /// bypass the same full-spec, ownership, quantity and exact-witness checks.
+    pub(crate) fn prepare_owned_transfer_into(
+        &self,
+        source: ItemId,
+        owner: ActorId,
+        recipient: ActorId,
+        quantity: u64,
+        merge: Option<ItemId>,
+    ) -> Result<PreparedTransfer, GameError> {
+        self.prepare_owned_transfer_selecting(source, owner, recipient, quantity, |_, _, _| merge)
+    }
+
+    fn prepare_owned_transfer_selecting(
+        &self,
+        source: ItemId,
+        owner: ActorId,
+        recipient: ActorId,
+        quantity: u64,
+        select: impl FnOnce(&Self, &Item, ItemLocation) -> Option<ItemId>,
+    ) -> Result<PreparedTransfer, GameError> {
         if owner == recipient {
             return Err(GameError::ItemUnavailable);
         }
@@ -267,17 +313,19 @@ impl Game {
             return Err(GameError::ItemUnavailable);
         }
         let destination = ItemLocation::Carried(recipient);
-        let merge = item
-            .spec
-            .stackable
-            .then(|| {
-                self.items
-                    .at(destination)
-                    .find(|id| self.items[id].spec == item.spec)
-            })
-            .flatten();
+        let merge = select(self, item, destination);
         let result = if let Some(id) = merge {
-            self.items[&id]
+            let existing = self
+                .items
+                .get(&id)
+                .filter(|existing| {
+                    id != source
+                        && item.spec.stackable
+                        && existing.location == destination
+                        && existing.spec == item.spec
+                })
+                .ok_or(GameError::ItemUnavailable)?;
+            existing
                 .quantity
                 .checked_add(quantity)
                 .ok_or(GameError::InvalidQuantity)?;

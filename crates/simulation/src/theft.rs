@@ -6,7 +6,7 @@ use crate::{
     ActorId, CurrencyKind, Game, GameError, ItemId, ItemLocation,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use tor_world::RegionId;
 
 /// Private-host load boundary, never an observation or persisted work queue.
@@ -20,6 +20,10 @@ pub struct PreparationRegionBoundary {
     pub started: u64,
     pub members: BTreeSet<RegionId>,
 }
+
+#[cfg(test)]
+#[path = "theft_merge_tests.rs"]
+mod merge_tests;
 
 #[cfg(test)]
 mod tests {
@@ -181,7 +185,7 @@ mod tests {
             quantity: 2,
         };
         game.items
-            .edit(ItemId(10), |item| item.holds.push(hold.clone()))
+            .edit(ItemId(10), |item| item.holds.push(hold))
             .unwrap();
         game.actors
             .get_mut(&ActorId(2))
@@ -337,7 +341,7 @@ mod tests {
             descriptors: vec![],
             riders: additional_riders.clone(),
         };
-        validate_strike_shapes(&[original.clone()]).unwrap();
+        validate_strike_shapes(std::slice::from_ref(&original)).unwrap();
         for corruption in 0..4 {
             let mut strike = original.clone();
             match corruption {
@@ -350,7 +354,7 @@ mod tests {
                 }
                 _ => unreachable!(),
             }
-            assert!(validate_strike_shapes(&[strike.clone()]).is_err());
+            assert!(validate_strike_shapes(std::slice::from_ref(&strike)).is_err());
             let encoded = serde_json::to_value(StrikeSource::Authored {
                 strikes: vec![strike],
             })
@@ -727,6 +731,9 @@ impl Game {
             PlannedTheftSelection::Currency { currency, amount } => {
                 let requested = amount.sample(rng)?;
                 let mut remaining = requested;
+                // Lazy, candidate-local full-spec merge index. A no-op theft
+                // never scans the recipient, and multiple fragments do so once.
+                let mut destinations: Option<BTreeMap<_, _>> = None;
                 // The indexed owner bucket is deterministic. Never sum a purse:
                 // subtraction caps each fragment without overflowing u64.
                 let mut previous = None;
@@ -747,8 +754,28 @@ impl Game {
                         .free_quantity(None)
                         .ok_or(GameError::ItemUnavailable)?
                         .min(remaining);
-                    let transfer = self.prepare_owned_transfer(id, target, source, quantity)?;
+                    let spec = self.items[&id].spec.clone();
+                    let destinations = destinations.get_or_insert_with(|| {
+                        let mut index = BTreeMap::new();
+                        // Indexed IDs are ordered. Keep the lowest-ID exact
+                        // match and its existing overflow behavior; Shared keys
+                        // retain definitions without copying them.
+                        for id in self.items.at(ItemLocation::Carried(source)) {
+                            crate::diagnostics::stack_candidate();
+                            let spec = &self.items[&id].spec;
+                            if spec.currency == Some(*currency) {
+                                index.entry(spec.clone()).or_insert(id);
+                            }
+                        }
+                        index
+                    });
+                    crate::diagnostics::stack_candidate();
+                    let merge = destinations.get(&spec).copied();
+                    let transfer =
+                        self.prepare_owned_transfer_into(id, target, source, quantity, merge)?;
+                    let result = transfer.result();
                     self.apply_owned_transfer(transfer)?;
+                    destinations.entry(spec).or_insert(result);
                     remaining -= quantity;
                 }
                 Ok((remaining < requested).then_some(TransferReceipt {

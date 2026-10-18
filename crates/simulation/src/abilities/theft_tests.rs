@@ -63,13 +63,31 @@ fn theft_game(
     relocate: bool,
     configure_game: impl FnOnce(&mut Game),
 ) -> (Game, IntentionId) {
-    theft_game_with_sources(offsets, amount, relocate, |_, _| {}, configure_game)
+    theft_game_in_regions(offsets, amount, relocate, 2, configure_game)
+}
+
+fn theft_game_in_regions(
+    offsets: &[u64],
+    amount: QuantityExpr,
+    relocate: bool,
+    regions: u64,
+    configure_game: impl FnOnce(&mut Game),
+) -> (Game, IntentionId) {
+    theft_game_with_sources(
+        offsets,
+        amount,
+        relocate,
+        regions,
+        |_, _| {},
+        configure_game,
+    )
 }
 
 fn theft_game_with_sources(
     offsets: &[u64],
     amount: QuantityExpr,
     relocate: bool,
+    regions: u64,
     configure_sources: impl FnOnce(&mut RulesetDocument, &mut crate::creatures::Species),
     configure_game: impl FnOnce(&mut Game),
 ) -> (Game, IntentionId) {
@@ -133,7 +151,7 @@ fn theft_game_with_sources(
             }
             configure_sources(rules, species);
         },
-        Some(3),
+        Some(regions),
         configure_game,
     )
 }
@@ -337,12 +355,18 @@ fn contextual_theft_requires_and_freezes_current_registered_depth() {
 
 #[test]
 fn frozen_theft_rejects_mixed_registered_scopes_across_riders() {
-    let (game, _) = theft_game(&[0, 0], QuantityExpr::Fixed { quantity: 1 }, true, |game| {
-        configure_population(game);
-        register_floor(game, 1, &[1, 2], vec![at(1, 1), at(1, 2), at(2, 1)]);
-        register_floor(game, 2, &[3], vec![at(3, 1)]);
-        game.activate_initial_floor().unwrap();
-    });
+    let (game, _) = theft_game_in_regions(
+        &[0, 0],
+        QuantityExpr::Fixed { quantity: 1 },
+        true,
+        3,
+        |game| {
+            configure_population(game);
+            register_floor(game, 1, &[1, 2], vec![at(1, 1), at(1, 2), at(2, 1)]);
+            register_floor(game, 2, &[3], vec![at(3, 1)]);
+            game.activate_initial_floor().unwrap();
+        },
+    );
     let original = &game.preparation(ActorId(1)).unwrap().plan;
     assert!(game.plan_source_valid(original));
     let mut forged = original.clone();
@@ -395,28 +419,43 @@ fn frozen_theft_shape_requires_a_sole_checked_success_rider() {
 
 #[test]
 fn supplemental_loaded_thief_never_recursively_roots_its_floor() {
-    let (mut game, _) = theft_game(&[0], QuantityExpr::Fixed { quantity: 1 }, true, |game| {
-        configure_population(game);
-        register_floor(game, 1, &[1, 2], vec![at(1, 1), at(1, 2), at(2, 1)]);
-        game.activate_initial_floor().unwrap();
-    });
+    let (mut game, _) =
+        theft_game_in_regions(&[0], QuantityExpr::Fixed { quantity: 1 }, true, 4, |game| {
+            configure_population(game);
+            register_floor(game, 1, &[1, 2], vec![at(1, 1), at(1, 2), at(2, 1)]);
+            game.activate_initial_floor().unwrap();
+        });
     let plan = game.preparation(ActorId(1)).unwrap().plan.clone();
-    game.transition_regions(
-        &RegionTransition {
-            active: [RegionId(3)].into(),
-            loaded: [RegionId(1), RegionId(3)].into(),
-        },
-        &mut MemoryRecords::default(),
-    )
-    .unwrap();
+    // Active corridor regions load their immediate neighbor independently of
+    // theft. Region 4 therefore keeps region 3 loaded, but cannot itself pin
+    // region 2, which belongs to the frozen thief's captured floor.
+    let (applied, _) = game
+        .transition_regions(
+            &RegionTransition {
+                active: [RegionId(4)].into(),
+                loaded: [RegionId(1), RegionId(4)].into(),
+            },
+            &mut MemoryRecords::default(),
+        )
+        .unwrap();
+    assert_eq!(applied.active, [RegionId(4)].into());
+    assert_eq!(
+        applied.loaded,
+        [RegionId(1), RegionId(3), RegionId(4)].into()
+    );
     assert_eq!(game.region_state(RegionId(1)), Some(RegionState::Frozen));
     assert_eq!(game.region_state(RegionId(2)), Some(RegionState::Detached));
     assert_eq!(game.preparation(ActorId(1)).unwrap().plan, plan);
-    let mut supplemental = [RegionId(1), RegionId(3)].into();
-    game.relocation_loaded_closure(&[RegionId(3)].into(), &mut supplemental);
-    assert_eq!(supplemental, [RegionId(1), RegionId(3)].into());
-    game.relocation_loaded_closure(&[RegionId(1), RegionId(3)].into(), &mut supplemental);
-    assert_eq!(supplemental, [RegionId(1), RegionId(2), RegionId(3)].into());
+    let mut supplemental = applied.loaded.clone();
+    game.relocation_loaded_closure(&applied.active, &mut supplemental);
+    assert_eq!(supplemental, applied.loaded);
+    // Promote the occupied region to an ordinary active root: the exact same
+    // retained plan now adds its otherwise absent floor member.
+    game.relocation_loaded_closure(&[RegionId(1), RegionId(4)].into(), &mut supplemental);
+    assert_eq!(
+        supplemental,
+        [RegionId(1), RegionId(2), RegionId(3), RegionId(4)].into()
+    );
 }
 
 #[test]
@@ -428,6 +467,7 @@ fn tr3_flag_gain_or_loss_does_not_rewrite_prepared_optional_relocation() {
             &[0],
             QuantityExpr::Fixed { quantity: 1 },
             true,
+            2,
             |rules, species| {
                 species.modifiers.retain(|modifier| {
                     !matches!(&modifier.op,

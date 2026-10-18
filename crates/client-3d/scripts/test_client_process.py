@@ -334,25 +334,22 @@ class Native3DProcesses(ProcessTestCase):
         player.stop()
         server.stop(save=False)
         self.server()
-        release_map = threading.Event()
         map_seen = threading.Event()
-        def hold_map(message):
+        def notice_map(message):
             if message.get("type") == "map_page":
                 map_seen.set()
-                if not release_map.wait(10):
-                    raise AssertionError("map reply was not released after initial rendering")
-        relay = StreamRelay(self.address, on_server_message=hold_map)
+        # Observe the actual hydration reply without holding it behind GPU
+        # startup: the shared protocol correctly expires map queries after
+        # ten seconds, independently of how fast a native frame renders.
+        relay = StreamRelay(self.address, on_server_message=notice_map)
         self.addCleanup(relay.close)
-        self.addCleanup(release_map.set)
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         window = self.launch("tor-client-3d", [
             "--connect", relay.address, "--observe", "--capture", self.directory / "map-captures", "--capture-every", "0.4",
             "--quit-after", "120",
         ], executable=executable)
-        self.captured(window, lambda f: True)
-        release_map.set()
-        self.assertTrue(map_seen.wait(5), "the server must send an actual hydration reply")
         frame = self.captured(window, lambda f: any(c["key"] == cell["key"] for c in f["remembered_terrain"]))
+        self.assertTrue(map_seen.wait(5), "the server must send an actual hydration reply")
         restored = next(c for c in frame["remembered_terrain"] if c["key"] == cell["key"])
         self.assertFalse(restored["lit"], "remembered terrain must not claim current illumination")
         self.assertNotIn(cell["key"], frame["visible_keys"], "map hydration must not manufacture current sight")
@@ -433,9 +430,11 @@ class Native3DProcesses(ProcessTestCase):
     def test_mouse_picks_the_presented_item_and_inventory_keys_do_not_exit_early(self):
         self.server(scenario=self.fallback_package())
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        # This route verifies Escape-driven exit. Per-step capture/input/exit
+        # waits bound failure; an independent auto-close timer can interrupt
+        # the route (or falsely satisfy its final exit assertion).
         window = self.launch("tor-client-3d", [
             "--connect", self.address, "--capture", self.directory / "mouse-captures", "--capture-every", "0.4",
-            "--quit-after", "120",
         ], executable=executable)
         initial = self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
         item = next(item for item in initial["ground_items"] if item["name"] == "unfamiliar relic")
@@ -480,9 +479,11 @@ class Native3DProcesses(ProcessTestCase):
 
     def launch_connected(self, captures, *, address=None):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        # Native routes below finish with escape_window and retain their
+        # bounded per-step waits; their lifetime belongs to the test driver.
         return self.launch("tor-client-3d", [
             "--connect", address or self.address, "--capture", self.directory / captures,
-            "--capture-every", "0.1", "--quit-after", "120",
+            "--capture-every", "0.1",
         ], executable=executable)
 
     def escape_window(self, window, native):
