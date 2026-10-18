@@ -5,6 +5,8 @@ the eligible recipes, with Vampire/Griffin/Jabberwock in the explicit mixed tail
 racial growth still refuses beyond current construction/storage capacity. Inputs
 are not balance recommendations or earned progression evidence. Run only in the
 qualified coordinator lane; the ordinary compiler creates candidate certificates.
+Reviewed twenty-one-species input is conditioned to the same eighteen-species
+diagnostic output; it does not reproduce current production population or Gold.
 """
 import argparse
 import copy
@@ -18,6 +20,7 @@ import tomllib
 from arena_evaluation import MAX_BYTES, digest, files, write_json
 from arena_matrix import toml_source
 from ruleset_sources import resolve_with_dependencies
+from rogue_activation_oracle import reviewed_twenty_one_activation
 
 
 REFERENCE = "c7c119f893bd2f8255f2ad78d58a32664ddb9a97"
@@ -85,8 +88,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RULES = "crates/simulation/data/default-ruleset.toml"
 FORMAT = "tor-rogue-activation-inputs-v2"
 # Package source is always injected. These are generator dependencies only.
-TOOL_INPUTS = ("scripts/rogue_activation_candidate.py", "scripts/arena_recipes.json",
-               "scripts/arena_matrix.py", "scripts/arena_evaluation.py", "scripts/ruleset_sources.py")
+TOOL_INPUTS = ("scripts/rogue_activation_candidate.py", "scripts/rogue_activation_oracle.py",
+               "scripts/arena_recipes.json",
+               "scripts/arena_matrix.py", "scripts/arena_evaluation.py", "scripts/ruleset_sources.py",
+               "scripts/scalar_wire.py")
 COMPILER_DEPENDENCY_INPUTS = (DEFAULT_RULES,)
 
 
@@ -126,7 +131,11 @@ def canonical_actor_stage():
 
 
 def population_shape(source):
-    """Accept only the two reviewed profiles, never derive an oracle from input."""
+    """Pin activation policy only, not arbitrary supplied catalog/rules bytes.
+
+    Full declared sources and resolved package rules are separately retained and
+    fingerprinted by create_candidate; the compiler owns content validation.
+    """
     activation = source["floor_activation"]
     legacy = [{"id": identity, "version": 1, "kind": "actors", "count": [2, 2],
                "bands": singleton_band(archetype), "ai": "rogue_hostile",
@@ -144,7 +153,20 @@ def population_shape(source):
     expected["carried_item_pools"] = {VAMPIRE_STOCK["pool"]: VAMPIRE_POOL}
     if exact(activation) == exact(expected):
         return "canonical_eighteen_species"
+    if exact(activation) == exact(reviewed_twenty_one_activation()):
+        return "reviewed_twenty_one_species_input"
     raise ValueError("Review changed population profile or carried-item pool before generating a candidate")
+
+
+def population_scope(manifest):
+    """Describe activated populations, not all unused catalog recipes."""
+    activation = manifest["floor_activation"]
+    stages = activation["profiles"]["rogue.low_depth"]["stages"]
+    return {"species": sorted({choice["archetype"] for stage in stages if stage["kind"] == "actors"
+                               for band in stage["bands"] for choice in band["choices"]}),
+            "stage_ids": [stage["id"] for stage in stages],
+            "carried_item_pools": sorted(activation.get("carried_item_pools", {}))}
+
 
 def candidate_manifest(source, *, start_depth=1):
     domain = source["procedural_worlds"]["dungeon"]["domain"]
@@ -212,6 +234,8 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
     output.mkdir(parents=True, exist_ok=False)
     inventory = {"format": FORMAT, "selector_reference": REFERENCE,
                  "source_provenance": provenance, "source_population_shape": shape,
+                 "input_population_scope": population_scope(source),
+                 "output_population_scope": population_scope(manifest),
                  "source_package_inputs": package_hashes, "tool_inputs": tool_hashes,
                  "compiler_dependency_inputs": compiler_input_hashes,
                  "compiler_sha256": compiler_hash, "generation_status": "resolving_rules",
@@ -224,7 +248,9 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
                  "carried_stock": {"policies": {NAMES[glyph]: copy.deepcopy(policy)
                                                 for glyph, policy in CARRIER_STOCK.items()},
                                    "pool": copy.deepcopy(VAMPIRE_POOL)},
-                 "limitations": ["later-source species remain required, not permanently omitted",
+                 "limitations": ["eighteen-species diagnostic output is not current twenty-one-species production; "
+                     "Leprechaun, Nymph, Orc, the Leprechaun birth-Gold pool and room-Gold stage are omitted",
+                     "later-source species remain required, not permanently omitted",
                      "open selection bands do not bypass current HD, numeric or storage capacity refusals",
                      "four independent draws can select four unicorns, vampires or jabberwocks; safety is unmeasured",
                      "Centaur 15%, Yeti 30%, Troll 50%, Vampire 20%, Jabberwock 70% birth stock uses a provisional equal ration/bandage pool",

@@ -463,8 +463,11 @@ balances and applied-condition counts cannot fill them in.
 ### Rogue roster study and bounded candidate inputs
 
 [`rogue_roster_study.py`](../../scripts/rogue_roster_study.py) prepares ordinary
-validated packages and paired runner plans from the current production roster.
-Preparing inputs is separate from running encounters or establishing balance.
+validated packages and paired runner plans for its declared eighteen-foe study
+selection. Production now selects 21 species; this study has not been expanded or
+qualified for L/N/O theft and Gold. Preparing inputs is separate from running
+encounters or establishing balance, and retained study identifiers remain tied
+to their original source fingerprints.
 
 Three explicit modes keep their scope separate:
 
@@ -480,7 +483,7 @@ Three explicit modes keep their scope separate:
   There is no default Mage spell. Authoring this purchase does not replace
   ordinary player-purchase acceptance or establish earned progression.
 
-Playable modes cover all eighteen selected K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J
+Playable modes cover the eighteen study-selected K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J
 recipes at player HD 1. They never synthesize HD 6/11
 or treat dungeon depth as character HD. Both retain foe actor 3 and declare exact
 per-arm `participant_rosters`; Warrior and Mage remain actors 1 and 2 through
@@ -491,9 +494,11 @@ Production starters are externally controlled and omitted when
 unselected. The study explicitly changes their control to AI and gives them
 `study_general`, explicitly matching the concrete
 `tor_simulation::ai::AiProfile::general()`: Explore idle movement,
-doors/care/equipment/loot enabled, and a flee threshold of 25%. The authoring
-constructor is a partial override that inherits species idle behavior, so the
-study supplies all six fields instead. Both sources remain pinned inputs. This
+doors/care/equipment/loot enabled, Gold interest disabled, and a flee threshold
+of 25%. The authoring constructor is a partial override that inherits species
+idle behavior and Gold interest. The study explicitly supplies all seven fields,
+so it does not inherit species Gold collection. Retained results cover only their
+recorded policy and source hashes. Both sources remain pinned inputs. This
 is not the separate `AiProfile::default()` or a production profile named
 `normal`. The inventory records this adaptation, policy values and source hashes.
 Foes retain their authored `rogue_hostile` profile. Autonomous choices are a
@@ -539,20 +544,32 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 
 The API likewise requires
 `create_candidate(output, compiler, source_package=package, source_provenance={"reference": reference})`.
-It accepts only the exact known preactivation E/S profile or canonical activated
-eighteen-species profile, including stage identities/order, counts, bands, growth,
-supplies and carried-stock policy. A partially promoted or modified profile
-rejects. Both accepted shapes materialize the same diagnostic policy without
-duplicating the shared C/Y/T/V/G/J pool. Existing output directories are never reused.
+It accepts only the exact known preactivation E/S profile, canonical activated
+eighteen-species profile, or reviewed twenty-one-species input with L/N/O,
+Leprechaun birth Gold and the appended room-Gold stage. An independent pinned-selector
+oracle checks the latter's exact roster, ordering, weights, growth, stages and
+stock policies; unknown or partially modified activation rules reject. The oracle
+pins population policy, not arbitrary supplied rules/catalog bytes. The full
+declared source closure, resolved package rules and dependency identities are
+separately retained and fingerprinted; the compiler owns content validation.
+All accepted inputs materialize the same eighteen-species, four-stage diagnostic
+output without L/N/O, the Leprechaun birth-Gold pool or room-Gold stage; this reduced
+output is not current production population. The shared C/Y/T/V/G/J pool is not
+duplicated. Existing output directories are never reused.
 
 New `tor-rogue-activation-inputs-v2` inventories record `source_population_shape`
-as `preactivation_es` or `canonical_eighteen_species`, explicit package provenance,
-and separate `source_package_inputs`, `tool_inputs` and `compiler_dependency_inputs`
-hashes. `artifact_purpose = "diagnostic_population_package"` and
+as `preactivation_es`, `canonical_eighteen_species` or
+`reviewed_twenty_one_species_input`, explicit package provenance, and separate
+`input_population_scope`/`output_population_scope` species, ordered stage IDs and
+pool IDs. Separate `source_package_inputs`, `tool_inputs` and
+`compiler_dependency_inputs` hashes cover each new generation, including the
+independent activation oracle. `artifact_purpose = "diagnostic_population_package"` and
 `production_mutated = false` describe this tool's action; the former global
 `production_activation = "not_selected"` claim is absent from new results.
 The pinned external Rogue selector reference is separate from the supplied TOR
-package reference. Prior inventories and retained campaign sources stay unchanged.
+package reference. Changed generator bytes receive fresh source-closure hashes;
+prior inventories, fingerprints and retained campaign sources stay unchanged and
+do not qualify newly generated packages.
 
 The bands condition the pinned Rogue selector on eighteen eligible species
 K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J. Kestrel is eligible at depths 1–6 and bat
@@ -571,10 +588,11 @@ Historical foe-stage and carried-pool IDs stay stable; unchanged item stages
 retain their streams, subject to changed occupancy. The appended restore-strength
 stage makes one finite attempt/unit per floor from depth 1; that provisional TOR
 rate is not Rogue's subtype probability or a promise of eligible placement.
-The bundled package selects this exact policy, with focused source-qualified
-coverage of its changed production contracts. The frozen earned-route
-arm named `production` remains the historical E/S comparator, not the current
-bundled package. No objective or terminal floor is added.
+The retained eighteen-species candidate selects this policy. Current production
+adds L/N/O and an independent room-Gold stage; earlier source-qualified witnesses
+do not qualify those changes. The frozen earned-route arm named `production`
+remains the historical E/S comparator, not the current bundled package. No
+objective or terminal floor is added by preparing a diagnostic candidate.
 
 The policy uses `racial_after` depth 26 with complete seeded per-HD rows and
 Health rolls, retained base purchases and ordinary unspent grants on appended

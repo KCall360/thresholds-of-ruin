@@ -279,3 +279,58 @@ asset = "creature.griffin"
 turn_ticks = 100
 body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 160 }
 creature = { species = "rogue.griffin", name = "griffin", faction = "dungeon_foes", binding = "awareness", starting_skills = ["heavy_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.regeneration" } }] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }] }
+
+[actors."rogue.leprechaun"]
+asset = "creature.fey.leprechaun"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 25 }
+[actors."rogue.leprechaun".creature]
+species = "rogue.leprechaun"
+name = "leprechaun"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["light_weaponry", "stealth"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "filch_gold" } }] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "vanish" } }] },
+  { source = "racial", purchases = [] },
+]
+
+[actors."rogue.nymph"]
+asset = "creature.fey.nymph"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 55 }
+[actors."rogue.nymph".creature]
+species = "rogue.nymph"
+name = "nymph"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["light_weaponry", "stealth"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "filch_charm" } }] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "vanish" } }] },
+  { source = "racial", purchases = [] },
+]
+
+[actors."rogue.orc"]
+asset = "creature.humanoid.orc"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
+[actors."rogue.orc".creature]
+species = "rogue.orc"
+name = "orc"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "stealth"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "measured_cut" } }] },
+]

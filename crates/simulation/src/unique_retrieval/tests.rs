@@ -42,6 +42,7 @@ pub(super) fn retrieval_game() -> Game {
     .unwrap();
     for (region, depth) in [(1, 25), (2, 26), (3, 27)] {
         game.register_activation_scope(PreparedScope {
+            rooms: vec![],
             scope: format!("dungeon/{depth}"),
             depth,
             profile: "plain".into(),

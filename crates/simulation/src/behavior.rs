@@ -46,6 +46,7 @@ pub struct BehaviorPolicy {
     pub care: bool,
     pub equipment: bool,
     pub loot: bool,
+    pub gold: bool,
     pub flee_percent: u32,
 }
 impl<'de> Deserialize<'de> for BehaviorPolicy {
@@ -60,6 +61,7 @@ impl<'de> Deserialize<'de> for BehaviorPolicy {
             care: bool,
             equipment: bool,
             loot: bool,
+            gold: bool,
             flee_percent: u32,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
@@ -71,6 +73,7 @@ impl<'de> Deserialize<'de> for BehaviorPolicy {
             care: fields.care,
             equipment: fields.equipment,
             loot: fields.loot,
+            gold: fields.gold,
             flee_percent: fields.flee_percent,
         };
         if !policy.valid() {
@@ -89,6 +92,7 @@ impl Default for BehaviorPolicy {
             care: false,
             equipment: false,
             loot: false,
+            gold: false,
             flee_percent: 25,
         }
     }

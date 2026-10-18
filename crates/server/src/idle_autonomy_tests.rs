@@ -195,7 +195,7 @@ const ROGUE_DEFAULTS: [(&str, &str, &str, [bool; 4]); 15] = [
 
 fn expected_profile(idle: &str, tools: [bool; 4], flee: u32) -> Value {
     json!({"idle":idle,"doors":tools[0],"care":tools[1],
-        "equipment":tools[2],"loot":tools[3],"flee_percent":flee})
+        "equipment":tools[2],"loot":tools[3],"gold":false,"flee_percent":flee})
 }
 
 fn saved_ai(game: &Game) -> Value {
@@ -365,6 +365,15 @@ fn partial_profile_fields_override_independently_including_false_wait_and_zero()
         (
             json!({"loot":false}),
             expected_profile("explore", [true, true, true, false], 25),
+        ),
+        (json!({"gold":true}), {
+            let mut expected = expected_profile("explore", [true; 4], 25);
+            expected["gold"] = json!(true);
+            expected
+        }),
+        (
+            json!({"gold":false}),
+            expected_profile("explore", [true; 4], 25),
         ),
         (
             json!({"idle":"wait"}),
@@ -760,7 +769,15 @@ fn persisted_effective_ai_policy_requires_every_resolved_field_and_valid_values(
     let game = fixture("rogue.hobgoblin", None, false).unwrap();
     let mut shared = tor_simulation::checkpoint::SharedState::default();
     let saved = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
-    for field in ["idle", "doors", "care", "equipment", "loot", "flee_percent"] {
+    for field in [
+        "idle",
+        "doors",
+        "care",
+        "equipment",
+        "loot",
+        "gold",
+        "flee_percent",
+    ] {
         let mut malformed = saved.clone();
         malformed["combat"]["ai"]["3"]["profile"]
             .as_object_mut()
@@ -775,6 +792,7 @@ fn persisted_effective_ai_policy_requires_every_resolved_field_and_valid_values(
         ("idle", json!("roam")),
         ("doors", Value::Null),
         ("care", json!(0)),
+        ("gold", Value::Null),
         ("unexpected", json!(true)),
     ] {
         let mut malformed = saved.clone();

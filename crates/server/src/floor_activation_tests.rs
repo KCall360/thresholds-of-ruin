@@ -8,6 +8,9 @@ use crate::scenario_package::{Manifest, Package};
 use serde_json::{json, Value};
 use tor_world::{Location, Position as WorldPosition, RegionId};
 
+#[path = "theft_residency_tests.rs"]
+mod theft_residency;
+
 #[path = "wizard_creature_spawn_tests.rs"]
 mod named_spawning;
 
@@ -281,6 +284,7 @@ fn walk_to_port(engine: &mut Engine, depth: u32, port: &str) {
         (at.position.x + slot % 3 * 26, at.position.y + slot / 3 * 7)
     };
     let (owner, at) = defs
+        .regions
         .iter()
         .find_map(|(id, def)| def.anchors.get(port).map(|at| (*id, *at)))
         .unwrap();
@@ -294,7 +298,7 @@ fn walk_to_port(engine: &mut Engine, depth: u32, port: &str) {
     });
     let start = coordinate(engine.game.observe(SimActor(1)).unwrap().location);
     let mut open = BTreeSet::new();
-    for (id, def) in &defs {
+    for (id, def) in &defs.regions {
         for y in 0..7 {
             for x in 0..26 {
                 if !def.walls.contains(&[x, y, 0]) {
@@ -1026,7 +1030,7 @@ fn reject_expired_population_actor_receipt_using_reserved_identity(reserved: u64
                     _ => None,
                 })
             }
-            StageResult::Skipped { .. } => None,
+            StageResult::Skipped { .. } | StageResult::RoomsEvaluated { .. } => None,
         })
         .expect("fixture must retain the abandoned actor origin");
     assert!(
@@ -1097,7 +1101,7 @@ fn checkpoint_rejects_expired_population_item_receipt_using_starting_kit_identit
         panic!("fixture must evaluate its marker stage");
     };
     let PlacementDecision::Placed {
-        entity: PopulationEntity::Item { id },
+        entity: PopulationEntity::Item { id, .. },
         ..
     } = &mut attempts[0]
     else {
@@ -1145,7 +1149,7 @@ fn reject_expired_population_receipt_using_retained_wizard_origin(
                     _ => None,
                 })
             }
-            StageResult::Skipped { .. } => None,
+            StageResult::Skipped { .. } | StageResult::RoomsEvaluated { .. } => None,
         })
         .expect("fixture must retain an abandoned origin of the requested kind");
     assert_ne!(*identity, origin);
@@ -1194,6 +1198,7 @@ fn checkpoint_rejects_expired_population_item_receipt_aliasing_retained_wizard_b
         abandoned,
         tor_simulation::floor_activation::PopulationEntity::Item {
             id: tor_simulation::ItemId(item),
+            quantity: 1,
         },
     );
 }
@@ -1294,7 +1299,7 @@ fn moved_population_items_preserve_origin_receipts_across_detach_and_recovery() 
     };
     let PlacementDecision::Placed {
         location,
-        entity: PopulationEntity::Item { id },
+        entity: PopulationEntity::Item { id, .. },
         ..
     } = attempts[0]
     else {

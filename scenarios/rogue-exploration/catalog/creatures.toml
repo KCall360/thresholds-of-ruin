@@ -399,3 +399,60 @@ anatomy = { slots = [] }
 displacement = { size = "large", anchored = false }
 modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "flying", enabled = true } } }, { scope = "always", op = { kind = "flag", flag = "regenerative" } }, { scope = "always", op = { kind = "flag", flag = "natural_sequence" } }]
 melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 4, sides = 3, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }, { offset = 0, unlock = "second_strike", check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 3, sides = 5, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
+
+# Shared trickster/gold policies; physical tuning remains provisional.
+[creatures.species."rogue.leprechaun"]
+behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = true, care = false, equipment = false, loot = false, gold = true, flee_percent = 25 }
+kind = "fey"
+attributes = { strength = 0, speed = 3, intellect = 2, willpower = 1, awareness = 2, presence = 1 }
+displacement = { size = "small", anchored = false }
+[creatures.species."rogue.leprechaun".melee]
+skill = "light_weaponry"
+bonus = 0
+wind_up = 100
+recovery = 100
+[[creatures.species."rogue.leprechaun".melee.strikes]]
+offset = 0
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 1 } }] } }]
+on_failure = []
+descriptors = []
+riders = []
+
+# Shared trickster/gold policies; physical tuning remains provisional.
+[creatures.species."rogue.nymph"]
+behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = true, care = false, equipment = false, loot = false, gold = false, flee_percent = 25 }
+kind = "fey"
+attributes = { strength = 0, speed = 2, intellect = 2, willpower = 2, awareness = 1, presence = 2 }
+displacement = { size = "medium", anchored = false }
+[creatures.species."rogue.nymph".melee]
+skill = "light_weaponry"
+bonus = 0
+wind_up = 100
+recovery = 100
+[[creatures.species."rogue.nymph".melee.strikes]]
+offset = 0
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = []
+on_failure = []
+descriptors = []
+riders = []
+
+# Shared trickster/gold policies; physical tuning remains provisional.
+[creatures.species."rogue.orc"]
+behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, gold = true, flee_percent = 25 }
+kind = "humanoid"
+attributes = { strength = 2, speed = 1, intellect = 1, willpower = 1, awareness = 1, presence = 0 }
+displacement = { size = "medium", anchored = false }
+[creatures.species."rogue.orc".melee]
+skill = "heavy_weaponry"
+bonus = 0
+wind_up = 100
+recovery = 100
+[[creatures.species."rogue.orc".melee.strikes]]
+offset = 0
+check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 8, bonus = 0 } } }] } }]
+on_failure = []
+descriptors = []
+riders = []

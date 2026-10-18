@@ -1539,6 +1539,8 @@ fn phase5_container_checkpoint_rejects_positional_item_spec() {
     *spec = json!(declared_field_values(
         spec,
         &[
+            "magical",
+            "currency",
             "equipment",
             "consumable",
             "edible",

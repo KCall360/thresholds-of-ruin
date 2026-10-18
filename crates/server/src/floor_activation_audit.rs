@@ -3,7 +3,7 @@
 //! prove the same ledger correspondence without replaying gameplay effects.
 use super::*;
 use tor_simulation::floor_activation::{
-    EntryCause, PlacementDecision, StageResult, MAX_RETAINED_DECISIONS, MAX_SCOPES,
+    EntryCause, PlacementDecision, MAX_RETAINED_DECISIONS, MAX_SCOPES,
 };
 use tor_simulation::unique_retrieval::RetrievalResult;
 use tor_simulation::ItemId;
@@ -117,29 +117,23 @@ impl<'a> ActivationAudit<'a> {
             }
             count = count.checked_add(1).ok_or_else(invalid_archive)?;
             for stage in &record.decisions {
-                let attempts = match &stage.result {
-                    StageResult::Skipped { .. } => 0,
-                    StageResult::Evaluated { attempts, .. } => {
-                        for attempt in attempts {
-                            if let PlacementDecision::Placed { entity, .. } = attempt {
-                                let unique = entity
-                                    .actor_birth()
-                                    .is_none_or(|id| self.actor_origins.insert(id.0))
-                                    && entity
-                                        .item_birth()
-                                        .is_none_or(|id| self.item_origins.insert(id.0));
-                                // Rewind preserves identity high-water marks. A
-                                // different historical origin cannot reuse an ID.
-                                if !unique {
-                                    return Err(invalid_archive());
-                                }
-                            }
+                for attempt in stage.result.attempts() {
+                    if let PlacementDecision::Placed { entity, .. } = attempt {
+                        let unique = entity
+                            .actor_birth()
+                            .is_none_or(|id| self.actor_origins.insert(id.0))
+                            && entity
+                                .item_birth()
+                                .is_none_or(|id| self.item_origins.insert(id.0));
+                        // Room items and carried stock share the global origin
+                        // audit, including abandoned historical branches.
+                        if !unique {
+                            return Err(invalid_archive());
                         }
-                        attempts.iter().map(PlacementDecision::decision_count).sum()
                     }
-                };
+                }
                 decisions = decisions
-                    .checked_add(1 + attempts)
+                    .checked_add(stage.decision_count())
                     .ok_or_else(invalid_archive)?;
             }
             if count > MAX_SCOPES || decisions > MAX_RETAINED_DECISIONS {

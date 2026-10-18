@@ -429,7 +429,7 @@ fn pushed_entry_allocates_stock_before_later_lethal_effect_in_the_same_batch() {
                             choices: vec![PreparedItemChoice {
                                 content: "entry marker".into(),
                                 weight: 1,
-                                quantity: 1,
+                                quantity: crate::quantity::QuantityExpr::Fixed { quantity: 1 },
                                 spec: crate::ItemSpec::ordinary("entry marker".into()),
                             }],
                         }],
@@ -441,6 +441,7 @@ fn pushed_entry_allocates_stock_before_later_lethal_effect_in_the_same_batch() {
     .unwrap();
     for (depth, stock) in [(1, cell(6, 6, 3)), (2, stock_at)] {
         game.register_activation_scope(PreparedScope {
+            rooms: vec![],
             scope: format!("dungeon/{depth}"),
             depth,
             profile: "baseline".into(),
@@ -511,7 +512,7 @@ fn pushed_entry_allocates_stock_before_later_lethal_effect_in_the_same_batch() {
         panic!("entered floor must evaluate stock");
     };
     let PlacementDecision::Placed {
-        entity: PopulationEntity::Item { id: stock },
+        entity: PopulationEntity::Item { id: stock, .. },
         location,
         ..
     } = &attempts[0]

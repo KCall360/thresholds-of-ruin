@@ -14,8 +14,17 @@ impl Game {
             if self.actor_frozen(id) {
                 continue;
             }
+            self.ensure_preparation_residency(id)?;
+            if self.region_transition_pending() {
+                return Ok(());
+            }
             // Includes equal-offset rows without rescanning every actor per rider.
             for _ in 0..=crate::limits::STRIKES {
+                // An ordinary effect may relocate this actor into a frozen
+                // load-only region. Preserve the paid tail, even at equal offsets.
+                if self.actor_frozen(id) {
+                    break;
+                }
                 let Some(preparation) = self.preparation(id).cloned() else {
                     break;
                 };

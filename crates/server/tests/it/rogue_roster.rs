@@ -47,6 +47,9 @@ fn rogue_roster_actual_hd_seeds_choices_and_natural_rows_round_trip_without_sour
         ("ice_monster", 1, 1),
         ("vampire", 8, 1),
         ("jabberwock", 15, 2),
+        ("leprechaun", 3, 1),
+        ("nymph", 3, 1),
+        ("orc", 1, 1),
     ] {
         let identity = format!("rogue.{name}");
         let recipe = catalog

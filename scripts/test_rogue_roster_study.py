@@ -66,18 +66,22 @@ class RogueRosterStudyTests(unittest.TestCase):
 
     def test_proxy_values_match_existing_authoritative_general_policy_not_default(self):
         self.assertEqual(PLAYABLE_AI, {"idle": "explore", "doors": True, "care": True,
-                                       "equipment": True, "loot": True, "flee_percent": 25})
+                                       "equipment": True, "loot": True, "gold": False, "flee_percent": 25})
         def general_fields(relative):
             text = (ROOT / relative).read_text()
             body = text.split("pub fn general() -> Self {", 1)[1].split("}", 1)[0]
             return dict(re.findall(r"^\s+(\w+): ([^,\n]+),", body, re.MULTILINE))
-        concrete_fields = {key: json.dumps(value) for key, value in PLAYABLE_AI.items() if key != "idle"}
+        concrete_fields = {key: json.dumps(value) for key, value in PLAYABLE_AI.items()
+                           if key not in ("idle", "gold")}
         self.assertEqual(general_fields(RUNTIME_AI_SOURCE),
-                         {"idle": "crate::behavior::IdleBehavior::Explore", **concrete_fields})
+                         {"idle": "crate::behavior::IdleBehavior::Explore", "gold": "false", **concrete_fields})
         self.assertEqual(general_fields(AUTHORING_AI_SOURCE),
-                         {"idle": "None", **{key: f"Some({value})" for key, value in concrete_fields.items()}})
+                         {"idle": "None", "gold": "None",
+                          **{key: f"Some({value})" for key, value in concrete_fields.items()}})
         self.assertEqual(set(AI_SOURCES), {AUTHORING_AI_SOURCE, RUNTIME_AI_SOURCE})
         self.assertTrue(set(AI_SOURCES).issubset(INPUTS))
+        self.assertIn("scripts/process_harness.py", INPUTS)
+        self.assertIn("scripts/scalar_wire.py", INPUTS)
         source = encounter_sources()
         self.assertNotIn(PLAYABLE_AI_NAME, source["manifest"]["ai_profiles"])
         self.assertTrue(all(row["unselected"] == "omit" for row in source["manifest"]["characters"]))

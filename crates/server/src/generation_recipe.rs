@@ -389,13 +389,20 @@ fn validate_carving(open: &BTreeSet<(i32, i32)>, size: [i32; 3]) -> Result<(), F
 }
 
 /// Prepare region definitions from a recipe without publishing simulation state.
+/// Geometry and stable room interiors are produced together, before any gameplay
+/// population. The room metadata is retained by prepared activation scopes.
+pub struct GeneratedGroup {
+    pub regions: BTreeMap<u64, RegionDef>,
+    pub rooms: Vec<tor_simulation::floor_activation::PreparedRoomGroup>,
+}
+
 pub fn materialize(
     identity: &str,
     group: &GenerationGroup,
     recipe: &Recipe,
     definitions: Vec<RegionDef>,
     seed: u64,
-) -> Result<BTreeMap<u64, RegionDef>, Failure> {
+) -> Result<GeneratedGroup, Failure> {
     check(recipe)?;
     check_group(group)?;
     let count = group.members.len();
@@ -586,12 +593,69 @@ pub fn materialize(
             }
         }
     }
-    Ok(definitions)
+    let rooms = group
+        .members
+        .iter()
+        .enumerate()
+        .map(|(slot, id)| {
+            let mut cells: Vec<_> = room_cells[slot]
+                .iter()
+                .map(|&(x, y)| tor_world::Location {
+                    region: tor_world::RegionId(*id),
+                    position: tor_world::Position { x, y, z: 0 },
+                })
+                .collect();
+            cells.sort();
+            tor_simulation::floor_activation::PreparedRoomGroup {
+                id: slot as u32 + 1,
+                cells,
+            }
+        })
+        .collect();
+    Ok(GeneratedGroup {
+        regions: definitions,
+        rooms,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn materialize(
+        identity: &str,
+        group: &GenerationGroup,
+        recipe: &Recipe,
+        definitions: Vec<RegionDef>,
+        seed: u64,
+    ) -> Result<BTreeMap<u64, RegionDef>, Failure> {
+        super::materialize(identity, group, recipe, definitions, seed)
+            .map(|generated| generated.regions)
+    }
+
+    #[test]
+    fn prepared_rooms_preserve_slot_ids_and_only_bounded_interior_cells() {
+        let (group, recipe, definitions) = fixture();
+        let first =
+            super::materialize("floor-1", &group, &recipe, definitions.clone(), 42).unwrap();
+        let mut reversed = definitions;
+        reversed.reverse();
+        let second = super::materialize("floor-1", &group, &recipe, reversed, 42).unwrap();
+        assert_eq!(first.rooms, second.rooms);
+        assert_eq!(first.rooms.len(), group.members.len());
+        for (slot, room) in first.rooms.iter().enumerate() {
+            assert_eq!(room.id, slot as u32 + 1);
+            assert!(!room.cells.is_empty());
+            assert!(room.cells.len() <= tor_simulation::floor_activation::MAX_ROOM_CELLS);
+            assert!(room.cells.windows(2).all(|pair| pair[0] < pair[1]));
+            let region = &first.regions[&group.members[slot]];
+            assert!(room.cells.iter().all(|cell| cell.region.0 == region.id
+                && cell.position.z == 0
+                && !region
+                    .walls
+                    .contains(&[cell.position.x, cell.position.y, 0])));
+        }
+    }
 
     #[test]
     fn extreme_authored_entries_return_validation_errors_without_overflow() {

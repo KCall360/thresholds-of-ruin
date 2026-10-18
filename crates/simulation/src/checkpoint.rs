@@ -468,7 +468,7 @@ fn share_definition<T: Ord>(pool: &mut BTreeSet<Shared<T>>, definition: &mut Sha
 impl Game {
     pub fn checkpoint(&self, shared: &mut SharedState) -> Snapshot {
         assert!(
-            !self.population_entry_pending() && !self.host_region_continuation,
+            !self.region_transition_pending() && !self.host_region_continuation,
             "a private host continuation must settle before checkpoint capture"
         );
         let worlds = &mut shared.worlds;
@@ -673,6 +673,7 @@ impl Game {
                 })
                 .transpose()?,
             population_entry_boundary: None,
+            preparation_region_boundary: None,
             host_region_continuation: false,
             lifecycle: match snapshot.lifecycle {
                 None => Lifecycle::default(),

@@ -14,7 +14,8 @@ from process_harness import ROOT
 PRODUCTION = ROOT / "scenarios/rogue-exploration"
 SPECIES = ("bat", "kestrel", "venus_flytrap", "griffin", "emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "centaur", "yeti", "troll", "wraith",
            "black_unicorn", "ice_monster", "vampire", "jabberwock")
-# Every currently authored foe is selected by production population.
+# Retained eighteen-foe static encounter set; production additionally owns L/N/O.
+# Theft witnesses register generated floor context separately.
 PLAYABLE_SPECIES = SPECIES
 
 

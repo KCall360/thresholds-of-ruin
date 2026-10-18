@@ -334,6 +334,9 @@ impl Game {
         let Some(ability) = plan.as_ability() else {
             return true;
         };
+        if !self.theft_contexts_valid(ability) {
+            return false;
+        }
         if ability
             .initial_hold
             .is_some_and(|hold| hold.0 >= self.next_hold_id)

@@ -33,6 +33,7 @@ const NATURAL_TALENTS: [&str; 5] = [
     "clutch",
     "tightening_hold",
 ];
+const THEFT_TALENTS: [&str; 3] = ["filch_gold", "filch_charm", "vanish"];
 const FORMS: [(&str, &[&str]); 3] = [
     (
         "evocation_initiate",
@@ -129,7 +130,7 @@ fn dependencies<'a>(requirement: &'a Requirement, result: &mut Vec<&'a TalentId>
 }
 
 #[test]
-fn catalog_contains_twelve_starter_and_five_natural_talents_six_forms_seventeen_abilities() {
+fn catalog_contains_exact_shared_talents_forms_and_abilities() {
     let rules = creature_fixture::ruleset();
     let actual: BTreeSet<_> = rules
         .document()
@@ -142,11 +143,12 @@ fn catalog_contains_twelve_starter_and_five_natural_talents_six_forms_seventeen_
         TALENTS
             .into_iter()
             .chain(NATURAL_TALENTS)
+            .chain(THEFT_TALENTS)
             .collect::<BTreeSet<_>>(),
-        "catalog must contain twelve starter and five explicit natural talents"
+        "catalog must contain twelve starter, five natural and three theft talents"
     );
     assert_eq!(rules.document().forms.len(), 6);
-    assert_eq!(rules.document().abilities.len(), 17);
+    assert_eq!(rules.document().abilities.len(), 19);
     let mut seen = BTreeSet::new();
     for id in rules.talent_order() {
         let definition = rules.talent(id).unwrap();
@@ -158,7 +160,10 @@ fn catalog_contains_twelve_starter_and_five_natural_talents_six_forms_seventeen_
         );
         assert!(seen.insert(id.clone()));
     }
-    assert_eq!(seen.len(), TALENTS.len() + NATURAL_TALENTS.len());
+    assert_eq!(
+        seen.len(),
+        TALENTS.len() + NATURAL_TALENTS.len() + THEFT_TALENTS.len()
+    );
 }
 
 #[test]

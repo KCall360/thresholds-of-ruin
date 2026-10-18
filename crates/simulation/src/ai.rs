@@ -17,6 +17,7 @@ pub struct AiProfile {
     pub care: bool,
     pub equipment: bool,
     pub loot: bool,
+    pub gold: bool,
     pub flee_percent: u32,
 }
 impl<'de> Deserialize<'de> for AiProfile {
@@ -29,6 +30,7 @@ impl<'de> Deserialize<'de> for AiProfile {
             care: bool,
             equipment: bool,
             loot: bool,
+            gold: bool,
             flee_percent: u32,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
@@ -38,6 +40,7 @@ impl<'de> Deserialize<'de> for AiProfile {
             care: fields.care,
             equipment: fields.equipment,
             loot: fields.loot,
+            gold: fields.gold,
             flee_percent: fields.flee_percent,
         })
     }
@@ -50,6 +53,7 @@ impl Default for AiProfile {
             care: false,
             equipment: false,
             loot: false,
+            gold: false,
             flee_percent: 25,
         }
     }
@@ -63,6 +67,7 @@ impl AiProfile {
             care: true,
             equipment: true,
             loot: true,
+            gold: false,
             flee_percent: 25,
         }
     }
@@ -79,6 +84,7 @@ impl From<crate::behavior::BehaviorPolicy> for AiProfile {
             care: policy.care,
             equipment: policy.equipment,
             loot: policy.loot,
+            gold: policy.gold,
             flee_percent: policy.flee_percent,
         }
     }
@@ -471,6 +477,9 @@ impl Game {
                 })
                 .flatten()
             {
+                return Some(AiDecision::action(action, ai, behavior));
+            }
+            if let Some(action) = self.choose_known_gold(id, view, &ai.profile, &mut route) {
                 return Some(AiDecision::action(action, ai, behavior));
             }
         }

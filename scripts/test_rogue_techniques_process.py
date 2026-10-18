@@ -12,7 +12,8 @@ from process_harness import (
 )
 
 from rogue_test_support import (
-    care_combat_action, disclosed_actor_candidates, disclosed_melee_candidate, disclosed_sight_candidate,
+    assert_room_gold_receipt, care_combat_action, disclosed_actor_candidates,
+    disclosed_melee_candidate, disclosed_sight_candidate,
     first_floor_foes,
 )
 
@@ -77,9 +78,10 @@ class RogueTechniquesProcesses(ProcessTestCase):
             ("rogue.rations", {"rogue.ration"}, "item", 1),
             ("rogue.restore_strength", {"rogue.restore_strength"}, "item", 1),
         )
-        self.assertEqual([row["id"] for row in receipt["decisions"]], [row[0] for row in expected])
-        identities = []
-        for stage, (_, eligible, kind, count) in zip(receipt["decisions"], expected, strict=True):
+        self.assertEqual([row["id"] for row in receipt["decisions"]],
+                         [row[0] for row in expected] + ["rogue.room_gold"])
+        identities = assert_room_gold_receipt(self, receipt["decisions"][4], 1)
+        for stage, (_, eligible, kind, count) in zip(receipt["decisions"][:4], expected, strict=True):
             self.assertEqual(stage["version"], 1)
             result = stage["result"]
             self.assertEqual(result["kind"], "evaluated")

@@ -446,6 +446,25 @@ impl Game {
             })
         })
     }
+
+    /// Geometry-only landing test for a fully materialized load-only floor.
+    /// Region activity never changes the distribution of legal destinations.
+    pub(crate) fn stable_landing(
+        &self,
+        id: ActorId,
+        at: Location,
+        frame: u8,
+        body: &BodySpec,
+    ) -> bool {
+        if !self.body_fits(id, at, frame, body) {
+            return false;
+        }
+        let entity = PhysicsEntity::Actor(id);
+        let gravity = self.effective_gravity(entity, at, frame, body);
+        (0..3).all(|axis| {
+            gravity[axis] == 0 || self.gravity_axis_blocked(entity, at, frame, body, gravity, axis)
+        })
+    }
     pub(crate) fn translate_body(
         &self,
         entity: PhysicsEntity,
@@ -846,7 +865,7 @@ impl Game {
                 self.reconcile_holds_for_actor(id)?;
                 // Falling into a frozen region freezes the actor there.
                 self.sync_actor_lifecycle(id)?;
-                if self.run_outcome().terminal && !self.population_entry_pending() {
+                if self.run_outcome().terminal && !self.region_transition_pending() {
                     self.settle_creature_time()?;
                     return Ok(tick);
                 }
@@ -861,7 +880,7 @@ impl Game {
                 // created by a later collision is newborn too, even though it
                 // has no population receipt. Ordinary terminal behavior stays
                 // on its existing path when there is no pending entry.
-                .filter(|(id, _)| !self.population_entry_pending() || id.0 < original_item_ceiling)
+                .filter(|(id, _)| !self.region_transition_pending() || id.0 < original_item_ceiling)
                 .filter_map(|(id, i)| matches!(i.location, ItemLocation::Ground(_)).then_some(*id))
                 .collect();
             for id in ids {
@@ -929,7 +948,7 @@ impl Game {
             // An accepted entry is immediate, but all existing entities and
             // due work at this tick must finish before horizons are settled.
             // A mid-tick return would silently skip the remaining entities.
-            if self.population_entry_pending() {
+            if self.region_transition_pending() {
                 return Ok(tick);
             }
             if self

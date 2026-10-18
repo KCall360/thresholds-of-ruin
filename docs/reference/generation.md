@@ -250,6 +250,25 @@ stage IDs are bounded ASCII alphanumeric/hyphen/underscore names, each stage use
 version 1, room-range bounds are 3–30, and extra-edge ranges are ordered and at most
 4. See [recipe validation](../../crates/server/src/generation_recipe.rs).
 
+## Present-room item population
+
+Room geometry exposes the present generated rooms to the separate once-only
+entry population transaction. A `room_items` stage can make one explicit chance
+decision per present room and create one ordinary finite stack with a checked
+quantity expression. It does not reroll room carving or assign loot to an omitted
+slot. Its decisions and births use the population ledger, not speculative
+geometry preparation or a new respawn clock.
+
+Rogue appends a 50% per-present-room Gold stage after the existing population and
+supplies. Its independent stage streams preserve the ordering and random domains
+of the older actor, bandage, ration and restore-strength stages. Returning to a
+floor, preloading, ascending or restarting cannot replenish its Gold. Exact
+schema and recovery ownership live in
+[first-entry population](scenario-packages.md#first-entry-population); quantity
+bounds live in [items](items.md#quantity-expressions). This addition does not
+change the unique retrieval objective or claim unchanged geometry was revalidated
+for every possible seed. See [status](../status.md) for current qualification.
+
 ## Preparation and publication
 
 The ordinary preparation horizon requests a group when any member enters it.

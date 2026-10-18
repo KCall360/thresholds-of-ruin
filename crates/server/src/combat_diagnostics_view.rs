@@ -108,128 +108,133 @@ fn record(
                 .outcome
                 .effects
                 .iter()
-                .map(|effect| match effect {
-                    s::abilities::ResolvedEffect::ApplyLinkedHold { .. } => {
-                        p::DiagnosticEffect::LinkedHold {
-                            target,
-                            holder: p::ActorId(value.actor.0),
+                .filter_map(|effect| {
+                    Some(match effect {
+                        s::abilities::ResolvedEffect::Theft { .. } => return None,
+                        s::abilities::ResolvedEffect::ApplyLinkedHold { .. } => {
+                            p::DiagnosticEffect::LinkedHold {
+                                target,
+                                holder: p::ActorId(value.actor.0),
+                            }
                         }
-                    }
-                    s::abilities::ResolvedEffect::Translate { mode, result } => {
-                        p::DiagnosticEffect::Translate {
-                            target,
-                            mode: match mode {
-                                s::abilities::MovementMode::Voluntary => {
-                                    p::DiagnosticMovementMode::Voluntary
-                                }
-                                s::abilities::MovementMode::Forced => {
-                                    p::DiagnosticMovementMode::Forced
-                                }
-                            },
-                            result: match result {
-                                s::abilities::MovementResult::Moved { .. } => {
-                                    p::DiagnosticMovementResult::Moved
-                                }
-                                s::abilities::MovementResult::Blocked => {
-                                    p::DiagnosticMovementResult::Blocked
-                                }
-                                s::abilities::MovementResult::Ineligible => {
-                                    p::DiagnosticMovementResult::Ineligible
-                                }
-                                s::abilities::MovementResult::Stale => {
-                                    p::DiagnosticMovementResult::Stale
-                                }
-                                s::abilities::MovementResult::Ambiguous => {
-                                    p::DiagnosticMovementResult::Ambiguous
-                                }
-                            },
+                        s::abilities::ResolvedEffect::Translate { mode, result } => {
+                            p::DiagnosticEffect::Translate {
+                                target,
+                                mode: match mode {
+                                    s::abilities::MovementMode::Voluntary => {
+                                        p::DiagnosticMovementMode::Voluntary
+                                    }
+                                    s::abilities::MovementMode::Forced => {
+                                        p::DiagnosticMovementMode::Forced
+                                    }
+                                },
+                                result: match result {
+                                    s::abilities::MovementResult::Moved { .. } => {
+                                        p::DiagnosticMovementResult::Moved
+                                    }
+                                    s::abilities::MovementResult::Blocked => {
+                                        p::DiagnosticMovementResult::Blocked
+                                    }
+                                    s::abilities::MovementResult::Ineligible => {
+                                        p::DiagnosticMovementResult::Ineligible
+                                    }
+                                    s::abilities::MovementResult::Stale => {
+                                        p::DiagnosticMovementResult::Stale
+                                    }
+                                    s::abilities::MovementResult::Ambiguous => {
+                                        p::DiagnosticMovementResult::Ambiguous
+                                    }
+                                },
+                            }
                         }
-                    }
-                    s::abilities::ResolvedEffect::Damage { amount } => {
-                        p::DiagnosticEffect::Damage {
+                        s::abilities::ResolvedEffect::Damage { amount } => {
+                            p::DiagnosticEffect::Damage {
+                                target,
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::Heal { amount } => {
+                            p::DiagnosticEffect::Heal {
+                                target,
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::LoseAttribute { attribute, amount } => {
+                            p::DiagnosticEffect::LoseAttribute {
+                                target,
+                                attribute: super::attribute(*attribute),
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::RestoreAttribute { attribute, amount } => {
+                            p::DiagnosticEffect::RestoreAttribute {
+                                target,
+                                attribute: super::attribute(*attribute),
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::DrainLatestHitDie { amount } => {
+                            p::DiagnosticEffect::DrainLatestHitDie {
+                                target,
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::RestoreHitDie { amount } => {
+                            p::DiagnosticEffect::RestoreHitDie {
+                                target,
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::LoseMaximumHealth { amount } => {
+                            p::DiagnosticEffect::LoseMaximumHealth {
+                                target,
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::RestoreMaximumHealth { amount } => {
+                            p::DiagnosticEffect::RestoreMaximumHealth {
+                                target,
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::Nourish { amount } => {
+                            p::DiagnosticEffect::Nourish {
+                                target,
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::Restore {
+                            resource: value,
+                            amount,
+                        } => p::DiagnosticEffect::Restore {
                             target,
+                            resource: resource(*value),
                             amount: *amount,
+                        },
+                        s::abilities::ResolvedEffect::ApplyCondition { id, duration } => {
+                            p::DiagnosticEffect::Condition {
+                                target,
+                                condition: condition(id, rules),
+                                source: p::ActorId(value.outcome.actor.0),
+                                duration: *duration,
+                            }
                         }
-                    }
-                    s::abilities::ResolvedEffect::Heal { amount } => p::DiagnosticEffect::Heal {
-                        target,
-                        amount: *amount,
-                    },
-                    s::abilities::ResolvedEffect::LoseAttribute { attribute, amount } => {
-                        p::DiagnosticEffect::LoseAttribute {
-                            target,
-                            attribute: super::attribute(*attribute),
-                            amount: *amount,
+                        s::abilities::ResolvedEffect::ObservePublicPlan { .. } => {
+                            p::DiagnosticEffect::Observation {
+                                target: p::ActorId(value.outcome.actor.0),
+                            }
                         }
-                    }
-                    s::abilities::ResolvedEffect::RestoreAttribute { attribute, amount } => {
-                        p::DiagnosticEffect::RestoreAttribute {
-                            target,
-                            attribute: super::attribute(*attribute),
-                            amount: *amount,
-                        }
-                    }
-                    s::abilities::ResolvedEffect::DrainLatestHitDie { amount } => {
-                        p::DiagnosticEffect::DrainLatestHitDie {
-                            target,
-                            amount: *amount,
-                        }
-                    }
-                    s::abilities::ResolvedEffect::RestoreHitDie { amount } => {
-                        p::DiagnosticEffect::RestoreHitDie {
-                            target,
-                            amount: *amount,
-                        }
-                    }
-                    s::abilities::ResolvedEffect::LoseMaximumHealth { amount } => {
-                        p::DiagnosticEffect::LoseMaximumHealth {
-                            target,
-                            amount: *amount,
-                        }
-                    }
-                    s::abilities::ResolvedEffect::RestoreMaximumHealth { amount } => {
-                        p::DiagnosticEffect::RestoreMaximumHealth {
-                            target,
-                            amount: *amount,
-                        }
-                    }
-                    s::abilities::ResolvedEffect::Nourish { amount } => {
-                        p::DiagnosticEffect::Nourish {
-                            target,
-                            amount: *amount,
-                        }
-                    }
-                    s::abilities::ResolvedEffect::Restore {
-                        resource: value,
-                        amount,
-                    } => p::DiagnosticEffect::Restore {
-                        target,
-                        resource: resource(*value),
-                        amount: *amount,
-                    },
-                    s::abilities::ResolvedEffect::ApplyCondition { id, duration } => {
-                        p::DiagnosticEffect::Condition {
-                            target,
-                            condition: condition(id, rules),
-                            source: p::ActorId(value.outcome.actor.0),
-                            duration: *duration,
-                        }
-                    }
-                    s::abilities::ResolvedEffect::ObservePublicPlan { .. } => {
-                        p::DiagnosticEffect::Observation {
+                        s::abilities::ResolvedEffect::ApplyQualifiedConditionToSource {
+                            id,
+                            duration,
+                            qualification,
+                        } => p::DiagnosticEffect::Condition {
                             target: p::ActorId(value.outcome.actor.0),
-                        }
-                    }
-                    s::abilities::ResolvedEffect::ApplyQualifiedConditionToSource {
-                        id,
-                        duration,
-                        qualification,
-                    } => p::DiagnosticEffect::Condition {
-                        target: p::ActorId(value.outcome.actor.0),
-                        condition: condition(id, rules),
-                        source: p::ActorId(qualification.opponent.0),
-                        duration: *duration,
-                    },
+                            condition: condition(id, rules),
+                            source: p::ActorId(qualification.opponent.0),
+                            duration: *duration,
+                        },
+                    })
                 })
                 .collect(),
         },
@@ -392,12 +397,38 @@ mod restorable_loss_diagnostic_tests {
                     s::abilities::ResolvedEffect::RestoreMaximumHealth { amount: 2 },
                     s::abilities::ResolvedEffect::DrainLatestHitDie { amount: 1 },
                     s::abilities::ResolvedEffect::RestoreHitDie { amount: 0 },
+                    s::abilities::ResolvedEffect::Theft {
+                        quantity: 987654321,
+                        relocation: Some(s::abilities::Placement {
+                            location: tor_world::Location {
+                                region: tor_world::RegionId(987654321),
+                                position: tor_world::Position {
+                                    x: 731,
+                                    y: 947,
+                                    z: 0,
+                                },
+                            },
+                            orientation: 3,
+                        }),
+                    },
                 ],
             },
             trace: d::ResolutionTrace::default(),
         };
         let record = record(&diagnostic, 1, &rules).unwrap();
         let encoded = serde_json::to_value(&record.outcome.effects).unwrap();
+        assert_eq!(
+            record.outcome.effects.len(),
+            6,
+            "private theft receipts have no diagnostic wire variant"
+        );
+        let disclosure = serde_json::to_string(&record).unwrap();
+        for private in ["theft", "987654321", "relocation", "orientation"] {
+            assert!(
+                !disclosure.contains(private),
+                "private receipt leaked {private}"
+            );
+        }
         assert_eq!(
             encoded[0],
             serde_json::json!({

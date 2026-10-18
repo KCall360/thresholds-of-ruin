@@ -45,6 +45,19 @@ impl From<ItemClass> for tor_simulation::ItemClass {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum CurrencyKind {
+    Gold,
+}
+impl From<CurrencyKind> for tor_simulation::CurrencyKind {
+    fn from(value: CurrencyKind) -> Self {
+        match value {
+            CurrencyKind::Gold => Self::Gold,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DamageType {
     Energy,
     Impact,
@@ -169,9 +182,34 @@ pub enum DamageExpr {
         components: Vec<DamageComponentExpr>,
     },
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TheftSelection {
+    Currency {
+        currency: CurrencyKind,
+        amount: super::PopulationQuantityExpr,
+    },
+    MagicalUnit,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelocationPolicy {
+    SameFloor,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelocationGate {
+    pub flag: String,
+    pub policy: RelocationPolicy,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    Theft {
+        selection: TheftSelection,
+        relocation: Option<RelocationGate>,
+    },
     ApplyLinkedHold {
         policy: HoldPolicy,
     },
@@ -331,6 +369,7 @@ pub struct AiProfile {
     pub care: Option<bool>,
     pub equipment: Option<bool>,
     pub loot: Option<bool>,
+    pub gold: Option<bool>,
     pub flee_percent: Option<u32>,
 }
 impl<'de> Deserialize<'de> for AiProfile {
@@ -349,6 +388,8 @@ impl<'de> Deserialize<'de> for AiProfile {
             #[serde(default)]
             loot: Option<bool>,
             #[serde(default)]
+            gold: Option<bool>,
+            #[serde(default)]
             flee_percent: Option<u32>,
         }
         let fields: Fields = crate::creature_authoring::named_map(d)?;
@@ -358,6 +399,7 @@ impl<'de> Deserialize<'de> for AiProfile {
             care: fields.care,
             equipment: fields.equipment,
             loot: fields.loot,
+            gold: fields.gold,
             flee_percent: fields.flee_percent,
         })
     }
@@ -370,6 +412,7 @@ impl AiProfile {
             care: Some(true),
             equipment: Some(true),
             loot: Some(true),
+            gold: None,
             flee_percent: Some(25),
         }
     }
@@ -397,6 +440,7 @@ impl AiProfile {
             care: self.care.unwrap_or(species.care),
             equipment: self.equipment.unwrap_or(species.equipment),
             loot: self.loot.unwrap_or(species.loot),
+            gold: self.gold.unwrap_or(species.gold),
             flee_percent: self.flee_percent.unwrap_or(species.flee_percent),
         }
     }
@@ -407,6 +451,10 @@ impl<'de> Deserialize<'de> for Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Theft {
+                selection: TheftSelection,
+                relocation: Option<RelocationGate>,
+            },
             ApplyLinkedHold {
                 policy: HoldPolicy,
             },
@@ -471,6 +519,13 @@ impl<'de> Deserialize<'de> for Effect {
             }
         }
         Ok(match deserializer.deserialize_map(Named)? {
+            Fields::Theft {
+                selection,
+                relocation,
+            } => Self::Theft {
+                selection,
+                relocation,
+            },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::HoldDamage {
                 category,

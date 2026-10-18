@@ -135,6 +135,7 @@ fn changing_retrieval_boundaries_keep_large_unchanged_population_pooled() {
         )
         .unwrap();
         let region = definitions
+            .regions
             .values()
             .find(|region| region.anchors.contains_key("up"))
             .unwrap();

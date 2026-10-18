@@ -823,7 +823,8 @@ impl Game {
             .tick
             .checked_add(remaining)
             .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
-        self.apply_outcome(outcome)
+        self.apply_outcome(outcome)?;
+        self.ensure_preparation_residency(actor)
     }
     pub fn apply_effects(
         &mut self,

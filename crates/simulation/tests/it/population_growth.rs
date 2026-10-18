@@ -112,7 +112,7 @@ fn configured(depth: u32, base: usize, destination: u64) -> (Game, CreatureBuild
                 choices: vec![PreparedItemChoice {
                     content: "marker".into(),
                     weight: 1,
-                    quantity: 1,
+                    quantity: tor_simulation::quantity::QuantityExpr::Fixed { quantity: 1 },
                     spec: ItemSpec::ordinary("marker".into()),
                 }],
             }],
@@ -143,6 +143,7 @@ fn configured(depth: u32, base: usize, destination: u64) -> (Game, CreatureBuild
     })
     .unwrap();
     game.register_activation_scope(PreparedScope {
+        rooms: vec![],
         scope: format!("dungeon/{depth}"),
         depth,
         profile: "growth".into(),

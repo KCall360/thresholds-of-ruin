@@ -161,12 +161,74 @@ pub struct CarriedItemPool {
     pub choices: Vec<CarriedItemChoice>,
 }
 
+/// Source convenience is separate from the canonical tagged compiled/save form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum QuantityExpression {
+    Fixed(u64),
+    Expression(PopulationQuantityExpr),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PopulationQuantityExpr {
+    Fixed {
+        quantity: u64,
+    },
+    Uniform {
+        minimum: u64,
+        maximum: u64,
+    },
+    DepthScaledUniform {
+        minimum: u64,
+        maximum_base: u64,
+        per_depth: u64,
+    },
+}
+impl PopulationQuantityExpr {
+    pub fn compiled(self) -> tor_simulation::quantity::QuantityExpr {
+        use tor_simulation::quantity::QuantityExpr;
+        match self {
+            Self::Fixed { quantity } => QuantityExpr::Fixed { quantity },
+            Self::Uniform { minimum, maximum } => QuantityExpr::Uniform { minimum, maximum },
+            Self::DepthScaledUniform {
+                minimum,
+                maximum_base,
+                per_depth,
+            } => QuantityExpr::DepthScaledUniform {
+                minimum,
+                maximum_base,
+                per_depth,
+            },
+        }
+    }
+}
+impl QuantityExpression {
+    pub fn compiled(&self) -> tor_simulation::quantity::QuantityExpr {
+        match *self {
+            Self::Fixed(quantity) => tor_simulation::quantity::QuantityExpr::Fixed { quantity },
+            Self::Expression(expression) => expression.compiled(),
+        }
+    }
+    fn maximum(&self) -> Result<u64, Failure> {
+        self.compiled()
+            .resolve(Some(1))
+            .map_err(|_| fail("Invalid quantity expression"))?;
+        self.compiled()
+            .resolve(Some(u32::MAX))
+            .map(|range| range.maximum)
+            .map_err(|_| fail("Quantity expression overflows its depth domain"))
+    }
+}
+fn unit_population_quantity() -> QuantityExpression {
+    QuantityExpression::Fixed(1)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CarriedItemChoice {
     pub archetype: String,
     pub weight: u32,
-    pub quantity: u64,
+    pub quantity: QuantityExpression,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -200,13 +262,20 @@ impl CarriedLoot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PopulationStage {
+    RoomItems {
+        id: String,
+        version: u32,
+        bands: Vec<PopulationBand>,
+        quantity: QuantityExpression,
+        chance: CarryChance,
+    },
     Items {
         id: String,
         version: u32,
         count: [u16; 2],
         bands: Vec<PopulationBand>,
-        #[serde(default = "unit_quantity")]
-        quantity: u64,
+        #[serde(default = "unit_population_quantity")]
+        quantity: QuantityExpression,
     },
     Actors {
         id: String,
@@ -233,6 +302,7 @@ pub struct CharacterLoadout {
 impl PopulationStage {
     fn header(&self) -> (&str, u32, [u16; 2]) {
         match self {
+            Self::RoomItems { id, version, .. } => (id, *version, [1, 1]),
             Self::Items {
                 id, version, count, ..
             }
@@ -313,7 +383,7 @@ impl Package {
                 pool.choices.len(),
             )?;
             for choice in &pool.choices {
-                require(choice.quantity > 0, "Empty carried item stack")?;
+                choice.quantity.maximum()?;
             }
         }
         for (name, profile) in &plan.profiles {
@@ -349,8 +419,17 @@ impl Package {
                 match stage {
                     PopulationStage::Items {
                         bands, quantity, ..
+                    }
+                    | PopulationStage::RoomItems {
+                        bands, quantity, ..
                     } => {
-                        require(*quantity > 0, "Empty population item stack")?;
+                        quantity.maximum()?;
+                        if let PopulationStage::RoomItems { chance, .. } = stage {
+                            require(
+                                chance.denominator > 0 && chance.numerator <= chance.denominator,
+                                "Invalid room population chance",
+                            )?;
+                        }
                         self.check_population_bands(bands, |choice| {
                             (&choice.archetype, choice.weight)
                         })?;
@@ -402,7 +481,8 @@ impl Package {
             };
             for stage in &plan.profiles[profile].stages {
                 match stage {
-                    PopulationStage::Items { bands, .. } => {
+                    PopulationStage::Items { bands, .. }
+                    | PopulationStage::RoomItems { bands, .. } => {
                         for choice in bands.iter().flat_map(|band| &band.choices) {
                             assets.extend(item_asset(&choice.archetype)?);
                         }
@@ -517,10 +597,9 @@ impl Package {
                     .map(|stage| {
                         let (id, version, count) = stage.header();
                         let population = match stage {
-                            PopulationStage::Items {
-                                quantity, bands, ..
-                            } => runtime::PopulationContent::Items {
-                                bands: bands
+                            PopulationStage::Items { quantity, bands, .. }
+                            | PopulationStage::RoomItems { quantity, bands, .. } => {
+                                let bands = bands
                                     .iter()
                                     .map(|band| {
                                         Ok(runtime::DepthBand {
@@ -532,10 +611,10 @@ impl Package {
                                                     Ok(runtime::PreparedItemChoice {
                                                         content: choice.archetype.clone(),
                                                         weight: choice.weight,
-                                                        quantity: *quantity,
+                                                        quantity: quantity.compiled(),
                                                         spec: index.definitions.population_item(
                                                             &choice.archetype,
-                                                            *quantity,
+                                                            quantity.maximum()?,
                                                             index.seed,
                                                             &index.appearances,
                                                         )?,
@@ -544,7 +623,11 @@ impl Package {
                                                 .collect::<Result<_, Failure>>()?,
                                         })
                                     })
-                                    .collect::<Result<_, Failure>>()?,
+                                    .collect::<Result<_, Failure>>()?;
+                                match stage {
+                                    PopulationStage::RoomItems { chance, .. } => runtime::PopulationContent::RoomItems { bands, chance: runtime::CarryChance { numerator: chance.numerator, denominator: chance.denominator } },
+                                    _ => runtime::PopulationContent::Items { bands },
+                                }
                             },
                             PopulationStage::Actors {
                                 ai,
@@ -615,10 +698,10 @@ impl Package {
                         Ok(runtime::PreparedItemChoice {
                             content: choice.archetype.clone(),
                             weight: choice.weight,
-                            quantity: choice.quantity,
+                            quantity: choice.quantity.compiled(),
                             spec: index.definitions.population_item(
                                 &choice.archetype,
-                                choice.quantity,
+                                choice.quantity.maximum()?,
                                 index.seed,
                                 &index.appearances,
                             )?,
@@ -703,6 +786,7 @@ impl Package {
         identity: &str,
         depth: u32,
         regions: &[&RegionDef],
+        rooms: &[runtime::PreparedRoomGroup],
     ) -> Result<Option<runtime::PreparedScope>, Failure> {
         let Some(plan) = &self.manifest.floor_activation else {
             return Ok(None);
@@ -739,6 +823,7 @@ impl Package {
             members: regions.iter().map(|region| RegionId(region.id)).collect(),
             cells: cells.into_iter().collect(),
             protected,
+            rooms: rooms.to_vec(),
         }))
     }
 
@@ -877,29 +962,42 @@ impl PopulationConfiguration<'_> {
         }
         let scopes = self.expected_scopes.borrow();
         let scope = &scopes[&record.scope];
+        let valid_attempt = |attempt: &runtime::PlacementDecision| match attempt {
+            runtime::PlacementDecision::Skipped { .. } => true,
+            runtime::PlacementDecision::Placed {
+                location, entity, ..
+            } => {
+                entity
+                    .actor_birth()
+                    .is_none_or(|id| id.0 >= self.actor_floor)
+                    && entity.item_birth().is_none_or(|id| id.0 >= self.item_floor)
+                    && scope.cells.binary_search(location).is_ok()
+                    && !scope.protected.contains(location)
+            }
+        };
         record.profile == scope.profile
-            && record
-                .decisions
-                .iter()
-                .all(|decision| match &decision.result {
-                    runtime::StageResult::Skipped { .. } => true,
-                    runtime::StageResult::Evaluated { attempts, .. } => {
-                        attempts.iter().all(|attempt| match attempt {
-                            runtime::PlacementDecision::Skipped { .. } => true,
-                            runtime::PlacementDecision::Placed {
-                                location, entity, ..
-                            } => {
-                                let population_identity = entity
-                                    .actor_birth()
-                                    .is_none_or(|id| id.0 >= self.actor_floor)
-                                    && entity.item_birth().is_none_or(|id| id.0 >= self.item_floor);
-                                population_identity
-                                    && scope.cells.binary_search(location).is_ok()
-                                    && !scope.protected.contains(location)
-                            }
-                        })
+            && record.decisions.iter().all(|decision| {
+                if let runtime::StageResult::RoomsEvaluated { rooms } = &decision.result {
+                    if rooms
+                        .iter()
+                        .map(|room| room.room)
+                        .ne(scope.rooms.iter().map(|room| room.id))
+                    {
+                        return false;
                     }
-                })
+                    for (decision, group) in rooms.iter().zip(&scope.rooms) {
+                        if let runtime::RoomResult::Attempt {
+                            decision: runtime::PlacementDecision::Placed { location, .. },
+                        } = &decision.result
+                        {
+                            if group.cells.binary_search(location).is_err() {
+                                return false;
+                            }
+                        }
+                    }
+                }
+                decision.result.attempts().all(valid_attempt)
+            })
     }
 
     fn valid_scope(&self, scope: &runtime::PreparedScope) -> bool {
@@ -921,10 +1019,10 @@ impl PopulationConfiguration<'_> {
             // Validate this address against the family's finite ID domain before
             // reconstructing its pure geometry.
             family.group(family_id, self.seed, depth).ok()?;
-            let definitions = self.package.group_definitions(identity, self.seed).ok()?;
-            let members: Vec<_> = definitions.values().collect();
+            let definitions = self.package.generated_group(identity, self.seed).ok()?;
+            let members: Vec<_> = definitions.regions.values().collect();
             self.package
-                .activation_scope(identity, depth, &members)
+                .activation_scope(identity, depth, &members, &definitions.rooms)
                 .ok()?
         })();
         let Some(expected) = expected else {
@@ -1075,7 +1173,10 @@ mod tests {
                     .definitions
                     .population_item(archetype, quantity, index.seed, &index.appearances)
                     .unwrap();
-                assert_eq!(pool["choices"][position]["quantity"], quantity);
+                assert_eq!(
+                    pool["choices"][position]["quantity"],
+                    json!({"kind":"fixed","quantity":quantity})
+                );
                 assert_eq!(
                     pool["choices"][position]["spec"],
                     serde_json::to_value(expected).unwrap()
@@ -1382,6 +1483,89 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
     }
 
     #[test]
+    fn room_gold_source_free_package_preserves_activated_and_unentered_scope_metadata() {
+        let package = changed(&fixture(), |value| {
+            value["archetypes"]["marker"]["stackable"] = json!(true);
+            value["floor_activation"]["profiles"]["plain"]["stages"] = json!([{
+                "kind":"room_items","id":"room-gold","version":1,
+                "quantity":{"kind":"depth_scaled_uniform","minimum":2,"maximum_base":51,"per_depth":10},
+                "chance":{"numerator":1,"denominator":2},
+                "bands":[{"depth":{"kind":"open","minimum":1},"choices":[{"archetype":"marker","weight":1}]}]
+            }]);
+        }).unwrap();
+        let bytes = crate::storage::schema::scenario::encode_content_package(&package).unwrap();
+        let restored = crate::storage::schema::scenario::decode_content_package(&bytes).unwrap();
+        assert!(restored.directory.is_none());
+        assert!(restored.rules_source.is_empty());
+        let mut warm = package.build(42, false).unwrap();
+        let cold = restored.build(42, false).unwrap();
+        assert_eq!(warm.activations_since(0), cold.activations_since(0));
+        assert_eq!(
+            warm.activation_scopes().collect::<Vec<_>>(),
+            cold.activation_scopes().collect::<Vec<_>>()
+        );
+        let generated = package.generated_group("dungeon/2", 42).unwrap();
+        let definitions: Vec<_> = generated.regions.values().collect();
+        let unentered = package
+            .activation_scope("dungeon/2", 2, &definitions, &generated.rooms)
+            .unwrap()
+            .unwrap();
+        warm.register_activation_scope(unentered.clone()).unwrap();
+        assert_eq!(warm.activation_count(), 1);
+        let configuration = restored.population_configuration(42).unwrap();
+        assert!(configuration.valid_game(&warm));
+        for original in warm.activation_scopes() {
+            assert!(configuration.valid_scope(original));
+            let mut corrupt = original.clone();
+            corrupt.rooms.remove(0);
+            assert!(!configuration.valid_scope(&corrupt));
+            let mut corrupt = original.clone();
+            corrupt.rooms[0].id = 64;
+            assert!(!configuration.valid_scope(&corrupt));
+            let mut corrupt = original.clone();
+            corrupt.rooms[0].cells.pop();
+            assert!(!configuration.valid_scope(&corrupt));
+        }
+        let record = warm.activations_since(0).unwrap().remove(0);
+        assert!(configuration.valid_record(&record));
+        let mut missing_room = record;
+        let runtime::StageResult::RoomsEvaluated { rooms } = &mut missing_room.decisions[0].result
+        else {
+            panic!()
+        };
+        rooms.remove(0);
+        assert!(!configuration.valid_record(&missing_room));
+        assert_eq!(
+            crate::storage::schema::scenario::encode_content_package(&restored).unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn quantity_expressions_check_depth_overflow_and_stackability_before_population() {
+        for quantity in [
+            json!({"kind":"uniform","minimum":0,"maximum":10}),
+            json!({"kind":"uniform","minimum":3,"maximum":2}),
+            json!({"kind":"depth_scaled_uniform","minimum":2,"maximum_base":u64::MAX,"per_depth":1}),
+            json!({"kind":"depth_scaled_uniform","minimum":2,"maximum_base":1,"per_depth":u64::MAX}),
+        ] {
+            let invalid = changed(&fixture(), |value| {
+                value["floor_activation"]["profiles"]["plain"]["stages"][0]["quantity"] = quantity;
+            })
+            .unwrap();
+            assert!(invalid.check().is_err());
+        }
+        let nonstackable = changed(&fixture(), |value| {
+            value["floor_activation"]["profiles"]["plain"]["stages"][0]["quantity"] =
+                json!({"kind":"uniform","minimum":1,"maximum":2});
+        })
+        .unwrap();
+        assert!(nonstackable
+            .population_plan(&nonstackable.index(42).unwrap())
+            .is_err());
+    }
+
+    #[test]
     fn group_preparation_contains_only_canonical_immutable_activation_geometry() {
         let package = fixture();
         let index = package.index(42).unwrap();
@@ -1462,7 +1646,7 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
             panic!("fixture must evaluate its marker stage");
         };
         let runtime::PlacementDecision::Placed {
-            entity: runtime::PopulationEntity::Item { id },
+            entity: runtime::PopulationEntity::Item { id, .. },
             ..
         } = &attempts[0]
         else {
@@ -1482,6 +1666,7 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
             };
             *entity = runtime::PopulationEntity::Item {
                 id: tor_simulation::ItemId(reserved),
+                quantity: 1,
             };
             assert!(
                 !configuration.valid_record(&record),

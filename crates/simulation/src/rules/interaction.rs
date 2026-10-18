@@ -133,9 +133,9 @@ impl Ruleset {
         bound(
             interaction != Interaction::NonHostile
                 || !effects.any(|effect| match effect {
-                    PlannedEffect::ApplyLinkedHold { .. } | PlannedEffect::HoldDamage { .. } => {
-                        true
-                    }
+                    PlannedEffect::Theft { .. }
+                    | PlannedEffect::ApplyLinkedHold { .. }
+                    | PlannedEffect::HoldDamage { .. } => true,
                     PlannedEffect::Damage { damage } => damage.can_harm(),
                     PlannedEffect::PushTargetOneCell { .. } | PlannedEffect::DrainLatestHitDie => {
                         true
@@ -179,7 +179,9 @@ impl Ruleset {
     }
     fn effect_directly_harms(&self, effect: &Effect) -> bool {
         match effect {
-            Effect::ApplyLinkedHold { .. } | Effect::HoldDamage { .. } => true,
+            Effect::Theft { .. } | Effect::ApplyLinkedHold { .. } | Effect::HoldDamage { .. } => {
+                true
+            }
             Effect::Damage {
                 damage: DamageExpr::SelectedWeapon { .. },
             }

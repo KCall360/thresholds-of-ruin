@@ -310,20 +310,35 @@ The selected-character selector resolves to the concrete declared character for
 the saved run, including an alternate preset. A numeric protagonist is available
 for fixtures but must agree with that selection. `families` maps existing
 procedural family IDs to declared profile IDs. Each ordered stage has a stable
-ID and version, an inclusive bounded attempt-count range and 1–32 ordered depth
-bands. A band has an explicit `finite` inclusive minimum/maximum or `open` minimum;
+ID and version and 1–32 ordered depth bands. Ordinary actor/item stages also
+declare an inclusive bounded attempt-count range; room-item stages use present
+room membership instead. A band has an explicit `finite` inclusive minimum/maximum or `open` minimum;
 minimums are positive, bands cannot overlap, and an open band must be last. Gaps
 and retired content produce a saved `no_eligible_content` stage skip. Every band
 has 1–64 distinct archetypes with positive integer weights whose sum fits u32.
-A profile has at most 32 stages and 256 total maximum attempts; the package
+A profile has at most 32 stages and 256 total maximum attempts, counting each
+present room for a room-item stage at contextual admission; the package
 supports at most 32 profiles. No implicit terminal depth or HD clamp is added.
 Actor stages reference ordinary actor archetypes and may select an AI profile;
 omitting `ai` leaves population actors externally controlled. Supplying a profile
 enrolls them in AI with that species' defaults plus the profile's partial
-overrides. Item stages reference ordinary item archetypes and a stack quantity.
-The tagged forms are strict: `quantity` belongs only to item stages, while `ai`,
-`avoid_protagonist_sight` and `depth_growth` belong only to actor stages. Archetypes
+overrides. Item stages reference ordinary item archetypes and a
+[quantity expression](items.md#quantity-expressions), with an integer accepted as
+fixed-quantity source shorthand. The tagged forms are strict: `quantity` belongs
+only to item stages, while `ai`, `avoid_protagonist_sight` and `depth_growth` belong only to actor stages. Archetypes
 referenced by these stages do not create entities merely by existing in a catalog.
+
+A `kind = "room_items"` stage instead makes one finite chance decision per
+present generated room. It declares `id`, `version`, depth `bands`, `quantity`
+and an explicit `chance = { numerator = 1, denominator = 2 }`; it has no
+attempt `count`. Omitted room slots are not present rooms and do not receive a
+roll. The selected content and quantity use the existing ordinary item adapter
+and checked quantity domain. Rogue appends this stage after all its existing
+actor and supply stages for a 50% Gold chance per present room. The stage has
+independent stable streams and records chance misses and placement decisions in
+the same once-only entry ledger. No legal placement cell produces a saved skip;
+it does not trigger a later retry or refill. It neither reorders earlier stages nor replaces geometry preparation,
+room topology or the unique retrieval objective.
 
 Actor stages may author `depth_growth = { kind = "racial_after", depth = 26 }`.
 The default `{ kind = "fixed" }` keeps the base recipe. Racial growth appends
@@ -388,22 +403,25 @@ choices = [{ archetype = "ration", weight = 1, quantity = 2 }]
 
 Pools and carry policies currently require version 1. There may be at most 32
 named pools, each with 1–64 distinct ordinary item archetypes, positive weights
-with a checked u32 sum, and fixed positive u64 quantities. Non-stackable items
-require quantity one. Every pool is validated and resolved through the ordinary
-item adapter, even when unused, unreachable or referenced by a zero-chance policy.
+with a checked u32 sum, and checked positive
+[quantity expressions](items.md#quantity-expressions). Non-stackable items
+require a range fixed at one. Depth-scaled birth quantities resolve using the
+birth floor before sampling; missing contextual depth is rejected, never inferred.
+Every pool is validated and resolved through the ordinary item adapter, even when unused, unreachable or referenced by a zero-chance policy.
 The fraction requires a positive denominator and numerator no greater than it;
 zero and certainty are valid. `carried_loot` belongs only to actor choices.
 Omission means no policy; compiled and saved current-format records retain an
 explicit nullable policy and an explicit pool map.
 
 A legally placed actor receives zero or one ordinary carried stack, with its own
-item identity and exact authored quantity, before the entry can publish. Chance
+item identity and exact sampled quantity, before the entry can publish. Chance
 uses exact bounded fraction sampling. A separate item-content stream uses the
 same multiply-high weighted mapping as ordinary population. Both use a separate
 birth-stock domain keyed by seed, scope, profile/stage identities and versions,
 attempt ordinal, actor content key and policy version; only item-content includes
-the pool identity/version. Existing count, placement, build and combat streams
-are unchanged. A placement skip does not evaluate a carry policy.
+the pool identity/version. Quantity sampling uses its own birth-quantity domain
+keyed by the selected pool and item. Existing chance, item-content, count,
+placement, build and combat streams are unchanged. A placement skip does not evaluate a carry policy.
 
 The actor's existing placement receipt retains a nullable nested result: no
 policy, an explicit chance miss, or the chosen content/quantity and ordinary item
@@ -553,7 +571,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v40"
+import = "interactions-v41"
 
 [[overrides]]
 op = "set"
@@ -819,15 +837,15 @@ without objectives may omit a build.
 ## Behavior defaults and AI overrides
 
 A species may author a `behavior` record. Its resolved policy contains
-`disposition`, `idle`, `memory_ticks`, `doors`, `care`, `equipment`, `loot` and
-`flee_percent`. Omitting behavior gives conservative passive acquisition with
-exploration, a 1,000-tick memory, no door use, care, equipment or looting, and a
-25% Health flee threshold. Disposition and the actor-active memory bound remain species-owned
+`disposition`, `idle`, `memory_ticks`, `doors`, `care`, `equipment`, `loot`,
+`gold` and `flee_percent`. Omitting behavior gives conservative passive acquisition with
+exploration, a 1,000-tick memory, no door use, care, equipment, looting or Gold
+interest, and a 25% Health flee threshold. Disposition and the actor-active memory bound remain species-owned
 through controller changes; see
 [behavior and provocation](creature-rules.md#creature-behavior-and-provocation).
 
 Manifest `ai_profiles` are partial overrides. They may supply any subset of
-`idle`, `doors`, `care`, `equipment`, `loot` and `flee_percent`; omitted fields
+`idle`, `doors`, `care`, `equipment`, `loot`, `gold` and `flee_percent`; omitted fields
 inherit the species' resolved defaults. Compilation resolves that combination
 once to a concrete runtime policy. For example,
 `rogue_hostile = { flee_percent = 0 }` disables low-Health fleeing without replacing any
@@ -843,6 +861,7 @@ Unknown names and invalid values are rejected.
 | `care` | Permit useful ordinary self-care with owned abilities and known finite consumables |
 | `equipment` | Permit useful known equipment changes through ordinary equipment actions |
 | `loot` | Permit bounded pickup of personally known, useful equipment and supplies |
+| `gold` | Permit pursuit and pickup of personally known reachable Gold after self-preservation and retaliation, before idle exploration |
 | `flee_percent` | Low-Health flee threshold from 0 through 100 inclusive; 0 disables that threshold |
 
 `wait` still permits useful care, equipment changes, pickup underfoot and
@@ -858,8 +877,12 @@ also keep one food reserve. Already held stock counts toward these limits;
 unidentified effects, unusable gear and excess supplies do not become loot goals.
 Eating requires known food and current personal hunger; visible danger or an
 active engagement takes priority over opportunistic eating. Existing food and
-ordinary consumption rules apply. This policy adds no item
-identification, food economy, currency collecting or gold hoard.
+ordinary consumption rules apply. Useful-item looting adds no identification or
+food economy. The independent `gold` policy selects ordinary currency stacks,
+using only the actor's own disclosed surroundings and known routes; it does not
+inspect hidden purses, infer magical identities or create a separate hoard ledger.
+Species defaults and partial overrides compile to one concrete boolean; saved
+policies require the field explicitly. Carrying gold does not grant this policy.
 
 The [Rogue policy matrix](../play/rogue.md#species-idle-policy) owns that package's
 provisional species choices. The first dungeon enables all four tool policies for

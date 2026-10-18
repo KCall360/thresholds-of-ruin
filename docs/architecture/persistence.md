@@ -24,6 +24,27 @@ the corpse inventory. Fresh saved fields are required; old logical formats do no
 acquire invented default epochs or advancement policy.
 
 
+## Inventory theft transactions
+
+Theft uses ordinary item state and the enclosing action's atomic candidate.
+Transfers, split/merge identities, optional same-floor relocation, random state,
+reservations and lifecycle cleanup publish together. An unsuccessful Store
+admission cannot expose a partial transfer, move the actor or consume random
+state. Death drops the resulting finite inventory through the ordinary path;
+there is no saved purse or stolen-loot reconstruction ledger.
+
+Current item definitions explicitly retain magical status and nullable currency
+capability. Concrete AI policies retain their Gold-interest boolean. Frozen
+checked-rider plans preserve the resolved positive quantity range and captured
+relocation decision rather than deriving either from a later depth, talent fold
+or source checkout. Strict independent adapters require current fields and reject
+invalid ranges and illegal theft payload placement. Journal/checkpoint restoration
+retains exact ordinary item identities, knowledge, held units and objective
+binding. The unique Amulet entry-relocation helper is unchanged; theft merely
+changes that same ordinary item's owner. See [items](../reference/items.md#theft-and-gold)
+for selection and disclosure, and [status](../status.md) for outstanding batch
+validation. None of these logical changes alters physical storage framing.
+
 ## Admission, durability and save policy
 
 The [CLI reference](../reference/cli.md) owns save-policy flags and defaults. The

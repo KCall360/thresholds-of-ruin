@@ -55,6 +55,9 @@ struct ItemDefinition {
     consumable: Option<ConsumableSpec>,
     edible: Option<EdibleSpec>,
     supply: Option<String>,
+    #[serde(default)]
+    magical: bool,
+    currency: Option<CurrencyKind>,
     identity: Option<String>,
     appearance_pool: Option<String>,
     #[serde(default)]
@@ -107,6 +110,8 @@ fn normalize_catalog_views(
                     consumable: item.consumable,
                     edible: item.edible,
                     supply: item.supply,
+                    magical: item.magical,
+                    currency: item.currency,
                     identity: item.identity,
                     appearance_pool: item.appearance_pool,
                     stackable: item.stackable,

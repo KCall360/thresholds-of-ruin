@@ -26,7 +26,9 @@ from process_harness import (
 from process_work_budget import ProcessOutputBudget, ProcessWorkBudget
 from rogue_earned_route_process import read_authoritative_evidence
 
-from rogue_test_support import DisclosedFloorGraph, disclosed_melee_candidate, first_floor_foes
+from rogue_test_support import (
+    DisclosedFloorGraph, assert_room_gold_receipt, disclosed_melee_candidate, first_floor_foes,
+)
 
 
 def observation(frame):
@@ -671,9 +673,9 @@ class RogueChecks:
             ("rogue.restore_strength", {"rogue.restore_strength"}, "item", 1),
         )
         self.assertEqual([stage["id"] for stage in receipt["decisions"]],
-                         [stage for stage, _, _, _ in expected])
-        entities = []
-        for stage, (_, choices, kind, count) in zip(receipt["decisions"], expected, strict=True):
+                         [stage for stage, _, _, _ in expected] + ["rogue.room_gold"])
+        entities = assert_room_gold_receipt(self, receipt["decisions"][4], depth)
+        for stage, (_, choices, kind, count) in zip(receipt["decisions"][:4], expected, strict=True):
             self.assertEqual(stage["version"], 1)
             result = stage["result"]
             self.assertEqual(result["kind"], "evaluated")

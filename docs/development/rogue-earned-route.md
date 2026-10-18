@@ -18,19 +18,19 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v9` retains exact package inputs and its
+`scripts/fixtures/rogue-earned-baseline-v10` retains exact package inputs and its
 current bundled-rule dependency hash. Its source-only transition changes only
-scenario format 17 to 18 and the previous bundled import to
-interactions-v40. The remaining authored package bytes are unchanged. Frozen
-v6–v8 inputs and their source/transition receipts remain immutable research
-evidence. Shared locomotion and linked-hold rules make this a new experiment
+scenario format 18 to 19 and the previous bundled import to
+interactions-v41. The remaining authored package bytes are unchanged. Frozen
+v6–v9 inputs and their source/transition receipts remain immutable research
+evidence. Shared theft and relocation rules make this a new experiment
 input, with no claim of identical outcomes or a requalified pilot. The source
 receipt alone does not establish compiler validation, regenerated certificates
 or route acceptance. Current route CI must still qualify the adapted fixture.
 New campaigns have distinct source fingerprints and cannot resume an earlier
 pilot with changed inputs. This is experimental input, not a historical save reader.
 The arm name remains unchanged when the bundled package
-selects eighteen species: it always names this historical comparator, never the
+selects twenty-one species: it always names this historical comparator, never the
 current production manifest. Its independent gameplay fixture is unchanged and lacks the
 complete Vampire catalog/rule closure needed as an eight-species generator source.
 The retained pilot candidate is a separately frozen eight-species E/S/H/I/Z/Q/U/V
@@ -285,10 +285,17 @@ snapshot contains `package/` and `source.json`, with a provenance reference,
 exact package hashes and rules dependency hashes. The same current compiler
 must resolve those pinned dependencies and compile both arms. Tests use the
 committed E/S fixture as the independent `production` arm and generate their
-candidate from the explicitly supplied current package; they need no Git history,
-network or environment overrides. The generator also accepts a retained complete
-preactivation source closure. It does not use the independent E/S fixture to
-reconstruct missing Vampire content.
+candidate from an explicitly supplied supported source package; they need no Git
+history, network or environment overrides. The strict candidate generator accepts
+the independently reviewed 21-species input with room Gold, then conditions it to
+the retained eighteen-species, four-stage diagnostic output without L/N/O, the
+Leprechaun birth-Gold pool or room-Gold stage. The oracle pins activation policy,
+not arbitrary supplied catalog/rules bytes; source closure and resolved package
+rules remain retained and fingerprinted. New generations have their own source
+fingerprints and qualification; an
+old compiler receipt cannot qualify them. The generator also accepts a retained
+complete preactivation or eighteen-species source closure. It does not use the
+independent E/S fixture to reconstruct missing Vampire content.
 
 ```sh
 python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-package SOURCE_PACKAGE --source-provenance '{"reference":"SOURCE_REVISION_OR_LABEL"}' --output NEW_CANDIDATE
@@ -297,13 +304,18 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 The corresponding create API requires `source_package` and `source_provenance`;
 provenance must be a nonempty JSON object with a nonempty string `reference`.
 The new diagnostic inventory records observed `source_population_shape`
-(`preactivation_es` or `canonical_eighteen_species`), package provenance and separate
-package/tool/compiler-dependency hashes. Its `production_mutated = false` and
+(`preactivation_es`, `canonical_eighteen_species` or
+`reviewed_twenty_one_species_input`), explicit input/output population scopes,
+package provenance and separate package/tool/compiler-dependency hashes, including
+the independent input oracle. Its `production_mutated = false` and
 diagnostic artifact purpose replace the obsolete global `production_activation`
 claim. See [generator contract](arena.md#rogue-roster-study-and-bounded-candidate-inputs).
-Newly generated candidates now use the eighteen-species population. The retained
-eight-species pilot remains old-source evidence, not acceptance of the later
-roster additions, flight, linked holds or ordinary restoration stock.
+The candidate generator's declared target remains the eighteen-species population.
+Its retained output scope and historical input labels are preserved rather than
+relabeled to match current 21-species production. The retained eight-species pilot
+remains old-source evidence, not acceptance of later roster additions, flight, linked holds,
+ordinary restoration stock, theft or Gold. Extending these studies to L/N/O and
+room Gold is separate from the production feature batch.
 These new results do not rewrite historical inventories, report schemas, cohort
 order or source identities. Resume an existing campaign from its retained sources
 and packages; never regenerate them from the current bundled package.
@@ -311,7 +323,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v9"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v10"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```

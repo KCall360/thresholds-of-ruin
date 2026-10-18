@@ -255,6 +255,16 @@ fn sequence_game_on_world(
     configure_sources: impl FnOnce(&mut crate::rules::RulesetDocument, &mut crate::creatures::Species),
     regions: Option<u64>,
 ) -> (crate::Game, crate::IntentionId) {
+    sequence_game_on_world_configured(offsets, configure, configure_sources, regions, |_| {})
+}
+
+pub(super) fn sequence_game_on_world_configured(
+    offsets: &[u64],
+    configure: impl FnOnce(&mut crate::rules::AbilityDef),
+    configure_sources: impl FnOnce(&mut crate::rules::RulesetDocument, &mut crate::creatures::Species),
+    regions: Option<u64>,
+    configure_game: impl FnOnce(&mut crate::Game),
+) -> (crate::Game, crate::IntentionId) {
     use crate::rules::*;
     use crate::{Action, ActorId, CreatureIdentity, IntentionOrigin};
     let mut document = crate::test_creatures::ruleset().document().clone();
@@ -349,6 +359,7 @@ fn sequence_game_on_world(
         )
         .unwrap();
     }
+    configure_game(&mut game);
     let intention = game
         .admit_intention(
             ActorId(1),
@@ -1112,6 +1123,7 @@ fn ordered_strikes_ai_resumes_paid_prefix_through_actual_scheduling() {
             care: true,
             equipment: true,
             loot: true,
+            gold: false,
             flee_percent: 0,
             idle: crate::behavior::IdleBehavior::Wait,
             doors: false,
@@ -1160,6 +1172,7 @@ fn ordered_strikes_fleeing_ai_uses_atomic_escape_and_old_preparation_identity() 
             care: true,
             equipment: true,
             loot: true,
+            gold: false,
             flee_percent: 100,
             idle: crate::behavior::IdleBehavior::Wait,
             doors: false,
@@ -3610,6 +3623,7 @@ fn ordered_strikes_self_step_retreat_never_replaces_paid_prefix() {
             care: true,
             equipment: true,
             loot: true,
+            gold: false,
             flee_percent: 100,
             idle: crate::behavior::IdleBehavior::Wait,
             doors: false,

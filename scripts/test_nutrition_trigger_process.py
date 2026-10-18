@@ -91,6 +91,8 @@ class NutritionTriggerProcesses(ProcessTestCase):
         observer, _ = self.client(observe=True)
         self.assertIn("Nutrition: 0/2000 (empty)", text.command("stats"))
         text.command("wait")
+        # The text player publishes a new revision on a different connection.
+        self.assertIsNone(self.request(peer, {"type": "snapshot"})["error"])
         self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
         shown = text.command("stats")
         self.assertIn("Nutrition: -1/2000 (empty)", shown)

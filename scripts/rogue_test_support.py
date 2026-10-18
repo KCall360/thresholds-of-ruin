@@ -5,6 +5,59 @@ The server still validates every submitted target and reports any refusal.
 """
 
 
+def assert_room_gold_receipt(test, stage, depth):
+    """Check a production gold audit; never feed private receipts to navigation."""
+    test.assertIs(type(depth), int)
+    test.assertGreater(depth, 0)
+    test.assertEqual(set(stage), {"id", "version", "result"})
+    test.assertIs(type(stage["version"]), int)
+    test.assertEqual((stage["id"], stage["version"]), ("rogue.room_gold", 1))
+    result = stage["result"]
+    test.assertEqual(set(result), {"kind", "rooms"})
+    test.assertEqual(result["kind"], "rooms_evaluated")
+    rooms = result["rooms"]
+    room_ids = [room["room"] for room in rooms]
+    for identity in room_ids:
+        test.assertIs(type(identity), int)
+        test.assertGreater(identity, 0)
+    test.assertEqual(room_ids, sorted(set(room_ids)))
+    identities = []
+    for room in rooms:
+        test.assertEqual(set(room), {"room", "result"})
+        outcome = room["result"]
+        if outcome["kind"] == "chance_miss":
+            test.assertEqual(outcome, {"kind": "chance_miss"})
+            continue
+        test.assertEqual(set(outcome), {"kind", "decision"})
+        test.assertEqual(outcome["kind"], "attempt")
+        decision = outcome["decision"]
+        test.assertEqual(decision["content"], "rogue.gold")
+        if decision["kind"] == "skipped":
+            test.assertEqual(decision, {"kind": "skipped", "content": "rogue.gold",
+                                       "reason": "no_eligible_cell"})
+            continue
+        test.assertEqual(set(decision), {"kind", "content", "location", "entity"})
+        test.assertEqual(decision["kind"], "placed")
+        location = decision["location"]
+        test.assertEqual(set(location), {"region", "position"})
+        test.assertIs(type(location["region"]), int)
+        test.assertGreater(location["region"], 0)
+        test.assertEqual(set(location["position"]), {"x", "y", "z"})
+        for coordinate in location["position"].values():
+            test.assertIs(type(coordinate), int)
+        entity = decision["entity"]
+        test.assertEqual(set(entity), {"kind", "id", "quantity"})
+        test.assertEqual(entity["kind"], "item")
+        test.assertIs(type(entity["id"]), int)
+        test.assertGreater(entity["id"], 0)
+        test.assertIs(type(entity["quantity"]), int)
+        test.assertGreaterEqual(entity["quantity"], 2)
+        test.assertLessEqual(entity["quantity"], 51 + 10 * depth)
+        identities.append(("item", entity["id"]))
+    test.assertEqual(len(identities), len(set(identities)))
+    return identities
+
+
 def first_floor_foes():
     import tomllib
     from process_harness import ROOT

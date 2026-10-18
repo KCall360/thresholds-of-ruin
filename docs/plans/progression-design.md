@@ -575,9 +575,16 @@ Eligibility: fey type.
 
 | ID | Node | HD | Parents | Effect | Needs |
 | --- | --- | ---: | --- | --- | --- |
-| TR1 | Filch Gold | 1 | — | Rider check vs Cognitive: take carried gold | X9 X12 |
-| TR2 | Filch Charm | 1 | — | Rider check vs Cognitive: take one unequipped magic item | X9 X12 |
-| TR3 | Vanish | 2 | TR1/TR2 | After a successful theft, relocate to a random legal cell on the floor | X11 |
+| TR1 | Filch Gold | 1 | — | Rider check vs Cognitive: one source-sized roll, capped by all free carried Gold | X9 X12 |
+| TR2 | Filch Charm | 1 | — | Rider check vs Cognitive: take one free unequipped magical unit | X9 X12 |
+| TR3 | Vanish | 2 | TR1/TR2 | Frozen compiled flag permits relocation to a legal cell on the same floor only after actual transfer | X11 |
+
+The current [shared theft contract](../reference/items.md#theft-and-gold) owns
+held-unit exclusion, explicit magical/currency capabilities, checked quantity
+ranges, concealment and ordinary death recovery. These nodes are now selected
+by the Rogue L/N builds, but the theft/gold batch's validation remains pending in
+[status](../status.md). A checked hit with no eligible transfer does not activate
+Vanish, and theft does not teach an item's identity.
 
 #### Breath tree
 

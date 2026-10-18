@@ -341,18 +341,19 @@ commitment and resolved strikes; active-time survival and recovery keep advancin
 Species: aquator, leprechaun, nymph, phantom, xeroc, medusa, vampire, wraith,
 griffin, jabberwock, dragon.
 
-Each species waits for the Rogue plan stage that provides its prerequisite:
+The current production roster already includes leprechaun, nymph, vampire,
+wraith, griffin and jabberwock. Their shared mechanisms are described in the
+[current Rogue scope](../status.md); L/N theft/gold validation remains pending.
+Those mechanisms do not close complete-run or numerical acceptance. The remaining
+species wait for the Rogue plan stage that provides each prerequisite:
 
 | Species | Needs | Rogue plan stage |
 | --- | --- | --- |
 | aquator | per-item rust and protection | Items and ranged actions |
-| leprechaun, nymph | theft, self-relocation | Items and ranged actions |
 | phantom | invisibility | Layout, perception and discovery |
 | xeroc | object disguise | Layout, perception and discovery |
 | medusa | confusion, sight-dependent immunity | Layout, perception and discovery |
-| vampire, wraith | maximum-Health drain, level drain | Complete shared builds/effects and survival |
 | dragon | rays with obstruction | Items and ranged actions |
-| griffin, jabberwock | flying, regeneration, Rending Pair | Phase 9 |
 
 **Acceptance:** every species meets its targets, and the Rogue roster acceptance
 in the [Rogue plan](rogue.md) can proceed.

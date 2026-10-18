@@ -120,9 +120,14 @@ pub(super) fn read_pools<'de, D: serde::Deserializer<'de>>(
 
 impl PreparedItemChoice {
     pub(super) fn valid(&self, game: &Game) -> bool {
-        self.quantity > 0
+        let low = self.quantity.resolve(Some(1));
+        let high = self.quantity.resolve(Some(u32::MAX));
+        low.is_ok()
+            && high.is_ok()
             && self.spec.valid()
-            && (self.spec.stackable || self.quantity == 1)
+            && (self.spec.stackable
+                || low.is_ok_and(|range| range.maximum == 1)
+                    && high.is_ok_and(|range| range.maximum == 1))
             && self.spec.validate_rules(game.content.rules()).is_ok()
     }
 }
@@ -150,9 +155,26 @@ impl CarriedLoot {
         self.version == 1
             && label(&self.pool)
             && pools.contains_key(&self.pool)
-            && self.chance.denominator > 0
-            && self.chance.numerator <= self.chance.denominator
+            && self.chance.valid()
     }
+}
+
+impl CarryChance {
+    pub(super) fn valid(self) -> bool {
+        self.denominator > 0 && self.numerator <= self.denominator
+    }
+    pub(super) fn succeeds(self, rng: &mut u64) -> bool {
+        self.numerator != 0
+            && (self.numerator == self.denominator
+                || index(rng, self.denominator as usize) < self.numerator as usize)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct SelectedBirthStock<'a> {
+    pub content: &'a str,
+    pub spec: &'a ItemSpec,
+    pub quantity: u64,
 }
 
 /// A new domain leaves every existing count/content/placement/build root intact.
@@ -164,6 +186,7 @@ pub(super) struct BirthStockContext<'a> {
     pub profile: &'a PopulationProfile,
     pub stage: &'a PopulationStage,
     pub ordinal: u64,
+    pub depth: Option<u32>,
 }
 impl BirthStockContext<'_> {
     pub(super) fn stream(
@@ -199,27 +222,60 @@ impl BirthStockContext<'_> {
         hash
     }
 
+    fn quantity_stream(
+        &self,
+        choice: &PreparedActorChoice,
+        policy: &CarriedLoot,
+        pool: &PreparedCarriedItemPool,
+        item: &PreparedItemChoice,
+    ) -> u64 {
+        // Keep the historical chance/content roots byte-for-byte. Extending
+        // the content root binds actor, policy and pool identities independently
+        // from the selected item's separate quantity domain.
+        let mut hash = self.stream(choice, policy, Some((&policy.pool, pool)));
+        for bytes in [b"item-quantity".as_slice(), item.content.as_bytes()] {
+            for byte in (bytes.len() as u64).to_le_bytes().iter().chain(bytes) {
+                hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+        hash
+    }
+
     /// Pure local selection. The actor choice distinguishes no policy from a
     /// chance miss, and the caller attaches the ordinary allocated item ID.
     pub fn select<'a>(
         &self,
         choice: &PreparedActorChoice,
         pools: &'a BTreeMap<String, PreparedCarriedItemPool>,
-    ) -> Option<&'a PreparedItemChoice> {
-        let policy = choice.carried_loot.as_ref()?;
-        let chance = policy.chance;
-        if chance.numerator == 0 {
-            return None;
-        }
-        if chance.numerator != chance.denominator {
-            let mut rng = self.stream(choice, policy, None);
-            if index(&mut rng, chance.denominator as usize) >= chance.numerator as usize {
-                return None;
-            }
-        }
+    ) -> Result<Option<SelectedBirthStock<'a>>, GameError> {
+        let Some(policy) = choice.carried_loot.as_ref() else {
+            return Ok(None);
+        };
         let pool = &pools[&policy.pool];
+        // Missing birth context and arithmetic failure cannot be hidden by a
+        // chance miss or a different weighted draw.
+        for item in &pool.choices {
+            item.quantity
+                .resolve(self.depth)
+                .map_err(|_| GameError::InvalidQuantity)?;
+        }
+        let mut rng = self.stream(choice, policy, None);
+        if !policy.chance.succeeds(&mut rng) {
+            return Ok(None);
+        }
         let mut rng = self.stream(choice, policy, Some((&policy.pool, pool)));
-        Some(weighted_choice(&mut rng, &pool.choices, |item| item.weight))
+        let item = weighted_choice(&mut rng, &pool.choices, |item| item.weight);
+        let mut quantity_rng = self.quantity_stream(choice, policy, pool, item);
+        let quantity = item
+            .quantity
+            .resolve(self.depth)
+            .map_err(|_| GameError::InvalidQuantity)?
+            .sample(&mut quantity_rng)?;
+        Ok(Some(SelectedBirthStock {
+            content: &item.content,
+            spec: &item.spec,
+            quantity,
+        }))
     }
 }
 
@@ -239,7 +295,7 @@ impl PopulationEntity {
                 ..
             } => Some(*item),
             Self::Actor { .. } => None,
-            Self::Item { id } => Some(*id),
+            Self::Item { id, .. } => Some(*id),
         }
     }
     fn policy_decisions(&self) -> usize {
@@ -267,6 +323,15 @@ impl StageDecision {
     pub fn decision_count(&self) -> usize {
         1 + match &self.result {
             StageResult::Skipped { .. } => 0,
+            StageResult::RoomsEvaluated { rooms } => rooms
+                .iter()
+                .map(|room| {
+                    1 + match &room.result {
+                        RoomResult::ChanceMiss => 0,
+                        RoomResult::Attempt { decision } => decision.decision_count(),
+                    }
+                })
+                .sum(),
             StageResult::Evaluated { attempts, .. } => {
                 attempts.iter().map(PlacementDecision::decision_count).sum()
             }
@@ -274,15 +339,20 @@ impl StageDecision {
     }
 }
 impl PopulationStage {
-    pub(super) fn maximum_decisions(&self) -> usize {
+    pub(super) fn maximum_decisions(&self, rooms: usize) -> Option<usize> {
+        if matches!(self.population, PopulationContent::RoomItems { .. }) {
+            return rooms.checked_mul(2)?.checked_add(1);
+        }
         let with_policy = match &self.population {
             PopulationContent::Actors { bands, .. } => bands.iter().any(|band| {
                 band.choices
                     .iter()
                     .any(|choice| choice.carried_loot.is_some())
             }),
-            PopulationContent::Items { .. } => false,
+            PopulationContent::Items { .. } | PopulationContent::RoomItems { .. } => false,
         };
-        1 + usize::from(self.count[1]) * (1 + usize::from(with_policy))
+        usize::from(self.count[1])
+            .checked_mul(1 + usize::from(with_policy))?
+            .checked_add(1)
     }
 }

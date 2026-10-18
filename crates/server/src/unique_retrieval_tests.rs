@@ -115,6 +115,7 @@ fn reserved_retrieval_definition_rejects_all_source_birth_channels() {
         "identity_alias",
         "kit",
         "floor",
+        "room_floor",
         "unused_pool",
         "version",
         "depth",
@@ -138,6 +139,14 @@ fn reserved_retrieval_definition_rejects_all_source_birth_channels() {
             "floor" => {
                 source["floor_activation"]["profiles"]["baseline"]["stages"][0]["bands"][0]
                     ["choices"][0]["archetype"] = json!("amulet")
+            }
+            "room_floor" => {
+                source["floor_activation"]["profiles"]["baseline"]["stages"][0] = json!({
+                    "kind":"room_items", "id":"reserved-room", "version":1,
+                    "chance":{"numerator":0,"denominator":1}, "quantity":1,
+                    "bands":[{"depth":{"kind":"open","minimum":1},
+                        "choices":[{"archetype":"amulet","weight":1}]}]
+                });
             }
             "unused_pool" => {
                 source["floor_activation"]["carried_item_pools"] = json!({"never-used":{"version":1,"choices":[{"archetype":"amulet","weight":1,"quantity":1}]}})
@@ -427,16 +436,12 @@ fn expired_created_receipt() -> (Engine, usize) {
 
 #[test]
 fn expired_artifact_origins_share_the_population_and_carried_stock_identity_audit() {
-    use tor_simulation::floor_activation::{PlacementDecision, StageResult};
+    use tor_simulation::floor_activation::PlacementDecision;
     let (engine, abandoned) = expired_created_receipt();
     let stock = engine.archive.records[abandoned].activations[0]
         .decisions
         .iter()
-        .filter_map(|stage| match &stage.result {
-            StageResult::Evaluated { attempts, .. } => Some(attempts),
-            _ => None,
-        })
-        .flatten()
+        .flat_map(|stage| stage.result.attempts())
         .find_map(|attempt| match attempt {
             PlacementDecision::Placed { entity, .. } if entity.actor_birth().is_some() => {
                 entity.item_birth()

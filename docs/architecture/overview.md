@@ -176,7 +176,12 @@ never resume automatically after restart. An explicit save does not cancel trave
 Text resolves disclosed nouns into structured opaque targets, asking about
 ambiguity before spending time. The backend still validates advertised actions
 against current state. Items support quantities, identity knowledge, timed equipment
-and consumables through the shared rule system. Capacity, containers, locks/keys
+and consumables through the shared rule system. Currency is an ordinary item
+capability, and theft is a checked shared rider with frozen quantity/relocation
+operands and live inventory validation. Transfers conserve that same physical
+stock, including unpaid reservations and ordinary death cleanup. Scenario depth
+is explicit input to quantity compilation, never global mutable context.
+Capacity, containers, locks/keys
 and broader use/identification mechanics remain future work; an appearance class
 alone does not implement food, wands or spellbooks. See [items](../reference/items.md).
 

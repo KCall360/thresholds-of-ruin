@@ -243,6 +243,10 @@ pub enum OutcomeStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResolvedEffect {
+    Theft {
+        quantity: u64,
+        relocation: Option<super::Placement>,
+    },
     ApplyLinkedHold {
         policy: crate::linked_hold::HoldPolicy,
     },
@@ -309,6 +313,7 @@ impl ResolvedEffect {
     /// reach this point only after the shared kernel observed a state change.
     pub(crate) fn changed(&self) -> bool {
         match self {
+            Self::Theft { quantity, .. } => *quantity > 0,
             Self::Translate { result, .. } => result.changed(),
             Self::Damage { amount }
             | Self::Heal { amount }
@@ -338,6 +343,7 @@ impl ResolvedEffect {
             return Ok(None);
         }
         let applied = match self {
+            Self::Theft { .. } => return Ok(None),
             Self::ApplyLinkedHold { .. } => self.clone(),
             Self::Translate { mode, result } => {
                 if let super::MovementResult::Moved { from, to } = result {
@@ -673,6 +679,7 @@ fn resolve_planned_check(
     total >= threshold
 }
 pub(super) struct BatchResolution {
+    pub deferred_theft: Option<crate::theft::PlannedTheft>,
     pub outcome: Outcome,
     /// Ordinary abilities may reject individual condition effects. Authoritative
     /// automatic effects must be able to reject their enclosing transaction.
@@ -786,6 +793,7 @@ pub(super) fn resolve_batch<'a>(
             fields: &[],
         });
         return Ok(BatchResolution {
+            deferred_theft: None,
             outcome,
             condition_error: None,
             selected_branch: None,
@@ -818,6 +826,7 @@ pub(super) fn resolve_batch<'a>(
             && snapshot.context.observation.is_none())
     {
         return Ok(BatchResolution {
+            deferred_theft: None,
             outcome,
             condition_error: None,
             selected_branch: None,
@@ -831,6 +840,7 @@ pub(super) fn resolve_batch<'a>(
         EffectRecipient::Source => {
             let Some(source) = &snapshot.context.source else {
                 return Ok(BatchResolution {
+                    deferred_theft: None,
                     outcome,
                     condition_error: None,
                     selected_branch: None,
@@ -841,12 +851,17 @@ pub(super) fn resolve_batch<'a>(
     };
     let mut placement = snapshot.context.spatial.map(|input| input.placement);
     let mut condition_error = None;
+    let mut deferred_theft = None;
     for effect in effects {
         // Once damage kills the target, later effects cannot revive or mutate it.
         if application.creature.health().dead() {
             break;
         }
         let effect = match effect {
+            PlannedEffect::Theft { theft } => {
+                deferred_theft = Some(theft.clone());
+                continue;
+            }
             PlannedEffect::StepSelfOneCell | PlannedEffect::PushTargetOneCell { .. } => {
                 let mode = if matches!(effect, PlannedEffect::StepSelfOneCell) {
                     super::MovementMode::Voluntary
@@ -996,6 +1011,7 @@ pub(super) fn resolve_batch<'a>(
         outcome.effects.push(effect);
     }
     Ok(BatchResolution {
+        deferred_theft,
         outcome,
         condition_error,
         selected_branch: Some(if success {
@@ -1010,6 +1026,11 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Theft {
+                quantity: u64,
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                relocation: Option<super::Placement>,
+            },
             ApplyLinkedHold {
                 policy: crate::linked_hold::HoldPolicy,
             },
@@ -1064,6 +1085,13 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             },
         }
         let effect = match crate::bounded::named_map(deserializer)? {
+            Fields::Theft {
+                quantity,
+                relocation,
+            } => Self::Theft {
+                quantity,
+                relocation,
+            },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Damage { amount } => Self::Damage { amount },
@@ -1093,6 +1121,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             },
         };
         let valid_amount = match effect {
+            Self::Theft { quantity, .. } => quantity > 0,
             Self::DrainLatestHitDie { amount } | Self::RestoreHitDie { amount } => amount <= 1,
             Self::LoseAttribute { amount, .. } | Self::RestoreAttribute { amount, .. } => {
                 amount <= u32::from(crate::limits::DERIVED_ATTRIBUTE)

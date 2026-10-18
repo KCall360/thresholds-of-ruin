@@ -44,6 +44,7 @@ fn retrieval_residency_fixture_with_destination_member(
     .unwrap();
     for (depth, members) in [(26, [1, destination_member]), (4, [8, 10]), (5, [9, 11])] {
         game.register_activation_scope(PreparedScope {
+            rooms: vec![],
             scope: format!("dungeon/{depth}"),
             depth,
             profile: "plain".into(),
@@ -81,10 +82,11 @@ fn retrieval_residency_fixture_with_destination_member(
                 care: true,
                 equipment: true,
                 loot: true,
+                gold: false,
                 flee_percent: 25,
                 idle: crate::behavior::IdleBehavior::Wait,
-        doors: false,
-},
+                doors: false,
+            },
         )
         .unwrap();
         actor

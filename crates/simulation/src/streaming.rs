@@ -1138,13 +1138,25 @@ impl Game {
         cache: &mut PinCache,
         can_prepare: &dyn Fn(RegionId) -> bool,
     ) -> RegionTransition {
-        // Resolve the ordinary frontier completely before adding the remote
-        // artifact source. Feeding the combined set back through floor closure
-        // would prepare every source/dependency floor on the next iteration.
-        let mut t = self.settle_pins(proposed, cache, can_prepare, true);
+        // Complete ordinary roots, including active hold/claim dependencies,
+        // before taking the relocation-root snapshot. Supplemental frozen actors
+        // cannot recursively promote their saved floor policies into roots.
+        let ordinary = self.settle_pins(proposed, cache, can_prepare, true);
+        let mut t = self.settle_dependencies(ordinary, cache, can_prepare);
+        let ordinary_active = t.active.clone();
+        self.relocation_loaded_closure(&ordinary_active, &mut t.loaded);
         if let Some(source) = self.retrieval_source_region() {
             t.loaded.insert(source);
         }
+        self.settle_dependencies(t, cache, can_prepare)
+    }
+
+    fn settle_dependencies(
+        &self,
+        mut t: RegionTransition,
+        cache: &mut PinCache,
+        can_prepare: &dyn Fn(RegionId) -> bool,
+    ) -> RegionTransition {
         loop {
             let before = (t.active.len(), t.loaded.len());
             let regions: Vec<_> = t.loaded.iter().copied().collect();
@@ -2547,6 +2559,7 @@ mod tests {
             care: true,
             equipment: true,
             loot: true,
+            gold: false,
             flee_percent: 25,
             idle: crate::behavior::IdleBehavior::Wait,
             doors: false,

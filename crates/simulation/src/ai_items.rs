@@ -5,6 +5,56 @@ use crate::{
 use tor_world::Location;
 
 impl Game {
+    pub(crate) fn choose_known_gold(
+        &self,
+        actor: ActorId,
+        view: &Observation,
+        profile: &crate::ai::AiProfile,
+        route: &mut impl FnMut(Location) -> Option<Vec<TravelStep>>,
+    ) -> Option<Action> {
+        if !profile.gold {
+            return None;
+        }
+        view.ground_items
+            .iter()
+            .filter(|item| item.known_currency == Some(crate::CurrencyKind::Gold))
+            .filter(|item| !self.exposed_to_visible_hostile(actor, item.location, view))
+            .filter_map(|item| {
+                if profile.idle == crate::behavior::IdleBehavior::Wait
+                    && item.location != view.location
+                {
+                    return None;
+                }
+                let path = if item.location == view.location {
+                    vec![]
+                } else {
+                    route(item.location)?
+                };
+                if path.len() > 3 {
+                    return None;
+                }
+                let action = if let Some(step) = path.first() {
+                    let (at, _) = self.actor_translation(actor, step.direction)?;
+                    if self.exposed_to_visible_hostile(actor, at, view) {
+                        return None;
+                    }
+                    Action::Move(step.direction)
+                } else {
+                    Action::Take {
+                        item: item.id,
+                        quantity: Some(item.quantity),
+                    }
+                };
+                (!self.condition_blocks_action(actor, &action)).then_some((
+                    path.len(),
+                    item.id,
+                    action,
+                ))
+            })
+            .min_by_key(|(distance, id, _)| (*distance, *id))
+            .map(|(_, _, action)| action)
+    }
+
     pub(crate) fn choose_nearby_loot(
         &self,
         actor: ActorId,
@@ -545,6 +595,226 @@ mod tests {
         crate::test_creatures::configure(&mut game, actor, "neutral", species);
         (game, actor, at)
     }
+
+    fn gold_fixture() -> (Game, ActorId, Location) {
+        let (mut game, actor, at) = fixture();
+        game.configure_ai(
+            actor,
+            crate::ai::AiProfile {
+                idle: crate::behavior::IdleBehavior::Wait,
+                gold: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        game.refresh_navigation();
+        (game, actor, at)
+    }
+
+    fn gold(concealed: bool) -> crate::ItemSpec {
+        let mut item = crate::ItemSpec::ordinary("gold coin".into());
+        item.class = crate::ItemClass::Coin;
+        item.stackable = true;
+        item.currency = Some(crate::CurrencyKind::Gold);
+        item.concealed = concealed;
+        item
+    }
+
+    fn healing_potion() -> crate::ItemSpec {
+        let mut item = crate::ItemSpec::ordinary("known restorative".into());
+        item.class = crate::ItemClass::Potion;
+        item.consumable = Some(crate::ConsumableSpec {
+            effects: vec![crate::rules::Effect::Heal {
+                amount: crate::rules::AmountExpr::Fixed { amount: 2 },
+            }],
+        });
+        item
+    }
+
+    fn neighbor(game: &mut Game, actor: ActorId, at: Location) -> ActorId {
+        let build = game.creature(actor).unwrap().build().clone();
+        let other = game
+            .spawn_actor(at, std::num::NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.configure_creature(
+            other,
+            crate::CreatureIdentity {
+                name: "neutral neighbor".into(),
+                faction: "neutral".into(),
+            },
+            build,
+        )
+        .unwrap();
+        game.refresh_navigation();
+        other
+    }
+
+    #[test]
+    fn known_gold_precedes_idle_without_enabling_other_loot_policies() {
+        let (mut game, actor, at) = gold_fixture();
+        game.place_item_stack(19, at, None, 1, healing_potion())
+            .unwrap();
+        assert_eq!(game.choose_ai(actor).unwrap().action, Action::Wait);
+        let profile = &game.combat.ai[&actor].profile;
+        assert!(!profile.care && !profile.equipment && !profile.loot && !profile.doors);
+        game.place_item_stack(20, at, None, 7, gold(false)).unwrap();
+        let view = game.observe(actor).unwrap();
+        assert_eq!(
+            view.ground_items
+                .iter()
+                .find(|item| item.id == ItemId(20))
+                .unwrap()
+                .known_currency,
+            Some(crate::CurrencyKind::Gold)
+        );
+        let before = game.clone();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().action,
+            Action::Take {
+                item: ItemId(20),
+                quantity: Some(7)
+            }
+        );
+        assert_eq!(
+            game, before,
+            "A preview must not move gold or advance its RNG"
+        );
+        game.combat.ai.get_mut(&actor).unwrap().profile.gold = false;
+        assert_eq!(game.choose_ai(actor).unwrap().action, Action::Wait);
+    }
+
+    #[test]
+    fn known_gold_uses_a_disclosed_short_route_only_when_idle_policy_allows_it() {
+        let (mut game, actor, at) = gold_fixture();
+        let destination = Location {
+            position: tor_world::Position {
+                x: at.position.x + 2,
+                ..at.position
+            },
+            ..at
+        };
+        game.place_item_stack(20, destination, None, 7, gold(false))
+            .unwrap();
+        game.refresh_navigation();
+        assert_eq!(game.choose_ai(actor).unwrap().action, Action::Wait);
+        game.combat.ai.get_mut(&actor).unwrap().profile.idle =
+            crate::behavior::IdleBehavior::Explore;
+        let before = game.clone();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().action,
+            Action::Move(tor_world::Direction::East)
+        );
+        assert_eq!(game, before);
+    }
+
+    #[test]
+    fn concealed_gold_and_another_actors_private_purse_do_not_change_idle_choice() {
+        let (mut game, actor, at) = gold_fixture();
+        let other_at = Location {
+            position: tor_world::Position {
+                x: at.position.x + 1,
+                ..at.position
+            },
+            ..at
+        };
+        let other = neighbor(&mut game, actor, other_at);
+        let mut hidden = game.clone();
+        hidden
+            .place_item_stack(21, other_at, Some(other), 99, gold(false))
+            .unwrap();
+        assert_eq!(game.observe(actor).unwrap(), hidden.observe(actor).unwrap());
+        assert_eq!(hidden.choose_ai(actor).unwrap().action, Action::Wait);
+        let mut ordinary_lookalike = game.clone();
+        game.place_item_stack(20, at, None, 7, gold(true)).unwrap();
+        let mut unknown_non_currency = gold(true);
+        unknown_non_currency.currency = None;
+        ordinary_lookalike
+            .place_item_stack(20, at, None, 7, unknown_non_currency)
+            .unwrap();
+        assert_eq!(
+            game.observe(actor).unwrap(),
+            ordinary_lookalike.observe(actor).unwrap()
+        );
+        assert_eq!(game.choose_ai(actor).unwrap().action, Action::Wait);
+        assert_eq!(
+            ordinary_lookalike.choose_ai(actor).unwrap().action,
+            Action::Wait
+        );
+        game.identify_item(actor, ItemId(20)).unwrap();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().action,
+            Action::Take {
+                item: ItemId(20),
+                quantity: Some(7)
+            }
+        );
+    }
+
+    #[test]
+    fn healing_retaliation_and_escape_retain_priority_over_visible_gold() {
+        let (mut game, actor, at) = gold_fixture();
+        game.place_item_stack(20, at, None, 7, gold(false)).unwrap();
+        let mut wounded = game.clone();
+        wounded.combat.ai.get_mut(&actor).unwrap().profile.care = true;
+        wounded
+            .place_item_stack(21, at, Some(actor), 1, healing_potion())
+            .unwrap();
+        let hp = wounded.health(actor).unwrap().0;
+        crate::test_creatures::injure(&mut wounded, actor, u32::try_from(hp - 1).unwrap()).unwrap();
+        assert_eq!(
+            wounded.choose_ai(actor).unwrap().action,
+            Action::Drink { item: ItemId(21) }
+        );
+
+        let other_at = Location {
+            position: tor_world::Position {
+                x: at.position.x + 1,
+                ..at.position
+            },
+            ..at
+        };
+        let other = neighbor(&mut game, actor, other_at);
+        assert_eq!(
+            game.choose_ai(actor).unwrap().action,
+            Action::Take {
+                item: ItemId(20),
+                quantity: Some(7)
+            },
+            "A neutral visible neighbor alone is not provocation"
+        );
+        let basic = crate::content_ids::AbilityId::new("basic_melee").unwrap();
+        let plan = game.ability_plan(other, &basic, actor).unwrap();
+        let outcome = game
+            .resolve_strike(
+                plan.as_ability().unwrap(),
+                0,
+                None,
+                &mut crate::combat::PreparationProgress::Ability {
+                    next_strike: 1,
+                    successful_primaries: 0,
+                    attempted_riders: [0; 2],
+                    linked_hold: None,
+                },
+            )
+            .unwrap();
+        assert!(outcome.target_participated());
+        let retaliation = game.choose_ai(actor).unwrap();
+        assert_eq!(retaliation.ai.state, crate::ai::State::Attack);
+        assert_eq!(
+            retaliation.action,
+            Action::UseAbility {
+                id: basic,
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: other },
+                supplies: Default::default(),
+            }
+        );
+        let hp = game.health(actor).unwrap().0;
+        crate::test_creatures::injure(&mut game, actor, u32::try_from(hp - 1).unwrap()).unwrap();
+        let escape = game.choose_ai(actor).unwrap();
+        assert_eq!(escape.ai.state, crate::ai::State::Flee);
+        assert!(matches!(escape.action, Action::Move(_)));
+    }
+
     fn add(game: &mut Game, actor: ActorId, at: Location, id: u64, gear: EquipmentSpec) {
         let mut item = crate::ItemSpec::ordinary(format!("gear {id}"));
         item.class = if gear.slot == EquipmentSlot::new("weapon").unwrap() {

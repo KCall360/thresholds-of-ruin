@@ -26,6 +26,7 @@ fn definitions(
         42,
     )
     .unwrap()
+    .regions
 }
 
 fn path(

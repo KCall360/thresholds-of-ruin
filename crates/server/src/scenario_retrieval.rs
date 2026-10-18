@@ -107,7 +107,9 @@ impl Package {
             .expect("checked plan");
         for profile in plan.profiles.values() {
             for stage in &profile.stages {
-                if let PopulationStage::Items { bands, .. } = stage {
+                if let PopulationStage::Items { bands, .. }
+                | PopulationStage::RoomItems { bands, .. } = stage
+                {
                     require(
                         bands
                             .iter()

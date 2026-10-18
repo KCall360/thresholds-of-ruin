@@ -36,6 +36,55 @@ impl Default for Streaming {
     }
 }
 
+type PreparationLineage = (
+    tor_simulation::ActorId,
+    Option<tor_simulation::IntentionId>,
+    Option<tor_simulation::IntentionId>,
+    u64,
+);
+
+/// Ephemeral progress evidence for one unpublished host transition.
+#[derive(Default)]
+struct BoundaryProgress {
+    preparations: BTreeMap<PreparationLineage, BTreeSet<RegionId>>,
+    population_tick: Option<u64>,
+}
+
+impl BoundaryProgress {
+    fn preparation(
+        &mut self,
+        boundary: &tor_simulation::theft::PreparationRegionBoundary,
+        missing: BTreeSet<RegionId>,
+    ) -> Result<(), Failure> {
+        let lineage = (
+            boundary.actor,
+            boundary.origin,
+            boundary.intention,
+            boundary.started,
+        );
+        if missing.is_empty()
+            || self.preparations.get(&lineage).is_some_and(|previous| {
+                missing.len() >= previous.len() || !missing.is_subset(previous)
+            })
+        {
+            return Err(storage_failure());
+        }
+        self.preparations.insert(lineage, missing);
+        Ok(())
+    }
+
+    fn population(&mut self, tick: u64) -> Result<(), Failure> {
+        if self
+            .population_tick
+            .is_some_and(|previous| tick <= previous)
+        {
+            return Err(storage_failure());
+        }
+        self.population_tick = Some(tick);
+        Ok(())
+    }
+}
+
 /// What a transition did, and the deterministic work it took. Performance
 /// contracts require none of the counts to grow with the world's size.
 #[derive(Clone, Debug, Default)]
@@ -409,14 +458,21 @@ impl Regions {
         profile: bool,
     ) -> Result<TransitionWork, Failure> {
         let mut total = TransitionWork::default();
+        let mut progress = BoundaryProgress::default();
         loop {
-            let pending_tick = game.population_entry_pending().then(|| game.tick());
-            let pending_before = pending_tick.map(|_| game.clone());
+            if let Some(boundary) = game.preparation_region_boundary().cloned() {
+                let missing = game.preparation_missing_regions(&boundary);
+                progress.preparation(&boundary, missing)?;
+            }
+            if game.population_entry_pending() {
+                progress.population(game.tick())?;
+            }
+            let pending_before = game.region_transition_pending().then(|| game.clone());
             let mut work = self.transition_staged(game, made, extra.clone(), profile)?;
             if work.before.is_none() {
                 work.before = pending_before;
             }
-            let continue_time = game.population_entry_pending() || !work.report.frozen.is_empty();
+            let continue_time = game.region_transition_pending() || !work.report.frozen.is_empty();
             // Residency is complete before continuation, including every bounded
             // member of an unactivated scope. A later physical entry yields
             // another internal boundary, never another command or receipt.
@@ -427,13 +483,8 @@ impl Regions {
                     })?;
             }
             total.absorb(work);
-            if !game.population_entry_pending() {
+            if !game.region_transition_pending() {
                 return Ok(total);
-            }
-            if pending_tick.is_some_and(|previous| game.tick() <= previous) {
-                // The complete tick was already processed. Repeated boundaries
-                // must make strict time progress rather than spin on one entry.
-                return Err(storage_failure());
             }
         }
     }
@@ -821,5 +872,63 @@ mod declaration_error_tests {
             regions.unsaved.is_empty(),
             "failed declaration must not pin source bytes"
         );
+    }
+}
+
+#[cfg(test)]
+mod boundary_progress_tests {
+    use super::*;
+    use tor_simulation::{theft::PreparationRegionBoundary, ActorId, IntentionId};
+
+    fn boundary(actor: u64) -> PreparationRegionBoundary {
+        PreparationRegionBoundary {
+            actor: ActorId(actor),
+            origin: Some(IntentionId(actor)),
+            intention: Some(IntentionId(actor + 10)),
+            started: 7,
+            members: BTreeSet::from([RegionId(1), RegionId(2), RegionId(3)]),
+        }
+    }
+    fn regions(ids: &[u64]) -> BTreeSet<RegionId> {
+        ids.iter().copied().map(RegionId).collect()
+    }
+
+    #[test]
+    fn repeated_preparation_lineage_requires_a_strict_missing_subset() {
+        let mut progress = BoundaryProgress::default();
+        let mut boundary = boundary(1);
+        progress
+            .preparation(&boundary, regions(&[1, 2, 3]))
+            .unwrap();
+        progress.preparation(&boundary, regions(&[1, 2])).unwrap();
+        assert!(progress.preparation(&boundary, regions(&[1, 2])).is_err());
+        assert!(progress.preparation(&boundary, regions(&[2, 3])).is_err());
+        assert!(progress.preparation(&boundary, regions(&[3])).is_err());
+        assert!(progress
+            .preparation(&boundary, regions(&[1, 2, 3]))
+            .is_err());
+        // Changing claimed scope members must not reset the paid lineage guard.
+        boundary.members = regions(&[1, 2, 3, 4]);
+        assert!(progress
+            .preparation(&boundary, regions(&[1, 2, 4]))
+            .is_err());
+        progress.preparation(&boundary, regions(&[2])).unwrap();
+        assert!(progress.preparation(&boundary, BTreeSet::new()).is_err());
+    }
+
+    #[test]
+    fn population_then_distinct_preparations_can_share_a_tick_without_reentry() {
+        let mut progress = BoundaryProgress::default();
+        progress.population(7).unwrap();
+        progress
+            .preparation(&boundary(1), regions(&[1, 2]))
+            .unwrap();
+        progress
+            .preparation(&boundary(2), regions(&[1, 2]))
+            .unwrap();
+        // The intervening preparation cannot hide a repeated population entry.
+        assert!(progress.population(7).is_err());
+        assert!(progress.population(6).is_err());
+        progress.population(8).unwrap();
     }
 }

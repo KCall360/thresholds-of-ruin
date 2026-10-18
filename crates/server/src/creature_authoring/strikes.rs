@@ -285,6 +285,36 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
         .iter()
         .map(|value| {
             Ok(match value {
+                Effect::Theft {
+                    selection,
+                    relocation,
+                } => s::rules::Effect::Theft {
+                    selection: match selection {
+                        crate::scenario_package::TheftSelection::Currency { currency, amount } => {
+                            s::theft::TheftSelection::Currency {
+                                currency: (*currency).into(),
+                                amount: amount.compiled(),
+                            }
+                        }
+                        crate::scenario_package::TheftSelection::MagicalUnit => {
+                            s::theft::TheftSelection::MagicalUnit
+                        }
+                    },
+                    relocation: relocation
+                        .as_ref()
+                        .map(|gate| -> Result<_, Failure> {
+                            Ok(s::theft::RelocationGate {
+                                flag: FlagId::new(&gate.flag)
+                                    .map_err(|_| invalid("Invalid theft relocation flag"))?,
+                                policy: match gate.policy {
+                                    crate::scenario_package::RelocationPolicy::SameFloor => {
+                                        s::theft::RelocationPolicy::SameFloor
+                                    }
+                                },
+                            })
+                        })
+                        .transpose()?,
+                },
                 Effect::ApplyLinkedHold { policy } => s::rules::Effect::ApplyLinkedHold {
                     policy: s::linked_hold::HoldPolicy {
                         sustaining: FlagId::new(&policy.sustaining)

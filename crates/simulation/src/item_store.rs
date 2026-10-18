@@ -101,6 +101,23 @@ impl ItemStore {
             .flat_map(|ids| ids.iter().copied())
     }
 
+    /// Cursor for candidate-local ownership changes. It does not clone an
+    /// inventory, and removing the previous entry cannot invalidate progress.
+    pub(crate) fn next_at_after(
+        &self,
+        at: ItemLocation,
+        previous: Option<ItemId>,
+    ) -> Option<ItemId> {
+        let ids = self.locations.ids(at)?;
+        match previous {
+            Some(id) => ids
+                .range((std::ops::Bound::Excluded(id), std::ops::Bound::Unbounded))
+                .next()
+                .copied(),
+            None => ids.first().copied(),
+        }
+    }
+
     pub fn perceived<'a>(
         &'a self,
         actor: ActorId,

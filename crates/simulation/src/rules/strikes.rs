@@ -238,6 +238,23 @@ pub fn validate_strike_shapes(strikes: &[StrikeDef]) -> Result<(), RulesetError>
     let mut descriptors = 0usize;
     for strike in strikes {
         bound(
+            !strike
+                .on_success
+                .iter()
+                .chain(&strike.on_failure)
+                .any(|effect| matches!(effect, Effect::Theft { .. }))
+                && strike.riders.iter().all(|rider| {
+                    !rider
+                        .effects
+                        .iter()
+                        .any(|effect| matches!(effect, Effect::Theft { .. }))
+                        || (rider.effects.len() == 1
+                            && rider.check.is_some()
+                            && rider.trigger == RiderTrigger::Success)
+                }),
+            "theft_checked_rider",
+        )?;
+        bound(
             strike.offset >= previous && strike.offset <= crate::limits::NUMERIC as u64,
             "strike_offset",
         )?;
