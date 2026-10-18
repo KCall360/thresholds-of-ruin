@@ -405,6 +405,13 @@ fn remembered_terrain_builds_dim_geometry_without_decorative_lighting() {
     use tor_protocol::RememberedMapCell;
     let mut app = app(CreatureModel::Placeholder);
     app.add_systems(Update, project_terrain.after(project));
+    app.update();
+    assert!(!app
+        .world()
+        .resource::<Game>()
+        .cave
+        .solids
+        .contains_key(&IVec3::new(2, 0, 2)));
     let wall = RememberedMapCell {
         key: "remembered-wall".into(),
         position: Position { x: 2, y: 2, z: 0 },
