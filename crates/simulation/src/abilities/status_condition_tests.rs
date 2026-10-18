@@ -116,6 +116,117 @@ fn park_peer_for_automatic_thaw(game: &mut Game) {
 }
 
 #[test]
+fn public_condition_application_preserves_own_interruption_across_immediate_reopen() {
+    let (mut game, intention) = sequence(false);
+    game.tick = 5;
+    ready_peer_for_snapshot(&mut game);
+    assert_eq!(
+        game.apply_condition(
+            ActorId(1),
+            &ConditionId::new("fixture_stillness").unwrap(),
+            ActorId(2),
+            200,
+        ),
+        Ok(crate::conditions::ConditionUpdate::Applied)
+    );
+    assert!(matches!(
+        game.combat_events().last(),
+        Some(crate::combat::CombatEvent::Interrupted {
+            actor: ActorId(1),
+            intention: Some(id),
+        }) if *id == intention
+    ));
+    let feedback = game.observe(ActorId(1)).unwrap().combat.unwrap().events;
+    assert!(matches!(
+        feedback.as_slice(),
+        [crate::combat::DisclosedCombatEvent::Interrupted { actor: ActorId(1) }]
+    ));
+    let reopened = round_trip(&game);
+    assert_eq!(reopened, game);
+    assert_eq!(
+        reopened.observe(ActorId(1)).unwrap().combat.unwrap().events,
+        feedback
+    );
+}
+
+#[test]
+fn host_condition_application_preserves_unpublished_observer_extension() {
+    let (mut game, _) = sequence(false);
+    game.tick = 5;
+    ready_peer_for_snapshot(&mut game);
+    game.host_region_continuation = true;
+    game.begin_event_batch().unwrap();
+    game.apply(super::Outcome {
+        actor: ActorId(1),
+        target: ActorId(1),
+        ability: Some(crate::content_ids::AbilityId::new("basic_melee").unwrap()),
+        intention: None,
+        result: super::OutcomeStatus::Applied,
+        check: None,
+        participation: super::AttemptedParticipation::empty(),
+        target_rider_participated: false,
+        effects: vec![],
+    })
+    .unwrap();
+    apply(&mut game, 200);
+    assert!(game.event_observations_open());
+    assert!(game
+        .observe(ActorId(2))
+        .unwrap()
+        .combat
+        .unwrap()
+        .events
+        .is_empty());
+    game.host_region_continuation = false;
+    let witness = game.event_observation_witness();
+    let (mut observation, _, proof) = game.observe_event_scene(ActorId(2)).unwrap();
+    assert!(game.event_observation_pending(&proof));
+    game.record_event_observation(&witness, &proof, &mut observation)
+        .unwrap();
+    assert!(matches!(
+        observation.combat.unwrap().events.as_slice(),
+        [crate::combat::DisclosedCombatEvent::Ability { .. }]
+    ));
+    game.seal_event_observations().unwrap();
+    assert_eq!(round_trip(&game), game);
+}
+
+#[test]
+fn public_condition_application_rolls_back_failed_event_publication() {
+    let (mut game, _) = sequence(false);
+    game.tick = 5;
+    game.host_region_continuation = true;
+    game.begin_event_batch().unwrap();
+    for _ in 0..crate::limits::EVENTS_PER_BATCH {
+        game.push_event(
+            crate::combat::CombatEvent::Interrupted {
+                actor: ActorId(2),
+                intention: None,
+            },
+            None,
+        )
+        .unwrap();
+    }
+    game.seal_participant_events().unwrap();
+    for host in [false, true] {
+        game.host_region_continuation = host;
+        let before = game.clone();
+        assert_eq!(
+            game.apply_condition(
+                ActorId(1),
+                &ConditionId::new("fixture_stillness").unwrap(),
+                ActorId(2),
+                200,
+            ),
+            Err(crate::GameError::Rule(super::RuleError::InvalidPlan))
+        );
+        assert_eq!(game, before);
+        assert!(game.event_observations_open());
+        assert!(game.preparation(ActorId(1)).unwrap().active);
+    }
+}
+
+#[test]
 fn status_pauses_unpaid_preparation_without_replacing_operands_holds_or_cooldown() {
     let (mut game, intention) = sequence(true);
     game.tick = 5;

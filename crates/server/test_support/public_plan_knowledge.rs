@@ -222,7 +222,7 @@ fn streaming_observer_scenario() -> Scenario {
     manifest.ai_profiles.insert(
         "witness".into(),
         serde_json::from_value(serde_json::json!({
-            "care": true, "equipment": true, "loot": true, "flee_percent":0
+            "idle": "wait", "care": true, "equipment": true, "loot": true, "flee_percent":0
         }))
         .unwrap(),
     );
@@ -259,7 +259,7 @@ fn streaming_observer_scenario() -> Scenario {
     });
     scenario
 }
-fn uncommitted_streaming_completion() -> (Engine, Candidate) {
+fn before_streaming_completion() -> Engine {
     let mut engine = Engine::memory(streaming_observer_scenario()).unwrap();
     assert!(
         !engine.game.has_actor(SimActor(3)),
@@ -287,25 +287,96 @@ fn uncommitted_streaming_completion() -> (Engine, Candidate) {
         act(&mut engine, ActorId(1), Action::Wait);
     }
     assert_eq!(engine.game.tick(), 200);
+    engine
+}
+fn uncommitted_streaming_completion(host: bool) -> (Engine, Candidate) {
+    let engine = before_streaming_completion();
+    let mut candidate = Candidate::capture(&engine);
+    if host {
+        assert!(matches!(
+            candidate
+                .game
+                .act_for_host(SimActor(1), tor_simulation::Action::Wait)
+                .unwrap(),
+            CandidateStep::Settled(_)
+        ));
+    } else {
+        candidate
+            .game
+            .act(SimActor(1), tor_simulation::Action::Wait)
+            .unwrap();
+    }
+    assert_eq!(candidate.game.tick(), 300);
+    assert_slow_plan_completion(&candidate.game);
+    (engine, candidate)
+}
+fn assert_slow_plan_completion(game: &Game) {
+    assert_eq!(
+        game.combat_events()
+            .iter()
+            .filter(|event| matches!(event,
+                tor_simulation::combat::CombatEvent::Resolved { outcome, strike: Some(0) }
+                    if outcome.actor == SimActor(2) && outcome.target == SimActor(1)
+                        && outcome.ability.as_ref().is_some_and(|id| id.as_str() == "slow_plan")
+            ))
+            .count(),
+        1,
+        "the exact ordinary completion must have executed once"
+    );
+}
+fn host_completion_with_existing_observer() -> (Engine, Candidate, ActorId) {
+    let mut engine = before_streaming_completion();
     let mut candidate = Candidate::capture(&engine);
     candidate
-        .game
-        .act(SimActor(1), tor_simulation::Action::Wait)
+        .transition_with(
+            engine.regions.as_mut(),
+            BTreeSet::from([tor_world::RegionId(3)]),
+            None,
+        )
         .unwrap();
+    assert!(candidate.game.has_actor(SimActor(3)));
+    assert!(!knows(&candidate.game, ActorId(3), "slow_plan"));
+    let mut last_actor = None;
+    for _ in 0..4 {
+        if candidate.game.tick() >= 300 {
+            break;
+        }
+        let actor = candidate.game.next_actor().unwrap();
+        assert!(matches!(actor, SimActor(1) | SimActor(3)));
+        assert!(matches!(
+            candidate
+                .game
+                .act_for_host(actor, tor_simulation::Action::Wait)
+                .unwrap(),
+            CandidateStep::Settled(_)
+        ));
+        last_actor = Some(ActorId(actor.0));
+        candidate.observations.clear();
+    }
     assert_eq!(candidate.game.tick(), 300);
-    (engine, candidate)
+    assert_slow_plan_completion(&candidate.game);
+    let view = candidate.revision_view(ActorId(3)).unwrap();
+    assert!(
+        candidate.game.event_observation_pending(&view.event_proof),
+        "the existing observer must retain a valid event-time proof"
+    );
+    assert!(
+        !discloses_slow_plan(&view),
+        "free projections cannot record receipts"
+    );
+    (engine, candidate, last_actor.unwrap())
 }
 fn discloses_slow_plan(view: &RevisionView) -> bool {
     view.observation.combat.as_ref().is_some_and(|combat| combat.events.iter().any(|event| matches!(event,
         tor_simulation::combat::DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "slow_plan")))
 }
-fn commit_streaming_wait(engine: &mut Engine, candidate: Candidate) {
+fn commit_streaming_wait(engine: &mut Engine, candidate: Candidate, actor: ActorId) {
     let entry = JournalEntry {
         intention_suspensions: vec![],
         intention_ends: vec![],
         id: new_id(),
         branch: candidate.branch().clone(),
-        actor: ActorId(1),
+        actor,
         tick: engine.game.tick(),
         author: Author::User {
             user: "player".into(),
@@ -321,8 +392,15 @@ fn commit_streaming_wait(engine: &mut Engine, candidate: Candidate) {
         .unwrap();
 }
 #[test]
-fn public_plan_final_region_acquisition_licenses_its_new_observer_at_commit() {
-    let (mut engine, mut candidate) = uncommitted_streaming_completion();
+fn public_plan_final_region_acquisition_cannot_invent_sealed_observer_history() {
+    assert_late_acquisition_cannot_learn(false);
+}
+#[test]
+fn public_plan_host_final_region_acquisition_cannot_reconstruct_an_event_time_witness() {
+    assert_late_acquisition_cannot_learn(true);
+}
+fn assert_late_acquisition_cannot_learn(host: bool) {
+    let (mut engine, mut candidate) = uncommitted_streaming_completion(host);
     let mut profile = CommandProfile::default();
     candidate
         .transition_with(
@@ -333,25 +411,32 @@ fn public_plan_final_region_acquisition_licenses_its_new_observer_at_commit() {
         .unwrap();
     assert_eq!(profile.region_changes, 1);
     assert!(candidate.game.has_actor(SimActor(3)));
-    assert!(discloses_slow_plan(
-        &candidate.revision_view(ActorId(3)).unwrap()
+    let view = candidate.revision_view(ActorId(3)).unwrap();
+    assert!(!discloses_slow_plan(&view));
+    assert!(!candidate.game.event_observation_pending(&view.event_proof));
+    commit_streaming_wait(&mut engine, candidate, ActorId(1));
+    assert!(!discloses_slow_plan(
+        &engine.revision_view(ActorId(3)).unwrap()
     ));
-    assert!(!knows(&candidate.game, ActorId(3), "slow_plan"));
-    commit_streaming_wait(&mut engine, candidate);
+    assert!(!knows(&engine.game, ActorId(3), "slow_plan"));
+}
+#[test]
+fn public_plan_host_final_publication_licenses_an_existing_event_time_observer() {
+    let (mut engine, candidate, actor) = host_completion_with_existing_observer();
+    commit_streaming_wait(&mut engine, candidate, actor);
+    assert!(discloses_slow_plan(
+        &engine.revision_view(ActorId(3)).unwrap()
+    ));
     assert!(knows(&engine.game, ActorId(3), "slow_plan"));
 }
 #[test]
-fn public_plan_pre_transition_disclosure_does_not_license_an_occluded_final_view() {
-    let (mut engine, mut candidate) = uncommitted_streaming_completion();
-    candidate
-        .transition_with(
-            engine.regions.as_mut(),
-            BTreeSet::from([tor_world::RegionId(3)]),
-            None,
-        )
-        .unwrap();
+fn public_plan_pre_transition_proof_does_not_license_an_occluded_final_view() {
+    let (mut engine, mut candidate, actor) = host_completion_with_existing_observer();
     let transient = Arc::new(candidate.revision_view(ActorId(3)).unwrap());
-    assert!(discloses_slow_plan(&transient));
+    assert!(candidate
+        .game
+        .event_observation_pending(&transient.event_proof));
+    assert!(!discloses_slow_plan(&transient));
     candidate.observations.insert(ActorId(3), transient);
     for y in 0..3 {
         for z in 0..2 {
@@ -383,7 +468,10 @@ fn public_plan_pre_transition_disclosure_does_not_license_an_occluded_final_view
         &candidate.revision_view(ActorId(3)).unwrap()
     ));
     assert!(!discloses_slow_plan(&candidate.observations[&ActorId(3)]));
-    commit_streaming_wait(&mut engine, candidate);
+    assert!(!candidate
+        .game
+        .event_observation_pending(&candidate.observations[&ActorId(3)].event_proof));
+    commit_streaming_wait(&mut engine, candidate, actor);
     assert!(!knows(&engine.game, ActorId(3), "slow_plan"));
 }
 fn private_work_scenario() -> Scenario {
@@ -745,7 +833,23 @@ fn public_plan_review_unseen_source_only_effect_does_not_disclose_or_license_to_
 fn public_plan_review_visible_source_only_effect_still_discloses_and_licenses() {
     let mut engine = asymmetric_public_plan_engine(true);
     complete_asymmetric_public_plan(&mut engine);
-    assert!(subject_discloses_fixture_observe_plan(&engine));
+    let events = engine
+        .game
+        .observe(SimActor(2))
+        .unwrap()
+        .combat
+        .unwrap()
+        .events;
+    assert!(matches!(events.as_slice(), [
+        tor_simulation::combat::DisclosedCombatEvent::Ability {
+            caster: Some(SimActor(1)),
+            target: Some(SimActor(2)),
+            id,
+            outcome: tor_simulation::abilities::OutcomeStatus::Applied,
+            strike: Some(0),
+            ..
+        }
+    ] if id.as_str() == "fixture_observe_plan"));
     assert!(knows(&engine.game, ActorId(2), "fixture_observe_plan"));
 }
 
@@ -766,7 +870,10 @@ enum ParticipationFixture {
     SelectedTargetFailure,
 }
 fn participation_engine(case: ParticipationFixture) -> Engine {
-    asymmetric_public_plan_engine_with(false, |rules, creatures| {
+    participation_engine_with_visibility(case, false)
+}
+fn participation_engine_with_visibility(case: ParticipationFixture, caster_lit: bool) -> Engine {
+    asymmetric_public_plan_engine_with(caster_lit, |rules, creatures| {
         use tor_simulation::rules::{Effect, StrikeSource};
         let ability = rules
             .abilities
@@ -922,17 +1029,43 @@ fn assert_participation_disclosure(case: ParticipationFixture, expected: bool) {
         }
         _ => assert!(outcome.check.is_some()),
     }
+    let view = engine.game.observe(SimActor(2)).unwrap();
+    let sensations: Vec<_> = view
+        .combat
+        .unwrap()
+        .events
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event,
+                tor_simulation::combat::DisclosedCombatEvent::UnseenAbility { .. }
+            )
+        })
+        .collect();
     assert_eq!(
-        subject_discloses_fixture_observe_plan(&engine),
-        expected,
-        "disclosure must follow actual target participation"
+        sensations.len(),
+        usize::from(expected),
+        "anonymous sensation must follow actual target participation exactly once"
+    );
+    if expected {
+        assert_eq!(
+            sensations[0],
+            tor_simulation::combat::DisclosedCombatEvent::UnseenAbility {
+                caster: None,
+                target: SimActor(2),
+                outcome: outcome.result,
+            }
+        );
+    }
+    assert!(
+        !subject_discloses_fixture_observe_plan(&engine),
+        "target sensation does not identify the unseen source's technique"
     );
     assert!(engine.game.observe(SimActor(1)).unwrap().combat.unwrap().events.iter().any(|event| matches!(event,
         tor_simulation::combat::DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "fixture_observe_plan")), "the source keeps its own action event");
-    assert_eq!(
-        knows(&engine.game, ActorId(2), "fixture_observe_plan"),
-        expected,
-        "knowledge must follow the same licensed event"
+    assert!(
+        !knows(&engine.game, ActorId(2), "fixture_observe_plan"),
+        "anonymous feedback must not teach the hidden technique"
     );
 }
 #[test]
@@ -989,6 +1122,79 @@ fn public_plan_review_selected_target_failure_discloses_actual_attempt() {
     assert_participation_disclosure(ParticipationFixture::SelectedTargetFailure, true);
 }
 
+#[test]
+fn public_plan_previously_learned_technique_survives_anonymous_target_sensation() {
+    use tor_simulation::abilities::OutcomeStatus;
+    use tor_simulation::combat::DisclosedCombatEvent;
+    let mut engine = participation_engine_with_visibility(ParticipationFixture::TargetZero, true);
+    complete_asymmetric_action(&mut engine);
+    let disclosed = engine
+        .game
+        .observe(SimActor(2))
+        .unwrap()
+        .combat
+        .unwrap()
+        .events;
+    assert!(
+        matches!(disclosed.as_slice(), [DisclosedCombatEvent::Ability {
+        caster: Some(SimActor(1)), target: Some(SimActor(2)), id,
+        outcome: OutcomeStatus::Unaffected, strike: Some(0), ..
+    }] if id.as_str() == "fixture_observe_plan")
+    );
+    assert!(knows(&engine.game, ActorId(2), "fixture_observe_plan"));
+    for z in 0..2 {
+        engine
+            .game
+            .set_cell_light(
+                tor_world::Location {
+                    region: tor_world::RegionId(1),
+                    position: tor_world::Position { x: 1, y: 1, z },
+                },
+                false,
+            )
+            .unwrap();
+    }
+    let now = engine.game.observe(SimActor(2)).unwrap();
+    assert!(!now
+        .visible_actors
+        .iter()
+        .any(|actor| actor.id == SimActor(1)));
+    assert_eq!(
+        now.combat.unwrap().events,
+        disclosed,
+        "the existing identified event keeps its original receipt"
+    );
+    engine.observations = ObservationCache::default();
+    for _ in 0..8 {
+        if engine.next_actor() == Some(ActorId(1)) {
+            break;
+        }
+        let actor = engine.next_actor().unwrap();
+        act(&mut engine, actor, Action::Wait);
+    }
+    assert_eq!(engine.next_actor(), Some(ActorId(1)));
+    complete_asymmetric_action(&mut engine);
+    assert_eq!(
+        engine
+            .game
+            .observe(SimActor(2))
+            .unwrap()
+            .combat
+            .unwrap()
+            .events,
+        vec![DisclosedCombatEvent::UnseenAbility {
+            caster: None,
+            target: SimActor(2),
+            outcome: OutcomeStatus::Unaffected,
+        }],
+        "prior technique knowledge cannot attribute a new hidden action"
+    );
+    assert!(
+        knows(&engine.game, ActorId(2), "fixture_observe_plan"),
+        "anonymous feedback must preserve legitimate previously learned knowledge"
+    );
+}
+
 #[derive(Clone, Copy)]
 enum RiderParticipationFixture {
     Damage,
@@ -1000,12 +1206,19 @@ enum RiderParticipationFixture {
     PrimaryImmune,
 }
 fn assert_committed_rider_disclosure(case: RiderParticipationFixture, expected: bool) {
+    assert_committed_rider_disclosure_with_visibility(case, expected, false);
+}
+fn assert_committed_rider_disclosure_with_visibility(
+    case: RiderParticipationFixture,
+    expected: bool,
+    caster_lit: bool,
+) {
     use tor_simulation::abilities::{OutcomeStatus, ResolvedEffect};
     use tor_simulation::combat::{CombatEvent, DisclosedCombatEvent};
     use tor_simulation::rules::{
         AmountExpr, Effect, RiderCheckDef, RiderDef, RiderTrigger, StrikeSource,
     };
-    let mut engine = asymmetric_public_plan_engine_with(false, |rules, creatures| {
+    let mut engine = asymmetric_public_plan_engine_with(caster_lit, |rules, creatures| {
         let ability = rules
             .abilities
             .iter_mut()
@@ -1154,8 +1367,9 @@ fn assert_committed_rider_disclosure(case: RiderParticipationFixture, expected: 
         .events
         .into_iter()
         .filter(|event| {
-            matches!(event,
-        DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "fixture_observe_plan")
+            matches!(event, DisclosedCombatEvent::UnseenAbility { .. })
+                || matches!(event,
+                    DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "fixture_observe_plan")
         })
         .collect();
     assert_eq!(
@@ -1164,44 +1378,93 @@ fn assert_committed_rider_disclosure(case: RiderParticipationFixture, expected: 
         "executed rider participation must license exactly one primary event"
     );
     if expected {
-        assert!(
-            matches!(
-                &events[0],
-                DisclosedCombatEvent::Ability {
+        if caster_lit {
+            assert!(
+                matches!(
+                    &events[0],
+                    DisclosedCombatEvent::Ability {
+                        caster: Some(SimActor(1)),
+                        target: Some(SimActor(2)),
+                        outcome: OutcomeStatus::Applied,
+                        strike: Some(0),
+                        ..
+                    }
+                ),
+                "identified source preserves the primary event and strike"
+            );
+        } else {
+            assert_eq!(
+                events[0],
+                DisclosedCombatEvent::UnseenAbility {
                     caster: None,
-                    target: Some(SimActor(2)),
+                    target: SimActor(2),
                     outcome: OutcomeStatus::Applied,
-                    strike: Some(0),
-                    ..
-                }
-            ),
-            "rider license preserves primary status without exposing its unseen caster"
-        );
+                },
+                "rider sensation preserves primary status without naming the technique"
+            );
+        }
     }
     assert_eq!(
         knows(&engine.game, ActorId(2), "fixture_observe_plan"),
-        expected,
-        "knowledge must come from that one licensed primary event"
+        caster_lit && expected,
+        "only the identified primary event may teach the technique"
+    );
+    assert_eq!(
+        subject_discloses_fixture_observe_plan(&engine),
+        caster_lit && expected
+    );
+    let source_events = engine
+        .game
+        .observe(SimActor(1))
+        .unwrap()
+        .combat
+        .unwrap()
+        .events;
+    let source_primaries: Vec<_> = source_events
+        .iter()
+        .filter(|event| {
+            matches!(event,
+                DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "fixture_observe_plan"
+            )
+        })
+        .collect();
+    assert_eq!(
+        source_primaries.len(),
+        1,
+        "the source retains exactly its own primary event"
+    );
+    assert!(
+        matches!(source_primaries[0], DisclosedCombatEvent::Ability {
+        caster: Some(SimActor(1)), target: Some(SimActor(2)), outcome, strike: Some(0), ..
+    } if *outcome == primary.result)
     );
 }
 #[test]
-fn public_plan_rider_review_executed_damage_licenses_primary_once() {
+fn public_plan_rider_review_identified_source_licenses_primary_once() {
+    assert_committed_rider_disclosure_with_visibility(
+        RiderParticipationFixture::Damage,
+        true,
+        true,
+    );
+}
+#[test]
+fn public_plan_rider_review_executed_damage_preserves_anonymous_primary_once() {
     assert_committed_rider_disclosure(RiderParticipationFixture::Damage, true);
 }
 #[test]
-fn public_plan_rider_review_executed_zero_heal_licenses_primary_once() {
+fn public_plan_rider_review_executed_zero_heal_preserves_anonymous_primary_once() {
     assert_committed_rider_disclosure(RiderParticipationFixture::ZeroHeal, true);
 }
 #[test]
-fn public_plan_rider_review_executed_defense_check_licenses_primary_once() {
+fn public_plan_rider_review_executed_defense_check_preserves_anonymous_primary_once() {
     assert_committed_rider_disclosure(RiderParticipationFixture::Defense, true);
 }
 #[test]
-fn public_plan_rider_review_immune_defense_check_licenses_primary_once() {
+fn public_plan_rider_review_immune_defense_check_preserves_anonymous_primary_once() {
     assert_committed_rider_disclosure(RiderParticipationFixture::ImmuneDefense, true);
 }
 #[test]
-fn public_plan_rider_review_immune_target_payload_licenses_primary_once() {
+fn public_plan_rider_review_immune_target_payload_preserves_anonymous_primary_once() {
     assert_committed_rider_disclosure(RiderParticipationFixture::ImmunePayload, true);
 }
 #[test]

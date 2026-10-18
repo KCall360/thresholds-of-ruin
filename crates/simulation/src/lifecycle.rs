@@ -338,15 +338,25 @@ impl Game {
     /// External effect application owns one transaction; internal lifecycle callers
     /// use the already existing action/physics transaction and actor-local snapshots.
     pub fn apply(&mut self, outcome: Outcome) -> Result<(), GameError> {
+        self.with_effect_publication(|candidate| candidate.apply_outcome(outcome))
+    }
+
+    /// Publish one complete public effect operation. Internal effect/rider work
+    /// stays on apply_outcome until its owning transaction finishes participation.
+    /// A host candidate retains its observer extension for the outer publication.
+    pub(crate) fn with_effect_publication<R>(
+        &mut self,
+        change: impl FnOnce(&mut Self) -> Result<R, GameError>,
+    ) -> Result<R, GameError> {
         let mut candidate = self.clone();
         if !candidate.host_region_continuation {
             candidate.seal_event_observations()?;
         }
-        candidate.apply_outcome(outcome)?;
+        let result = change(&mut candidate)?;
         candidate.reconcile_recovery_contexts()?;
         candidate.seal_participant_events()?;
         *self = candidate;
-        Ok(())
+        Ok(result)
     }
 
     pub(crate) fn apply_outcome(

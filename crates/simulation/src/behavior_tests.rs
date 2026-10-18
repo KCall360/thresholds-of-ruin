@@ -603,10 +603,18 @@ fn paired_hidden_attackers_do_not_become_identified_grudges() {
         let outcome = commit_strike(state, ActorId(1), ActorId(2));
         assert!(outcome.target_participated());
         let view = state.observe(ActorId(2)).unwrap();
-        assert!(view.combat.unwrap().events.iter().any(|event| matches!(
+        let events = view.combat.unwrap().events;
+        assert!(events.iter().any(|event| matches!(
             event,
-            crate::combat::DisclosedCombatEvent::Ability { caster: None, .. }
+            crate::combat::DisclosedCombatEvent::UnseenAbility {
+                caster: None,
+                target: ActorId(2),
+                outcome: result,
+            } if *result == outcome.result
         )));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, crate::combat::DisclosedCombatEvent::Ability { .. })));
         assert!(state.actors[&ActorId(2)].behavior.engagement.is_none());
     }
     assert_eq!(
@@ -679,17 +687,18 @@ fn partial_attacker_body_without_disclosed_caster_grants_no_identity() {
         .all(|actor| actor.id != ActorId(1) || actor.location != at(1)));
     let outcome = commit_strike(&mut game, ActorId(1), ActorId(2));
     assert!(outcome.target_participated());
-    assert!(game
-        .observe(ActorId(2))
-        .unwrap()
-        .combat
-        .unwrap()
-        .events
+    let events = game.observe(ActorId(2)).unwrap().combat.unwrap().events;
+    assert!(events.iter().any(|event| matches!(
+        event,
+        crate::combat::DisclosedCombatEvent::UnseenAbility {
+            caster: None,
+            target: ActorId(2),
+            outcome: result,
+        } if *result == outcome.result
+    )));
+    assert!(!events
         .iter()
-        .any(|event| matches!(
-            event,
-            crate::combat::DisclosedCombatEvent::Ability { caster: None, .. }
-        )));
+        .any(|event| matches!(event, crate::combat::DisclosedCombatEvent::Ability { .. })));
     assert!(game.actors[&ActorId(2)].behavior.engagement.is_none());
 }
 

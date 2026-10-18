@@ -3332,6 +3332,20 @@ mod ordered_strikes_terminal_tests {
     fn with_events(before: &Game, events: serde_json::Value) -> Game {
         let mut shared = tor_simulation::checkpoint::SharedState::default();
         let mut snapshot = serde_json::to_value(before.checkpoint(&mut shared)).unwrap();
+        assert!(snapshot["events"].as_array().unwrap().is_empty());
+        assert_eq!(snapshot["event_receipts"]["bindings"], 0);
+        assert!(snapshot["event_receipts"]["observers"]
+            .as_object()
+            .unwrap()
+            .is_empty());
+        // These classifier tests inspect raw terminal events only. Seal their
+        // synthetic batch without inventing any historical observer authority.
+        snapshot["event_receipts"] = serde_json::json!({
+            "generation": 1,
+            "sealed": events.as_array().unwrap().len(),
+            "bindings": 0,
+            "observers": {}
+        });
         snapshot["events"] = events;
         Game::restore_checkpoint(
             serde_json::from_value(snapshot).unwrap(),

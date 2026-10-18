@@ -1635,6 +1635,9 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
+        // Complete the outer publication omitted by the private damage helper.
+        game.seal_event_observations().unwrap();
+        assert!(game.event_receipts_valid());
         let preparation = game.preparation(actor).unwrap();
         assert_eq!(preparation.intention, Some(intention));
         assert!(!preparation.active);
@@ -2283,6 +2286,9 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
+        // Complete the outer publication omitted by the private damage helper.
+        game.seal_event_observations().unwrap();
+        assert!(game.event_receipts_valid());
         let before = game.health(actor).unwrap().0;
         let receipt = game
             .admit_intention(

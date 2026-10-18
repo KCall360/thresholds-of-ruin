@@ -5,6 +5,7 @@ use crate::{Game, GameError};
 struct BatchExecutionFacts<'a> {
     contact: Option<&'a crate::combat::contact::MeleeContact>,
     hold_damage: Option<super::HoldDamageExecution>,
+    disclosure_origin: &'a mut Option<crate::event_history::EventOrigin>,
 }
 
 impl Game {
@@ -174,6 +175,7 @@ impl Game {
         }
         let mut budget = resolve::StrikeBudget::new(strike);
         let mut activity = crate::lifecycle::DamageActivityGuard::default();
+        let mut disclosure_origin = None;
         let (mut primary, primary_receipt) = self.resolve_batch_in_transaction(
             ResolutionPlan::Strike { ability, strike },
             &mut budget,
@@ -185,6 +187,7 @@ impl Game {
             BatchExecutionFacts {
                 contact: contact.as_ref(),
                 hold_damage,
+                disclosure_origin: &mut disclosure_origin,
             },
         )?;
         if strike.qualifying_primary_check()
@@ -247,6 +250,7 @@ impl Game {
                     BatchExecutionFacts {
                         contact: contact.as_ref(),
                         hold_damage: None,
+                        disclosure_origin: &mut disclosure_origin,
                     },
                 )?;
                 progress.record_created_hold(
@@ -286,13 +290,15 @@ impl Game {
             | ResolutionPlan::Rider { ability, .. } => (ability.actor, ability.target),
             ResolutionPlan::Effects { actor, target, .. } => (actor, target),
         };
-        let mut disclosure_origin = self.capture_event_origin(actor, target);
+        let mut disclosure_origin =
+            self.reuse_event_origin(actor, target, facts.disclosure_origin.as_ref());
         if matches!(plan,
             ResolutionPlan::Ability(ability) | ResolutionPlan::Strike { ability, .. } | ResolutionPlan::Rider { ability, .. }
                 if matches!(ability.invocation, super::AbilityInvocation::ContactTarget { .. }))
         {
             disclosure_origin.cap_contact_target();
         }
+        *facts.disclosure_origin = Some(disclosure_origin.clone());
         let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
         let mut context = self.resolution_context(plan, actor, target)?;
         context.spatial = self.spatial_resolution_input(plan, facts.contact);

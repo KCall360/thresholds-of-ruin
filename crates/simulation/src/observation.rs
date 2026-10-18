@@ -201,13 +201,20 @@ pub(crate) struct DecisionSnapshot {
     pub sight: Vec<tor_world::SightCell>,
 }
 
+#[derive(Clone, Copy)]
+enum ScenePurpose {
+    Decision,
+    Ordinary,
+}
+
 impl Game {
     pub(crate) fn decision_snapshot(&self, id: ActorId) -> Result<DecisionSnapshot, GameError> {
         let mut sight = Vec::new();
-        crate::diagnostics::decision_scene();
-        let disclosed = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| {
-            sight.extend_from_slice(cells)
-        })?;
+        let disclosed = self.compute_scene_for(
+            id,
+            ScenePurpose::Decision,
+            &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells),
+        )?;
         let view = self.observe_in_scene(id, &disclosed, &sight)?;
         self.cache_scene(id, &disclosed, &sight)?;
         Ok(DecisionSnapshot { view, sight })
@@ -658,7 +665,6 @@ impl Game {
     /// offsets. Sight starts at the centre of the body's eye cell; offsets are
     /// relative to the actor's reference cell in its body frame.
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
-        crate::diagnostics::ordinary_scene();
         let mut sight = Vec::new();
         let scene = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| {
             sight.extend_from_slice(cells)
@@ -775,7 +781,6 @@ impl Game {
         // Do not copy the projected array merely to ask a membership question.
         // A rejected candidate may have populated this shared cache with a
         // different witness; replace that derived entry from this Game's inputs.
-        crate::diagnostics::ordinary_scene();
         let mut sight = Vec::new();
         let cells = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| {
             sight.extend_from_slice(cells)
@@ -796,8 +801,23 @@ impl Game {
         id: ActorId,
         sight_observer: &mut impl FnMut(&[tor_world::SightCell]),
     ) -> Result<Vec<tor_world::SightCell>, GameError> {
+        self.compute_scene_for(id, ScenePurpose::Ordinary, sight_observer)
+    }
+
+    fn compute_scene_for(
+        &self,
+        id: ActorId,
+        purpose: ScenePurpose,
+        sight_observer: &mut impl FnMut(&[tor_world::SightCell]),
+    ) -> Result<Vec<tor_world::SightCell>, GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        self.compute_scene_at(id, actor.location, actor.orientation, sight_observer)
+        self.compute_scene_at(
+            id,
+            actor.location,
+            actor.orientation,
+            purpose,
+            sight_observer,
+        )
     }
 
     pub(crate) fn scene_snapshot_at_placement(
@@ -814,6 +834,7 @@ impl Game {
             id,
             placement.location,
             placement.orientation,
+            ScenePurpose::Ordinary,
             &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells),
         )?;
         Ok((scene, sight))
@@ -823,12 +844,17 @@ impl Game {
         id: ActorId,
         location: Location,
         orientation: u8,
+        purpose: ScenePurpose,
         sight_observer: &mut impl FnMut(&[tor_world::SightCell]),
     ) -> Result<Vec<tor_world::SightCell>, GameError> {
         if !self.alive(id) && self.combat.selected != Some(id) && self.actors.contains_key(&id) {
             return Ok(Vec::new());
         }
         crate::diagnostics::scene();
+        match purpose {
+            ScenePurpose::Decision => crate::diagnostics::decision_scene(),
+            ScenePurpose::Ordinary => crate::diagnostics::ordinary_scene(),
+        }
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         let body = &actor.body;
         let Some((eye, eye_frame)) = self.eye_at(location, orientation, body) else {
@@ -983,6 +1009,42 @@ mod tests {
             .spawn_actor(at(1, 0, 0), NonZeroU64::new(100).unwrap())
             .unwrap();
         (game, actor)
+    }
+
+    #[test]
+    fn scene_build_counters_cover_cold_snapshots_placements_and_decisions() {
+        let (game, actor) = membership_fixture();
+        let before = crate::diagnostics::work_counts();
+        game.scene_snapshot(actor).unwrap();
+        let cold = crate::diagnostics::work_counts();
+        assert_eq!(cold.scenes - before.scenes, 1);
+        assert_eq!(cold.ordinary_scenes - before.ordinary_scenes, 1);
+        assert_eq!(cold.decision_scenes, before.decision_scenes);
+        game.scene_snapshot(actor).unwrap();
+        let warm = crate::diagnostics::work_counts();
+        assert_eq!(warm.scenes, cold.scenes);
+        assert_eq!(warm.ordinary_scenes, cold.ordinary_scenes);
+        game.scene_snapshot_at_placement(
+            actor,
+            crate::abilities::Placement {
+                location: at(1, 1, 0),
+                orientation: 0,
+            },
+        )
+        .unwrap();
+        let placed = crate::diagnostics::work_counts();
+        assert_eq!(placed.scenes - warm.scenes, 1);
+        assert_eq!(placed.ordinary_scenes - warm.ordinary_scenes, 1);
+        game.decision_snapshot(actor).unwrap();
+        let decided = crate::diagnostics::work_counts();
+        assert_eq!(decided.scenes - placed.scenes, 1);
+        assert_eq!(decided.decision_scenes - placed.decision_scenes, 1);
+        assert_eq!(decided.ordinary_scenes, placed.ordinary_scenes);
+        assert_eq!(
+            decided.scenes - before.scenes,
+            decided.ordinary_scenes - before.ordinary_scenes + decided.decision_scenes
+                - before.decision_scenes
+        );
     }
 
     #[test]

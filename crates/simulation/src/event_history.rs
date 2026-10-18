@@ -111,6 +111,7 @@ pub(crate) struct EventOrigin {
     source_target: Reference,
     target_source: Reference,
     witness: EventObservationWitness,
+    frozen: [bool; 2],
 }
 impl EventOrigin {
     pub(crate) fn cap_contact_target(&mut self) {
@@ -288,7 +289,28 @@ impl Game {
         let reference = |observer, subject| {
             if observer == subject {
                 Some(ActorReferenceKind::Creature)
+            } else if self.actor_frozen(observer) {
+                // Crediting a frozen causal owner cannot acquire new senses or
+                // activate its floor. Its personal outcome still has a receipt.
+                None
             } else {
+                if self.actor_frozen(subject) {
+                    let owner = self.actors.get(&observer)?;
+                    let other = self.actors.get(&subject)?;
+                    // An active recipient may see a frozen source across a
+                    // physical link. Only an isolated observer region plus an
+                    // absent subject body proves Hidden without a scene.
+                    if self.world.linked_regions(owner.location.region).is_empty()
+                        && self
+                            .body_cells(other.location, other.orientation, &other.body)
+                            .is_none_or(|body| {
+                                body.iter()
+                                    .all(|(at, _)| at.region != owner.location.region)
+                            })
+                    {
+                        return None;
+                    }
+                }
                 self.actor_disclosure(observer, subject)
                     .ok()
                     .and_then(|d| d.reference())
@@ -317,7 +339,33 @@ impl Game {
             source_target,
             target_source: reference(target, actor),
             witness: self.event_observation_witness(),
+            frozen: [self.actor_frozen(actor), self.actor_frozen(target)],
         }
+    }
+
+    /// Reuse only an unpublished origin with identical sensory inputs. Health
+    /// settlement alone does not invalidate these inputs, but a rider that
+    /// changes placement, life, guise or senses must capture its own new origin.
+    /// Appending a preceding event is allowed; every clone still binds to its
+    /// exact event key independently when published.
+    pub(crate) fn reuse_event_origin(
+        &self,
+        actor: ActorId,
+        target: ActorId,
+        previous: Option<&EventOrigin>,
+    ) -> EventOrigin {
+        previous
+            .filter(|origin| {
+                origin.event.is_none()
+                    && origin.actor == actor
+                    && origin.target == target
+                    && origin.witness.generation == self.event_receipts.generation
+                    && origin.witness.actors == self.actors.visibility_epoch()
+                    && origin.witness.world == self.world.perception_snapshot()
+                    && origin.frozen == [self.actor_frozen(actor), self.actor_frozen(target)]
+            })
+            .cloned()
+            .unwrap_or_else(|| self.capture_event_origin(actor, target))
     }
 
     pub(crate) fn begin_event_batch(&mut self) -> Result<(), GameError> {

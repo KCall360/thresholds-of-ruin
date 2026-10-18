@@ -225,8 +225,10 @@ impl Game {
         ))?;
         let context = self.condition_recovery_context(actor, condition)?;
         let update = combat.apply_condition(condition, source, duration, context)?;
-        self.with_recovery_transition(context.is_some(), |candidate| {
-            candidate.apply_outcome(outcome)
+        self.with_effect_publication(|candidate| {
+            candidate.apply_outcome(outcome)?;
+            candidate.retire_settled_falls();
+            Ok(())
         })?;
         Ok(update)
     }
@@ -945,6 +947,9 @@ mod tests {
             game.actors.get_mut(&actor).unwrap().ready_at = 10;
         }
         game.check_arena_policy().unwrap();
+        // This fixture invokes private settlement without the action publisher.
+        game.seal_event_observations().unwrap();
+        assert!(game.event_receipts_valid());
         assert_eq!(
             game.arena_run().unwrap().stop(),
             Some(&crate::arena::ArenaStop::Elimination {
