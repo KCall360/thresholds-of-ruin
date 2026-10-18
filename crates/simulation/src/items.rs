@@ -199,8 +199,14 @@ impl ItemSpec {
         Ok(())
     }
     pub(crate) fn valid(&self) -> bool {
-        self.currency.is_none_or(|_| self.class == ItemClass::Coin && self.stackable && self.equipment.is_none() && self.consumable.is_none() && self.edible.is_none() && self.supply.is_none())
-        && self.equipment.as_ref().is_none_or(|equipment| {
+        self.currency.is_none_or(|_| {
+            self.class == ItemClass::Coin
+                && self.stackable
+                && self.equipment.is_none()
+                && self.consumable.is_none()
+                && self.edible.is_none()
+                && self.supply.is_none()
+        }) && self.equipment.as_ref().is_none_or(|equipment| {
             !self.stackable
                 && self.consumable.is_none()
                 && self.edible.is_none()
@@ -229,30 +235,90 @@ impl ItemSpec {
 }
 
 impl Game {
-    pub(crate) fn prepare_owned_transfer(&self, source: ItemId, owner: ActorId, recipient: ActorId, quantity: u64) -> Result<PreparedTransfer, GameError> {
-        if owner == recipient { return Err(GameError::ItemUnavailable); }
+    pub(crate) fn prepare_owned_transfer(
+        &self,
+        source: ItemId,
+        owner: ActorId,
+        recipient: ActorId,
+        quantity: u64,
+    ) -> Result<PreparedTransfer, GameError> {
+        if owner == recipient {
+            return Err(GameError::ItemUnavailable);
+        }
         let actor = self.actors.get(&owner).ok_or(GameError::UnknownActor)?;
-        if !actor.alive() || self.actors.get(&recipient).is_none_or(|actor| !actor.alive()) || actor.equipment.values().any(|equipped| *equipped == source) { return Err(GameError::ItemUnavailable); }
-        let item = self.items.get(&source).filter(|item| item.location == ItemLocation::Carried(owner)).ok_or(GameError::ItemUnavailable)?;
-        if quantity == 0 || quantity > item.quantity { return Err(GameError::InvalidQuantity); }
-        if item.free_quantity(None).is_none_or(|free| free < quantity) { return Err(GameError::ItemUnavailable); }
+        if !actor.alive()
+            || self
+                .actors
+                .get(&recipient)
+                .is_none_or(|actor| !actor.alive())
+            || actor.equipment.values().any(|equipped| *equipped == source)
+        {
+            return Err(GameError::ItemUnavailable);
+        }
+        let item = self
+            .items
+            .get(&source)
+            .filter(|item| item.location == ItemLocation::Carried(owner))
+            .ok_or(GameError::ItemUnavailable)?;
+        if quantity == 0 || quantity > item.quantity {
+            return Err(GameError::InvalidQuantity);
+        }
+        if item.free_quantity(None).is_none_or(|free| free < quantity) {
+            return Err(GameError::ItemUnavailable);
+        }
         let destination = ItemLocation::Carried(recipient);
-        let merge = item.spec.stackable.then(|| self.items.at(destination).find(|id| self.items[id].spec == item.spec)).flatten();
+        let merge = item
+            .spec
+            .stackable
+            .then(|| {
+                self.items
+                    .at(destination)
+                    .find(|id| self.items[id].spec == item.spec)
+            })
+            .flatten();
         let result = if let Some(id) = merge {
-            self.items[&id].quantity.checked_add(quantity).ok_or(GameError::InvalidQuantity)?;
+            self.items[&id]
+                .quantity
+                .checked_add(quantity)
+                .ok_or(GameError::InvalidQuantity)?;
             id
-        } else if quantity == item.quantity { source } else {
-            self.next_item_id.checked_add(1).ok_or(GameError::IdentityExhausted)?;
+        } else if quantity == item.quantity {
+            source
+        } else {
+            self.next_item_id
+                .checked_add(1)
+                .ok_or(GameError::IdentityExhausted)?;
             ItemId(self.next_item_id)
         };
-        Ok(PreparedTransfer { source, expected_source: item.clone(), result, expected_destination: merge.map(|id| self.items[&id].clone()), destination, quantity, expected_next_item_id: self.next_item_id })
+        Ok(PreparedTransfer {
+            source,
+            expected_source: item.clone(),
+            result,
+            expected_destination: merge.map(|id| self.items[&id].clone()),
+            destination,
+            quantity,
+            expected_next_item_id: self.next_item_id,
+        })
     }
 
     pub(crate) fn apply_owned_transfer(&mut self, plan: PreparedTransfer) -> Result<(), GameError> {
-        if self.next_item_id != plan.expected_next_item_id || self.items.get(&plan.source) != Some(&plan.expected_source)
-            || (plan.source != plan.result && self.items.get(&plan.result) != plan.expected_destination.as_ref()) { return Err(GameError::ItemUnavailable); }
-        let ItemLocation::Carried(owner) = plan.expected_source.location else { return Err(GameError::ItemUnavailable); };
-        if self.actors.get(&owner).is_none_or(|actor| actor.equipment.values().any(|id| *id == plan.source)) { return Err(GameError::ItemUnavailable); }
+        if self.next_item_id != plan.expected_next_item_id
+            || self.items.get(&plan.source) != Some(&plan.expected_source)
+            || (plan.source != plan.result
+                && self.items.get(&plan.result) != plan.expected_destination.as_ref())
+        {
+            return Err(GameError::ItemUnavailable);
+        }
+        let ItemLocation::Carried(owner) = plan.expected_source.location else {
+            return Err(GameError::ItemUnavailable);
+        };
+        if self
+            .actors
+            .get(&owner)
+            .is_none_or(|actor| actor.equipment.values().any(|id| *id == plan.source))
+        {
+            return Err(GameError::ItemUnavailable);
+        }
         self.apply_transfer(plan.source, plan.result, plan.quantity, plan.destination)
     }
     pub fn place_item_stack(

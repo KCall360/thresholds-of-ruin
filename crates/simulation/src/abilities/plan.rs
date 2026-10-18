@@ -82,7 +82,9 @@ impl<'de> Deserialize<'de> for PlannedCheck {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PlannedEffect {
-    Theft { theft: crate::theft::PlannedTheft },
+    Theft {
+        theft: crate::theft::PlannedTheft,
+    },
     ApplyLinkedHold {
         policy: crate::linked_hold::HoldPolicy,
     },
@@ -561,7 +563,13 @@ pub(super) fn effects_match_definition_scoped(
             .zip(actual)
             .enumerate()
             .all(|(index, (expected, actual))| match (expected, actual) {
-                (Effect::Theft { selection, relocation }, PlannedEffect::Theft { theft }) => theft.matches(selection, relocation.as_ref()),
+                (
+                    Effect::Theft {
+                        selection,
+                        relocation,
+                    },
+                    PlannedEffect::Theft { theft },
+                ) => theft.matches(selection, relocation.as_ref()),
                 (
                     Effect::ApplyLinkedHold { policy: expected },
                     PlannedEffect::ApplyLinkedHold { policy: actual },
@@ -917,7 +925,12 @@ impl Game {
         effects
             .iter()
             .map(|effect| match effect {
-                Effect::Theft { selection, relocation } => Ok(PlannedEffect::Theft { theft: self.compile_theft(actor, selection, relocation.as_ref())? }),
+                Effect::Theft {
+                    selection,
+                    relocation,
+                } => Ok(PlannedEffect::Theft {
+                    theft: self.compile_theft(actor, selection, relocation.as_ref())?,
+                }),
                 Effect::ApplyLinkedHold { policy } => Ok(PlannedEffect::ApplyLinkedHold {
                     policy: policy.clone(),
                 }),
@@ -1041,7 +1054,10 @@ impl Game {
         actor: ActorId,
         effects: &[Effect],
     ) -> Result<Vec<PlannedEffect>, GameError> {
-        if effects.iter().any(|effect| effect.spatial() || matches!(effect, Effect::Theft { .. })) {
+        if effects
+            .iter()
+            .any(|effect| effect.spatial() || matches!(effect, Effect::Theft { .. }))
+        {
             return Err(invalid());
         }
         let effects =
@@ -1058,7 +1074,9 @@ impl<'de> Deserialize<'de> for PlannedEffect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
-            Theft { theft: crate::theft::PlannedTheft },
+            Theft {
+                theft: crate::theft::PlannedTheft,
+            },
             ApplyLinkedHold {
                 policy: crate::linked_hold::HoldPolicy,
             },

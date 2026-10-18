@@ -67,12 +67,24 @@ mod linked_hold_effect_tests {
     use super::*;
     #[test]
     fn theft_source_inspection_has_exact_bounded_declared_fields() {
-        let rules = s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
-        for selection in [s::theft::TheftSelection::MagicalUnit, s::theft::TheftSelection::Currency {
-            currency: s::CurrencyKind::Gold,
-            amount: s::quantity::QuantityExpr::DepthScaledUniform { minimum: 2, maximum_base: 51, per_depth: 10 },
-        }] {
-            let effect = s::rules::Effect::Theft { selection, relocation: None };
+        let rules =
+            s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
+                .unwrap();
+        for selection in [
+            s::theft::TheftSelection::MagicalUnit,
+            s::theft::TheftSelection::Currency {
+                currency: s::CurrencyKind::Gold,
+                amount: s::quantity::QuantityExpr::DepthScaledUniform {
+                    minimum: 2,
+                    maximum_base: 51,
+                    per_depth: 10,
+                },
+            },
+        ] {
+            let effect = s::rules::Effect::Theft {
+                selection,
+                relocation: None,
+            };
             assert_eq!(effect_fields(&effect), 3);
             assert_eq!(effect_view(&effect, &rules).fields.len(), 3);
         }

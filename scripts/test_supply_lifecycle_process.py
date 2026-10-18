@@ -210,6 +210,10 @@ class SupplyLifecycleProcesses(ProcessTestCase):
                     if row["item"]["known_supply"])
         self.assertIsNone(self.act(first, {"type": "move", "direction": "east"})["error"])
         self.assertIsNone(self.act(second, {"type": "wait"})["error"])
+        # Another client's wait publishes a new revision asynchronously. Refresh
+        # the taker's context; the second actor's explicit item selection stays
+        # unchanged so the refusal below still tests the consumed supply handle.
+        self.assertIsNone(self.request(first, {"type": "snapshot"})["error"])
         self.assertIsNone(self.act(first, {"type": "take", "item": item})["error"])
         before = self.request(second, {"type": "snapshot"})
         denied = self.act(second, stale)

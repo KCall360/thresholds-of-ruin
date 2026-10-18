@@ -1,7 +1,10 @@
 """Disclosed reach bounds for the production Rogue acceptance drivers."""
 import unittest
 
-from rogue_test_support import cardinal_melee_candidate, ground_sight_candidate
+from rogue_test_support import (
+    cardinal_melee_candidate, disclosed_body_cells, disclosed_melee_candidate,
+    disclosed_sight_candidate, ground_sight_candidate,
+)
 
 
 def actor(x, y, z=0):
@@ -9,6 +12,27 @@ def actor(x, y, z=0):
 
 
 class RogueReachChoices(unittest.TestCase):
+    def test_disclosed_own_body_allows_face_contact_with_hovering_foes(self):
+        view = {"self_target": "self", "visible_actors": [{"id": "self", **actor(0, 0, 1)}]}
+        self.assertEqual(disclosed_body_cells(view), {(0, 0, 0), (0, 0, 1)})
+        for point in ((1, 0, 1), (-1, 0, 1), (0, 0, 2), (0, 1, 0)):
+            self.assertTrue(disclosed_melee_candidate(view, actor(*point)), point)
+        for point in ((1, 1, 1), (1, 0, 2), (0, 0, 3), (0, 0, 1), (0, 0, 0)):
+            self.assertFalse(disclosed_melee_candidate(view, actor(*point)), point)
+
+    def test_other_actors_and_undisclosed_body_do_not_extend_reach(self):
+        view = {"self_target": "self", "visible_actors": [{"id": "other", **actor(0, 0, 1)}]}
+        self.assertEqual(disclosed_body_cells(view), {(0, 0, 0)})
+        self.assertFalse(disclosed_melee_candidate(view, actor(1, 0, 1)))
+        self.assertFalse(disclosed_melee_candidate(view, actor(0, 0, 2)))
+        self.assertTrue(disclosed_melee_candidate(view, actor(1, 0, 0)))
+
+    def test_sight_can_use_a_disclosed_airborne_body_occurrence(self):
+        self.assertTrue(disclosed_sight_candidate(actor(4, 2, 1), 6))
+        self.assertTrue(disclosed_sight_candidate(actor(-4, -1, 2), 6))
+        self.assertFalse(disclosed_sight_candidate(actor(4, 2, 2), 6))
+        self.assertFalse(disclosed_sight_candidate(actor(4, 2, 0), 6))
+
     def test_cardinal_contact_does_not_assume_diagonal_corner_reach(self):
         for x, y in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             self.assertTrue(cardinal_melee_candidate(actor(x, y)))
@@ -53,6 +77,17 @@ class DisclosedContactApproach(unittest.TestCase):
 
 
 class RogueCareChoices(unittest.TestCase):
+    def test_hovering_contact_still_requires_real_retaliation_before_care(self):
+        from rogue_test_support import care_combat_action
+        foe = {"id": "bird", **actor(1, 0, 1)}
+        view = {"self_target": "self", "visible_actors": [{"id": "self", **actor(0, 0, 1)}, foe]}
+        attack = {"type": "use_ability", "id": "basic_melee",
+                  "invocation": {"kind": "actor_target", "target": "bird"}}
+        self.assertEqual(care_combat_action([foe], injured=False, observation=view), attack)
+        self.assertEqual(care_combat_action([foe], injured=False, contacted={"bird"}, observation=view),
+                         {"type": "wait"})
+        self.assertEqual(care_combat_action([foe], injured=True, contacted={"bird"}, observation=view), attack)
+
     def action(self, foes, *, injured, contacted=()):
         from rogue_test_support import care_combat_action
         return care_combat_action(foes, injured=injured, contacted=contacted)

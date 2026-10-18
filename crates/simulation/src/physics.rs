@@ -449,11 +449,21 @@ impl Game {
 
     /// Geometry-only landing test for a fully materialized load-only floor.
     /// Region activity never changes the distribution of legal destinations.
-    pub(crate) fn stable_landing(&self, id: ActorId, at: Location, frame: u8, body: &BodySpec) -> bool {
-        if !self.body_fits(id, at, frame, body) { return false; }
+    pub(crate) fn stable_landing(
+        &self,
+        id: ActorId,
+        at: Location,
+        frame: u8,
+        body: &BodySpec,
+    ) -> bool {
+        if !self.body_fits(id, at, frame, body) {
+            return false;
+        }
         let entity = PhysicsEntity::Actor(id);
         let gravity = self.effective_gravity(entity, at, frame, body);
-        (0..3).all(|axis| gravity[axis] == 0 || self.gravity_axis_blocked(entity, at, frame, body, gravity, axis))
+        (0..3).all(|axis| {
+            gravity[axis] == 0 || self.gravity_axis_blocked(entity, at, frame, body, gravity, axis)
+        })
     }
     pub(crate) fn translate_body(
         &self,

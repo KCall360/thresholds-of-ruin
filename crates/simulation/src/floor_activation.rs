@@ -274,11 +274,25 @@ impl<'de> Deserialize<'de> for RoomDecision {
         })
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RoomResult {
     ChanceMiss,
     Attempt { decision: PlacementDecision },
+}
+impl<'de> Deserialize<'de> for RoomResult {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            ChanceMiss {},
+            Attempt { decision: PlacementDecision },
+        }
+        Ok(match Fields::deserialize(d)? {
+            Fields::ChanceMiss {} => Self::ChanceMiss,
+            Fields::Attempt { decision } => Self::Attempt { decision },
+        })
+    }
 }
 impl StageResult {
     /// Every ordinary birth receipt, including room-scoped attempts.
@@ -1310,6 +1324,13 @@ impl Game {
                 })
             })
     }
+    pub(crate) fn activation_scope(&self, id: &str) -> Option<&PreparedScope> {
+        self.floor_activation
+            .as_ref()?
+            .scopes
+            .get(id)
+            .map(|scope| &**scope)
+    }
     pub fn activation_scopes(&self) -> impl Iterator<Item = &PreparedScope> {
         self.floor_activation
             .iter()
@@ -1728,9 +1749,6 @@ impl Game {
 }
 
 impl Game {
-    /// Validate historical origin evidence against the pinned definitions, not
-    /// present ownership. Abandoned branches may name scopes not in this Game
-    /// and may have later ticks/IDs than the restored boundary being audited.
     fn evaluate_room_items(
         &mut self,
         entrant: ActorId,
@@ -1899,6 +1917,9 @@ impl Game {
         Ok(())
     }
 
+    /// Validate historical origin evidence against the pinned definitions, not
+    /// present ownership. Abandoned branches may name scopes not in this Game
+    /// and may have later ticks/IDs than the restored boundary being audited.
     pub fn validate_activation_record(
         &self,
         record: &FloorActivationRecord,

@@ -1309,6 +1309,7 @@ mod tests {
         })
         .unwrap();
         game.register_activation_scope(PreparedScope {
+            rooms: vec![],
             scope: "dungeon/2".into(),
             depth: 2,
             profile: "plain".into(),

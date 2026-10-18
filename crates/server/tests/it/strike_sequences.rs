@@ -395,7 +395,7 @@ fn ordered_strikes_saved_prefix_resumes_without_replaying_paid_strikes_or_admiss
                     json!({
                         "kind":"ability", "next_strike":completed,
                         "successful_primaries":if completed == 1 {1} else {3},
-                        "attempted_riders":[u64::from(completed == 2), 0]
+                        "attempted_riders":[u64::from(completed == 2), 0], "linked_hold":null
                     })
                 );
             }
@@ -535,7 +535,8 @@ fn failed_sequence_rider_journal_admission_preserves_prefix_and_replays_the_same
     assert_eq!(
         saved_preparation(&saved)["progress"],
         json!({
-            "kind":"ability", "next_strike":1, "successful_primaries":1, "attempted_riders":[0, 0]
+            "kind":"ability", "next_strike":1, "successful_primaries":1, "attempted_riders":[0, 0],
+            "linked_hold":null
         })
     );
     drop(engine);
@@ -655,7 +656,8 @@ fn failed_sequence_rider_journal_admission_preserves_prefix_and_replays_the_same
             assert_eq!(
                 saved_preparation(&actual)["progress"],
                 json!({
-                    "kind":"ability", "next_strike":2, "successful_primaries":3, "attempted_riders":[1, 0]
+                    "kind":"ability", "next_strike":2, "successful_primaries":3, "attempted_riders":[1, 0],
+                    "linked_hold":null
                 })
             );
         } else {

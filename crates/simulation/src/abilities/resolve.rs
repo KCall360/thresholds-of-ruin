@@ -243,7 +243,10 @@ pub enum OutcomeStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResolvedEffect {
-    Theft { quantity: u64, relocation: Option<super::Placement> },
+    Theft {
+        quantity: u64,
+        relocation: Option<super::Placement>,
+    },
     ApplyLinkedHold {
         policy: crate::linked_hold::HoldPolicy,
     },
@@ -837,7 +840,7 @@ pub(super) fn resolve_batch<'a>(
         EffectRecipient::Source => {
             let Some(source) = &snapshot.context.source else {
                 return Ok(BatchResolution {
-            deferred_theft: None,
+                    deferred_theft: None,
                     outcome,
                     condition_error: None,
                     selected_branch: None,
@@ -855,7 +858,10 @@ pub(super) fn resolve_batch<'a>(
             break;
         }
         let effect = match effect {
-            PlannedEffect::Theft { theft } => { deferred_theft = Some(theft.clone()); continue; }
+            PlannedEffect::Theft { theft } => {
+                deferred_theft = Some(theft.clone());
+                continue;
+            }
             PlannedEffect::StepSelfOneCell | PlannedEffect::PushTargetOneCell { .. } => {
                 let mode = if matches!(effect, PlannedEffect::StepSelfOneCell) {
                     super::MovementMode::Voluntary
@@ -1020,7 +1026,11 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
-            Theft { quantity: u64, #[serde(deserialize_with = "crate::bounded::required_option")] relocation: Option<super::Placement> },
+            Theft {
+                quantity: u64,
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                relocation: Option<super::Placement>,
+            },
             ApplyLinkedHold {
                 policy: crate::linked_hold::HoldPolicy,
             },
@@ -1075,7 +1085,13 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             },
         }
         let effect = match crate::bounded::named_map(deserializer)? {
-            Fields::Theft { quantity, relocation } => Self::Theft { quantity, relocation },
+            Fields::Theft {
+                quantity,
+                relocation,
+            } => Self::Theft {
+                quantity,
+                relocation,
+            },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Damage { amount } => Self::Damage { amount },

@@ -9,8 +9,14 @@ from arena_matrix import FAMILIES, HD_LEVELS, create_matrix, encounter, recipe, 
 
 class ArenaMatrixTests(unittest.TestCase):
     def test_generated_encounter_uses_current_scenario_format(self):
-        manifest, _ = encounter("warrior_rank_heavy", 1, False, False, "current-test-ruleset")
-        self.assertEqual(manifest["format"], 17)
+        source = Path(__file__).resolve().parents[1] / "scenarios/mob-arena/scenario.toml"
+        current_format = tomllib.loads(source.read_text(encoding="utf-8"))["format"]
+        for candidate in (False, True):
+            for mirrored in (False, True):
+                with self.subTest(candidate=candidate, mirrored=mirrored):
+                    manifest, _ = encounter("warrior_rank_heavy", 1, candidate, mirrored,
+                                            "current-test-ruleset")
+                    self.assertEqual(manifest["format"], current_format)
 
     def test_named_starter_allocations_cover_one_six_and_eleven_with_exact_paid_forms(self):
         names = {"warrior_rank_heavy", "warrior_talent_heavy", "warrior_mixed",

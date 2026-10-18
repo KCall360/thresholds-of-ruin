@@ -358,3 +358,73 @@ fn contextual_named_birth_requires_explicit_depth_even_when_chance_misses() {
         .spawn_named_population_actor("baseline", "carriers", "carrier", Some(52), at(1, 4, 1))
         .is_ok());
 }
+
+#[test]
+fn nested_room_receipts_reject_unknown_fields_missing_quantities_and_positional_maps() {
+    let mut game = room_gold_game(42, [1, 1], &[1]);
+    game.activate_initial_floor().unwrap();
+    let encoded = serde_json::to_value(game.activations_since(0).unwrap().remove(0)).unwrap();
+    for case in 0..4 {
+        let mut invalid = encoded.clone();
+        let room = &mut invalid["decisions"][0]["result"]["rooms"][0];
+        match case {
+            0 => room["result"] = serde_json::json!({"kind":"chance_miss","extra":1}),
+            1 => {
+                room["result"]["decision"]["entity"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("quantity");
+            }
+            2 => *room = serde_json::json!([1, {"kind":"chance_miss"}]),
+            3 => room["extra"] = serde_json::json!(1),
+            _ => unreachable!(),
+        }
+        assert!(
+            serde_json::from_value::<FloorActivationRecord>(invalid).is_err(),
+            "case {case}"
+        );
+    }
+    let mut invalid = encoded;
+    invalid["decisions"][0]["result"]["rooms"] = serde_json::json!(vec![
+        serde_json::json!({"room":1,"result":{"kind":"chance_miss"}});
+        MAX_ROOM_GROUPS + 1
+    ]);
+    assert!(serde_json::from_value::<FloorActivationRecord>(invalid).is_err());
+}
+
+#[test]
+fn changing_gold_quantity_does_not_reroll_room_chance_or_placement() {
+    for seed in 0..32 {
+        let mut variable = room_gold_game(seed, [1, 2], &[1, 2, 3]);
+        let mut fixed = variable.clone();
+        let PopulationContent::RoomItems { bands, .. } = &mut fixed
+            .floor_activation
+            .as_mut()
+            .unwrap()
+            .plan
+            .profiles
+            .get_mut("baseline")
+            .unwrap()
+            .stages[0]
+            .population
+        else {
+            panic!()
+        };
+        bands[0].choices[0].quantity = QuantityExpr::Fixed { quantity: 1 };
+        variable.activate_initial_floor().unwrap();
+        fixed.activate_initial_floor().unwrap();
+        let normalize = |game: &Game| {
+            let mut value = serde_json::to_value(game.activations_since(0).unwrap()).unwrap();
+            for room in value[0]["decisions"][0]["result"]["rooms"]
+                .as_array_mut()
+                .unwrap()
+            {
+                if let Some(entity) = room.pointer_mut("/result/decision/entity") {
+                    entity.as_object_mut().unwrap().remove("quantity");
+                }
+            }
+            value
+        };
+        assert_eq!(normalize(&variable), normalize(&fixed));
+    }
+}

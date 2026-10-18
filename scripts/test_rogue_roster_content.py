@@ -9,7 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "scenarios/rogue-exploration"
 ORDINARY = {"emu": (1, [(1, 2)]), "snake": (1, [(1, 3)]), "rattlesnake": (2, [(1, 6)]),
-            "hobgoblin": (1, [(1, 8)]), "zombie": (2, [(1, 8)]),
+            "hobgoblin": (1, [(1, 8)]), "orc": (1, [(1, 8)]), "zombie": (2, [(1, 8)]),
             "quagga": (3, [(1, 5), (1, 5)]),
             "centaur": (4, [(1, 2), (1, 5), (1, 5)]),
             "yeti": (4, [(1, 6), (1, 6)]),
@@ -50,19 +50,22 @@ class RogueRosterContent(unittest.TestCase):
     def test_every_rogue_species_owns_explicit_reference_disposition(self):
         species = source("catalog/creatures.toml")["creatures"]["species"]
         mean = {"kestrel", "venus_flytrap", "griffin", "emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "troll", "black_unicorn", "vampire"}
-        passive = {"bat", "human", "ice_monster", "centaur", "yeti", "wraith", "jabberwock"}
-        tool_users = {"human", "hobgoblin", "centaur", "troll", "vampire"}
+        passive = {"bat", "human", "ice_monster", "centaur", "yeti", "wraith", "jabberwock", "leprechaun", "nymph", "orc"}
+        tool_users = {"human", "hobgoblin", "centaur", "troll", "vampire", "orc"}
         care_and_loot = tool_users | {"yeti"}
         self.assertEqual(set(species), {"rogue." + name for name in mean | passive})
         for name in mean | passive:
             with self.subTest(species=name):
-                self.assertEqual(species["rogue." + name].get("behavior"), {
+                expected = {
                     "disposition": "mean" if name in mean else "passive",
                     "idle": "wait" if name in ("ice_monster", "venus_flytrap") else "explore", "memory_ticks": 1000,
-                    "doors": name in tool_users, "care": name in care_and_loot,
+                    "doors": name in tool_users | {"leprechaun", "nymph"}, "care": name in care_and_loot,
                     "equipment": name in tool_users, "loot": name in care_and_loot,
                     "flee_percent": 25,
-                })
+                }
+                if name in {"leprechaun", "nymph", "orc"}:
+                    expected["gold"] = name != "nymph"
+                self.assertEqual(species["rogue." + name].get("behavior"), expected)
 
     def test_natural_unlocks_are_explicit_eligible_purchases_not_free_attacks(self):
         rules = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text())
@@ -335,8 +338,6 @@ class RogueRosterContent(unittest.TestCase):
                 fixture = generated_carrier_manifest(name)
                 self.assertEqual(fixture["modules"], manifest["modules"])
                 self.assertEqual(fixture["ai_profiles"], manifest["ai_profiles"])
-                self.assertEqual(fixture["floor_activation"]["carried_item_pools"],
-                                 manifest["floor_activation"]["carried_item_pools"])
                 stage = fixture["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]
                 self.assertEqual(stage["id"], canonical["id"])
                 self.assertEqual(stage["ai"], canonical["ai"])
@@ -346,19 +347,22 @@ class RogueRosterContent(unittest.TestCase):
                 expected = next(row for band in canonical["bands"] for row in band["choices"]
                                 if row["archetype"] == "rogue." + name)
                 self.assertEqual(choice["carried_loot"], expected["carried_loot"])
+                pool = choice["carried_loot"]["pool"]
+                self.assertEqual(fixture["floor_activation"]["carried_item_pools"],
+                                 {pool: manifest["floor_activation"]["carried_item_pools"][pool]})
                 self.assertEqual(fixture["characters"][0]["anchor"], f"dungeon/{depth}/up")
                 self.assertEqual(len(fixture["characters"][0]["creature"]["hit_dice"]), 16)
                 self.assertEqual(fixture["characters"][0]["loadout"], manifest["characters"][0]["loadout"])
 
-    def test_production_population_selects_eighteen_species_and_preserves_stock_order(self):
+    def test_production_population_selects_twenty_one_species_and_preserves_stock_order(self):
         manifest = source("scenario.toml")
         activation = manifest["floor_activation"]
         profile = activation["profiles"]["rogue.low_depth"]
         self.assertEqual(profile["version"], 1)
         stages = profile["stages"]
         self.assertEqual([row["id"] for row in stages],
-                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength"])
-        self.assertEqual([row["count"] for row in stages], [[4, 4], [1, 1], [1, 1], [1, 1]])
+                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength", "rogue.room_gold"])
+        self.assertEqual([row["count"] for row in stages[:4]], [[4, 4], [1, 1], [1, 1], [1, 1]])
         actor = stages[0]
         self.assertEqual(actor["kind"], "actors")
         self.assertEqual(actor["version"], 1)
@@ -369,7 +373,7 @@ class RogueRosterContent(unittest.TestCase):
         # independent pinned-selector oracle in test_rogue_activation_candidate.
         self.assertEqual({row["archetype"] for band in actor["bands"] for row in band["choices"]},
                          {"rogue." + name for name in (
-                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "wraith", "black_unicorn", "vampire", "jabberwock", "bat", "kestrel", "venus_flytrap", "griffin")})
+                             "emu", "snake", "rattlesnake", "hobgoblin", "ice_monster", "zombie", "centaur", "quagga", "yeti", "troll", "wraith", "black_unicorn", "vampire", "jabberwock", "bat", "kestrel", "venus_flytrap", "griffin", "leprechaun", "nymph", "orc")})
         chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.griffin": (1, 5), "rogue.jabberwock": (7, 10)}
         for band in actor["bands"]:
             for row in band["choices"]:
@@ -378,13 +382,19 @@ class RogueRosterContent(unittest.TestCase):
                     self.assertEqual(row["carried_loot"], {"version": 1,
                         "pool": "rogue.vampire_supplies",
                         "chance": {"numerator": numerator, "denominator": denominator}})
+                elif row["archetype"] == "rogue.leprechaun":
+                    self.assertEqual(row["carried_loot"], {"version": 1,
+                        "pool": "rogue.leprechaun_gold",
+                        "chance": {"numerator": 1, "denominator": 1}})
                 else:
                     self.assertNotIn("carried_loot", row)
-        self.assertEqual(activation["carried_item_pools"], {"rogue.vampire_supplies": {
+        self.assertEqual(set(activation["carried_item_pools"]),
+                         {"rogue.vampire_supplies", "rogue.leprechaun_gold"})
+        self.assertEqual(activation["carried_item_pools"]["rogue.vampire_supplies"], {
             "version": 1, "choices": [
                 {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
-                {"archetype": "rogue.clean_bandage", "weight": 1, "quantity": 1}]}})
-        for stage, identity, quantity in zip(stages[1:], ("clean_bandage", "ration", "restore_strength"), (2, 1, 1), strict=True):
+                {"archetype": "rogue.clean_bandage", "weight": 1, "quantity": 1}]})
+        for stage, identity, quantity in zip(stages[1:4], ("clean_bandage", "ration", "restore_strength"), (2, 1, 1), strict=True):
             self.assertEqual(stage["kind"], "items")
             self.assertEqual(stage["bands"], [{"depth": {"kind": "open", "minimum": 1},
                               "choices": [{"archetype": "rogue." + identity, "weight": 1}]}])
@@ -393,6 +403,67 @@ class RogueRosterContent(unittest.TestCase):
         self.assertEqual(manifest["procedural_worlds"]["dungeon"]["domain"],
                          {"kind": "open", "max_depth": 1_000_000})
         self.assertNotIn("objective", manifest)
+
+
+    def test_tricksters_and_orc_own_exact_purchases_and_natural_damage(self):
+        actors = source("catalog/actors.toml")["actors"]
+        species = source("catalog/creatures.toml")["creatures"]["species"]
+        for name, kind, owner, talents in (
+                ("leprechaun", "fey", "racial", ["filch_gold", "vanish", None]),
+                ("nymph", "fey", "racial", ["filch_charm", "vanish", None]),
+                ("orc", "humanoid", "warrior", ["measured_cut"])):
+            with self.subTest(species=name):
+                identity = "rogue." + name
+                self.assertEqual(species[identity]["kind"], kind)
+                build = actors[identity]["creature"]
+                self.assertEqual(build["hit_dice"], [
+                    {"source": owner, "purchases": [{"pool": "advancement",
+                        "selection": {"kind": "talent", "talent": talent}}] if talent else []}
+                    for talent in talents])
+                self.assertEqual(build["nutrition"], {"kind": "exempt"})
+                self.assertEqual(build["future_growth"], {"kind": "disabled"})
+        # Fixed one is the exact 1d1 result; ordinary dice require at least two sides.
+        strike = species["rogue.leprechaun"]["melee"]["strikes"][0]
+        self.assertEqual(strike["on_success"][0]["damage"]["components"][0]["amount"],
+                         {"kind": "fixed", "amount": 1})
+        nymph = species["rogue.nymph"]["melee"]["strikes"][0]
+        self.assertIn("check", nymph)
+        self.assertEqual(nymph["on_success"], [])
+        self.assertEqual(nymph["on_failure"], [])
+        rules = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text())
+        abilities = {row["id"]: row for row in rules["abilities"]}
+        talents = {row["id"]: row for row in rules["talents"]}
+        quantity = {"kind": "depth_scaled_uniform", "minimum": 2,
+                    "maximum_base": 51, "per_depth": 10}
+        for ability, selection in (("filch_gold", {"kind": "currency", "currency": "gold", "amount": quantity}),
+                                   ("filch_charm", {"kind": "magical_unit"})):
+            rider, = abilities[ability]["strikes"]["additional_riders"]
+            self.assertEqual(rider["check"]["defense"], "cognitive")
+            self.assertEqual(rider["effects"], [{"kind": "theft", "selection": selection,
+                "relocation": {"flag": "theft_vanish", "policy": "same_floor"}}])
+            self.assertEqual(talents[ability]["modifiers"], [
+                {"scope": "always", "op": {"kind": "grant_ability", "ability": ability}}])
+        self.assertEqual(talents["vanish"]["modifiers"], [
+            {"scope": "always", "op": {"kind": "flag", "flag": "theft_vanish"}}])
+
+    def test_gold_rooms_and_birth_stock_are_independent_finite_ordinary_items(self):
+        items = source("catalog/items.toml")["items"]
+        self.assertTrue(items["rogue.restore_strength"]["magical"])
+        self.assertTrue(items["rogue.amulet_of_yendor"]["magical"])
+        self.assertFalse(items["rogue.ring_mail"].get("magical", False))
+        gold = items["rogue.gold"]
+        self.assertEqual((gold["currency"], gold["magical"], gold["stackable"]),
+                         ("gold", False, True))
+        activation = source("scenario.toml")["floor_activation"]
+        quantity = {"kind": "depth_scaled_uniform", "minimum": 2,
+                    "maximum_base": 51, "per_depth": 10}
+        self.assertEqual(activation["carried_item_pools"]["rogue.leprechaun_gold"], {
+            "version": 1, "choices": [{"archetype": "rogue.gold", "weight": 1, "quantity": quantity}]})
+        self.assertEqual(activation["profiles"]["rogue.low_depth"]["stages"][-1], {
+            "id": "rogue.room_gold", "version": 1, "kind": "room_items",
+            "chance": {"numerator": 1, "denominator": 2}, "quantity": quantity,
+            "bands": [{"depth": {"kind": "open", "minimum": 1},
+                       "choices": [{"archetype": "rogue.gold", "weight": 1}]}]})
 
 
 if __name__ == "__main__":

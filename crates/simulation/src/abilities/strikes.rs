@@ -308,8 +308,20 @@ impl FrozenStrike {
                 .filter(|effect| matches!(effect, PlannedEffect::HoldDamage { .. }))
                 .count()
         };
-        !self.on_success.iter().chain(&self.on_failure).any(|effect| matches!(effect, PlannedEffect::Theft { .. }))
-            && self.riders.iter().all(|rider| !rider.effects.iter().any(|effect| matches!(effect, PlannedEffect::Theft { .. })) || (rider.effects.len() == 1 && rider.check.is_some() && rider.trigger == crate::rules::RiderTrigger::Success))
+        !self
+            .on_success
+            .iter()
+            .chain(&self.on_failure)
+            .any(|effect| matches!(effect, PlannedEffect::Theft { .. }))
+            && self.riders.iter().all(|rider| {
+                !rider
+                    .effects
+                    .iter()
+                    .any(|effect| matches!(effect, PlannedEffect::Theft { .. }))
+                    || (rider.effects.len() == 1
+                        && rider.check.is_some()
+                        && rider.trigger == crate::rules::RiderTrigger::Success)
+            })
             && tightening(&self.on_success) <= 1
             && tightening(&self.on_failure) == 0
             && self

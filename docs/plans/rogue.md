@@ -112,7 +112,7 @@ L/N/O add the shared [theft and Gold](../reference/items.md#theft-and-gold)
 contracts: checked Cognitive currency/magical-item riders, preparation-frozen
 same-floor relocation only after actual transfer, protected held units and
 ordinary finite inventory/death recovery. L has three fey HD with TR1(1), TR3(2),
-natural 1d1, depths 6–15 and finite birth Gold. N has three fey HD with TR2(1),
+natural 1d1 (fixed one damage), depths 6–15 and finite birth Gold. N has three fey HD with TR2(1),
 TR3(2), natural zero damage and depths 10–19. O has one humanoid Warrior HD,
 W02(1), natural 1d8 and depths 4–13. Source-owned quantity expressions resolve
 checked positive u64 ranges using explicit birth/preparation depth. The appended

@@ -536,6 +536,7 @@ fn living_carrier_game(chance: [u32; 2], healing_stock: bool) -> Game {
         care: false,
         equipment: false,
         loot: false,
+        gold: false,
         flee_percent: 0,
         idle: crate::behavior::IdleBehavior::Wait,
         doors: false,

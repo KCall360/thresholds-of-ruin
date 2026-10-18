@@ -222,6 +222,25 @@ impl BirthStockContext<'_> {
         hash
     }
 
+    fn quantity_stream(
+        &self,
+        choice: &PreparedActorChoice,
+        policy: &CarriedLoot,
+        pool: &PreparedCarriedItemPool,
+        item: &PreparedItemChoice,
+    ) -> u64 {
+        // Keep the historical chance/content roots byte-for-byte. Extending
+        // the content root binds actor, policy and pool identities independently
+        // from the selected item's separate quantity domain.
+        let mut hash = self.stream(choice, policy, Some((&policy.pool, pool)));
+        for bytes in [b"item-quantity".as_slice(), item.content.as_bytes()] {
+            for byte in (bytes.len() as u64).to_le_bytes().iter().chain(bytes) {
+                hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+        hash
+    }
+
     /// Pure local selection. The actor choice distinguishes no policy from a
     /// chance miss, and the caller attaches the ordinary allocated item ID.
     pub fn select<'a>(
@@ -246,18 +265,7 @@ impl BirthStockContext<'_> {
         }
         let mut rng = self.stream(choice, policy, Some((&policy.pool, pool)));
         let item = weighted_choice(&mut rng, &pool.choices, |item| item.weight);
-        let mut quantity_rng = stream(
-            self.seed,
-            self.scope,
-            self.profile_id,
-            self.profile,
-            self.stage,
-            self.ordinal,
-            &format!(
-                "birth-quantity/{}/{}/{}",
-                policy.pool, pool.version, item.content
-            ),
-        );
+        let mut quantity_rng = self.quantity_stream(choice, policy, pool, item);
         let quantity = item
             .quantity
             .resolve(self.depth)

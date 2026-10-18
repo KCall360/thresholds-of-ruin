@@ -81,12 +81,12 @@ mod navigation_map;
 mod observation;
 mod places;
 pub mod progression;
-pub mod quantity;
-pub mod theft;
 pub mod public_plan;
+pub mod quantity;
 pub mod resolution_diagnostics;
 pub mod resources;
 pub mod survival_diagnostics;
+pub mod theft;
 pub use places::{NameOrigin, PlaceName};
 mod streaming;
 pub use streaming::{

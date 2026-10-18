@@ -2559,6 +2559,7 @@ mod tests {
             care: true,
             equipment: true,
             loot: true,
+            gold: false,
             flee_percent: 25,
             idle: crate::behavior::IdleBehavior::Wait,
             doors: false,

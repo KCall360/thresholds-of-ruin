@@ -58,3 +58,6 @@ mod effective_interaction_tests;
 
 #[cfg(test)]
 mod hold_damage_tests;
+
+#[cfg(test)]
+mod theft_tests;

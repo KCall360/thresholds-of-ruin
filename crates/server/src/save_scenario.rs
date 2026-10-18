@@ -410,7 +410,10 @@ enum PopulationStage {
     RoomItems {
         id: String,
         version: u32,
-        #[serde(serialize_with = "mapped::serialize", deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>")]
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>"
+        )]
         bands: Vec<source::PopulationBand>,
         #[serde(with = "mapped")]
         quantity: source::QuantityExpression,
@@ -435,11 +438,25 @@ enum PopulationStage {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(remote = "source::PopulationQuantityExpr", tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    remote = "source::PopulationQuantityExpr",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 enum PopulationQuantityExpr {
-    Fixed { quantity: u64 },
-    Uniform { minimum: u64, maximum: u64 },
-    DepthScaledUniform { minimum: u64, maximum_base: u64, per_depth: u64 },
+    Fixed {
+        quantity: u64,
+    },
+    Uniform {
+        minimum: u64,
+        maximum: u64,
+    },
+    DepthScaledUniform {
+        minimum: u64,
+        maximum_base: u64,
+        per_depth: u64,
+    },
 }
 
 // Numeric authoring sugar is canonicalized once. Saved inputs always require
@@ -447,7 +464,10 @@ enum PopulationQuantityExpr {
 impl Stored for source::QuantityExpression {
     fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Self::Fixed(quantity) => source::PopulationQuantityExpr::Fixed { quantity: *quantity }.encode(serializer),
+            Self::Fixed(quantity) => source::PopulationQuantityExpr::Fixed {
+                quantity: *quantity,
+            }
+            .encode(serializer),
             Self::Expression(expression) => expression.encode(serializer),
         }
     }
@@ -832,7 +852,12 @@ enum DamageExpr {
     },
 }
 #[derive(Serialize, Deserialize)]
-#[serde(remote = "source::TheftSelection", tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    remote = "source::TheftSelection",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 enum TheftSelection {
     Currency {
         #[serde(with = "mapped")]
@@ -3609,7 +3634,15 @@ mod tests {
             )
         };
         assert!(decode(&empty).is_ok());
-        for field in ["idle", "doors", "care", "equipment", "loot", "gold", "flee_percent"] {
+        for field in [
+            "idle",
+            "doors",
+            "care",
+            "equipment",
+            "loot",
+            "gold",
+            "flee_percent",
+        ] {
             let mut missing = empty.clone();
             missing.as_object_mut().unwrap().remove(field);
             assert!(
@@ -5160,7 +5193,13 @@ impl Effect {
             },
         }
         Ok(match super::named_map(deserializer)? {
-            Fields::Theft { selection, relocation } => source::Effect::Theft { selection, relocation },
+            Fields::Theft {
+                selection,
+                relocation,
+            } => source::Effect::Theft {
+                selection,
+                relocation,
+            },
             Fields::ApplyLinkedHold { policy } => source::Effect::ApplyLinkedHold { policy },
             Fields::HoldDamage {
                 category,
@@ -6645,12 +6684,18 @@ mod theft_gold_schema_tests {
 
     #[test]
     fn saved_item_traits_require_explicit_current_authority_fields() {
-        let source: source::Archetype = serde_json::from_value(json!({"name":"coin", "class":"coin", "stackable":true, "currency":"gold"})).unwrap();
+        let source: source::Archetype = serde_json::from_value(
+            json!({"name":"coin", "class":"coin", "stackable":true, "currency":"gold"}),
+        )
+        .unwrap();
         let encoded = serde_json::to_value(Borrowed(&source)).unwrap();
         assert_eq!(encoded["magical"], false);
         assert_eq!(encoded["currency"], "gold");
         let restored: Owned<source::Archetype> = serde_json::from_value(encoded.clone()).unwrap();
-        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), encoded);
+        assert_eq!(
+            serde_json::to_value(Borrowed(&restored.0)).unwrap(),
+            encoded
+        );
         for field in ["magical", "currency"] {
             let mut missing = encoded.clone();
             missing.as_object_mut().unwrap().remove(field);
@@ -6666,30 +6711,50 @@ mod theft_gold_schema_tests {
         let source: source::QuantityExpression = serde_json::from_value(json!(7)).unwrap();
         let encoded = serde_json::to_value(Borrowed(&source)).unwrap();
         assert_eq!(encoded, json!({"kind":"fixed", "quantity":7}));
-        let restored: Owned<source::QuantityExpression> = serde_json::from_value(encoded.clone()).unwrap();
-        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), encoded);
-        for malformed in [json!(7), json!(["fixed", 7]), json!({"kind":"fixed"}),
-            json!({"kind":"uniform","minimum":2}), json!({"kind":"fixed","quantity":7,"depth":1})] {
-            assert!(serde_json::from_value::<Owned<source::QuantityExpression>>(malformed).is_err());
+        let restored: Owned<source::QuantityExpression> =
+            serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(Borrowed(&restored.0)).unwrap(),
+            encoded
+        );
+        for malformed in [
+            json!(7),
+            json!(["fixed", 7]),
+            json!({"kind":"fixed"}),
+            json!({"kind":"uniform","minimum":2}),
+            json!({"kind":"fixed","quantity":7,"depth":1}),
+        ] {
+            assert!(
+                serde_json::from_value::<Owned<source::QuantityExpression>>(malformed).is_err()
+            );
         }
     }
 
     #[test]
     fn saved_theft_requires_independent_selection_and_nullable_relocation() {
-        for selection in [json!({"kind":"magical_unit"}), json!({"kind":"currency","currency":"gold","amount":{"kind":"uniform","minimum":2,"maximum":61}})] {
-            let authored: source::Effect = serde_json::from_value(json!({"kind":"theft", "selection":selection})).unwrap();
+        for selection in [
+            json!({"kind":"magical_unit"}),
+            json!({"kind":"currency","currency":"gold","amount":{"kind":"uniform","minimum":2,"maximum":61}}),
+        ] {
+            let authored: source::Effect =
+                serde_json::from_value(json!({"kind":"theft", "selection":selection})).unwrap();
             let encoded = serde_json::to_value(Borrowed(&authored)).unwrap();
             assert_eq!(encoded["relocation"], json!(null));
             let restored: Owned<source::Effect> = serde_json::from_value(encoded.clone()).unwrap();
-            assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), encoded);
+            assert_eq!(
+                serde_json::to_value(Borrowed(&restored.0)).unwrap(),
+                encoded
+            );
             for field in ["selection", "relocation"] {
                 let mut missing = encoded.clone();
                 missing.as_object_mut().unwrap().remove(field);
                 assert!(serde_json::from_value::<Owned<source::Effect>>(missing).is_err());
             }
-            let mut extra = encoded.clone(); extra["item"] = json!(1);
+            let mut extra = encoded.clone();
+            extra["item"] = json!(1);
             assert!(serde_json::from_value::<Owned<source::Effect>>(extra).is_err());
-            let mut positional = encoded; positional["selection"] = json!(["magical_unit"]);
+            let mut positional = encoded;
+            positional["selection"] = json!(["magical_unit"]);
             assert!(serde_json::from_value::<Owned<source::Effect>>(positional).is_err());
         }
     }

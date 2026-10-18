@@ -26,7 +26,7 @@ from process_harness import (
 from process_work_budget import ProcessOutputBudget, ProcessWorkBudget
 from rogue_earned_route_process import read_authoritative_evidence
 
-from rogue_test_support import DisclosedFloorGraph, cardinal_melee_candidate
+from rogue_test_support import DisclosedFloorGraph, disclosed_melee_candidate, first_floor_foes
 
 
 def observation(frame):
@@ -489,7 +489,7 @@ class RogueChecks:
                 if row["item"].get("known_supply"):
                     position = row["position"]
                     stock_cells.add((at[0] + position["x"], at[1] + position["y"]))
-            nearby = next((row for row in foes if cardinal_melee_candidate(row)), None)
+            nearby = next((row for row in foes if disclosed_melee_candidate(view, row)), None)
             if nearby:
                 before, start = current, len(player.transcript)
                 earned_before = int(growth["growth"]["earned_xp"])
@@ -539,7 +539,7 @@ class RogueChecks:
                 stock_cells.discard((at[0] + position["x"], at[1] + position["y"]))
                 continue
             # This positive seed must actually defeat four disclosed foes. XP
-            # depends on the rolled E/S/H roster and is never a route oracle.
+            # depends on the rolled production roster and is never a route oracle.
             if len(defeated) == 4 and collected == {"bandage": 2, "ration": 1}:
                 break
             targets = set(stock_cells)
@@ -579,7 +579,7 @@ class RogueChecks:
                 return current
             hostile = {row["actor"] for row in view["combat"]["actors"] if row["hostile"]}
             nearby = next((row for row in view["visible_actors"]
-                           if row["id"] in hostile and cardinal_melee_candidate(row)), None)
+                           if row["id"] in hostile and disclosed_melee_candidate(view, row)), None)
             if nearby:
                 current = self.settled_action(player, {"type": "use_ability", "id": "basic_melee",
                     "invocation": {"kind": "actor_target", "target": nearby["id"]}})
@@ -855,7 +855,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual(initial_rations, 1)
         current, growth, seen_foes, collected_cells, cleared_cells, floor_graph = self.clear_first_floor(player)
         self.assertEqual(len(seen_foes), 4)
-        self.assertTrue(set(seen_foes.values()).issubset({"emu", "snake", "hobgoblin"}))
+        self.assertTrue(set(seen_foes.values()).issubset(first_floor_foes().values()))
         completed_earned_xp = growth["growth"]["earned_xp"]
         self.assertEqual(growth["growth"]["spent_xp"], "100")
         self.assertEqual(int(growth["growth"]["held_xp"]), int(completed_earned_xp) - 100)

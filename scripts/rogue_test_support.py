@@ -5,10 +5,47 @@ The server still validates every submitted target and reports any refusal.
 """
 
 
+def first_floor_foes():
+    import tomllib
+    from process_harness import ROOT
+    package = ROOT / "scenarios/rogue-exploration"
+    manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
+    actors = tomllib.loads((package / "catalog/actors.toml").read_text(encoding="utf-8"))["actors"]
+    stages = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
+    eligible = {choice["archetype"] for stage in stages if stage["kind"] == "actors"
+                for band in stage["bands"] if band["depth"]["minimum"] <= 1
+                and (band["depth"]["kind"] == "open" or 1 <= band["depth"]["maximum"])
+                for choice in band["choices"]}
+    return {identity: actors[identity]["creature"]["name"] for identity in eligible}
+
+
 def cardinal_melee_candidate(actor):
     """Avoid diagonal corner reach; walk to a cardinal neighbor instead."""
     p = actor["position"]
     return p["z"] == 0 and abs(p["x"]) + abs(p["y"]) == 1
+
+
+def disclosed_body_cells(observation):
+    """Known feet plus currently disclosed own-body occurrences, never other actors."""
+    cells = {(0, 0, 0)}
+    cells.update(tuple(row["position"][axis] for axis in ("x", "y", "z"))
+                 for row in observation["visible_actors"]
+                 if row["id"] == observation["self_target"])
+    return cells
+
+
+def disclosed_melee_candidate(observation, actor):
+    """Use a visible face-adjacent body witness, including ordinary hovering foes."""
+    target = tuple(actor["position"][axis] for axis in ("x", "y", "z"))
+    body = disclosed_body_cells(observation)
+    return target not in body and any(sum(abs(a - b) for a, b in zip(target, own)) == 1
+                                     for own in body)
+
+
+def disclosed_sight_candidate(actor, distance, *, eye_height=1):
+    """Bound a disclosed body occurrence by Manhattan distance from the authored eye."""
+    p = actor["position"]
+    return abs(p["x"]) + abs(p["y"]) + abs(p["z"] - eye_height) <= distance
 
 
 def disclosed_contact_step(observation, actor):
@@ -62,15 +99,16 @@ def disclosed_actor_candidates(actors):
     return candidates
 
 
-def care_combat_action(foes, *, injured, contacted=()):
+def care_combat_action(foes, *, injured, contacted=(), observation=None):
     """Provoke contact, take a real injury, then clear it; None means approach.
 
     A disclosed hostile relation does not imply that a passive species will
     attack first. The caller records only actually resolved ordinary strikes
     in contacted, then waits at cardinal contact for real retaliation.
     """
-    adjacent = [foe for foe in disclosed_actor_candidates(foes)
-                if cardinal_melee_candidate(foe)]
+    adjacent = disclosed_actor_candidates(foe for foe in foes
+        if (cardinal_melee_candidate(foe) if observation is None
+            else disclosed_melee_candidate(observation, foe)))
     if not adjacent:
         return None
     if not injured and any(foe["id"] in contacted for foe in adjacent):

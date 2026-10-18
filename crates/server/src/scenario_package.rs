@@ -24,9 +24,8 @@ mod retrieval;
 pub use population::{
     ActorPopulationBand, ActorPopulationChoice, CarriedItemChoice, CarriedItemPool, CarriedLoot,
     CarryChance, CharacterLoadout, FloorActivation, PopulationBand, PopulationChoice,
-    PopulationDepth, PopulationDepthGrowth, PopulationProfile, PopulationStage, Protagonist,
-    PopulationQuantityExpr, QuantityExpression,
-    ScenarioCapabilities,
+    PopulationDepth, PopulationDepthGrowth, PopulationProfile, PopulationQuantityExpr,
+    PopulationStage, Protagonist, QuantityExpression, ScenarioCapabilities,
 };
 pub use retrieval::UniqueRetrieval;
 #[path = "scenario_rules.rs"]
@@ -36,10 +35,9 @@ pub use rules_source::{resolve_rules_source, ResolvedRules};
 #[path = "scenario_source.rs"]
 mod source;
 pub use authoring::{
-    AiProfile, AmountExpr, AnatomySpec, BodySpec, ConsumableSpec, DamageComponentExpr, DamageExpr,
-    CurrencyKind, DamageType, DiceExpr, Effect, EquipmentSlot, EquipmentSpec, HoldPolicy, ItemClass,
-    RelocationGate, RelocationPolicy, TheftSelection,
-    PushDirection,
+    AiProfile, AmountExpr, AnatomySpec, BodySpec, ConsumableSpec, CurrencyKind,
+    DamageComponentExpr, DamageExpr, DamageType, DiceExpr, Effect, EquipmentSlot, EquipmentSpec,
+    HoldPolicy, ItemClass, PushDirection, RelocationGate, RelocationPolicy, TheftSelection,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -3196,7 +3194,9 @@ impl Package {
                 .copied()
                 .filter(|region| group.members.contains(&region.id))
                 .collect();
-            let rooms = generated_rooms.get(&identity).ok_or_else(|| fail("Missing generated room metadata"))?;
+            let rooms = generated_rooms
+                .get(&identity)
+                .ok_or_else(|| fail("Missing generated room metadata"))?;
             if let Some(scope) = self.activation_scope(&identity, group.depth, &members, rooms)? {
                 game.register_activation_scope(scope)
                     .map_err(|error| fail(format!("Initial activation scope: {error:?}")))?;
@@ -6197,7 +6197,7 @@ value = 13
         assert_eq!(
             snapshot["combat"]["ai"]["2"]["profile"],
             serde_json::json!({"idle": "explore", "doors": false,
-                "care": true, "equipment": true, "loot": true, "flee_percent": 19})
+                "care": true, "equipment": true, "loot": true, "gold": false, "flee_percent": 19})
         );
         assert_eq!(
             shared["actors"][snapshot["actors"].as_u64().unwrap() as usize]["3"]["motion"]
@@ -6352,15 +6352,16 @@ value = 13
             care: true,
             equipment: true,
             loot: true,
+            gold: true,
             ..Default::default()
         };
         let author: AiProfile = serde_json::from_value(serde_json::json!({
-            "idle":"wait","doors":false,"care":false,"flee_percent":0
+            "idle":"wait","doors":false,"care":false,"gold":false,"flee_percent":0
         }))
         .unwrap();
         let resolved = author.resolve(species);
         assert_eq!(resolved.idle, tor_simulation::behavior::IdleBehavior::Wait);
-        assert!(!resolved.doors && !resolved.care);
+        assert!(!resolved.doors && !resolved.care && !resolved.gold);
         assert!(resolved.equipment && resolved.loot);
         assert_eq!(resolved.flee_percent, 0);
         assert_eq!(AiProfile::default().resolve(species), species.into());

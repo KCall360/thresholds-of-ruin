@@ -519,7 +519,13 @@ impl<'de> Deserialize<'de> for Effect {
             }
         }
         Ok(match deserializer.deserialize_map(Named)? {
-            Fields::Theft { selection, relocation } => Self::Theft { selection, relocation },
+            Fields::Theft {
+                selection,
+                relocation,
+            } => Self::Theft {
+                selection,
+                relocation,
+            },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::HoldDamage {
                 category,

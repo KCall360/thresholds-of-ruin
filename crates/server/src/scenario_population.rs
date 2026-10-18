@@ -1522,6 +1522,9 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
             let mut corrupt = original.clone();
             corrupt.rooms[0].id = 64;
             assert!(!configuration.valid_scope(&corrupt));
+            let mut corrupt = original.clone();
+            corrupt.rooms[0].cells.pop();
+            assert!(!configuration.valid_scope(&corrupt));
         }
         let record = warm.activations_since(0).unwrap().remove(0);
         assert!(configuration.valid_record(&record));
@@ -1643,7 +1646,7 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
             panic!("fixture must evaluate its marker stage");
         };
         let runtime::PlacementDecision::Placed {
-            entity: runtime::PopulationEntity::Item { id },
+            entity: runtime::PopulationEntity::Item { id, .. },
             ..
         } = &attempts[0]
         else {
@@ -1663,6 +1666,7 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
             };
             *entity = runtime::PopulationEntity::Item {
                 id: tor_simulation::ItemId(reserved),
+                quantity: 1,
             };
             assert!(
                 !configuration.valid_record(&record),

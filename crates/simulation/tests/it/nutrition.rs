@@ -1020,6 +1020,7 @@ fn population_game(requirement: tor_simulation::nutrition::NutritionRequirement)
     })
     .unwrap();
     game.register_activation_scope(PreparedScope {
+        rooms: vec![],
         scope: "dungeon/2".into(),
         depth: 2,
         profile: "birth".into(),
@@ -1558,7 +1559,7 @@ fn pooled_population_item_recipes_retain_distinct_declared_meal_operands() {
         let item = PreparedItemChoice {
             content: "meal".into(),
             weight: 1,
-            quantity: 1,
+            quantity: tor_simulation::quantity::QuantityExpr::Fixed { quantity: 1 },
             spec: serde_json::from_value(spec).unwrap(),
         };
         assert_eq!(

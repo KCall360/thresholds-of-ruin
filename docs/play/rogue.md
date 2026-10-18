@@ -210,7 +210,8 @@ Revisiting a floor or restarting does not replace spent or stolen stock.
 
 Leprechauns (L) appear at depths 6–15. Their three actual fey HD own Filch Gold
 (TR1) on HD 1 and Vanish (TR3) on HD 2, with one point unspent and a natural 1d1
-strike. The separate Cognitive-checked theft rider takes one rolled amount capped
+strike, encoded as fixed one damage because a one-sided die has no variation.
+The separate Cognitive-checked theft rider takes one rolled amount capped
 by all free carried Gold. Its range is frozen from the current floor when the
 attack is prepared. Nymphs (N), at depths 10–19, likewise own three fey HD,
 Filch Charm (TR2) on HD 1 and Vanish on HD 2, with one unspent point and zero

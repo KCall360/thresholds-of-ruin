@@ -4916,7 +4916,7 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 45);
+        assert_eq!(engine.archive.version, 46);
         assert_eq!(engine.archive.ruleset, "interactions-v41");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();

@@ -18,10 +18,6 @@ from rogue_activation_candidate import (COMPILER_DEPENDENCY_INPUTS, TOOL_INPUTS,
 from rogue_roster_study import DEFAULT_RULES, PLAYABLE_SPECIES, PRODUCTION, ROOT, encounter_sources
 
 
-SOURCE_ARGUMENTS = {"source_package": ROOT / PRODUCTION,
-                    "source_provenance": {"reference": "repository:scenarios/rogue-exploration"}}
-
-
 def preactivation_source():
     """Synthetic old shape, not a retained measurement baseline or fixture copy."""
     source = encounter_sources()["manifest"]
@@ -43,8 +39,28 @@ def preactivation_source():
     return source
 
 
+def synthetic_eighteen_source(destination):
+    """Explicit helper fixture, not a frozen measured production baseline."""
+    shutil.copytree(ROOT / PRODUCTION, destination, ignore=shutil.ignore_patterns(".compiled"))
+    manifest = candidate_manifest(preactivation_source())
+    (destination / "scenario.toml").write_text(toml_source(manifest), encoding="utf-8")
+    return destination
+
+
 class RogueActivationCandidateTests(unittest.TestCase):
-    def assert_pinned_source_mass(self, bands):
+    @classmethod
+    def setUpClass(cls):
+        directory = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(directory.cleanup)
+        cls.source_package = synthetic_eighteen_source(Path(directory.name) / "eighteen-source")
+        cls.source_arguments = {"source_package": cls.source_package,
+            "source_provenance": {"reference": "synthetic:eighteen-species-unit-fixture"}}
+
+    def test_retained_diagnostic_helper_rejects_new_production_policy(self):
+        with self.assertRaisesRegex(ValueError, "Review changed population profile"):
+            candidate_manifest(encounter_sources()["manifest"])
+
+    def assert_pinned_source_mass(self, bands, *, production=False):
         # Independent exact enumeration of the pinned ten-way selector and its
         # five-way boundary redistribution, not the helper's embedded table.
         ladder = "KEBSHIROZLCQANYFTWPXUMVGJD"
@@ -53,6 +69,8 @@ class RogueActivationCandidateTests(unittest.TestCase):
                                        "wraith", "black_unicorn", "vampire", "jabberwock"), strict=True))
         names.update(K="kestrel", B="bat", F="venus_flytrap", G="griffin")
         self.assertEqual(set(names.values()), set(PLAYABLE_SPECIES))
+        if production:
+            names.update(L="leprechaun", N="nymph", O="orc")
         self.assertTrue(all(math.gcd(*(choice["weight"] for choice in band["choices"])) == 1
                             for band in bands))
         for depth in (*range(1, 36), 267, 268, 274, 275, 1_000_000):
@@ -85,7 +103,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
     def test_production_bands_match_independent_pinned_selector(self):
         manifest = encounter_sources()["manifest"]
         stages = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
-        self.assert_pinned_source_mass(stages[0]["bands"])
+        self.assert_pinned_source_mass(stages[0]["bands"], production=True)
 
     def test_centaur_yeti_have_exact_pinned_selector_boundaries(self):
         production = encounter_sources()["manifest"]["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]["bands"]
@@ -148,7 +166,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             supplied = root / "retained-source"
-            shutil.copytree(ROOT / PRODUCTION, supplied, ignore=shutil.ignore_patterns(".compiled"))
+            synthetic_eighteen_source(supplied)
             source = tomllib.loads((supplied / "scenario.toml").read_text())
             source["id"] = "retained-explicit-source"
             (supplied / "scenario.toml").write_text(toml_source(source))
@@ -247,7 +265,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
         self.assertEqual(original, before)
 
     def test_only_reference_carriers_receive_exact_finite_birth_stock(self):
-        original = encounter_sources()["manifest"]
+        original = candidate_manifest(preactivation_source())
         candidate = candidate_manifest(original)
         activation = candidate["floor_activation"]
         chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5), "rogue.griffin": (1, 5), "rogue.jabberwock": (7, 10)}
@@ -293,7 +311,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
                                     if choice["archetype"] == "rogue." + name))
 
     def test_later_start_is_explicit_geometry_diagnostic_not_earned_growth(self):
-        source = encounter_sources()["manifest"]
+        source = candidate_manifest(preactivation_source())
         for depth in (2, 5, 8, 17, 26, 27, 274, 275, 1_000_000):
             candidate = candidate_manifest(source, start_depth=depth)
             self.assertEqual({row["anchor"] for row in candidate["characters"]}, {f"dungeon/{depth}/up"})
@@ -305,7 +323,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
                 candidate_manifest(source, start_depth=depth)
 
     def test_candidate_diagnostic_start_cannot_exceed_authored_world_domain(self):
-        source = encounter_sources()["manifest"]
+        source = candidate_manifest(preactivation_source())
         source["procedural_worlds"]["dungeon"]["domain"]["max_depth"] = 300
         self.assertEqual(candidate_manifest(source, start_depth=300)["characters"][0]["anchor"],
                          "dungeon/300/up")
@@ -345,7 +363,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
                        return_value=({"id": "test-rules"}, dependencies)), patch(
                     "rogue_activation_candidate.subprocess.run",
                     return_value=subprocess.CompletedProcess([], 0, "", "")) as launched:
-                result = create_candidate(output, compiler, start_depth=17, **SOURCE_ARGUMENTS)
+                result = create_candidate(output, compiler, start_depth=17, **self.source_arguments)
             launched.assert_called_once_with(
                 [str(resolved_compiler), "validate", str((output / "package").resolve())],
                 capture_output=True, text=True, encoding="utf-8", timeout=30)
@@ -361,7 +379,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertIn("capacity", " ".join(result["limitations"]))
             for relative in result["source_package_inputs"]:
                 self.assertEqual((output / "sources/package" / relative).read_bytes(),
-                                 (ROOT / PRODUCTION / relative).read_bytes())
+                                 (self.source_package / relative).read_bytes())
             for group, names in (("tools", TOOL_INPUTS), ("compiler", COMPILER_DEPENDENCY_INPUTS)):
                 for relative in names:
                     self.assertEqual((output / "sources" / group / relative).read_bytes(),
@@ -369,7 +387,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertEqual(json.loads((output / "inputs.json").read_text()), result)
             self.assertFalse((output / "partial.json").exists())
             with self.assertRaises(FileExistsError):
-                create_candidate(output, compiler, **SOURCE_ARGUMENTS)
+                create_candidate(output, compiler, **self.source_arguments)
 
     def test_failed_compiler_or_stale_bundle_keeps_partial_evidence_and_never_claims_validation(self):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
@@ -385,7 +403,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
                         "rogue_activation_candidate.subprocess.run",
                         return_value=subprocess.CompletedProcess([], 2, "", "invalid candidate")) as launched:
                     with self.assertRaises(ValueError):
-                        create_candidate(output, compiler, **SOURCE_ARGUMENTS)
+                        create_candidate(output, compiler, **self.source_arguments)
                 self.assertEqual(launched.call_count, 0 if stale else 1)
                 self.assertFalse((output / "inputs.json").exists())
                 partial = json.loads((output / "partial.json").read_text())
@@ -400,7 +418,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             supplied = root / "source"
-            shutil.copytree(ROOT / PRODUCTION, supplied, ignore=shutil.ignore_patterns(".compiled"))
+            synthetic_eighteen_source(supplied)
             compiler = root / "compiler"
             compiler.write_bytes(b"test compiler")
             output = root / "candidate"
@@ -436,7 +454,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
                        return_value=({"id": "test-rules"}, dependencies)), patch(
                     "rogue_activation_candidate.subprocess.run", side_effect=change_compiler):
                 with self.assertRaisesRegex(ValueError, "source or compiler changed"):
-                    create_candidate(output, compiler, **SOURCE_ARGUMENTS)
+                    create_candidate(output, compiler, **self.source_arguments)
             self.assertFalse((output / "inputs.json").exists())
             partial = json.loads((output / "partial.json").read_text())
             self.assertEqual(partial["generation_status"], "failed")
@@ -459,7 +477,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
                     return_value=subprocess.CompletedProcess([], 0, "", "")), patch(
                     "rogue_activation_candidate.digest", side_effect=fingerprint):
                 with self.assertRaisesRegex(ValueError, "source or compiler changed"):
-                    create_candidate(output, compiler, **SOURCE_ARGUMENTS)
+                    create_candidate(output, compiler, **self.source_arguments)
             self.assertFalse((output / "inputs.json").exists())
             partial = json.loads((output / "partial.json").read_text())
             self.assertEqual(partial["generation_status"], "failed")
