@@ -22,7 +22,9 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 44;
+pub(crate) const ARCHIVE_VERSION: u32 = 45;
+#[path = "action_resolution.rs"]
+mod action_resolution;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -31,6 +33,7 @@ pub mod arena_evaluation;
 mod checkpoint;
 #[path = "command_request.rs"]
 mod command_request;
+use action_resolution::ActionResolution;
 #[path = "floor_activation_audit.rs"]
 mod floor_activation_audit;
 #[cfg(test)]
@@ -47,8 +50,14 @@ mod intention_tests;
 #[path = "interaction_tests.rs"]
 mod interaction_tests;
 #[cfg(test)]
+#[path = "linked_hold_boundary_tests.rs"]
+mod linked_hold_boundary_tests;
+#[cfg(test)]
 #[path = "map_memory_tests.rs"]
 mod map_memory_tests;
+#[cfg(test)]
+#[path = "move_escape_admission_tests.rs"]
+mod move_escape_admission_tests;
 #[cfg(test)]
 #[path = "package_invariant_tests.rs"]
 mod package_invariant_tests;
@@ -967,6 +976,8 @@ pub(crate) struct Record {
     pub(crate) retrieval_after: Option<RetrievalBoundaryState>,
     pub(crate) entry: JournalEntry,
     pub(crate) receipt: Option<Receipt>,
+    /// Required private binding between the original input and admitted work.
+    pub(crate) action_resolution: ActionResolution,
     /// Exact new ledger entries, private to persistence and replay.
     pub(crate) activations: Vec<FloorActivationRecord>,
     /// Latest owning transaction only; empty non-entry deltas remain explicit.
@@ -1161,6 +1172,9 @@ impl Record {
 
     /// Check audit metadata even when recovery restores a checkpoint instead of replaying.
     pub(crate) fn valid_admission(&self) -> bool {
+        if !self.valid_action_resolution() {
+            return false;
+        }
         if self.receipt.as_ref().is_some_and(|receipt| {
             matches!(
                 receipt.command,
@@ -1171,11 +1185,9 @@ impl Record {
             return false;
         }
         match (&self.entry.content, self.receipt.as_ref()) {
-            (JournalContent::IntentionAdmitted { intention, action }, Some(receipt)) => {
+            (JournalContent::IntentionAdmitted { intention, .. }, Some(receipt)) => {
                 intention.0 != 0
-                    && matches!(&receipt.command, Command::AdmitIntention {
-                        action: requested, ..
-                    } if requested == action)
+                    && matches!(&receipt.command, Command::AdmitIntention { .. })
                     && receipt.actor == self.entry.actor
                     && receipt.branch == self.entry.branch
                     && self.entry.audience == Audience::Private
@@ -2319,7 +2331,8 @@ impl Engine {
             };
             if result.map_err(|_| invalid_archive())? != record.entry
                 || engine.archive.records.last().is_none_or(|actual| {
-                    actual.activations != record.activations
+                    actual.action_resolution != record.action_resolution
+                        || actual.activations != record.activations
                         || actual.retrievals != record.retrievals
                         || actual.retrieval_before != record.retrieval_before
                         || actual.retrieval_after != record.retrieval_after
@@ -3054,6 +3067,7 @@ impl Engine {
                 after_tick: self.game.tick(),
                 entry: entry.clone(),
                 receipt: Some(receipt),
+                action_resolution: ActionResolution::Unchanged,
                 activations: self
                     .game
                     .activations_since(activation_count)
@@ -3140,6 +3154,7 @@ impl Engine {
         let perception_changed = match action {
             Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
             Action::Move { .. }
+            | Action::Escape { .. }
             | Action::ChooseGrowthSource { .. }
             | Action::Purchase { .. }
             | Action::Respec { .. }
@@ -3188,11 +3203,17 @@ impl Engine {
         };
         outcome.next_tick = candidate.game.tick();
         outcome.next_actor = candidate.game.next_actor();
-        // Wait changes only tick/readiness. Other outcomes retain full
-        // comparison; new action kinds must make their impact explicit.
+        // Stationary waits usually change only tick/readiness. Capability
+        // expiry can change disclosed traversal without any geometry change.
         if !perception_changed {
             let started = Instant::now();
+            let mut capability_changes = Vec::new();
             for (&observer, revision) in candidate.revisions.iter_mut() {
+                if self.game.actor_locomotion(SimActor(observer.0))
+                    != candidate.game.actor_locomotion(SimActor(observer.0))
+                {
+                    capability_changes.push(observer);
+                }
                 if outcome.next_tick != tick
                     || ((observer == actor) != (outcome.next_actor == Some(SimActor(observer.0))))
                 {
@@ -3206,6 +3227,23 @@ impl Engine {
             }
             if let Some(profile) = profile.as_deref_mut() {
                 profile.revision_detection += started.elapsed();
+            }
+            for observer in capability_changes {
+                let started = Instant::now();
+                let after = candidate.revision_view(observer)?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.perception += started.elapsed();
+                    profile.actors_observed += 1;
+                }
+                let started = Instant::now();
+                candidate
+                    .game
+                    .refresh_navigation_scene(SimActor(observer.0), &after.scene);
+                candidate.observations.insert(observer, Arc::new(after));
+                navigation_refreshed = true;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.navigation_refresh += started.elapsed();
+                }
             }
         }
         // Navigation depends on geometry and each observer's scene, not the
@@ -3223,6 +3261,8 @@ impl Engine {
                 profile.actors_observed += 1;
             }
             if navigation_changed
+                || self.game.actor_locomotion(SimActor(actor.0))
+                    != candidate.game.actor_locomotion(SimActor(actor.0))
                 || candidate
                     .game
                     .navigation_scene_changed(&old.scene, &after.scene)
@@ -3267,6 +3307,7 @@ impl Engine {
         mut candidate: Candidate,
     ) -> Result<CommandResult, Failure> {
         let (receipt, revision) = checked.into_parts();
+        let mut action_resolution = ActionResolution::Unchanged;
         let mut tick = self.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
@@ -3300,11 +3341,14 @@ impl Engine {
                 )
             }
             Command::AdmitIntention { action, .. } => {
+                let (action, resolution) =
+                    ActionResolution::resolve(&candidate.game, receipt.actor, action);
+                action_resolution = resolution;
                 let intention = candidate
                     .game
                     .admit_intention(
                         SimActor(receipt.actor.0),
-                        adapt::action(action),
+                        adapt::action(&action),
                         tor_simulation::IntentionOrigin::Human,
                     )
                     .map_err(|error| {
@@ -3324,7 +3368,7 @@ impl Engine {
                     Audience::Private,
                     JournalContent::IntentionAdmitted {
                         intention,
-                        action: action.clone(),
+                        action: action.into_owned(),
                     },
                 )
             }
@@ -3446,10 +3490,13 @@ impl Engine {
                 expected_revision: _,
                 action,
             } => {
+                let (action, resolution) =
+                    ActionResolution::resolve(&candidate.game, receipt.actor, action);
+                action_resolution = resolution;
                 let outcome = self.resolve_action_transition(
                     &mut candidate,
                     receipt.actor,
-                    action,
+                    &action,
                     None,
                     profile.as_deref_mut(),
                 )?;
@@ -3459,7 +3506,7 @@ impl Engine {
                     },
                     Audience::Actor,
                     JournalContent::Action {
-                        action: action.clone(),
+                        action: action.into_owned(),
                         event: adapt::event(outcome.kind),
                     },
                 )
@@ -3525,14 +3572,37 @@ impl Engine {
             audience,
             content,
         };
-        self.commit_candidate(candidate, entry, Some(receipt.clone()), profile)
+        self.commit_candidate_with_resolution(
+            candidate,
+            entry,
+            Some(receipt.clone()),
+            action_resolution,
+            profile,
+        )
     }
 
     fn commit_candidate(
         &mut self,
+        candidate: Candidate,
+        entry: JournalEntry,
+        receipt: Option<Receipt>,
+        profile: Option<&mut CommandProfile>,
+    ) -> Result<CommandResult, Failure> {
+        self.commit_candidate_with_resolution(
+            candidate,
+            entry,
+            receipt,
+            ActionResolution::Unchanged,
+            profile,
+        )
+    }
+
+    fn commit_candidate_with_resolution(
+        &mut self,
         mut candidate: Candidate,
         mut entry: JournalEntry,
         receipt: Option<Receipt>,
+        action_resolution: ActionResolution,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
         if candidate.game.population_entry_pending() {
@@ -3583,6 +3653,7 @@ impl Engine {
             after_tick: candidate.game.tick(),
             entry: entry.clone(),
             receipt,
+            action_resolution,
             activations,
         };
         let survival = candidate.game.take_survival_diagnostics();
@@ -3696,6 +3767,7 @@ impl Engine {
             after_tick: self.game.tick(),
             entry: entry.clone(),
             receipt: None,
+            action_resolution: ActionResolution::Unchanged,
             activations: Vec::new(),
             retrievals: Vec::new(),
         };
@@ -3794,7 +3866,8 @@ impl Engine {
         // This bounded invariant runs before either persistence enqueue or
         // candidate publication. Rewind's target was validated by apply_wizard;
         // restoring it is not an entry and cannot carry a new receipt batch.
-        if record.retrieval_before != RetrievalBoundaryState::capture(&self.game)
+        if !record.valid_action_resolution_at(&self.game)
+            || record.retrieval_before != RetrievalBoundaryState::capture(&self.game)
             || record.retrieval_after != RetrievalBoundaryState::capture(&candidate.game)
         {
             return Err(invalid_archive());
@@ -4843,14 +4916,14 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 44);
-        assert_eq!(engine.archive.ruleset, "interactions-v39");
+        assert_eq!(engine.archive.version, 45);
+        assert_eq!(engine.archive.ruleset, "interactions-v40");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {
                 previous.version = ARCHIVE_VERSION - 1;
             } else {
-                previous.ruleset = "interactions-v38".into();
+                previous.ruleset = "interactions-v39".into();
             }
             assert_eq!(
                 Engine::replay(previous, None, None).unwrap_err().code,
@@ -4937,6 +5010,7 @@ mod playable_rogue_schema_tests {
                 "retrieval_after",
                 "entry",
                 "receipt",
+                "action_resolution",
                 "activations",
                 "retrievals",
             ],

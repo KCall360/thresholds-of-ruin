@@ -87,8 +87,11 @@ pub enum Command {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Event {
+    EscapeStarted {
+        hold: tor_simulation::HoldId,
+    },
     /// Private lifecycle markers; exact operands stay in the owning journal action.
     GrowthSourceChosen,
     Purchased,

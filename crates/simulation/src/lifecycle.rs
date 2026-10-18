@@ -36,8 +36,14 @@ impl DamageActivityGuard {
 /// fields are private so only successful lifecycle publication can create it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PublishedResolution {
+    created_hold: Option<crate::linked_hold::HoldId>,
     event: usize,
     role: PublishedRole,
+}
+impl PublishedResolution {
+    pub(crate) fn created_hold(self) -> Option<crate::linked_hold::HoldId> {
+        self.created_hold
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PublishedRole {
@@ -321,6 +327,7 @@ impl Game {
                     state.ready_at = state.ready_at.max(clock);
                 }
             }
+            state.holds.advance(elapsed);
             state.active_since = clock;
         }
         Ok(outcome)
@@ -412,8 +419,31 @@ impl Game {
         let mut forced = false;
         let mut damaged = false;
         let mut applied_count = 0;
+        let mut created_hold = None;
         for index in 0..outcome.effects.len() {
             let effect = &outcome.effects[index];
+            if let ResolvedEffect::ApplyLinkedHold { policy } = effect {
+                // Earlier effects become authoritative before testing contact/capability.
+                transition.state.location = placement.location;
+                transition.state.orientation = placement.orientation;
+                let mut events = std::mem::take(&mut transition.events);
+                let event_start = self.event_log.len();
+                self.commit_actor_outcome(transition)?;
+                events.extend(self.event_log.split_off(event_start));
+                let highwater = self.next_hold_id;
+                let applied =
+                    self.apply_linked_hold(outcome.actor, recipient_id, policy.clone())?;
+                if self.next_hold_id != highwater {
+                    created_hold = created_hold.or(applied);
+                }
+                transition = self.actor_outcome(recipient_id)?;
+                transition.events.extend(events);
+                if applied.is_some() {
+                    outcome.effects[applied_count] = effect.clone();
+                    applied_count += 1;
+                }
+                continue;
+            }
             let alive_before = transition.state.alive();
             if matches!(effect, ResolvedEffect::ApplyCondition { .. })
                 && !self.actors.contains_key(&outcome.actor)
@@ -522,8 +552,7 @@ impl Game {
                 transition.interrupt(Interruption::Suspend, self.actor_clock(recipient_id))?;
             }
             if matches!(&applied, ResolvedEffect::Translate { result, .. } if result.changed())
-                && transition.state.location.region != placement.location.region
-                && self.population_participates_in_entry(recipient_id, placement.location)
+                || self.hold_capability_lost(recipient_id, &transition.state)
             {
                 // The accepted spatial prefix is authoritative before later
                 // effects, including a fatal effect that allocates a corpse.
@@ -574,6 +603,7 @@ impl Game {
             .events
             .insert(0, CombatEvent::Resolved { outcome, strike });
         let receipt = PublishedResolution {
+            created_hold,
             event: self.event_log.len(),
             role,
         };
@@ -902,7 +932,14 @@ impl Game {
             outcome.survival.boundary(&self.actors[&id], &outcome.state);
             self.record_survival(id, &outcome.survival);
         }
+        if self.actors[&id].locomotion().flying != outcome.state.locomotion().flying {
+            outcome.state.motion.acceleration_remainder = [0; 3];
+        }
+        if outcome.state.motion.active_fall.is_some() && !self.fall_continues(id, &outcome.state) {
+            outcome.state.motion.active_fall = None;
+        }
         self.actors.insert(id, outcome.state);
+        self.reconcile_holds_for_actor(id)?;
         self.suspend_condition_denied_continuation(id);
         // Completion, replacement, discard and death all retire the original
         // reservation. Suspended or resumed plans keep it. Tokens are already

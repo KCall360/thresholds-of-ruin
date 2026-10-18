@@ -221,6 +221,10 @@ pub enum ObjectiveKind {
 /// One disclosed event for every data-defined ability, including the basic attack.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DisclosedCombatEvent {
+    EscapeResolved {
+        hold: crate::linked_hold::HoldId,
+        success: bool,
+    },
     Ability {
         caster: Option<ActorId>,
         target: Option<ActorId>,
@@ -250,6 +254,13 @@ pub enum SequenceEnd {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum CombatEvent {
+    #[serde(deserialize_with = "crate::escape::read_completion")]
+    EscapeResolved {
+        actor: ActorId,
+        hold: crate::linked_hold::HoldId,
+        success: bool,
+        intention: Option<crate::IntentionId>,
+    },
     #[serde(deserialize_with = "deserialize_respec_completion")]
     RespecCompleted {
         actor: ActorId,
@@ -435,6 +446,15 @@ impl Game {
                         strike: *strike,
                     })
                 }
+                CombatEvent::EscapeResolved {
+                    actor,
+                    hold,
+                    success,
+                    ..
+                } if *actor == id => Some(DisclosedCombatEvent::EscapeResolved {
+                    hold: *hold,
+                    success: *success,
+                }),
                 CombatEvent::Interrupted { actor, .. } if *actor == id => {
                     Some(DisclosedCombatEvent::Interrupted { actor: *actor })
                 }

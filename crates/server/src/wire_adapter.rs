@@ -22,6 +22,14 @@ pub fn decode_action(
         return Err(unavailable());
     }
     Ok(match action {
+        p::Action::Escape { hold } => a::Action::Escape {
+            hold: observation
+                .linked_holds
+                .iter()
+                .find(|offer| scope.hold(offer.id) == *hold)
+                .ok_or_else(unavailable)?
+                .id,
+        },
         p::Action::ChooseGrowthSource { basis, source } => a::Action::ChooseGrowthSource {
             basis: Box::new(crate::advancement_adapter::basis(basis)?),
             source: crate::advancement_adapter::growth_source(source)?,
@@ -134,6 +142,9 @@ pub fn decode_action(
 /// Encode backend action facts explicitly for the current wire schema.
 pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
     match action {
+        a::Action::Escape { hold } => p::Action::Escape {
+            hold: scope.hold(*hold),
+        },
         a::Action::ChooseGrowthSource { basis, source } => p::Action::ChooseGrowthSource {
             basis: Box::new(crate::advancement_adapter::wire_basis(basis)),
             source: crate::advancement_adapter::wire_growth_source(source),
@@ -651,6 +662,9 @@ pub fn disclose_entry(
             action: encode_action(action, scope),
             event: match event {
                 Event::GrowthSourceChosen | Event::Purchased | Event::RespecStarted => return None,
+                Event::EscapeStarted { hold } => VisibleEvent::EscapeStarted {
+                    hold: scope.hold(*hold),
+                },
                 Event::AbilityStarted { id, name, target } => VisibleEvent::AbilityStarted {
                     ability: p::ContentRef {
                         id: id.to_string(),

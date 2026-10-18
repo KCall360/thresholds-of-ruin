@@ -14,7 +14,7 @@ fn combat(sequence: Value) -> Value {
 
 fn state(combat: Value) -> StateView {
     serde_json::from_value(json!({"wizard_game":false,"revision":"1","observation":{
-        "actor":"1","self_target":ActorTarget::from_digest([1;32]),"tick":"15",
+        "linked_holds":[],"actor":"1","self_target":ActorTarget::from_digest([1;32]),"tick":"15",
         "position":{"x":0,"y":0,"z":0},"visible_cells":[],"ground_items":[],
         "inventory":[],"visible_actors":[],"places":[],"ready":false,
         "interactions":null,"motion":null,"combat":combat}}))

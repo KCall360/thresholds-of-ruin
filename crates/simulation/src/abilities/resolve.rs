@@ -19,11 +19,18 @@ use tor_world::Shared;
 /// when that payload applies its effects to the source actor.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResolutionContext {
+    pub hold_damage: Option<HoldDamageExecution>,
     pub observation: Option<Shared<PublicPlanObservation>>,
     pub source: Option<ApplicationSnapshot>,
     pub spatial: Option<super::SpatialInput>,
     pub target_recovery_context: Option<crate::health_recovery::RecoveryContext>,
     pub source_recovery_context: Option<crate::health_recovery::RecoveryContext>,
+}
+/// The sole dynamic relationship operand. Every attack statistic stays frozen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HoldDamageExecution {
+    pub id: crate::linked_hold::HoldId,
+    pub bonus: u32,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplicationSnapshot {
@@ -236,6 +243,9 @@ pub enum OutcomeStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResolvedEffect {
+    ApplyLinkedHold {
+        policy: crate::linked_hold::HoldPolicy,
+    },
     Translate {
         mode: super::MovementMode,
         result: super::MovementResult,
@@ -310,7 +320,8 @@ impl ResolvedEffect {
             | Self::LoseMaximumHealth { amount }
             | Self::RestoreMaximumHealth { amount }
             | Self::Restore { amount, .. } => *amount > 0,
-            Self::ApplyCondition { .. }
+            Self::ApplyLinkedHold { .. }
+            | Self::ApplyCondition { .. }
             | Self::ObservePublicPlan { .. }
             | Self::ApplyQualifiedConditionToSource { .. } => true,
         }
@@ -327,6 +338,7 @@ impl ResolvedEffect {
             return Ok(None);
         }
         let applied = match self {
+            Self::ApplyLinkedHold { .. } => self.clone(),
             Self::Translate { mode, result } => {
                 if let super::MovementResult::Moved { from, to } = result {
                     let Some(placement) = state.placement.as_deref_mut() else {
@@ -578,6 +590,88 @@ impl StrikeBudget {
         }
     }
 }
+/// Resolve a generic opposed check through the same kernel as ordinary abilities.
+pub(crate) fn resolve_escape_check(check: &PlannedCheck, rng: &mut u64) -> bool {
+    resolve_planned_check(check, rng, None, &StrikeBudget::effects(), &mut ())
+}
+fn resolve_planned_check(
+    check: &PlannedCheck,
+    rng: &mut u64,
+    shared_owner: Option<CheckSide>,
+    budget: &StrikeBudget,
+    observer: &mut dyn ResolutionObserver,
+) -> bool {
+    let mut check_edge = edge(check.edge);
+    let allocated = check_edge.take(CHECK_EDGE_CAPACITY);
+    let rng_before = *rng;
+    let rolled = roll_check(rng, allocated);
+    let total = i64::from(rolled.kept) + check.bonus;
+    let threshold = match check.threshold {
+        CheckThreshold::Fixed { value } => value,
+        CheckThreshold::Opposed {
+            bonus,
+            edge: opposed_edge,
+        } => {
+            let rng_before = *rng;
+            let mut opposed_remaining = edge(opposed_edge);
+            let opposed_allocated = opposed_remaining.take(CHECK_EDGE_CAPACITY);
+            let opposed = roll_check(rng, opposed_allocated);
+            let total = i64::from(opposed.kept) + bonus;
+            observer.record(ResolutionStep {
+                id: "opposed_check",
+                fields: &[
+                    dice("rolled", opposed.rolled()),
+                    dice("retained", opposed.retained()),
+                    unsigned("kept", u64::from(opposed.kept)),
+                    signed("input_edge", opposed_edge),
+                    signed(
+                        "shared_edge_spent",
+                        if shared_owner == Some(CheckSide::Opposing) {
+                            budget.check_debit
+                        } else {
+                            0
+                        },
+                    ),
+                    signed("edge", opposed_allocated.balance()),
+                    signed("unused_edge", opposed_remaining.balance()),
+                    signed("bonus", bonus),
+                    signed("total", total),
+                    unsigned("rng_before", rng_before),
+                    unsigned("rng_after", *rng),
+                ],
+            });
+            total
+        }
+    };
+    observer.record(ResolutionStep {
+        id: "check",
+        fields: &[
+            dice("rolled", rolled.rolled()),
+            dice("retained", rolled.retained()),
+            unsigned("kept", u64::from(rolled.kept)),
+            signed("input_edge", check.edge),
+            signed("edge", allocated.balance()),
+            signed("unused_edge", check_edge.balance()),
+            signed(
+                "shared_edge_spent",
+                if shared_owner == Some(CheckSide::Initiating) {
+                    budget.check_debit
+                } else {
+                    0
+                },
+            ),
+            signed("shared_damage_edge", budget.remaining.balance()),
+            unsigned("rng_before", rng_before),
+            unsigned("rng_after", *rng),
+            signed("total", total),
+            unsigned("roll", u64::from(rolled.kept)),
+            signed("bonus", check.bonus),
+            signed("threshold", threshold),
+            boolean("success", total >= threshold),
+        ],
+    });
+    total >= threshold
+}
 pub(super) struct BatchResolution {
     pub outcome: Outcome,
     /// Ordinary abilities may reject individual condition effects. Authoritative
@@ -699,76 +793,7 @@ pub(super) fn resolve_batch<'a>(
     }
 
     let success = if let Some(check) = check {
-        let mut check_edge = edge(check.edge);
-        let allocated = check_edge.take(CHECK_EDGE_CAPACITY);
-        let rng_before = *rng;
-        let rolled = roll_check(rng, allocated);
-        let total = i64::from(rolled.kept) + check.bonus;
-        let threshold = match check.threshold {
-            CheckThreshold::Fixed { value } => value,
-            CheckThreshold::Opposed {
-                bonus,
-                edge: opposed_edge,
-            } => {
-                let rng_before = *rng;
-                let mut opposed_remaining = edge(opposed_edge);
-                let opposed_allocated = opposed_remaining.take(CHECK_EDGE_CAPACITY);
-                let opposed = roll_check(rng, opposed_allocated);
-                let total = i64::from(opposed.kept) + bonus;
-                observer.record(ResolutionStep {
-                    id: "opposed_check",
-                    fields: &[
-                        dice("rolled", opposed.rolled()),
-                        dice("retained", opposed.retained()),
-                        unsigned("kept", u64::from(opposed.kept)),
-                        signed("input_edge", opposed_edge),
-                        signed(
-                            "shared_edge_spent",
-                            if shared_owner == Some(CheckSide::Opposing) {
-                                budget.check_debit
-                            } else {
-                                0
-                            },
-                        ),
-                        signed("edge", opposed_allocated.balance()),
-                        signed("unused_edge", opposed_remaining.balance()),
-                        signed("bonus", bonus),
-                        signed("total", total),
-                        unsigned("rng_before", rng_before),
-                        unsigned("rng_after", *rng),
-                    ],
-                });
-                total
-            }
-        };
-        observer.record(ResolutionStep {
-            id: "check",
-            fields: &[
-                dice("rolled", rolled.rolled()),
-                dice("retained", rolled.retained()),
-                unsigned("kept", u64::from(rolled.kept)),
-                signed("input_edge", check.edge),
-                signed("edge", allocated.balance()),
-                signed("unused_edge", check_edge.balance()),
-                signed(
-                    "shared_edge_spent",
-                    if shared_owner == Some(CheckSide::Initiating) {
-                        budget.check_debit
-                    } else {
-                        0
-                    },
-                ),
-                signed("shared_damage_edge", budget.remaining.balance()),
-                unsigned("rng_before", rng_before),
-                unsigned("rng_after", *rng),
-                signed("total", total),
-                unsigned("roll", u64::from(rolled.kept)),
-                signed("bonus", check.bonus),
-                signed("threshold", threshold),
-                boolean("success", total >= threshold),
-            ],
-        });
-        total >= threshold
+        resolve_planned_check(check, rng, shared_owner, budget, observer)
     } else {
         true
     };
@@ -834,6 +859,36 @@ pub(super) fn resolve_batch<'a>(
                     .filter(|input| input.mode == mode)
                     .map_or(super::MovementResult::Blocked, |input| input.result);
                 ResolvedEffect::Translate { mode, result }
+            }
+            PlannedEffect::ApplyLinkedHold { policy } => ResolvedEffect::ApplyLinkedHold {
+                policy: policy.clone(),
+            },
+            PlannedEffect::HoldDamage {
+                category,
+                descriptor,
+            } => {
+                let Some(execution) = snapshot.context.hold_damage else {
+                    continue;
+                };
+                let damage = crate::damage::DamageSpec::new(
+                    vec![crate::damage::DamageComponent::fixed(
+                        *category,
+                        descriptor.clone(),
+                        execution.bonus,
+                    )],
+                    None,
+                )
+                .map_err(|_| crate::creatures::CreatureStateError::Inconsistent)?;
+                let resolved = damage.resolve(
+                    rng,
+                    budget.remaining,
+                    &application.creature.derived().protection,
+                    observer,
+                );
+                budget.remaining = resolved.unused_edge;
+                ResolvedEffect::Damage {
+                    amount: resolved.total,
+                }
             }
             PlannedEffect::Damage { damage } => {
                 let resolved = damage.resolve(
@@ -955,6 +1010,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            ApplyLinkedHold {
+                policy: crate::linked_hold::HoldPolicy,
+            },
             Translate {
                 mode: super::MovementMode,
                 result: super::MovementResult,
@@ -1006,6 +1064,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             },
         }
         let effect = match crate::bounded::named_map(deserializer)? {
+            Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Damage { amount } => Self::Damage { amount },
             Fields::Heal { amount } => Self::Heal { amount },

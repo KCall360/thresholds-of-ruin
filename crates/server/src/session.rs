@@ -2218,6 +2218,7 @@ mod tests {
             places: Vec::new(),
             actor: o.actor,
             self_target: o.self_target,
+            linked_holds: o.linked_holds.clone(),
             tick: o.tick,
             position: o.position,
             cells: CellChanges {
@@ -4148,3 +4149,7 @@ mod advancement_tests;
 #[cfg(test)]
 #[path = "../test_support/public_plan_sessions.rs"]
 mod public_plan_observation_tests;
+
+#[cfg(test)]
+#[path = "locomotion_session_tests.rs"]
+mod locomotion_tests;

@@ -170,6 +170,7 @@ pub struct MotionView {
 /// Disclosed facts for one actor, separate from the authoritative game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
+    pub linked_holds: Vec<crate::linked_hold::LinkedHoldObservation>,
     pub interactions: Option<crate::interactions::InteractionView>,
     pub combat: Option<crate::combat::CombatView>,
     pub motion: Option<MotionView>,
@@ -359,6 +360,7 @@ impl Game {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Observation {
+            linked_holds: self.linked_holds(id),
             interactions: (!actor.anatomy.slots.is_empty()
                 || actor.pending.is_some()
                 || !item_interactions.is_empty()

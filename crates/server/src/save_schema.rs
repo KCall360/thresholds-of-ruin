@@ -63,6 +63,9 @@ pub(crate) enum IntentionChange {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Action {
+    Escape {
+        hold: tor_simulation::HoldId,
+    },
     #[serde(deserialize_with = "advancement::read_growth_source")]
     ChooseGrowthSource {
         #[serde(with = "advancement::basis")]
@@ -327,6 +330,7 @@ impl From<&crate::actions::Action> for Action {
     fn from(action: &crate::actions::Action) -> Self {
         use crate::actions::Action as Backend;
         match action {
+            Backend::Escape { hold } => Self::Escape { hold: *hold },
             Backend::ChooseGrowthSource { basis, source } => Self::ChooseGrowthSource {
                 basis: basis.clone(),
                 source: source.clone(),
@@ -382,6 +386,7 @@ impl From<&crate::actions::Action> for Action {
 impl From<Action> for crate::actions::Action {
     fn from(action: Action) -> Self {
         match action {
+            Action::Escape { hold } => Self::Escape { hold },
             Action::ChooseGrowthSource { basis, source } => {
                 Self::ChooseGrowthSource { basis, source }
             }
@@ -580,6 +585,33 @@ mod tests {
     struct Stored {
         #[serde(with = "super::Action")]
         action: Action,
+    }
+    #[test]
+    fn saved_escape_uses_exact_internal_numeric_identity_not_wire_tokens() {
+        let value = Stored {
+            action: Action::Escape {
+                hold: tor_simulation::HoldId(7),
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&value).unwrap(),
+            serde_json::json!({"action":{"type":"escape","hold":7}})
+        );
+        assert_eq!(
+            serde_json::from_value::<Stored>(serde_json::to_value(&value).unwrap()).unwrap(),
+            value
+        );
+        for hold in [
+            serde_json::json!(0),
+            serde_json::json!(u64::MAX),
+            serde_json::json!("7"),
+            serde_json::json!(format!("h_{}", "09".repeat(32))),
+        ] {
+            assert!(serde_json::from_value::<Stored>(
+                serde_json::json!({"action":{"type":"escape","hold":hold}})
+            )
+            .is_err());
+        }
     }
     #[test]
     fn saved_invocations_keep_each_direction_and_numeric_actor_independently_of_wire() {
@@ -850,6 +882,7 @@ mod tests {
             "retrievals": [],
             "retrieval_before": null,
             "retrieval_after": null,
+            "action_resolution": {"kind":"unchanged"},
             "entry": {
                 "intention_suspensions": [], "intention_ends": [],
                 "id": "entry", "branch": "branch", "actor": 18446744073709551615,

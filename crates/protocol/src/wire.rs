@@ -1,8 +1,10 @@
-use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamCursor};
+use crate::{
+    ActorId, ActorTarget, DoorTarget, HoldTarget, ItemTarget, StreamContext, StreamCursor,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 47;
+pub const PROTOCOL_VERSION: u32 = 48;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -224,6 +226,9 @@ pub enum Direction {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    Escape {
+        hold: HoldTarget,
+    },
     ChooseGrowthSource {
         basis: Box<crate::AdvancementBasis>,
         source: crate::GrowthSource,
@@ -279,6 +284,9 @@ impl<'de> Deserialize<'de> for Action {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Escape {
+                hold: HoldTarget,
+            },
             ChooseGrowthSource {
                 basis: Box<crate::AdvancementBasis>,
                 source: crate::GrowthSource,
@@ -330,6 +338,7 @@ impl<'de> Deserialize<'de> for Action {
             Wait,
         }
         Ok(match crate::bounded::named_map(d)? {
+            Fields::Escape { hold } => Self::Escape { hold },
             Fields::ChooseGrowthSource { basis, source } => {
                 Self::ChooseGrowthSource { basis, source }
             }
@@ -562,6 +571,8 @@ pub struct Observation {
     pub actor: ActorId,
     /// Own-body entity reference; attachment actor IDs are routing identities.
     pub self_target: ActorTarget,
+    #[serde(deserialize_with = "read_linked_holds")]
+    pub linked_holds: Vec<LinkedHold>,
     #[serde(with = "crate::integers::unsigned")]
     pub tick: u64,
     pub position: Position,
@@ -570,6 +581,35 @@ pub struct Observation {
     pub inventory: Vec<ItemView>,
     pub visible_actors: Vec<ActorView>,
     pub ready: bool,
+}
+
+pub const MAX_LINKED_HOLDS: usize = 128;
+
+/// A personal escape offer, separate from timed standalone conditions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkedHold {
+    pub target: HoldTarget,
+    /// Present only when ordinary sight already discloses this holder.
+    pub holder: Option<ActorTarget>,
+}
+impl<'de> Deserialize<'de> for LinkedHold {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            target: HoldTarget,
+            #[serde(deserialize_with = "required_option")]
+            holder: Option<ActorTarget>,
+        }
+        let Fields { target, holder } = crate::bounded::named_map(d)?;
+        Ok(Self { target, holder })
+    }
+}
+pub(crate) fn read_linked_holds<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<LinkedHold>, D::Error> {
+    crate::bounded::bounded::<D, LinkedHold, MAX_LINKED_HOLDS>(d)
 }
 
 pub const MAX_EQUIPMENT_SLOTS: usize = 64;
@@ -776,6 +816,11 @@ pub enum ObjectiveKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CombatEventView {
+    /// The observer's own Escape result, with no hidden holder details.
+    EscapeResolved {
+        hold: HoldTarget,
+        success: bool,
+    },
     Ability {
         caster: Option<ActorTarget>,
         target: Option<ActorTarget>,
@@ -957,8 +1002,11 @@ pub enum Command {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Event {
+    EscapeStarted {
+        hold: HoldTarget,
+    },
     AbilityStarted {
         ability: crate::ContentRef,
         target: ActorTarget,

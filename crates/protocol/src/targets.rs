@@ -113,3 +113,8 @@ target!(
     b'p',
     "Shared cosmetic identity of one creature, independent of observer and interaction authority."
 );
+target!(
+    HoldTarget,
+    b'h',
+    "Observer-scoped reference to one own incoming hold; no actor authority."
+);

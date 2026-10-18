@@ -71,7 +71,7 @@ per-group, graph-query, validation and preparation budgets still apply.
 Room lighting is depth-dependent and corridors are dark; the graph may include
 extra connections. The [starter slice](../play/rogue.md) adds explicit Warrior/Mage
 presets, an equipped mace and ring mail, finite bandages/rations, and ordinary
-E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J builds selected by the fourteen-species population policy. The
+K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J builds selected by the eighteen-species population policy. The
 initial HD point remains unspent and future growth explicitly
 selects the matching class. Floor profiles are separate from geometry preparation:
 first successful selected-character entry evaluates each finite stage once, and
@@ -79,7 +79,8 @@ returns retain entities, spent stock and recorded skips. NPC abstract-stair
 traversal is disabled by typed scenario capability. Ordinary purchases expose
 the starter talents and exact Mage forms; foes and Bind Wounds use shared combat,
 finite supplies and cooldowns. Four weighted actor attempts use authored depth bands,
-exact racial rows after depth 26 and finite C/Y/T/V birth stock at 15%/30%/50%/20%.
+exact racial rows after depth 26 and finite C/Y/T/V/G/J birth stock at
+15%/30%/50%/20%/20%/70%.
 The equal ration/bandage pool is provisional TOR scenario tuning, not original
 loot equivalence. The population has focused source-qualified activation coverage; its
 equipment/stat values and weights remain provisional.
@@ -97,6 +98,15 @@ The autonomous process stops at the survived 160-XP/HD1 drain and requires exact
 source-free checkpoint reopen. Both acceptance cases and the production depth-14
 W birth/receipt/source-free checkpoint case have passed. Autonomous recovery,
 starter and complete-run survival remain open.
+Shared source-derived flight, stationary movement and authored erratic probability
+now support B/K/F/G. The stationary plant F owns GR1 on HD1 and GR2 on HD6;
+Clutch creates a shared linked hold and later qualifying attack-tag HoldDamage
+primaries use its exact live-link increment. Ordinary paid Escape and per-holder
+protection use the same action, lifecycle and persistence boundaries. B/K/G keep
+their authored flight, natural damage and owned advancement rows. Focused unit,
+Service, recipe-combat and nongraphical process witnesses cover these mechanisms;
+native input and complete cross-platform qualification remain merge requirements.
+They do not establish pressured escape or complete-run balance.
 The retrieval/ascent victory is implemented; complete survival balancing remains open.
 Persistent floors and paired return stairs are intentional TOR adaptations,
 not exact replication of Rogue's regenerated floors and independent arrivals.
@@ -142,7 +152,7 @@ source-granted defenses, stacking and active-time recovery across freeze/replay.
 
 The shared foundation covers nutrition, eating, starvation and authored stochastic
 condition triggers through the shared status gate. The Rogue package now explicitly
-enrolls Warrior/Mage, keeps all fourteen selected foe recipes exempt, and makes its
+enrolls Warrior/Mage, keeps all eighteen selected foe recipes exempt, and makes its
 existing ration edible.
 Its layered acceptance contracts do not establish complete-run survival,
 production balance or final Rogue configuration. A creature requiring nutrition must use an authored shared rules

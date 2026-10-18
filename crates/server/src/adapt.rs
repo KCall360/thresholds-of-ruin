@@ -104,6 +104,7 @@ fn recorded_supplies(value: s::supplies::SupplySelection) -> a::SupplySelection 
 
 pub fn action(action: &a::Action) -> s::Action {
     match action {
+        a::Action::Escape { hold } => s::Action::Escape { hold: *hold },
         a::Action::ChooseGrowthSource { basis, source } => s::Action::ChooseGrowthSource {
             basis: (**basis).clone(),
             source: source.clone(),
@@ -182,6 +183,7 @@ pub fn action(action: &a::Action) -> s::Action {
 
 pub fn work(action: &a::Action) -> Option<s::Work> {
     Some(match action {
+        a::Action::Escape { hold } => s::Work::Escape { hold: *hold },
         a::Action::Respec {
             basis,
             replacement,
@@ -230,6 +232,7 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
 
 pub fn recorded_action(action: s::Action) -> Option<a::Action> {
     Some(match action {
+        s::Action::Escape { hold } => a::Action::Escape { hold },
         s::Action::ChooseGrowthSource { basis, source } => a::Action::ChooseGrowthSource {
             basis: Box::new(basis),
             source,
@@ -320,6 +323,7 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
 
 pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
     match kind {
+        s::OutcomeKind::EscapeStarted { hold } => crate::journal::Event::EscapeStarted { hold },
         s::OutcomeKind::GrowthSourceChosen { .. } => crate::journal::Event::GrowthSourceChosen,
         s::OutcomeKind::Purchased { .. } => crate::journal::Event::Purchased,
         s::OutcomeKind::RespecStarted { .. } => crate::journal::Event::RespecStarted,
@@ -486,11 +490,23 @@ pub fn observation(
             });
         }
     }
+    let linked_holds = view
+        .linked_holds
+        .iter()
+        .map(|hold| p::LinkedHold {
+            target: targets.hold(hold.id),
+            holder: visible_actors
+                .iter()
+                .any(|actor| actor.id == targets.actor(hold.holder))
+                .then(|| targets.actor(hold.holder)),
+        })
+        .collect();
     p::Observation {
         self_appearance: Some(p::CreatureAppearance {
             seed: targets.appearance_seed(view.actor),
             asset: view.asset.clone(),
         }),
+        linked_holds,
         interactions: view.interactions.map(|interaction| p::InteractionView {
             completed: interaction
                 .completed
@@ -646,6 +662,10 @@ fn combat_event_view(
     use s::combat::DisclosedCombatEvent as E;
     let id = |actor: s::ActorId| targets.actor(actor);
     match event {
+        E::EscapeResolved { hold, success } => p::CombatEventView::EscapeResolved {
+            hold: targets.hold(hold),
+            success,
+        },
         E::Ability {
             caster,
             target,

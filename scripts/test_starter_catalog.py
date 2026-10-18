@@ -10,7 +10,7 @@ TALENTS = {
     "evocation_initiate", "binding_initiate", "warding_initiate",
     "steady_recovery", "hardy_recovery",
 }
-NATURAL_TALENTS = {"second_strike", "third_strike", "rending_pair"}
+NATURAL_TALENTS = {"second_strike", "third_strike", "rending_pair", "clutch", "tightening_hold"}
 FORMS = {
     "evocation_initiate": ["spark_lance_fire", "spark_lance_cold"],
     "binding_initiate": ["falter"],
@@ -65,9 +65,9 @@ class StarterCatalogTests(unittest.TestCase):
 
     def test_playable_catalog_retires_every_legacy_definition_without_runtime_aliases(self):
         self.assertEqual(set(self.talents), TALENTS | NATURAL_TALENTS)
-        self.assertEqual(len(self.rules["talents"]), 15)
+        self.assertEqual(len(self.rules["talents"]), 17)
         self.assertEqual(len(self.rules["forms"]), 6)
-        self.assertEqual(len(self.rules["abilities"]), 16)
+        self.assertEqual(len(self.rules["abilities"]), 17)
         self.assertTrue(LEGACY.isdisjoint(self.talents))
         self.assertTrue({"power_strike", "magic_bolt", "fear"}.isdisjoint(self.abilities))
         self.assertIn("fear", self.conditions)

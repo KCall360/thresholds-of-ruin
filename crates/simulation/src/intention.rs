@@ -886,6 +886,7 @@ impl Game {
                                     }
                                 })
                         }
+                        IntentionWork::Action(Action::Escape { hold }) => hold.0 > 0 && hold.0 < self.next_hold_id,
                         IntentionWork::Action(Action::SetDoor { door, .. }) => door != 0,
                         IntentionWork::Action(Action::Equip { item, slot }) => {
                             item.0 > 0 && slot.0 < 64

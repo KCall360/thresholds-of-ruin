@@ -95,6 +95,9 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
         }
         for effect in &record.outcome.effects {
             rows.push(match effect {
+                DiagnosticEffect::LinkedHold { target, holder } => {
+                    format!("  Actor {}: linked hold from actor {}", target.0, holder.0)
+                }
                 DiagnosticEffect::Observation { target } => {
                     format!("  Actor {}: public-plan observation recorded", target.0)
                 }

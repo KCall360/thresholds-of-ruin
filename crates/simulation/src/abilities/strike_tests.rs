@@ -162,6 +162,8 @@ fn frozen_strike(ordinal: u16, offset: u64) -> Value {
 fn frozen_plan(strikes: Vec<Value>) -> Value {
     json!({
         "actor": 1,
+        "initial_hold": null,
+        "hold_damage_increment": 0,
         "invocation": {"kind": "actor_target", "target": 2},
         "step": null,
         "target": 2,
@@ -380,7 +382,7 @@ fn ordered_strikes_schedule_keeps_frozen_prefix_and_starts_recovery_after_last()
         );
         assert_eq!(
             serde_json::to_value(preparation).unwrap()["progress"],
-            json!({"kind":"ability","next_strike":completed,"successful_primaries":0,"attempted_riders":[0,0]})
+            json!({"kind":"ability","next_strike":completed,"successful_primaries":0,"attempted_riders":[0,0],"linked_hold":null})
         );
     }
     game.tick = 30;
@@ -776,7 +778,7 @@ fn ordered_strikes_checkpoint_tail_roundtrips_and_rejects_impossible_cursor_or_h
     for (field, value) in [
         (
             "progress",
-            json!({"kind":"ability","next_strike":3,"successful_primaries":0,"attempted_riders":[0,0]}),
+            json!({"kind":"ability","next_strike":3,"successful_primaries":0,"attempted_riders":[0,0],"linked_hold":null}),
         ),
         ("progress", json!({"kind":"item"})),
         ("hold", json!(1)),
@@ -786,9 +788,8 @@ fn ordered_strikes_checkpoint_tail_roundtrips_and_rejects_impossible_cursor_or_h
         let mut forged = serde_json::to_value(&shared).unwrap();
         forged["actors"][snapshot["actors"].as_u64().unwrap() as usize]["1"]["pending"][field] =
             value;
-        let Ok(forged) = serde_json::from_value::<SharedState>(forged) else {
-            continue;
-        };
+        let forged = serde_json::from_value::<SharedState>(forged)
+            .expect("current, structurally valid mutation must reach checkpoint admission");
         assert!(crate::Game::restore_checkpoint(
             serde_json::from_value(snapshot.clone()).unwrap(),
             &forged,
@@ -859,6 +860,7 @@ fn ordered_strikes_health_quiet_resets_once_across_riders_and_again_on_later_str
                 next_strike: 1,
                 successful_primaries: 0,
                 attempted_riders: [0; 2],
+                linked_hold: None,
             },
         )
         .unwrap();
@@ -877,6 +879,7 @@ fn ordered_strikes_health_quiet_resets_once_across_riders_and_again_on_later_str
                 next_strike: 2,
                 successful_primaries: 0,
                 attempted_riders: [0; 2],
+                linked_hold: None,
             },
         )
         .unwrap();
@@ -972,6 +975,7 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
                 next_strike: 1,
                 successful_primaries: 0,
                 attempted_riders: [0; 2],
+                linked_hold: None,
             },
         )
         .unwrap();
@@ -3463,6 +3467,7 @@ fn public_plan_rider_review_dead_participants_skip_rider_summary() {
                     next_strike: 1,
                     successful_primaries: 0,
                     attempted_riders: [0; 2],
+                    linked_hold: None,
                 },
             )
             .unwrap();

@@ -253,3 +253,29 @@ hit_dice = [
   { source = "racial", purchases = [] },
   { source = "racial", purchases = [] },
 ]
+
+# Movement/grasp cohort: source-owned HD/purchases; stock stays in population.
+
+[actors."rogue.bat"]
+asset = "creature.bat"
+turn_ticks = 100
+body = { cells = [[0, 0, 0]], eye = [0, 0, 0], mass = 1 }
+creature = { species = "rogue.bat", name = "bat", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
+
+[actors."rogue.kestrel"]
+asset = "creature.bird.kestrel"
+turn_ticks = 100
+body = { cells = [[0, 0, 0]], eye = [0, 0, 0], mass = 1 }
+creature = { species = "rogue.kestrel", name = "kestrel", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
+
+[actors."rogue.venus_flytrap"]
+asset = "creature.plant.venus.flytrap"
+turn_ticks = 100
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 25 }
+creature = { species = "rogue.venus_flytrap", name = "venus flytrap", faction = "dungeon_foes", binding = "awareness", starting_skills = ["heavy_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "clutch" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "tightening_hold" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }] }
+
+[actors."rogue.griffin"]
+asset = "creature.griffin"
+turn_ticks = 100
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 160 }
+creature = { species = "rogue.griffin", name = "griffin", faction = "dungeon_foes", binding = "awareness", starting_skills = ["heavy_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.regeneration" } }] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }] }

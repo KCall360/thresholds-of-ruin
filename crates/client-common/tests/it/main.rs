@@ -34,3 +34,5 @@ fn reset_snapshot(
 mod strike_sequences;
 
 mod public_plan_observation;
+
+mod linked_holds;

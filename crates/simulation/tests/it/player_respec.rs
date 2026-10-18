@@ -460,7 +460,7 @@ fn phase5_respec_progress_and_frozen_policy_cannot_be_substituted_on_restore() {
         match mutation {
             0 => pending["progress"] = json!({"kind":"item"}),
             1 => {
-                pending["progress"] = json!({"kind":"ability","next_strike":0,"successful_primaries":0,"attempted_riders":[0,0]})
+                pending["progress"] = json!({"kind":"ability","next_strike":0,"successful_primaries":0,"attempted_riders":[0,0],"linked_hold":null})
             }
             2 => pending["plan"]["basis"]["build_epoch"] = json!(2),
             3 => pending["plan"]["basis"]["actor"] = json!(2),
@@ -479,6 +479,12 @@ fn phase5_respec_progress_and_frozen_policy_cannot_be_substituted_on_restore() {
             ),
             _,
         > = serde_json::from_value(value);
+        if mutation == 1 {
+            assert!(
+                decoded.is_ok(),
+                "wrong progress kind must reach checkpoint admission"
+            );
+        }
         assert!(
             decoded.is_err()
                 || decoded.is_ok_and(|(snapshot, shared)| Game::restore_checkpoint(
@@ -535,10 +541,17 @@ fn phase5_respec_choice_rejects_valid_positional_aliases() {
 #[test]
 fn phase5_respec_progress_rejects_valid_positional_aliases() {
     use tor_simulation::combat::PreparationProgress;
-    let accepted: Vec<_> = [json!(["respec"]), json!(["item"]), json!(["ability", 0])]
-        .into_iter()
-        .filter(|value| serde_json::from_value::<PreparationProgress>(value.clone()).is_ok())
-        .collect();
+    let named = json!({"kind":"ability","next_strike":0,"successful_primaries":0,"attempted_riders":[0,0],"linked_hold":null});
+    let progress = serde_json::from_value::<PreparationProgress>(named.clone()).unwrap();
+    assert_eq!(serde_json::to_value(progress).unwrap(), named);
+    let accepted: Vec<_> = [
+        json!(["respec"]),
+        json!(["item"]),
+        json!(["ability", 0, 0, [0, 0], null]),
+    ]
+    .into_iter()
+    .filter(|value| serde_json::from_value::<PreparationProgress>(value.clone()).is_ok())
+    .collect();
     assert!(
         accepted.is_empty(),
         "accepted progress aliases {accepted:?}"

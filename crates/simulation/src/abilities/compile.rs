@@ -20,7 +20,7 @@ struct Compiler<'a> {
     defender: &'a crate::creatures::CreatureState,
     actor: ActorId,
     target: ActorId,
-    ability: &'a AbilityId,
+    ability: Option<&'a AbilityId>,
     modifiers: AbilityValues,
     outgoing_edge_policy: crate::rules::OutgoingEdgePolicy,
     claims: Vec<TokenClaim>,
@@ -79,7 +79,9 @@ impl<'a> Compiler<'a> {
                     rules,
                     context.roller,
                     false,
-                    Some((context.opponent, context.ability, context.roller_role)),
+                    context
+                        .ability
+                        .map(|ability| (context.opponent, ability, context.roller_role)),
                 )
                 .into_iter()
                 .filter(|token| {
@@ -334,6 +336,44 @@ impl<'a> Compiler<'a> {
     }
 }
 impl Game {
+    /// Generic checks share ordinary edge/token capture without an authored ability.
+    pub(crate) fn compile_escape_check(
+        &self,
+        actor: ActorId,
+        holder: ActorId,
+    ) -> Result<(PlannedCheck, Vec<TokenClaim>), GameError> {
+        let caster = self.creature(actor).ok_or(GameError::UnknownActor)?;
+        let defender = self.creature(holder).ok_or(GameError::UnknownActor)?;
+        let mut compiler = Compiler {
+            game: self,
+            caster: &caster,
+            defender: &defender,
+            actor,
+            target: holder,
+            ability: None,
+            modifiers: AbilityValues::default(),
+            outgoing_edge_policy: crate::rules::OutgoingEdgePolicy::Ordinary,
+            claims: Vec::new(),
+            natural_source: false,
+        };
+        let skill = SkillSelector::Named {
+            skill: crate::attributes::Skill::Athletics,
+        };
+        let phase = CheckPhase::Primary {
+            side: CheckSide::Initiating,
+        };
+        let check = compiler.check(
+            &CheckDef {
+                actor: CheckActor::User,
+                skill: skill.clone(),
+                against: Against::Opposed { skill },
+            },
+            0,
+            phase,
+            Some(phase),
+        )?;
+        Ok((check, compiler.claims))
+    }
     pub(super) fn compile_strike_plan(
         &self,
         actor: ActorId,
@@ -385,7 +425,7 @@ impl Game {
             defender: &defender,
             actor,
             target,
-            ability,
+            ability: Some(ability),
             modifiers: caster.derived().ability_values(ability),
             outgoing_edge_policy: definition.outgoing_edge_policy,
             claims: vec![],
@@ -520,6 +560,12 @@ impl Game {
             invocation,
             step,
             target,
+            initial_hold: self
+                .linked_holds(target)
+                .into_iter()
+                .find(|link| link.holder == actor)
+                .map(|link| link.id),
+            hold_damage_increment: compiler.modifiers.hold_damage_increment,
             public_aim: self.capture_public_aim(actor, target, sight),
             ability: ability.clone(),
             preparation: timing.preparation,

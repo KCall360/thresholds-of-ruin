@@ -141,7 +141,8 @@ fn replay_private_boundary(
     if !matches!(record.entry.content, JournalContent::Annotation { .. }) {
         game.begin_retrieval_transaction();
     }
-    if record.entry.tick != before.tick()
+    if !record.valid_action_resolution_at(&before)
+        || record.entry.tick != before.tick()
         || record.before_tick != before.tick()
         || record.retrieval_before != RetrievalBoundaryState::capture(&before)
     {
@@ -469,7 +470,10 @@ impl DiskCheckpoint {
                         .as_ref()
                         .map(|(game, revisions)| (game, revisions))
                         .unwrap_or((&previous.game, &previous.revisions));
-                    if record.before_tick != preceding.tick() || record.after_tick != game.tick() {
+                    if !record.valid_action_resolution_at(preceding)
+                        || record.before_tick != preceding.tick()
+                        || record.after_tick != game.tick()
+                    {
                         return Err(invalid_archive());
                     }
                     if !record.entry.content.rewindable() {
@@ -603,7 +607,7 @@ mod tests {
         assert!(package.get("rules_source").is_none());
         let rules: serde_json::Value =
             serde_json::from_str(package["rules_document"].as_str().unwrap()).unwrap();
-        assert_eq!(rules["format"], 12);
+        assert_eq!(rules["format"], 13);
         assert!(rules["document"].is_object());
         assert_eq!(
             archive["ruleset_hash"],
@@ -646,7 +650,7 @@ mod tests {
             .unwrap();
         let sequence = engine.archive.records.len() as u64;
         let valid = Checkpoint::capture(&engine).encode("test", sequence);
-        assert_eq!(valid.version, 44);
+        assert_eq!(valid.version, 45);
         valid.restore(engine.archive.clone()).unwrap();
         for version in [0, ARCHIVE_VERSION - 1, ARCHIVE_VERSION + 1] {
             let mut obsolete = Checkpoint::capture(&engine).encode("test", sequence);

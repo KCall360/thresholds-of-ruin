@@ -12,7 +12,8 @@ from process_harness import (
 )
 
 from rogue_test_support import (
-    care_combat_action, cardinal_melee_candidate, disclosed_actor_candidates, ground_sight_candidate,
+    care_combat_action, disclosed_actor_candidates, disclosed_melee_candidate, disclosed_sight_candidate,
+    first_floor_foes,
 )
 
 
@@ -40,8 +41,6 @@ def visible_foes(frame):
                                       if row["id"] in hostile)
 
 
-
-
 def disclosed_frames(player, start):
     """Keep transient resolved events even when the later ready frame replaces them."""
     for line in player.transcript[start:]:
@@ -65,6 +64,7 @@ def resolved_events(frames, before, identity, target):
 
 class RogueTechniquesProcesses(ProcessTestCase):
     def assert_first_floor_population(self, character):
+        foes = first_floor_foes()
         receipts = self.private_receipts(actor=character)
         self.assertEqual(len(receipts), 1)
         receipt = receipts[0]
@@ -72,7 +72,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
                          ("dungeon/1", character, "initial"))
         self.assertEqual((receipt["profile"], receipt["profile_version"]), ("rogue.low_depth", 1))
         expected = (
-            ("rogue.eight_species_foes", {"rogue.emu", "rogue.snake", "rogue.hobgoblin"}, "actor", 4),
+            ("rogue.eight_species_foes", set(foes), "actor", 4),
             ("rogue.bandages", {"rogue.clean_bandage"}, "item", 1),
             ("rogue.rations", {"rogue.ration"}, "item", 1),
             ("rogue.restore_strength", {"rogue.restore_strength"}, "item", 1),
@@ -99,6 +99,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
                 identities.append((kind, attempt["entity"]["id"]))
             self.assertTrue(placed, "The fixture must place real content for each stage")
         self.assertEqual(len(identities), len(set(identities)))
+        return set(foes.values())
 
     def settled(self, player, current):
         return settle_rogue_action(self, player, current)
@@ -151,7 +152,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
         self.server(scenario="rogue-exploration", seed=42, character=character)
         # Current observations and transient events are asserted, not map memory.
         player, _ = self.client(actor=character, omit_memory=True, compact_background=True)
-        self.assert_first_floor_population(character)
+        foe_names = self.assert_first_floor_population(character)
         current = self.buy_first(player, selection, identity)
         at, floor, visited = (0, 0), set(), set()
         attempts = 0
@@ -161,12 +162,13 @@ class RogueTechniquesProcesses(ProcessTestCase):
             # Use conservative visible reach. The server still validates the
             # actual body, sight and target at preparation and resolution.
             target = next((foe for foe in visible_foes(current)
-                           if (cardinal_melee_candidate(foe) if known["reach"]["kind"] == "melee"
-                               else ground_sight_candidate(foe, known["reach"]["range"]))), None)
+                           if (disclosed_melee_candidate(observation(current), foe)
+                               if known["reach"]["kind"] == "melee"
+                               else disclosed_sight_candidate(foe, known["reach"]["range"]))), None)
             if target is None:
                 current, at = self.explore(player, current, at, floor, visited)
                 continue
-            self.assertIn(target["name"], ("emu", "snake", "hobgoblin"))
+            self.assertIn(target["name"], foe_names)
             cost = known["cost"]
             if cost and resource(current, cost["resource"]["id"])["available"] < cost["start"] + cost["resolution"]:
                 current = self.act_settled(player, {"type": "wait"})
@@ -211,7 +213,8 @@ class RogueTechniquesProcesses(ProcessTestCase):
                 break
             # Passive species need a resolved hostile contact first. Then let
             # real retaliation injure us before clearing the treatment area.
-            action = care_combat_action(foes, injured=injured, contacted=contacted)
+            action = care_combat_action(foes, injured=injured, contacted=contacted,
+                                        observation=observation(current))
             if action is not None:
                 before, contact_start = current, len(player.transcript)
                 current = self.act_settled(player, action)

@@ -1022,6 +1022,7 @@ fn missing_retrieval_receipt_is_rejected_before_candidate_and_store_publication(
             after_tick: candidate.game.tick(),
             entry: entry.clone(),
             receipt: Some(receipt.clone()),
+            action_resolution: ActionResolution::Unchanged,
             activations: candidate
                 .game
                 .activations_since(engine.game.activation_count())

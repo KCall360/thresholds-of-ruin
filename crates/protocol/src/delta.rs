@@ -50,6 +50,8 @@ pub struct StateDelta {
     pub places: Vec<CollectionEdit<PlaceView>>,
     pub actor: ActorId,
     pub self_target: ActorTarget,
+    #[serde(deserialize_with = "crate::wire::read_linked_holds")]
+    pub linked_holds: Vec<LinkedHold>,
     #[serde(with = "crate::integers::unsigned")]
     pub tick: u64,
     pub position: Position,
@@ -234,6 +236,7 @@ impl StateDelta {
                 |actor| (actor.position, actor.id),
             )?,
             ready: observation.ready,
+            linked_holds: observation.linked_holds.clone(),
         })
     }
 
@@ -315,6 +318,7 @@ impl StateDelta {
                     self.visible_actors,
                 )?,
                 ready: self.ready,
+                linked_holds: self.linked_holds,
             },
         })
     }

@@ -469,7 +469,7 @@ Preparing inputs is separate from running encounters or establishing balance.
 Three explicit modes keep their scope separate:
 
 - `arena-diagnostic` uses the synthetic mixed Warrior/Mage allocation references
-  at HD 1, 6 and 11 against fourteen authored foes. The reference natural
+  at HD 1, 6 and 11 against eighteen authored foes. The reference natural
   weapon and no-flee policy are diagnostic controls, not selected-character kits.
 - `playable-unspent` copies the actual Warrior (actor 1) or Mage (actor 2) at HD 1,
   including species, attributes, starting ranks, binding, future growth,
@@ -480,7 +480,8 @@ Three explicit modes keep their scope separate:
   There is no default Mage spell. Authoring this purchase does not replace
   ordinary player-purchase acceptance or establish earned progression.
 
-Playable modes cover all fourteen selected E/S/H/R/Z/C/Q/Y/T/W/U/I/V/J recipes at player HD 1. They never synthesize HD 6/11
+Playable modes cover all eighteen selected K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J
+recipes at player HD 1. They never synthesize HD 6/11
 or treat dungeon depth as character HD. Both retain foe actor 3 and declare exact
 per-arm `participant_rosters`; Warrior and Mage remain actors 1 and 2 through
 run, finish, load, resume and replay. Faction multisets match without identity
@@ -519,9 +520,9 @@ python scripts/arena_evaluation.py --binary TOR_ARENA run CASE_INPUT/plan.json N
 python scripts/arena_evaluation.py --binary TOR_ARENA replay NEW_BATCH
 ```
 
-The unspent subset plans 24 runs and the fourteen-species purchased set 112:
-136 initial runs plus 136 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
-and a 30-second timeout, so each pass has a maximum 68-minute timeout budget
+The unspent subset plans 24 runs and the eighteen-species purchased set 144:
+168 initial runs plus 168 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
+and a 30-second timeout, so each pass has a maximum 84-minute timeout budget
 before preparation overhead. These are smoke inputs, not a balance result.
 Shared seeds and mirrored/class arms are not independent observations. Net
 resources do not establish gross spending, recovery or stock flow.
@@ -539,13 +540,13 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 The API likewise requires
 `create_candidate(output, compiler, source_package=package, source_provenance={"reference": reference})`.
 It accepts only the exact known preactivation E/S profile or canonical activated
-fourteen-species profile, including stage identities/order, counts, bands, growth,
+eighteen-species profile, including stage identities/order, counts, bands, growth,
 supplies and carried-stock policy. A partially promoted or modified profile
 rejects. Both accepted shapes materialize the same diagnostic policy without
-duplicating the shared C/Y/T/V/J pool. Existing output directories are never reused.
+duplicating the shared C/Y/T/V/G/J pool. Existing output directories are never reused.
 
 New `tor-rogue-activation-inputs-v2` inventories record `source_population_shape`
-as `preactivation_es` or `canonical_fourteen_species`, explicit package provenance,
+as `preactivation_es` or `canonical_eighteen_species`, explicit package provenance,
 and separate `source_package_inputs`, `tool_inputs` and `compiler_dependency_inputs`
 hashes. `artifact_purpose = "diagnostic_population_package"` and
 `production_mutated = false` describe this tool's action; the former global
@@ -553,15 +554,18 @@ hashes. `artifact_purpose = "diagnostic_population_package"` and
 The pinned external Rogue selector reference is separate from the supplied TOR
 package reference. Prior inventories and retained campaign sources stay unchanged.
 
-The bands condition the pinned Rogue selector on fourteen eligible species
-E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J. Centaur enters at depth 7 and leaves after 16; Yeti enters at
-11 and leaves after 20. Rattlesnake enters at 3 and leaves after 12, with zero
-carry chance. Troll enters at 13 and leaves after 22; Wraith enters at 14 and
-leaves after 23, with zero carry. Jabberwock enters at depth 21. Depths 21–22
-select T:W:U:V:J 1:1:1:1:1; depth 23 selects W:U:V:J 5:5:6:6; 24–26 use
-U:V:J 5:7:7, 5:8:8 and 5:9:9 respectively. Depths 27–28 select V:J 1:1;
-29 uses 7:12 and 30 uses 8:13. The open 31+ band returns to V:J 1:1.
-Four-U, four-V and four-J draws are possible.
+The bands condition the pinned Rogue selector on eighteen eligible species
+K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J. Kestrel is eligible at depths 1–6 and bat
+at 1–8; neither carries stock. Centaur enters at depth 7 and leaves after 16;
+Yeti enters at 11 and leaves after 20. Rattlesnake enters at 3 and leaves after
+12, with zero carry chance. Flytrap is eligible at 12–21, also with zero stock.
+Troll enters at 13 and leaves after 22; Wraith enters at 14 and leaves after
+23, with zero carry. Griffin enters at depth 20 and Jabberwock at 21.
+Depth 21 selects F:T:W:U:V:G:J equally; depth 22 selects T:W:U:V:G:J equally.
+Depth 23 uses W:U:V:G:J 5:5:6:6:6; 24–26 use U:V:G:J 5:7:7:7, 5:8:8:8
+and 5:9:9:9 respectively. Depths 27–28 select V:G:J 1:1:1; 29 uses 7:12:12
+and 30 uses 8:8:13. The open 31+ band returns to V:G:J 1:1:1.
+Four-U, four-V, four-G and four-J draws are possible.
 These weights remain provisional, without a numerical balance qualification.
 Historical foe-stage and carried-pool IDs stay stable; unchanged item stages
 retain their streams, subject to changed occupancy. The appended restore-strength
@@ -575,16 +579,17 @@ bundled package. No objective or terminal floor is added.
 The policy uses `racial_after` depth 26 with complete seeded per-HD rows and
 Health rolls, retained base purchases and ordinary unspent grants on appended
 rows. J has 15 HD at 26 and reaches 256 at 267; a sampled J at 268 requests
-257 and must refuse the whole entry atomically. All-V draws can remain valid
-through 274, where V reaches 256. At 275 both tail recipes exceed capacity.
+257 and must refuse the whole entry atomically. G reaches 256 HD at 269 and
+refuses at 270. All-V draws can remain valid through 274, where V reaches 256.
+At 275 all three tail recipes exceed capacity.
 Selection is never clamped or rerolled to avoid the sampled recipe's refusal.
 This open policy has an operational capacity boundary, not a designed plateau or
 full unlimited-depth execution. Wide counts, lossless chunked persistence,
 long-journal-only startup and depth-conditioned haste remain unfinished.
 
-C/Y/T/V/J receive 15%/30%/50%/20%/70% birth-stock chances: one ordinary ration
-or clean bandage with equal provisional weights. E/S/H/I/R/Z/Q/W/U have no
-carry policy. Stock does
+C/Y/T/V/G/J receive 15%/30%/50%/20%/20%/70% birth-stock chances: one ordinary ration
+or clean bandage with equal provisional weights. K/E/B/S/H/I/R/Z/Q/F/W/U have
+no carry policy. Stock does
 not enable care, equipment or loot tactics, and revisit/restart never restock.
 Isolated roster-study actors have no population stage and therefore no birth
 stock; their inventory records that limitation. Full Rogue item-pool parity is

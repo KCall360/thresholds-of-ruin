@@ -476,6 +476,34 @@ impl Canvas {
                 );
             }
         }
+        if !app.hold_choices.is_empty() {
+            self.screen(
+                "ESCAPE A HOLD",
+                "UP/DOWN selects   ENTER escapes   ESC or F11 cancels",
+            );
+            let start = app.selected.saturating_sub(crate::STATS_ROWS - 1);
+            for (index, choice) in app
+                .hold_choices
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(crate::STATS_ROWS)
+            {
+                self.text(
+                    72,
+                    156 + (index - start) * 22,
+                    &format!(
+                        "{} {}. {}",
+                        if index == app.selected { ">" } else { " " },
+                        index + 1,
+                        choice.label
+                    ),
+                    if index == app.selected { GOLD } else { TEXT },
+                    2,
+                    crate::STATS_WIDTH,
+                );
+            }
+        }
         if app.advancement_open {
             self.screen(
                 "ADVANCEMENT",

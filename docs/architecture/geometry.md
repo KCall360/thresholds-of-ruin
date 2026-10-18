@@ -161,6 +161,15 @@ by cell count. Opposing fields cancel, partial exposure weakens acceleration,
 and perpendicular fields can produce a diagonal. Do not normalize the result.
 Uniform mass distribution cancels from acceleration.
 
+The shared effective flying capability replaces that resultant with zero for
+the creature only. All support checks, physics scheduling, integration and fall
+provenance use the same entity-aware calculation; loose or dropped items retain
+their own physical field. Flight does not brake imposed velocity or clear
+fractional displacement. Gaining or losing it resets only the acceleration
+remainder in the existing actor-publication transaction. Loss resumes gravity
+at the next ordinary quantum without snapping the body or inventing an attacker.
+
+
 One simulation tick is one integration quantum. Position has 65,536 fixed-point
 units per cell; velocity uses these units per tick; one authored gravity unit
 adds 16 velocity units per tick. Signed remainders retain weak acceleration.
@@ -182,8 +191,10 @@ scheduled physics quantum.
 Any obstructed occupied cell may support the rigid body. Ordinary walking in a
 gravity-enabled region requires support against at least one nonzero component
 of the resultant field. Unsupported bodies may wait and manipulate inventory,
-but cannot walk through air. Jumping, flight and zero-gravity push-off controls
-are not implemented. Walking preserves existing velocity.
+but cannot walk through air without an effective flying grant. Flying permits
+ordinary paid unsupported translation with whole-body clearance. Jumping and
+zero-gravity push-off controls remain unimplemented. Walking and flight preserve
+existing velocity.
 
 A collision clears only the obstructed velocity component and its fractional
 displacement. Tangential components survive. Resting support suppresses

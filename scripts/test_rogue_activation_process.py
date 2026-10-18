@@ -18,6 +18,14 @@ from rogue_activation_candidate import conditional_bands, create_candidate, popu
 from status_condition_package import actor_creature, checkpoint
 
 
+def eligible_actors(manifest, depth):
+    stages = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
+    return {choice["archetype"] for stage in stages if stage["kind"] == "actors"
+            for band in stage["bands"] if band["depth"]["minimum"] <= depth
+            and (band["depth"]["kind"] == "open" or depth <= band["depth"]["maximum"])
+            for choice in band["choices"]}
+
+
 class RogueActivationCandidateProcesses(ProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -261,18 +269,17 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         return output, manifest
 
     def test_depth_fourteen_wraith_birth_has_owned_rows_zero_stock_and_source_free_restart(self):
-        output, _ = self.production_anchor_package(1, 14)
-        receipts = self.package_restart(output, 1, 14, 1, {
-            "rogue.zombie", "rogue.centaur", "rogue.quagga", "rogue.yeti", "rogue.troll", "rogue.wraith"}, seed=42)
+        output, manifest = self.production_anchor_package(1, 14)
+        # Fixed seed 2 selects F/Q/W/T from the current production band.
+        receipts = self.package_restart(output, 1, 14, 1, eligible_actors(manifest, 14), seed=2)
         placed = [row for row in receipts[0]["decisions"][0]["result"]["attempts"]
                   if row["kind"] == "placed" and row["content"] == "rogue.wraith"]
         self.assertTrue(placed, "Fixed depth-14 entry must actually construct W")
         self.assertTrue(all(row["entity"]["carried_loot"] is None for row in placed))
 
     def test_depth_twenty_one_jabberwock_birth_has_owned_rows_stock_and_source_free_restart(self):
-        output, _ = self.production_anchor_package(1, 21)
-        receipts = self.package_restart(output, 1, 21, 1, {
-            "rogue.troll", "rogue.wraith", "rogue.black_unicorn", "rogue.vampire", "rogue.jabberwock"}, seed=1)
+        output, manifest = self.production_anchor_package(1, 21)
+        receipts = self.package_restart(output, 1, 21, 1, eligible_actors(manifest, 21), seed=1)
         placed = [row for row in receipts[0]["decisions"][0]["result"]["attempts"]
                   if row["kind"] == "placed" and row["content"] == "rogue.jabberwock"]
         self.assertTrue(placed, "Fixed depth-21 production entry must actually construct J")
@@ -310,7 +317,8 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         choices = [{"archetype": "rogue." + species, "weight": 1, "carried_loot": {
             "version": 1, "pool": "rogue.vampire_supplies",
             "chance": {"numerator": numerator, "denominator": denominator}}}
-            for species, numerator, denominator in (("vampire", 1, 5), ("jabberwock", 7, 10))]
+            for species, numerator, denominator in (("vampire", 1, 5), ("griffin", 1, 5),
+                                                   ("jabberwock", 7, 10))]
         at_entry = next(band for band in stages[0]["bands"] if band["depth"]["minimum"] == 27)
         self.assertEqual(at_entry, {"depth": {"kind": "finite", "minimum": 27, "maximum": 28},
                                     "choices": choices})
@@ -329,7 +337,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                          "DR1/RG1 must remain owned by the first/second Vampire racial rows")
         self.assertEqual(mage["creature"]["hit_dice"], [{"source": "mage", "purchases": []}])
         self.assertEqual(mage["creature"]["starting_skills"], ["spellcasting", "heavy_weaponry"])
-        self.package_restart(output, 2, 27, 1, {"rogue.vampire", "rogue.jabberwock"}, seed=42)
+        self.package_restart(output, 2, 27, 1, eligible_actors(manifest, 27), seed=42)
 
     def test_depth_267_mixed_tail_keeps_exact_owned_rows_after_source_deletion(self):
         # Every possible recipe fits here. Sampled J refuses entry from268;
@@ -340,8 +348,8 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                         "The fixed depth267 witness must reach the exact J256 owned-row assertion")
 
     def test_open_tail_birth_stock_success_and_miss_remain_pinned_after_source_deletion(self):
-        # One fixed input witnesses both decisions; no process-time seed search.
-        receipts = self.candidate_restart(2, 27, 1, seed=0)
+        # Seed 1 selects a stocked J and unstocked G/G/V; no process-time seed search.
+        receipts = self.candidate_restart(2, 27, 1, seed=1)
         decisions = [row["entity"]["carried_loot"]["kind"]
                      for row in receipts[0]["decisions"][0]["result"]["attempts"]
                      if row["kind"] == "placed"]
@@ -356,8 +364,9 @@ class RogueActivationSourceTests(unittest.TestCase):
         from rogue_roster_package import encounter_sources
         driver = RogueActivationCandidateProcesses()
         driver.directory, driver.bin, driver.suffix = Path("unused-output"), Path("compiler-bin"), ""
-        shape = population_shape(encounter_sources()["manifest"])
-        self.assertEqual(shape, "canonical_fourteen_species")
+        manifest = encounter_sources()["manifest"]
+        shape = population_shape(manifest)
+        self.assertEqual(shape, "canonical_eighteen_species")
 
         def candidate(output, compiler, **kwargs):
             return {"format": "tor-rogue-activation-inputs-v2",
@@ -370,10 +379,9 @@ class RogueActivationSourceTests(unittest.TestCase):
                 __name__ + ".create_candidate", side_effect=candidate), patch.object(
                 driver, "package_restart", return_value=[]) as reopened:
             self.assertEqual(driver.candidate_restart(1, 21, 1), [])
-        self.assertEqual(reopened.call_args.args[1:], (1, 21, 1,
-            {"rogue.troll", "rogue.wraith", "rogue.black_unicorn", "rogue.vampire", "rogue.jabberwock"}))
+        self.assertEqual(reopened.call_args.args[1:], (1, 21, 1, eligible_actors(manifest, 21)))
 
-    def check_production_anchor(self, method, selected, depth, seed, eligible, receipt):
+    def check_production_anchor(self, method, selected, depth, seed, receipt):
         from pathlib import Path
         import tempfile
         from unittest.mock import patch
@@ -384,7 +392,7 @@ class RogueActivationSourceTests(unittest.TestCase):
         next(row for row in expected["characters"] if row["id"] == selected)["anchor"] = f"dungeon/{depth}/up"
         def restart(output, actual_selected, actual_depth, interval, actual_eligible, *, seed):
             self.assertEqual((actual_selected, actual_depth, interval), (selected, depth, 1))
-            self.assertEqual(actual_eligible, eligible)
+            self.assertEqual(actual_eligible, eligible_actors(original, depth))
             package = output / "package"
             self.assertEqual(tomllib.loads((package / "scenario.toml").read_text()), expected)
             for relative in [original["ruleset"], *original["modules"]]:
@@ -409,8 +417,8 @@ class RogueActivationSourceTests(unittest.TestCase):
         receipt = [{"decisions": [{"result": {"attempts": [{"kind": "placed",
             "content": "rogue.wraith", "entity": {"carried_loot": None}}]}}]}]
         self.check_production_anchor(
-            "test_depth_fourteen_wraith_birth_has_owned_rows_zero_stock_and_source_free_restart", 1, 14, 42,
-            {"rogue.zombie", "rogue.centaur", "rogue.quagga", "rogue.yeti", "rogue.troll", "rogue.wraith"}, receipt)
+            "test_depth_fourteen_wraith_birth_has_owned_rows_zero_stock_and_source_free_restart", 1, 14, 2,
+            receipt)
 
     def test_jabberwock_depth21_changes_only_production_warrior_anchor(self):
         receipt = [{"decisions": [{"result": {"attempts": [{"kind": "placed",
@@ -418,12 +426,12 @@ class RogueActivationSourceTests(unittest.TestCase):
                 "kind": "carried", "content": "rogue.ration", "quantity": 1}}}]}}]}]
         self.check_production_anchor(
             "test_depth_twenty_one_jabberwock_birth_has_owned_rows_stock_and_source_free_restart", 1, 21, 1,
-            {"rogue.troll", "rogue.wraith", "rogue.black_unicorn", "rogue.vampire", "rogue.jabberwock"}, receipt)
+            receipt)
 
     def test_mixed_depth27_changes_only_production_mage_anchor(self):
         self.check_production_anchor(
             "test_production_mage_depth_twenty_seven_keeps_mixed_growth_and_stock_after_source_deletion", 2, 27, 42,
-            {"rogue.vampire", "rogue.jabberwock"}, [])
+            [])
 
 
 if __name__ == "__main__":
