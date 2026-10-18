@@ -3451,7 +3451,7 @@ mod tests {
     #[test]
     fn combined_movement_and_presentation_formats_preserve_physical_envelopes() {
         assert_eq!(tor_protocol::PROTOCOL_VERSION, 48);
-        assert_eq!(super::RULES_INPUT_FORMAT, 13);
+        assert_eq!(super::RULES_INPUT_FORMAT, 14);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Locomotion and linked-hold operands advance saved and compiled inputs;
         // presentation metadata also advances the public protocol. None of these
@@ -5877,7 +5877,7 @@ mod population_boundary_tests {
         assert_eq!(
             good["package"]["manifest"]["floor_activation"]["carried_item_pools"]["supplies"]
                 ["choices"][1]["quantity"],
-            7
+            json!({"kind":"fixed", "quantity":7})
         );
         for path in [
             "/package/manifest/floor_activation/carried_item_pools",

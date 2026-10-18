@@ -1490,6 +1490,8 @@ fn actual_ability_plan_values() -> Vec<Value> {
             "invocation",
             "step",
             "target",
+            "initial_hold",
+            "hold_damage_increment",
             "public_aim",
             "ability",
             "preparation",
@@ -1537,6 +1539,8 @@ fn phase5_container_checkpoint_rejects_positional_item_spec() {
     *spec = json!(declared_field_values(
         spec,
         &[
+            "magical",
+            "currency",
             "equipment",
             "consumable",
             "edible",

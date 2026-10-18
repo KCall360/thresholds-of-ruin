@@ -26,13 +26,13 @@ def fixture():
     actors = tomllib.loads((source / "catalog/actors.toml").read_text(encoding="utf-8"))["actors"]
     items = tomllib.loads((source / "catalog/items.toml").read_text(encoding="utf-8"))
     rules = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"))
-    # Complete owned N/L rows and source damage survive. Strong fixture checks
-    # make this a composition witness, not a repeated probabilistic search.
+    # Complete owned N/L rows and source damage survive. Both real checks roll
+    # against an explicitly vulnerable fixture target, without seed searching.
     names = ("rogue.human", "rogue.nymph", "rogue.leprechaun")
     manifest["creatures"] = {"species": {name: copy.deepcopy(species[name]) for name in names}}
-    for name in names[1:]:
-        manifest["creatures"]["species"][name]["melee"]["bonus"] = 100
     manifest["creatures"]["species"]["rogue.human"].setdefault("modifiers", []).extend([
+        {"scope": "always", "op": {"kind": "set", "stat": {"kind": "defense", "defense": "physical"}, "value": 0}},
+        {"scope": "always", "op": {"kind": "set", "stat": {"kind": "defense", "defense": "cognitive"}, "value": 0}},
         {"scope": "always", "op": {"kind": "add", "stat": {"kind": "health"}, "value": 200}},
         {"scope": "always", "op": {"kind": "grant_ability", "ability": "fixture_finish"}},
     ])
@@ -45,7 +45,9 @@ def fixture():
                 {"category": "impact", "amount": {"kind": "fixed", "amount": 1000}}]}}],
             "on_failure": [], "descriptors": [], "riders": []}]},
         "ai": {"priority": 0, "hostile": True, "minimum_resource_percent": 0, "range_preference": "any"}})
-    manifest.update(id="theft-service", modules=[], objective=None, unique_retrieval=None,
+    # Service create accepts a resolved Manifest, not module/preset authoring.
+    manifest.pop("modules")
+    manifest.update(id="theft-service", objective=None, unique_retrieval=None,
         archetypes={**{name: copy.deepcopy(actors[name]) for name in names[1:]},
             **{name: copy.deepcopy(items["items"][name]) for name in ("rogue.gold", "rogue.restore_strength")}},
         appearance_pools=items["appearance_pools"])
@@ -55,8 +57,14 @@ def fixture():
         {"archetype": "rogue.gold", "quantity": 100}])
     manifest["characters"][0]["creature"]["nutrition"] = {"kind": "exempt"}
     manifest["characters"][0]["creature"]["future_growth"] = {"kind": "disabled"}
-    manifest["generation_recipes"] = {"room": {"kind": "grid_rooms", "version": 1,
-        "room_width": [7, 7], "room_height": [5, 5], "extra_connections": [0, 0]}}
+    manifest["generation_recipes"] = {"room": {"version": 1, "stages": [
+        {"id": "stone", "version": 1, "operation": {"kind": "stone_fill"}},
+        {"id": "slots", "version": 1, "operation": {"kind": "grid_partition"}},
+        {"id": "rooms", "version": 1, "operation": {"kind": "rooms", "width": [7, 7], "height": [5, 5]}},
+        {"id": "connections", "version": 1, "operation": {"kind": "connected_graph", "extra": [0, 0]}},
+        {"id": "corridors", "version": 1, "operation": {"kind": "corridors"}},
+        {"id": "stairs", "version": 1, "operation": {"kind": "stairs"}},
+    ]}}
     manifest["procedural_worlds"] = {"dungeon": {"kind": "grid_chain", "version": 1,
         "base_region": 1, "grid": [1, 1], "size": [9, 7, 2], "recipe": "room",
         "domain": {"kind": "open", "max_depth": 2}}}
@@ -108,10 +116,16 @@ class TheftServiceContracts(unittest.TestCase):
             self.subject_frames.extend(rows)
         return rows
 
-    def request(self, peer, request):
+    def request(self, peer, request, *, response=None):
         self.serial += 1
-        self.host.request(case=self.case, connection=peer, request_id=f"theft-{self.serial}", request=request)
-        return self.drain(peer)
+        identity = f"theft-{self.serial}"
+        self.host.request(case=self.case, connection=peer, request_id=identity, request=request)
+        rows = self.drain(peer)
+        if response is not None:
+            # Publications queued by another peer's command remain in the full
+            # disclosure transcript, but are not this request's response.
+            return [row for row in rows if row["type"] == response and row.get("request_id") == identity]
+        return rows
 
     def connect(self, actor):
         peer = self.host.call("connect", case=self.case, role="player", user=f"owner-{actor}", actors=[actor])["connection"]
@@ -122,7 +136,7 @@ class TheftServiceContracts(unittest.TestCase):
         return peer
 
     def snapshot(self, actor):
-        rows = self.request(self.peers[actor], {"type": "snapshot"})
+        rows = self.request(self.peers[actor], {"type": "snapshot"}, response="snapshot")
         values = [row["snapshot"] for row in rows if row["type"] == "snapshot"]
         self.assertEqual(len(values), 1)
         return values[0]
@@ -134,22 +148,30 @@ class TheftServiceContracts(unittest.TestCase):
             "command": {"expected_revision": current["state"]["revision"], **command}}
 
     def setup_command(self, command):
-        rows = self.request(self.wizard, {"type": "snapshot"})
-        current = next(row["snapshot"] for row in rows if row["type"] == "snapshot")
+        rows = self.request(self.wizard, {"type": "snapshot"}, response="snapshot")
+        self.assertEqual(len(rows), 1)
+        current = rows[0]["snapshot"]
         self.request(self.wizard, self.envelope(current, {"type": "wizard", "operation": command}))
         return self.host.call("audit", case=self.case, actor=1, user="setup")
 
     def spawn(self, name):
         # One exact fixture position; no search, retries, or dynamic RNG tuning.
         result = self.setup_command(f"creature spawn archetype:rogue.{name} 1 5 3 0")
-        summaries = [entry["content"]["summary"] for entry in result["history"] if entry["content"]["type"] == "wizard"]
-        actor = int(re.search(r"Spawned actor (\d+)", summaries[-1]).group(1))
+        # Audit returns {state, history: HistoryPage}; entries are oldest first.
+        entries = result["history"]["entries"]
+        self.assertTrue(entries)
+        self.assertEqual(entries[-1]["content"]["type"], "wizard")
+        spawned = re.match(rf"Spawned actor (\d+) from archetype:rogue\.{re.escape(name)} ",
+            entries[-1]["content"]["summary"])
+        self.assertIsNotNone(spawned, "the newest wizard history must acknowledge this creature spawn")
+        actor = int(spawned.group(1))
         self.connect(actor)
         return actor
 
     def act(self, actor, action):
         current = self.snapshot(actor)
-        rows = self.request(self.peers[actor], self.envelope(current, {"type": "act", "action": action}))
+        start = len(self.frames)
+        rows = self.request(self.peers[actor], self.envelope(current, {"type": "act", "action": action}), response="ack")
         receipts = [row["receipt"] for row in rows if row["type"] == "ack"]
         self.assertEqual(len(receipts), 1)
         self.assertEqual(receipts[0]["type"], "admitted")
@@ -161,13 +183,14 @@ class TheftServiceContracts(unittest.TestCase):
                 ready = self.snapshot(other)
                 if ready["readiness"]["admission"] and observation(ready)["ready"]:
                     self.request(self.peers[other], self.envelope(ready, {"type": "act", "action": {"type": "wait"}}))
-            start = len(self.frames)
             result = self.host.call("step", case=self.case)
             for peer in [*self.peers.values(), self.wizard]:
                 self.drain(peer)
             statuses = [row["update"]["body"]["status"] for row in self.frames[start:]
                 if row["type"] == "update" and row["update"]["body"]["type"] == "intention"
-                and row["update"]["body"]["status"]["intention"] == intention]
+                and row["update"]["body"]["status"]["intention"] == intention
+                and row["update"]["body"]["status"]["actor"] == str(actor)
+                and row["update"]["body"]["status"]["branch"] == current["branch"]]
             self.assertFalse([row for row in statuses if row["phase"] in ("failed", "cancelled", "paused")], statuses)
             if any(row["phase"] == "resolved" for row in statuses):
                 return self.snapshot(actor)
@@ -200,8 +223,11 @@ class TheftServiceContracts(unittest.TestCase):
         stolen = self.use(nymph, "filch_charm", "Warrior")
         after = self.snapshot(1)
         self.assertEqual(observation(after)["combat"]["hp"], hp, "N's checked contact deals zero damage")
-        self.assertEqual(inventory_units(after, "potion"), 1)
-        self.assertEqual(inventory_units(stolen, "potion"), 1)
+        transfer = {"victim_potions": inventory_units(after, "potion"),
+            "thief_potions": inventory_units(stolen, "potion"),
+            "events": observation(stolen)["combat"]["events"]}
+        self.assertEqual(transfer["victim_potions"], 1, transfer)
+        self.assertEqual(transfer["thief_potions"], 1, transfer)
         potion = next(item for item in observation(stolen)["inventory"] if item["class"] == "potion")
         self.assertFalse(potion["identified"])
         self.assertNotEqual(potion["name"], POTION)

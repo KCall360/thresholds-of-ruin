@@ -118,8 +118,12 @@ W02(1), natural 1d8 and depths 4–13. Source-owned quantity expressions resolve
 checked positive u64 ranges using explicit birth/preparation depth. The appended
 50% per-present-room Gold stage preserves earlier stage ordering and random
 streams. This brings production selection to 21 species, with five remaining.
-The unique objective helper is unchanged. This batch adds no UI or 3D scope and
-has not yet established its required validation evidence.
+The unique objective helper is unchanged. Focused simulation, strict saved-input,
+source-free load-only recovery, catalog, Service and ordinary-process witnesses
+cover the mechanics. The process uses a labeled synthetic victim and ordinary
+checked equipped recovery; it does not establish pursuit or survival balance.
+This batch adds no UI or 3D features. Complete cross-platform CI remains a merge
+requirement.
 The retrieval/ascent victory is implemented; complete survival balancing remains open.
 Persistent floors and paired return stairs are intentional TOR adaptations,
 not exact replication of Rogue's regenerated floors and independent arrivals.

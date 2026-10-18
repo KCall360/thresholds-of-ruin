@@ -3,8 +3,10 @@
 The generated floor, finite stock, synthetic durable victim and neutral factions
 are authored fixture context. Production L/N/O species, purchases, AI and shared
 Filch rules are copied unchanged. This is not starter survival or balance data.
-The victim's harmless natural contact provokes normally; equipping the production
-mace later permits ordinary death/drop/recovery. No runtime edits or seed search.
+The victim's harmless natural contact provokes normally. Its fixture-owned +32
+basic-melee flat bonus affects the equipped production mace's Impact primary,
+ending recovery on one successful hit before unrelated flee-chasing. The empty
+unarmed effect branch stays harmless. No runtime edits or seed search.
 
 Unchanged application-boundary assertion owners (not multiplied per species):
 * test_items_process.ItemProcesses.test_direct_quantities_merge_drop_and_restart:
@@ -51,11 +53,21 @@ def theft_package(test, species):
                     factions={"delvers": [], "dungeon_foes": []},
                     ai_profiles={"ordinary": {}}, capabilities={"npc_stair_traversal": False})
     victim = copy.deepcopy(source["species"]["rogue.human"])
-    victim["attributes"].update(strength=20, speed=10)
     victim["melee"]["bonus"] = 100
     victim["melee"]["strikes"][0]["on_success"] = []
+    # Initial species attributes obey the shared cap of five. This labeled
+    # mechanism's effective Strength/Speed use the ordinary source modifier
+    # fold instead, retaining the intended bounded combat and pursuit timings.
     victim["modifiers"] = [
+        *[{"scope": "always", "op": {"kind": "set", "stat": {
+            "kind": "attribute", "attribute": attribute}, "value": value}}
+          for attribute, value in (("strength", 20), ("speed", 10))],
         {"scope": "always", "op": {"kind": "add", "stat": {"kind": "health"}, "value": 500}},
+        # Mace minimum 2d4+1+32 = 35 exceeds unchanged L/N <=18 and O=12
+        # Health. A flat modifier cannot create effects in the empty unarmed
+        # branch; the ordinary selected-weapon check still must succeed.
+        {"scope": "always", "op": {"kind": "add", "stat": {
+            "kind": "ability", "ability": "basic_melee", "stat": "flat_bonus"}, "value": 32}},
         *[{"scope": "always", "op": {"kind": "add", "stat": {
             "kind": "defense", "defense": defense}, "value": -100}}
           for defense in ("physical", "cognitive")]]
@@ -117,30 +129,68 @@ def inventory(frame, name):
 class RogueTheftProcesses(ProcessTestCase):
     def setUp(self):
         super().setUp()
+        # Three finite arms share one non-resetting aggregate budget. The first
+        # retained L trace projects to 6.02 MB through restored checkpoint, before
+        # death/recovery; allow 16 MiB per complete arm and 48 MiB total. These
+        # bound fixture diagnostics, not production performance or game balance.
         self.work_budget = ProcessWorkBudget(requests=500, actor_ticks=20000,
-                                             transcript_bytes=16 * 1024 * 1024)
+                                             transcript_bytes=48 * 1024 * 1024)
+        self.arm_budgets = {}
+        self.arm_budget = None
+
+    def budgets(self):
+        return [self.work_budget, *([self.arm_budget] if self.arm_budget is not None else [])]
+
+    def check_budgets(self):
+        for budget in self.budgets():
+            budget.check()
 
     def tearDown(self):
         report = self.work_budget.report()
+        report["arms"] = {species: budget.report() for species, budget in self.arm_budgets.items()}
         (self.directory / "work-budget.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print("Theft process budget: " + json.dumps(report, sort_keys=True), flush=True)
         if not self._failed():
-            self.work_budget.check()
+            self.check_budgets()
         super().tearDown()
 
+    def launch(self, *args, **kwargs):
+        self.check_budgets()
+        process = super().launch(*args, **kwargs)
+        # Include the Text spectator and server logs, as well as headless output.
+        for budget in self.budgets():
+            budget.output.paths += (process.transcript.path,)
+        self.check_budgets()
+        return process
+
     def client(self, *args, **kwargs):
+        self.check_budgets()
+        # Assertions use current state/history and raw lifecycle updates, never
+        # accumulated memory or repeated state on palette/map/waiting frames.
+        kwargs["omit_memory"] = True
+        kwargs["compact_background"] = True
         client, frame = super().client(*args, **kwargs)
-        self.work_budget.track(client, frame)
+        for budget in self.budgets():
+            budget.track(client, frame)
         return client, frame
 
     def command(self, client, value):
-        self.work_budget.before()
+        for budget in self.budgets():
+            budget.before()
         result = super().command(client, value)
-        self.work_budget.after(client, result)
+        for budget in self.budgets():
+            budget.after(client, result)
         return result
 
     def frame(self, client, predicate, seconds=15):
-        return self.work_budget.frame_wait(super().frame, client, predicate, seconds=seconds)
+        self.check_budgets()
+
+        def checked(frame):
+            if self.arm_budget is not None:
+                self.arm_budget.after(client, frame)
+            return predicate(frame)
+
+        return self.work_budget.frame_wait(super().frame, client, checked, seconds=seconds)
 
     def execute(self, player, action):
         return settle_rogue_action(self, player, self.act(player, action))
@@ -230,6 +280,15 @@ class RogueTheftProcesses(ProcessTestCase):
     def test_fixed_generated_l_n_o_keep_finite_loot_recoverable_after_source_free_restore(self):
         fallback = unrelated_fallback(self)
         for species, signature in (("leprechaun", "filch_gold"), ("nymph", "filch_charm"), ("orc", "measured_cut")):
+            # subTest records and suppresses failures; do not launch another
+            # fixture/server after any failure, especially an exhausted budget.
+            if self._failed():
+                return
+            self.check_budgets()
+            self.assertNotIn(species, self.arm_budgets, "Finite arms cannot reset their budgets")
+            self.arm_budget = ProcessWorkBudget(requests=500, actor_ticks=20000,
+                                                transcript_bytes=16 * 1024 * 1024)
+            self.arm_budgets[species] = self.arm_budget
             with self.subTest(species=species):
                 self.save = self.directory / (species + ".db")
                 package = theft_package(self, species)
@@ -246,6 +305,8 @@ class RogueTheftProcesses(ProcessTestCase):
                 initial = checkpoint(self, player)
                 recipe = encounter_sources()["actors"]["rogue." + species]["creature"]
                 creature = actor_creature(initial, actor)
+                self.assertEqual(creature["injury"], 0)
+                self.assertFalse(creature["dead"])
                 self.assertEqual(creature["build"]["species"], "rogue." + species)
                 self.assertEqual(len(creature["build"]["hd"]), len(recipe["hit_dice"]))
                 self.assertEqual(creature["build"]["choices"], [
@@ -278,6 +339,9 @@ class RogueTheftProcesses(ProcessTestCase):
                 else:
                     self.fail(f"Fixed seed42 {species} did not execute its signature/transfer within twelve waits")
                 transferred = checkpoint(self, player)
+                self.assertEqual(actor_creature(transferred, actor)["injury"], creature["injury"],
+                                 "Empty natural provocation must stay harmless despite the fixture flat bonus")
+                self.assertFalse(actor_creature(transferred, actor)["dead"])
                 self.assertEqual(transferred["actors"][str(actor)]["location"]["region"], 1)
                 if species == "orc":
                     identity, expected = GOLD, 7

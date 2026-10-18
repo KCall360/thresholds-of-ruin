@@ -380,10 +380,13 @@ appended room stage makes a 50% gold decision for each present room, without
 reordering existing stages or their streams. Restore-strength potions and the
 Amulet are explicitly magical; ordinary ring mail is not. The unique objective
 helper and its relocation policy are unchanged. This batch adds no UI or 3D
-feature. Its documentation and implementation are not validation evidence:
-focused, integration, Service, actual-process, recovery, repository gates and
-final Windows/Linux debug/release qualification have not yet been established
-for this batch.
+feature. Focused simulation, strict current-save, load-only source-free recovery,
+catalog integration, Service and ordinary-process witnesses cover these contracts.
+The process fixture uses a labeled durable victim, harmless natural provocation
+and strengthened equipped recovery damage; production L/N/O builds and AI are
+unchanged. This proves ownership, disclosure and recoverability, not pursuit or
+survival balance. Complete Windows/Linux debug/release CI remains required before
+merge.
 
 ## Important limitations
 

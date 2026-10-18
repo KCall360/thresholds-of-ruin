@@ -113,12 +113,17 @@ fn roundtrip(game: &Game) -> Game {
 }
 
 fn assert_checkpoint_rejects_progress(game: &Game, value: Value, label: &str) {
+    let structurally_valid = serde_json::from_value::<PreparationProgress>(value.clone()).is_ok();
     let mut shared = crate::checkpoint::SharedState::default();
     let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
     let mut shared = serde_json::to_value(shared).unwrap();
     shared["actors"][snapshot["actors"].as_u64().unwrap() as usize]["1"]["pending"]["progress"] =
         value;
     let Ok(shared) = serde_json::from_value::<crate::checkpoint::SharedState>(shared) else {
+        assert!(
+            !structurally_valid,
+            "{label} must reach checkpoint admission"
+        );
         // Numeric and future-prefix bounds may reject at the stored decoder;
         // source-dependent slot/history checks belong to checkpoint admission.
         return;
@@ -406,12 +411,14 @@ fn sequence_rider_checkpoint_rejects_future_hits_and_forged_receipt_slots() {
     ] {
         assert_checkpoint_rejects_progress(&game, serde_json::to_value(bad).unwrap(), label);
     }
+    let upper_word = json!({
+        "kind": "ability", "next_strike": 2,
+        "successful_primaries": 3, "attempted_riders": [2, 1], "linked_hold": null
+    });
+    assert!(serde_json::from_value::<PreparationProgress>(upper_word.clone()).is_ok());
     assert_checkpoint_rejects_progress(
         &game,
-        json!({
-            "kind": "ability", "next_strike": 2,
-            "successful_primaries": 3, "attempted_riders": [2, 1]
-        }),
+        upper_word,
         "a receipt outside the captured rows in the upper word",
     );
 

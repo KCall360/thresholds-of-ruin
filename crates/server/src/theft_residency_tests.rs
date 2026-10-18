@@ -12,6 +12,7 @@ const DISTANT_MEMBER: u64 = 5;
 fn scenario() -> Scenario {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
     let production = crate::scenario_package::resolve_source(&root).unwrap();
+    let rules = std::fs::read_to_string(root.join(&production.manifest.ruleset)).unwrap();
     let mut source = serde_json::to_value(&production.manifest).unwrap();
     source["id"] = json!("theft-residency");
     source["characters"].as_array_mut().unwrap().truncate(1);
@@ -20,13 +21,30 @@ fn scenario() -> Scenario {
         json!([{"archetype":"rogue.restore_strength","quantity":1}]);
     source["characters"][0]["creature"]["nutrition"] = json!({"kind":"exempt"});
     source["characters"][0]["creature"]["future_growth"] = json!({"kind":"disabled"});
-    // Deterministic checked contact, retaining N's real zero-damage natural
-    // strike, owned TR2/TR3 purchases, selection and relocation rules.
-    source["creatures"]["species"]["rogue.nymph"]["melee"]["bonus"] = json!(100);
-    source["generation_recipes"] = json!({"room":{
-        "kind":"grid_rooms","version":1,"room_width":[7,7],
-        "room_height":[5,5],"extra_connections":[0,0]
-    }});
+    // Both real checks still roll. An explicitly vulnerable fixture target
+    // makes contact and the separate Cognitive rider deterministic, retaining
+    // N's complete natural strike, TR2/TR3 purchases and relocation rules.
+    source["creatures"]["species"]["rogue.human"]["modifiers"]
+        .as_array_mut()
+        .unwrap()
+        .extend([
+            json!({"scope":"always","op":{"kind":"set",
+                "stat":{"kind":"defense","defense":"physical"},"value":0}}),
+            json!({"scope":"always","op":{"kind":"set",
+                "stat":{"kind":"defense","defense":"cognitive"},"value":0}}),
+        ]);
+    // from_parts consumes a resolved Manifest; lower the authoring preset with
+    // the production conversion before serializing the immutable recipe.
+    let room = crate::generation_recipe::GridRoomsPreset {
+        version: 1,
+        room_width: [7, 7],
+        room_height: [5, 5],
+        extra_connections: [0, 0],
+        lighting: None,
+    }
+    .to_recipe()
+    .unwrap();
+    source["generation_recipes"] = json!({"room": room});
     source["procedural_worlds"] = json!({"dungeon":{
         "kind":"grid_chain","version":1,"base_region":1,"grid":[5,1],
         "size":[9,7,2],"recipe":"room","domain":{"kind":"open","max_depth":100}
@@ -38,12 +56,8 @@ fn scenario() -> Scenario {
          "bands":[{"depth":{"kind":"open","minimum":1},
             "choices":[{"archetype":"marker","weight":1}]}]}
     ]}}});
-    let package = Package::from_parts(
-        serde_json::from_value(source).unwrap(),
-        vec![],
-        tor_simulation::rules::DEFAULT_RULESET_TOML,
-    )
-    .unwrap();
+    let package =
+        Package::from_parts(serde_json::from_value(source).unwrap(), vec![], &rules).unwrap();
     Scenario {
         seed: 42,
         actors: vec![],
