@@ -1238,7 +1238,9 @@ encounter; an empty traversal has no fabricated recipient diagnostic.
 
 Actor-target and self-step preparation freezes one bounded ordered strike plan.
 Earlier queue admission stores the request, not the plan. Each ability authors strikes
-or selects the current melee source. Both authored abilities and natural sources
+or selects the current melee source. Every strike-source variant is a named,
+`kind`-tagged record; positional arrays are rejected at the typed source boundary.
+Both authored abilities and natural sources
 may unlock later rows through active owned talents. A dormant owned unlock omits
 its row from a new preparation without changing the remaining authored ordinals.
 Restoring eligibility includes the row in subsequent preparations. The captured

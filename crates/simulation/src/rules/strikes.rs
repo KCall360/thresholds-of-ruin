@@ -43,7 +43,7 @@ impl<'de> Deserialize<'de> for StrikeSource {
                 additional_riders: Bounded<RiderDef, { crate::limits::RIDERS_PER_STRIKE }>,
             },
         }
-        match Record::deserialize(deserializer)? {
+        match crate::bounded::named_map::<_, Record>(deserializer)? {
             Record::Authored { strikes } => {
                 validate_strike_shapes(&strikes.0).map_err(serde::de::Error::custom)?;
                 Ok(Self::Authored { strikes: strikes.0 })

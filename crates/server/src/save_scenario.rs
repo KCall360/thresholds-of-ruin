@@ -5754,6 +5754,7 @@ mod advancement_boundary_tests {
             "forms",
             "ability_tags",
             "talents",
+            "expertises",
             "creature_types",
             "subtypes",
             "classes",
