@@ -106,9 +106,45 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
     def snapshot(self, client):
         return self.request(client, {"type": "snapshot"})
 
+    def decision_snapshots(self, clients, attempts=24):
+        """Read one held external-input boundary without advancing gameplay."""
+        def progress(frame):
+            return (frame["cursor"], frame["state"]["revision"], frame["readiness"],
+                    frame["intentions"])
+
+        for _ in range(attempts):
+            frames = tuple(self.snapshot(client) for client in clients)
+            for frame in frames:
+                self.assertIsNone(frame["error"])
+            if observation(frames[0])["tick"] != observation(frames[1])["tick"]:
+                continue
+            owners = [index for index, frame in enumerate(frames)
+                      if observation(frame)["ready"] and frame["readiness"]["admission"]]
+            if len(owners) != 1 and not any(combat(frame)["terminal"] for frame in frames):
+                # An admission ACK can precede execution of already paid work.
+                # Read again; never queue another action to make it settle.
+                continue
+            owner = owners[0] if len(owners) == 1 else 0
+            # Peers sampled before this owner may predate same-tick execution.
+            # Reread those peers so the owner's two samples bracket every peer.
+            frames = list(frames)
+            for index in range(owner):
+                frames[index] = self.snapshot(clients[index])
+                self.assertIsNone(frames[index]["error"])
+            confirmed = self.snapshot(clients[owner])
+            self.assertIsNone(confirmed["error"])
+            # Cursor sequence and readiness revisions are attachment-local.
+            # Confirm only the same actor across the intervening peer reads.
+            if (progress(confirmed) == progress(frames[owner])
+                    and all(observation(frame)["tick"] == observation(confirmed)["tick"]
+                            for frame in frames)):
+                return tuple(confirmed if index == owner else frame
+                             for index, frame in enumerate(frames))
+        self.fail(f"Mechanism snapshots did not align within {attempts} read attempts")
+
     def advance_until(self, clients, predicate, decisions=24, allow_dead=False):
         for _ in range(decisions):
-            frames = tuple(self.snapshot(client) for client in clients)
+            frames = self.decision_snapshots(clients)
             self.assertEqual(observation(frames[0])["tick"], observation(frames[1])["tick"])
             if not allow_dead:
                 self.assertFalse(any(combat(frame)["dead"] for frame in frames))
@@ -116,6 +152,7 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
                 return frames
             ready = [index for index, frame in enumerate(frames) if observation(frame)["ready"]]
             self.assertEqual(len(ready), 1)
+            self.assertTrue(frames[ready[0]]["readiness"]["admission"])
             self.assertIsNone(self.act(clients[ready[0]], {"type": "wait"})["error"])
         self.fail(f"Mechanism did not settle within {decisions} ordinary decisions")
 
@@ -256,6 +293,99 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
         self.assertLessEqual(hp - u64(combat(hit)["hp"]), 36)
         self.assertEqual(combat(after)["hp"], combat(original)["hp"])
         self.reopen_without_source(package, server, clients)
+
+
+class RogueMechanismSnapshotTests(unittest.TestCase):
+    @staticmethod
+    def view(tick, sequence, *, ready=False, admission=True, intentions=(), terminal=False):
+        return {"cursor": {"sequence": str(sequence), "tick": str(tick)},
+                "state": {"revision": str(sequence), "observation": {
+                    "tick": str(tick), "ready": ready,
+                    "combat": {"dead": terminal, "terminal": terminal}}},
+                "readiness": {"revision": str(sequence), "admission": admission},
+                "intentions": list(intentions), "error": None}
+
+    def test_mixed_ticks_are_reread_before_predicate_without_spending_a_decision(self):
+        from unittest.mock import Mock, patch
+        driver = RogueCorrosionRayProcesses()
+        clients = (object(), object())
+        player = self.view(800, 32, ready=True)
+        foe = self.view(800, 46)
+        # Different attachment-local sequences at one stable tick are legal.
+        reads = [self.view(768, 31), self.view(800, 46), player, foe, player]
+        predicate = Mock(return_value=True)
+        with patch.object(driver, "snapshot", side_effect=reads) as snapshot, \
+                patch.object(driver, "act") as act:
+            self.assertEqual(driver.advance_until(clients, predicate, decisions=1), (player, foe))
+            predicate.assert_called_once_with((player, foe))
+            self.assertEqual(snapshot.call_count, 5)
+            act.assert_not_called()
+
+    def test_same_actor_progress_invalidates_an_equal_tick_pair(self):
+        from unittest.mock import Mock, patch
+        driver = RogueCorrosionRayProcesses()
+        clients = (object(), object())
+        old_owner = self.view(800, 32, ready=True)
+        player = self.view(800, 33)
+        foe = self.view(800, 47, ready=True)
+        reads = [old_owner, self.view(800, 46), player, player, foe, player, foe]
+        predicate = Mock(return_value=True)
+        with patch.object(driver, "snapshot", side_effect=reads), patch.object(driver, "act") as act:
+            self.assertEqual(driver.advance_until(clients, predicate, decisions=1), (player, foe))
+            predicate.assert_called_once_with((player, foe))
+            act.assert_not_called()
+
+    def test_paid_admission_settles_before_one_wait_at_the_current_owner(self):
+        from unittest.mock import Mock, patch
+        driver = RogueCorrosionRayProcesses()
+        clients = (object(), object())
+        queued = self.view(800, 32, ready=True, admission=False,
+                           intentions=({"phase": "queued"},))
+        player = self.view(800, 33, ready=True)
+        foe = self.view(800, 46)
+        after = (self.view(900, 35), self.view(900, 48, ready=True))
+        reads = [queued, foe, player, foe, player, *after, after[0], after[1]]
+        predicate = Mock(side_effect=[False, True])
+        with patch.object(driver, "snapshot", side_effect=reads), \
+                patch.object(driver, "act", return_value={"error": None}) as act:
+            self.assertEqual(driver.advance_until(clients, predicate, decisions=2), after)
+            self.assertEqual(predicate.call_count, 2)
+            act.assert_called_once_with(clients[0], {"type": "wait"})
+
+    def test_never_aligned_reads_fail_closed_without_predicate_or_gameplay(self):
+        from unittest.mock import Mock, patch
+        driver = RogueCorrosionRayProcesses()
+        clients = (object(), object())
+        reads = [self.view(768, 31), self.view(800, 46)] * 24
+        predicate = Mock(return_value=True)
+        with patch.object(driver, "snapshot", side_effect=reads) as snapshot, \
+                patch.object(driver, "act") as act:
+            with self.assertRaisesRegex(AssertionError, "did not align within 24 read attempts"):
+                driver.advance_until(clients, predicate, decisions=1)
+            self.assertEqual(snapshot.call_count, 48)
+            predicate.assert_not_called()
+            act.assert_not_called()
+
+    def test_terminal_boundary_preserves_allow_dead_without_waiting(self):
+        from unittest.mock import Mock, patch
+        driver = RogueCorrosionRayProcesses()
+        clients = (object(), object())
+        frames = (self.view(800, 32, admission=False, terminal=True),
+                  self.view(800, 46, admission=False, terminal=True))
+        for allow_dead in (False, True):
+            with self.subTest(allow_dead=allow_dead), \
+                    patch.object(driver, "snapshot", side_effect=[*frames, frames[0]]), \
+                    patch.object(driver, "act") as act:
+                predicate = Mock(return_value=True)
+                if allow_dead:
+                    self.assertEqual(driver.advance_until(clients, predicate, decisions=1,
+                                                          allow_dead=True), frames)
+                    predicate.assert_called_once_with(frames)
+                else:
+                    with self.assertRaises(AssertionError):
+                        driver.advance_until(clients, predicate, decisions=1)
+                    predicate.assert_not_called()
+                act.assert_not_called()
 
 
 if __name__ == "__main__":

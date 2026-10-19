@@ -233,13 +233,11 @@ fn source_record_rejects_unknown_fields_bounded_collections_and_invalid_mechanic
             target = &mut target[key];
         }
         *target = value;
-        let record: MeleeAttackRecord = serde_json::from_value(invalid).unwrap();
-        assert!(record.restore().is_err());
+        assert!(serde_json::from_value::<MeleeAttackRecord>(invalid).is_err());
     }
     let mut invalid_dice = encoded.clone();
     invalid_dice["damage"]["components"][0]["amount"]["count"] = serde_json::json!(65);
-    let record: MeleeAttackRecord = serde_json::from_value(invalid_dice).unwrap();
-    assert!(record.restore().is_err());
+    assert!(serde_json::from_value::<MeleeAttackRecord>(invalid_dice).is_err());
     let mut missing_primary = encoded;
     missing_primary["damage"]
         .as_object_mut()
@@ -314,18 +312,16 @@ fn nested_record_fields_and_non_nested_descriptor_groups_are_rejected() {
     // cannot be unambiguously nested within both categories.
     invalid["damage"]["components"][0]["descriptor"] = serde_json::json!("fire");
     invalid["damage"]["primary"]["descriptor"] = serde_json::json!("fire");
-    let record: MeleeAttackRecord = serde_json::from_value(invalid).unwrap();
-    assert!(record.restore().is_err());
+    assert!(serde_json::from_value::<MeleeAttackRecord>(invalid).is_err());
     let mut missing_key = encoded;
     missing_key["damage"]["primary"]["sides"] = serde_json::json!(8);
-    let record: MeleeAttackRecord = serde_json::from_value(missing_key).unwrap();
-    assert!(record.restore().is_err());
+    assert!(serde_json::from_value::<MeleeAttackRecord>(missing_key).is_err());
 }
 
 #[test]
 fn attack_values_deserialize_through_validation_and_preserve_stack_key_equivalence() {
     let source = serde_json::json!({
-        "skill":"light_weaponry", "bonus":2, "wind_up":90, "recovery":70,
+        "skill":"light_weaponry", "bonus":2, "damage_enchantment":0, "wind_up":90, "recovery":70,
         "damage": {"primary":{"category":"energy","descriptor":"fire","sides":6},
             "components":[
                 {"category":"energy","descriptor":"fire","amount":{"type":"rolled","count":1,"sides":6,"bonus":-1}},

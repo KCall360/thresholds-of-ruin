@@ -1548,6 +1548,7 @@ fn phase5_container_checkpoint_rejects_positional_item_spec() {
             "magical",
             "currency",
             "equipment",
+            "equipment_generation",
             "consumable",
             "readable",
             "device",
