@@ -84,6 +84,13 @@ may satisfy unchanged boundaries only with an explicit mapping of the relevant
 source paths, assertions and test IDs. New unique guarantees and interactions
 need new evidence; a generic invariant does not prove states it never reaches.
 
+For focused local qualification, follow the changed production dependencies as
+well as newly added tests. Include existing owners of affected restore fold
+counts, retained build provenance, frozen plan witnesses and complete schema
+field inventories even when their test files were not initially edited. Record
+the selected test IDs and the contracts they cover; a new feature's tests alone
+do not cover those older cross-cutting invariants.
+
 Choose owners by the production boundary, not the test language. Python-authored
 Service contracts exercise the production Service and encoder. The current host
 does not prove socket behavior, authentication setup, durable-store recovery or

@@ -733,7 +733,9 @@ impl BuildRecord {
             .collect::<Result<Vec<_>, BuildError>>()?;
         ledger.restore_drained(drained).map_err(BuildError::from)?;
         let choices = self.choices.0.iter().map(ChoiceRecord::restore).collect();
-        let mut build = CreatureBuild::from_recorded(
+        // Saved learning must be installed before the one permanent validation
+        // fold; constructing fresh birth receipts here would be discarded work.
+        let mut build = CreatureBuild::recorded_structure(
             content,
             self.species.clone(),
             Attributes::new(self.initial_attributes).map_err(|_| BuildError::InvalidDefinition)?,
@@ -881,6 +883,26 @@ mod tests {
             CreatureRecord::capture(&restored).next_condition_generation,
             2
         );
+    }
+
+    #[test]
+    fn fresh_recorded_build_derives_once_and_retains_birth_learning() {
+        let (original, _) = subject(false, false);
+        let build = original.build();
+        let before = crate::creatures::derive::fold_count();
+        let fresh = CreatureBuild::from_recorded(
+            build.content.clone(),
+            build.species.clone(),
+            build.initial_attributes,
+            build.ledger.clone(),
+            build.binding,
+            build.advancement.clone(),
+            build.templates.clone(),
+        )
+        .unwrap();
+        assert_eq!(crate::creatures::derive::fold_count() - before, 1);
+        assert_eq!(&fresh, build);
+        assert!(fresh.intellect_learning.is_some());
     }
 
     #[test]

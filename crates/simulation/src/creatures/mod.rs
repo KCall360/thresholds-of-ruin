@@ -172,6 +172,36 @@ impl CreatureBuild {
         advancement: BuildAdvancement,
         templates: Vec<TemplateId>,
     ) -> Result<Self, BuildError> {
+        let mut build = Self::recorded_structure(
+            content,
+            species,
+            initial_attributes,
+            ledger,
+            binding,
+            advancement,
+            templates,
+        )?;
+        let derived = build.derive()?;
+        build.intellect_learning = Some(Arc::new(expertise_learning::IntellectLearning::new(
+            &build,
+            derived.intellect_sources.clone(),
+            derived.intellect_capacity,
+        )?));
+        Ok(build)
+    }
+
+    /// Resolve and validate recorded ownership before either creating birth
+    /// learning or installing independently validated saved learning. Callers
+    /// must derive the completed build before returning it to ordinary code.
+    fn recorded_structure(
+        content: Arc<Content>,
+        species: SpeciesId,
+        initial_attributes: Attributes,
+        ledger: HdLedger,
+        binding: ManaBinding,
+        advancement: BuildAdvancement,
+        templates: Vec<TemplateId>,
+    ) -> Result<Self, BuildError> {
         let species = content
             .catalog
             .species
@@ -203,12 +233,6 @@ impl CreatureBuild {
         };
         let kind = derive::kind_for_templates(&build, &build.templates)?;
         build.bind_health_origins(&kind)?;
-        let derived = build.derive()?;
-        build.intellect_learning = Some(Arc::new(expertise_learning::IntellectLearning::new(
-            &build,
-            derived.intellect_sources.clone(),
-            derived.intellect_capacity,
-        )?));
         if let RestorationPolicy::Authored(plan) = build.restoration_policy() {
             if plan.is_empty() || plan.len() > crate::limits::HIT_DICE {
                 return Err(BuildError::InvalidDefinition);
