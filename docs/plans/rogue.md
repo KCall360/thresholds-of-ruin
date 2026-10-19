@@ -388,7 +388,10 @@ Server-authored revision-scoped source/ammunition menus now drive Text and ASCII
 direction selection and exact cost/timing preview before explicit confirmation.
 Their strict protocol, shared client, Text and ASCII model owners have focused
 local coverage. Authored, equipped NPC projectile selection also has owning tests;
-ranged loot valuation and stock Rogue ranged loadouts remain separate work. Final
+bounded knowledge-safe launcher/ammunition acquisition now preserves conservative
+melee defaults unless an owned Launch ability has explicitly higher priority.
+The six-shot reserve changes no stock Rogue builds or birth loadouts; dedicated
+archer content and broader weapon trade-off tuning remain separate work. Final
 formats are frozen and current-writer fixtures generated; complete required CI
 is still required before merge. Production dagger/shortbow/arrow definitions
 now preserve the existing dagger damage, use published 20/60 and 80/320 foot

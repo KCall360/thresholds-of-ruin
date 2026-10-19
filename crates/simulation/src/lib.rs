@@ -33,6 +33,7 @@ pub mod unique_retrieval;
 pub use actor_creatures::{CreatureIdentity, CreatureInspection};
 pub mod ai;
 mod ai_items;
+mod ai_ranged_items;
 pub mod attacks;
 pub mod attributes;
 pub mod behavior;
