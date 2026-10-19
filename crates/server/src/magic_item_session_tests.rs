@@ -1,0 +1,481 @@
+//! Encoded production Service ownership/retry and Engine publication contracts.
+//! The ordinary magic-items package owns every capability and initial item.
+use super::*;
+use crate::scenario_package::{resolve_rules_source, Package};
+use serde_json::{json, Value};
+use std::path::Path;
+
+const OWNER: ActorId = ActorId(1);
+const OTHER: ActorId = ActorId(2);
+
+fn scenario(with_other: bool) -> crate::Scenario {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/magic-items");
+    let mut scenario = crate::scenario_package::load(&root, 42, None, true).unwrap();
+    if with_other {
+        let source = scenario.package.as_ref().unwrap();
+        let mut regions = source.region_defs().unwrap();
+        let mut region = serde_json::to_value(&regions[0]).unwrap();
+        // Only add a second ordinary external owner. Item definitions and stock
+        // remain exactly those in the repository acceptance package.
+        region["actors"] = json!([{
+            "id":2,"at":[5,2,0],"turn_ticks":100,"controller":"external",
+            "creature":source.manifest.characters[0].creature
+        }]);
+        regions[0] = serde_json::from_value(region).unwrap();
+        let rules = std::fs::read_to_string(root.join("rules.toml")).unwrap();
+        let rules = resolve_rules_source(&rules, "rules.toml").unwrap().source;
+        scenario.package = Some(Arc::new(
+            Package::from_parts(source.manifest.clone(), regions, &rules).unwrap(),
+        ));
+    }
+    scenario
+}
+
+struct Wire {
+    service: Service,
+    clients: BTreeMap<ActorId, Connection>,
+    serial: u64,
+}
+
+impl Wire {
+    fn new(engine: Engine) -> Self {
+        let actors = engine.actors();
+        let mut wire = Self {
+            service: Service::new(engine),
+            clients: BTreeMap::new(),
+            serial: 0,
+        };
+        for actor in actors {
+            let connection = wire
+                .service
+                .connect(
+                    &Account {
+                        user: format!("magic-owner-{}", actor.0),
+                        token: "fixture".into(),
+                        role: AccessRole::Player,
+                        actors: BTreeSet::from([actor]),
+                    },
+                    "encoded-magic-items".into(),
+                )
+                .unwrap();
+            wire.clients.insert(actor, connection);
+            wire.send(actor, "attach", Request::Attach { actor });
+            ack(wire.send(actor, "control", Request::AcquireControl));
+        }
+        wire
+    }
+
+    fn drain(&mut self, actor: ActorId) -> Vec<ServerMessage> {
+        std::iter::from_fn(|| {
+            self.clients
+                .get_mut(&actor)
+                .unwrap()
+                .messages
+                .try_recv_frame()
+                .ok()
+        })
+        .map(|frame| decode_response(&frame.text).unwrap())
+        .collect()
+    }
+
+    fn send(&mut self, actor: ActorId, id: &str, request: Request) -> Vec<ServerMessage> {
+        let encoded = serde_json::to_string(&ClientMessage::Request {
+            request_id: id.into(),
+            request: Box::new(request),
+        })
+        .unwrap();
+        let ClientMessage::Request {
+            request_id,
+            request,
+        } = decode_request(&encoded).unwrap()
+        else {
+            panic!("encoded gameplay request expected")
+        };
+        self.service
+            .handle(self.clients[&actor].id, request_id, *request);
+        self.drain(actor)
+    }
+
+    fn snapshot(&mut self, actor: ActorId) -> Box<Snapshot> {
+        self.send(actor, "snapshot", Request::Snapshot)
+            .into_iter()
+            .find_map(|message| match message {
+                ServerMessage::Snapshot { snapshot, .. } => Some(snapshot),
+                ServerMessage::Error { .. } => panic!("{message:?}"),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    fn request(&mut self, actor: ActorId, action: Action) -> Request {
+        let snapshot = self.snapshot(actor);
+        assert!(snapshot.has_control && snapshot.readiness.admission);
+        Request::Command {
+            context: snapshot.reply_context().input,
+            branch: snapshot.branch.clone(),
+            command: Command::Act {
+                expected_revision: snapshot.state.revision,
+                action,
+            },
+        }
+    }
+
+    fn finish(&mut self, actor: ActorId, id: &str, request: &Request) -> RequestReceipt {
+        for _ in 0..64 {
+            self.service.run_until_blocked();
+            for other in self.clients.keys().copied().collect::<Vec<_>>() {
+                assert!(!self
+                    .drain(other)
+                    .iter()
+                    .any(|message| matches!(message, ServerMessage::Error { .. })));
+            }
+            let receipt = ack(self.send(actor, id, request.clone()));
+            if matches!(
+                receipt,
+                RequestReceipt::Admitted {
+                    phase: IntentionPhase::Resolved,
+                    ..
+                }
+            ) {
+                return receipt;
+            }
+            let next = self.service.engine.next_actor().unwrap();
+            self.serial += 1;
+            let request = self.request(next, Action::Wait);
+            ack(self.send(next, &format!("clock-{}", self.serial), request));
+        }
+        panic!("ordinary magic-item work did not resolve")
+    }
+
+    fn act(&mut self, id: &str, action: Action) -> RequestReceipt {
+        let request = self.request(OWNER, action);
+        ack(self.send(OWNER, id, request.clone()));
+        self.finish(OWNER, id, &request)
+    }
+
+    fn take(&mut self, class: ItemClass) -> ItemTarget {
+        let item = self
+            .snapshot(OWNER)
+            .state
+            .observation
+            .ground_items
+            .iter()
+            .find(|row| row.item.class == class)
+            .unwrap()
+            .item
+            .id;
+        self.act(
+            &format!("take-{class:?}"),
+            Action::Take {
+                item,
+                quantity: None,
+            },
+        );
+        item
+    }
+
+    fn checkpoint(&self) -> Value {
+        checkpoint(&self.service.engine)
+    }
+}
+
+fn checkpoint(engine: &Engine) -> Value {
+    serde_json::to_value(crate::engine::Checkpoint::capture(engine).encode("magic-items", 0))
+        .unwrap()
+}
+
+fn ack(messages: Vec<ServerMessage>) -> RequestReceipt {
+    assert!(
+        !messages
+            .iter()
+            .any(|message| matches!(message, ServerMessage::Error { .. })),
+        "{messages:?}"
+    );
+    messages
+        .into_iter()
+        .find_map(|message| match message {
+            ServerMessage::Ack { receipt, .. } => Some(receipt),
+            _ => None,
+        })
+        .unwrap()
+}
+
+fn rejected(messages: Vec<ServerMessage>) {
+    assert!(
+        !messages
+            .iter()
+            .any(|message| matches!(message, ServerMessage::Ack { .. })),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| matches!(
+            message,
+            ServerMessage::Error {
+                code: ErrorCode::InvalidAction,
+                ..
+            }
+        )),
+        "{messages:?}"
+    );
+}
+
+fn choice(snapshot: &Snapshot) -> IdentificationChoiceView {
+    snapshot
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .identification
+        .clone()
+        .unwrap()
+}
+
+fn quantity(snapshot: &Snapshot, item: ItemTarget) -> u64 {
+    snapshot
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|row| row.id == item)
+        .unwrap()
+        .quantity
+}
+
+#[test]
+fn encoded_paid_identify_requires_exact_owner_category_and_carried_target_then_retries() {
+    let mut wire = Wire::new(Engine::memory(scenario(true)).unwrap());
+    let scroll = wire.take(ItemClass::Scroll);
+    let wand = wire.take(ItemClass::Wand);
+    let potion = wire.take(ItemClass::Potion);
+    let ground_wand = wire
+        .snapshot(OWNER)
+        .state
+        .observation
+        .ground_items
+        .iter()
+        .find(|row| row.item.class == ItemClass::Wand)
+        .unwrap()
+        .item
+        .id;
+    wire.act("read", Action::Read { item: scroll });
+    let paid = wire.snapshot(OWNER);
+    let pending = choice(&paid);
+    assert_eq!(quantity(&paid, scroll), 2);
+    assert_eq!(pending.class, ItemClass::Wand);
+    assert_eq!(pending.items, vec![wand]);
+    assert!(!pending.choice.0.is_empty());
+    assert!(wire
+        .snapshot(OTHER)
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .identification
+        .is_none());
+
+    // The exact disclosed token is necessary, as are current carried ownership
+    // and the category paid for by the source scroll.
+    for (id, actor, token, item) in [
+        ("wrong-owner", OTHER, pending.choice.clone(), wand),
+        ("wrong-category", OWNER, pending.choice.clone(), potion),
+        ("not-carried", OWNER, pending.choice.clone(), ground_wand),
+        (
+            "wrong-choice",
+            OWNER,
+            IntentionId(format!("{}-stale", pending.choice.0)),
+            wand,
+        ),
+    ] {
+        let before = wire.checkpoint();
+        let request = wire.request(
+            actor,
+            Action::Identify {
+                choice: token,
+                item: Some(item),
+            },
+        );
+        rejected(wire.send(actor, id, request));
+        assert_eq!(
+            wire.checkpoint(),
+            before,
+            "{id} changed authoritative state"
+        );
+    }
+
+    let request = wire.request(
+        OWNER,
+        Action::Identify {
+            choice: pending.choice.clone(),
+            item: Some(wand),
+        },
+    );
+    let admitted = ack(wire.send(OWNER, "identify", request.clone()));
+    let resolved = wire.finish(OWNER, "identify", &request);
+    assert_eq!(resolved.entry_id(), admitted.entry_id());
+    let identified = wire.snapshot(OWNER);
+    assert!(identified
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .identification
+        .is_none());
+    assert_eq!(quantity(&identified, scroll), 2);
+    assert!(
+        identified
+            .state
+            .observation
+            .inventory
+            .iter()
+            .find(|row| row.id == wand)
+            .unwrap()
+            .identified
+    );
+    assert!(
+        !identified
+            .state
+            .observation
+            .inventory
+            .iter()
+            .find(|row| row.id == potion)
+            .unwrap()
+            .identified
+    );
+    let before = wire.checkpoint();
+    // Reuse every request byte, including its now-stale context and vanished
+    // choice. Receipt lookup must precede fresh target/choice resolution.
+    assert_eq!(ack(wire.send(OWNER, "identify", request)), resolved);
+    assert_eq!(wire.checkpoint(), before, "retry paid or learned twice");
+    let stale = wire.request(
+        OWNER,
+        Action::Identify {
+            choice: pending.choice,
+            item: Some(wand),
+        },
+    );
+    rejected(wire.send(OWNER, "new-request-old-choice", stale));
+    assert_eq!(wire.checkpoint(), before);
+}
+
+#[test]
+fn late_store_rejection_rolls_back_magic_charge_and_paid_selection_then_retries() {
+    // These are the three new mutable publication facts, not a scenario matrix:
+    // charge spend, creation of a paid choice, and consumption of that choice.
+    for operation in ["zap", "read", "identify"] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("magic-items.db");
+        let fixture = scenario(false);
+        let mut wire = Wire::new(Engine::open(&path, fixture.clone()).unwrap());
+        let scroll = wire.take(ItemClass::Scroll);
+        let wand = wire.take(ItemClass::Wand);
+        let action = match operation {
+            "zap" => {
+                wire.act("read", Action::Read { item: scroll });
+                let pending = choice(&wire.snapshot(OWNER));
+                wire.act(
+                    "learn-charges",
+                    Action::Identify {
+                        choice: pending.choice,
+                        item: Some(wand),
+                    },
+                );
+                Action::Zap {
+                    item: wand,
+                    direction: Direction::East,
+                }
+            }
+            "read" => Action::Read { item: scroll },
+            "identify" => {
+                wire.act("read", Action::Read { item: scroll });
+                Action::Identify {
+                    choice: choice(&wire.snapshot(OWNER)).choice,
+                    item: Some(wand),
+                }
+            }
+            _ => unreachable!(),
+        };
+        let request = wire.request(OWNER, action);
+        let admitted = ack(wire.send(OWNER, "publish", request.clone()));
+        wire.service.engine.flush().unwrap();
+        drop(wire);
+        let saved = crate::inspect_save(&path).unwrap();
+        let refusing = crate::SavePolicy {
+            max_pending_bytes: 1,
+            ..Default::default()
+        };
+        // Exercise Engine publication directly after reopening: Service startup
+        // deliberately suspends pending human work and is a different contract.
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), refusing).unwrap();
+        let before = checkpoint(&engine);
+        let sequence = engine.save_status().accepted_sequence;
+        for _ in 0..2 {
+            // This executes a private candidate before Store refuses publication,
+            // unlike an admission/preflight rejection of an invalid action.
+            let error = engine.execute_next_intention().unwrap_err();
+            assert_eq!(error.code, ErrorCode::StorageFailure, "{operation}");
+            assert_eq!(
+                error.message,
+                "Save queue is full; wait for saving to finish before retrying"
+            );
+            assert_eq!(checkpoint(&engine), before, "{operation}");
+            assert_eq!(engine.save_status().accepted_sequence, sequence);
+            assert_eq!(crate::inspect_save(&path).unwrap(), saved);
+        }
+        drop(engine);
+        let mut engine = Engine::open(&path, fixture).unwrap();
+        // One successful execution of the same saved candidate demonstrates that
+        // the failed publication above reached the specific mutable fact.
+        engine.execute_next_intention().unwrap().unwrap();
+        let mut wire = Wire::new(engine);
+        let after = wire.snapshot(OWNER);
+        let interaction = after.state.observation.interactions.as_ref().unwrap();
+        match operation {
+            "zap" => {
+                assert_eq!(
+                    interaction
+                        .inventory
+                        .iter()
+                        .find(|row| row.item == wand)
+                        .unwrap()
+                        .charges,
+                    Some(2)
+                );
+                assert!(interaction.identification.is_none());
+                assert_eq!(quantity(&after, scroll), 2);
+            }
+            "read" => {
+                assert_eq!(choice(&after).items, vec![wand]);
+                assert_eq!(quantity(&after, scroll), 2);
+            }
+            "identify" => {
+                assert!(interaction.identification.is_none());
+                assert!(
+                    after
+                        .state
+                        .observation
+                        .inventory
+                        .iter()
+                        .find(|row| row.id == wand)
+                        .unwrap()
+                        .identified
+                );
+                assert_eq!(quantity(&after, scroll), 2);
+            }
+            _ => unreachable!(),
+        }
+        let completed = wire.checkpoint();
+        let receipt = ack(wire.send(OWNER, "publish", request));
+        assert_eq!(receipt.entry_id(), admitted.entry_id());
+        assert!(matches!(
+            receipt,
+            RequestReceipt::Admitted {
+                phase: IntentionPhase::Resolved,
+                ..
+            }
+        ));
+        assert_eq!(wire.checkpoint(), completed);
+    }
+}

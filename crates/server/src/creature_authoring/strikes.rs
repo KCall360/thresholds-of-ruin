@@ -357,6 +357,34 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                         },
                     },
                 },
+                Effect::HealPerHitDie {
+                    sides,
+                    bonus,
+                    overflow,
+                } => s::rules::Effect::HealPerHitDie {
+                    sides: *sides,
+                    bonus: *bonus,
+                    overflow: match overflow {
+                        crate::scenario_package::HealingOverflow::None => {
+                            s::rules::HealingOverflow::None
+                        }
+                        crate::scenario_package::HealingOverflow::ImproveEarliestHitDie => {
+                            s::rules::HealingOverflow::ImproveEarliestHitDie
+                        }
+                    },
+                },
+                Effect::ApplyConditionForTurns {
+                    condition,
+                    duration,
+                } => s::rules::Effect::ApplyConditionForTurns {
+                    condition: ConditionId::new(condition)
+                        .map_err(|_| invalid("Invalid condition ID"))?,
+                    duration: amount(duration),
+                },
+                Effect::RemoveCondition { condition } => s::rules::Effect::RemoveCondition {
+                    condition: ConditionId::new(condition)
+                        .map_err(|_| invalid("Invalid condition ID"))?,
+                },
                 Effect::Heal { amount: value } => s::rules::Effect::Heal {
                     amount: amount(value),
                 },

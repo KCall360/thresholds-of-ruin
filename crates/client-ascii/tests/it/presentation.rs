@@ -271,6 +271,7 @@ fn carried_rings() -> Snapshot {
     second.id = super::item_target(1);
     view.inventory = vec![first, second];
     view.interactions = Some(InteractionView {
+        identification: None,
         completed: Vec::new(),
         slots: vec![
             equipment_slot("ring", "on a finger", false),
@@ -287,6 +288,9 @@ fn carried_rings() -> Snapshot {
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
+                readable: false,
+                zappable: false,
+                charges: None,
             })
             .collect(),
     });
@@ -2215,6 +2219,7 @@ fn eat_picker_and_hunger_status_use_only_disclosed_nutrition() {
     item.class = ItemClass::Food;
     view.inventory = vec![item.clone()];
     view.interactions = Some(InteractionView {
+        identification: None,
         slots: vec![],
         preparation: None,
         completed: vec![],
@@ -2225,6 +2230,9 @@ fn eat_picker_and_hunger_status_use_only_disclosed_nutrition() {
             known_equipment: None,
             drinkable: false,
             edible: true,
+            readable: false,
+            zappable: false,
+            charges: None,
         }],
     });
     let mut app = App::new();

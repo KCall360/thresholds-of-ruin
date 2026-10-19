@@ -89,6 +89,12 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Event {
+    /// Private paid-choice outcome; no item identity or charge data is public history.
+    IdentificationResolved {
+        choice: tor_simulation::IntentionId,
+        #[serde(deserialize_with = "required_option")]
+        item: Option<u64>,
+    },
     EscapeStarted {
         hold: tor_simulation::HoldId,
     },

@@ -46,7 +46,7 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `what now`, `what can i do` | Ideas drawn from what's in sight, and the task |
 | `who am i` | Your character in brief; `stats` has the detail |
 | `examine <thing>`, `x`, `look at` | Read disclosed appearance and condition |
-| `read <thing>` | Read its disclosed description, if available |
+| `read <thing>` | Consume one carried readable item, or read disclosed scenery text |
 | `examine floor`, `walls`, `ceiling` | Describe currently perceived surfaces |
 | `examine me`, `diagnose`, `how am i` | Your condition and what you have in use |
 | `status`, `score` | Condition and the disclosed objective |
@@ -59,6 +59,8 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `wear/wield <item>` | Equip a carried item |
 | `remove <item>` | Unequip a carried item |
 | `drink <potion>` | Use one carried potion |
+| `zap <item> <direction>` | Spend a charge from a carried device |
+| `identify <item>`, `identify cancel` | Resolve or decline a consumed identify scroll’s pending choice |
 | `eat <item>` | Eat one explicitly edible carried item |
 | `open/close <door>` | Approach if necessary, then manipulate the door |
 | `attack/kill/hit <creature>` | Approach if necessary, then attempt basic melee; with no creature named, the one foe in sight |
@@ -392,3 +394,14 @@ server/client connections, transcript boundaries, interruption, spectators,
 control transfer and save/resume. Follow the shared
 [verification policy](../development/testing.md) rather than treating illustrative
 transcripts as a substitute for those tests.
+
+### Scrolls and devices
+
+Read consumes the selected scroll before an identification category is shown.
+Choose a currently carried item with `identify <name or #id>`, or decline with
+`identify cancel`; declining does not restore the scroll. The choice survives
+reconnection and blocks another Read until resolved. Device names and charge
+knowledge are separate: learning a device type does not reveal every instance's
+charges. `zap <name or #id> <direction>` works at rank zero and spends a charge
+when it resolves, even if the ray misses or is resisted. Empty devices still take
+time. See [item authority and knowledge](../reference/items.md#reading-identification-and-charged-devices).

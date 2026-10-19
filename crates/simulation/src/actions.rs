@@ -491,6 +491,10 @@ impl Game {
         let mut touches = Vec::new();
         let mut requested_destination = None;
         let (kind, duration) = match action.clone() {
+            Action::Identify { choice, item } => {
+                self.validate_identification(id, choice, item)?;
+                (OutcomeKind::IdentificationResolved { choice, item }, 0)
+            }
             Action::ChooseGrowthSource { basis, source } => {
                 self.preview_player_growth_source(id, &basis, &source)?;
                 (
@@ -510,6 +514,8 @@ impl Game {
             | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
+            | Action::Read { .. }
+            | Action::Zap { .. }
             | Action::Drink { .. }
             | Action::Eat { .. } => {
                 let work = match action.clone() {
@@ -535,6 +541,8 @@ impl Game {
                     Action::Equip { item, slot } => crate::Work::Equip { item, slot },
                     Action::Unequip { item } => crate::Work::Unequip { item },
                     Action::Drink { item } => crate::Work::Drink { item },
+                    Action::Read { item } => crate::Work::Read { item },
+                    Action::Zap { item, direction } => crate::Work::Zap { item, direction },
                     Action::Eat { item } => crate::Work::Eat { item },
                     _ => return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention)),
                 };
@@ -737,6 +745,9 @@ impl Game {
             let (_, outcome) = self.prepare_player_growth_source(id, basis, source)?;
             return self.publish_actor_outcome(outcome);
         }
+        if let OutcomeKind::IdentificationResolved { choice, item } = kind {
+            return self.resolve_identification(id, choice, item);
+        }
         if let OutcomeKind::Purchased { basis, purchase } = &kind {
             // Recheck the frozen proposal inside the current action transaction.
             // No saved full-state preview can overwrite earned runtime changes.
@@ -770,6 +781,9 @@ impl Game {
                 unreachable!("growth source uses one actor publication")
             }
             OutcomeKind::Purchased { .. } => unreachable!("purchase uses one actor publication"),
+            OutcomeKind::IdentificationResolved { .. } => {
+                unreachable!("identification uses one actor publication")
+            }
             OutcomeKind::AbilityStarted { .. }
             | OutcomeKind::ItemStarted { .. }
             | OutcomeKind::EscapeStarted { .. }

@@ -269,6 +269,40 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
                 text("ability_tag", ability_tag.as_str()),
             ],
         ),
+        s::rules::Effect::ApplyConditionForTurns {
+            condition: id,
+            duration,
+        } => (
+            "apply_condition_for_turns",
+            vec![
+                content("condition", condition(id, rules)),
+                text("duration_turns", amount_text(duration)),
+            ],
+        ),
+        s::rules::Effect::RemoveCondition { condition: id } => (
+            "remove_condition",
+            vec![content("condition", condition(id, rules))],
+        ),
+        s::rules::Effect::HealPerHitDie {
+            sides,
+            bonus,
+            overflow,
+        } => (
+            "heal_per_hit_die",
+            vec![
+                unsigned("sides", u64::from(*sides)),
+                signed("bonus", i64::from(*bonus)),
+                text(
+                    "overflow",
+                    match overflow {
+                        s::rules::HealingOverflow::None => "none",
+                        s::rules::HealingOverflow::ImproveEarliestHitDie => {
+                            "improve_earliest_hit_die"
+                        }
+                    },
+                ),
+            ],
+        ),
         s::rules::Effect::ApplyCondition {
             condition: id,
             duration,

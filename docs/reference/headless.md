@@ -59,6 +59,17 @@ request to paste:
 {"type":"act","action":{"type":"take","item":"<received i_ target>"}}
 ```
 
+Ordinary carried-item actions also accept `read` with an opaque `item` target and
+`zap` with that target plus a direction. Neither requires a named actor ability.
+An Identify scroll is consumed before its owner receives
+`state.observation.interactions.identification`: a bounded category, an opaque
+`choice` token and currently eligible carried item targets. Send
+`{"type":"act","action":{"type":"identify","choice":"<received choice>","item":"<received i_ target>"}}`
+to choose, or send an explicit `"item":null` to decline without refund. Keep the
+received choice token unchanged; stale or foreign choices reject. Device charge
+counts are nullable and disclosed only for the exact instance whose details this
+actor knows. Knowing a device type does not reveal another instance's charges.
+
 `advancement` uses the same ordinary bounded navigation and exact preview/confirm
 flow as Text and ASCII. Its `command` accepts the commands in the
 [advancement guide](../play/advancement.md); it cannot name another actor or

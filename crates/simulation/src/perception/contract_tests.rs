@@ -1085,6 +1085,7 @@ fn item_preparation_keeps_known_threat_reference_domains_separate() {
         let mut potion = crate::ItemSpec::ordinary("ordinary potion".into());
         potion.class = crate::ItemClass::Potion;
         potion.consumable = Some(crate::ConsumableSpec {
+            discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![crate::rules::Effect::Heal {
                 amount: crate::rules::AmountExpr::Fixed { amount: 1 },
             }],

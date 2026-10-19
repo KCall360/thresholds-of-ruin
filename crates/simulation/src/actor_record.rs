@@ -29,6 +29,10 @@ pub(crate) struct ActorRecord {
     ready_at: u64,
     visited: BTreeSet<RegionId>,
     knowledge: Shared<BTreeSet<String>>,
+    #[serde(deserialize_with = "crate::magic_items::read_known_charges")]
+    known_charges: Shared<crate::magic_items::ChargeKnowledge>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    identification: Option<crate::magic_items::IdentificationChoice>,
     #[serde(deserialize_with = "crate::public_plan::read_recognized_abilities")]
     recognized_abilities: Shared<BTreeSet<crate::content_ids::AbilityId>>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -57,6 +61,10 @@ impl<'de> Deserialize<'de> for ActorRecord {
             ready_at: u64,
             visited: BTreeSet<RegionId>,
             knowledge: Shared<BTreeSet<String>>,
+            #[serde(deserialize_with = "crate::magic_items::read_known_charges")]
+            known_charges: Shared<crate::magic_items::ChargeKnowledge>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            identification: Option<crate::magic_items::IdentificationChoice>,
             #[serde(deserialize_with = "crate::public_plan::read_recognized_abilities")]
             recognized_abilities: Shared<BTreeSet<crate::content_ids::AbilityId>>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -82,6 +90,8 @@ impl<'de> Deserialize<'de> for ActorRecord {
             ready_at: fields.ready_at,
             visited: fields.visited,
             knowledge: fields.knowledge,
+            known_charges: fields.known_charges,
+            identification: fields.identification,
             recognized_abilities: fields.recognized_abilities,
             public_plan: fields.public_plan,
             asset: fields.asset,
@@ -116,6 +126,8 @@ impl ActorRecord {
             ready_at: actor.ready_at,
             visited: actor.visited.clone(),
             knowledge: actor.knowledge.clone(),
+            known_charges: actor.known_charges.clone(),
+            identification: actor.identification.clone(),
             recognized_abilities: actor.recognized_abilities.clone(),
             public_plan: actor.public_plan.clone(),
             asset: actor.asset.clone(),
@@ -162,6 +174,8 @@ impl ActorRecord {
             ready_at: self.ready_at,
             visited: self.visited.clone(),
             knowledge: self.knowledge.clone(),
+            known_charges: self.known_charges.clone(),
+            identification: self.identification.clone(),
             recognized_abilities: self.recognized_abilities.clone(),
             public_plan: self.public_plan.clone(),
             asset: self.asset.clone(),

@@ -324,6 +324,8 @@ impl Game {
                     if item.spec.equipment.is_some()
                         || item.spec.consumable.is_some()
                         || item.spec.edible.is_some()
+                        || item.spec.readable.is_some()
+                        || item.spec.device.is_some()
                     {
                         item_interactions.push(crate::interactions::ItemInteractionView {
                             item: item_id,
@@ -347,6 +349,9 @@ impl Game {
                                 .find_map(|(slot, item)| (*item == item_id).then_some(*slot)),
                             known_equipment: identified.then(|| item.equipment_view()).flatten(),
                             drinkable: item.spec.consumable.is_some(),
+                            readable: item.spec.readable.is_some(),
+                            zappable: item.spec.device.is_some(),
+                            charges: actor.known_charges.observed(item_id, item.charges),
                             edible: item.spec.edible.is_some(),
                         });
                     }
@@ -404,9 +409,11 @@ impl Game {
             linked_holds: self.linked_holds(id),
             interactions: (!actor.anatomy.slots.is_empty()
                 || actor.pending.is_some()
+                || actor.identification.is_some()
                 || !item_interactions.is_empty()
                 || !completed.is_empty())
             .then(|| crate::interactions::InteractionView {
+                identification: self.identification_view(id),
                 completed,
                 slots,
                 preparation: actor.pending.as_ref().map(|progress| {

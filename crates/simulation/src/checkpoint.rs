@@ -897,6 +897,7 @@ impl Game {
                                 || self.detached_actor(entry.source)
                         })
                 })
+            && self.magic_knowledge_valid(id)
             && id.0 < self.next_actor_id
             && actor.recognized_abilities.len() <= crate::limits::CATALOG_ENTRIES
             && actor
@@ -955,7 +956,14 @@ impl Game {
     /// Checks restoring gives a loaded item; attaching a stored region gives
     /// its items the same.
     pub(crate) fn item_state_valid(&self, id: ItemId, item: &Item) -> bool {
-        if !item.condition_valid() {
+        if !item.condition_valid()
+            || item.charges.is_some() != item.spec.device.is_some()
+            || item
+                .spec
+                .device
+                .as_ref()
+                .is_some_and(|d| item.charges.is_none_or(|c| c > d.initial_charges.maximum))
+        {
             return false;
         }
         id.0 != 0
@@ -1280,6 +1288,7 @@ mod tests {
         let mut effect = crate::ItemSpec::ordinary("potion".into());
         effect.class = crate::ItemClass::Potion;
         effect.consumable = Some(crate::ConsumableSpec {
+            discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![Effect::ApplyCondition {
                 condition: ConditionId::new("missing_condition").unwrap(),
                 duration: 100,

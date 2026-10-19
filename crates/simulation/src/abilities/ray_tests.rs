@@ -17,7 +17,7 @@ fn at(x: i32) -> Location {
 fn fixture() -> Game {
     fixture_with(|_, _, _| {})
 }
-fn fixture_with(
+pub(super) fn fixture_with(
     customize: impl FnOnce(&mut RulesetDocument, &mut AbilityDef, &mut crate::creatures::Species),
 ) -> Game {
     let mut document = crate::test_creatures::ruleset().document().clone();

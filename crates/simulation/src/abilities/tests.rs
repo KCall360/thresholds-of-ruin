@@ -1122,6 +1122,7 @@ fn typed_item_plans_round_trip_and_reject_ability_only_fields_at_decode() {
             preparation: 20,
         },
         Plan::Drink {
+            discovery: crate::ItemDiscovery::SelfEffect,
             actor,
             item,
             preparation: 30,

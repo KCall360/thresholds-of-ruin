@@ -178,7 +178,20 @@ impl StateView {
                             | crate::Action::Unequip { .. }
                             | crate::Action::Drink { .. }
                             | crate::Action::Eat { .. }
+                            | crate::Action::Read { .. }
+                            | crate::Action::Zap { .. }
                     )
+                })
+                || interactions.identification.as_ref().is_some_and(|choice| {
+                    choice.choice.0.is_empty()
+                        || choice.choice.0.len() > 256
+                        || choice.items.len() > 64
+                        || !unique(choice.items.iter().copied())
+                        || choice.items.iter().any(|item| {
+                            inventory
+                                .get(item)
+                                .is_none_or(|item| item.class != choice.class)
+                        })
                 })
                 || interactions.inventory.len() > inventory.len()
                 || !unique(interactions.inventory.iter().map(|item| item.item))
@@ -187,6 +200,8 @@ impl StateView {
                         return true;
                     };
                     (!item.identified && interaction.known_equipment.is_some())
+                        || (interaction.charges.is_some()
+                            && (!item.identified || !interaction.zappable))
                         || interaction.slot.as_ref().is_some_and(|slot| !slot.valid())
                         || (interaction.slot.is_none()
                             && (interaction.equipped_slot.is_some()
@@ -228,7 +243,9 @@ impl StateView {
                         }
                         crate::Action::Unequip { item }
                         | crate::Action::Drink { item }
-                        | crate::Action::Eat { item } => !inventory.contains_key(item),
+                        | crate::Action::Eat { item }
+                        | crate::Action::Read { item }
+                        | crate::Action::Zap { item, .. } => !inventory.contains_key(item),
                         _ => true,
                     }
                 })

@@ -143,7 +143,9 @@ pub fn decode_action(
         p::Action::Equip { item, .. }
         | p::Action::Unequip { item }
         | p::Action::Drink { item }
-        | p::Action::Eat { item } => {
+        | p::Action::Eat { item }
+        | p::Action::Read { item }
+        | p::Action::Zap { item, .. } => {
             let identity = observation
                 .inventory
                 .iter()
@@ -159,7 +161,38 @@ pub fn decode_action(
                 p::Action::Unequip { .. } => a::Action::Unequip { item: identity },
                 p::Action::Drink { .. } => a::Action::Drink { item: identity },
                 p::Action::Eat { .. } => a::Action::Eat { item: identity },
+                p::Action::Read { .. } => a::Action::Read { item: identity },
+                p::Action::Zap { direction, .. } => a::Action::Zap {
+                    item: identity,
+                    direction: crate::adapt::requested_direction(*direction),
+                },
                 _ => unreachable!(),
+            }
+        }
+        p::Action::Identify { choice, item } => {
+            let pending = observation
+                .interactions
+                .as_ref()
+                .and_then(|interaction| interaction.identification.as_ref())
+                .filter(|pending| scope.identification_choice(pending.choice) == *choice)
+                .ok_or_else(unavailable)?;
+            let item = item
+                .map(|token| {
+                    observation
+                        .inventory
+                        .iter()
+                        .find(|candidate| {
+                            scope.item(candidate.id) == token
+                                && candidate.class == pending.class
+                                && pending.items.contains(&candidate.id)
+                        })
+                        .map(|candidate| candidate.id.0)
+                        .ok_or_else(unavailable)
+                })
+                .transpose()?;
+            a::Action::Identify {
+                choice: pending.choice,
+                item,
             }
         }
         p::Action::Wait => a::Action::Wait,
@@ -246,6 +279,17 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
         },
         a::Action::Eat { item } => p::Action::Eat {
             item: scope.item(s::ItemId(*item)),
+        },
+        a::Action::Read { item } => p::Action::Read {
+            item: scope.item(s::ItemId(*item)),
+        },
+        a::Action::Zap { item, direction } => p::Action::Zap {
+            item: scope.item(s::ItemId(*item)),
+            direction: crate::adapt::wire_direction(*direction),
+        },
+        a::Action::Identify { choice, item } => p::Action::Identify {
+            choice: scope.identification_choice(*choice),
+            item: item.map(|item| scope.item(s::ItemId(item))),
         },
         a::Action::Wait => p::Action::Wait,
     }
@@ -702,7 +746,10 @@ pub fn disclose_entry(
         | JournalContent::IntentionContinued { action, event, .. } => Content::Action {
             action: encode_action(action, scope),
             event: match event {
-                Event::GrowthSourceChosen | Event::Purchased | Event::RespecStarted => return None,
+                Event::GrowthSourceChosen
+                | Event::Purchased
+                | Event::RespecStarted
+                | Event::IdentificationResolved { .. } => return None,
                 Event::EscapeStarted { hold } => VisibleEvent::EscapeStarted {
                     hold: scope.hold(*hold),
                 },

@@ -1334,6 +1334,35 @@ impl CreatureState {
             self.costs.restore_resource(resource, amount)
         }
     }
+    /// Apply an already-selected record mutation. Eligibility is cached in the
+    /// permanent sheet; publication checks one exact active row, never reselects.
+    pub(crate) fn heal_and_improve_hit_die(
+        &mut self,
+        amount: u32,
+        claim: &crate::progression::HitDieHealthImprovement,
+        expected_epoch: BuildEpoch,
+    ) -> Result<u32, CreatureStateError> {
+        if self.health.dead()
+            || self.build_epoch != expected_epoch
+            || self.derived.next_health_improvement.as_ref() != Some(claim)
+        {
+            return Err(CreatureStateError::Inconsistent);
+        }
+        let mut candidate = self.clone();
+        let healed = candidate.heal(amount);
+        let mut build = (*candidate.build).clone();
+        build
+            .stage_health_improvement(claim)
+            .map_err(CreatureStateError::Build)?;
+        let context = candidate.recovery_context;
+        candidate.rebuild_one_with_recovery_context(
+            build,
+            ConditionReconciliation::AutomaticGrowth,
+            || Ok(context),
+        )?;
+        *self = candidate;
+        Ok(healed)
+    }
     pub fn heal(&mut self, amount: u32) -> u32 {
         let healed = self.health.heal(amount);
         self.health_recovery.clear_if_saturated(self.health);
@@ -1389,6 +1418,35 @@ impl CreatureState {
         duration: u64,
     ) -> Result<ConditionUpdate, ConditionError> {
         self.apply_qualified_condition(id, source, duration, None)
+    }
+    /// Cure one condition's active applications without discarding other state,
+    /// protection phases, or reservations owned by already-paid work.
+    pub fn remove_condition(&mut self, id: &ConditionId) -> Result<bool, ConditionError> {
+        if self.build.ruleset().condition(id).is_none() {
+            return Err(ConditionError::UnknownCondition);
+        }
+        let mut conditions = self.conditions.clone();
+        if !conditions.remove(id) {
+            return Ok(false);
+        }
+        let sources = condition_sources(&self.build, &self.extra_sources, &conditions);
+        if sources != self.extra_sources {
+            let derived = self
+                .permanent
+                .fold(
+                    &self.build,
+                    &sources,
+                    &self.equipment,
+                    self.restorable_losses,
+                )
+                .map_err(|_| ConditionError::InvalidModifiers)?;
+            self.conditions = conditions;
+            self.extra_sources = sources;
+            self.replace_derived(derived);
+        } else {
+            self.conditions = conditions;
+        }
+        Ok(true)
     }
     pub fn condition_restricts(&self, operation: crate::rules::ConditionRestriction) -> bool {
         self.conditions.restricts(self.build.ruleset(), operation)

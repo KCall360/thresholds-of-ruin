@@ -1652,6 +1652,7 @@ fn assert_rolled_meal_late_failure_is_atomic(charge_regeneration: bool) {
     let mut potion = ItemSpec::ordinary("late failure".into());
     potion.class = tor_simulation::ItemClass::Potion;
     potion.consumable = Some(tor_simulation::ConsumableSpec {
+        discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Damage {
             damage: DamageExpr::Components {
                 components: vec![DamageComponentExpr {

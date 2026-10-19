@@ -222,6 +222,7 @@ fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() 
     carrying(&mut s);
     let ring = super::item_target(12);
     s.observation.interactions = Some(InteractionView {
+        identification: None,
         completed: Vec::new(),
         slots: vec![
             equipment_slot("ring", "on a finger", false),
@@ -235,6 +236,9 @@ fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() 
             known_equipment: None,
             drinkable: false,
             edible: false,
+            readable: false,
+            zappable: false,
+            charges: None,
         }],
     });
     assert_eq!(

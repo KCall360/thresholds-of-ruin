@@ -58,6 +58,10 @@ pub struct ItemSpec {
     pub equipment: Option<crate::EquipmentSpec>,
     pub consumable: Option<crate::ConsumableSpec>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub readable: Option<crate::ReadableSpec>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub device: Option<crate::DeviceSpec>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
     pub edible: Option<crate::EdibleSpec>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub supply: Option<crate::content_ids::SupplyId>,
@@ -86,6 +90,10 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
             equipment: Option<crate::EquipmentSpec>,
             consumable: Option<crate::ConsumableSpec>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
+            readable: Option<crate::ReadableSpec>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            device: Option<crate::DeviceSpec>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
             edible: Option<crate::EdibleSpec>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             supply: Option<crate::content_ids::SupplyId>,
@@ -106,6 +114,8 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
             currency: fields.currency,
             equipment: fields.equipment,
             consumable: fields.consumable,
+            readable: fields.readable,
+            device: fields.device,
             edible: fields.edible,
             supply: fields.supply,
             class: fields.class,
@@ -135,6 +145,8 @@ impl Clone for ItemSpec {
             currency: self.currency,
             equipment: self.equipment.clone(),
             consumable: self.consumable.clone(),
+            readable: self.readable.clone(),
+            device: self.device.clone(),
             edible: self.edible.clone(),
             supply: self.supply.clone(),
             class: self.class,
@@ -157,6 +169,8 @@ impl ItemSpec {
             currency: None,
             equipment: None,
             consumable: None,
+            readable: None,
+            device: None,
             edible: None,
             supply: None,
             class: ItemClass::Misc,
@@ -194,6 +208,12 @@ impl ItemSpec {
         if let Some(consumable) = &self.consumable {
             rules.validate_effects(&consumable.effects)?;
         }
+        if let Some(readable) = &self.readable {
+            readable.validate_rules(rules)?;
+        }
+        if let Some(device) = &self.device {
+            device.validate_rules(rules)?;
+        }
         if let Some(edible) = &self.edible {
             if !edible.valid() {
                 return Err(crate::rules::RulesetError::Bound {
@@ -205,31 +225,36 @@ impl ItemSpec {
         Ok(())
     }
     pub(crate) fn valid(&self) -> bool {
-        self.currency.is_none_or(|_| {
-            self.class == ItemClass::Coin
-                && self.stackable
-                && self.equipment.is_none()
-                && self.consumable.is_none()
-                && self.edible.is_none()
-                && self.supply.is_none()
-        }) && self.equipment.as_ref().is_none_or(|equipment| {
-            !self.stackable
-                && self.consumable.is_none()
-                && self.edible.is_none()
-                && self.supply.is_none()
-                && equipment.valid_shape()
-        }) && self.consumable.as_ref().is_none_or(|consumable| {
-            self.class == ItemClass::Potion && self.edible.is_none() && consumable.valid()
-        }) && self.edible.as_ref().is_none_or(|edible| {
-            edible.valid() && self.equipment.is_none() && self.consumable.is_none()
-        }) && [
-            &self.archetype,
-            &self.identity,
-            &self.name,
-            &self.appearance,
-        ]
-        .iter()
-        .all(|s| !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control))
+        self.magic_shape_valid()
+            && self.currency.is_none_or(|_| {
+                self.class == ItemClass::Coin
+                    && self.stackable
+                    && self.equipment.is_none()
+                    && self.consumable.is_none()
+                    && self.edible.is_none()
+                    && self.supply.is_none()
+            })
+            && self.equipment.as_ref().is_none_or(|equipment| {
+                !self.stackable
+                    && self.consumable.is_none()
+                    && self.edible.is_none()
+                    && self.supply.is_none()
+                    && equipment.valid_shape()
+            })
+            && self.consumable.as_ref().is_none_or(|consumable| {
+                self.class == ItemClass::Potion && self.edible.is_none() && consumable.valid()
+            })
+            && self.edible.as_ref().is_none_or(|edible| {
+                edible.valid() && self.equipment.is_none() && self.consumable.is_none()
+            })
+            && [
+                &self.archetype,
+                &self.identity,
+                &self.name,
+                &self.appearance,
+            ]
+            .iter()
+            .all(|s| !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control))
             && self.properties.len() <= 32
             && self.properties.iter().all(|(k, v)| {
                 !k.is_empty()
@@ -382,13 +407,21 @@ impl Game {
         }
         spec.validate_rules(self.content.rules())
             .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidDefinition))?;
+        let mut rng = self.rules_rng;
+        let charges = spec
+            .device
+            .as_ref()
+            .map(|device| device.initial_charges.sample(&mut rng))
+            .transpose()?;
         let item = self.place_authored_item(id, at, spec.name.clone(), owner)?;
         self.items
             .edit(item, |entry| {
                 entry.spec = tor_world::Shared::new(spec);
                 entry.quantity = quantity;
+                entry.charges = charges;
             })
             .expect("placed item");
+        self.rules_rng = rng;
         Ok(item)
     }
 
@@ -433,6 +466,8 @@ impl Game {
             || item.spec.equipment.is_some()
             || item.spec.consumable.is_some()
             || item.spec.edible.is_some()
+            || item.spec.readable.is_some()
+            || item.spec.device.is_some()
             || item.spec.supply.is_some()
             // An item without payment capabilities cannot own valid holds.
             // Reject corrupt evidence rather than silently releasing it.
@@ -618,6 +653,11 @@ impl Game {
             .get(&source)
             .ok_or(GameError::ItemUnavailable)?
             .condition;
+        let charges = self
+            .items
+            .get(&source)
+            .ok_or(GameError::ItemUnavailable)?
+            .charges;
         let spec = self
             .items
             .get(&source)
@@ -647,6 +687,7 @@ impl Game {
                 result,
                 Item {
                     condition,
+                    charges,
                     corpse: None,
                     holds: vec![],
                     motion,
@@ -848,7 +889,12 @@ mod tests {
                         modifiers: vec![],
                     })
                 }
-                6 => entry.spec.consumable = Some(crate::ConsumableSpec { effects: vec![] }),
+                6 => {
+                    entry.spec.consumable = Some(crate::ConsumableSpec {
+                        discovery: crate::ItemDiscovery::SelfEffect,
+                        effects: vec![],
+                    })
+                }
                 7 => {
                     entry.spec.edible = Some(crate::EdibleSpec {
                         nutrition: crate::rules::AmountExpr::Fixed { amount: 1 },

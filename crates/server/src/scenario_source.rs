@@ -53,6 +53,8 @@ struct ItemDefinition {
     class: ItemClass,
     equipment: Option<EquipmentSpec>,
     consumable: Option<ConsumableSpec>,
+    readable: Option<ReadableSpec>,
+    device: Option<DeviceSpec>,
     edible: Option<EdibleSpec>,
     supply: Option<String>,
     #[serde(default)]
@@ -108,6 +110,8 @@ fn normalize_catalog_views(
                     class: item.class,
                     equipment: item.equipment,
                     consumable: item.consumable,
+                    readable: item.readable,
+                    device: item.device,
                     edible: item.edible,
                     supply: item.supply,
                     magical: item.magical,
@@ -758,6 +762,8 @@ domain = { kind = "finite", count = 3 }
         assert!(resolved.provenance.contains_key("items.coin"));
         for declaration in [
             "[actors.bad]\nstackable=true",
+            "[actors.bad]\nreadable={identify=\"potion\",discovery=\"on_use\"}",
+            "[actors.bad]\ndevice={ability=\"ray\",initial_charges={minimum=3,maximum=7},discovery=\"on_use\"}",
             "[actors.bad]\nname=\"Unsupported actor name\"",
             "[items.bad]\nturn_ticks=100",
             "[items.token]\nname=\"Duplicate\"",
@@ -766,6 +772,54 @@ domain = { kind = "finite", count = 3 }
             std::fs::write(&file, format!("{original}\n{declaration}\n")).unwrap();
             assert!(resolve_source(root.path()).is_err(), "{declaration}");
         }
+    }
+
+    #[test]
+    fn typed_item_catalog_preserves_magic_capabilities_and_source_provenance() {
+        let root = source_package("[\"magic.toml\"]");
+        std::fs::write(root.path().join("magic.toml"), r#"
+            namespace = "magic"
+            [items."magic.scroll"]
+            name = "readable tablet"
+            class = "tool"
+            readable = { identify = "wand", discovery = "on_use" }
+            [items."magic.device"]
+            name = "charged stone"
+            class = "gem"
+            device = { ability = "magic.ray", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
+        "#).unwrap();
+        let resolved = resolve_source(root.path()).unwrap();
+        let readable = resolved.manifest.archetypes["magic.scroll"]
+            .readable
+            .as_ref()
+            .unwrap();
+        assert_eq!(readable.identify, Some(ItemClass::Wand));
+        assert_eq!(readable.discovery, ItemDiscovery::OnUse);
+        let device = resolved.manifest.archetypes["magic.device"]
+            .device
+            .as_ref()
+            .unwrap();
+        assert_eq!(device.ability, "magic.ray");
+        assert_eq!(
+            device.initial_charges,
+            ChargeRange {
+                minimum: 3,
+                maximum: 7
+            }
+        );
+        assert_eq!(resolved.provenance["items.magic.scroll"], "magic.toml");
+        assert_eq!(resolved.provenance["items.magic.device"], "magic.toml");
+        // Normalization preserves capability even though neither item uses the
+        // conventional Scroll or Wand physical class.
+        let restored: Manifest = parse(&resolved.manifest_text, "resolved").unwrap();
+        assert_eq!(
+            restored.archetypes["magic.scroll"].readable.as_ref(),
+            Some(readable)
+        );
+        assert_eq!(
+            restored.archetypes["magic.device"].device.as_ref(),
+            Some(device)
+        );
     }
 
     #[test]

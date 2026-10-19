@@ -21,6 +21,9 @@ use crate::{
 /// actions; see [`super::turn`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Goal {
+    MagicItem {
+        action: Action,
+    },
     Escape {
         hold: HoldTarget,
     },
@@ -146,7 +149,7 @@ pub struct Choice {
 
 pub const HELP: &str = "\
 Look and ask: look, examine <thing>, look <direction>, exits, where am i, what now, inventory, stats, status.
-Handle things: take <thing>, take all, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, eat <food>, open or close <door>.
+Handle things: take <thing>, take all, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, eat <food>, read <scroll>, zap <device> <direction>, identify <item> or identify cancel, open or close <door>.
 Fight: attack <creature>, fight <creature> to keep attacking, follow <creature>, flee, back.
 Move: a direction (north, ne, up...) walks until there's something to see; go to <thing or place>, go to exit, go to start, places, name room <name>.
 Time: wait, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, advancement.
@@ -1153,6 +1156,28 @@ fn transitive_meaning(
         (Verb::Flee, _) => Interpretation::Back { flee: true },
         (Verb::Back, _) => Interpretation::Back { flee: false },
         (Verb::Read, _) => bind(direct, scene, referents, Domain::Any, &|r| {
+            if let Key::Item(item) = r.key {
+                if scene
+                    .state
+                    .observation
+                    .interactions
+                    .as_ref()
+                    .is_some_and(|interactions| {
+                        interactions
+                            .inventory
+                            .iter()
+                            .any(|offer| offer.item == item && offer.readable)
+                    })
+                {
+                    return match item_action(&scene.state.observation, item, ItemOperation::Read) {
+                        Ok(_) => goal(Goal::UseItem {
+                            item,
+                            operation: ItemOperation::Read,
+                        }),
+                        Err(reason) => refuse(reason),
+                    };
+                }
+            }
             say(if r.is(Kind::Thing) && !r.description.is_empty() {
                 r.description.clone()
             } else {
@@ -1712,11 +1737,27 @@ pub fn inventory(scene: &Scene) -> String {
             None => prose::counted(*count, name),
         })
         .collect();
-    if carried.is_empty() {
+    let mut text = if carried.is_empty() {
         "You are empty-handed.".into()
     } else {
         format!("You are carrying {}.", prose::and_list(&carried))
+    };
+    for item in &scene.state.observation.inventory {
+        if let Some(charges) = tor_client_common::items::charges(&scene.state.observation, item.id)
+        {
+            text.push_str(&format!(
+                " {} (#{}) has {charges} charges.",
+                safe(&item.name),
+                item.id
+            ));
+        }
     }
+    if let Some(prompt) = tor_client_common::items::identification_prompt(&scene.state.observation)
+    {
+        text.push(' ');
+        text.push_str(&prompt);
+    }
+    text
 }
 
 /// The character's condition, without numbers beyond HP.

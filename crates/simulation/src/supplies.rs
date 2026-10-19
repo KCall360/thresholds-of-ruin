@@ -215,9 +215,10 @@ impl Plan {
                 selection: &plan.supplies,
                 spend_at: SupplySpendAt::ReplacementCommit,
             },
-            Self::Drink { item, .. } | Self::Eat { item, .. } => {
-                ItemContract::ExactUnit { item: *item }
-            }
+            Self::Read { item, .. }
+            | Self::Zap { item, .. }
+            | Self::Drink { item, .. }
+            | Self::Eat { item, .. } => ItemContract::ExactUnit { item: *item },
             Self::Escape(_) | Self::Equip { .. } | Self::Unequip { .. } => ItemContract::None,
         }
     }
@@ -355,6 +356,15 @@ impl Game {
                     && item.location == ItemLocation::Carried(plan.actor())
                     && match plan {
                         Plan::Drink { .. } => item.spec.consumable.is_some(),
+                        Plan::Read { .. } => item.spec.readable.is_some(),
+                        Plan::Zap { charges, ray, .. } => {
+                            item.charges == Some(*charges)
+                                && item
+                                    .spec
+                                    .device
+                                    .as_ref()
+                                    .is_some_and(|d| d.ability == ray.ability)
+                        }
                         Plan::Eat { .. } => item.spec.edible.is_some(),
                         _ => false,
                     }
@@ -663,11 +673,16 @@ impl Game {
                 lineage,
                 cost_ordinal: reference.cost_ordinal,
             };
-            let diagnostic = self.survival_diagnostics.as_ref().and_then(|_| {
-                let item = self.items.get(&reference.item)?;
-                let hold = item.holds.iter().find(|hold| hold.key == key)?;
-                Some((hold.quantity, item.spec.edible.is_some()))
-            });
+            let is_charge = matches!(preparation.plan, Plan::Zap { .. });
+            let diagnostic = self
+                .survival_diagnostics
+                .as_ref()
+                .filter(|_| !is_charge)
+                .and_then(|_| {
+                    let item = self.items.get(&reference.item)?;
+                    let hold = item.holds.iter().find(|hold| hold.key == key)?;
+                    Some((hold.quantity, item.spec.edible.is_some()))
+                });
             let depleted = self
                 .items
                 .edit(reference.item, |item| -> Result<bool, GameError> {
@@ -676,10 +691,15 @@ impl Game {
                         .binary_search_by_key(&key, |hold| hold.key)
                         .map_err(|_| GameError::ItemUnavailable)?;
                     let quantity = item.holds[index].quantity;
-                    item.quantity = item
-                        .quantity
-                        .checked_sub(quantity)
-                        .ok_or(GameError::ItemUnavailable)?;
+                    if is_charge {
+                        let charges = item.charges.as_mut().ok_or(GameError::ItemUnavailable)?;
+                        *charges = charges.saturating_sub(1);
+                    } else {
+                        item.quantity = item
+                            .quantity
+                            .checked_sub(quantity)
+                            .ok_or(GameError::ItemUnavailable)?;
+                    }
                     item.holds.remove(index);
                     Ok(item.quantity == 0)
                 })

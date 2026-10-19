@@ -68,9 +68,12 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
                 | Action::Escape { .. }
                 | Action::Equip { .. }
                 | Action::Unequip { .. }
+                | Action::Read { .. }
+                | Action::Zap { .. }
                 | Action::Drink { .. }
                 | Action::Eat { .. } => unreachable!("prepared work has separate timing tests"),
-                Action::TouchApparentObject { .. }
+                Action::Identify { .. }
+                | Action::TouchApparentObject { .. }
                 | Action::Drop { .. }
                 | Action::Purchase { .. }
                 | Action::ChooseGrowthSource { .. }
@@ -237,6 +240,7 @@ fn remaining_family(index: usize) -> (Game, ActorId, Action, u64) {
         3 => {
             spec.class = tor_simulation::ItemClass::Potion;
             spec.consumable = Some(ConsumableSpec {
+                discovery: tor_simulation::ItemDiscovery::SelfEffect,
                 effects: vec![tor_simulation::rules::Effect::Heal {
                     amount: tor_simulation::rules::AmountExpr::Fixed { amount: 1 },
                 }],

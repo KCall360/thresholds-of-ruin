@@ -614,7 +614,10 @@ fn item_game_from(creature: CreatureState, effects: Vec<Effect>) -> (crate::Game
     }
     let mut potion = crate::ItemSpec::ordinary("restorable loss probe".into());
     potion.class = crate::ItemClass::Potion;
-    potion.consumable = Some(crate::ConsumableSpec { effects });
+    potion.consumable = Some(crate::ConsumableSpec {
+        discovery: crate::ItemDiscovery::SelfEffect,
+        effects,
+    });
     let at = game.actors[&ActorId(1)].location;
     let item = game
         .place_item_stack(game.next_item_id, at, Some(ActorId(1)), 1, potion)

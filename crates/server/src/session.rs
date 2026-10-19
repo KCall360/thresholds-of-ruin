@@ -21,6 +21,19 @@ pub struct Account {
     pub actors: BTreeSet<ActorId>,
 }
 
+/// Ordinary preparation remains visible; paid selection and exact-instance
+/// counts belong only to account-authorized owner attachments.
+fn restrict_item_disclosure(state: &mut StateView, role: AccessRole) {
+    if role == AccessRole::Spectator {
+        if let Some(interaction) = &mut state.observation.interactions {
+            interaction.identification = None;
+            for item in &mut interaction.inventory {
+                item.charges = None;
+            }
+        }
+    }
+}
+
 struct DisclosedObservation {
     branch: BranchId,
     base: ObservationBase,
@@ -1686,7 +1699,8 @@ impl Service {
                 ));
             }
         };
-        let state = self.engine.state(actor)?;
+        let mut state = self.engine.state(actor)?;
+        restrict_item_disclosure(&mut state, client.role);
         let readiness = match self.current_readiness(id) {
             Some(readiness) => readiness,
             None => {
@@ -1900,7 +1914,14 @@ impl Service {
         }
     }
 
-    fn update(&mut self, id: u64, body: UpdateBody) {
+    fn update(&mut self, id: u64, mut body: UpdateBody) {
+        if let Some(client) = self.clients.get(&id) {
+            if let UpdateBody::Observation { state, .. } = &mut body {
+                if client.role == AccessRole::Spectator {
+                    restrict_item_disclosure(Arc::make_mut(state), client.role);
+                }
+            }
+        }
         let branch = self.engine.branch().clone();
         let Some(client) = self.clients.get_mut(&id) else {
             return;
@@ -3272,6 +3293,104 @@ mod tests {
     }
 
     #[test]
+    fn paid_identification_and_instance_counts_are_owner_only_on_encoded_updates() {
+        let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+        let item = ItemTarget::from_digest([72; 32]);
+        let mut state = service.engine.state(ActorId(1)).unwrap();
+        state.observation.inventory.push(serde_json::from_value(serde_json::json!({
+            "id":item,"class":"wand","quantity":"1","appearance":"ivory wand","identified":true,"name":"Known wand","known_supply":null
+        })).unwrap());
+        state.observation.interactions = Some(InteractionView {
+            completed: vec![],
+            slots: vec![],
+            preparation: Some(PreparationView {
+                action: Action::Zap {
+                    item,
+                    direction: Direction::North,
+                },
+                remaining: 1,
+                active: true,
+            }),
+            identification: Some(IdentificationChoiceView {
+                choice: IntentionId("private-paid-choice".into()),
+                class: ItemClass::Wand,
+                items: vec![item],
+            }),
+            inventory: vec![ItemInteractionView {
+                item,
+                slot: None,
+                equipped_slot: None,
+                known_equipment: None,
+                drinkable: false,
+                edible: false,
+                readable: false,
+                zappable: true,
+                charges: Some(7),
+            }],
+        });
+        state.revision += 1;
+        let shared = Arc::new(state.clone());
+        for role in [AccessRole::Player, AccessRole::Spectator] {
+            let account = Account {
+                role,
+                user: format!("{role:?}"),
+                token: "test-only".into(),
+                actors: BTreeSet::from([ActorId(1)]),
+            };
+            let mut connection = service.connect(&account, "headless".into()).unwrap();
+            connection.messages.try_recv().unwrap();
+            service.handle(
+                connection.id,
+                "attach".into(),
+                Request::Attach { actor: ActorId(1) },
+            );
+            while connection.messages.try_recv().is_ok() {}
+            service.update(
+                connection.id,
+                UpdateBody::Observation {
+                    state: Arc::clone(&shared),
+                    event: None,
+                },
+            );
+            let frame = connection.messages.try_recv().unwrap();
+            let text = serde_json::to_string(&frame).unwrap();
+            assert_eq!(
+                text.contains("private-paid-choice"),
+                role == AccessRole::Player
+            );
+            let disclosed = &service.clients[&connection.id]
+                .last_observation
+                .as_ref()
+                .unwrap()
+                .state
+                .observation;
+            let interaction = disclosed.interactions.as_ref().unwrap();
+            assert_eq!(
+                interaction.identification.is_some(),
+                role == AccessRole::Player
+            );
+            assert_eq!(
+                interaction.inventory[0].charges,
+                (role == AccessRole::Player).then_some(7)
+            );
+            assert!(
+                interaction.preparation.is_some(),
+                "ordinary preparation remains visible"
+            );
+            assert_eq!(interaction.inventory[0].zappable, true);
+            // The same restriction owns snapshots as well as delta bases.
+            let mut snapshot_state = state.clone();
+            restrict_item_disclosure(&mut snapshot_state, role);
+            assert_eq!(snapshot_state.observation, *disclosed);
+        }
+        assert_eq!(
+            shared.as_ref(),
+            &state,
+            "spectator projection cannot mutate shared owner state"
+        );
+    }
+
+    #[test]
     fn observation_sharing_requires_equal_state_actor_and_branch() {
         let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
         let account = Account {
@@ -4187,3 +4306,7 @@ mod corrosion_tests;
 #[cfg(test)]
 #[path = "ray_session_tests.rs"]
 mod ray_tests;
+
+#[cfg(test)]
+#[path = "magic_item_session_tests.rs"]
+mod magic_item_tests;

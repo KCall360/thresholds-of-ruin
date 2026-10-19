@@ -639,6 +639,7 @@ impl Game {
             }
             let context = match effect {
                 ResolvedEffect::ApplyCondition { id, .. }
+                | ResolvedEffect::RemoveCondition { id }
                 | ResolvedEffect::ApplyQualifiedConditionToSource { id, .. } => {
                     if self.condition_uses_recovery_context(id)? {
                         Some(self.recovery_context_at_placement(recipient_id, placement)?)
@@ -1229,6 +1230,7 @@ impl Game {
     fn death_outcome(&self, outcome: &mut ActorOutcome) -> Result<DeathOutcome, GameError> {
         let award = self.prepare_death_award(outcome)?;
         let actor = &mut outcome.state;
+        actor.identification = None;
         let combat = actor.combat.as_mut().ok_or(GameError::UnknownActor)?;
         combat
             .set_equipment(Vec::new())
@@ -1256,6 +1258,7 @@ impl Game {
         actor.motion.active_fall = None;
         let body = Item {
             condition: crate::armor::ItemCondition::default(),
+            charges: None,
             corpse: Some(crate::CorpseAppearance {
                 actor: outcome.id,
                 asset: actor.asset.clone(),

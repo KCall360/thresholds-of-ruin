@@ -27,6 +27,7 @@ fn potion(name: &str, concealed: bool) -> ItemSpec {
     item.concealed = concealed;
     item.stackable = true;
     item.consumable = Some(crate::ConsumableSpec {
+        discovery: crate::ItemDiscovery::SelfEffect,
         effects: vec![crate::rules::Effect::Heal {
             amount: crate::rules::AmountExpr::Fixed { amount: 2 },
         }],

@@ -106,7 +106,9 @@ impl Game {
                 // Capture identification before an exact last unit disappears. Effects
                 // may kill the drinker and drop only the unconsumed remainder.
                 let consumed_identity = match &resolved.plan {
-                    crate::abilities::Plan::Drink { item, .. }
+                    crate::abilities::Plan::Read { item, .. }
+                    | crate::abilities::Plan::Zap { item, .. }
+                    | crate::abilities::Plan::Drink { item, .. }
                     | crate::abilities::Plan::Eat { item, .. } => Some(
                         self.items
                             .get(item)
@@ -148,6 +150,9 @@ impl Game {
                 }
                 resolved.hold = None;
                 self.apply_outcome(completion)?;
+                if let crate::abilities::Plan::Zap { item, charges, .. } = &resolved.plan {
+                    self.charge_payment_observed(id, *item, *charges);
+                }
                 match resolved.plan.work() {
                     Work::Escape { .. } => unreachable!("Escape has a distinct atomic completion"),
                     Work::Respec { .. } => unreachable!("respec has a distinct atomic completion"),
@@ -201,6 +206,58 @@ impl Game {
                             )?;
                         }
                     }
+                    Work::Zap { .. } => {
+                        let crate::abilities::Plan::Zap { charges, .. } = &resolved.plan else {
+                            unreachable!("zap owns ray plan")
+                        };
+                        let launched = *charges > 0;
+                        if launched {
+                            self.resolve_prepared_ray(&resolved)?;
+                        }
+                        self.finish_item_work(
+                            id,
+                            resolved.plan.work(),
+                            resolved.intention,
+                            launched,
+                            consumed_identity,
+                        )?;
+                    }
+                    Work::Read { .. }
+                        if matches!(
+                            &resolved.plan,
+                            crate::abilities::Plan::Read {
+                                identify: Some(_),
+                                ..
+                            }
+                        ) =>
+                    {
+                        self.finish_item_work(
+                            id,
+                            resolved.plan.work(),
+                            resolved.intention,
+                            true,
+                            consumed_identity,
+                        )?;
+                        let crate::abilities::Plan::Read {
+                            identify: Some(class),
+                            ..
+                        } = &resolved.plan
+                        else {
+                            unreachable!("identify source")
+                        };
+                        if self.alive(id) {
+                            let mut outcome = self.actor_outcome(id)?;
+                            if outcome.state.identification.is_some() {
+                                return Err(GameError::ItemUnavailable);
+                            }
+                            outcome.state.identification =
+                                Some(crate::magic_items::IdentificationChoice {
+                                    choice: resolved.origin.ok_or(GameError::ItemUnavailable)?,
+                                    class: *class,
+                                });
+                            self.apply_outcome(outcome)?;
+                        }
+                    }
                     Work::Drink { .. } if resolved.plan.on_success().is_empty() => {
                         self.finish_item_work(
                             id,
@@ -210,13 +267,22 @@ impl Game {
                             consumed_identity,
                         )?;
                     }
-                    Work::Drink { .. } | Work::Eat { .. } => {
+                    Work::Read { .. } | Work::Drink { .. } | Work::Eat { .. } => {
                         let outcome = self.resolve_consumed_item(&resolved)?;
                         self.finish_item_work(
                             id,
                             resolved.plan.work(),
                             resolved.intention,
-                            outcome.result == crate::abilities::OutcomeStatus::Applied,
+                            matches!(
+                                &resolved.plan,
+                                crate::abilities::Plan::Read {
+                                    discovery: crate::ItemDiscovery::OnUse,
+                                    ..
+                                } | crate::abilities::Plan::Drink {
+                                    discovery: crate::ItemDiscovery::OnUse,
+                                    ..
+                                }
+                            ) || outcome.result == crate::abilities::OutcomeStatus::Applied,
                             consumed_identity,
                         )?;
                         self.finish_combat_diagnostic(diagnostic, outcome);

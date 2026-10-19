@@ -86,6 +86,7 @@ impl From<crate::progression::HdError> for BuildError {
             // A missing type/class in a catalog-normalized ledger is malformed.
             crate::progression::HdError::UnknownSource => Self::InvalidDefinition,
             crate::progression::HdError::InvalidHealthRoot => Self::InvalidHealthRoot,
+            crate::progression::HdError::InvalidHealthImprovement => Self::InvalidDefinition,
         }
     }
 }
@@ -176,7 +177,7 @@ impl CreatureBuild {
                     .ok_or(BuildError::UnknownTemplate)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let build = Self {
+        let mut build = Self {
             content,
             species,
             initial_attributes,
@@ -186,6 +187,8 @@ impl CreatureBuild {
             future_growth: crate::earned_growth::FutureGrowth::Disabled {},
             templates,
         };
+        let kind = derive::kind_for_templates(&build, &build.templates)?;
+        build.bind_health_origins(&kind)?;
         build.derive()?;
         if let RestorationPolicy::Authored(plan) = build.restoration_policy() {
             if plan.is_empty() || plan.len() > crate::limits::HIT_DICE {
@@ -211,6 +214,29 @@ impl CreatureBuild {
             derive::advancement_facts(&intended, Attributes::default())?;
         }
         Ok(build)
+    }
+    fn bind_health_origins(&mut self, kind: &crate::content_ids::TypeId) -> Result<(), BuildError> {
+        self.ledger
+            .bind_health_origins(kind, &self.templates, self.content.rules())
+            .map_err(BuildError::from)?;
+        for entry in self
+            .ledger
+            .entries()
+            .iter()
+            .chain(self.ledger.drained().map(|(_, entry)| entry))
+        {
+            let origin = entry.health_origin().ok_or(BuildError::InvalidDefinition)?;
+            if derive::kind_for_templates(self, &origin.templates)? != origin.kind {
+                return Err(BuildError::InvalidDefinition);
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn stage_health_improvement(
+        &mut self,
+        claim: &crate::progression::HitDieHealthImprovement,
+    ) -> Result<(), BuildError> {
+        self.ledger.improve_health(claim).map_err(BuildError::from)
     }
     /// Only consulted at an explicit build replacement boundary. Future growth
     /// and restoration instructions do not change the currently owned sheet.
@@ -292,6 +318,8 @@ impl CreatureBuild {
     ) -> Result<(Self, DerivedCreature), BuildError> {
         let mut candidate = self.clone();
         f(&mut candidate)?;
+        let kind = derive::kind_for_templates(&candidate, &candidate.templates)?;
+        candidate.bind_health_origins(&kind)?;
         let derived = candidate.derive()?;
         let owned: BTreeSet<_> = self
             .choices()
@@ -419,3 +447,6 @@ impl CreatureBuild {
         Some(RemovedAdvancement { hit_die, choices })
     }
 }
+
+#[cfg(test)]
+mod healing_improvement_tests;

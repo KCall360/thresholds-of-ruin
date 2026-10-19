@@ -115,6 +115,12 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                 DiagnosticEffect::Heal { target, amount } => {
                     format!("  Actor {}: {amount} healing", target.0)
                 }
+                DiagnosticEffect::HealAndImproveHitDie { target, amount } => {
+                    format!(
+                        "  Actor {}: {amount} healing; one owned Hit Die Health roll improved by 1",
+                        target.0
+                    )
+                }
                 DiagnosticEffect::LoseAttribute {
                     target,
                     attribute,
@@ -155,6 +161,9 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                     resource,
                     amount,
                 } => format!("  Actor {}: {amount} {} restored", target.0, resource.name),
+                DiagnosticEffect::ConditionRemoved { target, condition } => {
+                    format!("  Actor {}: {} removed", target.0, condition.name)
+                }
                 DiagnosticEffect::Condition {
                     target,
                     condition,

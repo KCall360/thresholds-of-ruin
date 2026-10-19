@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tor_client_common::holds::{hold_choices, render_holds, HoldChoice};
-use tor_client_common::items::{item_action, item_choices, ItemOperation};
+use tor_client_common::items::{
+    identification_action, item_action, item_choices, zap_action, ItemOperation,
+};
 use tor_client_common::ClientState;
 use tor_protocol::*;
 
@@ -29,6 +31,8 @@ pub enum Key {
     Unequip,
     Drink,
     Eat,
+    Read,
+    Zap,
     OpenDoor,
     CloseDoor,
     Control,
@@ -172,6 +176,9 @@ pub struct App {
     pub pickup: Vec<ItemView>,
     pub dropping: bool,
     pub item_operation: Option<ItemOperation>,
+    /// Exact carried device bound to the displayed observation, before aiming.
+    zap_selection: Option<(ItemTarget, ReplyContext)>,
+    pub identification_selected: usize,
     pub quantity: String,
     pub door_direction: Option<bool>,
     pub selected: usize,
@@ -234,6 +241,8 @@ impl App {
             pickup: vec![],
             dropping: false,
             item_operation: None,
+            zap_selection: None,
+            identification_selected: 0,
             quantity: String::new(),
             door_direction: None,
             selected: 0,
@@ -244,12 +253,25 @@ impl App {
         }
     }
 
+    fn clear_magic_selection(&mut self) {
+        self.zap_selection = None;
+        self.identification_selected = 0;
+        if matches!(
+            self.item_operation,
+            Some(ItemOperation::Read | ItemOperation::Zap)
+        ) {
+            self.item_operation = None;
+            self.pickup.clear();
+        }
+    }
+
     pub fn set_state(&mut self, state: ClientState) {
         let old = self
             .state
             .as_ref()
             .map(|s| (s.branch().clone(), s.state().revision));
         self.state = Some(state);
+        self.clear_magic_selection();
         self.hold_choices.clear();
         self.state_changed(old);
     }
@@ -276,6 +298,15 @@ impl App {
         let old = Some((state.branch().clone(), state.state().revision));
         state.apply(update)?;
         if observed || control_changed {
+            if matches!(
+                self.item_operation,
+                Some(ItemOperation::Read | ItemOperation::Zap)
+            ) {
+                self.item_operation = None;
+                self.pickup.clear();
+            }
+            self.zap_selection = None;
+            self.identification_selected = 0;
             self.hold_choices.clear();
         }
         if observed {
@@ -321,6 +352,7 @@ impl App {
             self.state = Some(ClientState::from_snapshot(snapshot)?);
         }
         self.hold_choices.clear();
+        self.clear_magic_selection();
         self.inspection = None;
         self.strike_pages.clear();
         self.strike_sources_open = false;
@@ -343,6 +375,13 @@ impl App {
             }
         }
         let state = self.state.as_ref().expect("validated state");
+        if self
+            .zap_selection
+            .as_ref()
+            .is_some_and(|(_, context)| *context != state.snapshot().reply_context())
+        {
+            self.zap_selection = None;
+        }
         if old
             .as_ref()
             .is_some_and(|(branch, _)| branch != state.branch())
@@ -351,6 +390,7 @@ impl App {
             self.note = None;
             self.pickup.clear();
             self.item_operation = None;
+            self.zap_selection = None;
             self.attack_targets.clear();
             self.ability_choices.clear();
             self.hold_choices.clear();
@@ -376,6 +416,7 @@ impl App {
                 .min(state.state().observation.places.len().saturating_sub(1));
             self.pickup.clear();
             self.item_operation = None;
+            self.zap_selection = None;
             self.attack_targets.clear();
             self.ability_choices.clear();
             self.hold_choices.clear();
@@ -387,6 +428,7 @@ impl App {
         if !state.has_control() {
             self.pickup.clear();
             self.item_operation = None;
+            self.zap_selection = None;
             self.attack_targets.clear();
             self.ability_choices.clear();
             self.hold_choices.clear();
@@ -488,6 +530,32 @@ impl App {
             .unwrap_or_else(|| ('a'..='z').chain('A'..='Z').nth(index).unwrap_or('?'))
     }
 
+    /// Item picker rows use only this exact instance's disclosed charge count.
+    pub fn item_rows(&self) -> Vec<String> {
+        self.pickup
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let mut label = item_phrase(&item.name, item.quantity);
+                if let Some(charges) = self
+                    .state
+                    .as_ref()
+                    .and_then(|state| state.state().observation.interactions.as_ref())
+                    .and_then(|view| view.inventory.iter().find(|offer| offer.item == item.id))
+                    .and_then(|offer| offer.charges)
+                {
+                    label.push_str(&format!(" [charges: {charges}]"));
+                }
+                format!(
+                    "{} {} - {}",
+                    if index == self.selected { ">" } else { " " },
+                    self.choice_letter(index),
+                    label
+                )
+            })
+            .collect()
+    }
+
     /// Whether another creature is in sight, which stops a run.
     pub fn creature_in_view(&self) -> bool {
         self.state.as_ref().is_some_and(|state| {
@@ -569,6 +637,8 @@ impl App {
         self.note = None;
         self.pickup.clear();
         self.item_operation = None;
+        self.zap_selection = None;
+        self.identification_selected = 0;
         self.attack_targets.clear();
         self.ability_choices.clear();
         self.hold_choices.clear();
@@ -1236,7 +1306,179 @@ impl App {
         Effect::None
     }
 
+    /// The owner-only paid choice currently disclosed by the server.
+    pub fn identification_choice(&self) -> Option<&IdentificationChoiceView> {
+        let state = self.state.as_ref()?;
+        if !self.connected || self.role == AccessRole::Spectator || !state.has_control() {
+            return None;
+        }
+        state
+            .state()
+            .observation
+            .interactions
+            .as_ref()?
+            .identification
+            .as_ref()
+    }
+
+    /// Exact inventory entries in the server's category-specific offer order.
+    fn identification_entries(&self) -> Vec<InventoryEntry> {
+        let Some(choice) = self.identification_choice() else {
+            return vec![];
+        };
+        let view = &self
+            .state
+            .as_ref()
+            .expect("current choice")
+            .state()
+            .observation;
+        let entries = inventory_entries(self, view);
+        choice
+            .items
+            .iter()
+            .filter_map(|target| {
+                view.inventory
+                    .iter()
+                    .position(|item| item.id == *target)
+                    .and_then(|index| entries.get(index).cloned())
+            })
+            .collect()
+    }
+
+    pub fn identification_rows(&self) -> Vec<String> {
+        self.identification_entries()
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                format!(
+                    "{} {}",
+                    if index == self.identification_selected {
+                        ">"
+                    } else {
+                        " "
+                    },
+                    entry.long()
+                )
+            })
+            .collect()
+    }
+
+    /// Aiming never outlives the exact observation where the device was selected.
+    pub fn zap_item(&self) -> Option<ItemTarget> {
+        let (item, context) = self.zap_selection.as_ref()?;
+        let state = self.state.as_ref()?;
+        (self.connected
+            && self.role != AccessRole::Spectator
+            && state.has_control()
+            && state.snapshot().reply_context() == *context)
+            .then_some(*item)
+    }
+
+    fn identification_input(&mut self, input: Input) -> Effect {
+        if self.busy || !self.connected {
+            return Effect::None;
+        }
+        let targets: Vec<_> = self
+            .identification_choice()
+            .map(|choice| choice.items.clone())
+            .unwrap_or_default();
+        let selected = match input {
+            Input::Key { key: Key::Escape } => Some(None),
+            Input::Key { key: Key::Up } => {
+                self.identification_selected = self.identification_selected.saturating_sub(1);
+                None
+            }
+            Input::Key { key: Key::Down } => {
+                self.identification_selected =
+                    (self.identification_selected + 1).min(targets.len().saturating_sub(1));
+                None
+            }
+            Input::Key { key: Key::Enter } => {
+                targets.get(self.identification_selected).copied().map(Some)
+            }
+            Input::Text { text } => {
+                text.chars()
+                    .find(char::is_ascii_alphabetic)
+                    .and_then(|letter| {
+                        let item = targets
+                            .iter()
+                            .copied()
+                            .find(|target| self.letters.get(target) == Some(&letter));
+                        if item.is_none() {
+                            self.status = format!("No offered item is lettered {letter}.");
+                        }
+                        item.map(Some)
+                    })
+            }
+            _ => None,
+        };
+        let Some(item) = selected else {
+            return Effect::None;
+        };
+        match identification_action(
+            &self
+                .state
+                .as_ref()
+                .expect("current choice")
+                .state()
+                .observation,
+            item,
+        ) {
+            Ok(action) => self.act(action),
+            Err(reason) => {
+                self.status = reason;
+                Effect::None
+            }
+        }
+    }
+
+    fn zap_input(&mut self, input: Input) -> Effect {
+        if self.busy || !self.connected {
+            return Effect::None;
+        }
+        if matches!(input, Input::Key { key: Key::Escape }) {
+            self.zap_selection = None;
+            self.status = "Never mind.".into();
+            return Effect::None;
+        }
+        let Input::Key { key } = input else {
+            return Effect::None;
+        };
+        let Some(direction) = key.step_direction() else {
+            return Effect::None;
+        };
+        let Some(item) = self.zap_item() else {
+            self.zap_selection = None;
+            self.status = "That device selection is no longer current.".into();
+            return Effect::None;
+        };
+        let result = zap_action(
+            &self
+                .state
+                .as_ref()
+                .expect("current device")
+                .state()
+                .observation,
+            item,
+            direction,
+        );
+        self.zap_selection = None;
+        match result {
+            Ok(action) => self.act(action),
+            Err(reason) => {
+                self.status = reason;
+                Effect::None
+            }
+        }
+    }
+
     pub fn input(&mut self, input: Input) -> Effect {
+        if self.identification_choice().is_some() {
+            return self.identification_input(input);
+        }
+        if self.zap_selection.is_some() {
+            return self.zap_input(input);
+        }
         if !self.hold_choices.is_empty() {
             return self.hold_input(input);
         }
@@ -1818,6 +2060,21 @@ impl App {
                 Key::Enter => {
                     let item = self.pickup[self.selected].id;
                     if let Some(operation) = self.item_operation.take() {
+                        if operation == ItemOperation::Zap {
+                            let state = self.state.as_ref().expect("connected state");
+                            if !item_choices(&state.state().observation, operation)
+                                .any(|candidate| candidate.id == item)
+                            {
+                                self.pickup.clear();
+                                self.status = "That device selection is no longer current.".into();
+                                return Effect::None;
+                            }
+                            self.zap_selection = Some((item, state.snapshot().reply_context()));
+                            self.pickup.clear();
+                            self.status =
+                                "Zap in which direction? Movement keys select; Esc cancels.".into();
+                            return Effect::None;
+                        }
                         let result = item_action(
                             &self
                                 .state
@@ -2212,16 +2469,24 @@ impl App {
                     }
                 }
             }
-            Key::Equip | Key::Unequip | Key::Drink | Key::Eat => {
+            Key::Equip | Key::Unequip | Key::Drink | Key::Eat | Key::Read | Key::Zap => {
                 let operation = match key {
                     Key::Equip => ItemOperation::Equip,
                     Key::Unequip => ItemOperation::Unequip,
                     Key::Eat => ItemOperation::Eat,
+                    Key::Read => ItemOperation::Read,
+                    Key::Zap => ItemOperation::Zap,
                     _ => ItemOperation::Drink,
                 };
                 let Some(state) = &self.state else {
                     return Effect::None;
                 };
+                if matches!(operation, ItemOperation::Read | ItemOperation::Zap)
+                    && !state.has_control()
+                {
+                    self.status = "You are observing. Press F3 to request control.".into();
+                    return Effect::None;
+                }
                 let view = &state.state().observation;
                 let mut seen = std::collections::BTreeSet::new();
                 let items: Vec<_> = item_choices(view, operation)
@@ -2652,6 +2917,8 @@ pub struct InventoryEntry {
     pub equipped: Option<String>,
     /// Known equipment numbers, when the server discloses them.
     pub stats: Option<String>,
+    /// Exact charge count only when disclosed for this carried instance.
+    pub charges: Option<u16>,
 }
 
 impl InventoryEntry {
@@ -2674,6 +2941,9 @@ impl InventoryEntry {
         }
         if let Some(stats) = &self.stats {
             text.push_str(&format!("  [{stats}]"));
+        }
+        if let Some(charges) = self.charges {
+            text.push_str(&format!("  [charges: {charges}]"));
         }
         text
     }
@@ -2716,6 +2986,7 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
                 quantity: item.quantity,
                 equipped,
                 stats,
+                charges: affordance.and_then(|affordance| affordance.charges),
             }
         })
         .collect()
@@ -2982,6 +3253,7 @@ pub const HELP: &[&str] = &[
     "w t q e equip/remove/drink/eat F2     game history",
     "o c     open / close a door     F5     remembered places",
     "F11     escape a hold           F4     write a note",
+    "F6 read; F12 zap, then direction; identify: letter/Enter, Esc aborts",
     "                                F7     wizard command editor",
     "                                F10    advancement / respec",
     "F3 R    take / release control  [ ]    slower / faster journeys",

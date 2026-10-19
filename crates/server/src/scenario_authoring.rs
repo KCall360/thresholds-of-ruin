@@ -235,6 +235,14 @@ pub struct RelocationGate {
     pub policy: RelocationPolicy,
 }
 
+/// Healing overflow is explicitly authored and never inferred from potion identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HealingOverflow {
+    None,
+    ImproveEarliestHitDie,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
@@ -265,6 +273,11 @@ pub enum Effect {
     Heal {
         amount: AmountExpr,
     },
+    HealPerHitDie {
+        sides: u16,
+        bonus: i32,
+        overflow: HealingOverflow,
+    },
     LoseAttribute {
         attribute: String,
         amount: AmountExpr,
@@ -285,6 +298,13 @@ pub enum Effect {
     ApplyCondition {
         condition: String,
         duration: u64,
+    },
+    ApplyConditionForTurns {
+        condition: String,
+        duration: AmountExpr,
+    },
+    RemoveCondition {
+        condition: String,
     },
     Restore {
         resource: String,
@@ -332,10 +352,28 @@ impl<'de> Deserialize<'de> for HoldPolicy {
         })
     }
 }
+/// Discovery is an explicit content policy, never inferred from the item name.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemDiscovery {
+    #[default]
+    SelfEffect,
+    OnUse,
+}
+impl From<ItemDiscovery> for tor_simulation::ItemDiscovery {
+    fn from(value: ItemDiscovery) -> Self {
+        match value {
+            ItemDiscovery::SelfEffect => Self::SelfEffect,
+            ItemDiscovery::OnUse => Self::OnUse,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsumableSpec {
     pub effects: Vec<Effect>,
+    pub discovery: ItemDiscovery,
 }
 impl<'de> Deserialize<'de> for ConsumableSpec {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -346,36 +384,155 @@ impl<'de> Deserialize<'de> for ConsumableSpec {
                 deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, { tor_simulation::limits::CONSUMABLE_EFFECTS }>"
             )]
             effects: Vec<Effect>,
+            #[serde(default)]
+            discovery: ItemDiscovery,
         }
-        struct Named;
-        impl<'de> serde::de::Visitor<'de> for Named {
-            type Value = Fields;
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("a named consumable object")
-            }
-            fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<Fields, M::Error> {
-                Fields::deserialize(serde::de::value::MapAccessDeserializer::new(map))
-            }
-        }
-        let fields = deserializer.deserialize_map(Named)?;
+        let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self {
             effects: fields.effects,
+            discovery: fields.discovery,
         })
     }
+}
+fn compile_item_effects(
+    effects: &[Effect],
+    rules: &tor_simulation::rules::Ruleset,
+) -> Result<Vec<tor_simulation::rules::Effect>, crate::Failure> {
+    let value = serde_json::to_value(effects).map_err(|error| super::fail(error.to_string()))?;
+    let effects: Vec<tor_simulation::rules::Effect> = serde_json::from_value(value)
+        .map_err(|error| super::fail(format!("Invalid item effect: {error}")))?;
+    rules
+        .validate_effects(&effects)
+        .map_err(|error| super::fail(format!("Invalid item effect: {error:?}")))?;
+    Ok(effects)
 }
 impl ConsumableSpec {
     pub(crate) fn compile(
         &self,
         rules: &tor_simulation::rules::Ruleset,
     ) -> Result<tor_simulation::ConsumableSpec, crate::Failure> {
-        let value =
-            serde_json::to_value(&self.effects).map_err(|error| super::fail(error.to_string()))?;
-        let effects: Vec<tor_simulation::rules::Effect> = serde_json::from_value(value)
-            .map_err(|error| super::fail(format!("Invalid item effect: {error}")))?;
-        rules
-            .validate_effects(&effects)
-            .map_err(|error| super::fail(format!("Invalid item effect: {error:?}")))?;
-        Ok(tor_simulation::ConsumableSpec { effects })
+        Ok(tor_simulation::ConsumableSpec {
+            effects: compile_item_effects(&self.effects, rules)?,
+            discovery: self.discovery.into(),
+        })
+    }
+}
+
+/// Reading either applies bounded immediate effects or requests one class of
+/// identity selection. Physical class does not grant this capability.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadableSpec {
+    pub effects: Vec<Effect>,
+    pub identify: Option<ItemClass>,
+    pub discovery: ItemDiscovery,
+}
+impl<'de> Deserialize<'de> for ReadableSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(
+                default,
+                deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, { tor_simulation::limits::CONSUMABLE_EFFECTS }>"
+            )]
+            effects: Vec<Effect>,
+            identify: Option<ItemClass>,
+            #[serde(default)]
+            discovery: ItemDiscovery,
+        }
+        let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
+        Ok(Self {
+            effects: fields.effects,
+            identify: fields.identify,
+            discovery: fields.discovery,
+        })
+    }
+}
+impl ReadableSpec {
+    pub(crate) fn compile(
+        &self,
+        rules: &tor_simulation::rules::Ruleset,
+    ) -> Result<tor_simulation::ReadableSpec, crate::Failure> {
+        let spec = tor_simulation::ReadableSpec {
+            effects: compile_item_effects(&self.effects, rules)?,
+            identify: self.identify.map(Into::into),
+            discovery: self.discovery.into(),
+        };
+        super::require(spec.valid(), "Invalid readable definition")?;
+        Ok(spec)
+    }
+}
+
+/// Charge ranges are distinct from physical stack quantities and admit empty
+/// devices for authored fixtures. Ordinary Rogue devices use three to seven.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChargeRange {
+    pub minimum: u16,
+    pub maximum: u16,
+}
+impl<'de> Deserialize<'de> for ChargeRange {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            minimum: u16,
+            maximum: u16,
+        }
+        let fields: Fields = crate::creature_authoring::named_map(d)?;
+        if fields.minimum > fields.maximum {
+            return Err(serde::de::Error::custom("Invalid charge range"));
+        }
+        Ok(Self {
+            minimum: fields.minimum,
+            maximum: fields.maximum,
+        })
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceSpec {
+    pub ability: String,
+    pub initial_charges: ChargeRange,
+    pub discovery: ItemDiscovery,
+}
+impl<'de> Deserialize<'de> for DeviceSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            ability: String,
+            initial_charges: ChargeRange,
+            #[serde(default)]
+            discovery: ItemDiscovery,
+        }
+        let fields: Fields = crate::creature_authoring::named_map(d)?;
+        Ok(Self {
+            ability: fields.ability,
+            initial_charges: fields.initial_charges,
+            discovery: fields.discovery,
+        })
+    }
+}
+impl DeviceSpec {
+    pub(crate) fn compile(
+        &self,
+        rules: &tor_simulation::rules::Ruleset,
+    ) -> Result<tor_simulation::DeviceSpec, crate::Failure> {
+        let ability = tor_simulation::content_ids::AbilityId::new(&self.ability)
+            .map_err(|_| super::fail(format!("Invalid device ability {:?}", self.ability)))?;
+        let spec = tor_simulation::DeviceSpec {
+            ability,
+            initial_charges: tor_simulation::ChargeRange {
+                minimum: self.initial_charges.minimum,
+                maximum: self.initial_charges.maximum,
+            },
+            discovery: self.discovery.into(),
+        };
+        spec.validate_rules(rules)
+            .map_err(|error| super::fail(format!("Invalid device definition: {error:?}")))?;
+        Ok(spec)
     }
 }
 
@@ -517,6 +674,11 @@ impl<'de> Deserialize<'de> for Effect {
             Heal {
                 amount: AmountExpr,
             },
+            HealPerHitDie {
+                sides: u16,
+                bonus: i32,
+                overflow: HealingOverflow,
+            },
             LoseAttribute {
                 attribute: String,
                 amount: AmountExpr,
@@ -537,6 +699,13 @@ impl<'de> Deserialize<'de> for Effect {
             ApplyCondition {
                 condition: String,
                 duration: u64,
+            },
+            ApplyConditionForTurns {
+                condition: String,
+                duration: AmountExpr,
+            },
+            RemoveCondition {
+                condition: String,
             },
             Restore {
                 resource: String,
@@ -583,6 +752,15 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
+            Fields::HealPerHitDie {
+                sides,
+                bonus,
+                overflow,
+            } => Self::HealPerHitDie {
+                sides,
+                bonus,
+                overflow,
+            },
             Fields::LoseAttribute { attribute, amount } => {
                 Self::LoseAttribute { attribute, amount }
             }
@@ -599,6 +777,14 @@ impl<'de> Deserialize<'de> for Effect {
                 condition,
                 duration,
             },
+            Fields::ApplyConditionForTurns {
+                condition,
+                duration,
+            } => Self::ApplyConditionForTurns {
+                condition,
+                duration,
+            },
+            Fields::RemoveCondition { condition } => Self::RemoveCondition { condition },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
             Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
             Fields::ObservePublicPlan {} => Self::ObservePublicPlan,
@@ -732,12 +918,14 @@ mod tests {
     #[test]
     fn generic_item_effects_compile_and_reject_unknown_content_references() {
         let valid = ConsumableSpec {
+            discovery: ItemDiscovery::SelfEffect,
             effects: vec![Effect::Heal {
                 amount: AmountExpr::Fixed { amount: 5 },
             }],
         };
         assert!(valid.compile(&rules()).is_ok());
         let missing = ConsumableSpec {
+            discovery: ItemDiscovery::SelfEffect,
             effects: vec![Effect::ApplyCondition {
                 condition: "missing_condition".into(),
                 duration: 100,
@@ -745,6 +933,7 @@ mod tests {
         };
         assert!(missing.compile(&rules()).is_err());
         let missing_descriptor = ConsumableSpec {
+            discovery: ItemDiscovery::SelfEffect,
             effects: vec![Effect::Damage {
                 damage: DamageExpr::Components {
                     components: vec![DamageComponentExpr {
@@ -756,6 +945,239 @@ mod tests {
             }],
         };
         assert!(missing_descriptor.compile(&rules()).is_err());
+    }
+
+    #[test]
+    fn item_condition_and_hit_die_healing_effects_preserve_owned_source_shapes() {
+        for value in [
+            serde_json::json!({"kind":"apply_condition_for_turns","condition":"braced","duration":{"kind":"rolled","dice":{"count":1,"sides":5,"bonus":3}}}),
+            serde_json::json!({"kind":"remove_condition","condition":"braced"}),
+            serde_json::json!({"kind":"heal_per_hit_die","sides":4,"bonus":0,"overflow":"none"}),
+        ] {
+            let effect: Effect = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&effect).unwrap(), value);
+            let compiled = ConsumableSpec {
+                effects: vec![effect],
+                discovery: ItemDiscovery::OnUse,
+            }
+            .compile(&rules())
+            .unwrap();
+            assert_eq!(serde_json::to_value(&compiled.effects[0]).unwrap(), value);
+            let mut extra = value.clone();
+            extra["private_counter"] = 1.into();
+            assert!(serde_json::from_value::<Effect>(extra).is_err());
+            let mut missing = value;
+            let key = if missing["kind"] == "heal_per_hit_die" {
+                "sides"
+            } else {
+                "condition"
+            };
+            missing.as_object_mut().unwrap().remove(key);
+            assert!(serde_json::from_value::<Effect>(missing).is_err());
+        }
+        for value in [
+            serde_json::json!({"kind":"apply_condition_for_turns","condition":"missing","duration":{"kind":"fixed","amount":4}}),
+            serde_json::json!({"kind":"remove_condition","condition":"missing"}),
+            serde_json::json!({"kind":"heal_per_hit_die","sides":0,"bonus":0,"overflow":"none"}),
+        ] {
+            let effect: Effect = serde_json::from_value(value).unwrap();
+            assert!(ConsumableSpec {
+                effects: vec![effect],
+                discovery: ItemDiscovery::OnUse
+            }
+            .compile(&rules())
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn hit_die_healing_requires_an_explicit_supported_overflow_policy() {
+        for (name, policy) in [
+            ("none", HealingOverflow::None),
+            (
+                "improve_earliest_hit_die",
+                HealingOverflow::ImproveEarliestHitDie,
+            ),
+        ] {
+            let value = serde_json::json!({
+                "kind":"heal_per_hit_die", "sides":4, "bonus":0, "overflow":name
+            });
+            let effect: Effect = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(
+                effect,
+                Effect::HealPerHitDie {
+                    sides: 4,
+                    bonus: 0,
+                    overflow: policy
+                }
+            );
+            let compiled = ConsumableSpec {
+                effects: vec![effect],
+                discovery: ItemDiscovery::OnUse,
+            }
+            .compile(&rules())
+            .unwrap();
+            assert_eq!(serde_json::to_value(&compiled.effects[0]).unwrap(), value);
+        }
+        for value in [
+            serde_json::json!({"kind":"heal_per_hit_die","sides":4,"bonus":0}),
+            serde_json::json!({"kind":"heal_per_hit_die","sides":4,"bonus":0,"overflow":null}),
+            serde_json::json!({"kind":"heal_per_hit_die","sides":4,"bonus":0,"overflow":"improve_latest_hit_die"}),
+            serde_json::json!({"kind":"heal_per_hit_die","sides":4,"bonus":0,"overflow":{"kind":"none"}}),
+            serde_json::json!(["heal_per_hit_die", 4, 0, "none"]),
+        ] {
+            assert!(serde_json::from_value::<Effect>(value).is_err());
+        }
+    }
+
+    #[test]
+    fn readable_authoring_compiles_exactly_one_effect_or_identify_capability() {
+        let effects: ReadableSpec = toml::from_str(
+            r#"effects = [{ kind = "heal", amount = { kind = "fixed", amount = 5 } }]
+               discovery = "on_use""#,
+        )
+        .unwrap();
+        assert!(effects.compile(&rules()).is_ok());
+        let identify: ReadableSpec = toml::from_str(
+            r#"identify = "potion"
+               discovery = "on_use""#,
+        )
+        .unwrap();
+        let compiled = identify.compile(&rules()).unwrap();
+        assert_eq!(compiled.identify, Some(tor_simulation::ItemClass::Potion));
+        assert_eq!(compiled.discovery, tor_simulation::ItemDiscovery::OnUse);
+        let mut invalid = identify.clone();
+        invalid.effects = effects.effects;
+        assert!(invalid.compile(&rules()).is_err());
+        invalid.effects.clear();
+        invalid.identify = None;
+        assert!(invalid.compile(&rules()).is_err());
+        invalid.effects.push(Effect::ApplyCondition {
+            condition: "missing".into(),
+            duration: 100,
+        });
+        assert!(invalid.compile(&rules()).is_err());
+        for value in [
+            serde_json::json!([[], "potion", "on_use"]),
+            serde_json::json!({"identify":"potion", "unknown":true}),
+            serde_json::json!({"identify":"secret_class"}),
+            serde_json::json!({"identify":"potion", "discovery":"infer_name"}),
+        ] {
+            assert!(serde_json::from_value::<ReadableSpec>(value).is_err());
+        }
+    }
+
+    #[test]
+    fn device_sources_own_named_bounded_charge_ranges_and_reject_non_ray_abilities() {
+        for (minimum, maximum) in [(0, 0), (3, 7), (0, u16::MAX)] {
+            let range: ChargeRange = serde_json::from_value(serde_json::json!({
+                "minimum":minimum, "maximum":maximum
+            }))
+            .unwrap();
+            assert_eq!((range.minimum, range.maximum), (minimum, maximum));
+        }
+        for value in [
+            serde_json::json!([3, 7]),
+            serde_json::json!({"minimum":7,"maximum":3}),
+            serde_json::json!({"minimum":3}),
+            serde_json::json!({"minimum":0,"maximum":65536}),
+            serde_json::json!({"minimum":3,"maximum":7,"seed":2}),
+        ] {
+            assert!(serde_json::from_value::<ChargeRange>(value).is_err());
+        }
+        for ability in ["missing", "basic_melee"] {
+            let device = DeviceSpec {
+                ability: ability.into(),
+                initial_charges: ChargeRange {
+                    minimum: 3,
+                    maximum: 7,
+                },
+                discovery: ItemDiscovery::OnUse,
+            };
+            assert!(device.compile(&rules()).is_err());
+        }
+        for value in [
+            serde_json::json!(["basic_melee", {"minimum":3,"maximum":7}, "on_use"]),
+            serde_json::json!({"ability":"basic_melee","discovery":"on_use"}),
+            serde_json::json!({"ability":"basic_melee","initial_charges":{"minimum":3,"maximum":7},"charges":4}),
+        ] {
+            assert!(serde_json::from_value::<DeviceSpec>(value).is_err());
+        }
+    }
+
+    #[test]
+    fn device_source_compilation_requires_cost_free_directional_ray_authority() {
+        use tor_simulation::rules::{AbilityDef, Ruleset};
+        let ability: AbilityDef = toml::from_str(r#"
+            id = "fixture.device_ray"
+            name = "Fixture Ray"
+            interaction = "hostile_to_target"
+            tags = ["attack"]
+            basic_attack = false
+            invocation = "directional_ray"
+            timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }
+            reach = { kind = "sight", range = 6 }
+            strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "target", skill = { kind = "named", skill = "agility" }, against = { kind = "opposed", skill = { kind = "named", skill = "agility" } } }, on_success = [], on_failure = [{ kind = "damage", damage = { kind = "components", components = [{ category = "energy", amount = { kind = "fixed", amount = 5 } }] } }], descriptors = [], riders = [] }] }
+            ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
+        "#).unwrap();
+        let source = DeviceSpec {
+            ability: "fixture.device_ray".into(),
+            initial_charges: ChargeRange {
+                minimum: 3,
+                maximum: 7,
+            },
+            discovery: ItemDiscovery::OnUse,
+        };
+        let mut document = rules().document().clone();
+        document.abilities.push(ability.clone());
+        let valid = Ruleset::validate(document).unwrap();
+        let compiled = source.compile(&valid).unwrap();
+        assert_eq!(compiled.ability.as_str(), "fixture.device_ray");
+        assert_eq!(compiled.initial_charges.minimum, 3);
+        assert_eq!(compiled.initial_charges.maximum, 7);
+        for (field, operand) in [
+            (
+                "cost",
+                serde_json::json!({"resource":"mana","start":1,"resolution":0}),
+            ),
+            (
+                "supply_costs",
+                serde_json::json!([{"supply":"bandage","quantity":1,"access":"carried_only","spend_at":"first_resolution"}]),
+            ),
+            ("cooldown", serde_json::json!(100)),
+        ] {
+            let mut changed = serde_json::to_value(&ability).unwrap();
+            changed[field] = operand;
+            let mut document = rules().document().clone();
+            document
+                .abilities
+                .push(serde_json::from_value(changed).unwrap());
+            let rules = Ruleset::validate(document).unwrap();
+            assert!(
+                source.compile(&rules).is_err(),
+                "device must reject {field}"
+            );
+        }
+        let mut hidden = source;
+        hidden.discovery = ItemDiscovery::SelfEffect;
+        assert!(hidden.compile(&valid).is_err());
+    }
+
+    #[test]
+    fn authored_consumable_discovery_omission_preserves_self_effect_policy() {
+        let spec: ConsumableSpec = toml::from_str(
+            r#"effects = [{ kind = "heal", amount = { kind = "fixed", amount = 5 } }]"#,
+        )
+        .unwrap();
+        assert_eq!(spec.discovery, ItemDiscovery::SelfEffect);
+        assert_eq!(
+            spec.compile(&rules()).unwrap().discovery,
+            tor_simulation::ItemDiscovery::SelfEffect
+        );
+        assert_eq!(
+            serde_json::to_value(spec).unwrap()["discovery"],
+            "self_effect"
+        );
     }
 
     #[test]
@@ -779,6 +1201,7 @@ mod tests {
                 let authored: Effect =
                     serde_json::from_value(value.clone()).expect("author effect");
                 let compiled = ConsumableSpec {
+                    discovery: ItemDiscovery::SelfEffect,
                     effects: vec![authored],
                 }
                 .compile(&rules())
@@ -793,6 +1216,7 @@ mod tests {
                 value["amount"] = serde_json::json!({"kind":"fixed","amount":1_000_001});
                 let invalid: Effect = serde_json::from_value(value).unwrap();
                 assert!(ConsumableSpec {
+                    discovery: ItemDiscovery::SelfEffect,
                     effects: vec![invalid]
                 }
                 .compile(&rules())
@@ -804,6 +1228,7 @@ mod tests {
         }))
         .unwrap();
         assert!(ConsumableSpec {
+            discovery: ItemDiscovery::SelfEffect,
             effects: vec![invalid]
         }
         .compile(&rules())

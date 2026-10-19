@@ -10,6 +10,7 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
     item.name = "silver ring".into();
     s.observation.inventory = vec![item.clone()];
     s.observation.interactions = Some(InteractionView {
+        identification: None,
         completed: Vec::new(),
         slots: vec![
             equipment_slot("ring", "on a finger", false),
@@ -23,6 +24,9 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
             known_equipment: None,
             drinkable: false,
             edible: false,
+            readable: false,
+            zappable: false,
+            charges: None,
         }],
     });
     assert!(
@@ -49,6 +53,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
     let slot = equipment_slot("fixture_wing", "fastened to a wing", true);
     state.observation.inventory = vec![first.clone(), second.clone()];
     state.observation.interactions = Some(InteractionView {
+        identification: None,
         completed: vec![],
         slots: vec![slot.clone(); 2],
         preparation: None,
@@ -60,6 +65,9 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
+                readable: false,
+                zappable: false,
+                charges: None,
             },
             ItemInteractionView {
                 item: second.id,
@@ -68,6 +76,9 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
+                readable: false,
+                zappable: false,
+                charges: None,
             },
         ],
     });
@@ -317,6 +328,7 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
     item.name = "fixture meal".into();
     s.observation.inventory = vec![item.clone()];
     s.observation.interactions = Some(InteractionView {
+        identification: None,
         completed: vec![],
         slots: vec![],
         preparation: None,
@@ -327,6 +339,9 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
             known_equipment: None,
             drinkable: false,
             edible: false,
+            readable: false,
+            zappable: false,
+            charges: None,
         }],
     });
     assert!(parse("eat fixture meal", &s).is_err());
@@ -381,4 +396,148 @@ fn directional_ray_commands_select_direction_without_a_visible_creature() {
         assert!(parse(&format!("arbitrary ray {noun}"), &state).is_err());
     }
     assert_eq!(state, before);
+}
+
+fn magic_state() -> StateView {
+    let mut view = state();
+    view.observation.combat = tor_client_common::test_support::observation().combat;
+    let mut scroll = view.observation.ground_items[0].item.clone();
+    scroll.class = ItemClass::Scroll;
+    scroll.name = "amber scroll".into();
+    scroll.identified = false;
+    let mut wand = view.observation.ground_items[1].item.clone();
+    wand.class = ItemClass::Wand;
+    wand.name = "ivory wand".into();
+    wand.identified = false;
+    view.observation.inventory = vec![scroll.clone(), wand.clone()];
+    view.observation.interactions = Some(InteractionView {
+        identification: None,
+        completed: vec![],
+        slots: vec![],
+        preparation: None,
+        inventory: vec![
+            ItemInteractionView {
+                item: scroll.id,
+                slot: None,
+                equipped_slot: None,
+                known_equipment: None,
+                drinkable: false,
+                edible: false,
+                readable: true,
+                zappable: false,
+                charges: None,
+            },
+            ItemInteractionView {
+                item: wand.id,
+                slot: None,
+                equipped_slot: None,
+                known_equipment: None,
+                drinkable: false,
+                edible: false,
+                readable: false,
+                zappable: true,
+                charges: None,
+            },
+        ],
+    });
+    view
+}
+
+#[test]
+fn ordinary_magic_commands_select_one_disclosed_item_and_direction() {
+    let mut view = magic_state();
+    let scroll = view.observation.inventory[0].id;
+    let wand = view.observation.inventory[1].id;
+    for (text, action) in [
+        (
+            "read amber scroll".to_owned(),
+            Action::Read { item: scroll },
+        ),
+        (format!("read #{scroll}"), Action::Read { item: scroll }),
+        (
+            "zap the ivory wand northeast".to_owned(),
+            Action::Zap {
+                item: wand,
+                direction: Direction::NorthEast,
+            },
+        ),
+        (
+            format!("zap #{wand} down"),
+            Action::Zap {
+                item: wand,
+                direction: Direction::Down,
+            },
+        ),
+    ] {
+        assert_eq!(
+            parse(&text, &view).unwrap(),
+            Input::Command(Command::Act {
+                expected_revision: view.revision,
+                action
+            })
+        );
+    }
+    for bad in [
+        "zap ivory wand",
+        "zap ivory wand somewhere",
+        "zap amber scroll north",
+        "read ivory wand",
+        "identify ivory wand",
+        "identify cancel",
+    ] {
+        assert!(parse(bad, &view).is_err(), "{bad}");
+    }
+    for charges in [None, Some(0), Some(3)] {
+        view.observation.interactions.as_mut().unwrap().inventory[1].charges = charges;
+        assert!(
+            parse("zap ivory wand east", &view).is_ok(),
+            "counts do not control device eligibility"
+        );
+        let text = tor_client_text::inventory(&view);
+        assert_eq!(text.contains("charges]"), charges.is_some());
+    }
+}
+
+#[test]
+fn identification_commands_bind_current_choice_and_exact_category() {
+    let mut view = magic_state();
+    let wand = view.observation.inventory[1].id;
+    let choice = IntentionId("paid-owner-choice".into());
+    view.observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .identification = Some(IdentificationChoiceView {
+        choice: choice.clone(),
+        class: ItemClass::Wand,
+        items: vec![wand],
+    });
+    assert_eq!(
+        parse("identify ivory wand", &view).unwrap(),
+        Input::Command(Command::Act {
+            expected_revision: view.revision,
+            action: Action::Identify {
+                choice: choice.clone(),
+                item: Some(wand)
+            }
+        })
+    );
+    assert_eq!(
+        parse("identify cancel", &view).unwrap(),
+        Input::Command(Command::Act {
+            expected_revision: view.revision,
+            action: Action::Identify { choice, item: None }
+        })
+    );
+    assert!(parse("identify amber scroll", &view).is_err());
+    assert!(tor_client_text::inventory(&view).contains("already been used"));
+    view.observation.inventory.pop();
+    assert!(parse("identify ivory wand", &view).is_err());
+    assert!(parse("identify cancel", &view).is_ok());
+    view.observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .identification = None;
+    assert!(parse("identify cancel", &view).is_err());
 }

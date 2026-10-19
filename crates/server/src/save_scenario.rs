@@ -733,6 +733,10 @@ struct Archetype {
     #[serde(with = "mapped")]
     consumable: Option<source::ConsumableSpec>,
     #[serde(with = "mapped")]
+    readable: Option<source::ReadableSpec>,
+    #[serde(with = "mapped")]
+    device: Option<source::DeviceSpec>,
+    #[serde(with = "mapped")]
     edible: Option<source::EdibleSpec>,
     #[serde(deserialize_with = "required_option")]
     supply: Option<String>,
@@ -916,6 +920,12 @@ struct RelocationGate {
     policy: source::RelocationPolicy,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::HealingOverflow", rename_all = "snake_case")]
+enum HealingOverflow {
+    None,
+    ImproveEarliestHitDie,
+}
 #[derive(Serialize)]
 #[serde(
     remote = "source::Effect",
@@ -958,6 +968,12 @@ enum Effect {
         #[serde(with = "mapped")]
         amount: source::AmountExpr,
     },
+    HealPerHitDie {
+        sides: u16,
+        bonus: i32,
+        #[serde(with = "mapped")]
+        overflow: source::HealingOverflow,
+    },
     LoseAttribute {
         attribute: String,
         #[serde(with = "mapped")]
@@ -983,6 +999,14 @@ enum Effect {
     ApplyCondition {
         condition: String,
         duration: u64,
+    },
+    ApplyConditionForTurns {
+        condition: String,
+        #[serde(with = "mapped")]
+        duration: source::AmountExpr,
+    },
+    RemoveCondition {
+        condition: String,
     },
     Restore {
         resource: String,
@@ -1111,7 +1135,41 @@ mod linked_hold_storage_tests {
 #[serde(remote = "source::ConsumableSpec", deny_unknown_fields)]
 struct ConsumableSpec {
     #[serde(with = "mapped")]
+    discovery: source::ItemDiscovery,
+    #[serde(with = "mapped")]
     effects: Vec<source::Effect>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ItemDiscovery", rename_all = "snake_case")]
+enum ItemDiscovery {
+    SelfEffect,
+    OnUse,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ReadableSpec", deny_unknown_fields)]
+struct ReadableSpec {
+    #[serde(with = "mapped")]
+    effects: Vec<source::Effect>,
+    #[serde(with = "mapped")]
+    identify: Option<source::ItemClass>,
+    #[serde(with = "mapped")]
+    discovery: source::ItemDiscovery,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ChargeRange", deny_unknown_fields)]
+struct ChargeRange {
+    minimum: u16,
+    maximum: u16,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::DeviceSpec", deny_unknown_fields)]
+struct DeviceSpec {
+    ability: String,
+    #[serde(with = "mapped")]
+    initial_charges: source::ChargeRange,
+    #[serde(with = "mapped")]
+    discovery: source::ItemDiscovery,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2218,6 +2276,7 @@ enum ConditionPreparation {
 enum ConditionStacking {
     Refresh,
     Longest,
+    Extend,
     Keep,
     Stack { maximum: u16 },
 }
@@ -2230,12 +2289,14 @@ impl ConditionStacking {
         enum Fields {
             Refresh {},
             Longest {},
+            Extend {},
             Keep {},
             Stack { maximum: u16 },
         }
         Ok(match super::named_map(deserializer)? {
             Fields::Refresh {} => tor_simulation::rules::Stacking::Refresh,
             Fields::Longest {} => tor_simulation::rules::Stacking::Longest,
+            Fields::Extend {} => tor_simulation::rules::Stacking::Extend,
             Fields::Keep {} => tor_simulation::rules::Stacking::Keep,
             Fields::Stack { maximum } => tor_simulation::rules::Stacking::Stack { maximum },
         })
@@ -3056,6 +3117,10 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    ConsumableSpec => source::ConsumableSpec,
+    ReadableSpec => source::ReadableSpec,
+    DeviceSpec => source::DeviceSpec,
+    ChargeRange => source::ChargeRange,
     Purchase => crate::creature_authoring::Purchase,
     EquipmentSpec => source::EquipmentSpec,
     ArmorSpec => source::ArmorSpec,
@@ -3124,6 +3189,8 @@ macro_rules! string_remote {
     )+};
 }
 string_remote!(
+    HealingOverflow => source::HealingOverflow,
+    ItemDiscovery => source::ItemDiscovery,
     ArmorMaterial => source::ArmorMaterial,
     BehaviorDisposition => crate::creature_authoring::Disposition,
     BehaviorIdle => crate::creature_authoring::IdleBehavior,
@@ -3210,7 +3277,6 @@ remote!(
     Advancement => crate::creature_authoring::Advancement,
     PurchaseSelection => crate::creature_authoring::PurchaseSelection,
     Restoration => crate::creature_authoring::Restoration,
-    ConsumableSpec => source::ConsumableSpec,
     BodySpec => source::BodySpec,
     DamageType => source::DamageType,
     Certificate => source::Certificate,
@@ -3274,7 +3340,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 16;
+const RULES_INPUT_FORMAT: u32 = 17;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -3374,7 +3440,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 18;
+const CONTENT_PACKAGE_FORMAT: u32 = 19;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -3606,7 +3672,7 @@ mod tests {
     }
 
     #[test]
-    fn corrosion_and_ray_formats_match_independent_payload_boundaries() {
+    fn magic_item_formats_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -3617,16 +3683,16 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (48, 21, "interactions-v43", 16, 5, 18, "tor-arena-run-v5")
+            (49, 22, "interactions-v44", 17, 5, 19, "tor-arena-run-v5")
         );
     }
 
     #[test]
-    fn corrosion_and_ray_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 50);
-        assert_eq!(super::RULES_INPUT_FORMAT, 16);
+    fn magic_item_formats_preserve_physical_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 51);
+        assert_eq!(super::RULES_INPUT_FORMAT, 17);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
-        // Corrosion, directional rays and birth schedules advance their owning
+        // Magic-item capabilities, charges and choice state advance their owning
         // semantic payloads without changing compiled region inputs or physical
         // framing.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
@@ -5355,6 +5421,12 @@ impl Effect {
                 #[serde(with = "mapped")]
                 amount: source::AmountExpr,
             },
+            HealPerHitDie {
+                sides: u16,
+                bonus: i32,
+                #[serde(with = "mapped")]
+                overflow: source::HealingOverflow,
+            },
             LoseAttribute {
                 attribute: String,
                 #[serde(with = "mapped")]
@@ -5380,6 +5452,14 @@ impl Effect {
             ApplyCondition {
                 condition: String,
                 duration: u64,
+            },
+            ApplyConditionForTurns {
+                condition: String,
+                #[serde(with = "mapped")]
+                duration: source::AmountExpr,
+            },
+            RemoveCondition {
+                condition: String,
             },
             Restore {
                 resource: String,
@@ -5419,6 +5499,15 @@ impl Effect {
             }
             Fields::Damage { damage } => source::Effect::Damage { damage },
             Fields::Heal { amount } => source::Effect::Heal { amount },
+            Fields::HealPerHitDie {
+                sides,
+                bonus,
+                overflow,
+            } => source::Effect::HealPerHitDie {
+                sides,
+                bonus,
+                overflow,
+            },
             Fields::LoseAttribute { attribute, amount } => {
                 source::Effect::LoseAttribute { attribute, amount }
             }
@@ -5437,6 +5526,14 @@ impl Effect {
                 condition,
                 duration,
             },
+            Fields::ApplyConditionForTurns {
+                condition,
+                duration,
+            } => source::Effect::ApplyConditionForTurns {
+                condition,
+                duration,
+            },
+            Fields::RemoveCondition { condition } => source::Effect::RemoveCondition { condition },
             Fields::Restore { resource, amount } => source::Effect::Restore { resource, amount },
             Fields::SearchAdjacentGuises {} => source::Effect::SearchAdjacentGuises,
             Fields::ObservePublicPlan {} => source::Effect::ObservePublicPlan,
@@ -7050,5 +7147,71 @@ mod birth_advancement_record_tests {
         let mut oversized = good.clone();
         oversized["advancement"] = json!(vec![good["advancement"][0].clone(); 257]);
         assert!(serde_json::from_value::<Owned<source::ActorPopulationChoice>>(oversized).is_err());
+    }
+}
+
+#[cfg(test)]
+mod consumable_effect_stored_tests {
+    use super::*;
+    #[test]
+    fn saved_consumable_effects_and_extend_stacking_are_independent_strict_named_records() {
+        for raw in [
+            r#"{"kind":"heal_per_hit_die","overflow":"none","sides":4,"bonus":0}"#,
+            r#"{"kind":"heal_per_hit_die","overflow":"improve_earliest_hit_die","sides":4,"bonus":0}"#,
+            r#"{"kind":"remove_condition","condition":"readied"}"#,
+            r#"{"kind":"apply_condition_for_turns","condition":"readied","duration":{"kind":"rolled","dice":{"count":1,"sides":2,"bonus":18}}}"#,
+        ] {
+            let source: source::Effect = serde_json::from_str(raw).unwrap();
+            let saved: Owned<source::Effect> =
+                crate::storage::codec::strict(raw.as_bytes()).unwrap();
+            assert_eq!(saved.0, source);
+            let bytes = serde_json::to_vec(&Borrowed(&source)).unwrap();
+            assert_eq!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(&bytes)
+                    .unwrap()
+                    .0,
+                source
+            );
+            let mut bad: serde_json::Value = serde_json::from_str(raw).unwrap();
+            bad["extra"] = serde_json::json!(1);
+            assert!(crate::storage::codec::strict::<Owned<source::Effect>>(
+                &serde_json::to_vec(&bad).unwrap()
+            )
+            .is_err());
+        }
+        for raw in [
+            r#"["remove_condition","readied"]"#,
+            r#"{"kind":"remove_condition","condition":"readied","condition":"fear"}"#,
+            r#"{"kind":"heal_per_hit_die","overflow":"none","sides":4}"#,
+            r#"{"kind":"heal_per_hit_die","sides":4,"bonus":0}"#,
+            r#"{"kind":"heal_per_hit_die","overflow":null,"sides":4,"bonus":0}"#,
+            r#"{"kind":"heal_per_hit_die","overflow":"unknown","sides":4,"bonus":0}"#,
+            r#"{"kind":"apply_condition_for_turns","condition":"readied","duration":{"kind":"rolled","dice":[1,2,18]}}"#,
+        ] {
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(raw.as_bytes()).is_err(),
+                "{raw}"
+            );
+        }
+        let stacking = tor_simulation::rules::Stacking::Extend;
+        let saved = serde_json::to_vec(&Borrowed(&stacking)).unwrap();
+        assert_eq!(
+            crate::storage::codec::strict::<Owned<tor_simulation::rules::Stacking>>(&saved)
+                .unwrap()
+                .0,
+            stacking
+        );
+        for raw in [
+            r#"["extend"]"#,
+            r#"{"kind":"extend","maximum":1}"#,
+            r#"{"kind":"extend","kind":"extend"}"#,
+        ] {
+            assert!(
+                crate::storage::codec::strict::<Owned<tor_simulation::rules::Stacking>>(
+                    raw.as_bytes()
+                )
+                .is_err()
+            );
+        }
     }
 }

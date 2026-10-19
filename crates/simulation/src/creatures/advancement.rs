@@ -338,6 +338,8 @@ impl CreatureBuild {
         candidate.advancement.choices.push(planned.choices);
         // An intended choice can be dormant after another retained choice or
         // permanent template changed. Ownership is restored, never eligibility.
+        let kind = super::derive::kind_for_templates(&candidate, &candidate.templates)?;
+        candidate.bind_health_origins(&kind)?;
         candidate.derive()?;
         *self = candidate;
         Ok(())

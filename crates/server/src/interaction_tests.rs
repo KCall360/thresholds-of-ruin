@@ -28,6 +28,7 @@ fn fixture() -> Engine {
     );
     for name in ["healing", "poison"] {
         manifest.archetypes.get_mut(name).unwrap().consumable = Some(author::ConsumableSpec {
+            discovery: Default::default(),
             effects: vec![author::Effect::Heal {
                 amount: author::AmountExpr::Fixed { amount: 4 },
             }],

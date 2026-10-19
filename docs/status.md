@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **50**, save format **48**, scenario format **21**, ruleset
-**`interactions-v43`**, scenario validator **`tor-scenario-33`**. Unsupported
+**Current formats:** protocol **51**, save format **49**, scenario format **22**, ruleset
+**`interactions-v44`**, scenario validator **`tor-scenario-34`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **16**, ContentPackage **18** and
+The independent compiled inputs use RulesInput **17**, ContentPackage **19** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -25,7 +25,10 @@ admission bindings, durable floor-activation records,
 explicit cell illumination and shared creature/corpse appearance. Current payloads
 also retain explicit item magical/currency capability, checked quantity ranges and
 frozen theft/relocation plans, item-owned armor corrosion, frozen directional-ray
-plans and bounded future birth-advancement schedules. Prior payload identities
+plans and bounded future birth-advancement schedules, nullable readable/device
+capabilities, exact instance charges and observed-charge facts, one paid owner-only
+identification continuation, and owned-HD Health improvements with immutable
+acquisition witnesses and bounded dormant drain records. Prior payload identities
 remain rejection-only. RegionInput and physical framing remain unchanged.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
@@ -82,6 +85,16 @@ resource payments, unpaid holds and consumed units without changing gameplay,
 ordinary disclosure or saved authority. Measurement requires a loss-free final
 save barrier bound to independent durable history; stock acquisition/drop/transfer
 flows remain unavailable. See [measurement limits](development/performance.md#private-committed-survival-flows).
+
+The current ordinary magic-item slice adds Drink, Read, paid class-restricted
+Identify and directional Zap through the same exact-item preparation and payment
+boundaries. Text, ASCII (F6/F12) and headless use server-owned choices; spectators
+receive neither choices nor exact instance charge details. Rogue includes healing,
+restore-Strength, confusion and blindness potions, selected identify/sleep scrolls,
+and fire/cold/lightning devices. Elemental rays use Intellect + Lore versus
+Speed + Agility; activation has no separate check or Mana cost. Healing overflow
+improves a bounded owned HD record rather than adding an unbounded HP modifier.
+See [items](reference/items.md#reading-identification-and-charged-devices).
 
 ## Implemented scope
 

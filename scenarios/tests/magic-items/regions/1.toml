@@ -1,0 +1,11 @@
+id = 1
+name = "Magic item study"
+size = [7, 5, 2]
+chamber = true
+anchors = { start = [1, 2, 0] }
+items = [
+  { id = 10, at = [1, 2, 0], archetype = "draught", quantity = 2 },
+  { id = 20, at = [1, 2, 0], archetype = "identify", quantity = 3 },
+  { id = 30, at = [1, 2, 0], archetype = "ember" },
+  { id = 31, at = [1, 2, 0], archetype = "ember" },
+]

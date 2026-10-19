@@ -545,6 +545,7 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
     let item = ring.id;
     initial.observation.inventory.push(ring);
     initial.observation.interactions = Some(InteractionView {
+        identification: None,
         completed: Vec::new(),
         slots: vec![
             equipment_slot("ring", "on a finger", false),
@@ -558,6 +559,9 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
             known_equipment: None,
             drinkable: false,
             edible: false,
+            readable: false,
+            zappable: false,
+            charges: None,
         }],
     });
     let mut link = Scripted::new(initial, move |request, now| {
@@ -3561,4 +3565,177 @@ async fn adventure_chained_escape_repetition_keeps_the_original_hold_token() {
         1,
         "the remaining hold moved to row 1 but was never selected"
     );
+}
+
+fn magic_turn_state() -> StateView {
+    let mut state = state();
+    let mut scroll = state.observation.ground_items.remove(0).item;
+    scroll.name = "amber scroll".into();
+    scroll.class = ItemClass::Scroll;
+    scroll.identified = false;
+    let mut wand = scroll.clone();
+    wand.id = super::item_target(73);
+    wand.name = "ivory wand".into();
+    wand.class = ItemClass::Wand;
+    state.observation.inventory = vec![scroll.clone(), wand.clone()];
+    state.observation.interactions = Some(InteractionView {
+        completed: vec![],
+        slots: vec![],
+        preparation: None,
+        identification: None,
+        inventory: vec![
+            ItemInteractionView {
+                item: scroll.id,
+                slot: None,
+                equipped_slot: None,
+                known_equipment: None,
+                drinkable: false,
+                edible: false,
+                readable: true,
+                zappable: false,
+                charges: None,
+            },
+            ItemInteractionView {
+                item: wand.id,
+                slot: None,
+                equipped_slot: None,
+                known_equipment: None,
+                drinkable: false,
+                edible: false,
+                readable: false,
+                zappable: true,
+                charges: None,
+            },
+        ],
+    });
+    state
+}
+
+#[tokio::test]
+async fn ordinary_read_discloses_paid_choice_then_identifies_without_another_scroll() {
+    let initial = magic_turn_state();
+    let scroll = initial.observation.inventory[0].id;
+    let wand = initial.observation.inventory[1].id;
+    let choice = IntentionId("owner-paid-choice".into());
+    let bound = choice.clone();
+    let mut link = Scripted::new(initial, move |request, now| {
+        let mut after = now.clone();
+        if is_act(request, &Action::Read { item: scroll }) {
+            after.observation.inventory.remove(0);
+            let interactions = after.observation.interactions.as_mut().unwrap();
+            interactions.inventory.remove(0);
+            interactions.completed = vec![Action::Read { item: scroll }];
+            interactions.identification = Some(IdentificationChoiceView {
+                choice: bound.clone(),
+                class: ItemClass::Wand,
+                items: vec![wand],
+            });
+            after.observation.tick += 10;
+            vec![
+                Frame::View(
+                    after,
+                    Some(Event::ItemStarted {
+                        action: Action::Read { item: scroll },
+                    }),
+                ),
+                Frame::Ack,
+            ]
+        } else {
+            assert!(is_act(
+                request,
+                &Action::Identify {
+                    choice: bound.clone(),
+                    item: Some(wand)
+                }
+            ));
+            after.observation.inventory[0].name = "Wand of sparks".into();
+            after.observation.inventory[0].identified = true;
+            let interactions = after.observation.interactions.as_mut().unwrap();
+            interactions.identification = None;
+            interactions.completed.clear();
+            interactions.inventory[0].charges = Some(3);
+            vec![Frame::View(after, None), Frame::Ack]
+        }
+    });
+    let mut engine = Engine::default();
+    let read = play(&mut link, &mut engine, "read amber scroll").await;
+    assert!(read.contains("finish reading"), "{read}");
+    assert!(
+        read.contains("identify <item> or identify cancel"),
+        "{read}"
+    );
+    assert!(read.contains("already been used"), "{read}");
+    assert_eq!(link.sent.len(), 1);
+    let tick = link.client.state().observation.tick;
+    let identified = play(&mut link, &mut engine, "identify ivory wand").await;
+    assert!(identified.contains("identify"), "{identified}");
+    assert_eq!(link.sent.len(), 2);
+    assert_eq!(link.client.state().observation.tick, tick);
+    assert_eq!(link.client.state().observation.inventory.len(), 1);
+    let inventory = play(&mut link, &mut engine, "inventory").await;
+    assert!(inventory.contains("3 charges"), "{inventory}");
+    let stale = play(&mut link, &mut engine, "identify cancel").await;
+    assert!(stale.contains("no identification choice"), "{stale}");
+    assert_eq!(link.sent.len(), 2);
+}
+
+#[tokio::test]
+async fn ordinary_zap_and_paid_abort_use_current_authority_and_no_hidden_names() {
+    let mut initial = magic_turn_state();
+    let wand = initial.observation.inventory[1].id;
+    initial
+        .observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .identification = Some(IdentificationChoiceView {
+        choice: IntentionId("cancel-choice".into()),
+        class: ItemClass::Wand,
+        items: vec![wand],
+    });
+    let mut link = Scripted::new(initial, move |request, now| {
+        let mut after = now.clone();
+        if is_act(
+            request,
+            &Action::Identify {
+                choice: IntentionId("cancel-choice".into()),
+                item: None,
+            },
+        ) {
+            after
+                .observation
+                .interactions
+                .as_mut()
+                .unwrap()
+                .identification = None;
+            vec![Frame::View(after, None), Frame::Ack]
+        } else {
+            let action = Action::Zap {
+                item: wand,
+                direction: Direction::East,
+            };
+            assert!(is_act(request, &action));
+            after.observation.tick += 10;
+            after.observation.interactions.as_mut().unwrap().completed = vec![action.clone()];
+            vec![
+                Frame::View(after, Some(Event::ItemStarted { action })),
+                Frame::Ack,
+            ]
+        }
+    });
+    let mut engine = Engine::default();
+    assert!(engine.welcome(&link).contains("already been used"));
+    let aborted = play(&mut link, &mut engine, "identify cancel").await;
+    assert!(
+        aborted.contains("leave the identification choice"),
+        "{aborted}"
+    );
+    let zapped = play(&mut link, &mut engine, "zap the ivory wand east").await;
+    assert!(zapped.contains("zapping the ivory wand"), "{zapped}");
+    assert!(!zapped.contains("charges"));
+    assert_eq!(link.sent.len(), 2);
+    link.role = AccessRole::Spectator;
+    let refused = play(&mut link, &mut engine, "zap ivory wand east").await;
+    assert!(refused.to_lowercase().contains("spectator"), "{refused}");
+    assert_eq!(link.sent.len(), 2);
 }

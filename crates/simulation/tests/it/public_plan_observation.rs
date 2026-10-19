@@ -690,6 +690,7 @@ fn public_plan_review_item_source_matrix_rejects_ineligible_qualified_effects() 
         let mut item = tor_simulation::ItemSpec::ordinary("qualification vial".into());
         item.class = tor_simulation::ItemClass::Potion;
         item.consumable = Some(tor_simulation::ConsumableSpec {
+            discovery: tor_simulation::ItemDiscovery::SelfEffect,
             effects: vec![effect],
         });
         let actual = game

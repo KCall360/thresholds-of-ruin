@@ -34,19 +34,19 @@ class RulesetSources(unittest.TestCase):
                 return result
             return run(command, **kwargs)
 
-        expected = resolve_with_dependencies('import = "interactions-v43"\n')
+        expected = resolve_with_dependencies('import = "interactions-v44"\n')
         with tempfile.TemporaryDirectory() as directory, patch(
             "ruleset_sources.subprocess.run", side_effect=windows_pipe
         ):
             path = Path(directory) / "rules.toml"
             for ending in ("\n", "\r\n"):
-                authored = f'import = "interactions-v43"{ending}'
+                authored = f'import = "interactions-v44"{ending}'
                 path.write_bytes(authored.encode("utf-8"))
                 for source in (authored, path):
                     with self.subTest(ending=repr(ending), source_type=type(source).__name__):
                         self.assertEqual(resolve_with_dependencies(source), expected)
             for ending in ("\r", "\r\r\n"):
-                authored = f'import = "interactions-v43"{ending}'
+                authored = f'import = "interactions-v44"{ending}'
                 path.write_bytes(authored.encode("utf-8"))
                 for source in (authored, path):
                     with self.subTest(ending=repr(ending), source_type=type(source).__name__):
@@ -94,10 +94,10 @@ class RulesetSources(unittest.TestCase):
         self.assertEqual(load_rules(ROOT / "crates/simulation/data/default-ruleset.toml"), canonical)
 
     def test_strict_operations_reject_unknown_imports_paths_identity_drift_and_overlap(self):
-        valid = {"import": "interactions-v43", "overrides": []}
+        valid = {"import": "interactions-v44", "overrides": []}
         bad_inputs = [{"import": "../rules.toml"}, {"import": "https://example.test/rules"},
                       {"import": "interactions-v35"}, {"import": "interactions-v38"},
-                      {"import": "interactions-v43", "unknown": True}, {"import": "interactions-v43", "overrides": {}}]
+                      {"import": "interactions-v44", "unknown": True}, {"import": "interactions-v44", "overrides": {}}]
         operations = [
             {"op": "set", "path": ["id"], "value": "other"},
             {"op": "set", "path": [], "value": 1},
@@ -125,19 +125,19 @@ class RulesetSources(unittest.TestCase):
         for path, value in [(["talents", "warding_initiate", "id"], "renamed_ward"),
                             (["resources", "mana", "resource"], "focus")]:
             with self.subTest(path=path), self.assertRaisesRegex(ValueError, "identity"):
-                resolve_document({"import": "interactions-v43", "overrides": [
+                resolve_document({"import": "interactions-v44", "overrides": [
                     {"op": "set", "path": path, "value": value}]})
         # A resource reference inside an ability's cost is not catalog identity.
-        result = resolve_document({"import": "interactions-v43", "overrides": [
+        result = resolve_document({"import": "interactions-v44", "overrides": [
             {"op": "set", "path": ["abilities", "spark_lance_fire", "cost", "resource"], "value": "focus"}]})
         self.assertEqual(next(value for value in result["abilities"] if value["id"] == "spark_lance_fire")["cost"]["resource"], "focus")
 
     def test_dependency_identity_tracks_general_source_and_standalone_snapshots_are_detached(self):
         import hashlib
         from arena_matrix import toml_source
-        source = {"import": "interactions-v43"}
+        source = {"import": "interactions-v44"}
         resolved, dependencies = resolve_with_dependencies(source)
-        self.assertEqual(dependencies, {"interactions-v43": hashlib.sha256(
+        self.assertEqual(dependencies, {"interactions-v44": hashlib.sha256(
             (ROOT / "crates/simulation/data/default-ruleset.toml").read_bytes().replace(b"\r\n", b"\n")).hexdigest()})
         standalone = toml_source(resolved)
         self.assertEqual(resolve_with_dependencies(standalone), (resolved, {}))
@@ -147,14 +147,14 @@ class RulesetSources(unittest.TestCase):
             file.write_text('id = "fake-rules"\n', encoding="utf-8")
             with patch("ruleset_sources.DEFAULT_RULESET", file):
                 self.assertEqual(resolve_with_dependencies(source), (resolved, dependencies))
-        changed = resolve_document({"import": "interactions-v43", "overrides": [
+        changed = resolve_document({"import": "interactions-v44", "overrides": [
             {"op": "set", "path": ["talents", "brace_for_impact", "modifiers"], "value": []}]})
         self.assertEqual(next(value for value in changed["talents"] if value["id"] == "brace_for_impact")["modifiers"], [])
 
     def test_missing_compiler_is_reported_without_build_or_python_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "Cannot run rules resolver"):
-                resolve_document({"import": "interactions-v43"}, Path(directory) / "missing-compiler")
+                resolve_document({"import": "interactions-v44"}, Path(directory) / "missing-compiler")
 
     def test_oversized_source_is_rejected_before_launching_compiler(self):
         with tempfile.TemporaryDirectory() as directory:

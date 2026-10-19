@@ -344,6 +344,12 @@ impl Canvas {
             self.text(188, 250, "hjklyubn or arrow keys", TEXT, 2, 50);
             self.text(188, 292, "Esc cancels without taking a turn", MUTED, 1, 80);
         }
+        if app.zap_item().is_some() {
+            self.panel(160, 176, 880, 160);
+            self.text(188, 204, "ZAP IN WHICH DIRECTION?", ACCENT, 2, 50);
+            self.text(188, 250, "hjklyubn, arrows, or < >", TEXT, 2, 50);
+            self.text(188, 292, "Esc cancels without taking a turn", MUTED, 1, 80);
+        }
         if !app.pickup.is_empty() {
             self.panel(160, 150, 880, 480);
             let title = match app.item_operation {
@@ -372,16 +378,11 @@ impl Canvas {
                 100,
             );
             let start = app.selected.saturating_sub(10);
-            for (i, item) in app.pickup.iter().enumerate().skip(start).take(11) {
+            for (i, row) in app.item_rows().iter().enumerate().skip(start).take(11) {
                 self.text(
                     188,
                     240 + (i - start) * 32,
-                    &format!(
-                        "{} {} - {}",
-                        if i == app.selected { ">" } else { " " },
-                        app.choice_letter(i),
-                        crate::item_phrase(&item.name, item.quantity)
-                    ),
+                    row,
                     if i == app.selected { GOLD } else { TEXT },
                     2,
                     50,
@@ -603,6 +604,40 @@ impl Canvas {
             }
             if page.entries.is_empty() {
                 self.text(72, 156, "No history entries yet.", MUTED, 2, 60);
+            }
+        }
+        if let Some(choice) = app.identification_choice() {
+            self.screen(
+                &format!("IDENTIFY: {:?}", choice.class).to_uppercase(),
+                "letter or UP/DOWN + ENTER chooses   ESC aborts the paid choice",
+            );
+            let rows = app.identification_rows();
+            if rows.is_empty() {
+                self.text(
+                    72,
+                    156,
+                    "No items offered in this category. Esc aborts.",
+                    TEXT,
+                    2,
+                    65,
+                );
+            }
+            let start = app
+                .identification_selected
+                .saturating_sub(crate::STATS_ROWS - 1);
+            for (index, row) in rows.iter().enumerate().skip(start).take(crate::STATS_ROWS) {
+                self.text(
+                    72,
+                    156 + (index - start) * 22,
+                    row,
+                    if index == app.identification_selected {
+                        GOLD
+                    } else {
+                        TEXT
+                    },
+                    2,
+                    crate::STATS_WIDTH,
+                );
             }
         }
     }

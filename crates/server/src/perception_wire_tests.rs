@@ -325,6 +325,7 @@ fn contact_action_and_preparation_never_upgrade_when_current_disclosure_changes(
             view.visible_actors.clear();
         }
         view.interactions = Some(s::InteractionView {
+            identification: None,
             completed: vec![],
             slots: vec![],
             inventory: vec![],
@@ -569,4 +570,122 @@ fn apparent_mundane_mace_matches_ordinary_ground_mace_except_opaque_identity() {
     assert!(wire["inventory"].as_array().unwrap().is_empty());
     assert!(wire["visible_actors"].as_array().unwrap().is_empty());
     withheld(&wire, &scope);
+}
+
+#[test]
+fn magic_choices_resolve_exact_owner_tokens_category_and_carried_incarnation() {
+    let (mut view, scene, scope) = fixture();
+    let item = s::ItemId(700);
+    let choice = s::IntentionId(80);
+    view.inventory = vec![s::ItemView {
+        corpse: None,
+        class: s::ItemClass::Wand,
+        description: String::new(),
+        id: item,
+        name: "ivory wand".into(),
+        quantity: 1,
+        appearance: "ivory wand".into(),
+        identified: false,
+        known_supply: None,
+        known_currency: None,
+        asset: None,
+    }];
+    view.interactions = Some(s::InteractionView {
+        completed: vec![],
+        slots: vec![],
+        preparation: None,
+        inventory: vec![],
+        identification: Some(s::IdentificationChoiceView {
+            choice,
+            class: s::ItemClass::Wand,
+            items: vec![item],
+        }),
+    });
+    let projected = projected(view.clone(), scene, &scope);
+    assert_eq!(
+        projected["interactions"]["identification"]["choice"],
+        json!(scope.identification_choice(choice))
+    );
+    assert_eq!(
+        projected["interactions"]["identification"]["items"],
+        json!([scope.item(item)])
+    );
+    let selected = p::Action::Identify {
+        choice: scope.identification_choice(choice),
+        item: Some(scope.item(item)),
+    };
+    let resolved = a::Action::Identify {
+        choice,
+        item: Some(item.0),
+    };
+    assert_eq!(decode_action(&selected, &scope, &view).unwrap(), resolved);
+    assert_eq!(encode_action(&resolved, &scope), selected);
+    let cancelled = p::Action::Identify {
+        choice: scope.identification_choice(choice),
+        item: None,
+    };
+    assert_eq!(
+        decode_action(&cancelled, &scope, &view).unwrap(),
+        a::Action::Identify { choice, item: None }
+    );
+    for action in [
+        p::Action::Read {
+            item: scope.item(item),
+        },
+        p::Action::Zap {
+            item: scope.item(item),
+            direction: p::Direction::SouthWest,
+        },
+    ] {
+        let resolved = decode_action(&action, &scope, &view).unwrap();
+        assert_eq!(encode_action(&resolved, &scope), action);
+        assert_eq!(
+            crate::adapt::recorded_action(crate::adapt::action(&resolved)).unwrap(),
+            resolved
+        );
+    }
+    let other = TargetScope::new(uuid::Uuid::from_u128(7), s::ActorId(view.actor.0 + 1));
+    assert_ne!(
+        scope.identification_choice(choice),
+        other.identification_choice(choice)
+    );
+    assert!(decode_action(&selected, &other, &view).is_err());
+    for stale in [
+        p::Action::Identify {
+            choice: other.identification_choice(choice),
+            item: Some(scope.item(item)),
+        },
+        p::Action::Identify {
+            choice: scope.identification_choice(s::IntentionId(choice.0 + 1)),
+            item: Some(scope.item(item)),
+        },
+        p::Action::Identify {
+            choice: scope.identification_choice(choice),
+            item: Some(other.item(item)),
+        },
+    ] {
+        assert!(decode_action(&stale, &scope, &view).is_err());
+    }
+    view.inventory[0].class = s::ItemClass::Potion;
+    assert!(decode_action(&selected, &scope, &view).is_err());
+    view.inventory[0].class = s::ItemClass::Wand;
+    view.inventory[0].id = s::ItemId(item.0 + 1);
+    assert!(decode_action(&selected, &scope, &view).is_err());
+    // Aborting is still permitted even when the last eligible item disappeared.
+    assert!(decode_action(&cancelled, &scope, &view).is_ok());
+    view.interactions.as_mut().unwrap().identification = None;
+    assert!(decode_action(&cancelled, &scope, &view).is_err());
+    // Historic receipts retain opaque stable mapping without re-reading live items.
+    assert_eq!(encode_action(&resolved, &scope), selected);
+    assert!(disclose_entry(
+        &entry(
+            resolved,
+            Event::IdentificationResolved {
+                choice,
+                item: Some(item.0)
+            }
+        ),
+        &scope
+    )
+    .is_none());
 }

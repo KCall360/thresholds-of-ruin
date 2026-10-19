@@ -302,6 +302,46 @@ impl Game {
         direction: StepDirection,
         supplies: crate::supplies::SupplySelection,
     ) -> Result<Plan, GameError> {
+        self.compile_ray_source(actor, ability, direction, supplies, None)
+    }
+    pub(crate) fn compile_device_ray_plan(
+        &self,
+        actor: ActorId,
+        item: crate::ItemId,
+        direction: StepDirection,
+        preparation: u64,
+    ) -> Result<Plan, GameError> {
+        let source = self
+            .items
+            .get(&item)
+            .filter(|i| i.location == crate::ItemLocation::Carried(actor))
+            .ok_or(GameError::ItemUnavailable)?;
+        let device = source
+            .spec
+            .device
+            .as_ref()
+            .ok_or(GameError::ItemUnavailable)?;
+        let charges = source.charges.ok_or(GameError::ItemUnavailable)?;
+        let plan = self.compile_ray_source(
+            actor,
+            &device.ability,
+            direction,
+            crate::supplies::SupplySelection::Carried,
+            Some(preparation),
+        )?;
+        let Plan::Ray(ray) = plan else {
+            return Err(invalid());
+        };
+        Ok(Plan::Zap { item, charges, ray })
+    }
+    fn compile_ray_source(
+        &self,
+        actor: ActorId,
+        ability: &AbilityId,
+        direction: StepDirection,
+        supplies: crate::supplies::SupplySelection,
+        item_preparation: Option<u64>,
+    ) -> Result<Plan, GameError> {
         let caster = self.creature(actor).ok_or(GameError::UnknownActor)?;
         if caster.health().dead() {
             return Err(GameError::Rule(RuleError::Dead));
@@ -310,7 +350,7 @@ impl Game {
         let definition = rules
             .ability(ability)
             .ok_or(GameError::Rule(RuleError::UnknownAbility))?;
-        if !caster.derived().abilities.contains(ability) {
+        if item_preparation.is_none() && !caster.derived().abilities.contains(ability) {
             return Err(GameError::Rule(RuleError::UnknownAbility));
         }
         if definition.invocation != super::InvocationKind::DirectionalRay
@@ -345,10 +385,14 @@ impl Game {
         };
         let Reach::Sight {
             range: clear_visits,
-        } = caster
-            .derived()
-            .ability_reach(ability)
-            .map_err(|_| invalid())?
+        } = (if item_preparation.is_some() {
+            definition.reach.clone()
+        } else {
+            caster
+                .derived()
+                .ability_reach(ability)
+                .map_err(|_| invalid())?
+        })
         else {
             return Err(invalid());
         };
@@ -427,7 +471,13 @@ impl Game {
                 },
             }))
             .collect();
-        let timing = self.ability_timing(actor, ability)?;
+        let timing = match item_preparation {
+            Some(preparation) => crate::creatures::AbilityTiming {
+                preparation,
+                recovery: 0,
+            },
+            None => self.ability_timing(actor, ability)?,
+        };
         let modifiers = caster.derived().ability_values(ability);
         let source_bonus = named_bonus(caster.derived(), *source_skill)
             .checked_add(i64::from(modifiers.check_bonus))

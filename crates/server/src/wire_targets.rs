@@ -78,6 +78,20 @@ impl TargetScope {
         HoldTarget::from_digest(self.digest(b'h', identity.0))
     }
 
+    pub fn identification_choice(
+        &self,
+        identity: tor_simulation::IntentionId,
+    ) -> tor_protocol::IntentionId {
+        let digest = self.digest(b'q', identity.0);
+        tor_protocol::IntentionId(format!(
+            "choice:{}",
+            digest
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        ))
+    }
+
     pub fn item(&self, identity: ItemId) -> ItemTarget {
         ItemTarget::from_digest(self.digest(b'i', identity.0))
     }

@@ -143,11 +143,40 @@ archetype identities; region instances still reference them through `archetype`.
 An actor definition accepts `creature`, `anatomy`, `body`, `turn_ticks` and
 `asset`. Actor names belong to `creature.name`; a standalone actor `name` field
 is rejected because the current engine has no anatomy-only naming mechanism. An item definition accepts `name`, `class`, `equipment`,
-`consumable`, `supply`, `identity`, `appearance_pool`, `stackable`, `properties` and `asset`.
+`consumable`, `readable`, `device`, `edible`, `supply`, `magical`, `currency`,
+`identity`, `appearance_pool`, `stackable`, `properties` and `asset`.
 A supply names a rules-defined finite-cost capability; declaring it alone does
 not grant an eating or drinking action.
 Irrelevant fields are rejected: an actor cannot declare item stacking or
 consumable effects, and an item cannot declare actor anatomy or turn duration.
+Reading and device use are explicit capabilities independent of physical class.
+A readable authors exactly one of a nonempty immediate `effects` list or an
+`identify` physical class, such as `potion`, `scroll` or `wand`. A device authors
+an `ability` reference and `initial_charges = { minimum = 3, maximum = 7 }`;
+its range is bounded to `u16`, permits zero for empty fixtures, and must be ordered.
+Devices are single non-stackable instances. Their ability must be a strict
+single-strike directional ray with no resource, finite-supply or cooldown cost;
+item ownership supplies invocation authority without permanently granting it.
+Initial charges are sampled once when each instance is created, while remaining
+charges are mutable state and never part of the archetype or appearance mapping.
+Equipment, consumable, readable and device capabilities cannot be combined.
+
+Consumables and readables author `discovery = "self_effect"` or `"on_use"`;
+author omission defaults to `self_effect`. Devices require `on_use`. Source
+conveniences do not weaken the canonical content/save schema, which records all
+capability fields and discovery policies explicitly. A readable may omit its
+unused `effects` or `identify` source field. Canonical content requires the exact
+empty list and nullable identify field. Appearance pools must agree on physical
+class and exposed Drink/Read/Zap/Eat affordances, never on hidden effect identity.
+`apply_condition_for_turns` uses a bounded fixed/rolled duration measured in the
+user's actor turns, frozen once at effect preparation; `remove_condition` cures
+one named active condition. `heal_per_hit_die` rolls one declared-sided die per
+current Hit Die, plus its declared bonus. It requires an explicit `overflow`
+policy: `none` or `improve_earliest_hit_die`. The latter improves the earliest
+eligible active owned Hit Die by one only when rolled healing strictly exceeds
+current injury, bounded by that row's original acquisition-time die maximum.
+These are shared effects, not item-name branches.
+
 Duplicate IDs across `actors`, `items` and the low-level `archetypes` catalog
 are errors. The broad low-level catalog remains available for advanced fixtures.
 
@@ -339,6 +368,48 @@ independent stable streams and records chance misses and placement decisions in
 the same once-only entry ledger. No legal placement cell produces a saved skip;
 it does not trigger a later retry or refill. It neither reorders earlier stages nor replaces geometry preparation,
 room topology or the unique retrieval objective.
+
+The selected Rogue magic-item catalog appends finite potion, scroll and device
+stages after the existing actor, bandage, ration, restore-Strength and room-Gold
+stages. Every new stage makes one item-placement attempt per first entered floor;
+failed placement is recorded, and revisits never refill it. Equal subtype weights
+are provisional TOR tuning, not the source game's full item probability table.
+Existing carried-supply pools and their source policies are unchanged.
+
+Initial identify scrolls target potions, scrolls or wands separately. Source
+weapon/armor identify and the combined ring-or-wand category remain deferred;
+wand-only selection is an explicit initial TOR adaptation. Sleep applies four to
+eight actor turns of forced inaction. Potion confusion lasts nineteen to twenty
+actor turns and blindness lasts 808 to 892; repeated doses extend their active
+duration, and ordinary expiry grants no gaze-style protection. These source
+ranges use TOR actor-active timing rather than claiming identical source cycles.
+Elemental devices use six-cell fire/cold/lightning rays dealing 6d6 Energy damage
+with the corresponding descriptor. Activating a charged device has no separate
+success check: its one frozen Intellect + Lore attack roll is opposed by each
+recipient's Speed + Agility. Rank-zero Lore remains usable. There is no Mana,
+supply or cooldown cost, and item ownership never grants an ability. These TOR
+checks replace source magic saves. Each new device independently starts with
+three to seven charges; charged launches discover their type even when no target
+is damaged, while remaining charges require knowledge of the exact instance.
+An empty use spends its ordinary action without damage, charge loss or discovery.
+
+Ordinary healing potions roll one independent d4 per active owned Hit Die, cure
+ordinary blindness, and identify on use even when no injury or blindness changes.
+The strict-overflow trigger follows the source's ordinary-healing rule: matching
+injury exactly gives no permanent improvement. The accepted TOR adaptation gives
++1 to the earliest eligible active owned Hit Die's acquisition roll, capped at
+that row's original die maximum; the first Hit Die starts at maximum. If every
+active row is already at maximum, overflow adds nothing. An improvement survives
+drain only on restoration of that same Hit Die row and cannot transfer to a
+replacement from another source. This owned-row cap differs from the source's
+unbounded maximum-HP increase. Extra-healing is outside this initial catalog.
+
+Restore Strength retains its existing deficit-only restoration and
+observed-change discovery policy. Source behavior is pinned to Rogue 5.4.4
+revision `c7c119f893bd2f8255f2ad78d58a32664ddb9a97`: see
+[potions](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/potions.c#L90-L110),
+[scrolls](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/scrolls.c#L103-L164)
+and [elemental devices](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/sticks.c#L222-L243).
 
 Actor stages may author `depth_growth = { kind = "racial_after", depth = 26 }`.
 The default `{ kind = "fixed" }` keeps the base recipe. Racial growth appends
@@ -588,7 +659,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v43"
+import = "interactions-v44"
 
 [[overrides]]
 op = "set"

@@ -342,7 +342,7 @@ impl AbilityPlan {
 }
 impl Game {
     pub(crate) fn plan_source_valid(&self, plan: &Plan) -> bool {
-        if let Plan::Ray(ray) = plan {
+        if let Some(ray) = plan.as_ray() {
             return self.world.knows(ray.origin.location)
                 && ray
                     .launch_footprint
