@@ -645,6 +645,37 @@ value = {{ id = "test_projectile", name = "Test projectile", tags = [], basic_at
     }
 
     #[test]
+    fn strike_source_domain_requires_named_records_for_every_variant() {
+        use serde_json::json;
+
+        let strike = json!({"offset": 0, "unlock": null, "check": null,
+            "on_success": [], "on_failure": [], "descriptors": [], "riders": []});
+        for (named, positional) in [
+            (json!({"kind": "selected_melee"}), json!(["selected_melee"])),
+            (
+                json!({"kind": "projectile", "delivery": "throw"}),
+                json!(["projectile", "throw"]),
+            ),
+            (
+                json!({"kind": "projectile", "delivery": "launch"}),
+                json!(["projectile", "launch"]),
+            ),
+            (
+                json!({"kind": "authored", "strikes": [strike.clone()]}),
+                json!(["authored", [strike]]),
+            ),
+            (
+                json!({"kind": "natural_melee", "additional_riders": []}),
+                json!(["natural_melee", []]),
+            ),
+        ] {
+            let decoded: StrikeSource = serde_json::from_value(named.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), named);
+            assert!(serde_json::from_value::<StrikeSource>(positional).is_err());
+        }
+    }
+
+    #[test]
     fn projectile_source_rejects_missing_unknown_duplicate_and_surplus_fields() {
         let good = projectile_source("throw", "{ kind = \"selected_weapon\" }");
         for (field, value) in [

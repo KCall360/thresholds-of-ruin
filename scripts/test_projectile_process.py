@@ -321,7 +321,8 @@ class ProjectileProcesses(ProcessTestCase):
         page = self.reply("projectile_choices", start)["page"]
         self.assertEqual(page["query"]["phase"]["kind"], "ammunition")
         self.assertEqual(page["choices"], [{"kind": "ammunition", "item": item(initial, "arrow")["id"]}])
-        self.assertIn("compatible ammunition", "\n".join(ammunition["projectile_rows"]))
+        self.assertEqual(ammunition["projectile_selection"]["page"], page)
+        self.assertEqual(ammunition["projectile_rows"], ["> arrow"])
         press("Return", "enter")
         start = len(self.replies)
         preview = press("Right", "right")
