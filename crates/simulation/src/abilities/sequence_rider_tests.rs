@@ -96,7 +96,7 @@ fn sequence_rider_frozen_condition_is_required_and_bounded() {
     let mut missing = valid.clone();
     missing.as_object_mut().unwrap().remove("condition");
     assert!(serde_json::from_value::<super::FrozenRider>(missing).is_err());
-    for minimum in [0, 1, 17, u16::MAX] {
+    for minimum in [0, 17, u16::MAX] {
         let mut bad = valid.clone();
         bad["condition"]["minimum"] = json!(minimum);
         assert!(serde_json::from_value::<super::FrozenRider>(bad).is_err());

@@ -41,7 +41,7 @@ fn sequence_rider_condition_is_closed_bounded_and_success_only() {
     }]);
     let valid = document_with(vec![row]);
     assert!(decode(valid.clone()).is_ok());
-    for minimum in [0, 1, 17, u16::MAX] {
+    for minimum in [0, 17, u16::MAX] {
         let mut bad = valid.clone();
         bad["abilities"][0]["strikes"]["strikes"][0]["riders"][0]["condition"]["minimum"] =
             json!(minimum);

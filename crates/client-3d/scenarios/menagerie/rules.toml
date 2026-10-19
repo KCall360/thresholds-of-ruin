@@ -1,4 +1,4 @@
-import = "interactions-v42"
+import = "interactions-v43"
 
 # Provisional TOR mapping of the pinned Rogue food reserve, not calibrated balance.
 [[overrides]]

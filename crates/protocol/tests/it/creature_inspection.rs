@@ -480,7 +480,7 @@ fn inspection_skill_ranks_equal_starting_and_paid_ownership_with_generic_ids() {
     restored.validate().unwrap();
 
     // The wire accepts valid server-defined vocabulary and an optional zero-rank
-    // row. It must not embed the current simulation list of nineteen skills.
+    // row. It must not embed the current simulation list of twenty skills.
     let mut at_cap = value.clone();
     for _ in 0..4 {
         let skill = at_cap.starting_skills[0].clone();

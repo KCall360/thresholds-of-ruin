@@ -24,6 +24,15 @@ pub fn line(record: &PublicPlanObservationView) -> String {
             text.push_str("; aim ");
             match aim {
                 ObservedAimView::Unavailable => text.push_str("unavailable"),
+                ObservedAimView::Direction { direction } => {
+                    write!(
+                        &mut text,
+                        "direction ({},{},{}) in your frame at that time",
+                        direction.x, direction.y, direction.z
+                    )
+                    .expect("String writes are infallible");
+                }
+
                 ObservedAimView::Disclosed { occurrences, .. } => {
                     for (index, at) in occurrences.iter().enumerate() {
                         if index > 0 {

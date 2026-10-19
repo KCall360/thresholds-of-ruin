@@ -40,6 +40,10 @@ pub struct DiagnosticCost {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
+    CorrodeArmor {
+        target: ActorId,
+        amount: u32,
+    },
     LinkedHold {
         target: ActorId,
         holder: ActorId,
@@ -226,7 +230,8 @@ impl CombatDiagnosticRecord {
                     *target == self.target && *holder == self.actor && target != holder
                 }
                 DiagnosticEffect::Observation { target } => *target == self.actor,
-                DiagnosticEffect::Damage { target, amount }
+                DiagnosticEffect::CorrodeArmor { target, amount }
+                | DiagnosticEffect::Damage { target, amount }
                 | DiagnosticEffect::Heal { target, amount }
                 | DiagnosticEffect::Nourish { target, amount } => {
                     target.0 != 0 && *amount <= 1_000_000
@@ -315,6 +320,10 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            CorrodeArmor {
+                target: ActorId,
+                amount: u32,
+            },
             LinkedHold {
                 target: ActorId,
                 holder: ActorId,
@@ -381,6 +390,7 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::CorrodeArmor { target, amount } => Self::CorrodeArmor { target, amount },
             Fields::LinkedHold { target, holder } => Self::LinkedHold { target, holder },
             Fields::Translate {
                 target,

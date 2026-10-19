@@ -426,6 +426,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
     let mut item = crate::ItemSpec::ordinary("clock mail".into());
     item.class = crate::ItemClass::Armor;
     item.equipment = Some(crate::EquipmentSpec {
+        armor: None,
         slot: slot.clone(),
         attack: None,
         modifiers: vec![Modifier {

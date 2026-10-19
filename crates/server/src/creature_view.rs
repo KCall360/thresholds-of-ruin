@@ -294,6 +294,8 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                 },
                 target_kind: if def.invocation == s::abilities::InvocationKind::SelfStep {
                     p::AbilityTargetKind::SelfStep
+                } else if def.invocation == s::abilities::InvocationKind::DirectionalRay {
+                    p::AbilityTargetKind::DirectionalRay
                 } else {
                     match def.reach {
                         s::rules::Reach::SelfOnly => p::AbilityTargetKind::SelfOnly,
@@ -779,7 +781,10 @@ mod tests {
             .iter()
             .any(|ability| ability.id == "fixture_fear" && ability.name == "Dreadful Regard"));
         assert_eq!(stats.attributes.intellect, 3);
-        assert_eq!(stats.skills.len(), 19);
+        assert_eq!(stats.skills.len(), 20);
+        assert!(stats.skills.iter().any(|row| {
+            row.skill.id == "breath" && row.skill.name == "Breath" && row.rank == 0
+        }));
         assert_eq!(stats.resources.len(), 3);
         assert_eq!(stats.binding.id, "intellect");
         assert_eq!(stats.subtypes[0].id, "goblinoid");
@@ -1031,7 +1036,7 @@ mod tests {
             let starting = usize::from(original.starting_skills().contains(&skill));
             paid_ranks.extend(std::iter::repeat_n(skill, 5 - starting));
         }
-        assert_eq!(paid_ranks.len(), 93);
+        assert_eq!(paid_ranks.len(), 98);
         choices[1].purchases = paid_ranks
             .into_iter()
             .enumerate()
@@ -1075,7 +1080,7 @@ mod tests {
                 .iter()
                 .map(|die| die.purchases.len())
                 .sum::<usize>(),
-            349
+            354
         );
         let lines = tor_client_common::inspection::lines(&report).unwrap();
         let client_bytes = lines.iter().map(String::len).sum::<usize>();

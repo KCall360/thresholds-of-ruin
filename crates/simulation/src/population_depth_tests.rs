@@ -189,6 +189,7 @@ fn weighted_actor_and_item_receipts_bind_selected_content_and_survive_restore() 
                 depth: DepthInterval::Open { minimum: 1 },
                 choices: vec![
                     PreparedActorChoice {
+                        advancement: vec![],
                         carried_loot: None,
                         depth_growth: crate::prepared_spawn::DepthGrowth::Fixed {},
                         content: "first".into(),
@@ -197,6 +198,7 @@ fn weighted_actor_and_item_receipts_bind_selected_content_and_survive_restore() 
                         actor: actor.clone(),
                     },
                     PreparedActorChoice {
+                        advancement: vec![],
                         carried_loot: None,
                         depth_growth: crate::prepared_spawn::DepthGrowth::Fixed {},
                         content: "second".into(),

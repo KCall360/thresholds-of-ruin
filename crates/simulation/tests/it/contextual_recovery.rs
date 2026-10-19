@@ -493,6 +493,7 @@ fn first_contextual_equipment_source_does_not_round_through_an_inapplicable_rate
     let mut armor = ItemSpec::ordinary("quiet mail".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
+        armor: None,
         slot: slot.clone(),
         attack: None,
         modifiers: vec![context_modifier()],
@@ -747,6 +748,7 @@ fn contextual_recovery_followup_frozen_first_contextual_equipment_rejects_atomic
     let mut armor = ItemSpec::ordinary("quiet mail".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
+        armor: None,
         slot: slot.clone(),
         attack: None,
         modifiers: vec![context_modifier()],

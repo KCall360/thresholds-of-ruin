@@ -811,6 +811,7 @@ fn conditional_rider_page() -> Value {
 fn sequence_rider_inspection_condition_roundtrips_explicit_null_and_bounded_predicate() {
     for condition in [
         Value::Null,
+        json!({"kind":"sequence_successful_hits","minimum":1}),
         json!({"kind":"sequence_successful_hits","minimum":2}),
         json!({"kind":"sequence_successful_hits","minimum":16}),
     ] {
@@ -828,7 +829,6 @@ fn sequence_rider_inspection_rejects_missing_unknown_malformed_and_failure_condi
     let good = conditional_rider_page();
     for condition in [
         json!({"kind":"sequence_successful_hits","minimum":0}),
-        json!({"kind":"sequence_successful_hits","minimum":1}),
         json!({"kind":"sequence_successful_hits","minimum":17}),
         json!({"kind":"sequence_successful_hits","minimum":65536}),
         json!({"kind":"sequence_successful_hits","minimum":-1}),
@@ -901,7 +901,15 @@ fn sequence_rider_inspection_constructor_validation_retains_page_budgets() {
         0,
         "condition is fixed metadata, not a diagnostic field"
     );
-    for minimum in [0, 1, 17, u16::MAX] {
+    for minimum in [1, 2, 16] {
+        let mut valid = page.clone();
+        let StrikePageEntry::RiderHeader { condition, .. } = &mut valid.entries[0] else {
+            unreachable!()
+        };
+        *condition = Some(InspectionRiderCondition::SequenceSuccessfulHits { minimum });
+        assert!(valid.validate().is_ok(), "constructed minimum {minimum}");
+    }
+    for minimum in [0, 17, u16::MAX] {
         let mut invalid = page.clone();
         let StrikePageEntry::RiderHeader { condition, .. } = &mut invalid.entries[0] else {
             unreachable!()

@@ -524,6 +524,7 @@ impl PreparedDefinitions {
             "Population AI requires a creature build",
         )?;
         Ok(tor_simulation::floor_activation::PreparedActorChoice {
+            advancement: vec![],
             depth_growth: tor_simulation::prepared_spawn::DepthGrowth::Fixed {},
             content: archetype.into(),
             weight,

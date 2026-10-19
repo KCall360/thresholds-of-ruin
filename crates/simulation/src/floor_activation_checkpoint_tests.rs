@@ -11,6 +11,7 @@ fn checkpoint_population_game() -> Game {
             bands: vec![DepthBand {
                 depth: DepthInterval::Open { minimum: 1 },
                 choices: vec![PreparedActorChoice {
+                    advancement: vec![],
                     carried_loot: None,
                     depth_growth: crate::prepared_spawn::DepthGrowth::Fixed {},
                     content: "witness".into(),

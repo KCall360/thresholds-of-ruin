@@ -9,6 +9,10 @@ pub const MAX_PUBLIC_AIM_OCCURRENCES: usize = 33_usize.pow(3) + 64 * 27 + 2;
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ObservedAimView {
     Unavailable,
+    /// Unit ray vector in the observer's historical frame, never a destination.
+    Direction {
+        direction: Position,
+    },
     Disclosed {
         cell: String,
         occurrences: Vec<Position>,
@@ -20,6 +24,10 @@ impl<'de> Deserialize<'de> for ObservedAimView {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             Unavailable {},
+            Direction {
+                #[serde(deserialize_with = "read_direction")]
+                direction: Position,
+            },
             Disclosed {
                 #[serde(deserialize_with = "read_cell")]
                 cell: String,
@@ -29,6 +37,7 @@ impl<'de> Deserialize<'de> for ObservedAimView {
         }
         Ok(match crate::bounded::named_map(d)? {
             Fields::Unavailable {} => Self::Unavailable,
+            Fields::Direction { direction } => Self::Direction { direction },
             Fields::Disclosed { cell, occurrences } => Self::Disclosed { cell, occurrences },
         })
     }
@@ -114,6 +123,7 @@ impl PublicPlanObservationView {
                         && ability.as_ref().is_none_or(ContentRef::valid)
                         && match aim {
                             ObservedAimView::Unavailable => true,
+                            ObservedAimView::Direction { direction } => valid_direction(*direction),
                             ObservedAimView::Disclosed { cell, occurrences } => {
                                 crate::valid_label(cell, 128)
                                     && !occurrences.is_empty()
@@ -178,4 +188,30 @@ fn read_occurrences<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Positi
     }
     crate::bounded::bounded::<D, NamedPosition, MAX_PUBLIC_AIM_OCCURRENCES>(d)
         .map(|rows| rows.into_iter().map(|row| row.0).collect())
+}
+
+fn valid_direction(direction: Position) -> bool {
+    let components = [direction.x, direction.y, direction.z];
+    components.iter().all(|value| (-1..=1).contains(value))
+        && (1..=2).contains(&components.iter().filter(|value| **value != 0).count())
+}
+fn read_direction<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Position, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fields {
+        x: i32,
+        y: i32,
+        z: i32,
+    }
+    let fields: Fields = crate::bounded::named_map(d)?;
+    let direction = Position {
+        x: fields.x,
+        y: fields.y,
+        z: fields.z,
+    };
+    if valid_direction(direction) {
+        Ok(direction)
+    } else {
+        Err(serde::de::Error::custom("invalid public ray direction"))
+    }
 }

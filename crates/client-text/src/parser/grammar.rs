@@ -52,6 +52,7 @@ pub enum SessionCommand {
 pub enum AbilitySelection {
     ActorTarget { direct: NounPhrase },
     SelfStep { direction: Direction },
+    DirectionalRay { direction: Direction },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParsedCommand {

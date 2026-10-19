@@ -836,7 +836,7 @@ impl Game {
                                 .condition_pauses_preparation(&p.plan.work().action())
                         }))
                     && p.plan.target().0 < self.next_actor_id
-                    && (!(p.plan.as_ability().is_some()
+                    && (!(p.plan.ability_id().is_some()
                         || matches!(
                             p.plan,
                             crate::abilities::Plan::Escape(_) | crate::abilities::Plan::Respec(_)
@@ -955,6 +955,9 @@ impl Game {
     /// Checks restoring gives a loaded item; attaching a stored region gives
     /// its items the same.
     pub(crate) fn item_state_valid(&self, id: ItemId, item: &Item) -> bool {
+        if !item.condition_valid() {
+            return false;
+        }
         id.0 != 0
             && id.0 < self.next_item_id
             && item.quantity != 0
@@ -1264,6 +1267,7 @@ mod tests {
         let mut modifier = crate::ItemSpec::ordinary("armor".into());
         modifier.class = crate::ItemClass::Armor;
         modifier.equipment = Some(crate::EquipmentSpec {
+            armor: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
             modifiers: vec![Modifier {
@@ -1284,6 +1288,7 @@ mod tests {
         let mut attack = crate::ItemSpec::ordinary("weapon".into());
         attack.class = crate::ItemClass::Weapon;
         attack.equipment = Some(crate::EquipmentSpec {
+            armor: None,
             slot: crate::EquipmentSlot::new("weapon").unwrap(),
             modifiers: vec![],
             attack: Some(
@@ -1302,6 +1307,7 @@ mod tests {
         let mut slot = crate::ItemSpec::ordinary("unknown slot armor".into());
         slot.class = crate::ItemClass::Armor;
         slot.equipment = Some(crate::EquipmentSpec {
+            armor: None,
             slot: crate::EquipmentSlot::new("missing_slot").unwrap(),
             attack: None,
             modifiers: vec![],

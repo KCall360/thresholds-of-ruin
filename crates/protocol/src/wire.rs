@@ -4,7 +4,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 49;
+pub const PROTOCOL_VERSION: u32 = 50;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -1511,12 +1511,13 @@ pub enum ItemClass {
     Coin,
     Gem,
 }
-/// Selected public operand; the backend resolves a self-step destination.
+/// Selected public operand; the backend resolves movement and ray collision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AbilityInvocation {
     ActorTarget { target: ActorTarget },
     SelfStep { direction: Direction },
+    DirectionalRay { direction: Direction },
 }
 impl From<ActorTarget> for AbilityInvocation {
     fn from(target: ActorTarget) -> Self {
@@ -1543,10 +1544,15 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
                 #[serde(deserialize_with = "direction_token")]
                 direction: Direction,
             },
+            DirectionalRay {
+                #[serde(deserialize_with = "direction_token")]
+                direction: Direction,
+            },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::ActorTarget { target } => Self::ActorTarget { target },
             Fields::SelfStep { direction } => Self::SelfStep { direction },
+            Fields::DirectionalRay { direction } => Self::DirectionalRay { direction },
         })
     }
 }

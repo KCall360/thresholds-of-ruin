@@ -138,6 +138,9 @@ CLIENT = [
                   for ability in ("basic_melee", "rattling_blow", "spark_lance_fire", "falter")),
                 {"type": "use_ability", "id": "guarded_step", "invocation": {"kind": "self_step", "direction": "north_east"},
                  "supplies": {"kind": "carried"}},
+                {"type": "use_ability", "id": "fixture_directional_ray",
+                 "invocation": {"kind": "directional_ray", "direction": "east"},
+                 "supplies": {"kind": "carried"}},
                 {"type": "use_ability", "id": "bind_wounds", "invocation": {"kind": "actor_target", "target": "a_" + "02" * 32},
                  "supplies": {"kind": "explicit", "items": [
                      {"cost_ordinal": 0, "item": "i_" + "04" * 32}]}},

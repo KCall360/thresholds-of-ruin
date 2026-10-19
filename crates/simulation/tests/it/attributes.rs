@@ -105,7 +105,7 @@ fn all_reference_skills_and_mana_bindings_use_declared_attributes() {
         ),
         (
             Attribute::Willpower,
-            &[Skill::Discipline, Skill::Intimidation][..],
+            &[Skill::Discipline, Skill::Intimidation, Skill::Breath][..],
         ),
         (
             Attribute::Awareness,
@@ -123,7 +123,7 @@ fn all_reference_skills_and_mana_bindings_use_declared_attributes() {
             assert!(seen.insert(skill));
         }
     }
-    assert_eq!(seen.len(), 18);
+    assert_eq!(seen.len(), 19);
     for (binding, attribute) in [
         (ManaBinding::Intellect, Attribute::Intellect),
         (ManaBinding::Willpower, Attribute::Willpower),
@@ -132,7 +132,63 @@ fn all_reference_skills_and_mana_bindings_use_declared_attributes() {
     ] {
         assert_eq!(Skill::Spellcasting.attribute(binding), attribute);
     }
-    assert_eq!(Skill::ALL.len(), 19);
+    assert_eq!(Skill::ALL.len(), 20);
+}
+
+#[test]
+fn breath_has_one_canonical_name_and_all_skill_slots_roundtrip_independently() {
+    let breath: Skill = serde_json::from_str("\"breath\"").unwrap();
+    assert_eq!(breath.as_str(), "breath");
+    assert!(Skill::ALL.contains(&breath));
+    let mut names = std::collections::BTreeSet::new();
+    for skill in Skill::ALL {
+        assert!(names.insert(skill.as_str()));
+        let encoded = serde_json::to_string(&skill).unwrap();
+        assert_eq!(encoded, format!("\"{}\"", skill.as_str()));
+        assert_eq!(serde_json::from_str::<Skill>(&encoded).unwrap(), skill);
+        let ranks = SkillRanks::default().with_rank(skill, 5).unwrap();
+        for other in Skill::ALL {
+            assert_eq!(ranks.get(other), if other == skill { 5 } else { 0 });
+        }
+        assert_eq!(ranks.with_rank(skill, 6), Err(BuildValueError::Rank));
+    }
+    for unknown in ["Breath", "breath_weapon", "breath ", "missing"] {
+        assert!(serde_json::from_value::<Skill>(serde_json::json!(unknown)).is_err());
+    }
+}
+
+#[test]
+fn breath_check_adds_willpower_and_owned_rank_independent_of_mana_binding() {
+    let attributes = Attributes::new(ByAttribute {
+        strength: 1,
+        speed: 2,
+        intellect: 0,
+        willpower: 3,
+        awareness: 4,
+        presence: 5,
+    })
+    .unwrap();
+    let ranks = SkillRanks::default().with_rank(Skill::Breath, 2).unwrap();
+    for binding in [
+        ManaBinding::Intellect,
+        ManaBinding::Willpower,
+        ManaBinding::Awareness,
+        ManaBinding::Presence,
+    ] {
+        let check = SkillCheck {
+            skill: Skill::Breath,
+            binding,
+            modifier: 0,
+            threshold: 10,
+        };
+        assert_eq!(Skill::Breath.attribute(binding), Attribute::Willpower);
+        assert_eq!(check.bonus(attributes, ranks), 5);
+        let mut state = 42;
+        let outcome = check.resolve(&mut state, attributes, ranks, Edge::default(), &mut ());
+        assert_eq!(outcome.roll.kept, 5);
+        assert_eq!(outcome.total, 10);
+        assert!(outcome.success);
+    }
 }
 
 #[test]

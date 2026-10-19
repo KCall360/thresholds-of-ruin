@@ -76,6 +76,11 @@ pub fn decode_action(
                 p::AbilityInvocation::SelfStep { direction } => a::AbilityInvocation::SelfStep {
                     direction: crate::adapt::requested_direction(*direction),
                 },
+                p::AbilityInvocation::DirectionalRay { direction } => {
+                    a::AbilityInvocation::DirectionalRay {
+                        direction: crate::adapt::requested_direction(*direction),
+                    }
+                }
             };
             let supplies = decode_supplies(supplies, scope, observation)?;
             a::Action::UseAbility {
@@ -202,6 +207,11 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
                 a::AbilityInvocation::SelfStep { direction } => p::AbilityInvocation::SelfStep {
                     direction: crate::adapt::wire_direction(*direction),
                 },
+                a::AbilityInvocation::DirectionalRay { direction } => {
+                    p::AbilityInvocation::DirectionalRay {
+                        direction: crate::adapt::wire_direction(*direction),
+                    }
+                }
             },
             supplies: encode_supplies(supplies, scope),
         },

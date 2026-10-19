@@ -152,6 +152,18 @@ impl Game {
                     Work::Escape { .. } => unreachable!("Escape has a distinct atomic completion"),
                     Work::Respec { .. } => unreachable!("respec has a distinct atomic completion"),
                     Work::UseAbility { .. } => {
+                        if resolved.plan.as_ray().is_some() {
+                            self.resolve_prepared_ray(&resolved)?;
+                            self.push_event(
+                                CombatEvent::SequenceEnded {
+                                    actor: id,
+                                    intention: resolved.intention,
+                                    reason: SequenceEnd::Completed,
+                                },
+                                None,
+                            )?;
+                            break;
+                        }
                         let plan = resolved
                             .plan
                             .as_ability()

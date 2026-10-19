@@ -66,8 +66,8 @@ rerun the same pure preview against current authorized state.
 
 Continuations retain the exact basis, proposal, section and revision. Dependent
 removals and gross refunds remain separately and completely traversable. The
-conservative wire ledger capacity is 351; two immutable free starting ranks make
-the maximum legal purchased ledger 349. Up to 256 HD times 16 grants produce
+conservative wire ledger capacity is 356; two immutable free starting ranks make
+the maximum legal purchased ledger 354. Up to 256 HD times 16 grants produce
 4,096 balance rows. Source metadata capacity still applies to combinations of
 catalog, purchase and requirement bounds; their independent maxima are not a
 claim that one package can contain every maximum simultaneously.
@@ -286,7 +286,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":49,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":50,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -1303,7 +1303,7 @@ requires six named fields: `strength`, `speed`, `intellect`, `willpower`,
 and `spiritual`. These fixed DTO fields must not be confused with extensible
 content collections. Type/subtype, owned HD source, binding, skill, resource,
 talent and ability references use validated content IDs and names. Skill/resource
-collections are not required to contain the stock nineteen skills or three
+collections are not required to contain the stock twenty skills or three
 resources: validation bounds the lists, checks unique valid IDs and enforces
 numeric and pool consistency. Pools separate `balance`, `maximum`, `available`
 and `reserved`; available plus reserved equals balance. Granted abilities describe

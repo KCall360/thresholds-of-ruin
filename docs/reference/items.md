@@ -69,6 +69,37 @@ and effect definitions are rejected. Multiple matching sockets may hold weapons;
 the highest equipped weapon-capable socket supplies the selected attack. Other
 equipment still contributes its modifiers. Simultaneous dual attacks are not implemented.
 
+### Armor and corrosion
+
+Ordinary armor uses an explicit equipment capability, for example
+`armor = { physical_reduction = 2, material = "metal", rustproof = false }`.
+Its Physical protection is additive damage reduction for Impact and Keen, rather
+than a Physical-defense bonus. Energy, Spirit and Vital damage and unrelated
+modifiers retain their ordinary rules. `material` is the closed `metal`/`nonmetal`
+choice; string-valued item properties never grant armor or rust protection.
+
+An item definition is shared and immutable. Each actual item owns its persisted
+`condition = { corrosion = 0 }`; loss cannot exceed that item's original armor
+contribution. Nonmetal, rustproof and non-armor items cannot carry corrosion.
+The item ID and loss survive transfer, dropping, death, recovery and re-equipping.
+Two items sharing a definition can have different losses. Equip, AI comparison,
+restoration and identified equipment views use the same effective contribution.
+A change folds the existing permanent compiled sheet, without walking HD rows.
+
+The generic `corrode_armor` effect names an equipment-slot kind and a positive
+bounded amount. It selects the first currently equipped socket of that kind,
+reduces rustable item-owned Physical armor protection by that amount, and floors
+at zero. Empty, nonmetal, rustproof and already exhausted armor are no-ops.
+Corrosion is an isolated effect payload: the exact item witness and actor sheet
+publish in the enclosing action transaction; later strikes see the new protection.
+No hidden inventory identity appears in its public result. CO1 uses one attempt
+per source occurrence after at least one successful natural contact, even when
+that contact deals zero damage.
+
+Authoring may omit `armor` and defaults `rustproof` to false. Current owned
+records require the explicit nullable armor field, all armor fields and the
+item condition; unknown fields, positional aliases and impossible loss reject.
+
 One unit of a supply stack provides one unit of its named supply. Supply identity
 participates in physical stack equality, cloning and saved item definitions.
 Equipment cannot also be supply content, and unknown supply references reject

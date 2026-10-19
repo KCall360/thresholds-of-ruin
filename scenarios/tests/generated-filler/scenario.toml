@@ -2,7 +2,7 @@
 # Two authored halls with two generated caves between them. The caves' rooms,
 # corridors, rats and coins come from their generator when first built. Each
 # cave's two entries share a row, so a corridor always joins them straight.
-format = 20
+format = 21
 id = "generated-filler"
 version = "1.0"
 ruleset = "rules.toml"

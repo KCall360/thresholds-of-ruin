@@ -1440,7 +1440,10 @@ impl App {
                             tor_client_common::abilities::choices(&state.state().observation)
                                 .contains(&ability)
                         }) {
-                            if ability.target_kind == AbilityTargetKind::SelfStep {
+                            if matches!(
+                                ability.target_kind,
+                                AbilityTargetKind::SelfStep | AbilityTargetKind::DirectionalRay
+                            ) {
                                 self.status = format!(
                                     "Choose a direction for {}. Movement keys select; Esc cancels.",
                                     ability.name
@@ -1463,21 +1466,27 @@ impl App {
             }
             return Effect::None;
         }
-        if self
-            .selected_ability
-            .as_ref()
-            .is_some_and(|ability| ability.target_kind == AbilityTargetKind::SelfStep)
-        {
+        if self.selected_ability.as_ref().is_some_and(|ability| {
+            matches!(
+                ability.target_kind,
+                AbilityTargetKind::SelfStep | AbilityTargetKind::DirectionalRay
+            )
+        }) {
             if let Input::Key { key } = input {
                 if key == Key::Escape {
                     self.selected_ability = None;
                     self.status = "Never mind.".into();
                 } else if let Some(direction) = key.step_direction() {
-                    let ability = self.selected_ability.take().expect("selected step ability");
-                    return self.choose_ability_invocation(
-                        ability,
-                        AbilityInvocation::SelfStep { direction },
-                    );
+                    let ability = self
+                        .selected_ability
+                        .take()
+                        .expect("selected directional ability");
+                    let invocation = if ability.target_kind == AbilityTargetKind::DirectionalRay {
+                        AbilityInvocation::DirectionalRay { direction }
+                    } else {
+                        AbilityInvocation::SelfStep { direction }
+                    };
+                    return self.choose_ability_invocation(ability, invocation);
                 }
             }
             return Effect::None;

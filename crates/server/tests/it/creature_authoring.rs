@@ -57,6 +57,37 @@ fn authored_creature_recipes_validate_owned_choices_and_assign_stable_actor_heal
 }
 
 #[test]
+fn authored_breath_starting_and_purchased_ranks_use_strict_generic_skill_names() {
+    let compiled = catalog().compile(rules()).unwrap();
+    let mut spec = specification();
+    spec.starting_skills = ["heavy_weaponry".into(), "breath".into()];
+    spec.hit_dice = serde_json::from_value(serde_json::json!([
+        {"source":"racial"}, {"source":"racial"}, {"source":"racial"}, {"source":"racial"},
+        {"source":"racial"}, {"source":"racial"}, {"source":"racial"}, {"source":"racial"}
+    ]))
+    .unwrap();
+    let starting = compiled.prepare(&spec).unwrap().instantiate(42).unwrap();
+    assert_eq!(starting.derive().unwrap().skills.get(Skill::Breath), 1);
+    assert_eq!(starting.unspent_points(), 8);
+    spec.hit_dice[7].purchases = vec![rank("breath")];
+    let built = compiled.prepare(&spec).unwrap().instantiate(42).unwrap();
+    assert_eq!(built.derive().unwrap().skills.get(Skill::Breath), 2);
+    assert_eq!(built.unspent_points(), 7);
+    assert_eq!(
+        built.choices()[7].purchases[0].selection,
+        tor_simulation::creatures::PurchaseSelection::SkillRank(Skill::Breath)
+    );
+    for unknown in ["Breath", "breath_weapon", "breath ", "missing"] {
+        let mut invalid = spec.clone();
+        invalid.starting_skills[1] = unknown.into();
+        assert!(compiled.prepare(&invalid).is_err());
+        let mut invalid = spec.clone();
+        invalid.hit_dice[7].purchases = vec![rank(unknown)];
+        assert!(compiled.prepare(&invalid).is_err());
+    }
+}
+
+#[test]
 fn authored_builds_reject_unknown_references_invalid_budgets_and_dormant_talents() {
     // Permanent-flag eligibility remains a generic authoring contract even
     // though the starter Mage roots no longer impose a mindless restriction.

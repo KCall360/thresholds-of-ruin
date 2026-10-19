@@ -108,10 +108,41 @@ impl AnatomySpec {
         Ok(anatomy)
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArmorMaterial {
+    Metal,
+    Nonmetal,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArmorSpec {
+    pub physical_reduction: u32,
+    pub material: ArmorMaterial,
+    #[serde(default)]
+    pub rustproof: bool,
+}
+impl ArmorSpec {
+    fn compile(self) -> Result<tor_simulation::ArmorSpec, crate::Failure> {
+        let armor = tor_simulation::ArmorSpec {
+            physical_reduction: self.physical_reduction,
+            material: match self.material {
+                ArmorMaterial::Metal => tor_simulation::ArmorMaterial::Metal,
+                ArmorMaterial::Nonmetal => tor_simulation::ArmorMaterial::Nonmetal,
+            },
+            rustproof: self.rustproof,
+        };
+        if !armor.valid() {
+            return Err(super::fail("Invalid armor reduction"));
+        }
+        Ok(armor)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EquipmentSpec {
     pub slot: EquipmentSlot,
+    pub armor: Option<ArmorSpec>,
     pub attack: Option<crate::creature_authoring::Melee>,
     #[serde(default)]
     pub modifiers: Vec<crate::creature_authoring::Modifier>,
@@ -138,6 +169,7 @@ impl EquipmentSpec {
             )));
         }
         Ok(tor_simulation::EquipmentSpec {
+            armor: self.armor.map(ArmorSpec::compile).transpose()?,
             slot,
             attack: self
                 .attack
@@ -209,6 +241,10 @@ pub enum Effect {
     Theft {
         selection: TheftSelection,
         relocation: Option<RelocationGate>,
+    },
+    CorrodeArmor {
+        slot: String,
+        amount: u32,
     },
     ApplyLinkedHold {
         policy: HoldPolicy,
@@ -456,6 +492,10 @@ impl<'de> Deserialize<'de> for Effect {
                 selection: TheftSelection,
                 relocation: Option<RelocationGate>,
             },
+            CorrodeArmor {
+                slot: String,
+                amount: u32,
+            },
             ApplyLinkedHold {
                 policy: HoldPolicy,
             },
@@ -528,6 +568,7 @@ impl<'de> Deserialize<'de> for Effect {
                 selection,
                 relocation,
             },
+            Fields::CorrodeArmor { slot, amount } => Self::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::HoldDamage {
                 category,
@@ -663,6 +704,7 @@ mod tests {
         let compiled = anatomy.compile(&rules).unwrap();
         assert_eq!(compiled.slots[0].as_str(), "tentacle");
         let equipment = EquipmentSpec {
+            armor: None,
             slot: "tentacle".into(),
             attack: None,
             modifiers: vec![],

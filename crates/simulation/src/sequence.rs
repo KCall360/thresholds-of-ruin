@@ -66,6 +66,7 @@ pub enum PreparationProgress {
         linked_hold: Option<HoldBinding>,
     },
     Escape {},
+    Ray {},
     Item {},
     Respec {},
 }
@@ -82,6 +83,7 @@ impl<'de> Deserialize<'de> for PreparationProgress {
                 linked_hold: Option<HoldBinding>,
             },
             Escape {},
+            Ray {},
             Item {},
             Respec {},
         }
@@ -105,6 +107,7 @@ impl<'de> Deserialize<'de> for PreparationProgress {
                 }
             }
             Fields::Escape {} => Self::Escape {},
+            Fields::Ray {} => Self::Ray {},
             Fields::Item {} => Self::Item {},
             Fields::Respec {} => Self::Respec {},
         })
@@ -204,6 +207,8 @@ impl PreparationProgress {
             Self::Escape {}
         } else if matches!(plan, Plan::Respec(_)) {
             Self::Respec {}
+        } else if matches!(plan, Plan::Ray(_)) {
+            Self::Ray {}
         } else if plan.as_ability().is_some() {
             Self::Ability {
                 next_strike: 0,
@@ -368,6 +373,7 @@ impl Preparation {
         match self.progress {
             PreparationProgress::Ability { next_strike, .. } => Some(usize::from(next_strike)),
             PreparationProgress::Escape {}
+            | PreparationProgress::Ray {}
             | PreparationProgress::Item {}
             | PreparationProgress::Respec {} => None,
         }
@@ -422,6 +428,7 @@ impl Preparation {
         matches!(
             (&self.plan, self.progress),
             (Plan::Escape(_), PreparationProgress::Escape {})
+                | (Plan::Ray(_), PreparationProgress::Ray {})
                 | (Plan::Respec(_), PreparationProgress::Respec {})
                 | (Plan::Ability(_), PreparationProgress::Ability { .. })
                 | (

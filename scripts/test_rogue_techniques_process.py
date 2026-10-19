@@ -4,7 +4,6 @@ The production package, its seed and disclosed cells are the only setup. These
 bounded examples establish usable content, not numerical balance or pacing.
 """
 from scalar_wire import u64
-import json
 import unittest
 
 from process_harness import (
@@ -14,7 +13,7 @@ from process_harness import (
 from rogue_test_support import (
     assert_room_gold_receipt, care_combat_action, disclosed_actor_candidates,
     disclosed_melee_candidate, disclosed_sight_candidate,
-    first_floor_foes,
+    first_floor_foes, disclosed_frames, resolved_events,
 )
 
 
@@ -40,27 +39,6 @@ def visible_foes(frame):
     hostile = {row["actor"] for row in combat(frame)["actors"] if row["hostile"]}
     return disclosed_actor_candidates(row for row in observation(frame)["visible_actors"]
                                       if row["id"] in hostile)
-
-
-def disclosed_frames(player, start):
-    """Keep transient resolved events even when the later ready frame replaces them."""
-    for line in player.transcript[start:]:
-        if line.startswith("{"):
-            frame = json.loads(line)
-            if frame.get("state") is not None:
-                yield frame
-
-
-def resolved_events(frames, before, identity, target):
-    for frame in frames:
-        # An acknowledgement can repeat the preceding attempt's combat event.
-        if int(frame["state"]["revision"]) <= int(before["state"]["revision"]):
-            continue
-        for event in combat(frame)["events"]:
-            if (event["type"] == "ability" and event["ability"]["id"] == identity
-                    and event["caster"] == observation(before)["self_target"]
-                    and event["target"] == target and event["strike"] == 0):
-                yield event
 
 
 class RogueTechniquesProcesses(ProcessTestCase):

@@ -3,6 +3,28 @@
 These flat-floor drivers do not reproduce the engine's general contact solver.
 The server still validates every submitted target and reports any refusal.
 """
+import json
+
+
+def disclosed_frames(player, start):
+    """Keep transient resolved events even when the later ready frame replaces them."""
+    for line in player.transcript[start:]:
+        if line.startswith("{"):
+            frame = json.loads(line)
+            if frame.get("state") is not None:
+                yield frame
+
+
+def resolved_events(frames, before, identity, target):
+    for frame in frames:
+        # An acknowledgement can repeat the preceding attempt's combat event.
+        if int(frame["state"]["revision"]) <= int(before["state"]["revision"]):
+            continue
+        for event in frame["state"]["observation"]["combat"]["events"]:
+            if (event["type"] == "ability" and event["ability"]["id"] == identity
+                    and event["caster"] == before["state"]["observation"]["self_target"]
+                    and event["target"] == target and event["strike"] == 0):
+                yield event
 
 
 def assert_room_gold_receipt(test, stage, depth):

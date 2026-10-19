@@ -285,6 +285,11 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
         .iter()
         .map(|value| {
             Ok(match value {
+                Effect::CorrodeArmor { slot, amount } => s::rules::Effect::CorrodeArmor {
+                    slot: s::EquipmentSlot::new(slot)
+                        .map_err(|_| invalid("Invalid corrosion equipment slot"))?,
+                    amount: *amount,
+                },
                 Effect::Theft {
                     selection,
                     relocation,

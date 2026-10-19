@@ -1,13 +1,13 @@
 # Play the Rogue starter slice
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
-authors Warrior and Mage presets, twenty-four depth-selected foe species, equipped
+authors Warrior and Mage presets, all 26 depth-selected foe species, equipped
 starting gear, and finite bandage/ration supplies on persistent generated floors.
-The package selects the canonical K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/J population.
+The package selects the canonical K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/J/A/D population.
 The L/N/O theft/gold additions still need the qualification described below.
 Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
-Aquator, dragon and the calibrated depth curve remain unfinished. The Amulet
+The calibrated depth curve, traps and full survival loop remain unfinished. The Amulet
 and intentional surface escape provide the retrieval/ascent objective. The default launch still selects the separate
 [first dungeon](gameplay.md).
 
@@ -35,7 +35,7 @@ AI-controlled; they do not automate the selected player's turns.
 | Orc | Explore | Yes | Yes | Yes | Yes | Yes |
 | Leprechaun | Explore | Yes | No | No | No | Yes |
 | Nymph | Explore | Yes | No | No | No | No |
-| Bat, kestrel, griffin, emu, snake, rattlesnake, quagga, black unicorn, zombie, wraith, jabberwock, phantom | Explore | No | No | No | No | No |
+| Bat, kestrel, griffin, emu, snake, rattlesnake, quagga, black unicorn, zombie, wraith, jabberwock, phantom, aquator, dragon | Explore | No | No | No | No | No |
 | Yeti | Explore | No | Yes | No | Yes | No |
 | Ice monster, Venus flytrap, xeroc | Wait | No | No | No | No | No |
 
@@ -152,7 +152,7 @@ commitment cost rules. Paused Eat requires Resume or a successful ordinary
 replacement; it has no explicit cancellation. Eating still needs time, and reaching
 -852 causes persistent death.
 A ration adds 1100–1499 reserve after clearing negative debt, capped at 2000. Frozen
-or detached floors do not digest or catch up on missed faint rolls. All ten
+or detached floors do not digest or catch up on missed faint rolls. All 26
 selected foe recipes are explicitly exempt. These values and food distribution
 are provisional; see
 [nutrition](../reference/creature-rules.md#authored-empty-depletion-conditions).
@@ -263,8 +263,34 @@ invisible phantom. Shapechanger itself still grants no additional mechanics.
 
 M/X stock uses the same provisional equal ration/bandage pool as other carriers.
 Bodies, attributes, ranks, timing and AI priorities are provisional TOR tuning;
-these source contracts do not establish encounter or survival balance. This WIP
-cohort is source-only; its focused tests and compiler certification have not run.
+these source contracts do not establish encounter or survival balance. The
+perception cohort landed in PR #168 after focused checks and complete CI.
+
+## Rust and bouncing breath
+
+Aquator has five racial HD and one zero-damage contact. A successful CO1 contact
+reduces the equipped armor item's own physical damage reduction by one, to zero.
+Ring mail starts with two reduction against Impact and Keen; armor does not
+increase Physical defense. Nonmetal or rustproof armor is exempt. Item identity
+and corrosion persist through unequipping, transfer and save/reopen.
+
+Dragon has ten racial HD, fire immunity, purchased second/third natural strikes
+(1d8/1d8/3d10) and Breath Weapon. Its Willpower 3 plus Breath rank 2 gives one
+3d6 + 5 source roll for the ray. Each encountered creature rolls Speed + Agility;
+a tie or better dodges with zero damage and lets the ray continue. Failure takes
+6d6 Energy damage with the fire descriptor and intercepts the ray, even when
+ordinary immunity reduces that damage to zero.
+
+The ray visits at most six clear cells, reverses at walls and closed doors,
+and passes open doors. Physical joins can rotate it; abstract stairs do not
+carry it. Leaving and re-entering a creature's body requires another dodge with
+one additional disadvantage for every earlier check against that same ray.
+A contiguous multi-cell pass checks once. Positive edge cancels those penalties
+before the ordinary three-extra-dice cap; a new ray resets the counter.
+Preparation/recovery are provisionally 100/100 ticks, with a 2000-tick cooldown.
+Later explicit Breath purchases at racial HD 15/20/25 raise the rank to 3/4/5;
+these spacing values are provisional tuning. They use ordinary owned points
+and the rank-five cap, without a separate HD-derived roll bonus.
 
 ## Floors keep their history
 
@@ -277,17 +303,19 @@ provisional TOR availability, not Rogue's 13% subtype probability; legal placeme
 can still fail, so it does not guarantee a cure. The final independent
 `rogue.room_gold` stage makes the per-room Gold decisions described above; the earlier stage order and
 random streams are unchanged. The actor stage's authored depth bands
-select K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/J. Kestrel (K) is eligible at depths
+select all 26 species. Kestrel (K) is eligible at depths
 1–6, bat (B) at 1–8, orc at 4–13, leprechaun at 6–15, centaur at 7–16,
-rattlesnake at 3–12, nymph at 10–19, yeti at 11–20,
+rattlesnake at 3–12, aquator at 9–18, nymph at 10–19, yeti at 11–20,
 Venus flytrap (F) at 12–21, troll at 13–22, wraith at 14–23, phantom at 15–24
-and xeroc at 16–25. Medusa enters at 18, Griffin (G) at 20 and Jabberwock at 21.
+and xeroc at 16–25. Medusa enters at 18, Griffin (G) at 20, Jabberwock at 21
+and Dragon at 22. Dragon always receives one finite birth-pool item.
 Depth 1 selects K/E/B/S/H equally. The pinned upper-boundary redistribution
 keeps M eligible at every depth from 18 onward. Depth 27 onward selects
-M/V/G/J, equal except 6:11:11:11 at 28, 7:7:12:12 at 29 and 8:8:8:13 at 30. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
+M/V/G/J/D, equal at 27, then 6:11:11:11:11 at 28, 7:7:12:12:12 at 29,
+8:8:8:13:13 at 30 and 9:9:9:9:14 at 31. The uniform tail begins at 32. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
 owns the full band/weight table. The historical `rogue.eight_species_foes`
 and `rogue.vampire_supplies` IDs stay unchanged to preserve unrelated deterministic
-streams. Four-U, four-M, four-V, four-G and four-J draws are possible; these
+streams. Four-U, four-M, four-V, four-G, four-J and four-D draws are possible; these
 provisional counts and weights do not establish a safe or calibrated depth curve.
 Foe placement excludes your current sight, body occupancy and protected arrival
 cells. A stage can record a failed placement when legal space is unavailable;
@@ -302,11 +330,12 @@ physical pushes, falls and physical portals retain the shared physics rules.
 
 The actor stage uses `racial_after` depth 26: each birth appends one actual racial
 HD per depth beyond 26, preserving its base rows, purchases and seeded per-HD
-Health rolls. New rows keep their ordinary unspent grants. J has 15 HD at depth
+Health rolls. New rows keep ordinary grants, with explicitly authored future
+purchases spending their points at the specified ordinal. J has 15 HD at depth
 26 and reaches 256 at 267; a sampled J requests 257 at 268 and refuses the whole
 entry atomically, without partial population or time advance. G reaches 256 HD
-at 269 and refuses at 270. All-M/V draws remain valid through depth 274, where each
-reaches 256 HD; at 275 all four tail recipes exceed capacity. Admission follows the actual sampled recipes, without
+at 269 and refuses at 270; D reaches 256 at 272 and refuses at 273. All-M/V draws remain valid through depth 274, where each
+reaches 256 HD; at 275 all five tail recipes exceed capacity. Admission follows the actual sampled recipes, without
 clamping or replacing an over-cap choice. This is a current construction-capacity
 limit, not a designed HD plateau.
 
@@ -344,7 +373,7 @@ persistent terminal outcomes; restarting does not grant a new Amulet or victory.
 All starting stats, equipment bonuses, foe timing, quantities, XP policy and the
 depth-selected population are provisional TOR tuning. A successful seeded
 walkthrough is behavioral coverage, not evidence of balanced Warrior/Mage runs. Bow/arrows,
-the two remaining species, aquator and dragon, traps, wandering populations, calibrated food pressure and complete
+traps, wandering populations, calibrated food pressure and complete
 run balancing remain in the [Rogue plan](../plans/rogue.md).
 
 Shared engine support and playable content have different acceptance boundaries.
@@ -353,6 +382,21 @@ they do not establish a complete survival loop or useful builds throughout HD 1�
 
 The authored content contracts live in
 [`test_rogue_playable_content.py`](../../scripts/test_rogue_playable_content.py).
+The [full population oracle](../../scripts/test_rogue_population_content.py)
+independently enumerates the pinned 26-species selector, including the finite
+31 and open 32 boundary. [Owned Dragon tests](../../crates/server/tests/it/rogue_roster.rs)
+check exact seeded rows, separate attribute/skill spending, drain/restoration and
+the bounded future-purchase schedule. Shared ray tests own collision order,
+frozen source/live recipients, repeated dodges and immunity interception.
+The [A/D process cases](../../scripts/test_rogue_corrosion_ray_process.py) use
+unchanged production recipes with ordinary commands in small authored rooms,
+then delete the source package and require exact state/history on reopen.
+[Population entry cases](../../scripts/test_rogue_activation_process.py) also
+exercise actual depth-31 Dragon birth, its HD-15 purchase and finite stock with
+source-free restart. These focused checks pass; full cross-platform CI is still
+required before merge, and none of these bounded witnesses establishes survival
+or balance for the complete run.
+
 The bounded [hobgoblin roaming tests](../../crates/server/src/hobgoblin_roaming_tests.rs)
 compile the production recipe and policies into small rooms, checking committed
 idle movement, hidden-player independence, doors, stair restrictions and personal
@@ -423,7 +467,7 @@ play, pressured escape or numerical calibration. See [status](../status.md) and 
 
 ## Reconstructed roster and depth source checkpoint
 
-The selected K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/J recipes use the shared compiler and character-sheet
+The selected 26 species recipes use the shared compiler and character-sheet
 pipeline. Centaur owns four actual Warrior HD, with Second Strike purchased on
 HD 2 and Third Strike on HD 4; its natural sequence is 1d2/1d5/1d5. Yeti owns four
 actual racial HD, purchases Second Strike on HD 2 and uses 1d6/1d6; its cold
@@ -440,7 +484,7 @@ uses that same provisional pool. The regenerative flag only permits RG1, which
 supplies the existing −50% Health-recovery-period modifier; no RG2 is selected.
 Troll's giant attributes (2/1/0/1/1/0), Physical defense +3, two-cell body of mass
 250 and 100/100-tick melee reuse provisional authoring choices, without a
-balance or earned-kit claim. Remaining signature species and balance are unfinished.
+balance or earned-kit claim. Complete encounter and survival balance remain unfinished.
 
 Jabberwock owns fifteen actual aberration racial-HD rows, with Second Strike on
 HD 2 and Rending Pair on HD 8; thirteen points remain unspent. It has a heavy

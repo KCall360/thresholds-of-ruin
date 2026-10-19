@@ -345,9 +345,7 @@ impl Game {
                                 .equipment
                                 .iter()
                                 .find_map(|(slot, item)| (*item == item_id).then_some(*slot)),
-                            known_equipment: identified
-                                .then(|| item.spec.equipment.clone())
-                                .flatten(),
+                            known_equipment: identified.then(|| item.equipment_view()).flatten(),
                             drinkable: item.spec.consumable.is_some(),
                             edible: item.spec.edible.is_some(),
                         });

@@ -383,6 +383,9 @@ impl Game {
         supplies: crate::supplies::SupplySelection,
     ) -> Result<Plan, GameError> {
         crate::diagnostics::ability_plan();
+        if let super::AbilityInvocation::DirectionalRay { direction } = invocation {
+            return self.compile_ray_plan(actor, ability, direction, supplies);
+        }
         let target = invocation.target(actor);
         let caster = self.creature(actor).ok_or(GameError::UnknownActor)?;
         // The original reference domain is an admission operand, not a hint.

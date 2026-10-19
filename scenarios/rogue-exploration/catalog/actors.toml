@@ -409,3 +409,53 @@ hit_dice = [
   { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.ambush_from_guise" } }] },
   { source = "racial", purchases = [] },
 ]
+
+# A keeps the accepted TOR single-contact mapping; CO1 grants no free NA1.
+[actors."rogue.aquator"]
+asset = "creature.aquator"
+turn_ticks = 100
+body = { cells = [[0, 0, 0]], eye = [0, 0, 0], mass = 40 }
+[actors."rogue.aquator".creature]
+species = "rogue.aquator"
+name = "aquator"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "athletics"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.corrode" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]
+
+# D: the normal HD4/8 attribute choices and HD8 skill purchase produce
+# Willpower 3 + Breath rank 2. Later population purchases are separately authored.
+[actors."rogue.dragon"]
+asset = "creature.dragon"
+turn_ticks = 100
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 250 }
+[actors."rogue.dragon".creature]
+species = "rogue.dragon"
+name = "dragon"
+faction = "dungeon_foes"
+binding = "willpower"
+starting_skills = ["heavy_weaponry", "breath"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", attribute = "willpower", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "third_strike" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.breath_weapon" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", attribute = "willpower", purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]

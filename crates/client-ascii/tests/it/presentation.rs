@@ -16,7 +16,7 @@ fn creature_snapshot() -> Snapshot {
                 "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
             "kind": {"id":"humanoid","name":"Humanoid"}, "subtypes": [], "hit_dice": {"total":"1","sources":[{"source_kind":"class","source":{"id":"warrior","name":"Warrior"},"count":"1"}]},
             "attributes": {"strength": 2, "speed": 1, "intellect": 3, "willpower": 2, "awareness": 1, "presence": 0},
-            "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting"].into_iter().map(|skill| serde_json::json!({"skill": tor_client_common::test_support::content(skill), "rank": 0})).collect::<Vec<_>>()),
+            "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting", "breath"].into_iter().map(|skill| serde_json::json!({"skill": tor_client_common::test_support::content(skill), "rank": 0})).collect::<Vec<_>>()),
             "defenses": {"physical": 13, "cognitive": 15, "spiritual": 11},
             "binding": {"id":"intellect","name":"Intellect"}, "resources": (["stamina", "focus", "mana"].into_iter().map(|resource| serde_json::json!({"resource": tor_client_common::test_support::content(resource), "balance": 2, "maximum": 3, "available": 1, "reserved": 1})).collect::<Vec<_>>()),
             "active_talents": [], "dormant_talents": [], "abilities": [{"cooldown_remaining":"0","supply_costs":[],"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true}, {"cooldown_remaining":"0","supply_costs":[],"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false}]
@@ -42,6 +42,7 @@ fn stats_screen_is_readonly_scrollable_and_available_to_spectators() {
     assert!(rows
         .iter()
         .any(|row| row.contains("Health recovery: 1 per 1200 active ticks")));
+    assert!(rows.iter().any(|row| row.contains("Breath: 0")));
     assert!(rows.len() > tor_client_ascii::STATS_ROWS);
     for _ in 0..100 {
         assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);

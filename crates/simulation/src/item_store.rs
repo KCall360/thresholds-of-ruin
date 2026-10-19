@@ -260,6 +260,7 @@ mod tests {
 
     fn item(location: ItemLocation) -> Item {
         Item {
+            condition: crate::armor::ItemCondition::default(),
             corpse: None,
             holds: vec![],
             location,

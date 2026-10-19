@@ -16,6 +16,59 @@ pub enum DepthGrowth {
     RacialAfter { depth: u32 },
 }
 
+/// An ordinary purchase row applied only when birth adds this exact racial HD.
+/// This recipe is never consulted by live-sheet queries or earned growth.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct OrdinalAdvancement {
+    pub ordinal: crate::HdCount,
+    #[serde(serialize_with = "serialize_choices")]
+    pub choices: HdChoices,
+}
+fn serialize_choices<S: serde::Serializer>(
+    choices: &HdChoices,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    crate::creatures::record::ChoiceRecord::capture(choices).serialize(serializer)
+}
+impl<'de> Deserialize<'de> for OrdinalAdvancement {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            ordinal: crate::HdCount,
+            #[serde(deserialize_with = "crate::bounded::named_map")]
+            choices: crate::creatures::record::ChoiceRecord,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        if fields.ordinal.get() == 0 || fields.ordinal.get() > crate::limits::HIT_DICE as u64 {
+            return Err(serde::de::Error::custom(
+                "birth advancement ordinal is out of bounds",
+            ));
+        }
+        Ok(Self {
+            ordinal: fields.ordinal,
+            choices: fields.choices.restore(),
+        })
+    }
+}
+
+fn validate_ordinals(base: u64, schedule: &[OrdinalAdvancement]) -> Result<(), BuildError> {
+    if schedule.len() > crate::limits::HIT_DICE {
+        return Err(BuildError::TooManyHitDice);
+    }
+    let mut previous = base;
+    for entry in schedule {
+        if entry.ordinal.get() <= previous || entry.ordinal.get() > crate::limits::HIT_DICE as u64 {
+            return Err(BuildError::InvalidOwnership);
+        }
+        if entry.choices.purchases.len() > crate::limits::POINTS_PER_HIT_DIE {
+            return Err(BuildError::NoAdvancementPoint);
+        }
+        previous = entry.ordinal.get();
+    }
+    Ok(())
+}
+
 /// Operational limits, not gameplay level caps. Hosts disclose no private counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopulationCapacity {
@@ -181,9 +234,21 @@ impl CreatureBuild {
         seed: u64,
         additional: u64,
     ) -> Result<Self, PreparedSpawnError> {
+        self.instantiate_seeded_racial_with_advancement(seed, additional, &[])
+    }
+
+    /// Apply bounded authored choices only to newly materialized exact-HD rows.
+    /// Normal reconstruction validates pool budgets, prerequisites and rank caps.
+    pub fn instantiate_seeded_racial_with_advancement(
+        &self,
+        seed: u64,
+        additional: u64,
+        schedule: &[OrdinalAdvancement],
+    ) -> Result<Self, PreparedSpawnError> {
         use crate::progression::{HdLedger, HdSource};
         let base = u64::try_from(self.ledger().entries().len())
             .map_err(|_| PreparedSpawnError::Capacity(PopulationCapacity::Allocation))?;
+        validate_ordinals(base, schedule).map_err(PreparedSpawnError::Build)?;
         let maximum = crate::limits::HIT_DICE as u64;
         let requested = base
             .checked_add(additional)
@@ -193,6 +258,36 @@ impl CreatureBuild {
                 requested,
                 maximum,
             }));
+        }
+        // Saved ownership may legitimately contain dormant talents, but a new
+        // scheduled purchase must be eligible at its actual acquisition ordinal.
+        // Only scheduled rows incur this bounded preparation/birth validation;
+        // empty growth retains the single bulk reconstruction below.
+        if schedule
+            .first()
+            .is_some_and(|entry| entry.ordinal.get() <= requested)
+        {
+            let mut eligible = self.clone();
+            for entry in schedule
+                .iter()
+                .take_while(|entry| entry.ordinal.get() <= requested)
+            {
+                let previous = eligible.ledger().total_hd().get();
+                eligible =
+                    eligible.instantiate_seeded_racial(seed, entry.ordinal.get() - previous)?;
+                let owner = crate::HdIndex::from_ordinal(entry.ordinal)
+                    .ok_or(PreparedSpawnError::Build(BuildError::InvalidOwnership))?;
+                if let Some(attribute) = entry.choices.attribute {
+                    eligible
+                        .increase_attribute(owner, attribute)
+                        .map_err(PreparedSpawnError::Build)?;
+                }
+                for purchase in &entry.choices.purchases {
+                    eligible
+                        .purchase(owner, purchase.pool.clone(), purchase.selection.clone())
+                        .map_err(PreparedSpawnError::Build)?;
+                }
+            }
         }
         if additional > 0 {
             DepthGrowth::RacialAfter { depth: 1 }
@@ -229,6 +324,17 @@ impl CreatureBuild {
                         choices: HdChoices::default(),
                     },
                 );
+            }
+        }
+        for entry in schedule
+            .iter()
+            .take_while(|entry| entry.ordinal.get() <= requested)
+        {
+            let index = usize::try_from(entry.ordinal.get() - 1)
+                .map_err(|_| PreparedSpawnError::Capacity(PopulationCapacity::Allocation))?;
+            advancement.choices[index] = entry.choices.clone();
+            if let RestorationPolicy::Authored(plan) = &mut advancement.restoration {
+                plan[index].choices = entry.choices.clone();
             }
         }
         let mut result = Self::from_recorded(
@@ -269,6 +375,37 @@ impl PreparedActor {
         growth.validate_build(build.as_ref())
     }
 
+    pub fn validate_birth_advancement(
+        &self,
+        content: std::sync::Arc<crate::creatures::Content>,
+        growth: DepthGrowth,
+        schedule: &[OrdinalAdvancement],
+    ) -> Result<(), BuildError> {
+        if schedule.is_empty() {
+            return self.validate_depth_growth(content, growth);
+        }
+        if matches!(growth, DepthGrowth::Fixed {}) {
+            return Err(BuildError::InvalidDefinition);
+        }
+        let build = self
+            .build
+            .as_ref()
+            .ok_or(BuildError::InvalidDefinition)?
+            .restore(content)?;
+        growth.validate_build(Some(&build))?;
+        let base = build.ledger().entries().len() as u64;
+        validate_ordinals(base, schedule)?;
+        let last = schedule
+            .last()
+            .ok_or(BuildError::InvalidDefinition)?
+            .ordinal
+            .get();
+        build
+            .instantiate_seeded_racial_with_advancement(0, last - base, schedule)
+            .map(|_| ())
+            .map_err(PreparedSpawnError::into_build_error)
+    }
+
     /// Complete checked construction before any actor identity is allocated.
     pub(crate) fn instantiate_build(
         &self,
@@ -276,6 +413,7 @@ impl PreparedActor {
         seed: u64,
         growth: DepthGrowth,
         depth: u32,
+        schedule: &[OrdinalAdvancement],
     ) -> Result<Option<CreatureBuild>, PreparedSpawnError> {
         let prototype = self
             .build
@@ -287,7 +425,13 @@ impl PreparedActor {
             .validate_build(prototype.as_ref())
             .map_err(PreparedSpawnError::Build)?;
         prototype
-            .map(|build| build.instantiate_seeded_racial(seed, growth.additional(depth)))
+            .map(|build| {
+                build.instantiate_seeded_racial_with_advancement(
+                    seed,
+                    growth.additional(depth),
+                    schedule,
+                )
+            })
             .transpose()
     }
 
@@ -340,8 +484,13 @@ impl Game {
         definition: &PreparedActor,
         seed: u64,
     ) -> Result<(), PreparedSpawnError> {
-        let build =
-            definition.instantiate_build(self.content.clone(), seed, DepthGrowth::Fixed {}, 1)?;
+        let build = definition.instantiate_build(
+            self.content.clone(),
+            seed,
+            DepthGrowth::Fixed {},
+            1,
+            &[],
+        )?;
         self.configure_prepared_actor_build(id, definition, build)
     }
 
@@ -420,7 +569,7 @@ impl Game {
         }
         let seed = health_seed(self.seed, self.next_actor_id);
         let build = definition
-            .instantiate_build(self.content.clone(), seed, DepthGrowth::Fixed {}, 1)
+            .instantiate_build(self.content.clone(), seed, DepthGrowth::Fixed {}, 1, &[])
             .map_err(GameError::from)?;
         let mut candidate = self.clone();
         candidate.begin_effect_publication()?;
@@ -450,6 +599,7 @@ impl Game {
                 health_seed(self.seed, actor.0),
                 DepthGrowth::Fixed {},
                 1,
+                &[],
             )
             .map_err(GameError::from)?;
         Ok(())

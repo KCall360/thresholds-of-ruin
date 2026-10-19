@@ -530,14 +530,18 @@ pub fn interpret(
                 }),
                 Err(reason) => refuse(reason),
             };
-            let crate::parser::grammar::AbilitySelection::ActorTarget { direct } = operand else {
-                let crate::parser::grammar::AbilitySelection::SelfStep { direction } = operand
-                else {
-                    unreachable!()
-                };
-                return invoke(AbilityInvocation::SelfStep {
-                    direction: *direction,
-                });
+            let direct = match operand {
+                crate::parser::grammar::AbilitySelection::ActorTarget { direct } => direct,
+                crate::parser::grammar::AbilitySelection::SelfStep { direction } => {
+                    return invoke(AbilityInvocation::SelfStep {
+                        direction: *direction,
+                    });
+                }
+                crate::parser::grammar::AbilitySelection::DirectionalRay { direction } => {
+                    return invoke(AbilityInvocation::DirectionalRay {
+                        direction: *direction,
+                    });
+                }
             };
             bind(direct, scene, referents, Domain::Figures, &|r| {
                 let target = match r.key {

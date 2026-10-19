@@ -1,5 +1,6 @@
 """Preserve the legacy acknowledgement boundary while exposing driver delay."""
 import io
+import json
 import queue
 from pathlib import Path
 import tempfile
@@ -7,6 +8,92 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch, Mock
 from performance_driver import DiagnosticLog, JsonProcess, wall_time_ns, stop_all
+
+
+class SavedExplorationInput(unittest.TestCase):
+    def client(self, frames):
+        client = JsonProcess.__new__(JsonProcess)
+        client.name = "ascii"
+        client.child = SimpleNamespace(stdin=io.StringIO(), wait=lambda **_: 1)
+        client.lines = queue.Queue()
+        for frame, received in frames:
+            client.lines.put((frame, received))
+        return client
+
+    def frame(self, *, done=None, admit=False, phase=None, revision="76"):
+        return dict(input_done=done, busy=False, connected=True, window_open=True,
+                    has_control=True,
+                    can_admit_intention=admit,
+                    intentions=[dict(phase=phase)] if phase else [],
+                    state=dict(revision=revision, observation=dict(ready=True)))
+
+    def test_sequential_exploration_waits_past_effect_for_ordered_admission(self):
+        from saved_exploration_driver import key
+        # Windows release presented the right acknowledgement, then its moved
+        # observation and cleared intention before the next admission permission.
+        unrelated = self.frame(done="left", admit=True, revision="75")
+        acknowledged = self.frame(done="right", phase="queued", revision="75")
+        executed = self.frame()
+        permitted = self.frame(admit=True)
+        client = self.client([(unrelated, 101.), (acknowledged, 102.),
+                              (executed, 103.), (permitted, 104.)])
+        with patch("saved_exploration_driver.time.perf_counter", return_value=100.):
+            frame, elapsed = key(client, "right")
+        self.assertIs(frame, permitted, "The next key needs authoritative admission")
+        self.assertEqual(elapsed, 4000., "Timing must use the returned frame's receipt")
+        self.assertEqual(json.loads(client.child.stdin.getvalue()),
+                         {"type": "key", "key": "right"})
+
+    def test_already_permitted_input_returns_its_acknowledged_frame(self):
+        from saved_exploration_driver import key
+        expected = self.frame(done="right", admit=True)
+        client = self.client([(expected, 101.)])
+        with patch("saved_exploration_driver.time.perf_counter", return_value=100.):
+            frame, elapsed = key(client, "right")
+        self.assertIs(frame, expected)
+        self.assertEqual(elapsed, 1000.)
+
+    def test_release_returns_without_requiring_action_permission(self):
+        from saved_exploration_driver import key
+        expected = {**self.frame(done="release"), "has_control": False}
+        client = self.client([(expected, 101.)])
+        with patch("saved_exploration_driver.time.perf_counter", return_value=100.):
+            frame, elapsed = key(client, "release")
+        self.assertIs(frame, expected)
+        self.assertEqual(elapsed, 1000.)
+
+    def test_terminal_exploration_fails_without_waiting_for_admission(self):
+        from saved_exploration_driver import key
+        for changed, reason in [
+                ({"connected": False}, "disconnected"),
+                ({"window_open": False}, "closed"),
+                ({"has_control": False}, "control"),
+                ({"state": {"observation": {"combat": {"dead": True}}}}, "died"),
+                ({"state": {"observation": {"combat": {"terminal": True}}}}, "ended")]:
+            with self.subTest(reason=reason):
+                terminal = {**self.frame(done="right"), **changed}
+                poison = {"type": "fatal", "error": "Wait continued after terminal frame"}
+                client = self.client([(terminal, 101.), (poison, 102.)])
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    key(client, "right")
+                self.assertEqual(client.lines.qsize(), 1)
+
+    def test_fatal_error_and_process_exit_end_admission_wait(self):
+        from saved_exploration_driver import key
+        for failure, reason in [({"type": "fatal", "error": "retained reader error"},
+                                 "retained reader error"),
+                                (None, "Owned process exited")]:
+            with self.subTest(reason=reason):
+                client = self.client([(self.frame(done="right"), 101.), (failure, 102.)])
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    key(client, "right")
+
+    def test_missing_admission_keeps_existing_absolute_deadline(self):
+        from saved_exploration_driver import key
+        client = self.client([(self.frame(done="right"), 101.)])
+        with patch("performance_driver.time.monotonic", side_effect=[0., 0., 0., 0., 30.]):
+            with self.assertRaisesRegex(RuntimeError, "deadline"):
+                key(client, "right")
 
 
 class DriverDeadlines(unittest.TestCase):

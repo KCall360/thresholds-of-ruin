@@ -52,7 +52,8 @@ class RogueStarterChillProcesses(ProcessTestCase):
             ice, ice_initial = self.client(actor=3)
             view = initial["state"]["observation"]
             self.assertFalse(initial["state"]["wizard_game"])
-            self.assertEqual(view["combat"]["own_stats"]["defenses"]["physical"], 16)
+            # Ring mail reduces physical damage; it does not raise this defense.
+            self.assertEqual(view["combat"]["own_stats"]["defenses"]["physical"], 14)
             self.assertEqual({row["name"]: int(row["quantity"]) for row in view["inventory"]},
                              {"mace": 1, "ring mail": 1, "clean bandage": 3, "food ration": 1})
             growth = self.command(player, {"type": "advancement", "command": "overview"})

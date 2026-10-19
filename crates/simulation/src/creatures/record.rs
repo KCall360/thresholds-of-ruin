@@ -360,17 +360,33 @@ struct HdRecord {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ChoiceRecord {
+pub(crate) struct ChoiceRecord {
     purchases: Bounded<PurchaseRecord, { limits::POINTS_PER_HIT_DIE }>,
     #[serde(deserialize_with = "required_option")]
     attribute: Option<Attribute>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct PurchaseRecord {
     pool: crate::content_ids::PointPoolId,
     selection: SelectionRecord,
 }
+impl<'de> Deserialize<'de> for PurchaseRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            pool: crate::content_ids::PointPoolId,
+            selection: SelectionRecord,
+        }
+        let fields: Fields = named_map(deserializer)?;
+        Ok(Self {
+            pool: fields.pool,
+            selection: fields.selection,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum SelectionRecord {
@@ -423,7 +439,7 @@ impl SourceRecord {
     }
 }
 impl ChoiceRecord {
-    fn capture(choice: &HdChoices) -> Self {
+    pub(crate) fn capture(choice: &HdChoices) -> Self {
         Self {
             attribute: choice.attribute,
             purchases: Bounded(
@@ -451,7 +467,7 @@ impl ChoiceRecord {
             ),
         }
     }
-    fn restore(&self) -> HdChoices {
+    pub(crate) fn restore(&self) -> HdChoices {
         HdChoices {
             attribute: self.attribute,
             purchases: self

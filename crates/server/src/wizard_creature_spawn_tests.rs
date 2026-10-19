@@ -22,12 +22,20 @@ fn fixture_engine() -> Engine {
 }
 fn available(engine: &Engine) -> Position {
     let at = engine.game.observe(SimActor(1)).unwrap().location;
+    // These fixtures have single-cell bodies. A travel route may deliberately
+    // end at an occupied attack destination, which is not a legal birth cell.
+    let occupied: BTreeSet<_> = engine
+        .game
+        .loaded_actor_ids()
+        .map(|actor| engine.game.observe(actor).unwrap().location)
+        .collect();
     let location = engine
         .game
         .known_cells(SimActor(1))
         .find(|location| {
             location.region == at.region
                 && *location != at
+                && !occupied.contains(location)
                 && engine.game.travel_route(SimActor(1), *location).is_ok()
         })
         .unwrap();
@@ -442,4 +450,74 @@ fn named_spawn_store_admission_failure_leaves_no_birth_and_exact_retry_succeeds(
         )
         .unwrap();
     restored_both_ways(&restored);
+}
+
+#[test]
+fn authored_future_purchases_cross_real_entry_and_named_birth_after_source_free_reopen() {
+    use tor_simulation::attributes::Skill;
+    for interval in [1, 4096] {
+        let scenario = scenario_with(|source| {
+            let stage = &mut source["floor_activation"]["profiles"]["baseline"]["stages"][2];
+            stage["count"] = json!([1, 1]);
+            stage["depth_growth"] = json!({"kind":"racial_after","depth":1});
+            stage["bands"][0]["choices"][0]["advancement"] = json!([
+                {"ordinal":2,"purchases":[{"pool":"advancement","selection":{"kind":"skill_rank","skill":"agility"}}]},
+                {"ordinal":4,"purchases":[{"pool":"advancement","selection":{"kind":"skill_rank","skill":"agility"}}]}
+            ]);
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("future-purchases.db");
+        let policy = crate::SavePolicy {
+            checkpoint_interval: interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, scenario, policy.clone()).unwrap();
+        walk_to_port(&mut engine, 1, "down");
+        step(&mut engine, Direction::Down);
+        let receipt = floor(&engine, 2);
+        let actor = SimActor(
+            receipt["decisions"][2]["result"]["attempts"][0]["entity"]["id"]
+                .as_u64()
+                .unwrap(),
+        );
+        let born = engine.game.creature(actor).unwrap().build().clone();
+        assert_eq!(born.ledger().total_hd(), tor_simulation::HdCount(2));
+        assert_eq!(born.derive().unwrap().skills.get(Skill::Agility), 1);
+        assert_eq!(born.choices()[1].purchases.len(), 1);
+        let tor_simulation::creatures::RestorationPolicy::Authored(plan) =
+            born.restoration_policy()
+        else {
+            panic!()
+        };
+        assert_eq!(plan[1].choices, born.choices()[1]);
+        restored_both_ways(&engine);
+        engine.flush().unwrap();
+        // A diagnostic copy retains the live journal lock. Compare with an
+        // independently replayed in-memory state while reopening the real save.
+        let before = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        exact_equal(&before, &engine);
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, Scenario::two_room(0), policy).unwrap();
+        exact_equal(&engine, &before);
+        if interval == 1 {
+            assert!(engine.recovery_profile().checkpoint_sequence > 0);
+        } else {
+            assert!(engine.recovery_profile().records_replayed > 0);
+        }
+        let (same_depth, _) = spawn(&mut engine, "population:baseline/foe/rat", Some(2));
+        let comparison_state = engine.game.creature(SimActor(same_depth.0)).unwrap();
+        let comparison = comparison_state.build();
+        assert_eq!(comparison.choices(), born.choices());
+        assert_eq!(
+            comparison.derive().unwrap().skills,
+            born.derive().unwrap().skills
+        );
+        let (deeper, _) = spawn(&mut engine, "population:baseline/foe/rat", Some(4));
+        let deeper_state = engine.game.creature(SimActor(deeper.0)).unwrap();
+        let deeper = deeper_state.build();
+        assert_eq!(deeper.ledger().total_hd(), tor_simulation::HdCount(4));
+        assert_eq!(deeper.derive().unwrap().skills.get(Skill::Agility), 2);
+        assert_eq!(deeper.choices()[3].purchases.len(), 1);
+        restored_both_ways(&engine);
+    }
 }

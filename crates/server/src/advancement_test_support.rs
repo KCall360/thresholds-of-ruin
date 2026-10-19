@@ -178,7 +178,7 @@ pub(crate) fn maximum_scenario() -> (Scenario, usize) {
             skill_purchases += 1;
         }
     }
-    assert_eq!(skill_purchases, 93);
+    assert_eq!(skill_purchases, 98);
     manifest["characters"][0]["creature"]["hit_dice"] = json!(hit_dice);
     let package = Package::from_parts(
         serde_json::from_value(manifest).unwrap(),

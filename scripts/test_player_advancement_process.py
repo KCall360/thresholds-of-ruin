@@ -104,7 +104,7 @@ def maximum_owner_package(test):
     skills = ("athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth",
               "thievery", "crafting", "deduction", "lore", "medicine", "discipline",
               "intimidation", "insight", "perception", "survival", "deception",
-              "leadership", "persuasion", "spellcasting")
+              "leadership", "persuasion", "spellcasting", "breath")
     dice = [{"source": "racial", "purchases": []} for _ in range(256)]
     for index in range(256):
         dice[index // 16]["purchases"].append({"pool": pools[index % 16],
@@ -115,7 +115,7 @@ def maximum_owner_package(test):
             dice[16 + purchases // 16]["purchases"].append({"pool": pools[purchases % 16],
                 "selection": {"kind": "skill_rank", "skill": skill}})
             purchases += 1
-    test.assertEqual(purchases, 93)
+    test.assertEqual(purchases, 98)
     build["hit_dice"] = dice
     (package / "scenario.toml").write_text(toml_source(manifest), encoding="utf-8", newline="\n")
     # The region ally must also use the newly authored grants, but has no owned
@@ -586,15 +586,15 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         overview = self.advance(player, "overview")
         points = overview["advancement_page"]["entries"][0]["value"]["points"]
         self.assertEqual((u64(points["earned"]), u64(points["spent"]), u64(points["unspent"])),
-                         (65536, 349, 65187))
+                         (65536, 354, 65182))
         ledger = self.rows(player, "ledger")
-        self.assertEqual(len(ledger), 349)
+        self.assertEqual(len(ledger), 354)
         self.assertEqual(len({(row["value"]["source"]["owner"], row["value"]["source"]["index"])
-                              for row in ledger}), 349)
+                              for row in ledger}), 354)
         balances = self.rows(player, "balances")
         self.assertEqual(len(balances), 4096)
         self.assertEqual(sum(row["value"]["granted"] for row in balances), 65536)
-        self.assertEqual(sum(row["value"]["spent"] for row in balances), 349)
+        self.assertEqual(sum(row["value"]["spent"] for row in balances), 354)
         self.assertEqual(len(self.rows(player, "talents")), 4096)
         preview = self.advance(player, "remove 1 1")
         summary = preview["advancement_page"]["entries"][0]["value"]
@@ -608,7 +608,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.assertEqual(sum(row["value"]["points"] for row in refunds), 256)
         remaining = self.rows(player, "details balances")
         self.assertEqual(len(remaining), 4096)
-        self.assertEqual(sum(row["value"]["spent"] for row in remaining), 93)
+        self.assertEqual(sum(row["value"]["spent"] for row in remaining), 98)
         self.assertEqual(self.rows(player, "details talents"), [])
         current = self.request(player, {"type": "snapshot"})
         self.assertEqual(current["state"], initial["state"])

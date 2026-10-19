@@ -4179,3 +4179,11 @@ mod locomotion_tests;
 #[cfg(test)]
 #[path = "perception_session_tests.rs"]
 mod perception_tests;
+
+#[cfg(test)]
+#[path = "corrosion_session_tests.rs"]
+mod corrosion_tests;
+
+#[cfg(test)]
+#[path = "ray_session_tests.rs"]
+mod ray_tests;

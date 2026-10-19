@@ -342,6 +342,19 @@ impl AbilityPlan {
 }
 impl Game {
     pub(crate) fn plan_source_valid(&self, plan: &Plan) -> bool {
+        if let Plan::Ray(ray) = plan {
+            return self.world.knows(ray.origin.location)
+                && ray
+                    .launch_footprint
+                    .iter()
+                    .all(|cell| self.world.knows(*cell))
+                && match &ray.supplies {
+                    crate::supplies::SupplySelection::Carried => true,
+                    crate::supplies::SupplySelection::Explicit { items } => {
+                        items.iter().all(|row| row.item.0 < self.next_item_id)
+                    }
+                };
+        }
         if let Plan::Escape(plan) = plan {
             return self.escape_plan_source_valid(plan);
         }

@@ -36,6 +36,9 @@ impl<'de> Deserialize<'de> for ObservedAbility {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ObservedAim {
     Unavailable,
+    Direction {
+        direction: Position,
+    },
     Disclosed {
         location: Location,
         occurrences: Vec<Position>,
@@ -47,6 +50,10 @@ impl<'de> Deserialize<'de> for ObservedAim {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             Unavailable {},
+            Direction {
+                #[serde(deserialize_with = "read_position")]
+                direction: Position,
+            },
             Disclosed {
                 #[serde(deserialize_with = "read_location")]
                 location: Location,
@@ -56,6 +63,12 @@ impl<'de> Deserialize<'de> for ObservedAim {
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::Unavailable {} => Self::Unavailable,
+            Fields::Direction { direction } => {
+                if !ray_direction_valid(direction) {
+                    return Err(serde::de::Error::custom("invalid ray direction"));
+                }
+                Self::Direction { direction }
+            }
             Fields::Disclosed {
                 location,
                 occurrences,
@@ -148,6 +161,7 @@ impl PublicPlanObservation {
                         })
                         && match aim {
                             ObservedAim::Unavailable => true,
+                            ObservedAim::Direction { direction } => ray_direction_valid(*direction),
                             ObservedAim::Disclosed {
                                 location,
                                 occurrences,
@@ -161,6 +175,11 @@ impl PublicPlanObservation {
                 }
             }
     }
+}
+fn ray_direction_valid(direction: Position) -> bool {
+    let parts = [direction.x, direction.y, direction.z];
+    parts.iter().all(|v| (-1..=1).contains(v))
+        && matches!(parts.iter().filter(|v| **v != 0).count(), 1 | 2)
 }
 fn valid_name(value: &str) -> bool {
     !value.trim().is_empty()
@@ -374,39 +393,60 @@ impl Game {
             return None;
         }
         // Classification grants disclosure; a timing helper alone never does.
-        let state = if let Some(plan) = actor
+        let state = if let Some((pending, ability_id)) = actor
             .pending
             .as_ref()
-            .and_then(|pending| pending.plan.as_ability())
+            .and_then(|pending| pending.plan.ability_id().map(|id| (pending, id)))
         {
             let ability = owner
                 .recognized_abilities
-                .contains(&plan.ability)
-                .then(|| self.content.rules.ability(&plan.ability))
+                .contains(ability_id)
+                .then(|| self.content.rules.ability(ability_id))
                 .flatten()
                 .map(|definition| ObservedAbility {
                     id: definition.id.clone(),
                     name: definition.name.clone(),
                 });
-            let aim = match plan.public_aim {
-                PublicAim::Cell { location } => {
-                    let occurrences: Vec<_> = scene
-                        .iter()
-                        .filter(|cell| cell.location == location)
-                        .map(|cell| cell.offset)
-                        .collect::<std::collections::BTreeSet<_>>()
-                        .into_iter()
-                        .collect();
-                    if occurrences.is_empty() {
-                        ObservedAim::Unavailable
-                    } else {
-                        ObservedAim::Disclosed {
-                            location,
-                            occurrences,
+            let aim = if let Some(ray) = pending.plan.as_ray() {
+                let mut directions = scene
+                    .iter()
+                    .filter(|cell| cell.physical && cell.location == ray.origin.location)
+                    .map(|cell| {
+                        let direction = tor_world::Direction::from(ray.direction)
+                            .rotated(ray.origin.orientation)
+                            .rotated(tor_world::inverse_rotation(cell.rotation));
+                        let (x, y, z) = direction.delta();
+                        Position { x, y, z }
+                    })
+                    .collect::<std::collections::BTreeSet<_>>();
+                if directions.len() == 1 {
+                    ObservedAim::Direction {
+                        direction: directions.pop_first().expect("single disclosed direction"),
+                    }
+                } else {
+                    ObservedAim::Unavailable
+                }
+            } else {
+                match pending.plan.as_ability().map(|plan| plan.public_aim) {
+                    Some(PublicAim::Cell { location }) => {
+                        let occurrences: Vec<_> = scene
+                            .iter()
+                            .filter(|cell| cell.location == location)
+                            .map(|cell| cell.offset)
+                            .collect::<std::collections::BTreeSet<_>>()
+                            .into_iter()
+                            .collect();
+                        if occurrences.is_empty() {
+                            ObservedAim::Unavailable
+                        } else {
+                            ObservedAim::Disclosed {
+                                location,
+                                occurrences,
+                            }
                         }
                     }
+                    _ => ObservedAim::Unavailable,
                 }
-                _ => ObservedAim::Unavailable,
             };
             PublicPlanState::Preparing {
                 ability,
@@ -617,6 +657,7 @@ mod tests {
         let mut equipment = ItemSpec::ordinary("private mail".into());
         equipment.class = ItemClass::Armor;
         equipment.equipment = Some(EquipmentSpec {
+            armor: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
             modifiers: vec![],

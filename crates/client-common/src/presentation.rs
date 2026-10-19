@@ -517,6 +517,36 @@ pub fn vocabulary() -> &'static AssetTable<Presentation> {
                 },
             ),
             (
+                "creature.aquator",
+                Presentation {
+                    noun: NounForms {
+                        message_key: "presentation.creature.aquator.noun",
+                        singular: "aquator",
+                        plural: "aquators",
+                        indefinite: "an aquator",
+                    },
+                    ascii: AsciiAppearance {
+                        glyph: 'A',
+                        color: 0x7fd4f0,
+                    },
+                },
+            ),
+            (
+                "creature.dragon",
+                Presentation {
+                    noun: NounForms {
+                        message_key: "presentation.creature.dragon.noun",
+                        singular: "dragon",
+                        plural: "dragons",
+                        indefinite: "a dragon",
+                    },
+                    ascii: AsciiAppearance {
+                        glyph: 'D',
+                        color: 0xf09b5b,
+                    },
+                },
+            ),
+            (
                 "creature.jabberwock",
                 Presentation {
                     noun: NounForms {
@@ -770,6 +800,28 @@ pub fn resolve(palette: &Palette, asset: Option<&str>) -> Option<&'static Presen
 mod tests {
     use super::*;
     use tor_protocol::{PaletteBody, PaletteUpdate};
+
+    #[test]
+    fn aquator_and_dragon_use_shared_keyed_presentations_only_when_forecast() {
+        let mut palette = Palette::default();
+        for (asset, glyph, noun) in [
+            ("creature.aquator", 'A', "aquator"),
+            ("creature.dragon", 'D', "dragon"),
+        ] {
+            assert!(resolve(&palette, Some(asset)).is_none());
+            palette.apply(&PaletteUpdate {
+                revision: 1,
+                body: PaletteBody::Full {
+                    assets: [asset.to_owned()].into(),
+                },
+            });
+            let entry = resolve(&palette, Some(asset)).unwrap();
+            assert_eq!(entry.ascii.glyph, glyph);
+            assert_eq!(entry.noun.singular, noun);
+            assert!(entry.noun.message_key.ends_with(&format!("{noun}.noun")));
+            palette = Palette::default();
+        }
+    }
 
     #[test]
     fn vocabulary_is_shared_keyed_and_falls_back_only_inside_a_current_palette() {

@@ -145,3 +145,38 @@ pub(crate) fn wire_future_growth(value: &s::earned_growth::FutureGrowth) -> p::F
         s::earned_growth::FutureGrowth::Authored {} => p::FutureGrowth::Authored {},
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn breath_and_every_named_skill_roundtrip_without_accepting_aliases() {
+        for skill in s::attributes::Skill::ALL {
+            let domain = a::PurchaseChoice::SkillRank { skill };
+            let wire = wire_choice(&domain);
+            assert_eq!(
+                wire,
+                p::PurchaseChoice::SkillRank {
+                    skill: skill.as_str().into()
+                }
+            );
+            assert_eq!(choice(&wire).unwrap(), domain);
+        }
+        assert_eq!(
+            choice(&p::PurchaseChoice::SkillRank {
+                skill: "breath".into()
+            })
+            .unwrap(),
+            a::PurchaseChoice::SkillRank {
+                skill: s::attributes::Skill::Breath
+            }
+        );
+        for unknown in ["Breath", "breath_weapon", "breath ", "missing"] {
+            assert!(choice(&p::PurchaseChoice::SkillRank {
+                skill: unknown.into()
+            })
+            .is_err());
+        }
+    }
+}

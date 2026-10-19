@@ -438,3 +438,24 @@ fn restorable_hit_dice_are_required_exact_and_never_a_second_saved_history() {
     value["restorable_losses"]["removed_ordinals"] = serde_json::json!([]);
     assert!(serde_json::from_value::<OwnStats>(value).is_err());
 }
+
+#[test]
+fn directional_ray_catalog_discloses_only_bounded_sight_range_and_direction_kind() {
+    let mut value = stats().abilities.pop().unwrap();
+    value.target_kind = AbilityTargetKind::DirectionalRay;
+    value.reach = AbilityReach::Sight { range: 6 };
+    value.basic_attack = false;
+    assert!(value.valid());
+    for reach in [
+        AbilityReach::SelfOnly,
+        AbilityReach::Melee,
+        AbilityReach::Sight { range: 0 },
+        AbilityReach::Sight { range: 17 },
+    ] {
+        let mut invalid = value.clone();
+        invalid.reach = reach;
+        assert!(!invalid.valid());
+    }
+    value.basic_attack = true;
+    assert!(!value.valid());
+}

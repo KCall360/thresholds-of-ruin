@@ -19,6 +19,35 @@ KEYS = {"north":"up", "east":"right", "south":"down", "west":"left",
         "up":"ascend", "down":"descend"}
 
 
+def key(window, name):
+    started = time.perf_counter()
+    window.input_unix_ns = wall_time_ns(started)
+    window.child.stdin.write(json.dumps({"type":"key", "key":name}) + "\n")
+    window.child.stdin.flush()
+    # Effects and terminal lifecycle can precede the ordered permission update.
+    # Sequential traversal needs that permission before sending its next key;
+    # releasing control instead ends with admission unavailable by design.
+    complete = ascii_input_completion(name, wait_for_admission=name != "release")
+
+    def completed(frame):
+        if not frame["connected"]:
+            raise RuntimeError("Exploration client disconnected")
+        if not frame["window_open"]:
+            raise RuntimeError("Exploration window closed")
+        if name != "release" and not frame["has_control"]:
+            raise RuntimeError("Exploration actor control was lost")
+        observation = (frame.get("state") or {}).get("observation") or {}
+        combat = observation.get("combat") or {}
+        if combat.get("dead"):
+            raise RuntimeError("Exploration actor died")
+        if combat.get("terminal"):
+            raise RuntimeError("Exploration run ended")
+        return complete(frame)
+
+    frame, received = window.until(completed)
+    return frame, (received-started)*1000
+
+
 def validate(result):
     require(isinstance(result, dict) and not result.get("diagnostics_error"), "Invalid saved exploration report")
     positive_counts(result, ("regions", "trace_version", "checkpoint_interval", "actions", "disclosed_cells",
@@ -73,14 +102,6 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
             "--save-target-ms", 10, "--save-max-ms", 50, "--save-idle-ms", 1], name)
         ready, _ = process.until(lambda f:"address" in f)
         return process, ready["address"]
-    def key(window, name):
-        started = time.perf_counter()
-        window.input_unix_ns = wall_time_ns(started)
-        window.child.stdin.write(json.dumps({"type":"key", "key":name}) + "\n")
-        window.child.stdin.flush()
-        frame, received = window.until(ascii_input_completion(name))
-        assert frame["connected"] and frame["window_open"]
-        return frame, (received-started)*1000
     result = {"trace_version":spec["version"], "seed":spec["seed"], "regions":regions,
               "checkpoint_interval":interval, "correlate":correlate, "defer_logs":defer_logs, "samples":[]}
     try:

@@ -344,14 +344,31 @@ Actor stages may author `depth_growth = { kind = "racial_after", depth = 26 }`.
 The default `{ kind = "fixed" }` keeps the base recipe. Racial growth appends
 `max(0, floor_depth - depth)` actual racial HD to the authored base, preserving
 all original class/racial rows, choices and ordinal Health seeds. New rows have
-explicit empty choices and retain their ordinary unspent grants. An authored
-restoration recipe grows by those same empty racial ordinals; choose-again and
+empty choices by default and retain their ordinary unspent grants. An authored
+restoration recipe grows by those same racial ordinals; choose-again and
 future-source policies retain their meanings. A drained prototype whose retained
 authored restoration recipe extends beyond its present base is rejected, rather
 than overwriting its pending source or purchase choices.
 
-Construction makes bounded per-birth passes over the complete owned rows instead
-of rebuilding every growing prefix. Prototype restoration, build validation and
+Each actor choice may additionally author a bounded `advancement` schedule. Each
+row names a strictly increasing future one-based `ordinal`, ordinary `purchases`
+and an optional `attribute`. The ordinal must be after the prototype's existing
+HD rows and at most 256. The schedule requires racial-after depth growth; fixed
+recipes cannot carry unreachable purchases. Source preparation validates the
+complete bounded schedule using ordinary purchase validation at each acquisition
+ordinal, including point-pool, prerequisite and rank rules. An attribute choice
+for that ordinal is applied before its declaration-ordered purchases. Existing
+dormant ownership is preserved, but a new ineligible talent is rejected even if
+a later scheduled HD would supply its prerequisite. A birth applies only the rows actually reached, recording both the owned
+choices and authored restoration plan. Omitted ordinals retain their ordinary
+unspent grants. The same immutable recipe is used for normal population and
+explicit-depth developer placement. Live sheet queries and earned progression
+never consult this birth-only schedule, and no skill grows beyond its ordinary
+rank cap merely because depth increases.
+
+Empty-schedule construction makes bounded per-birth passes over the complete owned
+rows instead of rebuilding every growing prefix. Nonempty schedules additionally
+validate only their reached authored ordinals through ordinary purchase previews. Prototype restoration, build validation and
 actor installation retain separate derivation/compilation boundaries. The narrow
 helper counter does not measure all of that work; end-to-end costs still need
 separate measurement.
@@ -571,7 +588,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v42"
+import = "interactions-v43"
 
 [[overrides]]
 op = "set"

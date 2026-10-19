@@ -183,9 +183,7 @@ fn collision_damage_saturates_at_the_shared_injury_bound() {
 
 #[test]
 fn multiple_weapon_sockets_select_the_highest_equipped_slot_once() {
-    use tor_simulation::{
-        AnatomySpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec, Game, ItemClass, ItemSpec,
-    };
+    use tor_simulation::{AnatomySpec, EquipmentSlot, EquipmentSlotId, Game, ItemClass, ItemSpec};
     let mut species = super::creature_fixture::species();
     species.anatomy = AnatomySpec {
         slots: vec![
@@ -210,7 +208,8 @@ fn multiple_weapon_sockets_select_the_highest_equipped_slot_once() {
     for (id, slot, attack) in [(11, 1, high.clone()), (12, 0, low)] {
         let mut item = ItemSpec::ordinary(format!("weapon {id}"));
         item.class = ItemClass::Weapon;
-        item.equipment = Some(EquipmentSpec {
+        item.equipment = Some(tor_simulation::EquipmentSpec {
+            armor: None,
             slot: EquipmentSlot::new("weapon").unwrap(),
             attack: Some(attack),
             modifiers: vec![],
@@ -227,9 +226,7 @@ fn multiple_weapon_sockets_select_the_highest_equipped_slot_once() {
 
 #[test]
 fn ordinary_equipment_does_not_require_a_combat_creature() {
-    use tor_simulation::{
-        AnatomySpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec, Game, ItemClass, ItemSpec,
-    };
+    use tor_simulation::{AnatomySpec, EquipmentSlot, EquipmentSlotId, Game, ItemClass, ItemSpec};
     let mut game = Game::two_room(42, super::creature_fixture::content());
     let at = tor_world::Location {
         region: tor_world::RegionId(1),
@@ -247,15 +244,15 @@ fn ordinary_equipment_does_not_require_a_combat_creature() {
     .unwrap();
     let mut armor = ItemSpec::ordinary("mail".into());
     armor.class = ItemClass::Armor;
-    armor.equipment = Some(EquipmentSpec {
-        slot: EquipmentSlot::new("body_armor").unwrap(),
+    armor.equipment = Some(tor_simulation::EquipmentSpec {
+        armor: Some(tor_simulation::ArmorSpec {
+            physical_reduction: 3,
+            material: tor_simulation::ArmorMaterial::Metal,
+            rustproof: false,
+        }),
+        slot: tor_simulation::EquipmentSlot::new("body_armor").unwrap(),
         attack: None,
-        modifiers: vec![modifier(ModifierOp::Add {
-            stat: Stat::Defense {
-                defense: DefenseKind::Physical,
-            },
-            value: 3,
-        })],
+        modifiers: vec![],
     });
     game.place_item_stack(10, at, Some(actor), 1, armor)
         .unwrap();

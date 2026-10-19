@@ -324,11 +324,11 @@ fn assert_rogue_tail_actor(engine: &Engine, attempt: &Value, content: &str, hd: 
 
 #[test]
 fn rogue_mixed_tail_all_vampire_entry_at_274_publishes_exact_256_hd_and_replays() {
-    // Fixed seed 27 samples four Vampires from the production V/G/J/M band.
-    // Seed 42 samples G/G/V/V, whose Griffins correctly exceed the cap.
-    // Unselected over-cap Griffin/Jabberwock recipes must not reject this entry.
+    // Fixed seed 80 samples four Vampires from the production V/G/J/M/D band.
+    // Seed 42 samples G/J/V/V, whose first two recipes exceed the cap.
+    // Unselected over-cap Griffin/Jabberwock/Dragon recipes must not reject it.
     let mut scenario = rogue_tail_entry_fixture(274, "up");
-    scenario.seed = 27;
+    scenario.seed = 80;
     let engine = Engine::memory(scenario).unwrap();
     assert_eq!(
         engine
@@ -354,7 +354,15 @@ fn assert_rogue_tail_capacity(failure: Failure) {
             .contains("no movement or population was committed"),
         "the complete first entry must remain retryable: {failure:?}"
     );
-    for hidden in ["vampire", "griffin", "jabberwock", "256", "257"] {
+    for hidden in [
+        "vampire",
+        "griffin",
+        "jabberwock",
+        "medusa",
+        "dragon",
+        "256",
+        "257",
+    ] {
         assert!(!failure.message.contains(hidden), "{failure:?}");
     }
     assert_capacity(failure);
@@ -363,9 +371,9 @@ fn assert_rogue_tail_capacity(failure: Failure) {
 #[test]
 fn rogue_mixed_tail_sampled_jabberwock_at_268_refuses_whole_entry_and_replays() {
     let mut scenario = rogue_tail_entry_fixture(267, "down");
-    // The production content stream samples G/J/J/M at 267 and V/V/J/V at 268,
+    // The production content stream samples D/J/D/J at 267 and V/V/J/V at 268,
     // preserving legal 256-HD Jabberwocks before the selected 257-HD refusal.
-    scenario.seed = 4906;
+    scenario.seed = 1718;
     let original = scenario.package.as_ref().unwrap();
     let mut source = serde_json::to_value(&original.manifest).unwrap();
     let cutoff = &mut source["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]
@@ -397,7 +405,7 @@ fn rogue_mixed_tail_sampled_jabberwock_at_268_refuses_whole_entry_and_replays() 
 
     let mut engine = Engine::memory(scenario).unwrap();
     let initial = rogue_tail_attempts(&engine, 267);
-    for attempt in [&initial[1], &initial[2]] {
+    for attempt in [&initial[1], &initial[3]] {
         assert_rogue_tail_actor(&engine, attempt, "rogue.jabberwock", 256);
     }
     assert!(decisions(&engine)["floors"].get("dungeon/268").is_none());

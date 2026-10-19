@@ -227,6 +227,7 @@ pub enum Skill {
     Leadership,
     Persuasion,
     Spellcasting,
+    Breath,
 }
 
 impl Skill {
@@ -251,9 +252,10 @@ impl Skill {
             Self::Leadership => "leadership",
             Self::Persuasion => "persuasion",
             Self::Spellcasting => "spellcasting",
+            Self::Breath => "breath",
         }
     }
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Athletics,
         Self::HeavyWeaponry,
         Self::Agility,
@@ -273,6 +275,7 @@ impl Skill {
         Self::Leadership,
         Self::Persuasion,
         Self::Spellcasting,
+        Self::Breath,
     ];
 
     pub fn attribute(self, binding: ManaBinding) -> Attribute {
@@ -282,7 +285,7 @@ impl Skill {
                 Attribute::Speed
             }
             Self::Crafting | Self::Deduction | Self::Lore | Self::Medicine => Attribute::Intellect,
-            Self::Discipline | Self::Intimidation => Attribute::Willpower,
+            Self::Discipline | Self::Intimidation | Self::Breath => Attribute::Willpower,
             Self::Insight | Self::Perception | Self::Survival => Attribute::Awareness,
             Self::Deception | Self::Leadership | Self::Persuasion => Attribute::Presence,
             Self::Spellcasting => binding.attribute(),
@@ -291,7 +294,7 @@ impl Skill {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SkillRanks([u8; 19]);
+pub struct SkillRanks([u8; Skill::ALL.len()]);
 
 impl SkillRanks {
     pub fn get(self, skill: Skill) -> u8 {

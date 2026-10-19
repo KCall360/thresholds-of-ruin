@@ -62,7 +62,9 @@ pub mod locomotion;
 pub mod perception;
 mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
+mod armor;
 mod item_store;
+pub use armor::{ArmorMaterial, ArmorSpec};
 mod items;
 pub use items::{CurrencyKind, ItemClass, ItemSpec};
 mod interactions;
@@ -423,6 +425,7 @@ enum ItemLocation {
 struct Item {
     /// Captured at death; authored item properties cannot create this provenance.
     corpse: Option<CorpseAppearance>,
+    condition: armor::ItemCondition,
     motion: MotionState,
     orientation: u8,
     spec: Shared<ItemSpec>,
@@ -438,6 +441,7 @@ impl<'de> serde::Deserialize<'de> for Item {
         struct Fields {
             #[serde(deserialize_with = "crate::bounded::required_option")]
             corpse: Option<CorpseAppearance>,
+            condition: armor::ItemCondition,
             motion: MotionState,
             orientation: u8,
             spec: Shared<ItemSpec>,
@@ -449,6 +453,7 @@ impl<'de> serde::Deserialize<'de> for Item {
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             corpse: fields.corpse,
+            condition: fields.condition,
             motion: fields.motion,
             orientation: fields.orientation,
             spec: fields.spec,
@@ -744,6 +749,7 @@ impl Game {
         self.items.insert(
             id,
             Item {
+                condition: crate::armor::ItemCondition::default(),
                 corpse: None,
                 holds: vec![],
                 motion: MotionState::default(),

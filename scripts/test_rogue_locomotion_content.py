@@ -94,7 +94,7 @@ class RogueLocomotionContent(unittest.TestCase):
                 if eligible:
                     stock = choices["rogue." + name].get("carried_loot")
                     self.assertEqual(stock, {"version": 1, "pool": "rogue.vampire_supplies", "chance": {"numerator": 1, "denominator": 5}} if name == "griffin" else None)
-        self.assertEqual({row["archetype"] for row in bands[-1]["choices"]}, {"rogue.vampire", "rogue.griffin", "rogue.jabberwock", "rogue.medusa"})
+        self.assertEqual({row["archetype"] for row in bands[-1]["choices"]}, {"rogue.vampire", "rogue.griffin", "rogue.jabberwock", "rogue.medusa", "rogue.dragon"})
 
 
 if __name__ == "__main__":

@@ -38,6 +38,10 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   run `scripts/verify.py quick`, unless a required higher tier covers it.
 - Give each Cargo target directory one owner and hand it off explicitly. Keep
   checked inputs unchanged during builds/tests; prepare other edits separately.
+  On a sequential cross-worktree handoff of a shared warm target, compare source
+  input hashes and refresh only changed local input mtimes before Cargo reuse;
+  preserve before/after hashes and protected binaries. See the handoff guard in
+  the testing guide. Do not broadly delete warm caches or infer test coverage.
   Reuse only qualified evidence and binaries, never duplicate full target builds
   across workers. Use owned sessions and exit receipts to establish run status;
   see [verification evidence](docs/development/testing.md#verification-evidence-and-reuse).

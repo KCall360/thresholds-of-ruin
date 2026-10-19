@@ -895,6 +895,10 @@ pub enum Effect {
         selection: crate::theft::TheftSelection,
         relocation: Option<crate::theft::RelocationGate>,
     },
+    CorrodeArmor {
+        slot: crate::EquipmentSlot,
+        amount: u32,
+    },
     ApplyLinkedHold {
         policy: crate::linked_hold::HoldPolicy,
     },
@@ -967,6 +971,11 @@ impl<'de> Deserialize<'de> for Effect {
                 #[serde(deserialize_with = "crate::bounded::required_option")]
                 relocation: Option<crate::theft::RelocationGate>,
             },
+            CorrodeArmor {
+                slot: crate::EquipmentSlot,
+                #[serde(deserialize_with = "crate::armor::read_corrosion_amount")]
+                amount: u32,
+            },
             ApplyLinkedHold {
                 policy: crate::linked_hold::HoldPolicy,
             },
@@ -1027,6 +1036,7 @@ impl<'de> Deserialize<'de> for Effect {
                 selection,
                 relocation,
             },
+            Fields::CorrodeArmor { slot, amount } => Self::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::HoldDamage {
                 category,
@@ -1517,6 +1527,7 @@ impl Ruleset {
             qualified_conditions: &qualified_conditions,
             descriptors: &descriptors,
             flags: &flags,
+            equipment_slots: &equipment_slots,
         };
         let c = &mut document.constants;
         bound(
@@ -2088,6 +2099,7 @@ struct References<'a> {
     qualified_conditions: &'a BTreeSet<ConditionId>,
     descriptors: &'a BTreeSet<DescriptorId>,
     flags: &'a BTreeSet<FlagId>,
+    equipment_slots: &'a BTreeSet<EquipmentSlot>,
 }
 impl References<'_> {
     fn descriptors(
@@ -2230,6 +2242,13 @@ impl References<'_> {
     fn effects(&self, values: &mut [Effect], pool: &mut Interner) -> Result<(), RulesetError> {
         bound(values.len() <= crate::limits::EFFECTS_PER_BRANCH, "effects")?;
         bound(
+            values.len() == 1
+                || !values
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::CorrodeArmor { .. })),
+            "corrosion_isolated_payload",
+        )?;
+        bound(
             values.first().is_none_or(|first| {
                 values
                     .iter()
@@ -2250,6 +2269,14 @@ impl References<'_> {
                         reference(self.flags, &gate.flag, "flag")?;
                         gate.flag.intern(pool);
                     }
+                }
+                Effect::CorrodeArmor { slot, amount } => {
+                    bound(
+                        (1..=crate::limits::NUMERIC as u32).contains(amount),
+                        "corrosion amount",
+                    )?;
+                    reference(self.equipment_slots, slot, "equipment_slot")?;
+                    slot.intern(pool);
                 }
                 Effect::ApplyLinkedHold { policy } => {
                     bound(policy.valid(), "hold_policy")?;
@@ -2372,10 +2399,10 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
                 Scope::VersusSource => matches!(
                     &modifier.op,
                     ModifierOp::Add {
-                        stat: Stat::Edge | Stat::CheckEdge,
+                        stat: Stat::Edge | Stat::CheckEdge | Stat::IncomingEdge { defense: None },
                         ..
                     } | ModifierOp::Set {
-                        stat: Stat::Edge | Stat::CheckEdge,
+                        stat: Stat::Edge | Stat::CheckEdge | Stat::IncomingEdge { defense: None },
                         ..
                     }
                 ),
@@ -2590,6 +2617,7 @@ impl Ruleset {
             .map(|d| d.id.clone())
             .collect();
         let flags = self.indexes.flags.keys().cloned().collect();
+        let equipment_slots = self.indexes.equipment_slots.keys().cloned().collect();
         References {
             abilities: &abilities,
             ability_tags: &ability_tags,
@@ -2601,6 +2629,7 @@ impl Ruleset {
             qualified_conditions: &qualified_conditions,
             descriptors: &descriptors,
             flags: &flags,
+            equipment_slots: &equipment_slots,
         }
         .modifiers(&mut modifiers.to_vec(), &mut Interner::default())?;
         self.expanded_modifier_count(modifiers).map(|_| ())
@@ -2733,6 +2762,7 @@ impl Ruleset {
             .map(|d| d.id.clone())
             .collect();
         let flags = self.indexes.flags.keys().cloned().collect();
+        let equipment_slots = self.indexes.equipment_slots.keys().cloned().collect();
         References {
             abilities: &abilities,
             ability_tags: &ability_tags,
@@ -2744,6 +2774,7 @@ impl Ruleset {
             qualified_conditions: &qualified_conditions,
             descriptors: &descriptors,
             flags: &flags,
+            equipment_slots: &equipment_slots,
         }
         .effects(&mut effects.to_vec(), &mut Interner::default())
     }
@@ -2769,6 +2800,7 @@ impl Ruleset {
             .map(|d| d.id.clone())
             .collect();
         let flags = self.indexes.flags.keys().cloned().collect();
+        let equipment_slots = self.indexes.equipment_slots.keys().cloned().collect();
         References {
             abilities: &abilities,
             ability_tags: &ability_tags,
@@ -2780,6 +2812,7 @@ impl Ruleset {
             qualified_conditions: &qualified_conditions,
             descriptors: &descriptors,
             flags: &flags,
+            equipment_slots: &equipment_slots,
         }
         .strikes(&mut strikes.to_vec(), &mut Interner::default())
     }
@@ -2819,6 +2852,9 @@ impl Effect {
                 crate::theft::TheftSelection::Currency { amount, .. } => amount.valid(),
                 crate::theft::TheftSelection::MagicalUnit => true,
             },
+            Self::CorrodeArmor { amount, .. } => {
+                (1..=crate::limits::NUMERIC as u32).contains(amount)
+            }
             Self::ApplyLinkedHold { policy } => policy.valid(),
             Self::HoldDamage { .. } => true,
             Self::StepSelfOneCell
@@ -3149,8 +3185,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v42\"",
-                "id = \"interactions-v42\"\nunknown = true"
+                "id = \"interactions-v43\"",
+                "id = \"interactions-v43\"\nunknown = true"
             ))
             .is_err()
         );

@@ -369,6 +369,181 @@ impl DerivedCreature {
             }],
         )
     }
+    /// A ray has no opponent at launch. Select unconditional source modifiers
+    /// before ordinary family/talent cancellation; qualified sources cannot
+    /// silently bind to the source or an aimed creature.
+    fn targetless_ray_sources(&self) -> BTreeMap<SourceId, Vec<Modifier>> {
+        self.sources
+            .iter()
+            .filter(|(source, _)| !matches!(source, SourceId::QualifiedCondition { .. }))
+            .map(|(source, modifiers)| {
+                (
+                    source.clone(),
+                    modifiers
+                        .iter()
+                        .filter(|modifier| modifier.scope == Scope::Always)
+                        .cloned()
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+    pub(crate) fn targetless_ray_edge(
+        &self,
+        rules: &Ruleset,
+        actor: crate::ActorId,
+        ability: &AbilityId,
+        policy: crate::rules::OutgoingEdgePolicy,
+        selected: &[crate::conditions::TokenReservation],
+    ) -> Result<i64, BuildError> {
+        fold_edges(
+            rules,
+            EdgeUse::Check,
+            [EdgeContext {
+                sources: &self.targetless_ray_sources(),
+                role: Some(crate::rules::CheckActor::User),
+                opponent: crate::ActorId(0),
+                ability: Some(ability),
+                incoming: None,
+                tokens: Some((actor, selected)),
+                policy,
+            }],
+        )
+    }
+    pub(crate) fn targetless_ray_effect_edge(
+        &self,
+        rules: &Ruleset,
+        policy: crate::rules::OutgoingEdgePolicy,
+    ) -> Result<i64, BuildError> {
+        fold_edges(
+            rules,
+            EdgeUse::Shared,
+            [EdgeContext {
+                sources: &self.targetless_ray_sources(),
+                role: None,
+                opponent: crate::ActorId(0),
+                ability: None,
+                incoming: None,
+                tokens: None,
+                policy,
+            }],
+        )
+    }
+    pub(crate) fn ray_incoming_sources(
+        &self,
+        rules: &Ruleset,
+        selected: &[crate::conditions::TokenReservation],
+    ) -> Vec<crate::abilities::RayIncomingSource> {
+        use crate::abilities::{RayIncomingOwner, RayIncomingSource};
+        let mut rows = Vec::new();
+        for (source, modifiers) in &self.sources {
+            let owner = match source {
+                SourceId::QualifiedCondition { .. } => continue,
+                SourceId::Condition(condition, causer) => {
+                    if rules.condition(condition).is_some_and(|definition| {
+                        definition.lifecycle != crate::rules::ConditionLifecycle::Timed
+                    }) && !selected
+                        .iter()
+                        .any(|token| &token.condition == condition && token.source == *causer)
+                    {
+                        continue;
+                    }
+                    RayIncomingOwner::Condition {
+                        condition: condition.clone(),
+                        source: *causer,
+                    }
+                }
+                SourceId::Talent(talent) => RayIncomingOwner::Talent {
+                    talent: talent.clone(),
+                },
+                _ => RayIncomingOwner::Ordinary {
+                    ordinal: rows.len() as u16,
+                },
+            };
+            let modifiers: Vec<_> = modifiers
+                .iter()
+                .filter(|m| {
+                    matches!(
+                        &m.op,
+                        ModifierOp::Add {
+                            stat: Stat::IncomingEdge { defense: None },
+                            ..
+                        } | ModifierOp::Set {
+                            stat: Stat::IncomingEdge { defense: None },
+                            ..
+                        }
+                    )
+                })
+                .cloned()
+                .collect();
+            if !modifiers.is_empty() {
+                rows.push(RayIncomingSource { owner, modifiers });
+            }
+        }
+        rows.sort_by(|a, b| a.owner.cmp(&b.owner));
+        rows
+    }
+    /// The source's incoming modifiers remain frozen; only this recipient's
+    /// compiled outgoing operands and one-use check tokens are live.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn ray_recipient_edge(
+        &self,
+        rules: &Ruleset,
+        actor: crate::ActorId,
+        source: crate::ActorId,
+        ability: &AbilityId,
+        incoming: &[crate::abilities::RayIncomingSource],
+        include_source_tokens: bool,
+        selected: &[crate::conditions::TokenReservation],
+    ) -> Result<i64, BuildError> {
+        use crate::abilities::RayIncomingOwner;
+        let frozen: BTreeMap<_, _> = incoming
+            .iter()
+            .filter_map(|row| {
+                let source = match &row.owner {
+                    RayIncomingOwner::Ordinary { ordinal } => {
+                        SourceId::Equipment(crate::ItemId(u64::from(*ordinal) + 1))
+                    }
+                    RayIncomingOwner::Talent { talent } => SourceId::Talent(talent.clone()),
+                    RayIncomingOwner::Condition { condition, source } => {
+                        if !include_source_tokens
+                            && rules.condition(condition).is_some_and(|def| {
+                                def.lifecycle != crate::rules::ConditionLifecycle::Timed
+                            })
+                        {
+                            return None;
+                        }
+                        SourceId::Condition(condition.clone(), *source)
+                    }
+                };
+                Some((source, row.modifiers.clone()))
+            })
+            .collect();
+        fold_edges(
+            rules,
+            EdgeUse::Check,
+            [
+                EdgeContext {
+                    sources: &self.sources,
+                    role: Some(crate::rules::CheckActor::Target),
+                    opponent: source,
+                    ability: Some(ability),
+                    incoming: None,
+                    tokens: Some((actor, selected)),
+                    policy: crate::rules::OutgoingEdgePolicy::Ordinary,
+                },
+                EdgeContext {
+                    sources: &frozen,
+                    role: None,
+                    opponent: actor,
+                    ability: None,
+                    incoming: Some(None),
+                    tokens: None,
+                    policy: crate::rules::OutgoingEdgePolicy::Ordinary,
+                },
+            ],
+        )
+    }
     /// Pure generic outgoing check preview, including unclaimed next-check edge.
     /// Action planning still captures ability context and claims tokens separately.
     pub fn edge_against(&self, target: crate::ActorId) -> crate::dice::Edge {

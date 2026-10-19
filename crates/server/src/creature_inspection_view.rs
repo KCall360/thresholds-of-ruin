@@ -149,6 +149,13 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
                 ],
             )
         }
+        s::rules::Effect::CorrodeArmor { slot, amount } => (
+            "corrode_armor",
+            vec![
+                text("slot", slot.to_string()),
+                unsigned("amount", u64::from(*amount)),
+            ],
+        ),
         s::rules::Effect::ApplyLinkedHold { policy } => (
             "apply_linked_hold",
             vec![

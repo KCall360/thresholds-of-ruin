@@ -80,7 +80,7 @@ fn actor_choice(build: &CreatureBuild) -> PreparedActorChoice {
     };
     serde_json::from_value(json!({
         "content":"subject", "weight":1, "turn_ticks":100, "actor":actor,
-        "depth_growth":{"kind":"racial_after", "depth":26}, "carried_loot":null
+        "depth_growth":{"kind":"racial_after", "depth":26}, "carried_loot":null, "advancement":[]
     }))
     .expect("racial-after policy must be a strict compiled actor choice")
 }
@@ -390,4 +390,227 @@ fn compiled_depth_growth_requires_its_explicit_strict_policy() {
         invalid["depth_growth"] = policy;
         assert!(serde_json::from_value::<PreparedActorChoice>(invalid).is_err());
     }
+}
+
+fn ordinal_skill(ordinal: u64) -> tor_simulation::prepared_spawn::OrdinalAdvancement {
+    use tor_simulation::{
+        attributes::Skill,
+        content_ids::PointPoolId,
+        creatures::{AdvancementPurchase, PurchaseSelection},
+        prepared_spawn::OrdinalAdvancement,
+        HdCount,
+    };
+    OrdinalAdvancement {
+        ordinal: HdCount(ordinal),
+        choices: HdChoices {
+            purchases: vec![AdvancementPurchase {
+                pool: PointPoolId::new("advancement").unwrap(),
+                selection: PurchaseSelection::SkillRank(Skill::Athletics),
+            }],
+            attribute: None,
+        },
+    }
+}
+
+#[test]
+fn population_future_ordinal_purchases_are_real_bounded_rows_and_restore_normally() {
+    use tor_simulation::attributes::Skill;
+    let base = base_build(2);
+    let schedule = vec![ordinal_skill(4), ordinal_skill(7), ordinal_skill(10)];
+    let initial_rank = base.derive().unwrap().skills.get(Skill::Athletics);
+    for (count, added_ranks) in [(2, 0), (3, 0), (4, 1), (6, 1), (7, 2), (10, 3), (20, 3)] {
+        let before = tor_simulation::diagnostics::work_counts();
+        let born = base
+            .instantiate_seeded_racial_with_advancement(42, count - 2, &schedule)
+            .unwrap();
+        let after = tor_simulation::diagnostics::work_counts();
+        assert_eq!(
+            after.permanent_creature_compiles - before.permanent_creature_compiles,
+            1 + 2 * added_ranks as usize
+        );
+        assert_eq!(
+            born.derive().unwrap().skills.get(Skill::Athletics),
+            initial_rank + added_ranks
+        );
+        assert_eq!(&born.choices()[..2], base.choices());
+        let RestorationPolicy::Authored(plan) = born.restoration_policy() else {
+            panic!()
+        };
+        assert_eq!(plan.len(), count as usize);
+        for (index, row) in born.choices().iter().enumerate() {
+            assert_eq!(&plan[index].choices, row);
+        }
+        assert_eq!(
+            BuildRecord::capture(&born)
+                .restore(base.content().clone())
+                .unwrap(),
+            born
+        );
+    }
+    assert_eq!(
+        base.derive().unwrap().skills.get(Skill::Athletics),
+        initial_rank
+    );
+}
+
+#[test]
+fn population_future_ordinal_purchases_reject_overwrites_order_budget_and_rank_overflow() {
+    let base = base_build(2);
+    for schedule in [
+        vec![ordinal_skill(2)],
+        vec![ordinal_skill(4), ordinal_skill(3)],
+        vec![ordinal_skill(3), ordinal_skill(3)],
+        vec![ordinal_skill(257)],
+    ] {
+        assert!(base
+            .instantiate_seeded_racial_with_advancement(42, 10, &schedule)
+            .is_err());
+    }
+    let mut overspent = ordinal_skill(3);
+    overspent
+        .choices
+        .purchases
+        .push(overspent.choices.purchases[0].clone());
+    assert!(base
+        .instantiate_seeded_racial_with_advancement(42, 1, &[overspent])
+        .is_err());
+    let schedule = (3..=8).map(ordinal_skill).collect::<Vec<_>>();
+    assert!(base
+        .instantiate_seeded_racial_with_advancement(42, 6, &schedule)
+        .is_err());
+    let choice = actor_choice(&base);
+    assert!(choice
+        .actor
+        .validate_birth_advancement(
+            base.content().clone(),
+            tor_simulation::prepared_spawn::DepthGrowth::Fixed {},
+            &[ordinal_skill(3)]
+        )
+        .is_err());
+    assert!(choice
+        .actor
+        .validate_birth_advancement(base.content().clone(), choice.depth_growth, &schedule)
+        .is_err());
+}
+
+#[test]
+fn population_future_ordinal_owned_records_require_named_complete_bounded_rows() {
+    use tor_simulation::prepared_spawn::OrdinalAdvancement;
+    let row = serde_json::to_value(ordinal_skill(3)).unwrap();
+    assert_eq!(
+        serde_json::from_value::<OrdinalAdvancement>(row.clone()).unwrap(),
+        ordinal_skill(3)
+    );
+    for invalid in [
+        json!([3, row["choices"]]),
+        json!({"ordinal":0,"choices":row["choices"]}),
+        json!({"ordinal":257,"choices":row["choices"]}),
+        json!({"ordinal":3}),
+        json!({"ordinal":3,"choices":[]}),
+    ] {
+        assert!(serde_json::from_value::<OrdinalAdvancement>(invalid).is_err());
+    }
+    let mut missing_attribute = row.clone();
+    missing_attribute["choices"]
+        .as_object_mut()
+        .unwrap()
+        .remove("attribute");
+    assert!(serde_json::from_value::<OrdinalAdvancement>(missing_attribute).is_err());
+    let mut positional_purchase = row.clone();
+    positional_purchase["choices"]["purchases"][0] =
+        json!(["advancement",{"kind":"skill_rank","skill":"athletics"}]);
+    assert!(serde_json::from_value::<OrdinalAdvancement>(positional_purchase).is_err());
+    let choice = actor_choice(&base_build(2));
+    let good = serde_json::to_value(choice).unwrap();
+    let mut missing = good.clone();
+    missing.as_object_mut().unwrap().remove("advancement");
+    assert!(serde_json::from_value::<PreparedActorChoice>(missing).is_err());
+    let mut overflow = good;
+    overflow["advancement"] = json!(vec![row; 257]);
+    assert!(serde_json::from_value::<PreparedActorChoice>(overflow).is_err());
+}
+
+#[test]
+fn future_birth_talents_require_prerequisites_at_each_acquisition_ordinal() {
+    use tor_simulation::{
+        content_ids::TalentId,
+        creatures::{BuildError, PurchaseSelection},
+        prepared_spawn::PreparedSpawnError,
+        rules::Requirement,
+        HdCount,
+    };
+    let parent = fixture::talent("fixture_birth_parent", vec![]);
+    let mut child = fixture::talent("fixture_birth_child", vec![]);
+    child.prerequisites = vec![parent.id.clone()];
+    child.requirement = Requirement::TotalHd {
+        minimum: HdCount(6),
+    };
+    let base = fixture::with_talents(base_build(2), [parent, child]);
+    let talent = |ordinal, id: &str| {
+        let mut row = ordinal_skill(ordinal);
+        row.choices.purchases[0].selection = PurchaseSelection::Talent(TalentId::new(id).unwrap());
+        row
+    };
+    for schedule in [
+        vec![talent(6, "fixture_birth_child")],
+        vec![
+            talent(3, "fixture_birth_child"),
+            talent(5, "fixture_birth_parent"),
+        ],
+        vec![
+            talent(3, "fixture_birth_parent"),
+            talent(4, "fixture_birth_child"),
+        ],
+    ] {
+        assert_eq!(
+            base.instantiate_seeded_racial_with_advancement(42, 8, &schedule),
+            Err(PreparedSpawnError::Build(BuildError::IneligibleTalent))
+        );
+        let prepared = actor_choice(&base);
+        assert_eq!(
+            prepared.actor.validate_birth_advancement(
+                base.content().clone(),
+                prepared.depth_growth,
+                &schedule
+            ),
+            Err(BuildError::IneligibleTalent)
+        );
+    }
+    let good = vec![
+        talent(5, "fixture_birth_parent"),
+        talent(6, "fixture_birth_child"),
+    ];
+    let born = base
+        .instantiate_seeded_racial_with_advancement(42, 8, &good)
+        .unwrap();
+    assert!(born
+        .derive()
+        .unwrap()
+        .active_talents
+        .contains(&TalentId::new("fixture_birth_child").unwrap()));
+    // Existing recorded dormant ownership remains legal; only new purchases
+    // must pass acquisition eligibility, as with ordinary player editing.
+    let mut advancement = base.advancement().clone();
+    advancement.choices[1] = talent(2, "fixture_birth_child").choices;
+    if let RestorationPolicy::Authored(plan) = &mut advancement.restoration {
+        plan[1].choices = advancement.choices[1].clone();
+    }
+    let dormant = CreatureBuild::from_recorded(
+        base.content().clone(),
+        base.species_id().clone(),
+        base.initial_attributes(),
+        base.ledger().clone(),
+        base.binding(),
+        advancement,
+        base.template_ids().to_vec(),
+    )
+    .unwrap();
+    assert!(dormant
+        .derive()
+        .unwrap()
+        .dormant_talents
+        .contains(&TalentId::new("fixture_birth_child").unwrap()));
+    assert!(dormant
+        .instantiate_seeded_racial_with_advancement(42, 1, &[ordinal_skill(3)])
+        .is_ok());
 }

@@ -163,6 +163,8 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                 self.assertLessEqual(stock["quantity"], 51 + 10 * depth)
             elif row["content"] in carriers:
                 self.assertIn(stock["kind"], ("carried", "not_carried"))
+                if row["content"] == "rogue.dragon":
+                    self.assertEqual(stock["kind"], "carried", "Dragon's birth chance is exactly 100%")
                 if stock["kind"] == "carried":
                     self.assertIn(stock["content"], ("rogue.ration", "rogue.clean_bandage"))
                     self.assertEqual(stock["quantity"], 1)
@@ -193,6 +195,14 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                                     {"kind": "class", "id": die["source"]} for die in recipe["hit_dice"]]
                 expected_sources += [{"kind": "racial"}] * (expected - len(expected_sources))
                 expected_choices += [{"purchases": [], "attribute": None}] * (expected - len(expected_choices))
+                authored = next(choice for band in stage["bands"]
+                                if band["depth"]["minimum"] <= depth and
+                                (band["depth"]["kind"] == "open" or depth <= band["depth"]["maximum"])
+                                for choice in band["choices"] if choice["archetype"] == row["content"])
+                for future in authored.get("advancement", []):
+                    if future["ordinal"] <= expected:
+                        expected_choices[future["ordinal"] - 1] = {
+                            "purchases": future["purchases"], "attribute": future.get("attribute")}
                 self.assertEqual([die["source"] for die in born["build"]["hd"]], expected_sources)
                 self.assertEqual(born["build"]["choices"], expected_choices)
                 self.assertEqual(born["build"]["restoration"], {"kind": "authored", "entries": [
@@ -302,6 +312,19 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
             self.assertEqual((stock["kind"], stock["content"], stock["quantity"]),
                              ("carried", "rogue.ration", 1))
 
+    def test_depth_thirty_one_dragon_birth_owns_rank_three_stock_and_source_free_restart(self):
+        # The actual full-26 policy owns the rank-three purchase at racial HD15.
+        # Only the starting anchor changes; this is birth/restore, not survival.
+        output, manifest = self.production_anchor_package(2, 31)
+        receipts = self.package_restart(output, 2, 31, 1, eligible_actors(manifest, 31),
+                                        seed=42, production_policy=True)
+        placed = [row for row in receipts[0]["decisions"][0]["result"]["attempts"]
+                  if row["kind"] == "placed" and row["content"] == "rogue.dragon"]
+        self.assertTrue(placed, "Fixed depth-31 entry must actually construct Dragon with its HD15 purchase")
+        for row in placed:
+            self.assertEqual(row["entity"]["carried_loot"]["kind"], "carried")
+            self.assertEqual(row["entity"]["carried_loot"]["quantity"], 1)
+
     def test_quagga_unicorn_candidate_boundary_survives_source_free_journal_restart(self):
         self.candidate_restart(2, 17, 0)
 
@@ -334,11 +357,16 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
             "chance": {"numerator": numerator, "denominator": denominator}}}
             for species, numerator, denominator in (("vampire", 1, 5), ("griffin", 1, 5),
                                                    ("jabberwock", 7, 10), ("medusa", 2, 5))]
+        choices.append({"archetype": "rogue.dragon", "weight": 1,
+            "carried_loot": {"version": 1, "pool": "rogue.vampire_supplies",
+                             "chance": {"numerator": 1, "denominator": 1}},
+            "advancement": [{"ordinal": ordinal, "purchases": [{"pool": "advancement", "selection": {
+                "kind": "skill_rank", "skill": "breath"}}]} for ordinal in (15, 20, 25)]})
         at_entry = next(band for band in stages[0]["bands"] if band["depth"]["minimum"] == 27)
         self.assertEqual(at_entry, {"depth": {"kind": "finite", "minimum": 27, "maximum": 27},
                                     "choices": choices})
         self.assertEqual(stages[0]["bands"][-1], {
-            "depth": {"kind": "open", "minimum": 31}, "choices": choices})
+            "depth": {"kind": "open", "minimum": 32}, "choices": choices})
         self.assertEqual(activation["carried_item_pools"]["rogue.vampire_supplies"], {
             "version": 1, "choices": [
                 {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
@@ -382,7 +410,7 @@ class RogueActivationSourceTests(unittest.TestCase):
         driver.directory, driver.bin, driver.suffix = Path("unused-output"), Path("compiler-bin"), ""
         manifest = encounter_sources()["manifest"]
         shape = population_shape(manifest)
-        self.assertEqual(shape, "reviewed_twenty_four_species_input")
+        self.assertEqual(shape, "reviewed_twenty_six_species_input")
 
         def candidate(output, compiler, **kwargs):
             return {"format": "tor-rogue-activation-inputs-v2",
@@ -449,6 +477,14 @@ class RogueActivationSourceTests(unittest.TestCase):
                 "kind": "carried", "content": "rogue.ration", "quantity": 1}}}]}}]}]
         self.check_production_anchor(
             "test_depth_twenty_one_jabberwock_birth_has_owned_rows_stock_and_source_free_restart", 1, 21, 2,
+            receipt)
+
+    def test_dragon_depth31_changes_only_production_mage_anchor(self):
+        receipt = [{"decisions": [{"result": {"attempts": [{"kind": "placed",
+            "content": "rogue.dragon", "entity": {"carried_loot": {
+                "kind": "carried", "content": "rogue.ration", "quantity": 1}}}]}}]}]
+        self.check_production_anchor(
+            "test_depth_thirty_one_dragon_birth_owns_rank_three_stock_and_source_free_restart", 2, 31, 42,
             receipt)
 
     def test_mixed_depth27_changes_only_production_mage_anchor(self):

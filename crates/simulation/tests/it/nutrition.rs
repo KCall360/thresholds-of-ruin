@@ -1004,6 +1004,7 @@ fn population_game(requirement: tor_simulation::nutrition::NutritionRequirement)
                         bands: vec![DepthBand {
                             depth: DepthInterval::Open { minimum: 1 },
                             choices: vec![PreparedActorChoice {
+                                advancement: vec![],
                                 carried_loot: None,
                                 depth_growth: tor_simulation::prepared_spawn::DepthGrowth::Fixed {},
                                 content: "newborn".into(),

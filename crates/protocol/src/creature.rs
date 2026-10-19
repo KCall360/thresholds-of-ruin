@@ -61,6 +61,7 @@ pub struct AbilityCost {
 #[serde(rename_all = "snake_case")]
 pub enum AbilityTargetKind {
     SelfStep,
+    DirectionalRay,
     SelfOnly,
     SelfOrAlly,
     Actor,
@@ -189,6 +190,9 @@ impl AbilityView {
                         }
                 }
                 (AbilityReach::Melee, AbilityTargetKind::Actor) => true,
+                (AbilityReach::Sight { range }, AbilityTargetKind::DirectionalRay) => {
+                    !self.basic_attack && (1..=16).contains(&range)
+                }
                 (AbilityReach::Sight { range }, AbilityTargetKind::Actor) => {
                     (1..=1000).contains(&range)
                 }

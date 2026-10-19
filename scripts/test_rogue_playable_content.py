@@ -99,7 +99,8 @@ class RoguePlayableContent(unittest.TestCase):
         self.assertEqual(set(actors), {"rogue.emu", "rogue.snake", "rogue.rattlesnake", "rogue.hobgoblin",
                          "rogue.zombie", "rogue.quagga", "rogue.centaur", "rogue.yeti", "rogue.troll", "rogue.wraith",
                          "rogue.black_unicorn", "rogue.ice_monster", "rogue.vampire", "rogue.jabberwock", "rogue.bat", "rogue.kestrel", "rogue.venus_flytrap", "rogue.griffin",
-                         "rogue.leprechaun", "rogue.nymph", "rogue.orc", "rogue.medusa", "rogue.phantom", "rogue.xeroc"})
+                         "rogue.leprechaun", "rogue.nymph", "rogue.orc", "rogue.medusa", "rogue.phantom", "rogue.xeroc",
+                         "rogue.aquator", "rogue.dragon"})
         for identity, category, sides in [("rogue.emu", "impact", 2), ("rogue.snake", "keen", 3)]:
             with self.subTest(species=identity):
                 build = actors[identity]["creature"]

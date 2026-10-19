@@ -244,3 +244,41 @@ fn public_plan_diagnostic_effect_count_is_eagerly_bounded() {
         );
     }
 }
+
+#[test]
+fn directional_public_aim_is_a_closed_unit_vector_without_target_or_path() {
+    use tor_protocol::ObservedAimView;
+    for x in -1_i32..=1 {
+        for y in -1_i32..=1 {
+            for z in -1_i32..=1 {
+                let value = serde_json::json!({"kind":"direction","direction":{"x":x,"y":y,"z":z}});
+                let decoded =
+                    serde_json::from_slice::<ObservedAimView>(&serde_json::to_vec(&value).unwrap());
+                let nonzero = [x, y, z]
+                    .iter()
+                    .filter(|component| **component != 0)
+                    .count();
+                assert_eq!(decoded.is_ok(), (1..=2).contains(&nonzero), "{value}");
+                if let Ok(decoded) = decoded {
+                    assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+                }
+            }
+        }
+    }
+    for raw in [
+        r#"{"kind":"direction","direction":{"x":2,"y":0,"z":0}}"#,
+        r#"{"kind":"direction","direction":{"x":1,"y":0}}"#,
+        r#"{"kind":"direction","direction":[1,0,0]}"#,
+        r#"{"kind":"direction","direction":"north"}"#,
+        r#"{"kind":"direction","direction":{"x":1,"x":-1,"y":0,"z":0}}"#,
+        r#"{"kind":"direction","direction":{"x":1,"y":0,"z":0,"region":1}}"#,
+        r#"{"kind":"direction","direction":{"x":1,"y":0,"z":0},"target":null}"#,
+        r#"{"kind":"direction","direction":{"x":1,"y":0,"z":0},"path":[]}"#,
+        r#"{"kind":"direction","direction":{"x":1,"y":0,"z":0},"occurrences":[]}"#,
+    ] {
+        assert!(
+            serde_json::from_slice::<ObservedAimView>(raw.as_bytes()).is_err(),
+            "{raw}"
+        );
+    }
+}
