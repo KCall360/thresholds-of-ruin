@@ -198,3 +198,27 @@ fn art_contract_long_hems_hang_free_while_short_edges_stay_neat() {
         assert!((waist.y - 0.04).abs() < 1e-5);
     }
 }
+
+#[test]
+fn art_contract_plate_lames_overlap_like_shingles() {
+    for (count, length, top_r, bottom_r) in [(3, 0.055, 0.064, 0.058), (4, 0.085, 0.104, 0.075)] {
+        let bands = geometry::lames(-0.04, count, length, top_r, bottom_r);
+        assert_eq!(bands.len(), count);
+        for pair in bands.windows(2) {
+            let (upper, lower) = (pair[0], pair[1]);
+            assert!(
+                lower.top > upper.bottom,
+                "plates must overlap, not open a gap"
+            );
+            assert!(
+                lower.top < upper.top,
+                "each plate starts below the one above"
+            );
+            // Where they overlap, the lower plate tucks inside the upper one.
+            assert!(lower.radius_top < upper.radius_bottom);
+        }
+        for band in bands {
+            assert!(band.top > band.bottom && band.radius_top > 0.0 && band.radius_bottom > 0.0);
+        }
+    }
+}
