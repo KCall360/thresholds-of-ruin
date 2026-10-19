@@ -1284,6 +1284,15 @@ fn plate_lames(
     }
 }
 
+/// How far each kind's leather jerkin or vest hangs free below the belt.
+pub(super) fn jerkin_peplum(style: Style) -> Option<f32> {
+    match style {
+        Style::Hero | Style::Scout => Some(0.08),
+        Style::Hobgoblin | Style::Orc => Some(0.06),
+        _ => None,
+    }
+}
+
 /// The skirt of each kind's tunic, robe or coat: its colour and length.
 fn tunic_skirt(l: &Look, tunic: Vec3) -> (Vec3, f32) {
     match l.style {
@@ -2706,6 +2715,36 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     skirt_color,
                     u64::from(l.v.shade),
                     matches!(style, Style::Medusa | Style::Leprechaun).then_some(l.trim),
+                );
+            },
+        );
+    }
+    // A jerkin's free region: below the belt its leather is no longer
+    // supported by the body and hangs as a short flared peplum over the tunic.
+    if let Some(length) = jerkin_peplum(style) {
+        let leather = LEATHER * if style == Style::Scout { 0.85 } else { 0.9 };
+        let top = Vec2::new(0.19 * b * hips_w, 0.143 * b);
+        let bottom = Vec2::new(0.215 * b * hips_w, 0.162 * b);
+        kit.drape(
+            hips,
+            Transform::from_xyz(0.0, 0.035, 0.0),
+            Drape::Skirt(length),
+            "peplum",
+            |p| {
+                draped_cloth(
+                    &mut p.satin,
+                    top,
+                    bottom,
+                    length,
+                    6,
+                    if matches!(style, Style::Hero | Style::Scout) {
+                        0.06
+                    } else {
+                        0.0
+                    },
+                    leather,
+                    u64::from(l.v.pattern),
+                    Some(leather * 0.7),
                 );
             },
         );

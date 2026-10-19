@@ -133,8 +133,10 @@ through turns, skirts sway with the stride, and cloth at rest barely stirs.
 This is a lagged swing, not cloth simulation, so contact with legs is not
 checked. Sentinel plate now articulates: overlapping lames form the
 rerebrace under each pauldron and the cuisses over the thigh, each band tucked
-inside the one above so bending cannot open a gap. Supported/eased/free torso
-regions remain to be done.
+inside the one above so bending cannot open a gap. Torso garments now have
+all three regions: supported at the shoulders, eased over the ribs, and free
+below the belt, where leather jerkins and vests hang as a short swinging
+peplum over the tunic skirt. Coats and robes keep their own skirts.
 
 ### 3. Separate composition concerns without a new content format
 
