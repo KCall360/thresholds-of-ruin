@@ -137,6 +137,10 @@ impl HumanoidBody {
             Style::Zombie => 0.92,
             Style::Vampire => 0.9,
             Style::Caster | Style::Scout => 0.92,
+            Style::Orc => 1.16,
+            Style::Troll => 1.26,
+            Style::Leprechaun | Style::Nymph | Style::Medusa => 0.95,
+            Style::Phantom | Style::Wraith => 0.9,
             _ => 1.0,
         } * [0.94, 1.0, 1.07][look.v.build as usize];
         let (shoulders, waist, hips_width): (f32, f32, f32) = if look.v.woman {
@@ -153,7 +157,12 @@ impl HumanoidBody {
             waist * profile.waist,
             hips_width * profile.hips,
         );
-        let arm_length = if look.style == Style::Yeti { 1.25 } else { 1.0 };
+        let arm_length = match look.style {
+            Style::Yeti => 1.25,
+            // Trolls' long arms hang to their knees.
+            Style::Troll => 1.18,
+            _ => 1.0,
+        };
         Self {
             woman: look.v.woman,
             build,

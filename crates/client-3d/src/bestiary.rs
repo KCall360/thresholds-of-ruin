@@ -47,16 +47,41 @@ const BEASTS: [&str; 8] = [
     "ember wisp",
     "ice monster",
 ];
+/// The Rogue scenario's own people and beasts, from their concept sheets.
+const ROGUE_FOLK: [&str; 7] = [
+    "orc",
+    "troll",
+    "leprechaun",
+    "nymph",
+    "medusa",
+    "phantom",
+    "wraith",
+];
+const ROGUE_BEASTS: [&str; 9] = [
+    "bat",
+    "kestrel",
+    "griffin",
+    "dragon",
+    "jabberwock",
+    "aquator",
+    "xeroc",
+    "venus flytrap",
+    "rattlesnake",
+];
+/// Each row performs as one group, in this order.
+const ROWS: [&[&str]; 4] = [&PEOPLE, &BEASTS, &ROGUE_FOLK, &ROGUE_BEASTS];
+const GROUP_TAGS: [&str; 4] = ["people", "beasts", "rogue-folk", "rogue-beasts"];
+const GROUPS: usize = ROWS.len();
 const WALK_TIME: f32 = 6.0;
 const MOVES_AT: f32 = 7.0;
-const CYCLE: f32 = 35.0;
+const CYCLE: f32 = 40.0;
 /// Close-up time for each creature after the group cycles.
 const PORTRAIT: f32 = 2.6;
 /// Seconds each row stands at rest with `--idles`.
 const IDLE: f32 = 12.0;
 
 /// Every move, in the order the groups perform them.
-const MOVES: [Move; 16] = [
+const MOVES: [Move; 19] = [
     Move::Strike,
     Move::Thrust,
     Move::Combo(false),
@@ -73,6 +98,9 @@ const MOVES: [Move; 16] = [
     Move::Guard(Accent::Gold),
     Move::Step,
     Move::Mend,
+    Move::Breath(Accent::Ember),
+    Move::Gaze,
+    Move::Bite(Accent::Teal),
 ];
 
 #[derive(Clone, Copy)]
@@ -92,10 +120,10 @@ fn schedule() -> Vec<(f32, Cue)> {
         .map(|(i, m)| (MOVES_AT + i as f32 * 1.38, Cue::Do(*m)))
         .collect();
     cues.extend([
-        (29.2, Cue::Hit),
-        (30.0, Cue::Miss),
-        (30.8, Cue::Die),
-        (34.4, Cue::Revive),
+        (34.0, Cue::Hit),
+        (34.8, Cue::Miss),
+        (35.6, Cue::Die),
+        (39.2, Cue::Revive),
     ]);
     cues
 }
@@ -117,9 +145,9 @@ fn shots() -> Vec<(f32, String)> {
         shots.push((at + m.impact() * m.duration() + 0.03, label(*m)));
     }
     shots.extend([
-        (29.3, "hurt".to_string()),
-        (30.2, "dodge".to_string()),
-        (33.0, "dead".to_string()),
+        (34.1, "hurt".to_string()),
+        (35.0, "dodge".to_string()),
+        (37.8, "dead".to_string()),
     ]);
     shots
 }
@@ -242,6 +270,15 @@ fn signature(name: &str) -> Move {
         "ice monster" => Move::Touch(Accent::Travel),
         "zombie" => Move::Hook,
         "hobgoblin" => Move::Bash,
+        "troll" | "jabberwock" => Move::Combo(false),
+        "leprechaun" => Move::Touch(Accent::Gold),
+        "nymph" => Move::Hex,
+        "medusa" => Move::Gaze,
+        "wraith" => Move::Drain,
+        "dragon" => Move::Breath(Accent::Ember),
+        "aquator" => Move::Touch(Accent::Amber),
+        "xeroc" => Move::Shove,
+        "rattlesnake" => Move::Bite(Accent::Teal),
         _ => Move::Strike,
     }
 }
@@ -252,10 +289,12 @@ struct Pacer {
     height: f32,
     name: &'static str,
     index: usize,
+    row: usize,
 }
 
 #[derive(Component)]
-struct Caption(Vec3, String);
+/// A name label: where it hangs, its text, and its row.
+struct Caption(Vec3, String, usize);
 
 #[derive(Resource, Default)]
 struct Director {
@@ -310,15 +349,49 @@ pub fn run(diagnostics: Diagnostics) {
 }
 
 fn spot(row: usize, i: usize) -> Vec3 {
-    if row == 0 {
-        Vec3::new(i as f32 * 1.6, -0.5, 0.0)
-    } else {
-        Vec3::new(1.0 + i as f32 * 1.75, -0.5, 4.5)
+    match row {
+        0 => Vec3::new(i as f32 * 1.6, -0.5, 0.0),
+        1 => Vec3::new(1.0 + i as f32 * 1.75, -0.5, ROW_DEPTH),
+        2 => Vec3::new(1.5 + i as f32 * 2.0, -0.5, ROW_DEPTH * 2.0),
+        _ => Vec3::new(i as f32 * 1.85, -0.5, ROW_DEPTH * 3.0),
     }
 }
 
+/// Distance between the rows of the stage.
+const ROW_DEPTH: f32 = 4.5;
+
+/// Where a row's first creature falls in the whole roster.
+fn row_start(row: usize) -> usize {
+    ROWS[..row].iter().map(|names| names.len()).sum()
+}
+
+/// A roster index as its row and its place in that row.
+fn row_of(index: usize) -> (usize, usize) {
+    let mut start = 0;
+    for (row, names) in ROWS.iter().enumerate() {
+        if index < start + names.len() {
+            return (row, index - start);
+        }
+        start += names.len();
+    }
+    (GROUPS - 1, ROWS[GROUPS - 1].len() - 1)
+}
+
 fn everyone() -> Vec<&'static str> {
-    PEOPLE.iter().chain(BEASTS.iter()).copied().collect()
+    ROWS.iter()
+        .flat_map(|names| names.iter().copied())
+        .collect()
+}
+
+/// The line-up roster: everyone, or only the families asked for by name.
+fn roster(diagnostics: &Diagnostics) -> Vec<&'static str> {
+    everyone()
+        .into_iter()
+        .filter(|name| {
+            diagnostics.families.is_empty()
+                || diagnostics.families.iter().any(|family| family == name)
+        })
+        .collect()
 }
 
 fn setup(
@@ -333,7 +406,7 @@ fn setup(
     let mut solids = HashMap::new();
     let mut open = HashSet::new();
     for x in -3..=17 {
-        for z in -3..=8 {
+        for z in -3..=17 {
             let key = (x as u64) << 32 ^ (z as u64) ^ 0x51;
             solids.insert(
                 IVec3::new(x, -1, z),
@@ -382,12 +455,12 @@ fn setup(
     }
     let cave_ms = profile_started.map(|time| time.elapsed().as_secs_f64() * 1000.0);
     let cast_started = profile_started.map(|_| std::time::Instant::now());
-    let rows: &[(usize, &[&str])] = if diagnostics.lineups {
-        &[]
+    let rows: Vec<(usize, &[&str])> = if diagnostics.lineups {
+        Vec::new()
     } else {
-        &[(0, &PEOPLE[..]), (1, &BEASTS[..])]
+        ROWS.iter().copied().enumerate().collect()
     };
-    for &(row, names) in rows {
+    for (row, names) in rows {
         for (i, name) in names.iter().enumerate() {
             let home = spot(row, i);
             let look = Look::preview(
@@ -406,7 +479,8 @@ fn setup(
                         home,
                         height: look.height(),
                         name,
-                        index: row * PEOPLE.len() + i,
+                        index: row_start(row) + i,
+                        row,
                     },
                     anim,
                     Transform::from_translation(home),
@@ -433,7 +507,7 @@ fn setup(
             }
             commands.entity(entity).insert(rig);
             commands.spawn((
-                Caption(home + Vec3::new(0.0, 0.0, 0.7), name.to_string()),
+                Caption(home + Vec3::new(0.0, 0.0, 0.7), name.to_string(), row),
                 Text::new(*name),
                 TextFont {
                     font_size: 13.0,
@@ -448,7 +522,7 @@ fn setup(
         }
     }
     for x in [1.0, 7.0, 13.0] {
-        for z in [1.8, 6.0] {
+        for z in [1.8, 6.0, 10.5, 15.0] {
             commands.spawn((
                 PointLight {
                     color: Color::srgb(1.0, 0.75, 0.48),
@@ -521,8 +595,8 @@ fn direct(
         Some(
             diagnostics
                 .quit_after
-                .unwrap_or(CYCLE * 2.0)
-                .min(CYCLE * 2.0),
+                .unwrap_or(CYCLE * GROUPS as f32)
+                .min(CYCLE * GROUPS as f32),
         )
     } else {
         diagnostics.quit_after
@@ -548,22 +622,24 @@ fn direct(
     let group = (now / CYCLE) as usize;
     let mut shots_now: Vec<String> = Vec::new();
     if diagnostics.idles {
-        // Everyone at rest, people then beasts, with a shot every so often.
-        for (_, mut anim, _, _) in &mut actors {
+        // Everyone at rest, one row at a time, with a shot every so often.
+        let showing = ((now / IDLE) as usize).min(GROUPS - 1);
+        for (pacer, mut anim, _, mut visibility) in &mut actors {
             anim.target_yaw = Some(0.0);
+            *visibility = shown(pacer.row == showing);
         }
         let mut at = 1.0;
-        while at < IDLE * 2.0 {
+        while at < IDLE * GROUPS as f32 {
             if crossed(at) {
-                let tag = if at < IDLE { "people" } else { "beasts" };
+                let tag = GROUP_TAGS[((at / IDLE) as usize).min(GROUPS - 1)];
                 shots_now.push(format!("idle-{tag}-{at:04.1}"));
             }
             at += 1.1;
         }
-        if diagnostics.capture.is_some() && now > IDLE * 2.0 + 0.5 && pending.is_empty() {
+        if diagnostics.capture.is_some() && now > IDLE * GROUPS as f32 + 0.5 && pending.is_empty() {
             exit.write(AppExit::Success);
         }
-    } else if group < 2 {
+    } else if group < GROUPS {
         let base = group as f32 * CYCLE;
         let t = now - base;
         let study_offset = diagnostics.travel_study.then(|| travel_study_offset(t));
@@ -572,7 +648,10 @@ fn direct(
         } else {
             schedule()
         };
-        for (pacer, mut anim, mut transform, _) in &mut actors {
+        for (pacer, mut anim, mut transform, mut visibility) in &mut actors {
+            // Only the performing row is shown, so no other row stands
+            // between it and the camera.
+            *visibility = shown(pacer.row == group);
             // Both paths return home and keep neighbours apart. The study
             // retains heading through stops to expose actual contact recovery.
             if let Some(offset) = study_offset {
@@ -599,7 +678,7 @@ fn direct(
                 }
             }
         }
-        let tag = if group == 0 { "people" } else { "beasts" };
+        let tag = GROUP_TAGS[group];
         let moments = if diagnostics.travel_study {
             travel_study_shots()
         } else {
@@ -612,7 +691,7 @@ fn direct(
         }
     } else {
         // Portraits: each creature close up, at rest and then in its signature move.
-        let start = CYCLE * 2.0;
+        let start = CYCLE * GROUPS as f32;
         let current = ((now - start) / PORTRAIT).max(0.0) as usize;
         for (pacer, mut anim, mut transform, mut visibility) in &mut actors {
             transform.translation = pacer.home;
@@ -635,6 +714,8 @@ fn direct(
                 }
                 continue;
             }
+            // Neighbours may stand in front; show only the creature in view.
+            *visibility = shown(pacer.index == current);
             if crossed(start) {
                 anim.dead = None;
             }
@@ -761,7 +842,7 @@ fn lineup(
     if !diagnostics.lineups {
         return;
     }
-    let names = everyone();
+    let names = roster(&diagnostics);
     // Preview deadlines use real time: animation time clamps slow frames to
     // 250 ms, making a four-second capture take minutes on software DX12.
     // Stop at each view and family boundary so a long frame cannot skip a
@@ -807,7 +888,7 @@ fn lineup(
             let want = seeds.len() % 2 == 0;
             if look.woman() == want
                 || j > 60
-                || !matches!(name, n if PEOPLE.contains(&n) || n == "centaur")
+                || !matches!(name, n if PEOPLE.contains(&n) || ROGUE_FOLK.contains(&n) || n == "centaur")
             {
                 seeds.push(seed);
             }
@@ -985,7 +1066,7 @@ fn clock(time: &Time, diagnostics: &Diagnostics, director: &Director) -> f32 {
     }
     (time.elapsed_secs() - diagnostics.capture_warmup).max(0.0)
         + if diagnostics.portraits {
-            CYCLE * 2.0
+            CYCLE * GROUPS as f32
         } else {
             0.0
         }
@@ -1003,28 +1084,30 @@ fn camera(
     }
     let now = clock(&time, &diagnostics, &director);
     let group = if diagnostics.idles {
-        usize::from(now >= IDLE)
+        ((now / IDLE) as usize).min(GROUPS - 1)
     } else if diagnostics.travel_study {
-        ((now / CYCLE) as usize).min(1)
+        ((now / CYCLE) as usize).min(GROUPS - 1)
     } else {
         (now / CYCLE) as usize
     };
-    let (focus, offset) = if group < 2 {
-        let (focus, width) = if group == 0 {
-            (Vec3::new(7.2, 0.45, 0.0), 14.4)
-        } else {
-            (Vec3::new(7.1, 0.35, 4.5), 17.0)
+    let (focus, offset) = if group < GROUPS {
+        // Frame the whole row from its first to its last creature.
+        let names = ROWS[group];
+        let (first, last) = (spot(group, 0), spot(group, names.len() - 1));
+        let (focus, width) = match group {
+            0 => (Vec3::new(7.2, 0.45, 0.0), 14.4),
+            1 => (Vec3::new(7.1, 0.35, ROW_DEPTH), 17.0),
+            _ => (
+                Vec3::new((first.x + last.x) * 0.5, 0.4, first.z),
+                (last.x - first.x) * 1.25 + 3.0,
+            ),
         };
         let d = diagnostics.distance.unwrap_or(width * 0.62);
         (focus, Vec3::new(0.0, d * 0.42, d * 0.9))
     } else {
         let names = everyone();
-        let index = (((now - CYCLE * 2.0) / PORTRAIT) as usize).min(names.len() - 1);
-        let (row, i) = if index < PEOPLE.len() {
-            (0, index)
-        } else {
-            (1, index - PEOPLE.len())
-        };
+        let index = (((now - CYCLE * GROUPS as f32) / PORTRAIT) as usize).min(names.len() - 1);
+        let (row, i) = row_of(index);
         let home = spot(row, i);
         let name = names[index];
         let height = Look::preview(
@@ -1044,6 +1127,14 @@ fn camera(
     }
 }
 
+fn shown(visible: bool) -> Visibility {
+    if visible {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    }
+}
+
 fn captions(
     time: Res<Time>,
     diagnostics: Res<Diagnostics>,
@@ -1054,14 +1145,15 @@ fn captions(
     let Ok((camera, eye)) = camera.single() else {
         return;
     };
-    let portraits =
-        !diagnostics.travel_study && clock(&time, &diagnostics, &director) >= CYCLE * 2.0;
+    let now = clock(&time, &diagnostics, &director);
+    let portraits = !diagnostics.travel_study && now >= CYCLE * GROUPS as f32;
+    let row = if diagnostics.idles {
+        ((now / IDLE) as usize).min(GROUPS - 1)
+    } else {
+        ((now / CYCLE) as usize).min(GROUPS - 1)
+    };
     for (caption, mut node, mut visibility) in &mut captions {
-        *visibility = if portraits {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        };
+        *visibility = shown(!portraits && caption.2 == row);
         if let Ok(at) = camera.world_to_viewport(eye, caption.0) {
             node.left = Val::Px(at.x - caption.1.len() as f32 * 3.4);
             node.top = Val::Px(at.y);

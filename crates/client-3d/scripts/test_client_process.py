@@ -125,6 +125,29 @@ class Native3DProcesses(ProcessTestCase):
                   if "ERROR" in line and any(term in line.lower() for term in ("shader", "pipeline", "wgpu"))]
         self.assertFalse(errors, "\n".join(errors)[-2500:])
 
+    def test_rogue_family_lineups_render_their_own_bodies_and_finish(self):
+        """The Rogue monsters' own recipes reach real GPU frames: a flier, a
+        winged beast, a rooted plant and a spectral body, each in a line-up."""
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        captures = self.directory / "rogue-lineup"
+        captures.mkdir(parents=True)
+        # Line-ups keep the bestiary's order whatever order the names are given in.
+        families = ["phantom", "bat", "dragon", "venus flytrap"]
+        window = self.launch("tor-client-3d", [
+            "--lineups", "--family", ",".join(reversed(families)), "--capture", captures, "--capture-warmup", "2",
+        ], executable=executable)
+        self.assertEqual(window.child.wait(timeout=240), 0, "line-ups must finish once every family is captured")
+        for index, name in enumerate(families):
+            for view in ("line", "close-a", "close-b"):
+                image = captures / f"{index:02d}-{view}-{name.replace(' ', '_')}.png"
+                self.assertTrue(image.exists(), f"missing {image.name}")
+                data = image.read_bytes()
+                self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+                self.assertEqual(data[-12:], b"\x00\x00\x00\x00IEND\xaeB`\x82", image.name)
+                self.assertGreater(len(data), 4096, image.name)
+        # Only the named families are lined up.
+        self.assertEqual(len(list(captures.glob("*.png"))), len(families) * 3)
+
     def own_private_backend_cleanup(self, pid):
         """Retain an OS process handle so failed tests cannot leak a backend
         or accidentally terminate a later process that reuses its PID.

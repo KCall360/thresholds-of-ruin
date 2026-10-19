@@ -121,3 +121,27 @@ fn slow_lineup_readbacks_preserve_each_view_and_render_new_families_before_captu
         screenshot(&mut app);
     }
 }
+
+#[test]
+fn every_bestiary_creature_has_a_model_and_families_filter_the_line_ups() {
+    let names = everyone();
+    assert_eq!(names.len(), 34, "people, beasts and both Rogue rows");
+    for name in &names {
+        assert_ne!(
+            crate::showcase::creature(name),
+            tor_client_3d_model::CreatureModel::Placeholder,
+            "{name}"
+        );
+    }
+    for (index, name) in names.iter().enumerate() {
+        let (row, i) = row_of(index);
+        assert_eq!(ROWS[row][i], *name);
+        assert_eq!(row_start(row) + i, index);
+    }
+    let diagnostics = Diagnostics {
+        families: vec!["venus flytrap".into(), "dragon".into()],
+        ..default()
+    };
+    assert_eq!(roster(&diagnostics), vec!["dragon", "venus flytrap"]);
+    assert_eq!(roster(&Diagnostics::default()), names);
+}

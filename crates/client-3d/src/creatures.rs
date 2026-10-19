@@ -19,6 +19,8 @@ pub enum Plan {
     Centaur,
     Serpent,
     Floater,
+    /// Rooted in place: a plant on its stem.
+    Rooted,
     Marker,
 }
 
@@ -153,6 +155,42 @@ enum Style {
     Wisp,
     Ice,
     Common,
+    Orc,
+    Troll,
+    Leprechaun,
+    Nymph,
+    Medusa,
+    Phantom,
+    Wraith,
+    Bat,
+    Kestrel,
+    Griffin,
+    Dragon,
+    Jabberwock,
+    Aquator,
+    Xeroc,
+    Flytrap,
+    Rattlesnake,
+}
+
+impl Style {
+    /// Winged creatures always drawn on the wing, never perched.
+    fn flies(self) -> bool {
+        matches!(self, Style::Bat | Style::Kestrel)
+    }
+
+    /// See-through in every light: its normal look, not a hidden state.
+    fn ghostly(self) -> bool {
+        self == Style::Phantom
+    }
+
+    /// The four-legged Rogue beasts built by their own recipes.
+    fn rogue_beast(self) -> bool {
+        matches!(
+            self,
+            Style::Griffin | Style::Dragon | Style::Jabberwock | Style::Aquator | Style::Xeroc
+        )
+    }
 }
 
 const LEATHER: Vec3 = Vec3::new(0.34, 0.2, 0.12);
@@ -193,6 +231,13 @@ impl Look {
                 | Style::Hobgoblin
                 | Style::Centaur
                 | Style::Common
+                | Style::Orc
+                | Style::Troll
+                | Style::Leprechaun
+                | Style::Nymph
+                | Style::Medusa
+                | Style::Phantom
+                | Style::Wraith
         );
         look.v = if model == CreatureModel::Placeholder {
             Variant::default()
@@ -308,6 +353,77 @@ impl Look {
                     Vec3::new(0.5, 0.52, 0.56),
                     Vec3::new(0.66, 0.56, 0.5),
                 ][v.shade as usize];
+            }
+            Style::Orc => {
+                self.skin = [
+                    Vec3::new(0.52, 0.6, 0.26),
+                    Vec3::new(0.46, 0.56, 0.24),
+                    Vec3::new(0.58, 0.62, 0.3),
+                    Vec3::new(0.42, 0.52, 0.28),
+                    Vec3::new(0.55, 0.56, 0.22),
+                ][v.skin as usize];
+            }
+            Style::Troll => {
+                self.skin = [
+                    Vec3::new(0.66, 0.56, 0.24),
+                    Vec3::new(0.6, 0.52, 0.22),
+                    Vec3::new(0.7, 0.6, 0.3),
+                    Vec3::new(0.56, 0.5, 0.26),
+                    Vec3::new(0.64, 0.5, 0.2),
+                ][v.skin as usize];
+            }
+            Style::Leprechaun | Style::Nymph => {
+                self.skin = SKINS[(v.skin as usize).min(3)];
+                if self.style == Style::Leprechaun {
+                    // Each wears a coat of their own green.
+                    self.cloth = [
+                        Vec3::new(0.12, 0.38, 0.22),
+                        Vec3::new(0.1, 0.32, 0.18),
+                        Vec3::new(0.16, 0.42, 0.2),
+                        Vec3::new(0.08, 0.34, 0.26),
+                    ][v.pattern as usize];
+                } else {
+                    self.cloth = [
+                        Vec3::new(0.3, 0.5, 0.18),
+                        Vec3::new(0.24, 0.44, 0.2),
+                        Vec3::new(0.38, 0.52, 0.2),
+                        Vec3::new(0.28, 0.48, 0.26),
+                    ][v.pattern as usize];
+                }
+            }
+            Style::Medusa => {
+                self.skin = [
+                    Vec3::new(0.62, 0.66, 0.4),
+                    Vec3::new(0.56, 0.62, 0.38),
+                    Vec3::new(0.66, 0.64, 0.42),
+                    Vec3::new(0.52, 0.58, 0.4),
+                    Vec3::new(0.6, 0.6, 0.36),
+                ][v.skin as usize];
+                self.cloth *= 1.0 + 0.12 * s;
+            }
+            Style::Phantom | Style::Wraith => {
+                self.skin = [
+                    Vec3::new(0.66, 0.72, 0.82),
+                    Vec3::new(0.6, 0.66, 0.78),
+                    Vec3::new(0.7, 0.74, 0.8),
+                    Vec3::new(0.62, 0.7, 0.76),
+                    Vec3::new(0.56, 0.62, 0.74),
+                ][v.skin as usize];
+                self.cloth *= 1.0 + 0.1 * s;
+            }
+            Style::Bat
+            | Style::Kestrel
+            | Style::Griffin
+            | Style::Dragon
+            | Style::Jabberwock
+            | Style::Aquator
+            | Style::Xeroc
+            | Style::Flytrap => {
+                self.skin *= 1.0 + 0.08 * s;
+            }
+            Style::Rattlesnake => {
+                self.skin *= 1.0 + 0.1 * s;
+                self.cloth *= 1.0 - 0.06 * s;
             }
             _ => {}
         }
@@ -466,7 +582,10 @@ impl Look {
                 )
             };
         }
-        if matches!(model, CreatureModel::Hobgoblin | CreatureModel::Troll) {
+        if let Some(look) = Self::rogue(model, &base) {
+            return look;
+        }
+        if model == CreatureModel::Hobgoblin {
             return Look {
                 scale: 0.95,
                 hunch: 0.15,
@@ -547,6 +666,192 @@ impl Look {
         base(Plan::Biped, Style::Common, SKIN, tint * 0.6, LEATHER)
     }
 
+    /// The Rogue scenario's own monsters, each from its concept sheet.
+    fn rogue(
+        model: CreatureModel,
+        base: &dyn Fn(Plan, Style, Vec3, Vec3, Vec3) -> Look,
+    ) -> Option<Look> {
+        let rgb = Vec3::new;
+        let look = match model {
+            CreatureModel::Orc => Look {
+                scale: 1.04,
+                hunch: 0.08,
+                stride: 0.9,
+                ..base(
+                    Plan::Biped,
+                    Style::Orc,
+                    rgb(0.52, 0.6, 0.26),
+                    rgb(0.36, 0.22, 0.13),
+                    rgb(0.62, 0.12, 0.12),
+                )
+            },
+            CreatureModel::Troll => Look {
+                scale: 1.14,
+                hunch: 0.22,
+                stride: 0.8,
+                ..base(
+                    Plan::Biped,
+                    Style::Troll,
+                    rgb(0.66, 0.56, 0.24),
+                    rgb(0.36, 0.38, 0.22),
+                    rgb(0.32, 0.18, 0.12),
+                )
+            },
+            CreatureModel::Leprechaun => Look {
+                scale: 0.76,
+                stride: 1.25,
+                ..base(
+                    Plan::Biped,
+                    Style::Leprechaun,
+                    SKIN,
+                    rgb(0.12, 0.38, 0.22),
+                    GILT,
+                )
+            },
+            CreatureModel::Nymph => Look {
+                scale: 0.96,
+                stride: 1.05,
+                ..base(
+                    Plan::Biped,
+                    Style::Nymph,
+                    SKIN,
+                    rgb(0.3, 0.5, 0.18),
+                    rgb(0.8, 0.66, 0.25),
+                )
+            },
+            CreatureModel::Medusa => Look {
+                eyes: Some(Accent::Amber),
+                ..base(
+                    Plan::Biped,
+                    Style::Medusa,
+                    rgb(0.62, 0.66, 0.4),
+                    rgb(0.42, 0.12, 0.24),
+                    rgb(0.78, 0.52, 0.24),
+                )
+            },
+            CreatureModel::Phantom => Look {
+                eyes: Some(Accent::Travel),
+                stride: 0.9,
+                ..base(
+                    Plan::Biped,
+                    Style::Phantom,
+                    rgb(0.66, 0.72, 0.82),
+                    rgb(0.36, 0.3, 0.55),
+                    rgb(0.24, 0.2, 0.36),
+                )
+            },
+            CreatureModel::Wraith => Look {
+                scale: 1.04,
+                hunch: 0.1,
+                eyes: Some(Accent::Teal),
+                stride: 0.85,
+                ..base(
+                    Plan::Biped,
+                    Style::Wraith,
+                    rgb(0.62, 0.68, 0.76),
+                    rgb(0.18, 0.2, 0.26),
+                    rgb(0.18, 0.42, 0.42),
+                )
+            },
+            CreatureModel::Bat => Look {
+                scale: 0.82,
+                stride: 1.4,
+                ..base(
+                    Plan::Bird,
+                    Style::Bat,
+                    rgb(0.56, 0.32, 0.18),
+                    rgb(0.42, 0.2, 0.26),
+                    rgb(0.86, 0.74, 0.56),
+                )
+            },
+            CreatureModel::Kestrel => Look {
+                scale: 0.8,
+                stride: 1.4,
+                ..base(
+                    Plan::Bird,
+                    Style::Kestrel,
+                    rgb(0.72, 0.38, 0.18),
+                    rgb(0.92, 0.8, 0.62),
+                    rgb(0.52, 0.56, 0.62),
+                )
+            },
+            CreatureModel::Griffin => Look {
+                scale: 1.06,
+                stride: 0.8,
+                ..base(
+                    Plan::Quadruped,
+                    Style::Griffin,
+                    rgb(0.74, 0.5, 0.24),
+                    rgb(0.94, 0.88, 0.72),
+                    rgb(0.12, 0.42, 0.42),
+                )
+            },
+            CreatureModel::Dragon => Look {
+                scale: 1.22,
+                stride: 0.65,
+                ..base(
+                    Plan::Quadruped,
+                    Style::Dragon,
+                    rgb(0.72, 0.2, 0.12),
+                    rgb(0.9, 0.74, 0.52),
+                    rgb(0.5, 0.12, 0.14),
+                )
+            },
+            CreatureModel::Jabberwock => Look {
+                scale: 1.12,
+                stride: 0.75,
+                ..base(
+                    Plan::Quadruped,
+                    Style::Jabberwock,
+                    rgb(0.32, 0.46, 0.26),
+                    rgb(0.88, 0.78, 0.6),
+                    rgb(0.9, 0.48, 0.16),
+                )
+            },
+            CreatureModel::Aquator => Look {
+                scale: 0.95,
+                stride: 1.6,
+                ..base(
+                    Plan::Quadruped,
+                    Style::Aquator,
+                    rgb(0.16, 0.5, 0.52),
+                    rgb(0.9, 0.84, 0.66),
+                    rgb(0.9, 0.42, 0.12),
+                )
+            },
+            CreatureModel::Xeroc => Look {
+                scale: 0.92,
+                stride: 1.7,
+                ..base(
+                    Plan::Quadruped,
+                    Style::Xeroc,
+                    rgb(0.46, 0.28, 0.34),
+                    rgb(0.78, 0.66, 0.48),
+                    rgb(0.62, 0.16, 0.2),
+                )
+            },
+            CreatureModel::Flytrap => base(
+                Plan::Rooted,
+                Style::Flytrap,
+                rgb(0.36, 0.58, 0.22),
+                rgb(0.72, 0.18, 0.16),
+                rgb(0.94, 0.88, 0.66),
+            ),
+            CreatureModel::Rattlesnake => Look {
+                scale: 1.45,
+                ..base(
+                    Plan::Serpent,
+                    Style::Rattlesnake,
+                    rgb(0.5, 0.48, 0.24),
+                    rgb(0.78, 0.64, 0.36),
+                    rgb(0.88, 0.82, 0.62),
+                )
+            },
+            _ => return None,
+        };
+        Some(look)
+    }
+
     /// Whether this individual is a woman.
     pub fn woman(&self) -> bool {
         self.v.woman
@@ -554,14 +859,21 @@ impl Look {
 
     /// Height of the head's top, for labels.
     pub fn height(&self) -> f32 {
-        let h = match self.plan {
-            Plan::Biped => 1.85,
-            Plan::Bird => 1.75,
-            Plan::Quadruped => 1.7,
-            Plan::Centaur => 2.2,
-            Plan::Serpent => 0.6,
-            Plan::Floater => 1.6,
-            Plan::Marker => 1.0,
+        let h = match (self.plan, self.style) {
+            (_, Style::Bat | Style::Kestrel) => 1.9,
+            (_, Style::Dragon) => 1.55,
+            (_, Style::Griffin) => 1.45,
+            (_, Style::Jabberwock) => 1.8,
+            (_, Style::Aquator) => 0.85,
+            (_, Style::Xeroc) => 0.72,
+            (Plan::Biped, _) => 1.85,
+            (Plan::Bird, _) => 1.75,
+            (Plan::Quadruped, _) => 1.7,
+            (Plan::Centaur, _) => 2.2,
+            (Plan::Serpent, _) => 0.6,
+            (Plan::Floater, _) => 1.6,
+            (Plan::Rooted, _) => 1.3,
+            (Plan::Marker, _) => 1.0,
         };
         h * self.scale
     }
@@ -618,8 +930,15 @@ pub enum J {
     HoofFR,
     HoofBL,
     HoofBR,
+    /// Wings: the arm from the shoulder, and the hand that carries the tip.
+    WingL,
+    WingR,
+    WingTipL,
+    WingTipR,
+    /// A lower jaw, or a flytrap's lower lobe.
+    Jaw,
 }
-const JOINTS: usize = 33;
+const JOINTS: usize = 38;
 
 #[derive(Component)]
 pub struct Rig {
@@ -637,6 +956,12 @@ pub struct Rig {
     style: Style,
     /// Overall size, applied to whole-body offsets (lunges, falls).
     scale: f32,
+    /// A four-legged beast's ankle height with its soles on the floor.
+    ankle_floor: f32,
+    /// Leg length relative to a horse's, scaling crouch and step height.
+    legs: f32,
+    /// Half the body's width, the height it lies at when fallen on its side.
+    girth: f32,
 }
 
 impl Rig {
@@ -682,6 +1007,12 @@ pub enum Move {
     Step,
     /// Kneeling to bind one's wounds (Bind Wounds).
     Mend,
+    /// Fire or frost breathed from an open jaw (Breath Weapon).
+    Breath(Accent),
+    /// A confusing stare (Confusing Gaze).
+    Gaze,
+    /// A venomous or corroding bite.
+    Bite(Accent),
 }
 
 impl Move {
@@ -701,6 +1032,12 @@ impl Move {
             "rogue.fear" => Move::Fear,
             "rogue.drain_vitality" => Move::Drain,
             "rogue.freezing_touch" => Move::Touch(Accent::Travel),
+            "rogue.breath_weapon" => Move::Breath(Accent::Ember),
+            "rogue.confusing_gaze" => Move::Gaze,
+            "rogue.corrode" => Move::Touch(Accent::Amber),
+            "rogue.energy_drain" => Move::Drain,
+            "rogue.ambush_from_guise" => Move::Shove,
+            "rogue.venomous_bite" => Move::Bite(Accent::Teal),
             "brace_for_impact" => Move::Guard(Accent::Gold),
             "shell_impact" | "shell_keen" | "shell_energy" => Move::Guard(Accent::Teal),
             "guarded_step" => Move::Step,
@@ -728,6 +1065,9 @@ impl Move {
             Move::Guard(_) => 1.1,
             Move::Step => 0.8,
             Move::Mend => 1.5,
+            Move::Breath(_) => 1.2,
+            Move::Gaze => 1.0,
+            Move::Bite(_) => 0.6,
         }
     }
 
@@ -751,6 +1091,9 @@ impl Move {
             Move::Guard(_) => 0.25,
             Move::Step => 0.3,
             Move::Mend => 0.6,
+            Move::Breath(_) => 0.5,
+            Move::Gaze => 0.5,
+            Move::Bite(_) => 0.42,
         }
     }
 
@@ -855,6 +1198,8 @@ mod geometry;
 #[cfg(test)]
 mod reaction_tests;
 mod robe;
+#[cfg(test)]
+mod rogue_tests;
 
 pub use animation::{animate, Boredom, BORED_AFTER};
 pub use corpse::{snuff, spawn_corpse, Snuffed};

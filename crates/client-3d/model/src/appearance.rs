@@ -31,6 +31,21 @@ pub enum CreatureModel {
     Snake,
     Wisp,
     Ice,
+    Orc,
+    Leprechaun,
+    Nymph,
+    Medusa,
+    Phantom,
+    Wraith,
+    Bat,
+    Kestrel,
+    Griffin,
+    Dragon,
+    Jabberwock,
+    Aquator,
+    Xeroc,
+    Flytrap,
+    Rattlesnake,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -94,6 +109,21 @@ fn creatures() -> &'static AssetTable<CreatureModel> {
             ("creature.serpent.snake", CreatureModel::Snake),
             ("creature.elemental.ember", CreatureModel::Wisp),
             ("creature.elemental.ice", CreatureModel::Ice),
+            ("creature.humanoid.orc", CreatureModel::Orc),
+            ("creature.fey.leprechaun", CreatureModel::Leprechaun),
+            ("creature.fey.nymph", CreatureModel::Nymph),
+            ("creature.medusa", CreatureModel::Medusa),
+            ("creature.undead.phantom", CreatureModel::Phantom),
+            ("creature.undead.wraith", CreatureModel::Wraith),
+            ("creature.bat", CreatureModel::Bat),
+            ("creature.bird.kestrel", CreatureModel::Kestrel),
+            ("creature.griffin", CreatureModel::Griffin),
+            ("creature.dragon", CreatureModel::Dragon),
+            ("creature.jabberwock", CreatureModel::Jabberwock),
+            ("creature.aquator", CreatureModel::Aquator),
+            ("creature.xeroc", CreatureModel::Xeroc),
+            ("creature.plant.venus.flytrap", CreatureModel::Flytrap),
+            ("creature.serpent.rattlesnake", CreatureModel::Rattlesnake),
         ])
     })
 }
@@ -173,5 +203,54 @@ fn item_shape(palette: &Palette, class: ItemClass, asset: Option<&str>) -> ItemM
         ItemClass::Coin => ItemModel::Coins,
         ItemClass::Gem => ItemModel::Gem,
         ItemClass::Misc => ItemModel::Placeholder,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+    use tor_protocol::{PaletteBody, PaletteUpdate};
+
+    /// The monsters the Rogue scenario names in its dungeon asset list; the
+    /// player's own body is named elsewhere in the manifest.
+    fn rogue_creature_assets() -> BTreeSet<String> {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../scenarios/rogue-exploration/scenario.toml");
+        let text = std::fs::read_to_string(&manifest).expect("rogue scenario manifest");
+        let dungeon = text
+            .split("dungeon = [")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .expect("dungeon asset list");
+        dungeon
+            .split('"')
+            .filter(|token| token.starts_with("creature."))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn every_rogue_monster_resolves_to_its_own_model() {
+        let assets = rogue_creature_assets();
+        assert_eq!(assets.len(), 26, "one asset per Rogue monster: {assets:?}");
+        let mut palette = Palette::default();
+        palette.apply(&PaletteUpdate {
+            revision: 1,
+            body: PaletteBody::Full {
+                assets: assets.clone(),
+            },
+        });
+        let mut owners: BTreeMap<String, &str> = BTreeMap::new();
+        for asset in &assets {
+            let model = creature_model(&palette, Some(asset));
+            assert!(
+                !matches!(model, CreatureModel::Placeholder | CreatureModel::Humanoid),
+                "{asset} has no model of its own: {model:?}"
+            );
+            if let Some(other) = owners.insert(format!("{model:?}"), asset) {
+                panic!("{asset} and {other} share the {model:?} model");
+            }
+        }
     }
 }

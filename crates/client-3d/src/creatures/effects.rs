@@ -349,6 +349,47 @@ pub fn stage(
             );
             0.32
         }
+        Move::Breath(accent) => {
+            // A stream poured from the open jaw.
+            let mouth = caster + Vec3::Y * height * 0.72 + toward * 0.55;
+            for k in 0..5 {
+                bolt(
+                    commands,
+                    library,
+                    meshes,
+                    mouth,
+                    chest(target) + Vec3::Y * (k as f32 - 2.0) * 0.06,
+                    accent,
+                    impact + k as f32 * 0.07,
+                    0.1,
+                );
+            }
+            0.3
+        }
+        Move::Gaze => {
+            // The eyes kindle, and the stare crosses to the target's eyes.
+            let eyes = caster + Vec3::Y * height * 0.9 + toward * 0.12;
+            halo(
+                commands,
+                library,
+                meshes,
+                eyes,
+                Accent::Amber,
+                0.3,
+                impact * 0.6,
+            );
+            bolt(
+                commands,
+                library,
+                meshes,
+                eyes,
+                target.0 + Vec3::Y * target.1 * 0.9,
+                Accent::Violet,
+                impact,
+                0.0,
+            );
+            0.25
+        }
         Move::Drain => {
             // The life leaves the target and flows back into the caster.
             for k in 0..3 {
@@ -370,9 +411,13 @@ pub fn stage(
     if landed {
         let (accent, size) = match action {
             Move::Touch(accent) => (accent, 0.55),
+            Move::Bite(accent) => (accent, 0.4),
+            Move::Breath(accent) => (accent, 0.5),
             Move::Heavy => (Accent::Gold, 0.45),
             Move::Bash | Move::Shove => (Accent::Gold, 0.35),
-            Move::Cast(_) | Move::Hex | Move::Drain | Move::Fear => (Accent::White, 0.0),
+            Move::Cast(_) | Move::Hex | Move::Drain | Move::Fear | Move::Gaze => {
+                (Accent::White, 0.0)
+            }
             _ => (Accent::White, 0.32),
         };
         if size > 0.0 {
