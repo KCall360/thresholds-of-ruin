@@ -483,53 +483,59 @@ pub(super) fn biped_extras(
         Style::Orc => {
             // A red loincloth front and back, hanging from the belt.
             let red = l.trim;
-            kit.attach(hips, Transform::IDENTITY, "loincloth", |p| {
-                for front in [1.0f32, -1.0] {
-                    let down = Vec3::new(0.0, 1.0, -0.12 * front).normalize();
-                    p.matte.extrude(
-                        &[
-                            Vec2::new(-0.075 * b, 0.0),
-                            Vec2::new(0.075 * b, 0.0),
-                            Vec2::new(0.09 * b, -0.4),
-                            Vec2::new(0.0, -0.44),
-                            Vec2::new(-0.09 * b, -0.4),
-                        ],
-                        Vec3::new(0.0, 0.04, front * (pelvis.z + 0.03)),
-                        Vec3::X,
-                        down,
-                        0.012,
-                        red,
+            kit.drape(
+                hips,
+                Transform::IDENTITY,
+                Drape::Skirt(0.4),
+                "loincloth",
+                |p| {
+                    for front in [1.0f32, -1.0] {
+                        let down = Vec3::new(0.0, 1.0, -0.12 * front).normalize();
+                        p.matte.extrude(
+                            &[
+                                Vec2::new(-0.075 * b, 0.0),
+                                Vec2::new(0.075 * b, 0.0),
+                                Vec2::new(0.09 * b, -0.4),
+                                Vec2::new(0.0, -0.44),
+                                Vec2::new(-0.09 * b, -0.4),
+                            ],
+                            Vec3::new(0.0, 0.04, front * (pelvis.z + 0.03)),
+                            Vec3::X,
+                            down,
+                            0.012,
+                            red,
+                        );
+                        // A worked border near the hem.
+                        p.matte.extrude(
+                            &[
+                                Vec2::new(-0.088 * b, -0.33),
+                                Vec2::new(0.088 * b, -0.33),
+                                Vec2::new(0.09 * b, -0.36),
+                                Vec2::new(-0.09 * b, -0.36),
+                            ],
+                            Vec3::new(0.0, 0.04, front * (pelvis.z + 0.037)),
+                            Vec3::X,
+                            down,
+                            0.004,
+                            GILT * 0.8,
+                        );
+                    }
+                    p.metal.torus(
+                        Vec3::new(0.0, 0.07, pelvis.z + 0.045),
+                        Vec3::Z,
+                        0.035,
+                        0.01,
+                        14,
+                        4,
+                        Vec3::new(0.82, 0.58, 0.26),
                     );
-                    // A worked border near the hem.
-                    p.matte.extrude(
-                        &[
-                            Vec2::new(-0.088 * b, -0.33),
-                            Vec2::new(0.088 * b, -0.33),
-                            Vec2::new(0.09 * b, -0.36),
-                            Vec2::new(-0.09 * b, -0.36),
-                        ],
-                        Vec3::new(0.0, 0.04, front * (pelvis.z + 0.037)),
-                        Vec3::X,
-                        down,
-                        0.004,
-                        GILT * 0.8,
-                    );
-                }
-                p.metal.torus(
-                    Vec3::new(0.0, 0.07, pelvis.z + 0.045),
-                    Vec3::Z,
-                    0.035,
-                    0.01,
-                    14,
-                    4,
-                    Vec3::new(0.82, 0.58, 0.26),
-                );
-            });
+                },
+            );
         }
         Style::Troll => {
             // Ragged strips of the kilt and a hanging leather apron.
             let kilt = l.cloth;
-            kit.attach(hips, Transform::IDENTITY, "rags", |p| {
+            kit.drape(hips, Transform::IDENTITY, Drape::Skirt(0.3), "rags", |p| {
                 tatters(
                     &mut p.matte,
                     Vec3::Y * -0.16,
@@ -585,30 +591,36 @@ pub(super) fn biped_extras(
         Style::Nymph => {
             // Two layers of long leaves over the short skirt.
             let green = l.cloth;
-            kit.attach(hips, Transform::IDENTITY, "leaves", |p| {
-                for layer in 0..2 {
-                    let count = 13 + layer * 3;
-                    for k in 0..count {
-                        let a = (k as f32 + layer as f32 * 0.5) / count as f32 * TAU;
-                        let out = Vec3::new(a.sin(), 0.0, a.cos());
-                        let root = Vec3::new(
-                            a.sin() * pelvis.x * 1.05,
-                            0.04 - layer as f32 * 0.09,
-                            a.cos() * pelvis.z * 1.05,
-                        );
-                        let dir = (Vec3::NEG_Y + out * 0.35).normalize();
-                        let shade = 0.8 + 0.35 * rand(99, k + layer * 40);
-                        leaf(
-                            &mut p.matte,
-                            root,
-                            dir,
-                            0.16 + 0.05 * rand(100, k),
-                            0.045,
-                            green.lerp(l.trim, 0.25 * layer as f32) * shade,
-                        );
+            kit.drape(
+                hips,
+                Transform::IDENTITY,
+                Drape::Skirt(0.25),
+                "leaves",
+                |p| {
+                    for layer in 0..2 {
+                        let count = 13 + layer * 3;
+                        for k in 0..count {
+                            let a = (k as f32 + layer as f32 * 0.5) / count as f32 * TAU;
+                            let out = Vec3::new(a.sin(), 0.0, a.cos());
+                            let root = Vec3::new(
+                                a.sin() * pelvis.x * 1.05,
+                                0.04 - layer as f32 * 0.09,
+                                a.cos() * pelvis.z * 1.05,
+                            );
+                            let dir = (Vec3::NEG_Y + out * 0.35).normalize();
+                            let shade = 0.8 + 0.35 * rand(99, k + layer * 40);
+                            leaf(
+                                &mut p.matte,
+                                root,
+                                dir,
+                                0.16 + 0.05 * rand(100, k),
+                                0.045,
+                                green.lerp(l.trim, 0.25 * layer as f32) * shade,
+                            );
+                        }
                     }
-                }
-            });
+                },
+            );
         }
         Style::Medusa => {
             // Bronze discs on the shoulders, and serpents for hair.
@@ -650,18 +662,24 @@ pub(super) fn biped_extras(
                 (0.208 + length * 0.045) * b * body.hips_width,
                 (0.208 + length * 0.045) * 0.74 * b,
             );
-            kit.attach(hips, Transform::IDENTITY, "tatters", |p| {
-                tatters(
-                    &mut p.matte,
-                    Vec3::Y * (0.06 - length),
-                    hem,
-                    22,
-                    0.24,
-                    0.035,
-                    cloth,
-                    21,
-                );
-            });
+            kit.drape(
+                hips,
+                Transform::IDENTITY,
+                Drape::Skirt(length + 0.24),
+                "tatters",
+                |p| {
+                    tatters(
+                        &mut p.matte,
+                        Vec3::Y * (0.06 - length),
+                        hem,
+                        22,
+                        0.24,
+                        0.035,
+                        cloth,
+                        21,
+                    );
+                },
+            );
             for (fore, side) in [(J::ForeL, 1.0f32), (J::ForeR, -1.0)] {
                 if let Some(joint) = kit.rig.joint(fore) {
                     let sleeve = cloth * 0.95;
@@ -691,57 +709,63 @@ pub(super) fn biped_extras(
 fn wraith_cloak(kit: &mut Kit, l: &Look, body: HumanoidBody, torso: Entity) {
     let cloak = l.cloth * 0.8;
     let lining = l.trim * 0.7;
-    kit.attach(torso, Transform::from_xyz(0.0, 0.53, -0.15), "cloak", |p| {
-        let folds = 7;
-        for k in 0..folds {
-            let t = k as f32 / (folds - 1) as f32 * 2.0 - 1.0;
-            let top = Vec3::new(
-                t * 0.18 * body.profile.shoulders,
+    kit.drape(
+        torso,
+        Transform::from_xyz(0.0, 0.53, -0.15),
+        Drape::Cloak,
+        "cloak",
+        |p| {
+            let folds = 7;
+            for k in 0..folds {
+                let t = k as f32 / (folds - 1) as f32 * 2.0 - 1.0;
+                let top = Vec3::new(
+                    t * 0.18 * body.profile.shoulders,
+                    0.0,
+                    -0.01 - 0.02 * (1.0 - t * t),
+                );
+                let drop = 1.1 + 0.12 * rand(96, k);
+                let bottom = Vec3::new(
+                    t * 0.34 * body.profile.hips,
+                    -drop,
+                    -0.15 - 0.05 * (1.0 - t * t),
+                );
+                let mid = top.lerp(bottom, 0.5) + Vec3::new(0.0, 0.0, -0.03);
+                let c = if t.abs() > 0.9 {
+                    lining
+                } else {
+                    cloak * (0.92 + 0.08 * (k as f32 * 2.3).sin())
+                };
+                tube(
+                    &mut p.matte,
+                    &[top, mid, bottom],
+                    &[
+                        (0.045 * body.profile.shoulders, 0.025),
+                        (0.055, 0.03),
+                        (0.05 * body.profile.hips, 0.024),
+                    ],
+                    c,
+                );
+                // Each fold ends in torn rags.
+                strip(
+                    &mut p.matte,
+                    bottom,
+                    Vec3::new(t, 0.0, -1.0),
+                    Vec3::X,
+                    0.18 + 0.1 * rand(97, k),
+                    0.04,
+                    c * 0.9,
+                    41 + k,
+                );
+            }
+            p.matte.blob(
+                Vec3::ZERO,
+                Vec3::new(0.22 * body.profile.shoulders, 0.04, 0.06),
+                2,
                 0.0,
-                -0.01 - 0.02 * (1.0 - t * t),
+                cloak,
             );
-            let drop = 1.1 + 0.12 * rand(96, k);
-            let bottom = Vec3::new(
-                t * 0.34 * body.profile.hips,
-                -drop,
-                -0.15 - 0.05 * (1.0 - t * t),
-            );
-            let mid = top.lerp(bottom, 0.5) + Vec3::new(0.0, 0.0, -0.03);
-            let c = if t.abs() > 0.9 {
-                lining
-            } else {
-                cloak * (0.92 + 0.08 * (k as f32 * 2.3).sin())
-            };
-            tube(
-                &mut p.matte,
-                &[top, mid, bottom],
-                &[
-                    (0.045 * body.profile.shoulders, 0.025),
-                    (0.055, 0.03),
-                    (0.05 * body.profile.hips, 0.024),
-                ],
-                c,
-            );
-            // Each fold ends in torn rags.
-            strip(
-                &mut p.matte,
-                bottom,
-                Vec3::new(t, 0.0, -1.0),
-                Vec3::X,
-                0.18 + 0.1 * rand(97, k),
-                0.04,
-                c * 0.9,
-                41 + k,
-            );
-        }
-        p.matte.blob(
-            Vec3::ZERO,
-            Vec3::new(0.22 * body.profile.shoulders, 0.04, 0.06),
-            2,
-            0.0,
-            cloak,
-        );
-    });
+        },
+    );
 }
 
 /// Serpents in place of hair: each its own posable piece rooted in the scalp.

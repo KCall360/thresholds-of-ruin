@@ -102,6 +102,24 @@ impl Kit<'_, '_, '_> {
             })
     }
 
+    /// Hanging cloth on its own entity, swung by the animation.
+    fn drape(
+        &mut self,
+        parent: Entity,
+        at: Transform,
+        kind: Drape,
+        part: &str,
+        build: impl FnOnce(&mut Parts),
+    ) {
+        let model = self.part(part, build);
+        let e = self.commands.spawn((at, Visibility::default())).id();
+        self.commands
+            .entity(e)
+            .with_children(|p| model.attach_scaled(p, Vec3::ONE));
+        self.commands.entity(parent).add_child(e);
+        self.rig.drapes.push((e, kind));
+    }
+
     fn attach(
         &mut self,
         parent: Entity,
@@ -149,6 +167,7 @@ pub fn spawn(
             ankle_floor: 0.081,
             legs: 1.0,
             girth: 0.2,
+            drapes: Vec::new(),
         },
         key: look.key.clone(),
         ghost: look.style.ghostly(),
@@ -1195,6 +1214,25 @@ pub(super) fn drape_point(
         0.04 - (length + 0.04) * t + hem_split - drop,
         a.cos() * (r.y + fold - thickness),
     )
+}
+
+/// The skirt of each kind's tunic, robe or coat: its colour and length.
+fn tunic_skirt(l: &Look, tunic: Vec3) -> (Vec3, f32) {
+    match l.style {
+        Style::Sentinel => (CREAM * 0.86, 0.26),
+        Style::Caster => (l.cloth, 0.84),
+        Style::Zombie => (tunic * 0.8, 0.2),
+        Style::Vampire => (DARK, 0.3),
+        Style::Orc => (LEATHER * 0.8, 0.18),
+        Style::Troll => (l.cloth, 0.26),
+        Style::Leprechaun => (l.cloth, 0.4),
+        Style::Nymph => (l.cloth, 0.2),
+        Style::Medusa => (l.cloth, 0.62),
+        Style::Phantom => (l.cloth * 0.9, 0.5),
+        Style::Wraith => (l.cloth, 0.66),
+        Style::Hero | Style::Scout if l.v.woman => (tunic * 0.98, 0.19),
+        _ => (tunic * 0.98, 0.22),
+    }
 }
 
 /// A hollow garment with vertical folds, an elliptical silhouette and a
@@ -2484,61 +2522,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             );
             return;
         }
-        // A skirt of the tunic over the hips breaks up the figure's column.
-        let (skirt_color, skirt_len, metal) = match style {
-            Style::Sentinel => (CREAM * 0.86, 0.26, false),
-            Style::Caster => (l.cloth, 0.84, false),
-            Style::Zombie => (tunic * 0.8, 0.2, false),
-            Style::Vampire => (DARK, 0.3, false),
-            Style::Orc => (LEATHER * 0.8, 0.18, false),
-            Style::Troll => (l.cloth, 0.26, false),
-            Style::Leprechaun => (l.cloth, 0.4, false),
-            Style::Nymph => (l.cloth, 0.2, false),
-            Style::Medusa => (l.cloth, 0.62, false),
-            Style::Phantom => (l.cloth * 0.9, 0.5, false),
-            Style::Wraith => (l.cloth, 0.66, false),
-            Style::Hero | Style::Scout if fem => (tunic * 0.98, 0.19, false),
-            _ => (tunic * 0.98, 0.22, false),
-        };
-        let skirt = if metal { &mut p.metal } else { &mut p.matte };
-        // A sentinel's skirt hangs straight so the tabard panels lie over it.
-        let flare = if style == Style::Sentinel {
-            0.185
-        } else {
-            0.208 + skirt_len * 0.045
-        };
-        if metal {
-            skirt.prism(
-                Vec3::Y * 0.06,
-                Vec3::Y * -skirt_len,
-                0.19 * b,
-                flare * b,
-                10,
-                skirt_color,
-                0.0,
-            );
-        } else if style != Style::Caster {
-            let top = Vec2::new(0.18 * b * hips_w, 0.135 * b);
-            let bottom = Vec2::new(flare * b * hips_w, flare * 0.74 * b);
-            draped_cloth(
-                skirt,
-                top,
-                bottom,
-                skirt_len,
-                if skirt_len > 0.5 { 12 } else { 8 },
-                match style {
-                    Style::Hero | Style::Scout => 0.055,
-                    // Coat tails and a robe-skirt part at the front.
-                    Style::Leprechaun => 0.07,
-                    Style::Medusa => 0.05,
-                    _ => 0.0,
-                },
-                skirt_color,
-                u64::from(l.v.shade),
-                matches!(style, Style::Caster | Style::Medusa | Style::Leprechaun)
-                    .then_some(l.trim),
-            );
-        }
+        // The tunic's own skirt is a separate drape (see below).
         if style == Style::Zombie {
             for k in 0..5 {
                 let a = k as f32 * 1.3;
@@ -2622,6 +2606,42 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             );
         }
     });
+    // The tunic's skirt hangs from the pelvis on its own, free to sway.
+    if !blocky && !furry && style != Style::Caster {
+        let (skirt_color, skirt_len) = tunic_skirt(&l, tunic);
+        let flare = if style == Style::Sentinel {
+            0.185
+        } else {
+            0.208 + skirt_len * 0.045
+        };
+        let top = Vec2::new(0.18 * b * hips_w, 0.135 * b);
+        let bottom = Vec2::new(flare * b * hips_w, flare * 0.74 * b);
+        kit.drape(
+            hips,
+            Transform::IDENTITY,
+            Drape::Skirt(skirt_len),
+            "skirt",
+            |p| {
+                draped_cloth(
+                    &mut p.matte,
+                    top,
+                    bottom,
+                    skirt_len,
+                    if skirt_len > 0.5 { 12 } else { 8 },
+                    match style {
+                        Style::Hero | Style::Scout => 0.055,
+                        // Coat tails and a robe-skirt part at the front.
+                        Style::Leprechaun => 0.07,
+                        Style::Medusa => 0.05,
+                        _ => 0.0,
+                    },
+                    skirt_color,
+                    u64::from(l.v.shade),
+                    matches!(style, Style::Medusa | Style::Leprechaun).then_some(l.trim),
+                );
+            },
+        );
+    }
     if style == Style::Caster {
         let sashes = [(0.05f32, 0.32f32), (0.085, 0.26)].map(|(dx, end)| super::robe::SashTail {
             path: [
@@ -3960,51 +3980,57 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         } else {
             (l.cloth * 0.62, l.trim)
         };
-        kit.attach(torso, Transform::from_xyz(0.0, 0.53, -0.15), "cloak", |p| {
-            // The cloak hangs in soft flutes from a gathered yoke across the
-            // shoulders, fanning wider toward the hem; the lining shows
-            // between the folds at the edges.
-            let folds = 6;
-            for k in 0..folds {
-                let t = k as f32 / (folds - 1) as f32 * 2.0 - 1.0;
-                let top = Vec3::new(
-                    t * 0.17 * body.profile.shoulders,
+        kit.drape(
+            torso,
+            Transform::from_xyz(0.0, 0.53, -0.15),
+            Drape::Cloak,
+            "cloak",
+            |p| {
+                // The cloak hangs in soft flutes from a gathered yoke across the
+                // shoulders, fanning wider toward the hem; the lining shows
+                // between the folds at the edges.
+                let folds = 6;
+                for k in 0..folds {
+                    let t = k as f32 / (folds - 1) as f32 * 2.0 - 1.0;
+                    let top = Vec3::new(
+                        t * 0.17 * body.profile.shoulders,
+                        0.0,
+                        -0.01 - 0.02 * (1.0 - t * t),
+                    );
+                    let bottom = Vec3::new(
+                        t * 0.3 * body.profile.hips,
+                        -0.98 + 0.03 * (k as f32 * 1.7).sin(),
+                        -0.13 - 0.05 * (1.0 - t * t),
+                    );
+                    let mid = top.lerp(bottom, 0.5) + Vec3::new(0.0, 0.0, -0.03);
+                    let c = if t.abs() > 0.9 {
+                        lining
+                    } else {
+                        cloak * (0.94 + 0.06 * (k as f32 * 2.3).sin())
+                    };
+                    tube(
+                        &mut p.matte,
+                        &[top, mid, bottom],
+                        &[
+                            (0.045 * body.profile.shoulders, 0.025),
+                            (
+                                0.055 * (body.profile.shoulders + body.profile.hips) * 0.5,
+                                0.03,
+                            ),
+                            (0.06 * body.profile.hips, 0.028),
+                        ],
+                        c,
+                    );
+                }
+                p.matte.blob(
+                    Vec3::new(0.0, 0.0, 0.0),
+                    Vec3::new(0.22 * body.profile.shoulders, 0.04, 0.06),
+                    2,
                     0.0,
-                    -0.01 - 0.02 * (1.0 - t * t),
+                    cloak,
                 );
-                let bottom = Vec3::new(
-                    t * 0.3 * body.profile.hips,
-                    -0.98 + 0.03 * (k as f32 * 1.7).sin(),
-                    -0.13 - 0.05 * (1.0 - t * t),
-                );
-                let mid = top.lerp(bottom, 0.5) + Vec3::new(0.0, 0.0, -0.03);
-                let c = if t.abs() > 0.9 {
-                    lining
-                } else {
-                    cloak * (0.94 + 0.06 * (k as f32 * 2.3).sin())
-                };
-                tube(
-                    &mut p.matte,
-                    &[top, mid, bottom],
-                    &[
-                        (0.045 * body.profile.shoulders, 0.025),
-                        (
-                            0.055 * (body.profile.shoulders + body.profile.hips) * 0.5,
-                            0.03,
-                        ),
-                        (0.06 * body.profile.hips, 0.028),
-                    ],
-                    c,
-                );
-            }
-            p.matte.blob(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(0.22 * body.profile.shoulders, 0.04, 0.06),
-                2,
-                0.0,
-                cloak,
-            );
-        });
+            },
+        );
     }
 }
 
