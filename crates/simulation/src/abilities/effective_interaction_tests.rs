@@ -705,15 +705,17 @@ fn growth_invariant_failure_rolls_back_fatal_damage_inventory_and_rng() {
                 BuildError::InvalidInteraction
             )))
         );
-        assert_eq!(game, before,
-            "fatal damage, XP, owned rows, inventory, corpse IDs, RNG and clocks roll back together");
+        assert_eq!(
+            game, before,
+            "fatal damage, XP, owned rows, inventory, corpse IDs, RNG and clocks roll back together"
+        );
     }
 }
 
 #[test]
 fn growth_harmless_numeric_pool_conflict_retains_xp_and_conditions_until_source_changes() {
     use crate::earned_growth::{FutureGrowth, GrowthSource};
-    use crate::progression::{HdLedger, HdSource};
+    use crate::progression::{HdLedger, HdSource, HealthOrigin, HitDie};
     let base = build(
         false,
         AmountExpr::Rolled {
@@ -786,10 +788,28 @@ fn growth_harmless_numeric_pool_conflict_retains_xp_and_conditions_until_source_
         })
         .unwrap();
     state.rebuild(build).unwrap();
-    assert_eq!(
-        state.build().ledger(),
-        &HdLedger::seeded(vec![HdSource::Racial; 2], 42).unwrap()
-    );
+    let seeded = HdLedger::seeded(vec![HdSource::Racial; 2], 42).unwrap();
+    let entries = seeded
+        .entries()
+        .iter()
+        .enumerate()
+        .map(|(ordinal, row)| {
+            HitDie::from_recorded(
+                row.source(),
+                row.health_seed(),
+                HealthOrigin {
+                    templates: vec![],
+                    kind: crate::content_ids::TypeId::new("humanoid").unwrap(),
+                    die: 8,
+                },
+                0,
+                ordinal,
+            )
+            .unwrap()
+        })
+        .collect();
+    let expected = HdLedger::from_recorded(entries, Some(42)).unwrap();
+    assert_eq!(state.build().ledger(), &expected);
     assert_eq!(state.conditions(), &conditions);
     assert_eq!(state.earned_progress().held_xp(), 0);
     assert_eq!(state.earned_progress().spent_xp(), 100);

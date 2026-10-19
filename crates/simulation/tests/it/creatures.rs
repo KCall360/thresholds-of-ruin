@@ -588,9 +588,44 @@ fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
     value.add_hit_die(HdSource::Racial, 123).unwrap();
     assert_eq!(&value.ledger().entries()[..2], before.ledger().entries());
     assert_eq!(&value.choices()[..2], before.choices());
-    let expected =
+    let seeded =
         HdLedger::seeded(vec![class("warrior"), class("mage"), HdSource::Racial], 123).unwrap();
-    assert_eq!(value.ledger().entries()[2], expected.entries()[2]);
+    let actual = serde_json::to_value(tor_simulation::creatures::record::BuildRecord::capture(
+        &value,
+    ))
+    .unwrap();
+    // Retained rows have explicit seed 42; only the new ordinal uses root 123.
+    // Pin acquisition facts without asking the build compiler to supply them.
+    let mut expected = actual.clone();
+    expected["hd"] = serde_json::json!([
+        {
+            "source": {"kind": "class", "id": "warrior"},
+            "health_seed": 42,
+            "health_origin": {"templates": [], "kind": "humanoid", "die": 10},
+            "health_improvement": 0,
+        },
+        {
+            "source": {"kind": "class", "id": "mage"},
+            "health_seed": 42,
+            "health_origin": {"templates": [], "kind": "humanoid", "die": 6},
+            "health_improvement": 0,
+        },
+        {
+            "source": {"kind": "racial"},
+            "health_seed": seeded.entries()[2].health_seed(),
+            "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
+            "health_improvement": 0,
+        },
+    ]);
+    expected["health_root_seed"] = serde_json::json!(null);
+    expected["drained_hd"] = serde_json::json!([]);
+    for field in ["hd", "health_root_seed", "drained_hd"] {
+        assert_eq!(actual[field], expected[field], "exact owned ledger {field}");
+    }
+    let expected: tor_simulation::creatures::record::BuildRecord =
+        serde_json::from_value(expected).unwrap();
+    let expected = expected.restore(value.content().clone()).unwrap();
+    assert_eq!(value.ledger(), expected.ledger());
     value
         .train(tor_simulation::HdIndex(2), Skill::Lore)
         .unwrap();
@@ -605,7 +640,24 @@ fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
         removed.choices.skills().collect::<Vec<_>>(),
         vec![Skill::Lore]
     );
-    assert_eq!(value, before);
+    // Removal restores the prior build while preserving the exact dormant row.
+    let mut expected = serde_json::to_value(
+        tor_simulation::creatures::record::BuildRecord::capture(&before),
+    )
+    .unwrap();
+    expected["drained_hd"] = serde_json::json!([{
+        "ordinal": 2,
+        "hit_die": {
+            "source": {"kind": "racial"},
+            "health_seed": seeded.entries()[2].health_seed(),
+            "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
+            "health_improvement": 0,
+        },
+    }]);
+    let expected: tor_simulation::creatures::record::BuildRecord =
+        serde_json::from_value(expected).unwrap();
+    let expected = expected.restore(before.content().clone()).unwrap();
+    assert_eq!(value, expected);
     value.add_hit_die(HdSource::Racial, 123).unwrap();
     assert_eq!(value.ledger().entries()[2], removed.hit_die);
 }

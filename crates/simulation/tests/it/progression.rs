@@ -414,7 +414,30 @@ fn recorded_only_builds_allow_explicit_manual_growth_without_claiming_a_health_r
     original.add_hit_die(HdSource::Racial, 43).unwrap();
     assert_eq!(original.ledger().entries()[0], retained);
     let other = HdLedger::seeded(vec![HdSource::Racial; 2], 43).unwrap();
-    assert_eq!(original.ledger().entries()[1], other.entries()[1]);
+    let actual = serde_json::to_value(BuildRecord::capture(&original)).unwrap();
+    let mut expected = actual.clone();
+    expected["hd"] = serde_json::json!([
+        {
+            "source": {"kind": "racial"},
+            "health_seed": 42,
+            "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
+            "health_improvement": 0,
+        },
+        {
+            "source": {"kind": "racial"},
+            "health_seed": other.entries()[1].health_seed(),
+            "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
+            "health_improvement": 0,
+        },
+    ]);
+    expected["health_root_seed"] = serde_json::json!(null);
+    expected["drained_hd"] = serde_json::json!([]);
+    for field in ["hd", "health_root_seed", "drained_hd"] {
+        assert_eq!(actual[field], expected[field], "exact owned ledger {field}");
+    }
+    let expected: BuildRecord = serde_json::from_value(expected).unwrap();
+    let expected = expected.restore(original.content().clone()).unwrap();
+    assert_eq!(original.ledger(), expected.ledger());
     assert_eq!(original.ledger().health_root_seed(), None);
     let restored = BuildRecord::capture(&original)
         .restore(original.content().clone())

@@ -173,10 +173,35 @@ fn population_racial_growth_keeps_authored_class_rows_and_every_ordinal_seed() {
             .map(|row| row.source())
             .collect();
         sources.resize(count, HdSource::Racial);
-        assert_eq!(
-            born.ledger(),
-            &HdLedger::seeded(sources.clone(), root).unwrap()
-        );
+        let seeded = HdLedger::seeded(sources.clone(), root).unwrap();
+        let hd: Vec<_> = seeded
+            .entries()
+            .iter()
+            .enumerate()
+            .map(|(ordinal, row)| {
+                json!({
+                    "source": row.source(),
+                    "health_seed": row.health_seed(),
+                    "health_origin": {
+                        "templates": [], "kind": "humanoid",
+                        "die": if ordinal == 0 { 10 } else { 8 },
+                    },
+                    "health_improvement": 0,
+                })
+            })
+            .collect();
+        let actual = serde_json::to_value(BuildRecord::capture(born)).unwrap();
+        // Borrow only non-ledger build fields to restore the explicit expectation.
+        let mut expected = actual.clone();
+        expected["hd"] = json!(hd);
+        expected["health_root_seed"] = json!(root);
+        expected["drained_hd"] = json!([]);
+        for field in ["hd", "health_root_seed", "drained_hd"] {
+            assert_eq!(actual[field], expected[field], "exact owned ledger {field}");
+        }
+        let expected: BuildRecord = serde_json::from_value(expected).unwrap();
+        let expected = expected.restore(born.content().clone()).unwrap();
+        assert_eq!(born.ledger(), expected.ledger());
         assert_eq!(&born.choices()[..7], base.choices());
         assert!(born.choices()[7..]
             .iter()
