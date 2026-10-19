@@ -32,6 +32,7 @@ pub struct CreatureRecord {
     pools: ByResource<PoolRecord>,
     holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
     conditions: Bounded<crate::conditions::ConditionInstance, { limits::CONDITIONS }>,
+    next_condition_generation: u64,
     cooldowns: Bounded<CooldownRecord, { limits::CATALOG_ENTRIES }>,
 }
 impl<'de> serde::Deserialize<'de> for CreatureRecord {
@@ -53,6 +54,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             pools: ByResource<PoolRecord>,
             holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
             conditions: Bounded<crate::conditions::ConditionInstance, { limits::CONDITIONS }>,
+            next_condition_generation: u64,
             cooldowns: Bounded<CooldownRecord, { limits::CATALOG_ENTRIES }>,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
@@ -69,6 +71,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             pools: fields.pools,
             holds: fields.holds,
             conditions: fields.conditions,
+            next_condition_generation: fields.next_condition_generation,
             cooldowns: fields.cooldowns,
         })
     }
@@ -279,6 +282,7 @@ impl CreatureRecord {
                     .collect(),
             ),
             conditions: Bounded(creature.conditions().instances().cloned().collect()),
+            next_condition_generation: creature.conditions().next_generation(),
             cooldowns: Bounded(
                 creature
                     .cooldowns()
@@ -300,6 +304,7 @@ impl CreatureRecord {
         let build = self.build.restore(content).map_err(Error::Build)?;
         let conditions = crate::conditions::ConditionState::from_recorded(
             self.conditions.0.clone(),
+            self.next_condition_generation,
             build.ruleset(),
         )
         .map_err(Error::Condition)?;
@@ -819,6 +824,63 @@ mod tests {
             .unwrap();
         creature.advance_active(3);
         (creature, equipment)
+    }
+
+    #[test]
+    fn empty_condition_restart_preserves_generation_and_rejects_expired_token_candidate() {
+        let (mut original, equipment) = subject(false, false);
+        let id = crate::content_ids::ConditionId::new("readied").unwrap();
+        let rules = original.build().ruleset().clone();
+        original
+            .apply_condition(&id, crate::ActorId(7), 40)
+            .unwrap();
+        let stale = original
+            .conditions()
+            .targetless_attack_tokens(
+                &rules,
+                crate::ActorId(1),
+                &AbilityId::new("basic_melee").unwrap(),
+            )
+            .pop()
+            .unwrap();
+        original.advance_active(40);
+        assert!(original.conditions().is_empty());
+        let record = CreatureRecord::capture(&original);
+        assert_eq!(record.next_condition_generation, 1);
+        let encoded = serde_json::to_vec(&record).unwrap();
+        let decoded: CreatureRecord = serde_json::from_slice(&encoded).unwrap();
+        let mut restored = decoded
+            .restore(original.build().content().clone(), equipment)
+            .unwrap();
+        assert_eq!(restored, original);
+        restored
+            .apply_condition(&id, crate::ActorId(7), 40)
+            .unwrap();
+        let fresh = restored
+            .conditions()
+            .qualifying_tokens(&rules, crate::ActorId(1), false)
+            .pop()
+            .unwrap();
+        assert_eq!(fresh.generation, 1);
+        assert_eq!(fresh.order, stale.order);
+        let before = restored.clone();
+        assert_eq!(
+            restored.reserve_tokens(std::slice::from_ref(&stale), crate::ActorId(2)),
+            Err(crate::conditions::ConditionError::InvalidReservation)
+        );
+        assert_eq!(restored, before);
+        restored
+            .reserve_tokens(std::slice::from_ref(&fresh), crate::ActorId(2))
+            .unwrap();
+        let held = restored.clone();
+        restored.consume_tokens(&[stale], crate::ActorId(2));
+        assert_eq!(restored, held);
+        restored.consume_tokens(&[fresh], crate::ActorId(2));
+        assert!(restored.conditions().is_empty());
+        assert_eq!(
+            CreatureRecord::capture(&restored).next_condition_generation,
+            2
+        );
     }
 
     #[test]

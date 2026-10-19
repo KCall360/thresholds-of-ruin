@@ -1,4 +1,4 @@
-format = 23
+format = 24
 id = "rogue-exploration"
 version = "1.0"
 ruleset = "rules.toml"
@@ -228,7 +228,7 @@ id = "rogue.equipment"
 version = 1
 kind = "items"
 count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.generated_mace", weight = 1 }, { archetype = "rogue.long_sword", weight = 1 }, { archetype = "rogue.dagger", weight = 1 }, { archetype = "rogue.two_handed_sword", weight = 1 }, { archetype = "rogue.spear", weight = 1 }, { archetype = "rogue.leather_armor", weight = 1 }, { archetype = "rogue.generated_ring_mail", weight = 1 }, { archetype = "rogue.studded_leather", weight = 1 }, { archetype = "rogue.scale_mail", weight = 1 }, { archetype = "rogue.chain_mail", weight = 1 }, { archetype = "rogue.splint_mail", weight = 1 }, { archetype = "rogue.banded_mail", weight = 1 }, { archetype = "rogue.plate_mail", weight = 1 }] }]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.generated_mace", weight = 1 }, { archetype = "rogue.long_sword", weight = 1 }, { archetype = "rogue.dagger", weight = 1 }, { archetype = "rogue.two_handed_sword", weight = 1 }, { archetype = "rogue.spear", weight = 1 }, { archetype = "rogue.leather_armor", weight = 1 }, { archetype = "rogue.generated_ring_mail", weight = 1 }, { archetype = "rogue.studded_leather", weight = 1 }, { archetype = "rogue.scale_mail", weight = 1 }, { archetype = "rogue.chain_mail", weight = 1 }, { archetype = "rogue.splint_mail", weight = 1 }, { archetype = "rogue.banded_mail", weight = 1 }, { archetype = "rogue.plate_mail", weight = 1 }, { archetype = "rogue.shortbow", weight = 1 }] }]
 quantity = 1
 
 [[floor_activation.profiles."rogue.low_depth".stages]]
@@ -238,6 +238,17 @@ kind = "items"
 count = [1, 1]
 bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.enchant_armor", weight = 1 }, { archetype = "rogue.protect_armor", weight = 1 }, { archetype = "rogue.enchant_weapon", weight = 1 }, { archetype = "rogue.remove_curse", weight = 1 }, { archetype = "rogue.identify_weapon", weight = 1 }, { archetype = "rogue.identify_armor", weight = 1 }] }]
 quantity = 1
+
+# One finite six-arrow stack attempt per first-entered floor. This ammunition
+# quantity is provisional TOR tuning; no retry or replenishment follows a skip.
+# The shortbow joins the equipment pool above, changing only that pool's choices.
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.ammunition"
+version = 1
+kind = "items"
+count = [1, 1]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.arrow", weight = 1 }] }]
+quantity = 6
 
 # Structure-only forecast, independent of depth, spawn rolls and hidden contents.
 [assets]

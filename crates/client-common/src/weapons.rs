@@ -163,6 +163,7 @@ mod tests {
                     item: item.id,
                     slot: Some(slot.clone()),
                     equipped_slot: Some(socket as u16),
+                    known_projectile_bonus: None,
                     known_equipment: None,
                     known_cursed: None,
                     known_protected: None,

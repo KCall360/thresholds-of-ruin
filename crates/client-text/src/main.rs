@@ -82,6 +82,7 @@ async fn run() -> Result<(), Error> {
         }
     });
     let mut weapon_confirmation: Option<tor_client_common::weapon_preview::WeaponPreview> = None;
+    let mut projectile_selection: Option<tor_client_common::projectiles::ProjectileMenu> = None;
     loop {
         tokio::select! {
             biased;
@@ -89,6 +90,8 @@ async fn run() -> Result<(), Error> {
                 match first {
                     tor_client_common::FirstReady::Server(message) => {
                         present(&connection, &message?)?;
+                        if projectile_selection.as_ref().is_some_and(|menu| !menu.current(&connection.state)) { projectile_selection = None; println!("Projectile choices changed. Choose the ability again."); }
+                        if weapon_confirmation.as_ref().is_some_and(|preview| !preview.current(&connection.state)) { weapon_confirmation = None; println!("The exact action preview changed. Choose again."); }
                         io::stdout().flush()?;
                     }
                     tor_client_common::FirstReady::Local(line) => {
@@ -100,6 +103,34 @@ async fn run() -> Result<(), Error> {
                             println!("Resynchronizing; input was not sent.");
                             ready()?;
                             continue;
+                        }
+                        if let Some(mut menu) = projectile_selection.take() {
+                            if !menu.current(&connection.state) { println!("Projectile choices changed. Choose the ability again."); ready()?; continue; }
+                            let progress = tor_client_text::projectiles::input(&mut menu, &connection.state, &line);
+                            let mut record = tor_client_text::engine::narrate::Record::default();
+                            let mut chronicler = tor_client_text::engine::chronicle::Chronicler::default();
+                            let handled = match progress {
+                                Ok(Some(tor_client_text::projectiles::Progress::Cancel)) => { println!("All right."); true }
+                                Ok(Some(tor_client_text::projectiles::Progress::Query)) => {
+                                    if tor_client_text::engine::turn::projectile_choices(&mut connection, &mut chronicler, &mut record, &mut menu).await? { projectile_selection = Some(menu); }
+                                    true
+                                }
+                                Ok(Some(tor_client_text::projectiles::Progress::Direction)) => { println!("{}", tor_client_text::projectiles::lines(&menu).join("\n")); projectile_selection = Some(menu); true }
+                                Ok(Some(tor_client_text::projectiles::Progress::Action(action))) => {
+                                    weapon_confirmation = tor_client_text::engine::turn::preview_weapon(&mut connection, &mut chronicler, &mut record, action).await?;
+                                    true
+                                }
+                                Err(reason) => { println!("{}", safe(&reason)); projectile_selection = Some(menu); true }
+                                Ok(None) if parse(&line, connection.state.state()).is_err() => {
+                                    println!("{}", tor_client_text::projectiles::lines(&menu).join("\n")); projectile_selection = Some(menu); true
+                                }
+                                Ok(None) => false,
+                            };
+                            if handled {
+                                println!("{}", tor_client_text::engine::narrate::compose(&record));
+                                if weapon_confirmation.is_some() { println!("Use this exact weapon action? (yes/no)"); }
+                                ready()?; continue;
+                            }
                         }
                         if let Some(preview) = weapon_confirmation.take() {
                             match line.trim().to_ascii_lowercase().as_str() {
@@ -120,6 +151,17 @@ async fn run() -> Result<(), Error> {
                         }
                         // `parse` stamps expected_revision from the state now in hand.
                         match parse(&line, connection.state.state()) {
+                            Ok(Input::Projectile(ability)) => {
+                                let mut menu = tor_client_common::projectiles::ProjectileMenu::new(&connection.state, &ability);
+                                match menu.as_mut() {
+                                    Ok(menu) => {
+                                        let mut record = tor_client_text::engine::narrate::Record::default();
+                                        if tor_client_text::engine::turn::projectile_choices(&mut connection, &mut tor_client_text::engine::chronicle::Chronicler::default(), &mut record, menu).await? { projectile_selection = Some(menu.clone()); }
+                                        println!("{}", tor_client_text::engine::narrate::compose(&record));
+                                    }
+                                    Err(error) => println!("{}", safe(error)),
+                                }
+                            }
                             Ok(Input::Quit) => break,
                             Ok(Input::Look) => println!("{}", describe(connection.state.state())),
                             Ok(Input::Places) => println!("{}", tor_client_text::places(connection.state.state())),
@@ -317,7 +359,7 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
                 println!("{line}");
             }
         }
-        ServerMessage::AbilityWeaponPreview { .. } => {} // Only the matching preview gate presents terms.
+        ServerMessage::ProjectileChoices { .. } | ServerMessage::AbilityWeaponPreview { .. } => {} // Only the matching preview gate presents terms.
         ServerMessage::Palette { .. }
         | ServerMessage::Waiting { .. }
         | ServerMessage::MapPage { .. } => {}

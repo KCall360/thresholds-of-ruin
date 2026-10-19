@@ -26,6 +26,8 @@ pub struct SurvivalFlows {
     pub nourishment_debt_cleared: u64,
     pub nourishment_offered: u64,
     pub nourishment_wasted: u64,
+    /// Selected AI projectile exceeded a numeric budget and paid a normal Wait.
+    pub projectile_numeric_budget_refusals: u64,
     pub items_consumed: u64,
     pub food_consumed: u64,
     pub consumed_items: BTreeMap<crate::ItemId, u64>,
@@ -157,6 +159,7 @@ impl SurvivalFlows {
             nourishment_debt_cleared,
             nourishment_offered,
             nourishment_wasted,
+            projectile_numeric_budget_refusals,
             items_consumed,
             food_consumed
         );

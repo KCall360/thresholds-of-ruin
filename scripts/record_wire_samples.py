@@ -18,6 +18,7 @@ import unittest
 
 from process_harness import ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, ProcessTestCase
 from stream_relay import StreamRelay
+from projectile_package import projectile_package
 from strike_sequence_package import sequence_package
 from supply_package import prepare as supply_package
 from public_plan_package import paid_preparation, public_plan_package
@@ -84,6 +85,8 @@ def has_condition_event(message, condition):
 SAMPLE_BASIS = {"actor": "1", "branch": "branch-1", "stream": "sample-attachment",
                 "reset": "1", "build_epoch": "1"}
 SAMPLE_ADVANCEMENT_COMMANDS = [
+    {"type": "act", "expected_revision": "3", "action": {"type": "choose_intellect_expertise",
+        "basis": SAMPLE_BASIS, "choice": {"threshold": 1, "expertise": "rogue.knife"}}},
     {"type": "act", "expected_revision": "3", "action": {"type": "choose_growth_source", "basis": SAMPLE_BASIS,
         "source": {"kind": "racial"}}},
     {"type": "advancement", "expected_revision": "3", "query": {"kind": "overview"}},
@@ -123,6 +126,8 @@ CLIENT = [
             {"type": "preview_ability_weapon", "expected_revision": "3", "ability": "basic_melee",
              "invocation": {"aim": {"kind": "actor_target", "target": "a_" + "02" * 32}, "weapon": {"kind": "default"}},
              "supplies": {"kind": "carried"}},
+            {"type": "projectile_choices", "expected_revision": "3",
+             "query": {"ability": "rogue.throw", "phase": {"kind": "sources"}, "offset": 0}},
             {"type": "rename_place", "expected_revision": "3", "key": "place-key", "name": "Lantern Hall"},
             {"type": "resume_intention", "expected_revision": "3", "intention": "admission-1"},
             {"type": "cancel_intention", "expected_revision": "3", "intention": "admission-1", "step": None},
@@ -168,6 +173,26 @@ CLIENT = [
 
 
 class Recorder(ProcessTestCase):
+    def record_projectile_choices(self, server_samples):
+        self.save = self.save.parent / "projectile-samples.db"
+        server = self.server(scenario=projectile_package(self))
+        owner, current = self.client()
+        query = {"ability": "rogue.throw", "phase": {"kind": "sources"}, "offset": 0}
+        result = self.request(owner, {"type": "command", "context": current["input_context"],
+            "branch": current["branch"], "command": {"type": "projectile_choices",
+                "expected_revision": current["state"]["revision"], "query": query}})
+        self.assertIsNone(result["error"])
+        messages = [json.loads(line).get("message") for line in owner.transcript if line.startswith("{")]
+        sample = next(message for message in reversed(messages)
+                      if message and message["type"] == "projectile_choices")
+        self.assertEqual(sample["page"]["query"], query)
+        # This ordinary character has not purchased knife expertise yet: an
+        # actual empty owner page records the capability gate without auto-grants.
+        self.assertEqual(sample["page"]["choices"], [])
+        server_samples["projectile_choices"] = sample
+        owner.stop()
+        server.stop()
+
     def record_amulet_escape(self, server_samples):
         sample = run_recording_case(amulet_recording_case(), "escape_sample")
         self.assertEqual(sample["type"], "snapshot")
@@ -509,6 +534,7 @@ class Recorder(ProcessTestCase):
         carer.stop()
         partner.stop()
         care_server.stop()
+        self.record_projectile_choices(server_samples)
         self.record_advancement(server_samples)
         self.record_public_plan(server_samples)
         self.record_nutrition(server_samples)

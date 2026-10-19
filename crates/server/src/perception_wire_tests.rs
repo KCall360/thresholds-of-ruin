@@ -731,6 +731,7 @@ fn equipped_weapon_selection_keeps_item_scope_socket_and_contact_authority_indep
             item,
             slot: None,
             equipped_slot: Some(socket),
+            known_projectile_bonus: None,
             known_equipment: None,
             known_cursed: None,
             known_protected: None,
@@ -834,4 +835,200 @@ fn equipped_weapon_selection_keeps_item_scope_socket_and_contact_authority_indep
     })
     .unwrap()
     .matches(&command, &scope));
+}
+
+#[test]
+fn projectile_delivery_preserves_exact_owned_operands_without_hidden_profile_authority() {
+    let (mut view, _, scope) = fixture();
+    view.inventory.clear();
+    let launcher = s::ItemId(9_007_199_254_740_995);
+    let ammunition = s::ItemId(9_007_199_254_740_997);
+    let slot = s::EquipmentSlotView {
+        id: s::content_ids::EquipmentSlot::new("hand").unwrap(),
+        name: "Hand".into(),
+        equipped_phrase: "in hand".into(),
+        requires_attack: true,
+    };
+    let inventory = [launcher, ammunition]
+        .into_iter()
+        .map(|item| {
+            // Unknown appearance and no numeric/profile facts are sufficient for
+            // identity resolution; actual delivery compatibility belongs simulation.
+            view.inventory.push(s::ItemView {
+                corpse: None,
+                class: s::ItemClass::Misc,
+                description: "Unknown item".into(),
+                id: item,
+                name: "unknown item".into(),
+                quantity: 2,
+                appearance: "unknown".into(),
+                identified: false,
+                known_supply: None,
+                known_currency: None,
+                asset: None,
+            });
+            s::ItemInteractionView {
+                item,
+                slot: None,
+                equipped_slot: (item == launcher).then_some(s::EquipmentSlotId(0)),
+                known_projectile_bonus: None,
+                known_equipment: None,
+                known_cursed: None,
+                known_protected: None,
+                drinkable: false,
+                readable: false,
+                zappable: false,
+                charges: None,
+                edible: false,
+            }
+        })
+        .collect();
+    view.interactions = Some(s::InteractionView {
+        identification: None,
+        completed: Vec::new(),
+        curse_blocked: Vec::new(),
+        slots: vec![slot.clone(), slot],
+        preparation: None,
+        inventory,
+    });
+    let throw = |item, socket, equipped| p::ProjectileDeliverySelection::Throw {
+        source: if equipped {
+            p::ThrownSourceSelection::Equipped { item, socket }
+        } else {
+            p::ThrownSourceSelection::Carried { item, socket }
+        },
+    };
+    let launch = |item, socket, ammunition| p::ProjectileDeliverySelection::Launch {
+        launcher: p::EquippedProjectileWeapon { item, socket },
+        ammunition,
+    };
+    let action = |delivery| p::Action::UseAbility {
+        id: "fixture_projectile".into(),
+        invocation: p::AbilityInvocation::directional_projectile(p::Direction::NorthEast, delivery),
+        supplies: p::SupplySelection::Carried,
+    };
+    let deliveries = [
+        throw(scope.item(launcher), 0, true),
+        throw(scope.item(ammunition), 1, false),
+        launch(scope.item(launcher), 0, scope.item(ammunition)),
+    ];
+    for delivery in deliveries {
+        let wire = action(delivery);
+        let before = view.clone();
+        let backend = decode_action(&wire, &scope, &view).unwrap();
+        assert_eq!(encode_action(&backend, &scope), wire);
+        assert_eq!(
+            crate::adapt::recorded_action(crate::adapt::action(&backend)),
+            Some(backend.clone())
+        );
+        assert_eq!(view, before);
+        let command = Command::AdmitIntention {
+            expected_revision: 7,
+            action: backend,
+        };
+        let decoded = decode_command(&p::Command::Act {
+            expected_revision: 7,
+            action: wire,
+        })
+        .unwrap();
+        assert!(
+            decoded.matches(&command, &scope),
+            "receipt comparison needs no live item state"
+        );
+    }
+    let foreign = TargetScope::new(uuid::Uuid::from_u128(8), view.actor);
+    let invalid = [
+        throw(foreign.item(launcher), 0, true),
+        throw(scope.item(s::ItemId(launcher.0 + 100)), 0, true),
+        throw(scope.apparent_object(SUBJECT), 0, true),
+        throw(scope.item(launcher), 1, true),
+        throw(scope.item(launcher), 0, false),
+        throw(scope.item(ammunition), 0, true),
+        throw(scope.item(ammunition), 2, false),
+        throw(scope.item(ammunition), 64, false),
+        launch(scope.item(launcher), 0, foreign.item(ammunition)),
+        launch(scope.item(ammunition), 1, scope.item(launcher)),
+        launch(scope.item(launcher), 0, scope.item(launcher)),
+    ];
+    let unavailable = decode_action(&action(invalid[0]), &scope, &view).unwrap_err();
+    for delivery in invalid {
+        assert_eq!(
+            decode_action(&action(delivery), &scope, &view).unwrap_err(),
+            unavailable
+        );
+    }
+    for delivery in deliveries {
+        let wire = action(delivery);
+        let mut no_inventory = view.clone();
+        no_inventory.inventory.clear();
+        let mut no_interactions = view.clone();
+        no_interactions.interactions = None;
+        let mut no_offer = view.clone();
+        no_offer.interactions.as_mut().unwrap().inventory.clear();
+        let mut no_anatomy = view.clone();
+        no_anatomy.interactions.as_mut().unwrap().slots.clear();
+        for unavailable_view in [no_inventory, no_interactions, no_offer, no_anatomy] {
+            assert_eq!(
+                decode_action(&wire, &scope, &unavailable_view).unwrap_err(),
+                unavailable
+            );
+        }
+        let mut conflicting = wire.clone();
+        let p::Action::UseAbility { invocation, .. } = &mut conflicting else {
+            unreachable!()
+        };
+        invocation.weapon = p::WeaponSelection::Equipped {
+            item: scope.item(launcher),
+            socket: 0,
+        };
+        assert_eq!(
+            decode_action(&conflicting, &scope, &view).unwrap_err(),
+            unavailable
+        );
+        assert!(decode_action(
+            &wire,
+            &TargetScope::new(uuid::Uuid::from_u128(7), s::ActorId(view.actor.0 + 1)),
+            &view
+        )
+        .is_err());
+    }
+    let mut plain_ammunition = view.clone();
+    plain_ammunition
+        .interactions
+        .as_mut()
+        .unwrap()
+        .inventory
+        .retain(|offer| offer.item != ammunition);
+    let wire = action(deliveries[2]);
+    let backend = decode_action(&wire, &scope, &plain_ammunition).unwrap();
+    assert_eq!(
+        encode_action(&backend, &scope),
+        wire,
+        "plain ammunition needs no equipment/use offer"
+    );
+    plain_ammunition
+        .inventory
+        .retain(|item| item.id != ammunition);
+    assert_eq!(
+        decode_action(&wire, &scope, &plain_ammunition).unwrap_err(),
+        unavailable,
+        "unowned or ground ammunition is not guessed"
+    );
+    let mut equipped_ammunition = view.clone();
+    equipped_ammunition.interactions.as_mut().unwrap().inventory[1].equipped_slot =
+        Some(s::EquipmentSlotId(1));
+    assert_eq!(
+        decode_action(&wire, &scope, &equipped_ammunition).unwrap_err(),
+        unavailable
+    );
+    // Reclassification and freshness do not silently fall back to another item.
+    view.interactions.as_mut().unwrap().inventory[0].equipped_slot = None;
+    assert_eq!(
+        decode_action(&action(deliveries[0]), &scope, &view).unwrap_err(),
+        unavailable
+    );
+    assert_eq!(
+        decode_action(&action(deliveries[2]), &scope, &view).unwrap_err(),
+        unavailable
+    );
 }

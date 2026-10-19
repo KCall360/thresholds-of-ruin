@@ -274,16 +274,15 @@ fn descriptor(
         })
         .transpose()
 }
-impl Melee {
+impl Damage {
     pub(crate) fn compile(
         &self,
         rules: &s::rules::Ruleset,
-    ) -> Result<s::attacks::MeleeAttack, Failure> {
-        if self.damage.components.len() > 32 {
+    ) -> Result<s::damage::DamageSpec, Failure> {
+        if self.components.len() > 32 {
             return Err(invalid("Too many damage components"));
         }
         let components = self
-            .damage
             .components
             .iter()
             .map(|component| {
@@ -308,7 +307,6 @@ impl Melee {
             })
             .collect::<Result<Vec<_>, Failure>>()?;
         let primary = self
-            .damage
             .primary
             .as_ref()
             .map(|key| {
@@ -321,6 +319,15 @@ impl Melee {
             .transpose()?;
         let damage = s::damage::DamageSpec::new(components, primary)
             .map_err(|_| invalid("Invalid damage definition"))?;
+        Ok(damage)
+    }
+}
+impl Melee {
+    pub(crate) fn compile(
+        &self,
+        rules: &s::rules::Ruleset,
+    ) -> Result<s::attacks::MeleeAttack, Failure> {
+        let damage = self.damage.compile(rules)?;
         s::attacks::MeleeAttack::new(
             skill(&self.skill)?,
             self.bonus,

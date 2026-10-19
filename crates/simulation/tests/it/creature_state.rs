@@ -348,17 +348,20 @@ fn forged_cross_field_state_rejects_instead_of_clamping_or_repairing() {
         ),
         (
             "conditions",
-            serde_json::json!([{"condition":"fear","source":9,"remaining":300,"stacks":1,"order":0},{"condition":"fear","source":9,"remaining":200,"stacks":1,"order":1}]),
+            serde_json::json!([{"condition":"fear","source":9,"remaining":300,"stacks":1,"order":0,"generation":0,"phase":"active","reserved_by":null,"qualification":null},{"condition":"fear","source":9,"remaining":200,"stacks":1,"order":1,"generation":1,"phase":"active","reserved_by":null,"qualification":null}]),
         ),
     ] {
         let mut forged_value = value.clone();
         forged_value[field] = forged;
+        if field == "conditions" {
+            forged_value["next_condition_generation"] = serde_json::json!(2);
+        }
         assert!(restore_value(forged_value).is_none(), "{field}");
     }
     let mut forged = value.clone();
     forged["dead"] = serde_json::json!(true);
-    forged["conditions"] =
-        serde_json::json!([{"condition":"fear","source":9,"remaining":300,"stacks":1,"order":0}]);
+    forged["next_condition_generation"] = serde_json::json!(1);
+    forged["conditions"] = serde_json::json!([{"condition":"fear","source":9,"remaining":300,"stacks":1,"order":0,"generation":0,"phase":"active","reserved_by":null,"qualification":null}]);
     assert!(restore_value(forged).is_none());
     let mut forged = value;
     forged.as_object_mut().unwrap().remove("holds");

@@ -271,7 +271,7 @@ fn dropped_stacks_compare_kinematics_without_copying_actor_fall_ownership() {
     let ground = game.place_item_stack(101, at, None, 3, spec).unwrap();
     let before = game.actors[&TARGET].motion.clone();
     assert!(
-        matches!(game.prepare_transfer(TARGET, carried, None, false).unwrap(),
+        matches!(game.prepare_transfer(TARGET, carried, None, false).unwrap().outcome(false),
         crate::OutcomeKind::Dropped { result, quantity: 2, .. } if result == ground)
     );
     game.apply_transfer(carried, ground, 2, ItemLocation::Ground(at))

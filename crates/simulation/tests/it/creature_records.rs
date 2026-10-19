@@ -414,3 +414,63 @@ fn rules_attribute_cap_above_five_survives_build_and_game_restore() {
         .restore(capped.content().clone())
         .is_err());
 }
+
+#[test]
+fn mutable_creature_records_require_condition_generation_counter_even_when_empty() {
+    let mut creature = CreatureState::new(build()).unwrap();
+    for conditioned in [false, true] {
+        if conditioned {
+            creature
+                .apply_condition(
+                    &tor_simulation::content_ids::ConditionId::new("readied").unwrap(),
+                    tor_simulation::ActorId(7),
+                    40,
+                )
+                .unwrap();
+        }
+        let mut value = serde_json::to_value(CreatureRecord::capture(&creature)).unwrap();
+        assert_eq!(value["next_condition_generation"], u64::from(conditioned));
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("next_condition_generation");
+        assert!(
+            serde_json::from_value::<CreatureRecord>(value).is_err(),
+            "conditioned={conditioned}"
+        );
+    }
+}
+
+#[test]
+fn mutable_creature_records_reject_condition_generation_counter_reuse() {
+    let mut creature = CreatureState::new(build()).unwrap();
+    creature
+        .apply_condition(
+            &tor_simulation::content_ids::ConditionId::new("readied").unwrap(),
+            tor_simulation::ActorId(7),
+            40,
+        )
+        .unwrap();
+    let mut value = serde_json::to_value(CreatureRecord::capture(&creature)).unwrap();
+    value["conditions"][0]["generation"] = serde_json::json!(7);
+    for counter in [0, 6, 7] {
+        value["next_condition_generation"] = serde_json::json!(counter);
+        let record: CreatureRecord = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            record.restore(creature.build().content().clone(), vec![]),
+            Err(tor_simulation::creatures::CreatureStateError::Condition(
+                tor_simulation::conditions::ConditionError::InvalidGeneration
+            ))
+        );
+    }
+    value["next_condition_generation"] = serde_json::json!(8);
+    let record: CreatureRecord = serde_json::from_value(value).unwrap();
+    let restored = record
+        .restore(creature.build().content().clone(), vec![])
+        .unwrap();
+    assert_eq!(
+        restored.conditions().instances().next().unwrap().generation,
+        7
+    );
+    assert_eq!(restored.conditions().next_generation(), 8);
+}

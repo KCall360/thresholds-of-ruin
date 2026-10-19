@@ -731,6 +731,8 @@ struct Archetype {
     #[serde(with = "mapped")]
     equipment: Option<source::EquipmentSpec>,
     #[serde(with = "mapped")]
+    projectile: Option<source::ProjectileSpec>,
+    #[serde(with = "mapped")]
     equipment_generation: Option<source::EquipmentGeneration>,
     #[serde(with = "mapped")]
     consumable: Option<source::ConsumableSpec>,
@@ -1061,12 +1063,42 @@ struct WeaponTraitChanges {
     )]
     remove: Vec<source::WeaponTraitKind>,
 }
+fn stored_launcher_family<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let family = String::deserialize(d)?;
+    tor_simulation::content_ids::LauncherFamilyId::new(&family)
+        .map_err(|_| serde::de::Error::custom("Invalid launcher family ID"))?;
+    Ok(family)
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::LauncherProfile", deny_unknown_fields)]
+struct LauncherProfile {
+    #[serde(deserialize_with = "stored_launcher_family")]
+    family: String,
+    #[serde(with = "mapped")]
+    range: source::WeaponRangeBands,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::HitRecovery", rename_all = "snake_case")]
+enum HitRecovery {
+    ConsumedOnHit,
+    Recoverable,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ProjectileSpec", deny_unknown_fields)]
+struct ProjectileSpec {
+    #[serde(deserialize_with = "stored_launcher_family")]
+    family: String,
+    #[serde(with = "mapped")]
+    damage: crate::creature_authoring::Damage,
+    #[serde(with = "HitRecovery")]
+    recovery: source::HitRecovery,
+}
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::WeaponProfileSpec", deny_unknown_fields)]
 struct WeaponProfileSpec {
     expertise: String,
     #[serde(with = "mapped")]
-    ranged: Option<source::WeaponRangeBands>,
+    launcher: Option<source::LauncherProfile>,
     #[serde(
         serialize_with = "mapped::serialize",
         deserialize_with = "bounded_stored::<_, _, 4>"
@@ -1766,7 +1798,10 @@ struct Melee {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::Damage", deny_unknown_fields)]
 struct NaturalDamage {
-    #[serde(with = "mapped")]
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, 32>"
+    )]
     components: Vec<crate::creature_authoring::Component>,
     #[serde(with = "mapped")]
     primary: Option<crate::creature_authoring::DamageKey>,
@@ -1776,6 +1811,7 @@ struct NaturalDamage {
 struct NaturalComponent {
     #[serde(with = "mapped")]
     category: source::DamageType,
+    #[serde(deserialize_with = "required_option")]
     descriptor: Option<String>,
     #[serde(with = "mapped")]
     amount: crate::creature_authoring::Amount,
@@ -1785,7 +1821,9 @@ struct NaturalComponent {
 struct NaturalDamageKey {
     #[serde(with = "mapped")]
     category: source::DamageType,
+    #[serde(deserialize_with = "required_option")]
     descriptor: Option<String>,
+    #[serde(deserialize_with = "required_option")]
     sides: Option<u16>,
 }
 #[derive(Serialize, Deserialize)]
@@ -3062,6 +3100,10 @@ enum RulesStrikeSource {
         strikes: Vec<tor_simulation::rules::StrikeDef>,
     },
     SelectedMelee,
+    Projectile {
+        #[serde(with = "RulesProjectileDeliveryKind")]
+        delivery: tor_simulation::projectile_profiles::ProjectileDeliveryKind,
+    },
     NaturalMelee {
         #[serde(
             serialize_with = "mapped::serialize",
@@ -3084,6 +3126,10 @@ impl RulesStrikeSource {
                 strikes: Vec<tor_simulation::rules::StrikeDef>,
             },
             SelectedMelee {},
+            Projectile {
+                #[serde(with = "RulesProjectileDeliveryKind")]
+                delivery: tor_simulation::projectile_profiles::ProjectileDeliveryKind,
+            },
             NaturalMelee {
                 #[serde(
                     deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::RIDERS_PER_STRIKE }>"
@@ -3098,6 +3144,9 @@ impl RulesStrikeSource {
                 tor_simulation::rules::StrikeSource::Authored { strikes }
             }
             Fields::SelectedMelee {} => tor_simulation::rules::StrikeSource::SelectedMelee,
+            Fields::Projectile { delivery } => {
+                tor_simulation::rules::StrikeSource::Projectile { delivery }
+            }
             Fields::NaturalMelee { additional_riders } => {
                 tor_simulation::rules::validate_rider_shapes(&additional_riders)
                     .map_err(serde::de::Error::custom)?;
@@ -3106,6 +3155,16 @@ impl RulesStrikeSource {
         })
     }
 }
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::projectile_profiles::ProjectileDeliveryKind",
+    rename_all = "snake_case"
+)]
+enum RulesProjectileDeliveryKind {
+    Throw,
+    Launch,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "tor_simulation::rules::StrikeDef", deny_unknown_fields)]
 struct RulesStrike {
@@ -3197,6 +3256,7 @@ impl OutgoingEdgePolicy {
 )]
 enum AbilityReach {
     Melee,
+    Projectile,
     Sight {
         range: u16,
     },
@@ -3217,6 +3277,7 @@ impl AbilityReach {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             Melee {},
+            Projectile {},
             Sight {
                 range: u16,
             },
@@ -3231,6 +3292,7 @@ impl AbilityReach {
         }
         Ok(match super::named_map(deserializer)? {
             Fields::Melee {} => tor_simulation::rules::Reach::Melee,
+            Fields::Projectile {} => tor_simulation::rules::Reach::Projectile,
             Fields::Sight { range } => tor_simulation::rules::Reach::Sight { range },
             Fields::MutualSight { range } => tor_simulation::rules::Reach::MutualSight { range },
             Fields::SelfOnly {} => tor_simulation::rules::Reach::SelfOnly,
@@ -3508,6 +3570,12 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    NaturalDamage => crate::creature_authoring::Damage,
+    NaturalComponent => crate::creature_authoring::Component,
+    NaturalDamageKey => crate::creature_authoring::DamageKey,
+    NaturalAmount => crate::creature_authoring::Amount,
+    LauncherProfile => source::LauncherProfile,
+    ProjectileSpec => source::ProjectileSpec,
     WeaponTrait => source::WeaponTrait,
     WeaponTraitChanges => source::WeaponTraitChanges,
     WeaponProfileSpec => source::WeaponProfileSpec,
@@ -3667,10 +3735,6 @@ remote!(
     SkillSelector => crate::creature_authoring::SkillSelector,
     StrikeAgainst => crate::creature_authoring::Against,
     StrikeFormula => crate::creature_authoring::Formula,
-    NaturalDamage => crate::creature_authoring::Damage,
-    NaturalComponent => crate::creature_authoring::Component,
-    NaturalDamageKey => crate::creature_authoring::DamageKey,
-    NaturalAmount => crate::creature_authoring::Amount,
     Modifier => crate::creature_authoring::Modifier,
     ModifierScope => crate::creature_authoring::Scope,
     ModifierOp => crate::creature_authoring::Op,
@@ -3742,7 +3806,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 18;
+const RULES_INPUT_FORMAT: u32 = 19;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -3842,7 +3906,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 20;
+const CONTENT_PACKAGE_FORMAT: u32 = 21;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4085,18 +4149,18 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (50, 23, "interactions-v45", 18, 5, 20, "tor-arena-run-v5")
+            (51, 24, "interactions-v46", 19, 5, 21, "tor-arena-run-v5")
         );
     }
 
     #[test]
-    fn equipment_magic_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 52);
-        assert_eq!(super::RULES_INPUT_FORMAT, 18);
+    fn projectile_expertise_formats_preserve_physical_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 53);
+        assert_eq!(super::RULES_INPUT_FORMAT, 19);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
-        // Equipment condition, knowledge, birth and frozen alterations advance their owning
-        // semantic payloads without changing compiled region inputs or physical
-        // framing.
+        // Expertise ownership, projectile plans and selected weapon profiles advance
+        // their owning semantic payloads without changing compiled region inputs
+        // or physical framing.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&base[..6], b"TORB\x06\x00");
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
@@ -4654,6 +4718,7 @@ mod tests {
             .flat_map(|ability| match &ability.strikes {
                 tor_simulation::rules::StrikeSource::Authored { strikes } => strikes.as_slice(),
                 tor_simulation::rules::StrikeSource::SelectedMelee
+                | tor_simulation::rules::StrikeSource::Projectile { .. }
                 | tor_simulation::rules::StrikeSource::NaturalMelee { .. } => &[],
             })
             .flat_map(|strike| &strike.on_success)
@@ -4666,6 +4731,7 @@ mod tests {
             .flat_map(|ability| match &ability.strikes {
                 tor_simulation::rules::StrikeSource::Authored { strikes } => strikes.as_slice(),
                 tor_simulation::rules::StrikeSource::SelectedMelee
+                | tor_simulation::rules::StrikeSource::Projectile { .. }
                 | tor_simulation::rules::StrikeSource::NaturalMelee { .. } => &[],
             })
             .flat_map(|strike| &strike.on_success)
@@ -6117,6 +6183,7 @@ enum InvocationKind {
     ActorTarget,
     SelfStep,
     DirectionalRay,
+    DirectionalProjectile,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -7953,7 +8020,7 @@ mod weapon_profile_record_tests {
     #[test]
     fn saved_weapon_profiles_are_independent_named_bounded_and_explicitly_nullable() {
         let good = json!({"slot":"weapon","armor":null,"attack":null,"modifiers":[],
-            "weapon_profile":{"expertise":"fixture.knife","ranged":null,
+            "weapon_profile":{"expertise":"fixture.knife","launcher":null,
                 "base_traits":[{"kind":"two_handed"},{"kind":"thrown","range":{"short_feet":20,"long_feet":60}}],
                 "expert_traits":{"add":[{"kind":"quickdraw"},{"kind":"offhand"}],"remove":["two_handed"]}}});
         let restored: Owned<source::EquipmentSpec> = serde_json::from_value(good.clone()).unwrap();
@@ -7961,7 +8028,7 @@ mod weapon_profile_record_tests {
         let mut bad = vec![];
         for pointer in [
             "/weapon_profile",
-            "/weapon_profile/ranged",
+            "/weapon_profile/launcher",
             "/weapon_profile/expertise",
             "/weapon_profile/base_traits",
             "/weapon_profile/expert_traits",
@@ -7984,7 +8051,7 @@ mod weapon_profile_record_tests {
                 vec![json!(["fixture.knife",null,[],{"add":[],"remove":[]}])],
             ),
             (
-                "/weapon_profile/ranged",
+                "/weapon_profile/launcher",
                 vec![
                     json!([20, 60]),
                     json!({"short_feet":20}),
@@ -8024,7 +8091,11 @@ mod weapon_profile_record_tests {
         ] {
             for replacement in replacements {
                 let mut value = good.clone();
-                *value.pointer_mut(pointer).unwrap() = replacement;
+                *value.pointer_mut(pointer).unwrap() = if pointer == "/weapon_profile/launcher" {
+                    json!({"family":"fixture.arrow", "range":replacement})
+                } else {
+                    replacement
+                };
                 bad.push(value);
             }
         }
@@ -8033,6 +8104,321 @@ mod weapon_profile_record_tests {
                 serde_json::from_value::<Owned<source::EquipmentSpec>>(value.clone()).is_err(),
                 "accepted {value}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod projectile_record_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn saved_projectile_is_named_strict_bounded_and_round_trips() {
+        let good = json!({"family":"fixture.arrow","recovery":"recoverable",
+            "damage":{"components":[{"category":"keen","descriptor":null,
+                "amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}],
+                "primary":{"category":"keen","descriptor":null,"sides":6}}});
+        let restored: Owned<source::ProjectileSpec> = serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+        for pointer in [
+            "/family",
+            "/recovery",
+            "/damage",
+            "/damage/components",
+            "/damage/primary",
+            "/damage/components/0/descriptor",
+            "/damage/primary/descriptor",
+            "/damage/primary/sides",
+            "/damage/components/0/amount/bonus",
+        ] {
+            let mut bad = good.clone();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            bad.pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert!(
+                serde_json::from_value::<Owned<source::ProjectileSpec>>(bad).is_err(),
+                "{pointer}"
+            );
+        }
+        for (pointer, replacement) in [
+            ("/family", json!("bad family")),
+            ("/recovery", json!("always")),
+            ("/damage", json!([[], null])),
+            (
+                "/damage/components",
+                json!(vec![good["damage"]["components"][0].clone(); 33]),
+            ),
+            (
+                "/damage/components/0",
+                json!(["keen",null,{"type":"fixed","value":1}]),
+            ),
+            ("/damage/primary", json!(["keen", null, 6])),
+            (
+                "/damage/components/0/amount",
+                json!({"type":"fixed","value":1,"extra":0}),
+            ),
+        ] {
+            let mut bad = good.clone();
+            *bad.pointer_mut(pointer).unwrap() = replacement;
+            assert!(
+                serde_json::from_value::<Owned<source::ProjectileSpec>>(bad).is_err(),
+                "{pointer}"
+            );
+        }
+        for pointer in ["", "/damage", "/damage/components/0", "/damage/primary"] {
+            let mut bad = good.clone();
+            bad.pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("extra".into(), json!(0));
+            assert!(serde_json::from_value::<Owned<source::ProjectileSpec>>(bad).is_err());
+        }
+        let archetype = source::Archetype {
+            projectile: Some(restored.0),
+            stackable: true,
+            class: source::ItemClass::Weapon,
+            ..Default::default()
+        };
+        let saved = serde_json::to_value(Borrowed(&archetype)).unwrap();
+        let restored: Owned<source::Archetype> = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), saved);
+        let mut missing = saved;
+        missing.as_object_mut().unwrap().remove("projectile");
+        assert!(serde_json::from_value::<Owned<source::Archetype>>(missing).is_err());
+        let empty = serde_json::to_value(Borrowed(&source::Archetype::default())).unwrap();
+        assert!(empty["projectile"].is_null());
+        assert!(serde_json::from_value::<Owned<source::Archetype>>(empty).is_ok());
+    }
+
+    #[test]
+    fn saved_launcher_rejects_old_range_field_and_requires_family_and_range() {
+        let good = json!({"expertise":"fixture.bow","launcher":{"family":"fixture.arrow",
+            "range":{"short_feet":20,"long_feet":60}},"base_traits":[],"expert_traits":{"add":[],"remove":[]}});
+        let restored: Owned<source::WeaponProfileSpec> =
+            serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+        for key in ["family", "range"] {
+            let mut bad = good.clone();
+            bad["launcher"].as_object_mut().unwrap().remove(key);
+            assert!(serde_json::from_value::<Owned<source::WeaponProfileSpec>>(bad).is_err());
+        }
+        let mut old = good;
+        old.as_object_mut().unwrap().remove("launcher");
+        old["ranged"] = json!({"short_feet":20,"long_feet":60});
+        assert!(serde_json::from_value::<Owned<source::WeaponProfileSpec>>(old).is_err());
+    }
+}
+
+#[cfg(test)]
+mod projectile_definition_codec_tests {
+    use super::*;
+    use serde_json::json;
+    use tor_simulation::abilities::InvocationKind as RuntimeInvocationKind;
+    use tor_simulation::projectile_profiles::ProjectileDeliveryKind;
+    use tor_simulation::rules::{AbilityDef, Reach, Ruleset, RulesetDocument, StrikeSource};
+
+    fn projectile_document(delivery: ProjectileDeliveryKind) -> RulesetDocument {
+        let mut document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let mut ability = document
+            .abilities
+            .iter()
+            .find(|row| row.basic_attack)
+            .unwrap()
+            .clone();
+        ability.id = tor_simulation::content_ids::AbilityId::new("test_projectile").unwrap();
+        ability.name = "Test projectile".into();
+        ability.basic_attack = false;
+        ability.invocation = RuntimeInvocationKind::DirectionalProjectile;
+        ability.reach = Reach::Projectile;
+        ability.strikes = StrikeSource::Projectile { delivery };
+        document.abilities.push(ability);
+        document
+    }
+
+    #[test]
+    fn projectile_definitions_round_trip_through_independent_compiled_rules_codec() {
+        for (delivery, name) in [
+            (ProjectileDeliveryKind::Throw, "throw"),
+            (ProjectileDeliveryKind::Launch, "launch"),
+        ] {
+            let document = projectile_document(delivery);
+            let expected = Ruleset::validate(document.clone()).unwrap();
+            let encoded = encode_rules_document(&document).unwrap();
+            let restored = decode_rules_document(&encoded).unwrap();
+            assert_eq!(encode_rules_document(&restored).unwrap(), encoded);
+            let restored_rules = Ruleset::validate(restored).unwrap();
+            let id = tor_simulation::content_ids::AbilityId::new("test_projectile").unwrap();
+            assert_eq!(restored_rules.ability(&id), expected.ability(&id));
+            let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            let ability = value["document"]["abilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["id"] == "test_projectile")
+                .unwrap();
+            assert_eq!(ability["invocation"], json!("directional_projectile"));
+            assert_eq!(ability["reach"], json!({"kind":"projectile"}));
+            assert_eq!(
+                ability["strikes"],
+                json!({"kind":"projectile","delivery":name})
+            );
+            let restored: Owned<AbilityDef> = serde_json::from_value(ability.clone()).unwrap();
+            assert_eq!(
+                serde_json::to_value(Borrowed(&restored.0)).unwrap(),
+                *ability
+            );
+        }
+    }
+
+    #[test]
+    fn stored_projectile_source_requires_exact_named_delivery() {
+        for (name, delivery) in [
+            ("throw", ProjectileDeliveryKind::Throw),
+            ("launch", ProjectileDeliveryKind::Launch),
+        ] {
+            let good = json!({"kind":"projectile","delivery":name});
+            let decoded: Owned<StrikeSource> = serde_json::from_value(good.clone()).unwrap();
+            assert_eq!(decoded.0, StrikeSource::Projectile { delivery });
+            assert_eq!(serde_json::to_value(Borrowed(&decoded.0)).unwrap(), good);
+        }
+        for bad in [
+            json!({"kind":"projectile"}),
+            json!({"delivery":"throw"}),
+            json!({"kind":"projectile","delivery":null}),
+            json!({"kind":"projectile","delivery":"lob"}),
+            json!({"kind":"projectile","delivery":"Throw"}),
+            json!({"kind":"projectile","delivery":"thrown"}),
+            json!({"kind":"projectile","delivery":"launched"}),
+            json!({"kind":"projectile","delivery":["throw"]}),
+            json!({"kind":"projectile","delivery":"throw","range":6}),
+            json!({"kind":"projectile","delivery":"launch","additional_riders":[]}),
+            json!({"kind":"projectile","delivery":"throw","strikes":[]}),
+            json!(["projectile", "throw"]),
+        ] {
+            assert!(
+                serde_json::from_value::<Owned<StrikeSource>>(bad.clone()).is_err(),
+                "{bad}"
+            );
+        }
+        for bad in [
+            r#"{"kind":"projectile","kind":"projectile","delivery":"throw"}"#,
+            r#"{"kind":"projectile","delivery":"throw","delivery":"launch"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<Owned<StrikeSource>>(bad).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn stored_projectile_definition_has_required_independent_named_fields() {
+        let document = projectile_document(ProjectileDeliveryKind::Throw);
+        let ability = document.abilities.last().unwrap();
+        let good = serde_json::to_value(Borrowed(ability)).unwrap();
+        for field in ["invocation", "reach", "strikes"] {
+            let mut bad = good.clone();
+            bad.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<Owned<AbilityDef>>(bad).is_err(),
+                "missing {field}"
+            );
+        }
+        for (field, value) in [
+            ("invocation", json!("projectile")),
+            ("invocation", json!("DirectionalProjectile")),
+            ("invocation", json!(null)),
+            ("reach", json!({})),
+            ("reach", json!({"kind":"projectile","range":6})),
+            ("reach", json!({"kind":"projectile","delivery":"throw"})),
+            ("reach", json!(["projectile"])),
+            ("strikes", json!({"kind":"projectile"})),
+            ("strikes", json!({"kind":"projectile","delivery":"lob"})),
+            ("strikes", json!(["projectile", "throw"])),
+        ] {
+            let mut bad = good.clone();
+            bad[field] = value;
+            assert!(
+                serde_json::from_value::<Owned<AbilityDef>>(bad).is_err(),
+                "{field}"
+            );
+        }
+        let positional =
+            serde_json::Value::Array(good.as_object().unwrap().values().cloned().collect());
+        assert!(serde_json::from_value::<Owned<AbilityDef>>(positional).is_err());
+        let text = serde_json::to_string(&good).unwrap();
+        for (before, after) in [
+            (
+                "\"invocation\":",
+                "\"invocation\":\"actor_target\",\"invocation\":",
+            ),
+            (
+                "\"reach\":{\"kind\":\"projectile\"}",
+                "\"reach\":{\"kind\":\"projectile\",\"kind\":\"projectile\"}",
+            ),
+            (
+                "\"delivery\":\"throw\"",
+                "\"delivery\":\"throw\",\"delivery\":\"launch\"",
+            ),
+        ] {
+            let bad = text.replacen(before, after, 1);
+            assert_ne!(bad, text, "ineffective mutation: {before}");
+            assert!(
+                serde_json::from_str::<Owned<AbilityDef>>(&bad).is_err(),
+                "{before}"
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_projectile_rules_reject_noncanonical_enum_records() {
+        let document = projectile_document(ProjectileDeliveryKind::Throw);
+        let encoded = encode_rules_document(&document).unwrap();
+        for (before, after) in [
+            (
+                "\"invocation\":\"directional_projectile\"",
+                "\"invocation\":{\"directional_projectile\":null}",
+            ),
+            ("\"delivery\":\"throw\"", "\"delivery\":{\"throw\":null}"),
+            ("\"delivery\":\"throw\"", "\"delivery\":\"lob\""),
+            (
+                "\"kind\":\"projectile\"",
+                "\"kind\":\"projectile\",\"range\":6",
+            ),
+        ] {
+            let bad = encoded.replacen(before, after, 1);
+            assert_ne!(bad, encoded, "ineffective mutation: {before}");
+            assert!(decode_rules_document(&bad).is_err(), "{after}");
+        }
+    }
+
+    #[test]
+    fn saved_invocation_kind_preserves_existing_variants() {
+        #[derive(Serialize, Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Record {
+            #[serde(with = "InvocationKind")]
+            invocation: RuntimeInvocationKind,
+        }
+        for (name, invocation) in [
+            ("actor_target", RuntimeInvocationKind::ActorTarget),
+            ("self_step", RuntimeInvocationKind::SelfStep),
+            ("directional_ray", RuntimeInvocationKind::DirectionalRay),
+            (
+                "directional_projectile",
+                RuntimeInvocationKind::DirectionalProjectile,
+            ),
+        ] {
+            let value = json!({"invocation":name});
+            let restored: Record = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(restored.invocation, invocation);
+            assert_eq!(serde_json::to_value(restored).unwrap(), value);
         }
     }
 }

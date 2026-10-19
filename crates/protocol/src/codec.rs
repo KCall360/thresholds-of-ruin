@@ -293,6 +293,8 @@ pub fn encode_response(
     use crate::{ServerMessage, StateDelta, StreamUpdate, UpdateBody};
     let limit = limit.min(if matches!(message, ServerMessage::MapPage { .. }) {
         crate::MAX_MAP_PAGE_BYTES
+    } else if matches!(message, ServerMessage::ProjectileChoices { .. }) {
+        crate::MAX_PROJECTILE_CHOICE_PAGE_BYTES
     } else if matches!(message, ServerMessage::AdvancementPage { .. }) {
         crate::MAX_ADVANCEMENT_PAGE_BYTES
     } else if matches!(message, ServerMessage::CreatureStrikePage { .. }) {
@@ -419,7 +421,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v52.json"
+                "/tests/fixtures/wire-v53.json"
             ))
             .expect("regenerate current wire samples"),
         )
@@ -570,7 +572,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v52.json"
+                "/tests/fixtures/wire-v53.json"
             ))
             .expect("regenerate current wire samples"),
         )

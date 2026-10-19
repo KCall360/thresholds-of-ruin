@@ -300,12 +300,19 @@ pub struct PreparationView {
     pub remaining: u64,
     pub active: bool,
 }
+/// Remembered instance enchantments, not a resolved attack or damage total.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProjectileBonusView {
+    pub hit: i32,
+    pub damage: i32,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemInteractionView {
     pub item: ItemId,
     pub slot: Option<EquipmentSlotView>,
     pub equipped_slot: Option<EquipmentSlotId>,
     pub known_equipment: Option<EquipmentSpec>,
+    pub known_projectile_bonus: Option<ProjectileBonusView>,
     pub known_cursed: Option<bool>,
     pub known_protected: Option<bool>,
     pub drinkable: bool,
@@ -640,6 +647,14 @@ impl Game {
         actor: ActorId,
         equipment: BTreeMap<EquipmentSlotId, ItemId>,
     ) -> Result<crate::lifecycle::ActorOutcome, GameError> {
+        self.equipment_candidate_with_frozen_pool(actor, equipment, None)
+    }
+    fn equipment_candidate_with_frozen_pool(
+        &self,
+        actor: ActorId,
+        equipment: BTreeMap<EquipmentSlotId, ItemId>,
+        frozen_pool: Option<&crate::content_ids::EquipmentCapacityId>,
+    ) -> Result<crate::lifecycle::ActorOutcome, GameError> {
         let deficits = self
             .equipment_capacity_state(actor, &equipment)
             .ok_or(GameError::ItemUnavailable)?;
@@ -653,15 +668,27 @@ impl Game {
                 .rules
                 .equipment_slot(&original.anatomy.slots[usize::from(socket.0)])
                 .ok_or(GameError::ItemUnavailable)?;
-            if slot
-                .capacity
-                .resource()
-                .is_some_and(|resource| deficits.contains_key(resource))
-            {
+            if slot.capacity.resource().is_some_and(|resource| {
+                Some(resource) != frozen_pool && deficits.contains_key(resource)
+            }) {
                 return Err(GameError::ItemUnavailable);
             }
         }
         let mut outcome = self.settled_actor_outcome(actor)?;
+        self.refresh_equipment_outcome(&mut outcome, equipment)?;
+        Ok(outcome)
+    }
+
+    /// Recompile equipment on the caller's owned state, preserving already-paid
+    /// resources and lifecycle changes in the same completion transaction.
+    pub(crate) fn refresh_equipment_outcome(
+        &self,
+        outcome: &mut crate::lifecycle::ActorOutcome,
+        equipment: BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Result<(), GameError> {
+        let actor = outcome.id;
+        self.equipment_capacity_state(actor, &equipment)
+            .ok_or(GameError::ItemUnavailable)?;
         if let Some(combat) = outcome.state.combat.as_mut() {
             let sources = equipment
                 .iter()
@@ -682,7 +709,7 @@ impl Game {
             }
         }
         outcome.state.equipment = equipment;
-        Ok(outcome)
+        Ok(())
     }
 
     fn set_actor_equipment(
@@ -860,12 +887,20 @@ impl Game {
             Work::Escape { .. } | Work::Respec { .. } | Work::Zap { .. } => {
                 unreachable!("distinct frozen plan")
             }
-            Work::Equip { item, slot } => crate::abilities::Plan::Equip {
-                actor,
-                item,
-                slot,
-                preparation,
-            },
+            Work::Equip { item, slot } => {
+                let allocation = self.capture_equip_allocation(actor, item, slot)?;
+                crate::abilities::Plan::Equip {
+                    actor,
+                    item,
+                    slot,
+                    preparation: if allocation.quickdraw(&self.content.rules) {
+                        0
+                    } else {
+                        preparation
+                    },
+                    allocation,
+                }
+            }
             Work::Unequip { item } => crate::abilities::Plan::Unequip {
                 actor,
                 item,
@@ -1219,12 +1254,13 @@ impl Game {
     pub(crate) fn finish_item_work(
         &mut self,
         actor: ActorId,
-        work: Work,
+        plan: &crate::abilities::Plan,
         intention: Option<crate::IntentionId>,
         observed: bool,
         consumed_identity: Option<String>,
     ) -> Result<(), GameError> {
         use crate::lifecycle::{ItemChange, ItemOutcome};
+        let work = plan.work();
         let item = work.item().ok_or(GameError::ItemUnavailable)?;
         let change = match work {
             Work::Equip { slot, .. } => {
@@ -1235,7 +1271,17 @@ impl Game {
                     .equipment
                     .clone();
                 equipment.insert(slot, item);
-                let mut outcome = self.equipment_candidate(actor, equipment)?;
+                let crate::abilities::Plan::Equip { allocation, .. } = plan else {
+                    return Err(GameError::ItemUnavailable);
+                };
+                if !self.frozen_equip_available(actor, item, slot, allocation) {
+                    return Err(GameError::ItemUnavailable);
+                }
+                let mut outcome = self.equipment_candidate_with_frozen_pool(
+                    actor,
+                    equipment,
+                    allocation.resource(self, actor, slot),
+                )?;
                 if let Some(gear) = self.items.get(&item).filter(|item| {
                     item.spec
                         .equipment
@@ -1302,6 +1348,7 @@ impl Game {
                 && entry.source == token.source
                 && entry.qualification == token.qualification
                 && entry.order == token.order
+                && entry.generation == token.generation
         };
         let claims_valid = state.pending.as_ref().is_none_or(|preparation| {
             preparation.plan.tokens().all(|token| {

@@ -13,8 +13,49 @@ fn client_message_envelopes_keep_a_bounded_inline_footprint() {
 }
 
 #[test]
+fn history_actions_keep_the_event_out_of_the_inline_footprint() {
+    // Keep the action inline, with only a pointer and tag for its event;
+    // duplicating the full action-sized event bloats every history entry.
+    let limit = std::mem::size_of::<Action>() + 2 * std::mem::size_of::<usize>();
+    assert!(
+        std::mem::size_of::<HistoryContent>() <= limit,
+        "history content exceeds its {limit}-byte inline budget: {}",
+        std::mem::size_of::<HistoryContent>()
+    );
+}
+
+#[test]
+fn history_actions_preserve_the_tagged_wire_shape_and_validate_event_payload() {
+    let source = r#"{"type":"action","action":{"type":"wait"},"event":{"type":"item_started","action":{"type":"wait"}}}"#;
+    let content: HistoryContent = serde_json::from_str(source).unwrap();
+    assert!(
+        matches!(&content, HistoryContent::Action { action: Action::Wait, event }
+        if matches!(event.as_ref(), Event::ItemStarted { action: Action::Wait }))
+    );
+    assert_eq!(serde_json::to_string(&content).unwrap(), source);
+
+    let canonical: serde_json::Value = serde_json::from_str(source).unwrap();
+    for invalid_event in [
+        serde_json::Value::Null,
+        serde_json::json!({"type":"item_started"}),
+        serde_json::json!({"type":"item_started","action":{"type":"wait"},"extra":true}),
+        serde_json::json!({"type":"item_started","action":["wait"]}),
+    ] {
+        let mut invalid = canonical.clone();
+        invalid["event"] = invalid_event;
+        assert!(
+            serde_json::from_value::<HistoryContent>(invalid.clone()).is_err(),
+            "invalid history event: {invalid}"
+        );
+    }
+    let mut missing = canonical;
+    missing.as_object_mut().unwrap().remove("event");
+    assert!(serde_json::from_value::<HistoryContent>(missing).is_err());
+}
+
+#[test]
 fn equipment_magic_commands_and_disclosures_require_protocol_52() {
-    assert_eq!(PROTOCOL_VERSION, 52);
+    assert_eq!(PROTOCOL_VERSION, 53);
 }
 
 #[test]
@@ -411,7 +452,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v52.json"
+            "/tests/fixtures/wire-v53.json"
         ))
         .expect("regenerate current wire samples"),
     )

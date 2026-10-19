@@ -322,6 +322,7 @@ impl Game {
                 }
                 ItemLocation::Carried(owner) if owner == id => {
                     if item.spec.equipment.is_some()
+                        || item.spec.projectile.is_some()
                         || item.spec.consumable.is_some()
                         || item.spec.edible.is_some()
                         || item.spec.readable.is_some()
@@ -348,6 +349,7 @@ impl Game {
                                 .iter()
                                 .find_map(|(slot, item)| (*item == item_id).then_some(*slot)),
                             known_equipment: self.known_equipment_view(id, item_id),
+                            known_projectile_bonus: self.known_projectile_bonus_view(id, item_id),
                             known_cursed: actor.known_equipment.curse(item_id),
                             known_protected: actor.known_equipment.protection(item_id),
                             drinkable: item.spec.consumable.is_some(),

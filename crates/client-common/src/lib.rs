@@ -9,6 +9,7 @@ pub mod inspection_pages;
 pub mod items;
 mod map_hydration;
 mod map_memory;
+pub mod projectiles;
 pub mod weapon_preview;
 pub mod weapons;
 pub use map_hydration::{MapHydrationStatus, MapMemoryUpdate};

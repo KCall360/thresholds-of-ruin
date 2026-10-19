@@ -2,7 +2,19 @@
 mod compile;
 mod execution;
 mod invocation;
+mod projectile;
+mod projectile_choices;
+pub use projectile_choices::{ProjectileChoice, ProjectileChoiceQuery};
+mod projectile_execution;
+mod projectile_flight;
+mod projectile_release;
+mod projectile_selection;
+pub use projectile::{ProjectilePlan, ProjectileSource};
+pub use projectile_selection::{
+    EquippedProjectileWeapon, ProjectileDeliverySelection, ThrownSourceSelection,
+};
 mod weapon_selection;
+pub(crate) use weapon_selection::selected_weapon_cost;
 pub use weapon_selection::{
     AbilityWeaponPreview, AbilityWeaponPreviewPhase, CapturedWeaponProfile, FrozenWeaponSelection,
 };

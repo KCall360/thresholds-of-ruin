@@ -886,11 +886,15 @@ impl Game {
                                     if matches!(invocation.aim, crate::abilities::AbilityAim::DirectionalRay { .. }) {
                                         return matches!(definition.reach, crate::rules::Reach::Sight { .. });
                                     }
+                                    if matches!(invocation.aim, crate::abilities::AbilityAim::DirectionalProjectile { .. }) {
+                                        return invocation.valid() && matches!(definition.reach, crate::rules::Reach::Projectile);
+                                    }
                                     let target = invocation.target(*actor);
                                     if target.0 == 0 || target.0 >= self.next_actor_id {
                                         return false;
                                     }
                                     match definition.reach {
+                                        crate::rules::Reach::Projectile => false,
                                         crate::rules::Reach::SelfOnly => target == *actor,
                                         crate::rules::Reach::SelfOrAlly { .. } => true,
                                         crate::rules::Reach::Melee

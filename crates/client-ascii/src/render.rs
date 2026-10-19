@@ -548,6 +548,21 @@ impl Canvas {
                 self.text(72, 152 + index * 26, row, TEXT, 2, 70);
             }
         }
+        if let Some(menu) = &app.projectile_selection {
+            self.screen(
+                &menu.title(),
+                if menu.step() == tor_client_common::projectiles::Step::Direction {
+                    "Movement keys choose direction   ESC cancels"
+                } else {
+                    "UP/DOWN selects   ENTER chooses   LEFT/RIGHT pages   ESC cancels"
+                },
+            );
+            let rows = app.projectile_rows();
+            let start = app.selected.saturating_sub(12);
+            for (index, row) in rows.iter().skip(start).take(18).enumerate() {
+                self.text(72, 152 + index * 26, row, TEXT, 2, 70);
+            }
+        }
         if app.weapon_confirmation.is_some() {
             self.screen(
                 "EXACT WEAPON ACTION PREVIEW",

@@ -1,5 +1,5 @@
 //! Narrow permanent Intellect composition and source-witness contracts.
-use super::intellect::{IntellectSources, current_sources, eligible_intellect};
+use super::intellect::{current_sources, eligible_intellect, IntellectSources};
 use super::{Content, CreatureBuild, Template};
 use crate::attributes::{Attribute, Attributes, ByAttribute};
 use crate::content_ids::{ClassId, FlagId, TalentId, TemplateId};

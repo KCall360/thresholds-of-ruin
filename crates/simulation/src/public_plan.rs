@@ -407,13 +407,23 @@ impl Game {
                     id: definition.id.clone(),
                     name: definition.name.clone(),
                 });
-            let aim = if let Some(ray) = pending.plan.as_ray() {
+            let directional = pending
+                .plan
+                .as_ray()
+                .map(|plan| (plan.origin, plan.direction))
+                .or_else(|| {
+                    pending
+                        .plan
+                        .as_projectile()
+                        .map(|plan| (plan.origin, plan.direction))
+                });
+            let aim = if let Some((origin, launch_direction)) = directional {
                 let mut directions = scene
                     .iter()
-                    .filter(|cell| cell.physical && cell.location == ray.origin.location)
+                    .filter(|cell| cell.physical && cell.location == origin.location)
                     .map(|cell| {
-                        let direction = tor_world::Direction::from(ray.direction)
-                            .rotated(ray.origin.orientation)
+                        let direction = tor_world::Direction::from(launch_direction)
+                            .rotated(origin.orientation)
                             .rotated(tor_world::inverse_rotation(cell.rotation));
                         let (x, y, z) = direction.delta();
                         Position { x, y, z }

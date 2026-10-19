@@ -111,7 +111,7 @@ pub struct NoteDraft {
 #[derive(serde::Serialize)]
 pub enum SupplyPurpose {
     Ability {
-        ability: AbilityView,
+        ability: Box<AbilityView>,
         invocation: AbilityInvocation,
     },
     Respec,
@@ -151,6 +151,7 @@ pub struct App {
     pub selected_weapon: WeaponSelection,
     pub weapon_selection: Option<WeaponDraft>,
     pub weapon_confirmation: Option<tor_client_common::weapon_preview::WeaponPreview>,
+    pub projectile_selection: Option<tor_client_common::projectiles::ProjectileMenu>,
     /// The look cursor, while choosing a cell to describe.
     pub look_cursor: Option<Position>,
     pub inventory_open: bool,
@@ -225,6 +226,7 @@ impl App {
             selected_weapon: WeaponSelection::Default,
             weapon_selection: None,
             weapon_confirmation: None,
+            projectile_selection: None,
             look_cursor: None,
             inventory_open: false,
             help_open: false,
@@ -378,6 +380,14 @@ impl App {
     }
 
     fn state_changed(&mut self, old: Option<(BranchId, u64)>) {
+        if self
+            .projectile_selection
+            .as_ref()
+            .is_some_and(|menu| self.state.as_ref().is_none_or(|state| !menu.current(state)))
+        {
+            self.projectile_selection = None;
+            self.status = "Projectile choices changed; choose the ability again.".into();
+        }
         if self.weapon_confirmation.as_ref().is_some_and(|preview| {
             self.state
                 .as_ref()
@@ -504,6 +514,7 @@ impl App {
     /// The server refused a request: stop any run and say why, in terms of
     /// what the player tried.
     pub fn refused(&mut self, status: String) {
+        self.projectile_selection = None;
         self.weapon_confirmation = None;
         if self.advancement_open {
             self.advancement_pages.invalidate();
@@ -660,6 +671,7 @@ impl App {
     }
 
     pub fn disconnect(&mut self, message: String) {
+        self.projectile_selection = None;
         self.close_advancement();
         self.travel_cursor = None;
         self.place_name = None;
@@ -1177,7 +1189,7 @@ impl App {
                 label: tor_client_common::abilities::ability_label(&ability),
                 costs: ability.supply_costs.clone(),
                 purpose: SupplyPurpose::Ability {
-                    ability,
+                    ability: Box::new(ability),
                     invocation,
                 },
                 candidates,
@@ -1664,6 +1676,9 @@ impl App {
     }
 
     pub fn input(&mut self, input: Input) -> Effect {
+        if self.projectile_selection.is_some() {
+            return self.projectile_input(input);
+        }
         if self.weapon_confirmation.is_some() {
             return self.weapon_confirmation_input(input);
         }
@@ -1895,6 +1910,10 @@ impl App {
                             tor_client_common::abilities::choices(&state.state().observation)
                                 .contains(&ability)
                         }) {
+                            if ability.target_kind == AbilityTargetKind::DirectionalProjectile {
+                                self.selected_weapon = WeaponSelection::Default;
+                                return self.open_projectile_picker(&ability.id);
+                            }
                             if matches!(
                                 ability.target_kind,
                                 AbilityTargetKind::SelfStep | AbilityTargetKind::DirectionalRay
@@ -2823,6 +2842,136 @@ impl App {
         self.command(command)
     }
 
+    fn open_projectile_picker(&mut self, ability: &str) -> Effect {
+        let Some(state) = &self.state else {
+            return Effect::None;
+        };
+        match tor_client_common::projectiles::ProjectileMenu::new(state, ability) {
+            Ok(menu) => {
+                let command = menu.command().expect("new source query");
+                self.projectile_selection = Some(menu);
+                self.selected = 0;
+                self.command(command)
+            }
+            Err(reason) => {
+                self.status = reason;
+                Effect::None
+            }
+        }
+    }
+    pub fn bind_projectile_request(&mut self, id: &str) -> Result<(), String> {
+        if let Some(menu) = self.projectile_selection.as_mut() {
+            menu.bind_request(id)?;
+        }
+        Ok(())
+    }
+    pub fn show_projectile_choices(
+        &mut self,
+        context: &ReplyContext,
+        id: &str,
+        page: &ProjectileChoicePage,
+    ) -> Result<(), String> {
+        let Some(menu) = self.projectile_selection.as_mut() else {
+            return Ok(());
+        };
+        menu.accept(
+            self.state.as_ref().ok_or("No current observation.")?,
+            context,
+            id,
+            page,
+        )?;
+        self.selected = 0;
+        self.status = "Choose a source. Left/Right pages; Esc cancels.".into();
+        Ok(())
+    }
+    pub fn projectile_rows(&self) -> Vec<String> {
+        let Some(menu) = &self.projectile_selection else {
+            return vec![];
+        };
+        let mut rows: Vec<_> = menu
+            .rows()
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| format!("{} {row}", if i == self.selected { ">" } else { " " }))
+            .collect();
+        if menu.has_previous() {
+            rows.push("Left: previous choices".into());
+        }
+        if menu.has_next() {
+            rows.push("Right: more choices".into());
+        }
+        rows
+    }
+    fn projectile_input(&mut self, input: Input) -> Effect {
+        use tor_client_common::projectiles::Step;
+        if matches!(input, Input::Key { key: Key::Escape }) {
+            self.projectile_selection = None;
+            self.status = "Never mind.".into();
+            return Effect::None;
+        }
+        let Some(state) = self.state.as_ref() else {
+            self.projectile_selection = None;
+            return Effect::None;
+        };
+        let menu = self
+            .projectile_selection
+            .as_mut()
+            .expect("projectile picker");
+        if !menu.current(state) {
+            self.projectile_selection = None;
+            self.status = "Projectile choices changed; choose the ability again.".into();
+            return Effect::None;
+        }
+        if self.busy {
+            return Effect::None;
+        }
+        let Input::Key { key } = input else {
+            return Effect::None;
+        };
+        if menu.step() == Step::Direction {
+            if let Some(direction) = key.step_direction() {
+                let action = menu.action(state, direction);
+                self.projectile_selection = None;
+                return match action {
+                    Ok(action) => self.act(action),
+                    Err(reason) => {
+                        self.status = reason;
+                        Effect::None
+                    }
+                };
+            }
+            return Effect::None;
+        }
+        let command = match key {
+            Key::Up => {
+                self.selected = self.selected.saturating_sub(1);
+                return Effect::None;
+            }
+            Key::Down => {
+                self.selected = (self.selected + 1).min(menu.choices().len().saturating_sub(1));
+                return Effect::None;
+            }
+            Key::Left => menu.previous(state).map(Some),
+            Key::Right => menu.next(state).map(Some),
+            Key::Enter => menu.choose(state, self.selected),
+            _ => return Effect::None,
+        };
+        match command {
+            Ok(Some(command)) => {
+                self.selected = 0;
+                self.command(command)
+            }
+            Ok(None) => {
+                self.status = "Choose a direction. Movement keys select; Esc cancels.".into();
+                Effect::None
+            }
+            Err(reason) => {
+                self.status = reason;
+                Effect::None
+            }
+        }
+    }
+
     pub fn bind_weapon_preview(&mut self, id: &str) -> Result<(), String> {
         self.weapon_confirmation
             .as_mut()
@@ -3092,7 +3241,7 @@ pub fn history_text(entry: &HistoryEntry) -> String {
         HistoryContent::PlaceRenamed { name, .. } => format!("Place named {}.", name),
         HistoryContent::Travel { .. } => "Travel requested.".into(),
         HistoryContent::Wizard { summary, .. } => summary.clone(),
-        HistoryContent::Action { event, .. } => match event {
+        HistoryContent::Action { event, .. } => match event.as_ref() {
             Event::Moved { direction } => format!("Moved {}.", direction_name(*direction)),
             Event::Escaped { .. } => "Escaped with the objective item.".into(),
             Event::Taken { quantity, .. } => {

@@ -779,7 +779,7 @@ impl Game {
                         self.prepare_owned_transfer_into(id, target, source, quantity, merge)?;
                     let result = transfer.result();
                     self.apply_owned_transfer(transfer)?;
-                    destinations.entry(key).or_insert(result);
+                    destinations.insert(key, result);
                     remaining -= quantity;
                 }
                 Ok((remaining < requested).then_some(TransferReceipt {

@@ -606,6 +606,12 @@ pub(crate) fn inspect(
         abilities: derived
             .ability_timings
             .iter()
+            .filter(|(id, _)| {
+                !matches!(
+                    rules.ability(id).expect("validated ability").strikes,
+                    s::rules::StrikeSource::Projectile { .. }
+                )
+            })
             .map(|(id, timing)| {
                 let modifiers = derived.ability_values(id);
                 p::CombatTraceStep {
@@ -725,6 +731,18 @@ pub(crate) fn inspect(
                         s::rules::StrikeSource::Authored { strikes } => {
                             p::StrikeSourceInspectionView::Authored {
                                 strike_count: strikes.len() as u16,
+                            }
+                        }
+                        s::rules::StrikeSource::Projectile { delivery } => {
+                            p::StrikeSourceInspectionView::Projectile {
+                                delivery: match delivery {
+                                    s::projectile_profiles::ProjectileDeliveryKind::Throw => {
+                                        p::ProjectileDeliveryKind::Throw
+                                    }
+                                    s::projectile_profiles::ProjectileDeliveryKind::Launch => {
+                                        p::ProjectileDeliveryKind::Launch
+                                    }
+                                },
                             }
                         }
                         s::rules::StrikeSource::SelectedMelee => {

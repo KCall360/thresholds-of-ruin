@@ -36,6 +36,19 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         }),
     };
     let mut commands = vec![
+        Wire::ProjectileChoices {
+            expected_revision: u64::MAX,
+            query: tor_protocol::ProjectileChoiceQuery {
+                ability: "fixture.launch".into(),
+                phase: tor_protocol::ProjectileChoicePhase::Ammunition {
+                    launcher: tor_protocol::EquippedProjectileWeapon {
+                        item: scope.item(tor_simulation::ItemId(u64::MAX)),
+                        socket: 63,
+                    },
+                },
+                offset: u32::MAX,
+            },
+        },
         Wire::Advancement {
             expected_revision: u64::MAX,
             query: tor_protocol::AdvancementQuery::Overview {},
@@ -145,6 +158,13 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         let backend = tor_server::wire_adapter::decode_command(&wire).unwrap();
         let reconstructed = match backend {
             DecodedCommand::Backend(command) => engine.encode_command(ActorId(1), command).unwrap(),
+            DecodedCommand::ProjectileChoices {
+                expected_revision,
+                query,
+            } => Wire::ProjectileChoices {
+                expected_revision,
+                query,
+            },
             DecodedCommand::Advancement {
                 expected_revision,
                 query,

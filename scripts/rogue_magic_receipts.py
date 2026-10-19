@@ -61,9 +61,11 @@ EQUIPMENT_ITEM_STAGES = (
     ("rogue.equipment", ("rogue.generated_mace", "rogue.long_sword", "rogue.dagger",
                          "rogue.two_handed_sword", "rogue.spear", "rogue.leather_armor",
                          "rogue.generated_ring_mail", "rogue.studded_leather", "rogue.scale_mail",
-                         "rogue.chain_mail", "rogue.splint_mail", "rogue.banded_mail", "rogue.plate_mail")),
+                         "rogue.chain_mail", "rogue.splint_mail", "rogue.banded_mail", "rogue.plate_mail",
+                         "rogue.shortbow")),
     ("rogue.equipment_scrolls", ("rogue.enchant_armor", "rogue.protect_armor", "rogue.enchant_weapon",
                                  "rogue.remove_curse", "rogue.identify_weapon", "rogue.identify_armor")),
+    ("rogue.ammunition", ("rogue.arrow",)),
 )
 EQUIPMENT_ITEM_STAGE_IDS = tuple(identity for identity, _ in EQUIPMENT_ITEM_STAGES)
 
@@ -77,7 +79,7 @@ def assert_finite_item_identity(test, item, content):
 
 
 def assert_equipment_item_receipts(test, stages, *, require_placed=False):
-    """Require exactly one finite attempt per stage and return placed item IDs."""
+    """Require finite equipment/ammunition attempts and return placed item IDs."""
     test.assertEqual([stage["id"] for stage in stages], list(EQUIPMENT_ITEM_STAGE_IDS))
     identities = []
     for stage, (identity, choices) in zip(stages, EQUIPMENT_ITEM_STAGES, strict=True):
@@ -114,7 +116,7 @@ def assert_equipment_item_receipts(test, stages, *, require_placed=False):
         test.assertGreater(entity["id"], 0)
         test.assertLess(entity["id"], 1 << 64)
         test.assertIs(type(entity["quantity"]), int)
-        test.assertEqual(entity["quantity"], 1)
+        test.assertEqual(entity["quantity"], 6 if identity == "rogue.ammunition" else 1)
         identities.append(("item", entity["id"]))
     test.assertEqual(len(identities), len(set(identities)))
     return identities

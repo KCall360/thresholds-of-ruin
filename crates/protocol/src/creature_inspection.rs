@@ -417,6 +417,11 @@ impl CreatureInspectionView {
                 .all(|(source, ability)| {
                     source.valid()
                         && source.ability == ability.id
+                        && (matches!(
+                            source.source,
+                            crate::StrikeSourceInspectionView::Projectile { .. }
+                        ) == (ability.target_kind
+                            == crate::AbilityTargetKind::DirectionalProjectile))
                         && match source.source {
                             crate::StrikeSourceInspectionView::NaturalMelee {
                                 strike_count,

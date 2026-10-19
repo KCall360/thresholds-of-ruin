@@ -428,6 +428,85 @@ fn rogue_selected_presets_publish_real_equipped_kits_and_four_ordinary_foes() {
 }
 
 #[test]
+fn rogue_projectile_content_is_default_available_and_expertise_is_an_ordinary_choice() {
+    use tor_simulation::{
+        abilities::InvocationKind,
+        content_ids::{AbilityId, ExpertiseId},
+        expertise::ExpertiseCategory,
+        projectile_profiles::ProjectileDeliveryKind,
+        rules::{Reach, StrikeSource, ThreatSource, TimingSource},
+        HdIndex,
+    };
+
+    // Qualify the current source in an isolated package; published certificate
+    // regeneration belongs to the final coherent schema freeze.
+    let source = tempfile::tempdir().unwrap();
+    support::copy_package(&support::package("rogue-exploration"), source.path());
+    scenario_package::validate(source.path()).unwrap();
+    let scenario = scenario_package::load(source.path(), 42, Some(1), false).unwrap();
+    let package = scenario.package.as_ref().unwrap();
+    let rules = package.rules().unwrap();
+    for (name, delivery) in [
+        ("rogue.throw", ProjectileDeliveryKind::Throw),
+        ("rogue.launch", ProjectileDeliveryKind::Launch),
+    ] {
+        let id = AbilityId::new(name).unwrap();
+        let ability = rules.ability(&id).unwrap();
+        assert!(rules.constants().default_abilities.contains(&id));
+        assert_eq!(ability.invocation, InvocationKind::DirectionalProjectile);
+        assert_eq!(ability.reach, Reach::Projectile);
+        assert_eq!(ability.strikes, StrikeSource::Projectile { delivery });
+        assert_eq!(ability.timing.source, TimingSource::SelectedWeapon);
+        assert!(!ability.basic_attack);
+        assert!(ability.cost.is_none() && ability.supply_costs.is_empty());
+    }
+    let catalog = package.manifest.creatures.compile(rules.clone()).unwrap();
+    for character in &package.manifest.characters {
+        let initial = catalog
+            .prepare(character.creature.as_ref().unwrap())
+            .unwrap()
+            .instantiate(42)
+            .unwrap();
+        assert_eq!(initial.unspent_points(), 1);
+        for ability in ["rogue.throw", "rogue.launch", "rogue.search"] {
+            assert!(initial
+                .derive()
+                .unwrap()
+                .abilities
+                .contains(&AbilityId::new(ability).unwrap()));
+        }
+        for name in ["rogue.knife", "rogue.shortbow"] {
+            let id = ExpertiseId::new(name).unwrap();
+            assert_eq!(
+                rules.expertise(&id).unwrap().category,
+                ExpertiseCategory::Equipment
+            );
+            assert_eq!(
+                rules
+                    .document()
+                    .growth
+                    .threat
+                    .contribution(&ThreatSource::Expertise { id: id.clone() }),
+                10
+            );
+            assert!(!initial.derive().unwrap().expertises.owns(&id));
+            let mut paid = initial.clone();
+            paid.select_expertise(HdIndex(0), id.clone()).unwrap();
+            assert_eq!(paid.unspent_points(), 0);
+            assert!(paid.derive().unwrap().expertises.active(&id));
+            let mut intellect = initial.clone();
+            let (threshold, choice) = intellect.intellect_expertise_choices().next().unwrap();
+            assert!(choice.is_none());
+            intellect
+                .select_intellect_expertise(threshold, id.clone())
+                .unwrap();
+            assert_eq!(intellect.unspent_points(), 1);
+            assert!(intellect.derive().unwrap().expertises.active(&id));
+        }
+    }
+}
+
+#[test]
 fn rogue_geometry_fixture_stays_population_free_for_exploration_and_performance() {
     let engine = Engine::memory(support::load("rogue-geometry", 42)).unwrap();
     assert_eq!(engine.actors(), vec![tor_protocol::ActorId(1)]);

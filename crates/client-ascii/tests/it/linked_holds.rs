@@ -282,7 +282,7 @@ fn hold_escape_history_keeps_the_start_generic() {
         audience: Audience::Actor,
         content: HistoryContent::Action {
             action: Action::Escape { hold: target(1) },
-            event: Event::EscapeStarted { hold: target(1) },
+            event: Box::new(Event::EscapeStarted { hold: target(1) }),
         },
     };
     assert_eq!(

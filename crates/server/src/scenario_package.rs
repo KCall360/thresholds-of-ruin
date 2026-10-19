@@ -38,9 +38,10 @@ pub use authoring::{
     AiProfile, AmountExpr, AnatomySpec, ArmorMaterial, ArmorSpec, BodySpec, ChargeRange,
     ConsumableSpec, CurrencyKind, DamageComponentExpr, DamageExpr, DamageType, DeviceSpec,
     DiceExpr, Effect, EquipmentAlteration, EquipmentGeneration, EquipmentSlot, EquipmentSpec,
-    EquippedSelection, HealingOverflow, HoldPolicy, ItemClass, ItemDiscovery, PrimaryAttackSocket,
-    PushDirection, ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection,
-    WeaponProfileSpec, WeaponRangeBands, WeaponTrait, WeaponTraitChanges, WeaponTraitKind,
+    EquippedSelection, HealingOverflow, HitRecovery, HoldPolicy, ItemClass, ItemDiscovery,
+    LauncherProfile, PrimaryAttackSocket, ProjectileSpec, PushDirection, ReadableSpec,
+    RelocationGate, RelocationPolicy, TheftSelection, WeaponProfileSpec, WeaponRangeBands,
+    WeaponTrait, WeaponTraitChanges, WeaponTraitKind,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -51,13 +52,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v45";
-const VALIDATOR: &str = "tor-scenario-35";
+pub const RULESET: &str = "interactions-v46";
+const VALIDATOR: &str = "tor-scenario-36";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 23;
+pub const FORMAT: u32 = 24;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -231,6 +232,7 @@ pub struct Archetype {
     pub creature: Option<crate::creature_authoring::BuildSpec>,
     pub anatomy: Option<AnatomySpec>,
     pub equipment: Option<EquipmentSpec>,
+    pub projectile: Option<ProjectileSpec>,
     pub equipment_generation: Option<EquipmentGeneration>,
     pub consumable: Option<ConsumableSpec>,
     pub readable: Option<ReadableSpec>,
@@ -263,6 +265,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             creature: Option<crate::creature_authoring::BuildSpec>,
             anatomy: Option<AnatomySpec>,
             equipment: Option<EquipmentSpec>,
+            projectile: Option<ProjectileSpec>,
             equipment_generation: Option<EquipmentGeneration>,
             consumable: Option<ConsumableSpec>,
             readable: Option<ReadableSpec>,
@@ -300,6 +303,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             creature: fields.creature,
             anatomy: fields.anatomy,
             equipment: fields.equipment,
+            projectile: fields.projectile,
             equipment_generation: fields.equipment_generation,
             consumable: fields.consumable,
             readable: fields.readable,
@@ -333,6 +337,7 @@ impl Clone for Archetype {
             anatomy: self.anatomy.clone(),
             creature: self.creature.clone(),
             equipment: self.equipment.clone(),
+            projectile: self.projectile.clone(),
             equipment_generation: self.equipment_generation,
             consumable: self.consumable.clone(),
             readable: self.readable.clone(),
@@ -2504,6 +2509,7 @@ impl Package {
             ),
             None => failure,
         })?;
+        self.check_item_identities()?;
         self.check_population()?;
         self.check_unique_retrieval()
     }
@@ -2977,80 +2983,139 @@ impl Package {
         }
         Ok(())
     }
-    fn appearance_mapping(&self, seed: u64) -> Result<BTreeMap<String, String>, Failure> {
-        let rules = self.rules()?;
-        let mut result = BTreeMap::new();
+    /// Type knowledge is shared by identity. Revalidate the same invariant for
+    /// source-free metadata, not only when preparing authored appearances.
+    fn check_item_identities(&self) -> Result<(), Failure> {
         let mut signatures = BTreeMap::new();
-        for (key, a) in &self.manifest.archetypes {
-            (|| -> Result<(), Failure> {
-            require(
-                a.anatomy.as_ref().is_none_or(|anatomy| {
-                    anatomy.slots.len() <= tor_simulation::limits::EQUIPMENT_SOCKETS
-                }),
-                "Invalid anatomy",
-            )?;
-            if let Some(policy) = a.equipment_generation {
-                let equipment = a.equipment.as_ref().map(|gear| gear.compile(&rules)).transpose()?;
-                require(policy.compile()?.valid_for(a.class.into(), equipment.as_ref()), "Invalid equipment generation definition")?;
-            }
-            if let Some(equipment) = &a.equipment {
-                let spec = equipment.compile(&rules)?;
-                require(
-                    !a.stackable
-                        && a.consumable.is_none()
-                        && a.readable.is_none()
-                        && a.device.is_none()
-                        && a.edible.is_none()
-                        && a.supply.is_none()
-                        && spec.validate_rules(a.class.into(), &rules).is_ok(),
-                    "Invalid equipment definition",
-                )?;
-            }
-            if let Some(consumable) = &a.consumable {
-                let spec = consumable.compile(&rules)?;
-                require(
-                    a.class == ItemClass::Potion && a.edible.is_none() && a.readable.is_none() && a.device.is_none() && spec.valid(),
-                    "Invalid consumable definition",
-                )?;
-            }
-            if let Some(readable) = &a.readable {
-                readable.compile(&rules)?;
-                require(
-                    a.equipment.is_none() && a.consumable.is_none() && a.edible.is_none() && a.device.is_none() && a.supply.is_none() && a.currency.is_none(),
-                    "Invalid readable definition",
-                )?;
-            }
-            if let Some(device) = &a.device {
-                device.compile(&rules)?;
-                require(
-                    !a.stackable && a.equipment.is_none() && a.consumable.is_none() && a.edible.is_none() && a.readable.is_none() && a.supply.is_none() && a.currency.is_none(),
-                    "Invalid device definition",
-                )?;
-            }
-            if let Some(edible) = &a.edible {
-                require(edible.valid() && a.equipment.is_none() && a.consumable.is_none() && a.readable.is_none() && a.device.is_none(), "Invalid edible definition")?;
-            }
-            let identity = a.identity.as_ref().unwrap_or(key);
-            require(label(identity), "Invalid item identity")?;
+        for (key, item) in &self.manifest.archetypes {
+            let identity = item.identity.as_ref().unwrap_or(key);
+            require(label(identity), "Invalid item identity")
+                .map_err(|failure| self.archetype_origin(key).context(failure))?;
             let signature = (
-                &a.name,
-                &a.appearance_pool,
-                a.class,
-                &a.equipment,
-                &a.consumable,
-                &a.readable,
-                &a.device,
-                &a.edible,
-                &a.supply,
+                &item.name,
+                &item.appearance_pool,
+                item.class,
+                &item.equipment,
+                &item.projectile,
+                &item.consumable,
+                &item.readable,
+                &item.device,
+                &item.edible,
+                &item.supply,
             );
             if let Some(previous) = signatures.insert(identity, signature) {
-                require(
-                    previous == signature,
-                    "One identity must have one name, appearance pool, physical class, item effects and supply",
-                )?;
+                require(previous == signature,
+                    "One identity must have one name, appearance pool, physical class, item effects, projectile profile and supply")
+                    .map_err(|failure| self.archetype_origin(key).context(failure))?;
             }
-            Ok(())
-            })().map_err(|failure| self.archetype_origin(key).context(failure))?;
+        }
+        Ok(())
+    }
+    fn appearance_mapping(&self, seed: u64) -> Result<BTreeMap<String, String>, Failure> {
+        self.check_item_identities()?;
+        let rules = self.rules()?;
+        let mut result = BTreeMap::new();
+        for (key, a) in &self.manifest.archetypes {
+            (|| -> Result<(), Failure> {
+                require(
+                    a.anatomy.as_ref().is_none_or(|anatomy| {
+                        anatomy.slots.len() <= tor_simulation::limits::EQUIPMENT_SOCKETS
+                    }),
+                    "Invalid anatomy",
+                )?;
+                let projectile = a
+                    .projectile
+                    .as_ref()
+                    .map(|value| value.compile(&rules))
+                    .transpose()?;
+                if projectile.is_some() {
+                    require(
+                        a.class == ItemClass::Weapon
+                            && a.consumable.is_none()
+                            && a.readable.is_none()
+                            && a.device.is_none()
+                            && a.edible.is_none()
+                            && a.currency.is_none(),
+                        "Invalid projectile capability combination",
+                    )?;
+                }
+                if let Some(policy) = a.equipment_generation {
+                    let equipment = a
+                        .equipment
+                        .as_ref()
+                        .map(|gear| gear.compile(&rules))
+                        .transpose()?;
+                    require(
+                        policy.compile()?.valid_for(
+                            a.class.into(),
+                            equipment.as_ref(),
+                            projectile.as_ref(),
+                        ),
+                        "Invalid equipment generation definition",
+                    )?;
+                }
+                if let Some(equipment) = &a.equipment {
+                    let spec = equipment.compile(&rules)?;
+                    require(
+                        !a.stackable
+                            && a.consumable.is_none()
+                            && a.readable.is_none()
+                            && a.device.is_none()
+                            && a.edible.is_none()
+                            && a.supply.is_none()
+                            && spec.validate_rules(a.class.into(), &rules).is_ok(),
+                        "Invalid equipment definition",
+                    )?;
+                }
+                if let Some(consumable) = &a.consumable {
+                    let spec = consumable.compile(&rules)?;
+                    require(
+                        a.class == ItemClass::Potion
+                            && a.edible.is_none()
+                            && a.readable.is_none()
+                            && a.device.is_none()
+                            && spec.valid(),
+                        "Invalid consumable definition",
+                    )?;
+                }
+                if let Some(readable) = &a.readable {
+                    readable.compile(&rules)?;
+                    require(
+                        a.equipment.is_none()
+                            && a.consumable.is_none()
+                            && a.edible.is_none()
+                            && a.device.is_none()
+                            && a.supply.is_none()
+                            && a.currency.is_none(),
+                        "Invalid readable definition",
+                    )?;
+                }
+                if let Some(device) = &a.device {
+                    device.compile(&rules)?;
+                    require(
+                        !a.stackable
+                            && a.equipment.is_none()
+                            && a.consumable.is_none()
+                            && a.edible.is_none()
+                            && a.readable.is_none()
+                            && a.supply.is_none()
+                            && a.currency.is_none(),
+                        "Invalid device definition",
+                    )?;
+                }
+                if let Some(edible) = &a.edible {
+                    require(
+                        edible.valid()
+                            && a.equipment.is_none()
+                            && a.consumable.is_none()
+                            && a.readable.is_none()
+                            && a.device.is_none(),
+                        "Invalid edible definition",
+                    )?;
+                }
+                Ok(())
+            })()
+            .map_err(|failure| self.archetype_origin(key).context(failure))?;
             if let Some(pool) = &a.appearance_pool {
                 require(
                     a.name.is_some(),
@@ -4551,6 +4616,7 @@ mod tests {
             "anatomy",
             "equipment",
             "equipment_generation",
+            "projectile",
             "consumable",
             "readable",
             "device",
@@ -4643,8 +4709,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-35");
-        assert_eq!(original.certificate.ruleset, "interactions-v45");
+        assert_eq!(original.certificate.validator, "tor-scenario-36");
+        assert_eq!(original.certificate.ruleset, "interactions-v46");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -5767,6 +5833,76 @@ mod tests {
         );
     }
     #[test]
+    fn shared_item_identity_requires_one_projectile_profile_in_source_and_restore() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let template = read_package(&root).unwrap();
+        let projectile = serde_json::json!({
+            "family":"fixture.bow", "recovery":"recoverable",
+            "damage":{"components":[{"category":"keen","descriptor":null,"amount":{"type":"fixed","value":3}}],"primary":{"category":"keen","descriptor":null}}
+        });
+        let archetype = serde_json::json!({
+            "name":"shared arrow", "identity":"fixture.shared_arrow", "class":"weapon", "stackable":true,
+            "projectile":projectile
+        });
+        let mut manifest = template.manifest.clone();
+        for key in ["fixture.arrow_a", "fixture.arrow_b"] {
+            manifest.archetypes.insert(
+                key.into(),
+                serde_json::from_value(archetype.clone()).unwrap(),
+            );
+        }
+        let make = |manifest| {
+            Package::from_parts(
+                manifest,
+                template.region_defs().unwrap(),
+                &template.rules_source,
+            )
+            .unwrap()
+        };
+        let valid = make(manifest.clone());
+        valid.appearance_mapping(42).unwrap();
+        valid.check_identity().unwrap();
+        let encode = crate::storage::schema::scenario::encode_content_package;
+        let decode = crate::storage::schema::scenario::decode_content_package;
+        let restored = decode(&encode(&valid).unwrap()).unwrap();
+        assert!(restored.directory.is_none());
+        restored.check_identity().unwrap();
+        for changed in ["family", "damage", "recovery", "presence"] {
+            let mut manifest = manifest.clone();
+            let item = manifest.archetypes.get_mut("fixture.arrow_b").unwrap();
+            let mut profile = projectile.clone();
+            match changed {
+                "family" => profile["family"] = serde_json::json!("fixture.sling"),
+                "damage" => {
+                    profile["damage"]["components"][0]["amount"]["value"] = serde_json::json!(4)
+                }
+                "recovery" => profile["recovery"] = serde_json::json!("consumed_on_hit"),
+                "presence" => {}
+                _ => unreachable!(),
+            }
+            item.projectile =
+                (changed != "presence").then(|| serde_json::from_value(profile).unwrap());
+            // Rebuild the honest hash/certificate around the mismatch. Rejection
+            // must come from the shared semantic invariant, not stale hashes.
+            let invalid = make(manifest);
+            for failure in [
+                invalid.appearance_mapping(42).unwrap_err(),
+                invalid.check_identity().unwrap_err(),
+                decode(&encode(&invalid).unwrap()).unwrap_err(),
+            ] {
+                assert!(
+                    failure.message.contains("One identity"),
+                    "{changed}: {failure}"
+                );
+                assert!(
+                    failure.message.contains("projectile profile"),
+                    "{changed}: {failure}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn appearance_pools_cannot_encode_hidden_identity_through_physical_class() {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
@@ -6034,7 +6170,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v45"
+        let source = r#"import = "interactions-v46"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

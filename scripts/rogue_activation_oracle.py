@@ -189,7 +189,12 @@ def reviewed_twenty_six_activation():
             ("rogue.magic_devices", ("wand_fire", "wand_cold", "wand_lightning")),
             ("rogue.equipment", ("generated_mace", "long_sword", "dagger", "two_handed_sword", "spear",
                                  "leather_armor", "generated_ring_mail", "studded_leather", "scale_mail",
-                                 "chain_mail", "splint_mail", "banded_mail", "plate_mail")),
+                                 "chain_mail", "splint_mail", "banded_mail", "plate_mail", "shortbow")),
             ("rogue.equipment_scrolls", ("enchant_armor", "protect_armor", "enchant_weapon", "remove_curse",
                                         "identify_weapon", "identify_armor"))))
+    # One finite stack attempt; six arrows is explicit provisional TOR tuning.
+    activation["profiles"]["rogue.low_depth"]["stages"].append({
+        "id": "rogue.ammunition", "version": 1, "kind": "items", "count": [1, 1],
+        "bands": [{"depth": {"kind": "open", "minimum": 1},
+                   "choices": [{"archetype": "rogue.arrow", "weight": 1}]}], "quantity": 6})
     return activation

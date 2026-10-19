@@ -94,6 +94,7 @@ fn equipped_state(requires_attack: bool) -> StateView {
             equipped_slot: Some(0),
             known_cursed: None,
             known_protected: None,
+            known_projectile_bonus: None,
             known_equipment: Some(EquipmentView {
                 attack: requires_attack.then(super::creature_inspection::attack),
                 modifiers: vec![],
@@ -1464,6 +1465,7 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
             equipped_slot: None,
             known_cursed: None,
             known_protected: None,
+            known_projectile_bonus: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -1506,6 +1508,121 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
             invalid.validate(),
             Err(InvalidState::InvalidInteraction),
             "case {case}"
+        );
+    }
+}
+
+#[test]
+fn remembered_projectile_bonus_delta_requires_identified_item_and_bounds() {
+    let mut base = equipped_state(false);
+    let row = &mut base.observation.interactions.as_mut().unwrap().inventory[0];
+    row.slot = None;
+    row.equipped_slot = None;
+    row.known_equipment = None;
+    assert!(base.validate().is_ok());
+    let mut next = base.clone();
+    next.revision += 1;
+    next.observation.interactions.as_mut().unwrap().inventory[0].known_projectile_bonus =
+        Some(ProjectileBonusView {
+            hit: -1_000_000,
+            damage: 1_000_000,
+        });
+    round_trip(&base, &next);
+    let mut invalid = next.clone();
+    invalid.observation.inventory[0].identified = false;
+    assert_eq!(invalid.validate(), Err(InvalidState::InvalidInteraction));
+    next.observation.interactions.as_mut().unwrap().inventory[0]
+        .known_projectile_bonus
+        .as_mut()
+        .unwrap()
+        .hit = 1_000_001;
+    assert_eq!(next.validate(), Err(InvalidState::InvalidInteraction));
+}
+
+#[test]
+fn full_remembered_projectile_inventory_fits_retained_state_budget() {
+    let mut state = equipped_state(false);
+    let item = state.observation.inventory[0].clone();
+    let mut row = state.observation.interactions.as_ref().unwrap().inventory[0].clone();
+    row.slot = None;
+    row.equipped_slot = None;
+    row.known_equipment = None;
+    row.known_projectile_bonus = Some(ProjectileBonusView {
+        hit: -1_000_000,
+        damage: -1_000_000,
+    });
+    state.observation.inventory.clear();
+    state
+        .observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .inventory
+        .clear();
+    // Equipment memory holds at most 4096 exact-instance facts.
+    for index in 0..4096 {
+        let target = ItemTarget::from_digest(synthetic_digest(index + 100));
+        let mut item = item.clone();
+        item.id = target;
+        state.observation.inventory.push(item);
+        let mut row = row.clone();
+        row.item = target;
+        state
+            .observation
+            .interactions
+            .as_mut()
+            .unwrap()
+            .inventory
+            .push(row);
+    }
+    assert!(state.validate().is_ok());
+    assert!(encoded_length(&state, MAX_STATE_BYTES).unwrap().is_some());
+    let json = serde_json::to_string(&state).unwrap();
+    assert_eq!(serde_json::from_str::<StateView>(&json).unwrap(), state);
+}
+
+#[test]
+fn remembered_curse_and_protection_do_not_invent_equipment_slots_or_numeric_knowledge() {
+    let mut base = equipped_state(false);
+    let row = &mut base.observation.interactions.as_mut().unwrap().inventory[0];
+    row.slot = None;
+    row.equipped_slot = None;
+    row.known_equipment = None;
+    for identified in [false, true] {
+        base.observation.inventory[0].identified = identified;
+        for (cursed, protected) in [
+            (Some(true), None),
+            (None, Some(false)),
+            (Some(false), Some(true)),
+        ] {
+            let mut known = base.clone();
+            known.revision += 1;
+            let row = &mut known.observation.interactions.as_mut().unwrap().inventory[0];
+            row.known_cursed = cursed;
+            row.known_protected = protected;
+            assert!(row.known_projectile_bonus.is_none());
+            assert!(
+                known.validate().is_ok(),
+                "exact-instance facts need neither slots nor identified type"
+            );
+            round_trip(&base, &known);
+        }
+    }
+    for equipment in [false, true] {
+        let mut invalid = base.clone();
+        let row = &mut invalid.observation.interactions.as_mut().unwrap().inventory[0];
+        if equipment {
+            row.known_equipment = Some(EquipmentView {
+                attack: None,
+                modifiers: vec![],
+            });
+        } else {
+            row.equipped_slot = Some(0);
+        }
+        assert_eq!(
+            invalid.validate(),
+            Err(InvalidState::InvalidInteraction),
+            "actual equipment still requires a socket"
         );
     }
 }

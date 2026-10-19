@@ -62,6 +62,7 @@ pub struct AbilityCost {
 pub enum AbilityTargetKind {
     SelfStep,
     DirectionalRay,
+    DirectionalProjectile,
     SelfOnly,
     SelfOrAlly,
     Actor,
@@ -70,9 +71,15 @@ pub enum AbilityTargetKind {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AbilityReach {
     Melee,
-    Sight { range: u16 },
+    /// Range comes from the exact selected physical delivery profile.
+    Projectile,
+    Sight {
+        range: u16,
+    },
     SelfOnly,
-    SelfOrAlly { range: AbilityAllyRange },
+    SelfOrAlly {
+        range: AbilityAllyRange,
+    },
 }
 impl<'de> Deserialize<'de> for AbilityReach {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -80,12 +87,14 @@ impl<'de> Deserialize<'de> for AbilityReach {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             Melee,
+            Projectile {},
             Sight { range: u16 },
             SelfOnly,
             SelfOrAlly { range: AbilityAllyRange },
         }
         Ok(match crate::bounded::named_map(d)? {
             Fields::Melee => Self::Melee,
+            Fields::Projectile {} => Self::Projectile,
             Fields::Sight { range } => Self::Sight { range },
             Fields::SelfOnly => Self::SelfOnly,
             Fields::SelfOrAlly { range } => Self::SelfOrAlly { range },
@@ -193,6 +202,9 @@ impl AbilityView {
                         }
                 }
                 (AbilityReach::Melee, AbilityTargetKind::Actor) => true,
+                (AbilityReach::Projectile, AbilityTargetKind::DirectionalProjectile) => {
+                    !self.basic_attack && !self.weapon_selection
+                }
                 (AbilityReach::Sight { range }, AbilityTargetKind::DirectionalRay) => {
                     !self.basic_attack && (1..=16).contains(&range)
                 }

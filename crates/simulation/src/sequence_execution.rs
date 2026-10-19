@@ -105,6 +105,10 @@ impl Game {
                         }
                     }
                 }
+                if resolved.plan.as_projectile().is_some() {
+                    self.complete_projectile_release(resolved, completion, due)?;
+                    break;
+                }
                 // Capture identification before an exact last unit disappears. Effects
                 // may kill the drinker and drop only the unconsumed remainder.
                 let consumed_identity = match &resolved.plan {
@@ -218,7 +222,7 @@ impl Game {
                         }
                         self.finish_item_work(
                             id,
-                            resolved.plan.work(),
+                            &resolved.plan,
                             resolved.intention,
                             launched,
                             consumed_identity,
@@ -235,7 +239,7 @@ impl Game {
                     {
                         self.finish_item_work(
                             id,
-                            resolved.plan.work(),
+                            &resolved.plan,
                             resolved.intention,
                             true,
                             consumed_identity,
@@ -263,7 +267,7 @@ impl Game {
                     Work::Drink { .. } if resolved.plan.on_success().is_empty() => {
                         self.finish_item_work(
                             id,
-                            resolved.plan.work(),
+                            &resolved.plan,
                             resolved.intention,
                             false,
                             consumed_identity,
@@ -273,7 +277,7 @@ impl Game {
                         let outcome = self.resolve_consumed_item(&resolved)?;
                         self.finish_item_work(
                             id,
-                            resolved.plan.work(),
+                            &resolved.plan,
                             resolved.intention,
                             matches!(
                                 &resolved.plan,
@@ -302,7 +306,7 @@ impl Game {
                     Work::Equip { .. } | Work::Unequip { .. } => {
                         self.finish_item_work(
                             id,
-                            resolved.plan.work(),
+                            &resolved.plan,
                             resolved.intention,
                             false,
                             consumed_identity,

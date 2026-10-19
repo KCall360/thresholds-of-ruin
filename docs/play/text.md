@@ -154,8 +154,21 @@ binding, resources and reservations, talents and abilities. They are free and
 available to observers. Diagnostic actors without creature builds show their
 available health information instead.
 
+For a granted projectile ability, enter its name alone. The server lists exact
+throwing sources or equipped launchers using your current inventory names.
+Choose a numbered row; launching then asks for compatible ammunition. Use `next`
+and `previous` for pages, including empty filtered pages with a continuation, or
+`cancel` to leave. After selecting the source, enter a direction (`north`, `ne`,
+`up`, and the usual abbreviations). The server's exact cost, time to next strike
+and recovery appear before a separate `yes`/`no` confirmation. Only `yes` sends
+that exact action once. Source selection and preview are read-only and do not
+promise affordability. Changed observation, equipment, ability or authority
+requires choosing again; no action is retried automatically. The same flow is
+available in script mode. The menu requires known item types, not knowledge of
+instance enchantment, and never calculates projectile physics or hidden bonuses.
+
 The parser recognizes more verbs than the engine implements. Containers,
-locks/keys, throwing and conversation are examples of unsupported
+locks/keys, free-form throwing outside granted abilities and conversation are examples of unsupported
 interactions; recognizing their grammar does not make an effect available.
 Missing objects are reported before an unsupported interaction is refused, and
 the refusal is said in the world's terms ("No one here seems inclined to talk.")

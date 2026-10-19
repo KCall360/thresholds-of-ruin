@@ -65,6 +65,9 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
 - `verify.py` logs each step under `.local/verify/`, checks exit codes, and
   picks build jobs from free memory. Run other commands the same way,
   redirecting stdout and stderr to log files under `.local/` (gitignored).
+- Before running a new focused test owner, verify its registered module path or
+  inspect the existing owning binary with `--list`; do not infer a filter from
+  its source filename. A successful zero-test run is not qualification.
 - On success, report only a compact pass/fail summary. Don't load passing test
   listings or full logs into context.
 - On failure, surface the relevant failure output, expanding log inspection only

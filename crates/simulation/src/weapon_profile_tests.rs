@@ -71,7 +71,7 @@ fn ownership(active: bool) -> ExpertiseOwnership {
 fn spec() -> WeaponProfileSpec {
     WeaponProfileSpec {
         expertise: id(),
-        ranged: None,
+        launcher: None,
         base_traits: vec![],
         expert_traits: WeaponTraitChanges {
             add: vec![],
@@ -139,7 +139,7 @@ fn minimum_grip_demand_uses_both_actual_states() {
 #[test]
 fn explicit_removal_allows_same_kind_range_replacement() {
     let mut s = spec();
-    s.ranged = Some(range());
+    s.launcher = Some(launcher());
     s.base_traits = vec![WeaponTrait::Thrown { range: range() }];
     let improved = RangeBands {
         short_feet: 30,
@@ -154,7 +154,10 @@ fn explicit_removal_allows_same_kind_range_replacement() {
         profile.resolve(&ExpertiseOwnership::default()).thrown(),
         Some(range())
     );
-    assert_eq!(profile.resolve(&ownership(true)).ranged(), Some(range()));
+    assert_eq!(
+        profile.resolve(&ownership(true)).launcher(),
+        Some(&launcher())
+    );
 }
 #[test]
 fn physical_range_classification_includes_exact_boundaries() {
@@ -179,17 +182,27 @@ fn physical_range_classification_includes_exact_boundaries() {
 }
 #[test]
 fn invalid_ranges_and_deltas_are_rejected_in_memory_and_on_decode() {
-    for (short_feet, long_feet) in [(0, 20), (5, 0), (6, 20), (5, 21), (20, 10), (5, 1_000_005)] {
+    for (short_feet, long_feet) in [
+        (0, 20),
+        (5, 0),
+        (6, 20),
+        (5, 21),
+        (20, 10),
+        (5, MAX_PROJECTILE_STEPS * PROJECTILE_STEP_FEET + 5),
+    ] {
         let mut s = spec();
-        s.ranged = Some(RangeBands {
-            short_feet,
-            long_feet,
+        s.launcher = Some(LauncherProfile {
+            family: family(),
+            range: RangeBands {
+                short_feet,
+                long_feet,
+            },
         });
         assert!(s.validate(&rules()).is_err());
         assert!(
             serde_json::from_value::<WeaponProfileSpec>(serde_json::to_value(&s).unwrap()).is_err()
         );
-        s.ranged = None;
+        s.launcher = None;
         s.base_traits = vec![WeaponTrait::Thrown {
             range: RangeBands {
                 short_feet,
@@ -200,7 +213,7 @@ fn invalid_ranges_and_deltas_are_rejected_in_memory_and_on_decode() {
     }
     assert!(RangeBands {
         short_feet: 5,
-        long_feet: 1_000_000
+        long_feet: MAX_PROJECTILE_STEPS * PROJECTILE_STEP_FEET
     }
     .validate()
     .is_ok());
@@ -237,7 +250,7 @@ fn named_records_required_nullable_and_bounded_supported_traits_are_strict() {
         spec()
     );
     let mut invalid = vec![json!(["fixture.weapon", null, [], {"add":[],"remove":[]}])];
-    for key in ["expertise", "ranged", "base_traits", "expert_traits"] {
+    for key in ["expertise", "launcher", "base_traits", "expert_traits"] {
         let mut value = canonical.clone();
         value.as_object_mut().unwrap().remove(key);
         invalid.push(value);
@@ -245,8 +258,11 @@ fn named_records_required_nullable_and_bounded_supported_traits_are_strict() {
     for (key, value) in [
         ("unknown", json!(true)),
         ("expert_traits", json!([[], []])),
-        ("ranged", json!([20, 60])),
-        ("ranged", json!({"short_feet":20,"long_feet":60,"extra":0})),
+        ("launcher", json!([20, 60])),
+        (
+            "launcher",
+            json!({"short_feet":20,"long_feet":60,"extra":0}),
+        ),
         ("expert_traits", json!({"add":[],"remove":[],"extra":0})),
         ("base_traits", json!([{"kind":"discreet"}])),
         ("base_traits", json!([{"kind":"opportunity"}])),
@@ -524,4 +540,58 @@ fn two_handed_states_require_an_authored_shared_capacity() {
             assert_eq!(creature, before);
         }
     }
+}
+
+fn family() -> LauncherFamilyId {
+    LauncherFamilyId::new("fixture.bow").unwrap()
+}
+fn launcher() -> LauncherProfile {
+    LauncherProfile {
+        family: family(),
+        range: range(),
+    }
+}
+
+#[test]
+fn launcher_family_and_range_are_preserved_in_both_expertise_states() {
+    let mut source = spec();
+    source.launcher = Some(launcher());
+    let compiled = source.validate(&rules()).unwrap();
+    source.launcher = None;
+    for owner in [
+        ExpertiseOwnership::default(),
+        ownership(false),
+        ownership(true),
+    ] {
+        assert_eq!(compiled.resolve(&owner).launcher(), Some(&launcher()));
+        assert_eq!(compiled.resolve(&owner).thrown(), None);
+    }
+    let encoded = serde_json::to_value(compiled.spec()).unwrap();
+    assert_eq!(
+        serde_json::from_value::<WeaponProfileSpec>(encoded).unwrap(),
+        *compiled.spec()
+    );
+}
+
+#[test]
+fn launcher_is_strict_named_and_old_ranged_field_is_rejected() {
+    for value in [
+        json!(["fixture.bow", {"short_feet":20,"long_feet":60}]),
+        json!({"range":{"short_feet":20,"long_feet":60}}),
+        json!({"family":"fixture.bow"}),
+        json!({"family":"fixture.bow","range":[20,60]}),
+        json!({"family":"fixture.bow","range":{"short_feet":20,"long_feet":60,"extra":0}}),
+        json!({"family":"fixture.bow","range":{"short_feet":20,"long_feet":60},"extra":0}),
+        json!({"family":"Bad Family","range":{"short_feet":20,"long_feet":60}}),
+    ] {
+        assert!(
+            serde_json::from_value::<LauncherProfile>(value.clone()).is_err(),
+            "accepted {value}"
+        );
+    }
+    let mut old = serde_json::to_value(spec()).unwrap();
+    old.as_object_mut().unwrap().remove("launcher");
+    old["ranged"] = serde_json::Value::Null;
+    assert!(serde_json::from_value::<WeaponProfileSpec>(old).is_err());
+    assert!(serde_json::from_str::<LauncherProfile>(r#"{"family":"fixture.bow","family":"fixture.crossbow","range":{"short_feet":20,"long_feet":60}}"#).is_err());
 }

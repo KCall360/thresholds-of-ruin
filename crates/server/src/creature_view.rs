@@ -311,6 +311,7 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                 }),
                 reach: match stats.ability_reaches[&def.id] {
                     s::rules::Reach::Melee => p::AbilityReach::Melee,
+                    s::rules::Reach::Projectile => p::AbilityReach::Projectile,
                     s::rules::Reach::Sight { range } | s::rules::Reach::MutualSight { range } => {
                         p::AbilityReach::Sight { range }
                     }
@@ -326,10 +327,13 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                 },
                 target_kind: if def.invocation == s::abilities::InvocationKind::SelfStep {
                     p::AbilityTargetKind::SelfStep
+                } else if def.invocation == s::abilities::InvocationKind::DirectionalProjectile {
+                    p::AbilityTargetKind::DirectionalProjectile
                 } else if def.invocation == s::abilities::InvocationKind::DirectionalRay {
                     p::AbilityTargetKind::DirectionalRay
                 } else {
                     match def.reach {
+                        s::rules::Reach::Projectile => p::AbilityTargetKind::DirectionalProjectile,
                         s::rules::Reach::SelfOnly => p::AbilityTargetKind::SelfOnly,
                         s::rules::Reach::SelfOrAlly { .. } => p::AbilityTargetKind::SelfOrAlly,
                         s::rules::Reach::Melee
@@ -359,8 +363,35 @@ mod tests {
         game_with_reach(None)
     }
     fn game_with_reach(reach: Option<s::rules::Reach>) -> (s::Game, s::ActorId, s::ActorId) {
+        game_with_options(reach, None)
+    }
+    fn game_with_options(
+        reach: Option<s::rules::Reach>,
+        projectile: Option<s::projectile_profiles::ProjectileDeliveryKind>,
+    ) -> (s::Game, s::ActorId, s::ActorId) {
         let mut document: s::rules::RulesetDocument =
             toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap();
+        if let Some(delivery) = projectile {
+            let mut ability = document
+                .abilities
+                .iter()
+                .find(|ability| ability.basic_attack)
+                .unwrap()
+                .clone();
+            ability.id = AbilityId::new("fixture_projectile").unwrap();
+            ability.name = "Fixture Projectile".into();
+            ability.basic_attack = false;
+            ability.invocation = s::abilities::InvocationKind::DirectionalProjectile;
+            ability.reach = s::rules::Reach::Projectile;
+            ability.strikes = s::rules::StrikeSource::Projectile { delivery };
+            ability.timing.source = s::rules::TimingSource::SelectedWeapon;
+            ability.supply_costs.clear();
+            document
+                .constants
+                .default_abilities
+                .push(ability.id.clone());
+            document.abilities.push(ability);
+        }
         // Exact range and Focus arithmetic are fixture contracts, independent
         // of the shipped Mage form's reach or payment resource.
         let mut ability: s::rules::AbilityDef = serde_json::from_value(serde_json::json!({
@@ -694,6 +725,101 @@ mod tests {
         let restored =
             s::Game::restore_checkpoint(snapshot, &shared, preparing.content().clone()).unwrap();
         assert_eq!(view(&restored, subject, 1), view(&preparing, subject, 1));
+    }
+
+    #[test]
+    fn projectile_views_use_exact_source_kind_and_no_unselected_melee_profile() {
+        for (delivery, public_delivery) in [
+            (
+                s::projectile_profiles::ProjectileDeliveryKind::Throw,
+                p::ProjectileDeliveryKind::Throw,
+            ),
+            (
+                s::projectile_profiles::ProjectileDeliveryKind::Launch,
+                p::ProjectileDeliveryKind::Launch,
+            ),
+        ] {
+            let (game, actor, _) = game_with_options(None, Some(delivery));
+            let snapshot = view(&game, actor, 1);
+            snapshot.validate().unwrap();
+            let stats = snapshot
+                .observation
+                .combat
+                .as_ref()
+                .unwrap()
+                .own_stats
+                .as_ref()
+                .unwrap();
+            let ability = stats
+                .abilities
+                .iter()
+                .find(|ability| ability.id == "fixture_projectile")
+                .unwrap();
+            assert_eq!(ability.reach, p::AbilityReach::Projectile);
+            assert_eq!(
+                ability.target_kind,
+                p::AbilityTargetKind::DirectionalProjectile
+            );
+            assert!(!ability.weapon_selection);
+            let report = inspect(&game, actor, 1).unwrap();
+            report.validate().unwrap();
+            let source = report
+                .ability_strikes
+                .iter()
+                .find(|row| row.ability == ability.id)
+                .unwrap();
+            assert_eq!(
+                source.source,
+                p::StrikeSourceInspectionView::Projectile {
+                    delivery: public_delivery
+                }
+            );
+            assert!(!serde_json::to_string(&report.selected_attack.abilities)
+                .unwrap()
+                .contains("fixture_projectile"));
+            let error = strike_page(
+                &game,
+                actor,
+                &p::StrikeSourceSelector::Ability {
+                    id: ability.id.clone(),
+                },
+                None,
+                None,
+            )
+            .err()
+            .unwrap();
+            let unknown = strike_page(
+                &game,
+                actor,
+                &p::StrikeSourceSelector::Ability {
+                    id: "unknown".into(),
+                },
+                None,
+                None,
+            )
+            .err()
+            .unwrap();
+            assert_eq!(
+                error, unknown,
+                "unselected source has no invented melee rows"
+            );
+            assert!(strike_page(
+                &game,
+                actor,
+                &p::StrikeSourceSelector::SelectedMelee {},
+                None,
+                None
+            )
+            .is_ok());
+            assert!(strike_page(
+                &game,
+                actor,
+                &p::StrikeSourceSelector::Natural {},
+                None,
+                None
+            )
+            .is_ok());
+        }
     }
 
     #[test]

@@ -240,6 +240,7 @@ impl AbilityPlan {
             return false;
         }
         let source = match &definition.strikes {
+            StrikeSource::Projectile { .. } => false,
             StrikeSource::Authored { strikes } => {
                 self.strikes
                     .iter()
@@ -344,6 +345,19 @@ impl AbilityPlan {
 }
 impl Game {
     pub(crate) fn plan_source_valid(&self, plan: &Plan) -> bool {
+        if let Some(projectile) = plan.as_projectile() {
+            return self.projectile_plan_source_valid(projectile);
+        }
+        if let Plan::Equip {
+            actor,
+            item,
+            slot,
+            allocation,
+            ..
+        } = plan
+        {
+            return allocation.source_valid(self, *actor, *item, *slot);
+        }
         if let Some(ray) = plan.as_ray() {
             return self.world.knows(ray.origin.location)
                 && ray

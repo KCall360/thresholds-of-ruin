@@ -205,6 +205,10 @@ impl Plan {
                 selection: &plan.supplies,
                 spend_at: SupplySpendAt::FirstResolution,
             },
+            Self::Projectile(plan) => plan
+                .source
+                .item()
+                .map_or(ItemContract::None, |item| ItemContract::ExactUnit { item }),
             Self::Ray(plan) => ItemContract::Supplies {
                 costs: &plan.supply_costs,
                 selection: &plan.supplies,
@@ -366,6 +370,9 @@ impl Game {
                                     .is_some_and(|d| d.ability == ray.ability)
                         }
                         Plan::Eat { .. } => item.spec.edible.is_some(),
+                        Plan::Projectile(projectile) => {
+                            projectile.source.available(self, projectile.actor)
+                        }
                         _ => false,
                     }
             }

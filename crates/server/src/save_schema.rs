@@ -680,6 +680,13 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
             weapon: WeaponSelection,
         }
         let Fields { aim, weapon } = named_map(deserializer)?;
+        if matches!(aim, AbilityAim::DirectionalProjectile { .. })
+            && !matches!(weapon, WeaponSelection::Default)
+        {
+            return Err(serde::de::Error::custom(
+                "projectile delivery is the sole weapon selector",
+            ));
+        }
         Ok(Self { aim, weapon })
     }
 }
@@ -742,10 +749,22 @@ impl From<AbilityInvocation> for crate::actions::AbilityInvocation {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum AbilityAim {
-    ActorTarget { target: u64 },
-    ContactTarget { target: u64 },
-    SelfStep { direction: Direction },
-    DirectionalRay { direction: Direction },
+    ActorTarget {
+        target: u64,
+    },
+    ContactTarget {
+        target: u64,
+    },
+    SelfStep {
+        direction: Direction,
+    },
+    DirectionalRay {
+        direction: Direction,
+    },
+    DirectionalProjectile {
+        direction: Direction,
+        delivery: ProjectileDeliverySelection,
+    },
 }
 impl<'de> Deserialize<'de> for AbilityAim {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -776,12 +795,24 @@ impl<'de> Deserialize<'de> for AbilityAim {
                 #[serde(deserialize_with = "direction_token")]
                 direction: Direction,
             },
+            DirectionalProjectile {
+                #[serde(deserialize_with = "direction_token")]
+                direction: Direction,
+                delivery: ProjectileDeliverySelection,
+            },
         }
         Ok(match named_map(deserializer)? {
             Fields::ActorTarget { target } => Self::ActorTarget { target },
             Fields::ContactTarget { target } => Self::ContactTarget { target },
             Fields::SelfStep { direction } => Self::SelfStep { direction },
             Fields::DirectionalRay { direction } => Self::DirectionalRay { direction },
+            Fields::DirectionalProjectile {
+                direction,
+                delivery,
+            } => Self::DirectionalProjectile {
+                direction,
+                delivery,
+            },
         })
     }
 }
@@ -794,6 +825,13 @@ impl From<crate::actions::AbilityAim> for AbilityAim {
             crate::actions::AbilityAim::ContactTarget { target } => {
                 Self::ContactTarget { target: target.0 }
             }
+            crate::actions::AbilityAim::DirectionalProjectile {
+                direction,
+                delivery,
+            } => Self::DirectionalProjectile {
+                direction: direction.into(),
+                delivery: delivery.into(),
+            },
             crate::actions::AbilityAim::SelfStep { direction } => Self::SelfStep {
                 direction: direction.into(),
             },
@@ -812,11 +850,203 @@ impl From<AbilityAim> for crate::actions::AbilityAim {
             AbilityAim::ContactTarget { target } => Self::ContactTarget {
                 target: tor_simulation::ActorId(target),
             },
+            AbilityAim::DirectionalProjectile {
+                direction,
+                delivery,
+            } => Self::DirectionalProjectile {
+                direction: direction.into(),
+                delivery: delivery.into(),
+            },
             AbilityAim::SelfStep { direction } => Self::SelfStep {
                 direction: direction.into(),
             },
             AbilityAim::DirectionalRay { direction } => Self::DirectionalRay {
                 direction: direction.into(),
+            },
+        }
+    }
+}
+
+fn valid_projectile_item(item: u64) -> bool {
+    item != 0 && item != u64::MAX
+}
+fn valid_projectile_socket(socket: u16) -> bool {
+    usize::from(socket) < tor_simulation::limits::EQUIPMENT_SOCKETS
+}
+
+/// The selected equipped launcher, with no implicit primary-weapon fallback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct EquippedProjectileWeapon {
+    pub item: u64,
+    pub socket: u16,
+}
+impl EquippedProjectileWeapon {
+    pub(crate) fn valid(self) -> bool {
+        valid_projectile_item(self.item) && valid_projectile_socket(self.socket)
+    }
+}
+impl<'de> Deserialize<'de> for EquippedProjectileWeapon {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            item: u64,
+            socket: u16,
+        }
+        let fields: Fields = named_map(d)?;
+        let result = Self {
+            item: fields.item,
+            socket: fields.socket,
+        };
+        if !result.valid() {
+            return Err(serde::de::Error::custom(
+                "invalid projectile weapon selector",
+            ));
+        }
+        Ok(result)
+    }
+}
+
+/// Throw an equipped item or a carried stack using the selected socket.
+/// The socket remains explicit for either source mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum ThrownSourceSelection {
+    Equipped { item: u64, socket: u16 },
+    Carried { item: u64, socket: u16 },
+}
+impl ThrownSourceSelection {
+    pub(crate) fn valid(self) -> bool {
+        let (Self::Equipped { item, socket } | Self::Carried { item, socket }) = self;
+        valid_projectile_item(item) && valid_projectile_socket(socket)
+    }
+}
+impl<'de> Deserialize<'de> for ThrownSourceSelection {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Equipped { item: u64, socket: u16 },
+            Carried { item: u64, socket: u16 },
+        }
+        let result = match named_map(d)? {
+            Fields::Equipped { item, socket } => Self::Equipped { item, socket },
+            Fields::Carried { item, socket } => Self::Carried { item, socket },
+        };
+        if !result.valid() {
+            return Err(serde::de::Error::custom("invalid thrown source selector"));
+        }
+        Ok(result)
+    }
+}
+
+/// A closed delivery choice for exactly one projectile. Launch always names
+/// both the equipped launcher and the carried ammunition stack.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum ProjectileDeliverySelection {
+    Throw {
+        source: ThrownSourceSelection,
+    },
+    Launch {
+        launcher: EquippedProjectileWeapon,
+        ammunition: u64,
+    },
+}
+impl ProjectileDeliverySelection {
+    pub(crate) fn valid(self) -> bool {
+        match self {
+            Self::Throw { source } => source.valid(),
+            Self::Launch {
+                launcher,
+                ammunition,
+            } => {
+                launcher.valid() && valid_projectile_item(ammunition) && launcher.item != ammunition
+            }
+        }
+    }
+}
+impl<'de> Deserialize<'de> for ProjectileDeliverySelection {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Throw {
+                source: ThrownSourceSelection,
+            },
+            Launch {
+                launcher: EquippedProjectileWeapon,
+                ammunition: u64,
+            },
+        }
+        let result = match named_map(d)? {
+            Fields::Throw { source } => Self::Throw { source },
+            Fields::Launch {
+                launcher,
+                ammunition,
+            } => Self::Launch {
+                launcher,
+                ammunition,
+            },
+        };
+        if !result.valid() {
+            return Err(serde::de::Error::custom(
+                "invalid projectile delivery selector",
+            ));
+        }
+        Ok(result)
+    }
+}
+
+impl From<crate::actions::ProjectileDeliverySelection> for ProjectileDeliverySelection {
+    fn from(value: crate::actions::ProjectileDeliverySelection) -> Self {
+        match value {
+            crate::actions::ProjectileDeliverySelection::Throw { source } => Self::Throw {
+                source: match source {
+                    crate::actions::ThrownSourceSelection::Equipped { item, socket } => {
+                        ThrownSourceSelection::Equipped { item, socket }
+                    }
+                    crate::actions::ThrownSourceSelection::Carried { item, socket } => {
+                        ThrownSourceSelection::Carried { item, socket }
+                    }
+                },
+            },
+            crate::actions::ProjectileDeliverySelection::Launch {
+                launcher,
+                ammunition,
+            } => Self::Launch {
+                launcher: EquippedProjectileWeapon {
+                    item: launcher.item,
+                    socket: launcher.socket,
+                },
+                ammunition,
+            },
+        }
+    }
+}
+
+impl From<ProjectileDeliverySelection> for crate::actions::ProjectileDeliverySelection {
+    fn from(value: ProjectileDeliverySelection) -> Self {
+        match value {
+            ProjectileDeliverySelection::Throw { source } => Self::Throw {
+                source: match source {
+                    ThrownSourceSelection::Equipped { item, socket } => {
+                        crate::actions::ThrownSourceSelection::Equipped { item, socket }
+                    }
+                    ThrownSourceSelection::Carried { item, socket } => {
+                        crate::actions::ThrownSourceSelection::Carried { item, socket }
+                    }
+                },
+            },
+            ProjectileDeliverySelection::Launch {
+                launcher,
+                ammunition,
+            } => Self::Launch {
+                launcher: crate::actions::EquippedProjectileWeapon {
+                    item: launcher.item,
+                    socket: launcher.socket,
+                },
+                ammunition,
             },
         }
     }
@@ -832,6 +1062,145 @@ mod tests {
         #[serde(with = "super::Action")]
         action: Action,
     }
+    #[test]
+    fn saved_projectile_operands_are_numeric_exact_and_independent_of_live_items() {
+        use serde_json::json;
+        for delivery in [
+            json!({"kind":"throw","source":{"kind":"equipped","item":9_007_199_254_740_993_u64,"socket":0}}),
+            json!({"kind":"throw","source":{"kind":"carried","item":9_007_199_254_740_995_u64,"socket":63}}),
+            json!({"kind":"launch","launcher":{"item":9_007_199_254_740_993_u64,"socket":0},"ammunition":9_007_199_254_740_995_u64}),
+        ] {
+            for direction in [
+                "north",
+                "east",
+                "south",
+                "west",
+                "north_east",
+                "south_east",
+                "south_west",
+                "north_west",
+                "up",
+                "down",
+            ] {
+                let value = json!({"action":{"type":"use_ability","id":"fixture_projectile",
+                    "invocation":{"aim":{"kind":"directional_projectile","direction":direction,"delivery":delivery},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}});
+                let stored: Stored =
+                    crate::storage::codec::strict(&serde_json::to_vec(&value).unwrap()).unwrap();
+                assert_eq!(serde_json::to_value(&stored).unwrap(), value);
+                assert_eq!(
+                    crate::adapt::recorded_action(crate::adapt::action(&stored.action)),
+                    Some(stored.action)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn saved_projectile_selector_codec_rejects_missing_extra_positional_and_conflicting_operands() {
+        use serde_json::json;
+        let good = json!({"aim":{"kind":"directional_projectile","direction":"north","delivery":{"kind":"launch","launcher":{"item":1,"socket":0},"ammunition":2}},"weapon":{"kind":"default"}});
+        assert!(serde_json::from_value::<AbilityInvocation>(good.clone()).is_ok());
+        let mut bad = Vec::new();
+        for path in ["", "/aim", "/aim/delivery", "/aim/delivery/launcher"] {
+            let original = good.pointer(path).unwrap().as_object().unwrap();
+            for key in original.keys() {
+                let mut value = good.clone();
+                value
+                    .pointer_mut(path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(key);
+                bad.push(value);
+            }
+            let mut value = good.clone();
+            value.pointer_mut(path).unwrap()["extra"] = json!(null);
+            bad.push(value);
+            let mut value = good.clone();
+            *value.pointer_mut(path).unwrap() = json!(original.values().collect::<Vec<_>>());
+            bad.push(value);
+        }
+        for path in ["/aim/delivery/launcher/item", "/aim/delivery/ammunition"] {
+            for item in [
+                json!(0),
+                json!(u64::MAX),
+                json!("1"),
+                json!(1.0),
+                json!(-1),
+                json!(null),
+            ] {
+                let mut value = good.clone();
+                *value.pointer_mut(path).unwrap() = item;
+                bad.push(value);
+            }
+        }
+        for socket in [json!(64), json!(65536), json!(-1), json!(0.0), json!("0")] {
+            let mut value = good.clone();
+            value["aim"]["delivery"]["launcher"]["socket"] = socket;
+            bad.push(value);
+        }
+        let mut value = good.clone();
+        value["aim"]["delivery"]["ammunition"] = json!(1);
+        bad.push(value);
+        let mut value = good.clone();
+        value["weapon"] = json!({"kind":"equipped","item":1,"socket":0});
+        bad.push(value);
+        for direction in [
+            json!({"north":null}),
+            json!(["north"]),
+            json!("north_up"),
+            json!(null),
+        ] {
+            let mut value = good.clone();
+            value["aim"]["direction"] = direction;
+            bad.push(value);
+        }
+        for value in bad {
+            assert!(
+                serde_json::from_value::<AbilityInvocation>(value.clone()).is_err(),
+                "{value}"
+            );
+        }
+        let raw = serde_json::to_string(&good).unwrap();
+        for (from, to) in [
+            ("\"item\":1", "\"item\":1,\"item\":2"),
+            ("\"socket\":0", "\"socket\":0,\"socket\":1"),
+            ("\"ammunition\":2", "\"ammunition\":2,\"ammunition\":3"),
+            (
+                "\"kind\":\"launch\"",
+                "\"kind\":\"launch\",\"kind\":\"throw\"",
+            ),
+        ] {
+            assert!(serde_json::from_str::<AbilityInvocation>(&raw.replace(from, to)).is_err());
+        }
+        for kind in ["equipped", "carried"] {
+            let source = json!({"kind":kind,"item":1,"socket":0});
+            assert!(serde_json::from_value::<ThrownSourceSelection>(source.clone()).is_ok());
+            for key in ["kind", "item", "socket"] {
+                let mut value = source.clone();
+                value.as_object_mut().unwrap().remove(key);
+                assert!(serde_json::from_value::<ThrownSourceSelection>(value).is_err());
+            }
+            for item in [json!(0), json!(u64::MAX), json!("1")] {
+                let mut value = source.clone();
+                value["item"] = item;
+                assert!(serde_json::from_value::<ThrownSourceSelection>(value).is_err());
+            }
+            let mut value = source.clone();
+            value["socket"] = json!(64);
+            assert!(serde_json::from_value::<ThrownSourceSelection>(value).is_err());
+            let mut value = source.clone();
+            value["extra"] = json!(null);
+            assert!(serde_json::from_value::<ThrownSourceSelection>(value).is_err());
+            assert!(serde_json::from_value::<ThrownSourceSelection>(json!([kind, 1, 0])).is_err());
+            let raw = serde_json::to_string(&source).unwrap();
+            assert!(serde_json::from_str::<ThrownSourceSelection>(
+                &raw.replace("\"item\":1", "\"item\":1,\"item\":2")
+            )
+            .is_err());
+        }
+    }
+
     #[test]
     fn apparent_touch_saved_input_requires_exact_numeric_subject_and_nullable_quantity() {
         for quantity in [None, Some(1), Some(0), Some(2), Some(u64::MAX)] {
@@ -1160,7 +1529,7 @@ mod tests {
                 },
             };
             let encoded = serde_json::to_string(&value).unwrap();
-            assert_eq!(encoded, format!("{{\"action\":{{\"type\":\"use_ability\",\"id\":\"{name}\",\"invocation\":{{\"kind\":\"actor_target\",\"target\":18446744073709551615}},\"supplies\":{{\"kind\":\"carried\"}}}}}}"));
+            assert_eq!(encoded, format!("{{\"action\":{{\"type\":\"use_ability\",\"id\":\"{name}\",\"invocation\":{{\"aim\":{{\"kind\":\"actor_target\",\"target\":18446744073709551615}},\"weapon\":{{\"kind\":\"default\"}}}},\"supplies\":{{\"kind\":\"carried\"}}}}}}"));
             assert_eq!(
                 super::super::codec::strict::<Stored>(encoded.as_bytes()).unwrap(),
                 value

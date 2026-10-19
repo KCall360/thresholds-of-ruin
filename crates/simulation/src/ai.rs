@@ -130,6 +130,7 @@ pub(crate) struct AiDecision {
     pub ai: Ai,
     pub behavior: crate::behavior::Behavior,
     pub plan: Option<crate::abilities::Plan>,
+    pub numeric_budget_refusal: bool,
 }
 impl AiDecision {
     fn action(action: Action, ai: Ai, behavior: crate::behavior::Behavior) -> Self {
@@ -138,6 +139,7 @@ impl AiDecision {
             ai,
             behavior,
             plan: None,
+            numeric_budget_refusal: false,
         }
     }
     fn ability(plan: crate::abilities::Plan, ai: Ai, behavior: crate::behavior::Behavior) -> Self {
@@ -146,9 +148,30 @@ impl AiDecision {
             ai,
             behavior,
             plan: Some(plan),
+            numeric_budget_refusal: false,
         }
     }
 }
+
+enum AiAbilityChoice {
+    Frozen(crate::abilities::Plan),
+    Request(Action),
+}
+impl From<crate::abilities::Plan> for AiAbilityChoice {
+    fn from(plan: crate::abilities::Plan) -> Self {
+        Self::Frozen(plan)
+    }
+}
+impl AiAbilityChoice {
+    fn decision(self, ai: Ai, behavior: crate::behavior::Behavior) -> AiDecision {
+        match self {
+            Self::Frozen(plan) => AiDecision::ability(plan, ai, behavior),
+            Self::Request(action) => AiDecision::action(action, ai, behavior),
+        }
+    }
+}
+#[path = "ai_projectiles.rs"]
+mod projectiles;
 
 // Priority-ordered transition table: frightened, target known, resulting state.
 const TRANSITIONS: [(bool, bool, State); 4] = [
@@ -209,10 +232,7 @@ impl Game {
         let Some(cost) = plan.cost() else {
             return true;
         };
-        let ability = plan
-            .as_ability()
-            .map(|value| &value.ability)
-            .or_else(|| plan.as_ray().map(|value| &value.ability));
+        let ability = plan.ability_id();
         let minimum = ability
             .and_then(|id| self.content.rules().ability(id))
             .map_or(0, |definition| definition.ai.minimum_resource_percent);
@@ -285,7 +305,7 @@ impl Game {
                     if let Some(plan) =
                         self.choose_ai_ability(id, foe.id, &snapshot.sight, view, true)
                     {
-                        return Some(AiDecision::ability(plan, ai, behavior));
+                        return Some(plan.decision(ai, behavior));
                     }
                 }
             }
@@ -498,14 +518,14 @@ impl Game {
                 if let Some(ability) =
                     self.choose_ai_ability(id, target, &snapshot.sight, view, false)
                 {
-                    return Some(AiDecision::ability(ability, ai, behavior));
+                    return Some(ability.decision(ai, behavior));
                 }
             }
             if ai.state == State::Flee {
                 if let Some(ability) =
                     self.choose_ai_ability(id, target, &snapshot.sight, view, true)
                 {
-                    return Some(AiDecision::ability(ability, ai, behavior));
+                    return Some(ability.decision(ai, behavior));
                 }
             }
             if ai.state != State::Flee {
@@ -619,7 +639,7 @@ impl Game {
         sight: &[tor_world::SightCell],
         view: &crate::Observation,
         basic_only: bool,
-    ) -> Option<crate::abilities::Plan> {
+    ) -> Option<AiAbilityChoice> {
         use crate::rules::RangePreference;
         let creature = self.creature(actor)?;
         let costs = creature.costs();
@@ -648,10 +668,27 @@ impl Game {
                                 range,
                             ) == Some(*direction)
                         }
+                        crate::abilities::AbilityAim::DirectionalProjectile {
+                            direction, ..
+                        } => preparation.plan.as_projectile().is_some_and(|plan| {
+                            u16::try_from(
+                                plan.range.long_feet / crate::weapon_profiles::PROJECTILE_STEP_FEET,
+                            )
+                            .ok()
+                            .and_then(|range| {
+                                disclosed_ray_direction(
+                                    target,
+                                    sight,
+                                    view,
+                                    self.actors.get(&actor)?.body.eye,
+                                    range,
+                                )
+                            }) == Some(*direction)
+                        }),
                         _ => false,
                     };
                     if selected && self.preparation_still_available(preparation, Some(sight)) {
-                        return Some(preparation.plan.clone());
+                        return Some(preparation.plan.clone().into());
                     }
                 }
             }
@@ -690,6 +727,14 @@ impl Game {
                 }
             }
             let definition = rules.ability(id)?;
+            if definition.invocation == crate::abilities::InvocationKind::DirectionalProjectile {
+                if let Some(action) =
+                    self.choose_ai_projectile_request(actor, target, sight, view, id)
+                {
+                    return Some(AiAbilityChoice::Request(action));
+                }
+                continue;
+            }
             let invocation =
                 if definition.invocation == crate::abilities::InvocationKind::DirectionalRay {
                     let crate::rules::Reach::Sight { range } = definition.reach else {
@@ -713,11 +758,13 @@ impl Game {
                 continue;
             };
             if let Some(plan) = self.physical_ai_plan(plan, view) {
-                return Some(plan);
+                return Some(plan.into());
             }
         }
         if !basic_only {
-            return self.choose_ai_known_device(actor, target, sight, view);
+            return self
+                .choose_ai_known_device(actor, target, sight, view)
+                .map(Into::into);
         }
         None
     }

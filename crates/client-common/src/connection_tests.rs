@@ -2254,3 +2254,193 @@ async fn canceled_map_reply_is_discarded_and_map_error_cannot_cancel_another_con
         server.await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn projectile_transport_keeps_pages_private_bounded_and_correlated() {
+    for case in [
+        "owner",
+        "observer",
+        "spectator",
+        "revoked",
+        "oversized",
+        "wrong-id",
+    ] {
+        // Independent current-shape owner fixture; historical wire goldens stay unchanged.
+        let mut initial = Snapshot {
+            context: StreamContext {
+                stream: StreamId("projectile-fixture".into()),
+                epoch: 0,
+            },
+            readiness: Readiness {
+                revision: 0,
+                admission: true,
+                resume: vec![],
+                cancel: vec![],
+            },
+            intentions: vec![],
+            travel: None,
+            actor: ActorId(1),
+            branch: BranchId("main".into()),
+            cursor: StreamCursor {
+                sequence: 0,
+                tick: 0,
+            },
+            state: Arc::new(StateView {
+                wizard_game: false,
+                revision: 1,
+                observation: crate::test_support::observation(),
+            }),
+            has_control: true,
+            history: HistoryPage {
+                entries: vec![],
+                older_before: None,
+            },
+        };
+        initial.has_control = !matches!(case, "observer" | "spectator");
+        initial.readiness.admission = initial.has_control;
+        let role = if case == "spectator" {
+            AccessRole::Spectator
+        } else {
+            AccessRole::Player
+        };
+        let context = initial.reply_context();
+        let actor = initial.actor;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                    user: "owner".into(),
+                    actors: vec![actor],
+                    role,
+                },
+            )
+            .await;
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Snapshot {
+                    request_id: "attach".into(),
+                    snapshot: Box::new(initial.clone()),
+                },
+            )
+            .await;
+            let query = ProjectileChoiceQuery {
+                ability: "fixture_projectile".into(),
+                phase: ProjectileChoicePhase::Sources {},
+                offset: 0,
+            };
+            let id = if matches!(case, "observer" | "spectator") {
+                "unsolicited".into()
+            } else {
+                let ClientMessage::Request {
+                    request_id,
+                    request,
+                } = receive(&mut socket).await
+                else {
+                    panic!("query")
+                };
+                assert!(matches!(
+                    *request,
+                    Request::Command {
+                        command: Command::ProjectileChoices { .. },
+                        ..
+                    }
+                ));
+                request_id
+            };
+            if case == "revoked" {
+                send(
+                    &mut socket,
+                    ServerMessage::Update {
+                        update: Box::new(StreamUpdate {
+                            context: initial.context,
+                            actor,
+                            branch: initial.branch,
+                            cursor: StreamCursor {
+                                sequence: initial.cursor.sequence + 1,
+                                tick: initial.cursor.tick,
+                            },
+                            body: UpdateBody::Control { has_control: false },
+                        }),
+                    },
+                )
+                .await;
+            }
+            let reply = ServerMessage::ProjectileChoices {
+                context,
+                request_id: if case == "wrong-id" {
+                    "other".into()
+                } else {
+                    id
+                },
+                page: Box::new(ProjectileChoicePage {
+                    query,
+                    choices: vec![],
+                    next_offset: Some(128),
+                }),
+            };
+            if case == "oversized" {
+                let text = format!(
+                    "{}{}",
+                    serde_json::to_string(&reply).unwrap(),
+                    " ".repeat(MAX_PROJECTILE_CHOICE_PAGE_BYTES)
+                );
+                socket.send(Message::Text(text.into())).await.unwrap();
+            } else {
+                send(&mut socket, reply).await;
+            }
+        });
+        let mut client = Connection::connect(address, "token".into(), actor, "text")
+            .await
+            .unwrap();
+        let before = client.state.snapshot();
+        let id = if matches!(case, "observer" | "spectator") {
+            "unsolicited".into()
+        } else {
+            client
+                .request(client.state.command_request(Command::ProjectileChoices {
+                    expected_revision: client.state.state().revision,
+                    query: ProjectileChoiceQuery {
+                        ability: "fixture_projectile".into(),
+                        phase: ProjectileChoicePhase::Sources {},
+                        offset: 0,
+                    },
+                }))
+                .await
+                .unwrap()
+        };
+        if case == "revoked" {
+            assert!(matches!(
+                client.next().await.unwrap(),
+                ServerMessage::Update { .. }
+            ));
+            assert!(!client.state.has_control());
+        }
+        match case {
+            "owner" | "wrong-id" => {
+                let reply = client.next().await.unwrap();
+                assert!(matches!(reply, ServerMessage::ProjectileChoices { .. }));
+                let mut pending = crate::PendingRequest::new(id);
+                let completed = pending.observe(&client, &reply).is_some();
+                assert_eq!(completed, case == "owner");
+                assert_eq!(client.state.snapshot(), before);
+            }
+            "oversized" => {
+                assert!(client.next().await.is_err());
+                assert_eq!(client.state.snapshot(), before);
+            }
+            _ => {
+                let error = client.next().await.unwrap_err().to_string();
+                assert!(error.contains("without current control"), "{case}: {error}");
+            }
+        }
+        server.await.unwrap();
+    }
+}

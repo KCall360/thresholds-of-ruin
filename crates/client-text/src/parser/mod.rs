@@ -102,6 +102,15 @@ pub fn match_disclosed_sentence(
         },
     };
     if let Some((ability, noun)) = matched {
+        if ability.target_kind == tor_protocol::AbilityTargetKind::DirectionalProjectile {
+            return Ok(if noun.is_empty() {
+                ParsedCommand::Projectile {
+                    id: ability.id.clone(),
+                }
+            } else {
+                ParsedCommand::Refused("Start with the projectile ability name alone; choose a source, then a direction.".into())
+            });
+        }
         let (noun, supplies) = tor_client_common::abilities::split_supply_clause(&noun)?;
         let (noun, weapon) = tor_client_common::weapons::split_clause(noun)?;
         let suffix = format!(

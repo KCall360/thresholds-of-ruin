@@ -1,4 +1,41 @@
-import = "interactions-v45"
+import = "interactions-v46"
+
+# Equipment expertise is an ordinary HD-point or earned Intellect choice.
+# No preset, species, NPC or default talent receives a free expertise grant.
+[[overrides]]
+op = "add"
+path = ["expertises", "rogue.knife"]
+value = { id = "rogue.knife", name = "Knife", category = "equipment" }
+
+[[overrides]]
+op = "add"
+path = ["expertises", "rogue.shortbow"]
+value = { id = "rogue.shortbow", name = "Shortbow", category = "equipment" }
+
+[[overrides]]
+op = "add"
+path = ["ability_tags", "ranged"]
+value = { id = "ranged", name = "Ranged attack" }
+
+# Combat-benefit prices are provisional TOR tuning. The shared expertise
+# baseline remains zero; no pure-grant talent is added or counted a second time.
+[[overrides]]
+op = "set"
+path = ["growth", "threat", "overrides"]
+value = [{ source = { kind = "expertise", id = "rogue.knife" }, points = 10 }, { source = { kind = "expertise", id = "rogue.shortbow" }, points = 10 }]
+
+# These ordinary abilities capture selected-item timing and exact projectile
+# delivery. No added base resource or supply cost; shared secondary-weapon Focus
+# applies when selecting that socket. They are never basic-attack sequences.
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.throw"]
+value = { id = "rogue.throw", name = "Throw", interaction = "hostile_to_target", tags = ["attack", "ranged"], basic_attack = false, invocation = "directional_projectile", outgoing_edge_policy = { kind = "ordinary" }, supply_costs = [], timing = { source = { kind = "selected_weapon" }, scaled_by = "speed" }, reach = { kind = "projectile" }, strikes = { kind = "projectile", delivery = "throw" }, ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.launch"]
+value = { id = "rogue.launch", name = "Launch", interaction = "hostile_to_target", tags = ["attack", "ranged"], basic_attack = false, invocation = "directional_projectile", outgoing_edge_policy = { kind = "ordinary" }, supply_costs = [], timing = { source = { kind = "selected_weapon" }, scaled_by = "speed" }, reach = { kind = "projectile" }, strikes = { kind = "projectile", delivery = "launch" }, ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
 
 # Provisional TOR mapping of the pinned Rogue food reserve, not calibrated balance.
 [[overrides]]
@@ -136,7 +173,7 @@ value = { id = "rogue.ambush_from_guise", name = "Ambush From Guise", prerequisi
 [[overrides]]
 op = "set"
 path = ["constants", "default_abilities"]
-value = ["basic_melee", "bind_wounds", "rogue.search"]
+value = ["basic_melee", "bind_wounds", "rogue.search", "rogue.throw", "rogue.launch"]
 
 [[overrides]]
 op = "add"

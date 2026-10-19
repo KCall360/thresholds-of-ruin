@@ -1021,6 +1021,9 @@ impl Game {
                 // Keep only the frozen launch cells resident, never a forecast path.
                 live.extend(ray.launch_footprint.iter().map(|cell| cell.region));
             }
+            if let Some(projectile) = pending.plan.as_projectile() {
+                live.extend(projectile.launch_footprint.iter().map(|cell| cell.region));
+            }
             if let Some(step) = pending.plan.as_ability().and_then(|plan| plan.step) {
                 // Frozen/paused work still owns this exact destination. Its live
                 // body footprint can cross more regions than the anchor alone.

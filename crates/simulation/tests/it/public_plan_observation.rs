@@ -215,18 +215,28 @@ fn outgoing_token_qualification_is_named_and_cannot_broaden_incoming_tokens() {
     let build = super::creature_state::build();
     let value = json!({
         "condition":"readied", "source":1, "remaining":300, "stacks":1,
-        "order":0, "reserved_by":null, "phase":"active",
+        "order":0, "generation":0, "reserved_by":null, "phase":"active",
         "qualification":{"opponent":2,"ability_tag":"weapon_attack"}
     });
     let entry: ConditionInstance = serde_json::from_slice(&serde_json::to_vec(&value).unwrap())
         .expect("an existing outgoing token can carry an explicit bounded qualification");
-    assert!(ConditionState::from_recorded(vec![entry], build.ruleset()).is_ok());
+    assert!(ConditionState::from_recorded(
+        vec![entry.clone()],
+        entry.generation + 1,
+        build.ruleset()
+    )
+    .is_ok());
     for condition in ["exposed", "fear"] {
         let mut invalid = value.clone();
         invalid["condition"] = json!(condition);
         let entry: ConditionInstance =
             serde_json::from_slice(&serde_json::to_vec(&invalid).unwrap()).unwrap();
-        assert!(ConditionState::from_recorded(vec![entry], build.ruleset()).is_err());
+        assert!(ConditionState::from_recorded(
+            vec![entry.clone()],
+            entry.generation + 1,
+            build.ruleset()
+        )
+        .is_err());
     }
     for invalid in [
         json!({"opponent":0,"ability_tag":"weapon_attack"}),
@@ -236,7 +246,12 @@ fn outgoing_token_qualification_is_named_and_cannot_broaden_incoming_tokens() {
         malformed["qualification"] = invalid;
         let entry: ConditionInstance =
             serde_json::from_slice(&serde_json::to_vec(&malformed).unwrap()).unwrap();
-        assert!(ConditionState::from_recorded(vec![entry], build.ruleset()).is_err());
+        assert!(ConditionState::from_recorded(
+            vec![entry.clone()],
+            entry.generation + 1,
+            build.ruleset()
+        )
+        .is_err());
     }
     for qualifier in [
         r#"[2,"weapon_attack"]"#,
@@ -245,7 +260,7 @@ fn outgoing_token_qualification_is_named_and_cannot_broaden_incoming_tokens() {
         r#"{"opponent":2,"opponent":3,"ability_tag":"weapon_attack"}"#,
     ] {
         let encoded = format!(
-            r#"{{"condition":"readied","source":1,"remaining":300,"stacks":1,"order":0,"reserved_by":null,"phase":"active","qualification":{qualifier}}}"#
+            r#"{{"condition":"readied","source":1,"remaining":300,"stacks":1,"order":0,"generation":0,"reserved_by":null,"phase":"active","qualification":{qualifier}}}"#
         );
         assert!(
             serde_json::from_slice::<ConditionInstance>(encoded.as_bytes()).is_err(),

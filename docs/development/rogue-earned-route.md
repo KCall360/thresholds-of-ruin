@@ -18,13 +18,17 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v14` retains exact package inputs and its
-current bundled-rule dependency hash. Its source-only transition changes only
-the previous scenario format to the current format and the previous bundled
-import to interactions-v45. The remaining authored package bytes are unchanged. Frozen
-v6–v13 inputs and their source/transition receipts remain immutable research
-evidence. Shared equipment condition, enchantment, curse and Psychic-category
-rules make this a new experiment input, with no claim of identical outcomes or a requalified pilot. The source
+`scripts/fixtures/rogue-earned-baseline-v15` retains exact package inputs and its
+current bundled-rule dependency hash. Its source-only transition advances scenario
+format to 24 and the previous bundled import to interactions-v46, and adds
+the required empty capacities and explicit no-primary-attack-socket fields to the
+five existing empty anatomy declarations. Omitted anatomy still inherits bundled
+defaults. All other authored package bytes, including items, player kits and
+population stages, are unchanged; no new projectile loot is imported. Frozen
+v6–v14 inputs and their source/transition receipts remain immutable research
+evidence. Shared physical-projectile, weapon-expertise and equipment-capacity
+rules make this a new experiment input, with no claim of identical outcomes or a
+requalified pilot. The source
 receipt alone does not establish compiler validation, regenerated certificates
 or route acceptance. Current route CI must still qualify the adapted fixture.
 Certificate regeneration must select gameplay packages under `scenarios/` (and
@@ -333,7 +337,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v14"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v15"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```

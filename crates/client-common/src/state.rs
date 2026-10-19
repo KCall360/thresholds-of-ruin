@@ -582,7 +582,7 @@ impl ClientState {
                     return Err(StreamError::InconsistentState);
                 }
                 let own_action = event.as_ref().and_then(|entry| match &entry.content {
-                    HistoryContent::Action { event, .. } => Some(event.clone()),
+                    HistoryContent::Action { event, .. } => Some(event.as_ref().clone()),
                     _ => None,
                 });
                 if let Some(entry) = event {

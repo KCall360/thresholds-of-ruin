@@ -200,15 +200,19 @@ impl StateView {
                     let Some(item) = inventory.get(&interaction.item) else {
                         return true;
                     };
-                    (!item.identified && interaction.known_equipment.is_some())
+                    (!item.identified
+                        && (interaction.known_equipment.is_some()
+                            || interaction.known_projectile_bonus.is_some()))
+                        || interaction
+                            .known_projectile_bonus
+                            .as_ref()
+                            .is_some_and(|bonus| !bonus.valid())
                         || (interaction.charges.is_some()
                             && (!item.identified || !interaction.zappable))
                         || interaction.slot.as_ref().is_some_and(|slot| !slot.valid())
                         || (interaction.slot.is_none()
                             && (interaction.equipped_slot.is_some()
-                                || interaction.known_equipment.is_some()
-                                || interaction.known_cursed.is_some()
-                                || interaction.known_protected.is_some()))
+                                || interaction.known_equipment.is_some()))
                         || ((interaction.drinkable || interaction.edible)
                             && interaction.slot.is_some())
                         || (interaction.drinkable && interaction.edible)

@@ -171,7 +171,7 @@ impl Chronicler {
             ..
         }) = event
         {
-            match event {
+            match event.as_ref() {
                 Event::EscapeStarted { .. } => beats.push(Beat::EscapeHold(
                     tor_client_common::narration::action(event, a),
                 )),
@@ -440,7 +440,7 @@ mod tests {
             audience: Audience::Actor,
             content: HistoryContent::Action {
                 action: Action::Wait,
-                event,
+                event: Box::new(event),
             },
         }
     }
@@ -495,6 +495,7 @@ mod tests {
                 equipped_slot: Some(0),
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,

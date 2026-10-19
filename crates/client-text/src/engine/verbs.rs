@@ -153,7 +153,7 @@ Handle things: take <thing>, take all, drop <thing>, wear or wield <item>, remov
 Fight: attack <creature> [with <equipped weapon>], fight <creature> to keep attacking, follow <creature>, flee, back.
 Move: a direction (north, ne, up...) walks until there's something to see; go to <thing or place>, go to exit, go to start, places, name room <name>.
 Time: wait, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, advancement.
-Techniques, if granted: rattling blow <creature>, measured cut <creature>, brace for impact, spark lance fire <creature>, falter <creature>, shell impact. When the ability permits weapon selection, add with <equipped weapon> to choose its exact socket; optional using <supplies> comes last. Explicit choices show exact cost and next-strike/recovery timing, then ask yes/no before acting. stats lists yours; a first word is enough when it's unique, as in brace.
+Techniques, if granted: rattling blow <creature>, measured cut <creature>, brace for impact, spark lance fire <creature>, falter <creature>, shell impact. When the ability permits weapon selection, add with <equipped weapon> to choose its exact socket; optional using <supplies> comes last. Explicit choices show exact cost and next-strike/recovery timing, then ask yes/no before acting. For projectile abilities, enter the ability name, choose a numbered source (next/previous pages, cancel), ammunition if launching, then a direction. stats lists yours; a first word is enough when it's unique, as in brace.
 Talking to the game: again repeats a command (attack again repeats an attack); chain commands with then, commas or full stops; answer a question with a name or its number; it, them, him and her mean what was last mentioned.
 Settings: brief, verbose and superbrief choose how places are described when you arrive; all skips <kinds> chooses what take all leaves behind; options shows them. Type help session for more, and quit to save and leave.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds].\nstep <direction> makes one careful step. Developer commands require wizard authority. wizard creature list discovers named spawn recipes; add depth <N> or after <selector> to refine the listing. After creature inspection: strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.";
@@ -495,6 +495,7 @@ pub fn interpret(
     referents: &mut Referents,
 ) -> Interpretation {
     match command {
+        ParsedCommand::Projectile { id } => Interpretation::Tool(Input::Projectile(id.clone())),
         ParsedCommand::Ability {
             id,
             selection: operand,

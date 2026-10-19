@@ -1,6 +1,6 @@
 //! Typed weapon traits and expertise-gated profiles. These are independent of
 //! attack and damage formulas; only the explicitly supported traits are accepted.
-use crate::content_ids::ExpertiseId;
+use crate::content_ids::{ExpertiseId, LauncherFamilyId};
 use crate::expertise::{ExpertiseCategory, ExpertiseOwnership};
 use crate::rules::Ruleset;
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,11 @@ use std::collections::BTreeSet;
 
 /// There are exactly four supported trait kinds. Bound allocation before decoding.
 const TRAIT_LIMIT: usize = 4;
+
+/// Engine work bound, not an extra gameplay range. Every physical grid step
+/// costs five feet; authored bands exceeding this budget are rejected.
+pub const MAX_PROJECTILE_STEPS: u32 = 4096;
+pub const PROJECTILE_STEP_FEET: u32 = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct RangeBands {
@@ -28,7 +33,7 @@ impl RangeBands {
             || !self.short_feet.is_multiple_of(5)
             || !self.long_feet.is_multiple_of(5)
             || self.long_feet < self.short_feet
-            || i64::from(self.long_feet) > crate::limits::NUMERIC
+            || self.long_feet > MAX_PROJECTILE_STEPS * PROJECTILE_STEP_FEET
         {
             return Err(WeaponProfileError::InvalidRange);
         }
@@ -156,9 +161,31 @@ impl<'de> Deserialize<'de> for WeaponTraitChanges {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct LauncherProfile {
+    pub family: LauncherFamilyId,
+    pub range: RangeBands,
+}
+
+impl<'de> Deserialize<'de> for LauncherProfile {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            family: LauncherFamilyId,
+            range: RangeBands,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            family: fields.family,
+            range: fields.range,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct WeaponProfileSpec {
     pub expertise: ExpertiseId,
-    pub ranged: Option<RangeBands>,
+    pub launcher: Option<LauncherProfile>,
     pub base_traits: Vec<WeaponTrait>,
     pub expert_traits: WeaponTraitChanges,
 }
@@ -170,14 +197,14 @@ impl<'de> Deserialize<'de> for WeaponProfileSpec {
         struct Fields {
             expertise: ExpertiseId,
             #[serde(deserialize_with = "crate::bounded::required_option")]
-            ranged: Option<RangeBands>,
+            launcher: Option<LauncherProfile>,
             base_traits: crate::bounded::Bounded<WeaponTrait, TRAIT_LIMIT>,
             expert_traits: WeaponTraitChanges,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
         let result = Self {
             expertise: fields.expertise,
-            ranged: fields.ranged,
+            launcher: fields.launcher,
             base_traits: fields.base_traits.0,
             expert_traits: fields.expert_traits,
         };
@@ -237,8 +264,8 @@ impl WeaponProfileSpec {
     fn effective_states(
         &self,
     ) -> Result<(EffectiveWeaponProfile, EffectiveWeaponProfile), WeaponProfileError> {
-        if let Some(range) = self.ranged {
-            range.validate()?;
+        if let Some(launcher) = &self.launcher {
+            launcher.range.validate()?;
         }
         validate_traits(&self.base_traits)?;
         self.expert_traits.validate()?;
@@ -262,11 +289,11 @@ impl WeaponProfileSpec {
         validate_traits(&expert_traits)?;
         Ok((
             EffectiveWeaponProfile {
-                ranged: self.ranged,
+                launcher: self.launcher.clone(),
                 traits: self.base_traits.clone(),
             },
             EffectiveWeaponProfile {
-                ranged: self.ranged,
+                launcher: self.launcher.clone(),
                 traits: expert_traits,
             },
         ))
@@ -336,12 +363,12 @@ impl ValidatedWeaponProfile {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EffectiveWeaponProfile {
-    ranged: Option<RangeBands>,
+    launcher: Option<LauncherProfile>,
     traits: Vec<WeaponTrait>,
 }
 impl EffectiveWeaponProfile {
-    pub fn ranged(&self) -> Option<RangeBands> {
-        self.ranged
+    pub fn launcher(&self) -> Option<&LauncherProfile> {
+        self.launcher.as_ref()
     }
     pub fn traits(&self) -> &[WeaponTrait] {
         &self.traits

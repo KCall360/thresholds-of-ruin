@@ -41,12 +41,12 @@ def choices_at(bands, depth):
 class RoguePopulationContent(unittest.TestCase):
     def test_full_policy_matches_separate_oracle_and_preserves_other_stage_streams(self):
         activation = source("scenario.toml")["floor_activation"]
-        # Independent policy covers all ten stages, including unchanged legacy streams.
+        # Independent policy covers all eleven stages, including unchanged legacy streams.
         self.assertEqual(activation, reviewed_twenty_six_activation())
         stages = activation["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([row["id"] for row in stages], ["rogue.eight_species_foes",
             "rogue.bandages", "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions", "rogue.magic_scrolls",
-            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls"])
+            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition"])
         self.assertEqual(stages[0]["count"], [4, 4])
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         bands = stages[0]["bands"]

@@ -10,7 +10,18 @@ struct BatchExecutionFacts<'a> {
 
 impl Game {
     pub(crate) fn plan_actor_available(&self, plan: &Plan) -> bool {
-        plan.as_ability()
+        (match plan {
+            Plan::Projectile(plan) => plan.source.available(self, plan.actor),
+            Plan::Equip {
+                actor,
+                item,
+                slot,
+                allocation,
+                ..
+            } => self.frozen_equip_available(*actor, *item, *slot, allocation),
+            _ => true,
+        }) && plan
+            .as_ability()
             .is_none_or(|ability| self.frozen_weapon_available(ability.actor, &ability.weapon))
             && self
                 .actors
@@ -38,7 +49,7 @@ impl Game {
             && match plan {
                 Plan::Escape(plan) => self.escape_plan_available(plan),
                 Plan::Respec(plan) => self.respec_environment_safe(plan.basis.actor),
-                Plan::Ray(_) => true,
+                Plan::Ray(_) | Plan::Projectile(_) => true,
                 Plan::Ability(ability) => self.target_in_reach_snapshot(
                     ability.actor,
                     ability.target,
@@ -295,6 +306,9 @@ impl Game {
             | ResolutionPlan::Strike { ability, .. }
             | ResolutionPlan::Rider { ability, .. } => (ability.actor, ability.target),
             ResolutionPlan::RayEncounter { ray, target, .. } => (ray.actor, target),
+            ResolutionPlan::ProjectileEncounter {
+                projectile, target, ..
+            } => (projectile.actor, target),
             ResolutionPlan::Effects { actor, target, .. } => (actor, target),
         };
         let mut disclosure_origin =
@@ -516,7 +530,9 @@ impl Game {
             ResolutionPlan::Ability(ability)
             | ResolutionPlan::Strike { ability, .. }
             | ResolutionPlan::Rider { ability, .. } => Some(ability),
-            ResolutionPlan::RayEncounter { .. } | ResolutionPlan::Effects { .. } => None,
+            ResolutionPlan::RayEncounter { .. }
+            | ResolutionPlan::ProjectileEncounter { .. }
+            | ResolutionPlan::Effects { .. } => None,
         };
         let spatial = ability.and_then(|ability| match plan.spatial_effect()? {
             PlannedEffect::StepSelfOneCell => self.step_input(ability),

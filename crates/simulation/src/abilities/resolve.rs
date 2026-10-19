@@ -88,6 +88,12 @@ pub enum ResolutionPlan<'a> {
         rider: &'a FrozenRider,
         ordinal: u16,
     },
+    ProjectileEncounter {
+        projectile: &'a super::ProjectilePlan,
+        target: ActorId,
+        check: &'a PlannedCheck,
+        effect_edge: i64,
+    },
     RayEncounter {
         ray: &'a super::RayPlan,
         target: ActorId,
@@ -197,6 +203,21 @@ impl<'a> ResolutionPlan<'a> {
                 on_failure: &[],
                 descriptors: &rider.descriptors,
                 shared_owner: None,
+            },
+            Self::ProjectileEncounter {
+                projectile,
+                target,
+                check,
+                ..
+            } => ResolutionInput {
+                actor: projectile.actor,
+                target,
+                ability: Some(&projectile.ability),
+                check: Some(check),
+                on_success: &projectile.effects,
+                on_failure: &[],
+                descriptors: &[],
+                shared_owner: Some(CheckSide::Initiating),
             },
             Self::RayEncounter { ray, target, check } => ResolutionInput {
                 actor: ray.actor,
@@ -651,6 +672,19 @@ impl StrikeBudget {
             remaining: edge(strike.edge - check_debit),
         }
     }
+    pub(super) fn projectile(effect_edge: i64) -> Self {
+        let debit = effect_edge.clamp(
+            -i64::from(CHECK_EDGE_CAPACITY),
+            i64::from(CHECK_EDGE_CAPACITY),
+        );
+        Self {
+            check_debit: debit,
+            owner: Some(CheckPhase::Primary {
+                side: CheckSide::Initiating,
+            }),
+            remaining: edge(effect_edge - debit),
+        }
+    }
     pub(super) fn ray(ray: &super::RayPlan) -> Self {
         let debit = ray.effect_edge.clamp(
             -i64::from(CHECK_EDGE_CAPACITY),
@@ -830,6 +864,9 @@ fn resolve_payload<'a>(
         ResolutionPlan::Ability(ability) => StrikeBudget::new(&ability.strikes[0]),
         ResolutionPlan::Strike { strike, .. } => StrikeBudget::new(strike),
         ResolutionPlan::RayEncounter { ray, .. } => StrikeBudget::ray(ray),
+        ResolutionPlan::ProjectileEncounter { effect_edge, .. } => {
+            StrikeBudget::projectile(effect_edge)
+        }
         ResolutionPlan::Rider { .. } | ResolutionPlan::Effects { .. } => StrikeBudget::effects(),
     };
     resolve_batch(plan, snapshot, rng, observer, &mut budget)
@@ -1158,6 +1195,11 @@ pub(super) fn resolve_batch<'a>(
         ) {
             Ok(Some(effect)) => effect,
             Ok(None) => continue,
+            Err(
+                error @ EffectApplicationError::Condition(
+                    crate::conditions::ConditionError::InvalidGeneration,
+                ),
+            ) => return Err(error),
             Err(EffectApplicationError::Condition(error)) => {
                 condition_error.get_or_insert(error);
                 if let ResolvedEffect::ApplyCondition { id, .. } = &effect {

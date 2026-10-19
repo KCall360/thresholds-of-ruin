@@ -96,6 +96,7 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
                 "  {strike_count} natural strikes; {additional_riders} ability-added riders per strike; strikes ability {}",
                 source.ability
             )),
+            StrikeSourceInspectionView::Projectile { delivery } => rows.push(format!("  {delivery:?} projectile; strike details require an exact delivery selection.")),
             StrikeSourceInspectionView::SelectedMelee {} => rows.push(format!(
                 "  Uses selected melee; strikes ability {} (then strikes selected)",
                 source.ability

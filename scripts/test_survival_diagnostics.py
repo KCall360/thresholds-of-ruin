@@ -20,7 +20,7 @@ def nutrition(reserve, elapsed=0, remainder=0):
 
 
 def fixture():
-    common = {"survival_version": 1, "segment": "segment-1", "lineage": "lineage", "branch": "lineage",
+    common = {"survival_version": 2, "segment": "segment-1", "lineage": "lineage", "branch": "lineage",
               "history_sequence": 0, "entry_id": None, "tick": 0,
               "diagnostic_dropped": 0, "diagnostic_incomplete": False, "selected_actor": 1}
     flow = {**dict.fromkeys(SCALARS, 0), **{key: dict.fromkeys(RESOURCES, 0) for key in POOLS},
@@ -60,6 +60,35 @@ def append_commit(rows, *, branch=None, end_tick=None):
 
 
 class SurvivalDiagnosticReports(unittest.TestCase):
+    def test_projectile_refusals_are_required_bounded_and_aggregated(self):
+        key = "projectile_numeric_budget_refusals"
+        rows = fixture()
+        rows[1]["flows"]["actors"]["1"][key] = 2
+        rows = append_commit(rows)
+        rows[3]["flows"]["actors"]["1"][key] = 3
+        result = validate_records(rows)
+        self.assertEqual(result["survival_version"], 2)
+        self.assertEqual(result["actors"]["1"][key], 5)
+        for value in (None, True, 1.0, -1, 2**64):
+            invalid = fixture()
+            invalid[1]["flows"]["actors"]["1"][key] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_records(invalid)
+        missing = fixture()
+        del missing[1]["flows"]["actors"]["1"][key]
+        with self.assertRaises(ValueError):
+            validate_records(missing)
+
+    def test_historical_version_is_rejected_without_relabeling(self):
+        rows = fixture()
+        for row in rows:
+            row["survival_version"] = 1
+        del rows[1]["flows"]["actors"]["1"]["projectile_numeric_budget_refusals"]
+        original = copy.deepcopy(rows)
+        with self.assertRaises(ValueError):
+            validate_records(rows)
+        self.assertEqual(rows, original)
+
     def test_restart_aggregates_only_new_commits(self):
         rows = fixture()
         rows += restart(rows)
@@ -117,7 +146,7 @@ class SurvivalDiagnosticReports(unittest.TestCase):
                 validate_records(rows)
 
     def test_malformed_envelope_numbers_do_not_pass_python_equality(self):
-        for key, values in (("survival_version", (True, 1.0)),
+        for key, values in (("survival_version", (True, 2.0)),
                             ("diagnostic_dropped", (False, 0.0)),
                             ("diagnostic_incomplete", (0, None)),
                             ("tick", (False, -1, 2**64)),

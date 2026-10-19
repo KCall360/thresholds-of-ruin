@@ -476,3 +476,50 @@ fn expertise_snapshot_field_is_mandatory_and_eagerly_bounded() {
     value["expertises"] = serde_json::json!(vec![row; MAX_ADVANCEMENT_EXPERTISE_ROWS + 1]);
     assert!(serde_json::from_value::<OwnStats>(value).is_err());
 }
+
+#[test]
+fn projectile_catalog_uses_profile_reach_and_never_melee_or_ray_authority() {
+    let mut value = serde_json::to_value(stats().abilities.pop().unwrap()).unwrap();
+    value["target_kind"] = serde_json::json!("directional_projectile");
+    value["reach"] = serde_json::json!({"kind":"projectile"});
+    value["basic_attack"] = serde_json::json!(false);
+    value["weapon_selection"] = serde_json::json!(false);
+    let decoded: AbilityView = serde_json::from_value(value.clone()).unwrap();
+    assert!(decoded.valid());
+    assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+    for (key, invalid) in [
+        ("reach", serde_json::json!({"kind":"melee"})),
+        ("reach", serde_json::json!({"kind":"sight","range":6})),
+        ("target_kind", serde_json::json!("directional_ray")),
+        ("target_kind", serde_json::json!("actor")),
+        ("weapon_selection", serde_json::json!(true)),
+        ("basic_attack", serde_json::json!(true)),
+    ] {
+        let mut bad = value.clone();
+        bad[key] = invalid;
+        assert!(!serde_json::from_value::<AbilityView>(bad).unwrap().valid());
+    }
+    value["reach"]["range"] = serde_json::json!(6);
+    assert!(serde_json::from_value::<AbilityView>(value).is_err());
+}
+
+#[test]
+fn projectile_strike_summary_has_closed_delivery_without_fake_strike_rows() {
+    for delivery in ["throw", "launch"] {
+        let value = serde_json::json!({"kind":"projectile","delivery":delivery});
+        let source: StrikeSourceInspectionView = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(source).unwrap(), value);
+        for bad in [
+            serde_json::json!({"kind":"projectile"}),
+            serde_json::json!({"kind":"projectile","delivery":{"throw":null}}),
+            serde_json::json!({"kind":"projectile","delivery":delivery,"strike_count":1}),
+            serde_json::json!(["projectile", delivery]),
+        ] {
+            assert!(serde_json::from_value::<StrikeSourceInspectionView>(bad).is_err());
+        }
+    }
+    assert!(serde_json::from_str::<StrikeSourceInspectionView>(
+        r#"{"kind":"projectile","delivery":"throw","delivery":"launch"}"#
+    )
+    .is_err());
+}

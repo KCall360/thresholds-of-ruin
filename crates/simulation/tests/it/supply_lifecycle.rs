@@ -1494,6 +1494,7 @@ fn actual_ability_plan_values() -> Vec<Value> {
             "ambush",
             "actor",
             "invocation",
+            "weapon",
             "step",
             "target",
             "initial_hold",
@@ -1548,6 +1549,7 @@ fn phase5_container_checkpoint_rejects_positional_item_spec() {
             "magical",
             "currency",
             "equipment",
+            "projectile",
             "equipment_generation",
             "consumable",
             "readable",
@@ -1595,6 +1597,7 @@ fn phase5_container_checkpoint_rejects_positional_creature_record() {
             "pools",
             "holds",
             "conditions",
+            "next_condition_generation",
             "cooldowns",
         ]
     ));
@@ -1664,4 +1667,43 @@ fn phase5_bytes_action_rejects_positional_use_ability_type_first() {
 #[test]
 fn phase5_bytes_action_rejects_positional_use_ability_value_first() {
     use_ability_byte_operands_require_names(false);
+}
+
+#[test]
+fn ordinary_free_unit_transfer_preserves_exact_witness_before_own_cancellation() {
+    for taking in [false, true] {
+        let (mut game, actor, _) = fixture(None, true, json!({"kind":"self_only"}));
+        bandages(&mut game, 10, Some(actor), 2, 1);
+        if taking {
+            bandages(&mut game, 11, None, 1, 1);
+        }
+        start(&mut game, actor);
+        game.pause_preparation(actor).unwrap();
+        assert_eq!(game.profile_finite_claims().unwrap().held_units, 1);
+        let outcome = game
+            .act(
+                actor,
+                if taking {
+                    Action::Take {
+                        item: tor_simulation::ItemId(11),
+                        quantity: Some(1),
+                    }
+                } else {
+                    Action::Drop {
+                        item: tor_simulation::ItemId(10),
+                        quantity: Some(1),
+                    }
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            outcome.kind,
+            tor_simulation::OutcomeKind::Taken { quantity: 1, .. }
+                | tor_simulation::OutcomeKind::Dropped { quantity: 1, .. }
+        ));
+        assert!(game.preparation(actor).is_none());
+        assert_eq!(game.profile_finite_claims().unwrap().held_units, 0);
+        assert_eq!(quantity(&game, actor, 10), Some(if taking { 3 } else { 1 }));
+        assert_eq!(round_trip(&game), game);
+    }
 }

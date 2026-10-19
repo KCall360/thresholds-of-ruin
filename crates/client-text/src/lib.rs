@@ -6,11 +6,13 @@ pub mod adventure;
 pub mod engine;
 pub mod narrative;
 pub mod parser;
+pub mod projectiles;
 
-pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, expertises, intellect-expertises, intellect-expertise, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor> [with <equipped weapon>], <disclosed ability name> <actor> [with <equipped weapon>] [using <supplies>], places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nExplicit weapon choices preview exact cost, time to next strike and recovery, then require yes/no. Default choices act immediately.\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, expertises, intellect-expertises, intellect-expertise, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor> [with <equipped weapon>], <disclosed ability name> <actor> [with <equipped weapon>] [using <supplies>], places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nExplicit weapon and projectile choices preview exact cost, time to next strike and recovery, then require yes/no. For projectile abilities, enter the ability name, select a numbered server source (next/previous pages, cancel), ammunition if launching, then a direction. Other default choices act immediately.\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
+    Projectile(String),
     Advancement(tor_client_common::advancement::AdvancementInput),
     Look,
     Inventory,
@@ -229,6 +231,12 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
     if let Some((ability, noun)) =
         tor_client_common::abilities::match_command(&state.observation, line)?
     {
+        if ability.target_kind == AbilityTargetKind::DirectionalProjectile {
+            if !noun.is_empty() {
+                return Err("Start with the projectile ability name alone; choose a source, then a direction.".into());
+            }
+            return Ok(Input::Projectile(ability.id.clone()));
+        }
         let (noun, supplies) = tor_client_common::abilities::split_supply_clause(noun)?;
         let (noun, weapon) = tor_client_common::weapons::split_clause(noun)?;
         let weapon = weapon.map_or(Ok(WeaponSelection::Default), |text| {
@@ -761,11 +769,10 @@ pub fn history(entry: &HistoryEntry) -> String {
         HistoryContent::PlaceRenamed { name, .. } => format!("Place named {}.", safe(name)),
         HistoryContent::Travel { .. } => "Travel requested.".into(),
         HistoryContent::Wizard { summary, .. } => safe(summary),
-        HistoryContent::Action {
-            event: Event::EscapeStarted { .. },
-            ..
-        } => "You begin trying to escape a hold.".into(),
-        HistoryContent::Action { event, .. } => format!("{event:?}"),
+        HistoryContent::Action { event, .. } => match event.as_ref() {
+            Event::EscapeStarted { .. } => "You begin trying to escape a hold.".into(),
+            event => format!("{event:?}"),
+        },
         HistoryContent::Annotation {
             anchor,
             category,

@@ -59,6 +59,11 @@ pub fn decode_action(
             supplies,
         } => {
             let id = s::content_ids::AbilityId::new(id).map_err(|_| unavailable())?;
+            if matches!(invocation.aim, p::AbilityAim::DirectionalProjectile { .. })
+                && invocation.weapon != p::WeaponSelection::Default
+            {
+                return Err(unavailable());
+            }
             let aim = match &invocation.aim {
                 p::AbilityAim::ActorTarget { target } => {
                     let (identity, reference) = std::iter::once((
@@ -79,6 +84,13 @@ pub fn decode_action(
                         }
                     }
                 }
+                p::AbilityAim::DirectionalProjectile {
+                    direction,
+                    delivery,
+                } => a::AbilityAim::DirectionalProjectile {
+                    direction: crate::adapt::requested_direction(*direction),
+                    delivery: decode_projectile_delivery(*delivery, scope, observation)?,
+                },
                 p::AbilityAim::SelfStep { direction } => a::AbilityAim::SelfStep {
                     direction: crate::adapt::requested_direction(*direction),
                 },
@@ -231,6 +243,134 @@ pub fn decode_action(
     })
 }
 
+fn decode_projectile_delivery(
+    delivery: p::ProjectileDeliverySelection,
+    scope: &TargetScope,
+    observation: &s::Observation,
+) -> Result<a::ProjectileDeliverySelection, crate::Failure> {
+    let unavailable = || crate::Failure::new(p::ErrorCode::InvalidAction, "Target is unavailable");
+    let interactions = observation.interactions.as_ref().ok_or_else(unavailable)?;
+    let owned_item = |token: p::ItemTarget| {
+        observation
+            .inventory
+            .iter()
+            .find(|item| scope.item(item.id) == token)
+            .map(|item| item.id)
+            .ok_or_else(unavailable)
+    };
+    let owned = |token: p::ItemTarget| {
+        let item = owned_item(token)?;
+        let offer = interactions
+            .inventory
+            .iter()
+            .find(|offer| offer.item == item)
+            .ok_or_else(unavailable)?;
+        Ok::<_, crate::Failure>((item.0, offer.equipped_slot))
+    };
+    let socket_exists = |socket: u16| {
+        usize::from(socket) < p::MAX_EQUIPMENT_SLOTS
+            && usize::from(socket) < interactions.slots.len()
+    };
+    let equipped = |token: p::ItemTarget, socket: u16| {
+        let (item, equipped) = owned(token)?;
+        if !socket_exists(socket) || equipped != Some(s::EquipmentSlotId(socket)) {
+            return Err(unavailable());
+        }
+        Ok(item)
+    };
+    let carried = |token: p::ItemTarget| {
+        let (item, equipped) = owned(token)?;
+        if equipped.is_some() {
+            return Err(unavailable());
+        }
+        Ok(item)
+    };
+    let carried_ammunition = |token: p::ItemTarget| {
+        let item = owned_item(token)?;
+        // Plain ammunition has no equipment/use interaction row. The complete
+        // inventory still discloses its owner-scoped identity, and any equipped
+        // row would make this carried-only operand unavailable.
+        if interactions
+            .inventory
+            .iter()
+            .any(|offer| offer.item == item && offer.equipped_slot.is_some())
+        {
+            return Err(unavailable());
+        }
+        Ok(item.0)
+    };
+    Ok(match delivery {
+        p::ProjectileDeliverySelection::Throw { source } => a::ProjectileDeliverySelection::Throw {
+            source: match source {
+                p::ThrownSourceSelection::Equipped { item, socket } => {
+                    a::ThrownSourceSelection::Equipped {
+                        item: equipped(item, socket)?,
+                        socket,
+                    }
+                }
+                p::ThrownSourceSelection::Carried { item, socket } => {
+                    if !socket_exists(socket) {
+                        return Err(unavailable());
+                    }
+                    a::ThrownSourceSelection::Carried {
+                        item: carried(item)?,
+                        socket,
+                    }
+                }
+            },
+        },
+        p::ProjectileDeliverySelection::Launch {
+            launcher,
+            ammunition,
+        } => {
+            if launcher.item == ammunition {
+                return Err(unavailable());
+            }
+            a::ProjectileDeliverySelection::Launch {
+                launcher: a::EquippedProjectileWeapon {
+                    item: equipped(launcher.item, launcher.socket)?,
+                    socket: launcher.socket,
+                },
+                ammunition: carried_ammunition(ammunition)?,
+            }
+        }
+    })
+}
+
+fn encode_projectile_delivery(
+    delivery: a::ProjectileDeliverySelection,
+    scope: &TargetScope,
+) -> p::ProjectileDeliverySelection {
+    match delivery {
+        a::ProjectileDeliverySelection::Throw { source } => p::ProjectileDeliverySelection::Throw {
+            source: match source {
+                a::ThrownSourceSelection::Equipped { item, socket } => {
+                    p::ThrownSourceSelection::Equipped {
+                        item: scope.item(s::ItemId(item)),
+                        socket,
+                    }
+                }
+                a::ThrownSourceSelection::Carried { item, socket } => {
+                    p::ThrownSourceSelection::Carried {
+                        item: scope.item(s::ItemId(item)),
+                        socket,
+                    }
+                }
+            },
+        },
+        a::ProjectileDeliverySelection::Launch {
+            launcher,
+            ammunition,
+        } => p::ProjectileDeliverySelection::Launch {
+            launcher: p::EquippedProjectileWeapon {
+                item: scope.item(s::ItemId(launcher.item)),
+                socket: launcher.socket,
+            },
+            ammunition: scope.item(s::ItemId(ammunition)),
+        },
+    }
+}
+
 /// Encode backend action facts explicitly for the current wire schema.
 pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
     match action {
@@ -273,6 +413,13 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
                     },
                     a::AbilityAim::ContactTarget { target } => p::AbilityAim::ActorTarget {
                         target: scope.contact(*target),
+                    },
+                    a::AbilityAim::DirectionalProjectile {
+                        direction,
+                        delivery,
+                    } => p::AbilityAim::DirectionalProjectile {
+                        direction: crate::adapt::wire_direction(*direction),
+                        delivery: encode_projectile_delivery(*delivery, scope),
                     },
                     a::AbilityAim::SelfStep { direction } => p::AbilityAim::SelfStep {
                         direction: crate::adapt::wire_direction(*direction),
@@ -348,6 +495,10 @@ pub enum CombatDiagnosticsOperation {
 /// Normalized request facts before any live target resolution.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodedCommand {
+    ProjectileChoices {
+        expected_revision: u64,
+        query: p::ProjectileChoiceQuery,
+    },
     AbilityWeaponPreview {
         expected_revision: u64,
         ability: String,
@@ -389,6 +540,7 @@ impl DecodedCommand {
     pub(crate) fn requires_control(&self) -> bool {
         match self {
             Self::Gameplay { .. }
+            | Self::ProjectileChoices { .. }
             | Self::Advancement { .. }
             | Self::AbilityWeaponPreview { .. } => true,
             Self::CreatureCatalog { .. }
@@ -432,6 +584,9 @@ impl DecodedCommand {
             Self::AbilityWeaponPreview {
                 expected_revision, ..
             }
+            | Self::ProjectileChoices {
+                expected_revision, ..
+            }
             | Self::Advancement {
                 expected_revision, ..
             }
@@ -459,6 +614,22 @@ impl DecodedCommand {
 
 /// Normalize transport input; preserve gameplay references until fresh resolution.
 pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand, crate::Failure> {
+    if let p::Command::ProjectileChoices {
+        expected_revision,
+        query,
+    } = command
+    {
+        if !query.is_valid() {
+            return Err(crate::Failure::new(
+                p::ErrorCode::InvalidRequest,
+                "Invalid projectile choice query",
+            ));
+        }
+        return Ok(DecodedCommand::ProjectileChoices {
+            expected_revision: *expected_revision,
+            query: query.clone(),
+        });
+    }
     if let p::Command::PreviewAbilityWeapon {
         expected_revision,
         ability,
@@ -668,6 +839,7 @@ pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand,
         p::Command::Act { .. }
         | p::Command::InspectStrikeSource { .. }
         | p::Command::Advancement { .. }
+        | p::Command::ProjectileChoices { .. }
         | p::Command::PreviewAbilityWeapon { .. } => {
             unreachable!("runtime request decoded above")
         }
@@ -820,7 +992,7 @@ pub fn disclose_entry(
         | JournalContent::IntentionStarted { action, event, .. }
         | JournalContent::IntentionContinued { action, event, .. } => Content::Action {
             action: encode_action(action, scope),
-            event: match event {
+            event: Box::new(match event {
                 Event::GrowthSourceChosen
                 | Event::IntellectExpertiseChosen
                 | Event::Purchased
@@ -877,7 +1049,7 @@ pub fn disclose_entry(
                     item: scope.item(s::ItemId(*item)),
                 },
                 Event::Waited => VisibleEvent::Waited,
-            },
+            }),
         },
         JournalContent::Annotation {
             anchor,
@@ -1136,11 +1308,10 @@ mod retrieval_event_tests {
         assert!(disclosed.visible_to(p::ActorId(1), "spectator"));
         assert!(!disclosed.visible_to(p::ActorId(2), "player"));
         assert!(!disclosed.visible_to(p::ActorId(2), "spectator"));
-        let p::HistoryContent::Action {
-            event: p::Event::Escaped { item },
-            ..
-        } = disclosed.content
-        else {
+        let p::HistoryContent::Action { event, .. } = disclosed.content else {
+            panic!("terminal escape must remain an action");
+        };
+        let p::Event::Escaped { item } = *event else {
             panic!("terminal escape must remain distinct from movement");
         };
         assert_eq!(item, scope.item(id));

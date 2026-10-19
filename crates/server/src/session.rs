@@ -21,8 +21,24 @@ pub struct Account {
     pub actors: BTreeSet<ActorId>,
 }
 
-/// Ordinary preparation remains visible; paid selection and exact-instance
-/// counts belong only to account-authorized owner attachments.
+/// Keep the sharing fast path beside the restriction it must exactly match.
+/// Presence, including a known false curse/protection fact, is private knowledge.
+fn has_private_item_disclosure(state: &StateView) -> bool {
+    state.observation.interactions.as_ref().is_some_and(|view| {
+        view.identification.is_some()
+            || !view.curse_blocked.is_empty()
+            || view.inventory.iter().any(|item| {
+                item.charges.is_some()
+                    || item.known_equipment.is_some()
+                    || item.known_projectile_bonus.is_some()
+                    || item.known_cursed.is_some()
+                    || item.known_protected.is_some()
+            })
+    })
+}
+
+/// Ordinary preparation remains visible; paid selection, exact-instance counts,
+/// and learned equipment facts belong only to account-authorized owner attachments.
 fn restrict_item_disclosure(state: &mut StateView, role: AccessRole) {
     if role == AccessRole::Spectator {
         if let Some(interaction) = &mut state.observation.interactions {
@@ -31,6 +47,7 @@ fn restrict_item_disclosure(state: &mut StateView, role: AccessRole) {
             for item in &mut interaction.inventory {
                 item.charges = None;
                 item.known_equipment = None;
+                item.known_projectile_bonus = None;
                 item.known_cursed = None;
                 item.known_protected = None;
             }
@@ -53,6 +70,7 @@ struct DisclosedReadiness {
 
 /// Payloads prepared by a request and published after its ordered effects.
 enum RequestReply {
+    ProjectileChoices(Box<ProjectileChoicePage>),
     AbilityWeaponPreview(Box<tor_protocol::AbilityWeaponPreview>),
     Receipt(RequestReceipt),
     History(HistoryPage),
@@ -67,6 +85,11 @@ enum RequestReply {
 impl RequestReply {
     fn message(self, request_id: String, context: ReplyContext) -> ServerMessage {
         match self {
+            Self::ProjectileChoices(page) => ServerMessage::ProjectileChoices {
+                context,
+                request_id,
+                page,
+            },
             Self::AbilityWeaponPreview(preview) => ServerMessage::AbilityWeaponPreview {
                 context,
                 request_id,
@@ -677,6 +700,30 @@ impl Service {
                         self.engine.check_advancement_basis(&reply, basis)?;
                     }
                 }
+                if let crate::wire_adapter::DecodedCommand::ProjectileChoices {
+                    expected_revision,
+                    query,
+                } = &command
+                {
+                    let context = self.reply_context(id).ok_or_else(|| {
+                        Failure::new(ErrorCode::StaleContext, "Input context changed")
+                    })?;
+                    let budget = crate::engine::ProjectileChoicePageBudget {
+                        context: &context,
+                        request_id,
+                        limit: self.outbound.capabilities().max_response_bytes as usize,
+                    };
+                    let page = self.engine.projectile_choices(
+                        actor,
+                        &branch,
+                        *expected_revision,
+                        query,
+                        &budget,
+                    )?;
+                    return Ok(ProcessedRequest::Reply(RequestReply::ProjectileChoices(
+                        Box::new(page),
+                    )));
+                }
                 if let crate::wire_adapter::DecodedCommand::AbilityWeaponPreview {
                     expected_revision,
                     ability,
@@ -1144,11 +1191,7 @@ impl Service {
         if role != AccessRole::Spectator {
             return state;
         }
-        let private = state.observation.interactions.as_ref().is_some_and(|view| {
-            view.identification.is_some()
-                || view.inventory.iter().any(|item| item.charges.is_some())
-        });
-        if private {
+        if has_private_item_disclosure(&state) {
             let mut projected = state.as_ref().clone();
             restrict_item_disclosure(&mut projected, role);
             self.share_observation(projected)
@@ -3410,6 +3453,7 @@ mod tests {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: Some(ProjectileBonusView { hit: -2, damage: 3 }),
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -3484,6 +3528,26 @@ mod tests {
                 "ordinary preparation remains visible"
             );
             assert!(interaction.inventory[0].zappable);
+            assert_eq!(
+                interaction.inventory[0].known_projectile_bonus,
+                owner.then_some(ProjectileBonusView { hit: -2, damage: 3 })
+            );
+            // Bonus alone must trigger the shared-observation sanitation fast path.
+            let mut bonus_only = state.clone();
+            let facts = bonus_only.observation.interactions.as_mut().unwrap();
+            facts.identification = None;
+            facts.inventory[0].charges = None;
+            let projected = service.item_observation(Arc::new(bonus_only), role);
+            assert_eq!(
+                projected
+                    .observation
+                    .interactions
+                    .as_ref()
+                    .unwrap()
+                    .inventory[0]
+                    .known_projectile_bonus,
+                owner.then_some(ProjectileBonusView { hit: -2, damage: 3 })
+            );
             // The same restriction owns snapshots as well as delta bases.
             let mut snapshot_state = state.clone();
             restrict_item_disclosure(&mut snapshot_state, role);
@@ -3494,6 +3558,148 @@ mod tests {
             &state,
             "spectator projection cannot mutate shared owner state"
         );
+    }
+
+    #[test]
+    fn each_private_equipment_fact_is_sanitized_without_losing_public_arc_sharing() {
+        let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+        let item = ItemTarget::from_digest([73; 32]);
+        let mut public = service.engine.state(ActorId(1)).unwrap();
+        public.observation.inventory.push(
+            serde_json::from_value(serde_json::json!({
+                "id":item,"class":"ring","quantity":"1","appearance":"silver ring",
+                "identified":true,"name":"Known ring","known_supply":null
+            }))
+            .unwrap(),
+        );
+        public.observation.interactions = Some(InteractionView {
+            curse_blocked: vec![],
+            completed: vec![],
+            slots: vec![],
+            preparation: None,
+            identification: None,
+            inventory: vec![ItemInteractionView {
+                item,
+                slot: Some(EquipmentSlot {
+                    id: "fixture_ring".into(),
+                    name: "Ring".into(),
+                    equipped_phrase: "worn".into(),
+                    requires_attack: false,
+                }),
+                equipped_slot: None,
+                known_equipment: None,
+                known_projectile_bonus: None,
+                known_cursed: None,
+                known_protected: None,
+                drinkable: false,
+                edible: false,
+                readable: false,
+                zappable: false,
+                charges: None,
+            }],
+        });
+        public.revision += 1;
+        assert!(public.validate().is_ok());
+        let public = Arc::new(public);
+        for role in [AccessRole::Player, AccessRole::Spectator] {
+            assert!(
+                Arc::ptr_eq(
+                    &public,
+                    &service.item_observation(Arc::clone(&public), role)
+                ),
+                "truly public updates must preserve shared storage"
+            );
+        }
+        for fact in 0..6 {
+            let mut owner = public.as_ref().clone();
+            let interaction = owner.observation.interactions.as_mut().unwrap();
+            match fact {
+                0 => {
+                    interaction.inventory[0].known_equipment = Some(EquipmentView {
+                        attack: None,
+                        modifiers: vec![],
+                    })
+                }
+                1 => interaction.inventory[0].known_cursed = Some(true),
+                2 => interaction.inventory[0].known_protected = Some(true),
+                3 => interaction.curse_blocked.push(item),
+                4 => interaction.inventory[0].known_cursed = Some(false),
+                _ => interaction.inventory[0].known_protected = Some(false),
+            }
+            assert!(owner.validate().is_ok(), "fact {fact}");
+            let owner = Arc::new(owner);
+            let owner_projection = service.item_observation(Arc::clone(&owner), AccessRole::Player);
+            assert!(Arc::ptr_eq(&owner, &owner_projection));
+            let projected = service.item_observation(Arc::clone(&owner), AccessRole::Spectator);
+            assert_eq!(
+                projected.as_ref(),
+                public.as_ref(),
+                "private fact {fact} leaked through the fast path"
+            );
+            assert!(!Arc::ptr_eq(&owner, &projected));
+            for role in [AccessRole::Player, AccessRole::Spectator] {
+                let account = Account {
+                    role,
+                    user: format!("{role:?}-{fact}"),
+                    token: "test-only".into(),
+                    actors: BTreeSet::from([ActorId(1)]),
+                };
+                let mut connection = service.connect(&account, "headless".into()).unwrap();
+                connection.messages.try_recv().unwrap();
+                service.handle(
+                    connection.id,
+                    "attach".into(),
+                    Request::Attach { actor: ActorId(1) },
+                );
+                while connection.messages.try_recv().is_ok() {}
+                let base = Arc::clone(
+                    &service.clients[&connection.id]
+                        .last_observation
+                        .as_ref()
+                        .unwrap()
+                        .state,
+                );
+                service.update(
+                    connection.id,
+                    UpdateBody::Observation {
+                        state: Arc::clone(&owner),
+                        event: None,
+                    },
+                );
+                let frame = connection.messages.try_recv_frame().unwrap();
+                let ServerMessage::Update { update } = decode_response(&frame.text).unwrap() else {
+                    panic!("observation update expected")
+                };
+                let received = match update.body {
+                    UpdateBody::Observation { state, .. } => state.as_ref().clone(),
+                    UpdateBody::ObservationDelta { state, .. } => state.apply(&base).unwrap(),
+                    _ => panic!("observation body expected"),
+                };
+                let retained = &service.clients[&connection.id]
+                    .last_observation
+                    .as_ref()
+                    .unwrap()
+                    .state;
+                let expected = if role == AccessRole::Spectator {
+                    &public
+                } else {
+                    &owner
+                };
+                assert_eq!(
+                    retained.as_ref(),
+                    expected.as_ref(),
+                    "retained update role {role:?}, fact {fact}"
+                );
+                assert_eq!(
+                    &received,
+                    expected.as_ref(),
+                    "decoded update role {role:?}, fact {fact}"
+                );
+                let mut snapshot = owner.as_ref().clone();
+                restrict_item_disclosure(&mut snapshot, role);
+                assert_eq!(&snapshot, expected.as_ref());
+            }
+        }
     }
 
     #[test]

@@ -41,6 +41,7 @@ fn request_kind(request: &Request) -> &'static str {
         Request::Palette => "palette",
         Request::Map { .. } => "map",
         Request::Command { command, .. } => match command {
+            Command::ProjectileChoices { .. } => "command.projectile_choices",
             Command::PreviewAbilityWeapon { .. } => "command.preview_ability_weapon",
             Command::Advancement { .. } => "command.advancement",
             Command::InspectStrikeSource { .. } => "command.inspect_strike_source",
@@ -76,6 +77,8 @@ fn request_kind(request: &Request) -> &'static str {
 }
 
 const CLIENT_KINDS: &[&str] = &[
+    "act.choose_intellect_expertise",
+    "command.projectile_choices",
     "command.preview_ability_weapon",
     "act.escape",
     "hello",
@@ -155,6 +158,7 @@ server_sample_kinds! {
     CreatureStrikePage => ("creature_strike_page", None),
     AdvancementPage => ("advancement_page", None),
     AbilityWeaponPreview => ("ability_weapon_preview", None),
+    ProjectileChoices => ("projectile_choices", None),
     MapPage => ("map_page", None),
     CombatDiagnostics => ("combat_diagnostics", None),
     Error => ("error", None),
@@ -189,6 +193,7 @@ fn server_kind(message: &ServerMessage) -> ServerSampleKind {
         ServerMessage::CreatureCatalog { .. } => Kind::CreatureCatalog,
         ServerMessage::CreatureInspection { .. } => Kind::CreatureInspection,
         ServerMessage::CreatureStrikePage { .. } => Kind::CreatureStrikePage,
+        ServerMessage::ProjectileChoices { .. } => Kind::ProjectileChoices,
         ServerMessage::AbilityWeaponPreview { .. } => Kind::AbilityWeaponPreview,
         ServerMessage::AdvancementPage { .. } => Kind::AdvancementPage,
         ServerMessage::MapPage { .. } => Kind::MapPage,

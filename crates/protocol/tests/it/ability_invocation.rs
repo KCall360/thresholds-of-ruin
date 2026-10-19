@@ -221,3 +221,125 @@ fn exact_equipped_weapon_selection_round_trips_and_rejects_ambiguous_operands() 
         );
     }
 }
+
+#[test]
+fn projectile_invocations_keep_exact_typed_delivery_and_all_ten_directions() {
+    let item = tor_protocol::ItemTarget::from_digest([11; 32]);
+    let ammunition = tor_protocol::ItemTarget::from_digest([12; 32]);
+    for delivery in [
+        json!({"kind":"throw","source":{"kind":"equipped","item":item,"socket":0}}),
+        json!({"kind":"throw","source":{"kind":"carried","item":item,"socket":63}}),
+        json!({"kind":"launch","launcher":{"item":item,"socket":0},"ammunition":ammunition}),
+    ] {
+        for direction in [
+            "north",
+            "east",
+            "south",
+            "west",
+            "north_east",
+            "south_east",
+            "south_west",
+            "north_west",
+            "up",
+            "down",
+        ] {
+            let value = json!({"aim":{"kind":"directional_projectile","direction":direction,"delivery":delivery},"weapon":{"kind":"default"}});
+            let invocation: tor_protocol::AbilityInvocation =
+                serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(invocation).unwrap(), value);
+        }
+    }
+}
+
+#[test]
+fn projectile_invocations_reject_ambiguous_delivery_direction_and_outer_weapon() {
+    let item = tor_protocol::ItemTarget::from_digest([11; 32]);
+    let ammunition = tor_protocol::ItemTarget::from_digest([12; 32]);
+    let source = json!({"kind":"carried","item":item,"socket":0});
+    let delivery = json!({"kind":"throw","source":source});
+    let valid = json!({"aim":{"kind":"directional_projectile","direction":"north","delivery":delivery},"weapon":{"kind":"default"}});
+    assert!(serde_json::from_value::<tor_protocol::AbilityInvocation>(valid.clone()).is_ok());
+    let mut invalid = Vec::new();
+    for bad in [
+        json!(null),
+        json!(1),
+        json!({"north":null}),
+        json!(["north"]),
+        json!("north_up"),
+    ] {
+        let mut value = valid.clone();
+        value["aim"]["direction"] = bad;
+        invalid.push(value);
+    }
+    for extra in ["target", "path", "destination", "weapon"] {
+        let mut value = valid.clone();
+        value["aim"][extra] = json!(null);
+        invalid.push(value);
+    }
+    let mut value = valid.clone();
+    value["weapon"] = json!({"kind":"equipped","item":item,"socket":0});
+    invalid.push(value);
+    for bad in [
+        json!(null),
+        json!(["throw", source]),
+        json!({"kind":"throw"}),
+        json!({"kind":"throw","source":source,"ammunition":ammunition}),
+        json!({"kind":"launch","launcher":{"item":item,"socket":0}}),
+        json!({"kind":"launch","launcher":{"item":item,"socket":0},"ammunition":item}),
+        json!({"kind":"launch","launcher":[item,0],"ammunition":ammunition}),
+        json!({"kind":"launch","launcher":{"item":item,"socket":64},"ammunition":ammunition}),
+        json!({"kind":"launch","launcher":{"item":item,"socket":0,"extra":null},"ammunition":ammunition}),
+    ] {
+        let mut value = valid.clone();
+        value["aim"]["delivery"] = bad;
+        invalid.push(value);
+    }
+    for kind in ["equipped", "carried"] {
+        for bad in [
+            json!([kind, item, 0]),
+            json!({"kind":kind,"item":item}),
+            json!({"kind":kind,"socket":0}),
+            json!({"kind":kind,"item":1,"socket":0}),
+            json!({"kind":kind,"item":tor_protocol::ActorTarget::from_digest([11;32]),"socket":0}),
+            json!({"kind":kind,"item":item,"socket":64}),
+            json!({"kind":kind,"item":item,"socket":"0"}),
+            json!({"kind":kind,"item":item,"socket":0.0}),
+            json!({"kind":kind,"item":item,"socket":-1}),
+            json!({"kind":kind,"item":item,"socket":0,"extra":null}),
+        ] {
+            let mut value = valid.clone();
+            value["aim"]["delivery"]["source"] = bad;
+            invalid.push(value);
+        }
+    }
+    for value in invalid {
+        assert!(
+            serde_json::from_value::<tor_protocol::AbilityInvocation>(value.clone()).is_err(),
+            "{value}"
+        );
+    }
+    let raw = serde_json::to_string(&valid).unwrap();
+    for (from, to) in [
+        (
+            "\"direction\":\"north\"".to_owned(),
+            "\"direction\":\"north\",\"direction\":\"south\"".to_owned(),
+        ),
+        (
+            "\"kind\":\"throw\"".to_owned(),
+            "\"kind\":\"throw\",\"kind\":\"launch\"".to_owned(),
+        ),
+        (
+            "\"socket\":0".to_owned(),
+            "\"socket\":0,\"socket\":1".to_owned(),
+        ),
+        (
+            format!("\"item\":\"{item}\""),
+            format!("\"item\":\"{item}\",\"item\":\"{item}\""),
+        ),
+    ] {
+        assert!(
+            serde_json::from_str::<tor_protocol::AbilityInvocation>(&raw.replace(&from, &to))
+                .is_err()
+        );
+    }
+}

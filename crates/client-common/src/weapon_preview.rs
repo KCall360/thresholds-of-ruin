@@ -8,6 +8,7 @@ pub struct WeaponPreview {
     action: Action,
     request_id: Option<String>,
     preview: Option<AbilityWeaponPreview>,
+    projectile_binding: Option<crate::projectiles::ProjectileMenu>,
 }
 impl WeaponPreview {
     pub fn new(state: &ClientState, action: Action) -> Result<Self, String> {
@@ -28,7 +29,14 @@ impl WeaponPreview {
             *invocation,
             supplies.clone(),
         )?;
+        let projectile_binding =
+            if matches!(invocation.aim, AbilityAim::DirectionalProjectile { .. }) {
+                Some(crate::projectiles::ProjectileMenu::new(state, id)?)
+            } else {
+                None
+            };
         Ok(Self {
+            projectile_binding,
             context: state.snapshot().reply_context(),
             action,
             request_id: None,
@@ -59,7 +67,26 @@ impl WeaponPreview {
         Ok(())
     }
     pub fn current(&self, state: &ClientState) -> bool {
-        state.has_control() && state.snapshot().reply_context() == self.context
+        state.has_control()
+            && state.snapshot().reply_context() == self.context
+            && self
+                .projectile_binding
+                .as_ref()
+                .is_none_or(|binding| binding.current(state))
+            && match &self.action {
+                Action::UseAbility {
+                    id,
+                    invocation,
+                    supplies,
+                } => crate::abilities::invocation_action(
+                    &state.state().observation,
+                    id,
+                    *invocation,
+                    supplies.clone(),
+                )
+                .is_ok(),
+                _ => false,
+            }
     }
     pub fn ready(&self) -> bool {
         self.preview.is_some()
@@ -131,6 +158,9 @@ pub fn explicit_action(action: &Action) -> bool {
             invocation: AbilityInvocation {
                 weapon: WeaponSelection::Equipped { .. },
                 ..
+            } | AbilityInvocation {
+                aim: AbilityAim::DirectionalProjectile { .. },
+                ..
             },
             ..
         }
@@ -192,6 +222,7 @@ mod tests {
                 item,
                 slot: Some(slot),
                 equipped_slot: Some(10),
+                known_projectile_bonus: None,
                 known_equipment: None,
                 known_cursed: None,
                 known_protected: None,

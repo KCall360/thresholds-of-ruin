@@ -18,6 +18,8 @@ pub enum RuleError {
     CoolingDown,
     InvalidDefinition,
     InvalidPlan,
+    /// Valid operands exceed the shared runtime numeric budget.
+    NumericBudget,
     ConditionCapacity,
 }
 fn invalid() -> GameError {
@@ -231,6 +233,7 @@ pub enum Plan {
     Escape(tor_world::Shared<crate::escape::EscapePlan>),
     Ability(tor_world::Shared<AbilityPlan>),
     Ray(tor_world::Shared<super::RayPlan>),
+    Projectile(tor_world::Shared<super::ProjectilePlan>),
     Zap {
         item: ItemId,
         charges: u16,
@@ -241,6 +244,7 @@ pub enum Plan {
         actor: ActorId,
         item: ItemId,
         slot: EquipmentSlotId,
+        allocation: crate::equipment_capture::FrozenEquipAllocation,
         preparation: u64,
     },
     Unequip {
@@ -367,6 +371,7 @@ impl Plan {
         match self {
             Self::Ability(plan) => plan.tokens.as_slice(),
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.tokens.as_slice(),
+            Self::Projectile(plan) => plan.tokens.as_slice(),
             Self::Escape(plan) => plan.tokens.as_slice(),
             _ => &[],
         }
@@ -378,6 +383,7 @@ impl Plan {
             Self::Escape(plan) => plan.actor,
             Self::Ability(plan) => plan.actor,
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.actor,
+            Self::Projectile(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
@@ -392,6 +398,7 @@ impl Plan {
             Self::Ability(plan) => plan.target,
             // Legacy actor-local bookkeeping only; a ray has no persisted target.
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.actor,
+            Self::Projectile(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
@@ -411,6 +418,14 @@ impl Plan {
             Self::Zap { item, ray, .. } => Work::Zap {
                 item: *item,
                 direction: ray.direction,
+            },
+            Self::Projectile(plan) => Work::UseAbility {
+                id: plan.ability.clone(),
+                invocation: super::AbilityInvocation::directional_projectile(
+                    plan.direction,
+                    plan.selection,
+                ),
+                supplies: crate::supplies::SupplySelection::Carried,
             },
             Self::Ray(plan) => Work::UseAbility {
                 id: plan.ability.clone(),
@@ -437,6 +452,7 @@ impl Plan {
             Self::Escape(plan) => plan.preparation,
             Self::Ability(plan) => plan.preparation,
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.preparation,
+            Self::Projectile(plan) => plan.preparation,
             Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
             | Self::Unequip { preparation, .. }
@@ -450,6 +466,7 @@ impl Plan {
             Self::Escape(plan) => plan.recovery,
             Self::Ability(plan) => plan.recovery + plan.step.map_or(0, |step| step.duration),
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.recovery,
+            Self::Projectile(plan) => plan.recovery,
             Self::Respec(plan) => plan.recovery,
             Self::Equip { .. }
             | Self::Unequip { .. }
@@ -462,6 +479,7 @@ impl Plan {
         match self {
             Self::Ability(plan) => plan.cost,
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.cost,
+            Self::Projectile(plan) => plan.cost,
             Self::Escape(_) | Self::Respec(_) => None,
             Self::Equip { .. }
             | Self::Unequip { .. }
@@ -479,7 +497,8 @@ impl Plan {
             Self::Read { effects, .. }
             | Self::Drink { effects, .. }
             | Self::Eat { effects, .. } => effects,
-            Self::Ray(_)
+            Self::Projectile(_)
+            | Self::Ray(_)
             | Self::Zap { .. }
             | Self::Escape(_)
             | Self::Respec(_)
@@ -490,12 +509,22 @@ impl Plan {
     pub fn as_ability(&self) -> Option<&AbilityPlan> {
         match self {
             Self::Ability(plan) => Some(plan),
-            Self::Ray(_) | Self::Zap { .. } | Self::Escape(_) | Self::Respec(_) => None,
+            Self::Projectile(_)
+            | Self::Ray(_)
+            | Self::Zap { .. }
+            | Self::Escape(_)
+            | Self::Respec(_) => None,
             Self::Equip { .. }
             | Self::Unequip { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => None,
+        }
+    }
+    pub fn as_projectile(&self) -> Option<&super::ProjectilePlan> {
+        match self {
+            Self::Projectile(plan) => Some(plan),
+            _ => None,
         }
     }
     pub fn as_ray(&self) -> Option<&super::RayPlan> {
@@ -508,6 +537,7 @@ impl Plan {
         match self {
             Self::Ability(plan) => Some(&plan.ability),
             Self::Ray(plan) => Some(&plan.ability),
+            Self::Projectile(plan) => Some(&plan.ability),
             _ => None,
         }
     }
@@ -515,6 +545,7 @@ impl Plan {
         match self {
             Self::Ability(plan) => plan.cooldown,
             Self::Ray(plan) => plan.cooldown,
+            Self::Projectile(plan) => plan.cooldown,
             _ => None,
         }
     }
@@ -529,7 +560,8 @@ impl Plan {
                 target: *actor,
                 effects,
             }),
-            Self::Ray(_)
+            Self::Projectile(_)
+            | Self::Ray(_)
             | Self::Zap { .. }
             | Self::Escape(_)
             | Self::Respec(_)
@@ -539,11 +571,14 @@ impl Plan {
     }
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
         valid_actor(self.actor())
-            && (1..=crate::limits::NUMERIC as u64).contains(&self.preparation())
+            && self.preparation() <= crate::limits::NUMERIC as u64
+            && (self.preparation() > 0
+                || matches!(self, Self::Equip { allocation, .. } if allocation.quickdraw(rules)))
             && match self {
                 Self::Escape(plan) => plan.valid(rules),
                 Self::Ability(plan) => plan.valid(rules),
                 Self::Ray(plan) => plan.valid(rules),
+                Self::Projectile(plan) => plan.valid(rules),
                 Self::Zap { item, ray, .. } => {
                     valid_item(*item)
                         && ray.valid(rules)
@@ -552,8 +587,16 @@ impl Plan {
                         && ray.supply_costs.is_empty()
                 }
                 Self::Respec(plan) => plan.valid(rules),
-                Self::Equip { item, slot, .. } => {
-                    valid_item(*item) && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
+                Self::Equip {
+                    item,
+                    slot,
+                    allocation,
+                    ..
+                } => {
+                    valid_item(*item)
+                        && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
+                        && allocation.valid_shape(rules, *item, *slot)
+                        && allocation.quickdraw(rules) == (self.preparation() == 0)
                 }
                 Self::Unequip { item, .. } => valid_item(*item),
                 Self::Read {
@@ -1037,6 +1080,8 @@ impl Game {
             return false;
         }
         match reach {
+            // Physical projectile reach is resolved along its released flight.
+            Reach::Projectile => false,
             Reach::SelfOnly => actor == target,
             Reach::SelfOrAlly { range } => {
                 actor == target

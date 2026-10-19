@@ -1,5 +1,6 @@
 //! Closed player/NPC-selected operands. Permissions and destinations are not
 //! supplied by clients; ordinary movement supplies the frozen destination.
+use super::projectile_selection::ProjectileDeliverySelection;
 use crate::ActorId;
 use serde::{Deserialize, Serialize};
 
@@ -10,9 +11,12 @@ pub enum InvocationKind {
     ActorTarget,
     SelfStep,
     DirectionalRay,
+    DirectionalProjectile,
 }
 
-/// Aim authority and equipped-weapon selection are independent operands.
+/// Aim authority and ordinary equipped-weapon selection are separate operands.
+/// Physical projectiles carry their complete delivery selection inside the aim
+/// and require the outer weapon selector to remain `Default`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct AbilityInvocation {
     pub aim: AbilityAim,
@@ -27,10 +31,14 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
             weapon: WeaponSelection,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
-        Ok(Self {
+        let result = Self {
             aim: fields.aim,
             weapon: fields.weapon,
-        })
+        };
+        if !result.valid() {
+            return Err(serde::de::Error::custom("invalid ability invocation"));
+        }
+        Ok(result)
     }
 }
 impl AbilityInvocation {
@@ -57,6 +65,27 @@ impl AbilityInvocation {
             aim: AbilityAim::DirectionalRay { direction },
             weapon: WeaponSelection::Default,
         }
+    }
+    pub fn directional_projectile(
+        direction: StepDirection,
+        delivery: ProjectileDeliverySelection,
+    ) -> Self {
+        Self {
+            aim: AbilityAim::DirectionalProjectile {
+                direction,
+                delivery,
+            },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub(crate) fn valid(self) -> bool {
+        self.weapon.valid()
+            && match self.aim {
+                AbilityAim::DirectionalProjectile { delivery, .. } => {
+                    self.weapon == WeaponSelection::Default && delivery.valid()
+                }
+                _ => true,
+            }
     }
     pub fn target(self, actor: ActorId) -> ActorId {
         self.aim.target(actor)
@@ -118,26 +147,57 @@ impl<'de> Deserialize<'de> for WeaponSelection {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AbilityAim {
-    ActorTarget { target: ActorId },
-    ContactTarget { target: ActorId },
-    SelfStep { direction: StepDirection },
-    DirectionalRay { direction: StepDirection },
+    ActorTarget {
+        target: ActorId,
+    },
+    ContactTarget {
+        target: ActorId,
+    },
+    SelfStep {
+        direction: StepDirection,
+    },
+    DirectionalRay {
+        direction: StepDirection,
+    },
+    DirectionalProjectile {
+        direction: StepDirection,
+        delivery: ProjectileDeliverySelection,
+    },
 }
 impl<'de> Deserialize<'de> for AbilityAim {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
-            ActorTarget { target: ActorId },
-            ContactTarget { target: ActorId },
-            SelfStep { direction: StepDirection },
-            DirectionalRay { direction: StepDirection },
+            ActorTarget {
+                target: ActorId,
+            },
+            ContactTarget {
+                target: ActorId,
+            },
+            SelfStep {
+                direction: StepDirection,
+            },
+            DirectionalRay {
+                direction: StepDirection,
+            },
+            DirectionalProjectile {
+                direction: StepDirection,
+                delivery: ProjectileDeliverySelection,
+            },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::ActorTarget { target } => Self::ActorTarget { target },
             Fields::ContactTarget { target } => Self::ContactTarget { target },
             Fields::SelfStep { direction } => Self::SelfStep { direction },
             Fields::DirectionalRay { direction } => Self::DirectionalRay { direction },
+            Fields::DirectionalProjectile {
+                direction,
+                delivery,
+            } => Self::DirectionalProjectile {
+                direction,
+                delivery,
+            },
         })
     }
 }
@@ -145,7 +205,9 @@ impl AbilityAim {
     pub fn target(self, actor: ActorId) -> ActorId {
         match self {
             Self::ActorTarget { target } | Self::ContactTarget { target } => target,
-            Self::SelfStep { .. } | Self::DirectionalRay { .. } => actor,
+            Self::SelfStep { .. }
+            | Self::DirectionalRay { .. }
+            | Self::DirectionalProjectile { .. } => actor,
         }
     }
     pub fn reference(self) -> crate::perception::ActorReferenceKind {
@@ -159,14 +221,16 @@ impl AbilityAim {
             Self::ActorTarget { .. } | Self::ContactTarget { .. } => InvocationKind::ActorTarget,
             Self::SelfStep { .. } => InvocationKind::SelfStep,
             Self::DirectionalRay { .. } => InvocationKind::DirectionalRay,
+            Self::DirectionalProjectile { .. } => InvocationKind::DirectionalProjectile,
         }
     }
     pub fn step(self) -> Option<StepDirection> {
         match self {
             Self::SelfStep { direction } => Some(direction),
-            Self::ActorTarget { .. } | Self::ContactTarget { .. } | Self::DirectionalRay { .. } => {
-                None
-            }
+            Self::ActorTarget { .. }
+            | Self::ContactTarget { .. }
+            | Self::DirectionalRay { .. }
+            | Self::DirectionalProjectile { .. } => None,
         }
     }
 }
@@ -265,6 +329,12 @@ impl super::PlannedEffect {
 impl crate::rules::AbilityDef {
     pub(crate) fn spatial_shape_valid(&self) -> bool {
         use crate::rules::{Effect, Reach, StrikeSource};
+        if self.invocation == InvocationKind::DirectionalProjectile
+            || matches!(self.reach, Reach::Projectile)
+            || matches!(self.strikes, StrikeSource::Projectile { .. })
+        {
+            return super::projectile::definition_shape_valid(self);
+        }
         if let StrikeSource::NaturalMelee { additional_riders } = &self.strikes {
             return self.invocation == InvocationKind::ActorTarget
                 && matches!(self.reach, Reach::Melee)
@@ -391,6 +461,24 @@ mod tests {
                 serde_json::from_str::<AbilityInvocation>(&invocation).is_err(),
                 "{invocation}"
             );
+        }
+    }
+    #[test]
+    fn directional_projectile_request_round_trips_exact_delivery_operands() {
+        for delivery in [
+            serde_json::json!({"kind": "throw", "source": {"kind": "equipped", "item": 1, "socket": 0}}),
+            serde_json::json!({"kind": "throw", "source": {"kind": "carried", "item": 2, "socket": 1}}),
+            serde_json::json!({"kind": "launch", "launcher": {"item": 3, "socket": 2}, "ammunition": 4}),
+        ] {
+            let encoded = serde_json::json!({
+                "aim": {"kind": "directional_projectile", "direction": "north", "delivery": delivery},
+                "weapon": {"kind": "default"}
+            });
+            let decoded: AbilityInvocation = serde_json::from_value(encoded.clone())
+                .expect("a complete exact projectile selection must be accepted");
+            assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+            assert_eq!(decoded.target(crate::ActorId(7)), crate::ActorId(7));
+            assert_eq!(decoded.step(), None);
         }
     }
 }

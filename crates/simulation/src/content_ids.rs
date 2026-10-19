@@ -21,7 +21,6 @@ macro_rules! ids {
                 Ok(Self(Arc::from(value)))
             }
             pub fn as_str(&self) -> &str { &self.0 }
-            pub(crate) fn intern(&mut self, pool: &mut Interner) { self.0 = pool.intern(&self.0); }
         }
         impl<'de> Deserialize<'de> for $name {
             fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -34,7 +33,20 @@ macro_rules! ids {
         }
     )+};
 }
-ids!(
+// Capability identities can use the same validated representation without
+// claiming an interning owner. Existing catalog identities retain interning.
+macro_rules! interned_ids {
+    ($($name:ident),+ $(,)?) => {
+        ids!($($name),+);
+        $(impl $name {
+            pub(crate) fn intern(&mut self, pool: &mut Interner) {
+                self.0 = pool.intern(&self.0);
+            }
+        })+
+    };
+}
+ids!(LauncherFamilyId);
+interned_ids!(
     RulesetId,
     AbilityId,
     AbilityTagId,

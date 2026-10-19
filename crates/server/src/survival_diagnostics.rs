@@ -30,7 +30,7 @@ impl Engine {
         let Some(log) = &self.survival_log else {
             return;
         };
-        record["survival_version"] = 1.into();
+        record["survival_version"] = 2.into();
         record["segment"] = log.segment.clone().into();
         record["lineage"] = self.archive.branch.0.clone().into();
         record["branch"] = self.current_branch.0.clone().into();

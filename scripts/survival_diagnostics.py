@@ -12,7 +12,8 @@ from pathlib import Path
 SCALARS = ("active_ticks", "periodic_health", "nutrition_spent", "nutrition_time_demand",
            "nutrition_regeneration_demand", "nutrition_clipped", "direct_health",
            "nourishment_gain", "nourishment_debt_cleared", "nourishment_offered",
-           "nourishment_wasted", "items_consumed", "food_consumed")
+           "nourishment_wasted", "items_consumed", "food_consumed",
+           "projectile_numeric_budget_refusals")
 POOLS = ("periodic_resources", "paid_start", "paid_resolution", "holds_acquired",
          "holds_released", "direct_resources")
 RESOURCES = ("stamina", "focus", "mana")
@@ -158,7 +159,7 @@ def validate_records(rows, *, expected_final_anchor=None):
         event = row.get("event")
         _require(isinstance(event, str) and event in EVENT_KEYS, "unknown survival event")
         _shape(row, (*COMMON_KEYS, *EVENT_KEYS[event]), "invalid survival diagnostic record shape")
-        _require(_counter(row["survival_version"]) == 1, "unsupported survival diagnostic record")
+        _require(_counter(row["survival_version"]) == 2, "unsupported survival diagnostic record")
         _require(_counter(row["diagnostic_dropped"]) == 0, "survival diagnostic records were lost")
         _require(row["diagnostic_incomplete"] is False, "survival diagnostic counters are incomplete")
         _identity(row["segment"])
@@ -216,7 +217,7 @@ def validate_records(rows, *, expected_final_anchor=None):
     _require(segment is not None and closed, "missing final durable survival barrier")
     if expected_final_anchor is not None:
         _require(live == expected_final_anchor, "final survival barrier differs from expected durable anchor")
-    return {"survival_version": 1, **live, "segments": len(seen_segments),
+    return {"survival_version": 2, **live, "segments": len(seen_segments),
             "commits": commits, "actors": actors}
 
 

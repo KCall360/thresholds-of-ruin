@@ -162,7 +162,10 @@ fn independent_fixed_grant_survives_bonus_dormancy_and_attribute_damage_is_exclu
         .unwrap();
     build.select_intellect_expertise(2, id("knife")).unwrap();
     build
-        .select_talent(crate::HdIndex(0), TalentId::new("fixture_knife_training").unwrap())
+        .select_talent(
+            crate::HdIndex(0),
+            TalentId::new("fixture_knife_training").unwrap(),
+        )
         .unwrap();
     build.remove_latest().unwrap();
     let derived = build.derive().unwrap();

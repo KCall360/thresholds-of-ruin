@@ -24,6 +24,7 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
             equipped_slot: None,
             known_cursed: None,
             known_protected: None,
+            known_projectile_bonus: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -68,6 +69,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 equipped_slot: Some(0),
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -81,6 +83,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -347,6 +350,7 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
             equipped_slot: None,
             known_cursed: None,
             known_protected: None,
+            known_projectile_bonus: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -434,6 +438,7 @@ fn magic_state() -> StateView {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -447,6 +452,7 @@ fn magic_state() -> StateView {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -601,4 +607,49 @@ fn intellect_expertise_commands_use_distinct_ordinary_entitlements() {
         ))
     );
     assert!(parse("advancement intellect-expertise 0 spear", &state()).is_err());
+}
+
+#[test]
+fn projectile_commands_open_source_picker_without_actor_ray_or_step_fallback() {
+    let mut state = StateView {
+        wizard_game: false,
+        revision: 0,
+        observation: tor_client_common::test_support::observation(),
+    };
+    let mut ability = tor_client_common::test_support::ability("fixture_projectile");
+    ability.name = "Fixture Projectile".into();
+    ability.target_kind = AbilityTargetKind::DirectionalProjectile;
+    ability.reach = AbilityReach::Projectile;
+    ability.weapon_selection = false;
+    state
+        .observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities = vec![ability];
+    let before = state.clone();
+    assert_eq!(
+        parse("fixture projectile", &state).unwrap(),
+        Input::Projectile("fixture_projectile".into())
+    );
+    let tokens = tor_client_text::parser::tokenize("fixture projectile");
+    assert!(
+        matches!(tor_client_text::parser::match_disclosed_sentence(&tokens, "fixture projectile", &state.observation).unwrap(), tor_client_text::parser::grammar::ParsedCommand::Projectile { id } if id == "fixture_projectile")
+    );
+    for line in [
+        "fixture projectile north",
+        "fixture projectile me",
+        "fixture projectile with weapon",
+    ] {
+        assert!(parse(line, &state).unwrap_err().contains("choose a source"));
+        let tokens = tor_client_text::parser::tokenize(line);
+        assert!(
+            matches!(tor_client_text::parser::match_disclosed_sentence(&tokens, line, &state.observation).unwrap(),
+            tor_client_text::parser::grammar::ParsedCommand::Refused(reason) if reason.contains("choose a source"))
+        );
+    }
+    assert_eq!(state, before);
 }

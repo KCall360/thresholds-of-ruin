@@ -22,6 +22,12 @@ pub enum Event {
     History(HistoryPage),
     CreatureInspection(Box<CreatureInspectionView>),
     CreatureCatalog(Box<CreatureCatalogPage>),
+    ProjectileChoicesSent(String),
+    ProjectileChoices {
+        context: ReplyContext,
+        request_id: String,
+        page: Box<ProjectileChoicePage>,
+    },
     WeaponPreviewSent(String),
     AbilityWeaponPreview {
         context: ReplyContext,
@@ -246,6 +252,13 @@ async fn transact(
             ..
         }
     );
+    let projectile_choices = matches!(
+        &request,
+        Request::Command {
+            command: tor_protocol::Command::ProjectileChoices { .. },
+            ..
+        }
+    );
     let weapon_preview = matches!(
         &request,
         Request::Command {
@@ -254,6 +267,9 @@ async fn transact(
         }
     );
     let id = connection.request(request).await?;
+    if projectile_choices {
+        publish(tx, Event::ProjectileChoicesSent(id.clone()))?;
+    }
     if weapon_preview {
         publish(tx, Event::WeaponPreviewSent(id.clone()))?;
     }
@@ -263,7 +279,7 @@ async fn transact(
     if strike_query {
         publish(tx, Event::StrikeQuerySent(id.clone()))?;
     }
-    let mut refresh_preview = weapon_preview;
+    let mut refresh_preview = weapon_preview || projectile_choices;
     let mut pending = tor_client_common::PendingRequest::new(id);
     timeout(Duration::from_secs(10), async {
         loop {
@@ -295,6 +311,18 @@ async fn transact(
 
 fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> {
     match message {
+        ServerMessage::ProjectileChoices {
+            context,
+            request_id,
+            page,
+        } => publish(
+            tx,
+            Event::ProjectileChoices {
+                context,
+                request_id,
+                page,
+            },
+        ),
         ServerMessage::AbilityWeaponPreview {
             context,
             request_id,

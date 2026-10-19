@@ -93,7 +93,7 @@ class NutritionProcesses(ProcessTestCase):
     def assert_no_meal_operand(self, value):
         if isinstance(value, dict):
             if "edible" in value:
-                self.assertEqual(set(value), {"item", "slot", "equipped_slot", "known_equipment", "known_cursed", "known_protected",
+                self.assertEqual(set(value), {"item", "slot", "equipped_slot", "known_equipment", "known_projectile_bonus", "known_cursed", "known_protected",
                                              "drinkable", "edible", "readable", "zappable", "charges"})
                 self.assertFalse(value["readable"])
                 self.assertFalse(value["zappable"])
@@ -247,7 +247,7 @@ class NutritionProcesses(ProcessTestCase):
         for frame in (initial, observed, watched):
             entry = next(row for row in observation(frame)["interactions"]["inventory"] if row["item"] == meal["id"])
             self.assertTrue(entry["edible"])
-            self.assertEqual(set(entry), {"item", "slot", "equipped_slot", "known_equipment", "known_cursed", "known_protected",
+            self.assertEqual(set(entry), {"item", "slot", "equipped_slot", "known_equipment", "known_projectile_bonus", "known_cursed", "known_protected",
                                           "drinkable", "edible", "readable", "zappable", "charges"})
             self.assertFalse(entry["readable"])
             self.assertFalse(entry["zappable"])

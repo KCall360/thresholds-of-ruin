@@ -280,6 +280,7 @@ impl Engine {
         match command {
             DecodedCommand::Backend(command) => Ok(command),
             DecodedCommand::AbilityWeaponPreview { .. }
+            | DecodedCommand::ProjectileChoices { .. }
             | DecodedCommand::Advancement { .. }
             | DecodedCommand::CreatureCatalog { .. }
             | DecodedCommand::CreatureInspection { .. }

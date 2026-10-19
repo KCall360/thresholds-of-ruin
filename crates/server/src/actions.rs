@@ -141,15 +141,47 @@ pub struct AbilityInvocation {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AbilityAim {
-    ActorTarget { target: tor_simulation::ActorId },
-    ContactTarget { target: tor_simulation::ActorId },
-    SelfStep { direction: Direction },
-    DirectionalRay { direction: Direction },
+    ActorTarget {
+        target: tor_simulation::ActorId,
+    },
+    ContactTarget {
+        target: tor_simulation::ActorId,
+    },
+    SelfStep {
+        direction: Direction,
+    },
+    DirectionalRay {
+        direction: Direction,
+    },
+    DirectionalProjectile {
+        direction: Direction,
+        delivery: ProjectileDeliverySelection,
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WeaponSelection {
     Default,
     Equipped { item: u64, socket: u16 },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EquippedProjectileWeapon {
+    pub item: u64,
+    pub socket: u16,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThrownSourceSelection {
+    Equipped { item: u64, socket: u16 },
+    Carried { item: u64, socket: u16 },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectileDeliverySelection {
+    Throw {
+        source: ThrownSourceSelection,
+    },
+    Launch {
+        launcher: EquippedProjectileWeapon,
+        ammunition: u64,
+    },
 }
 impl AbilityInvocation {
     pub fn actor_target(target: tor_simulation::ActorId) -> Self {
@@ -167,6 +199,18 @@ impl AbilityInvocation {
     pub fn self_step(direction: Direction) -> Self {
         Self {
             aim: AbilityAim::SelfStep { direction },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub fn directional_projectile(
+        direction: Direction,
+        delivery: ProjectileDeliverySelection,
+    ) -> Self {
+        Self {
+            aim: AbilityAim::DirectionalProjectile {
+                direction,
+                delivery,
+            },
             weapon: WeaponSelection::Default,
         }
     }
@@ -231,6 +275,9 @@ mod tests {
                 unreachable!()
             };
             match aim {
+                AbilityAim::DirectionalProjectile { .. } => {
+                    unreachable!("this fixture uses independent equipped-weapon aims")
+                }
                 AbilityAim::ActorTarget { target } => assert_eq!(
                     invocation.aim,
                     wire::AbilityAim::ActorTarget {

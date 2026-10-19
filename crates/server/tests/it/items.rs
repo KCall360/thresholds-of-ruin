@@ -165,6 +165,297 @@ fn quantities_disclosure_restart_and_rewind_use_ordinary_packages() {
     }
 }
 
+fn projectile_stack_package(root: &Path) -> Scenario {
+    std::fs::create_dir_all(root.join("regions")).unwrap();
+    std::fs::copy(
+        support::package("items").join("rules.toml"),
+        root.join("rules.toml"),
+    )
+    .unwrap();
+    std::fs::write(root.join("scenario.toml"), r#"
+format = 24
+id = "projectile-stack-identity"
+version = "1.0"
+ruleset = "rules.toml"
+default_character = 1
+characters = [{ id = 1, anchor = "1/start" }]
+
+[archetypes.arrow]
+class = "weapon"
+name = "fixture arrow"
+stackable = true
+projectile = { family = "fixture_bow", recovery = "consumed_on_hit", damage = { components = [{ category = "keen", amount = { type = "fixed", value = 2 } }], primary = { category = "keen" } } }
+"#).unwrap();
+    std::fs::write(
+        root.join("regions/1.toml"),
+        r#"
+id = 1
+name = "Ammunition stacks"
+size = [3, 3, 2]
+chamber = true
+anchors = { start = [1, 1, 0] }
+items = [
+    { id = 10, at = [1, 1, 0], archetype = "arrow", quantity = 3 },
+    { id = 11, at = [1, 1, 0], archetype = "arrow", quantity = 2 }
+]
+"#,
+    )
+    .unwrap();
+    scenario_package::validate(root).unwrap();
+    scenario_package::load(root, 42, None, false).unwrap()
+}
+
+#[test]
+fn projectile_take_drop_merges_publish_fresh_disclosed_identity_and_survive_retry_reopen() {
+    use tor_protocol::{Action as WireAction, Event, HistoryContent};
+    let actor = ActorId(1);
+    for checkpoint_interval in [1, 4096] {
+        for taking in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let source = directory.path().join("source");
+            let scenario = projectile_stack_package(&source);
+            let database = directory.path().join("projectiles.db");
+            let policy = SavePolicy {
+                checkpoint_interval,
+                ..Default::default()
+            };
+            let mut engine = Engine::open_with_policy(&database, scenario, policy.clone()).unwrap();
+            let initial = engine.state(actor).unwrap();
+            assert_eq!(initial.observation.ground_items.len(), 2);
+            let ground = initial
+                .observation
+                .ground_items
+                .iter()
+                .find(|row| row.item.quantity == 3)
+                .unwrap()
+                .item
+                .id;
+            let carried = initial
+                .observation
+                .ground_items
+                .iter()
+                .find(|row| row.item.quantity == 2)
+                .unwrap()
+                .item
+                .id;
+            support::act_disclosed(
+                &mut engine,
+                actor,
+                WireAction::Take {
+                    item: carried,
+                    quantity: None,
+                },
+            )
+            .unwrap();
+            let setup = engine.state(actor).unwrap();
+            assert_eq!(setup.observation.inventory.len(), 1);
+            assert_eq!(
+                (
+                    setup.observation.inventory[0].id,
+                    setup.observation.inventory[0].quantity
+                ),
+                (carried, 2)
+            );
+            let (old_source, old_destination, merged_total, remainder) = if taking {
+                (ground, carried, 3, 2)
+            } else {
+                (carried, ground, 4, 1)
+            };
+            let action = if taking {
+                WireAction::Take {
+                    item: old_source,
+                    quantity: Some(1),
+                }
+            } else {
+                WireAction::Drop {
+                    item: old_source,
+                    quantity: Some(1),
+                }
+            };
+            // Keep the exact decoded action and request identity for retry checks.
+            let command = Command::Act {
+                expected_revision: engine.revision(actor).unwrap(),
+                action: engine.decode_action(actor, &action).unwrap(),
+            };
+            let branch = engine.branch().clone();
+            let committed = engine
+                .command(
+                    "player",
+                    "test",
+                    actor,
+                    "merge-ammunition",
+                    &branch,
+                    command.clone(),
+                )
+                .unwrap();
+            assert!(!committed.duplicate);
+            let expected = engine.state(actor).unwrap();
+            let history = engine.history(actor, "player", None, 50).unwrap();
+            let entry = history
+                .entries
+                .iter()
+                .find(|entry| entry.id == committed.entry.id)
+                .unwrap();
+            let HistoryContent::Action {
+                action: disclosed_action,
+                event,
+            } = &entry.content
+            else {
+                panic!("ordinary disclosed action history")
+            };
+            assert_eq!(disclosed_action, &action);
+            let (source_item, result, transferred) = match event.as_ref() {
+                Event::Taken {
+                    item,
+                    result,
+                    quantity,
+                } if taking => (*item, *result, *quantity),
+                Event::Dropped {
+                    item,
+                    result,
+                    quantity,
+                } if !taking => (*item, *result, *quantity),
+                other => panic!("expected the matching transfer event, got {other:?}"),
+            };
+            assert_eq!(source_item, old_source);
+            assert_eq!(
+                transferred, 1,
+                "event quantity is the transferred amount, not the merged total"
+            );
+            assert_ne!(
+                result, old_source,
+                "ammunition merge allocates a fresh result"
+            );
+            assert_ne!(
+                result, old_destination,
+                "ammunition merge cannot reuse destination identity"
+            );
+            let all_items: Vec<_> = expected
+                .observation
+                .inventory
+                .iter()
+                .chain(
+                    expected
+                        .observation
+                        .ground_items
+                        .iter()
+                        .map(|row| &row.item),
+                )
+                .collect();
+            assert!(
+                !all_items.iter().any(|item| item.id == old_destination),
+                "the old destination disappears from both disclosed locations"
+            );
+            assert_eq!(
+                all_items
+                    .iter()
+                    .find(|item| item.id == old_source)
+                    .unwrap()
+                    .quantity,
+                remainder
+            );
+            assert_eq!(
+                all_items
+                    .iter()
+                    .find(|item| item.id == result)
+                    .unwrap()
+                    .quantity,
+                merged_total
+            );
+            assert_eq!(all_items.iter().map(|item| item.quantity).sum::<u64>(), 5);
+            if taking {
+                assert_eq!(expected.observation.inventory.len(), 1);
+                assert_eq!(expected.observation.inventory[0].id, result);
+            } else {
+                assert_eq!(expected.observation.ground_items.len(), 1);
+                assert_eq!(expected.observation.ground_items[0].item.id, result);
+            }
+            let stale = if taking {
+                WireAction::Drop {
+                    item: old_destination,
+                    quantity: Some(1),
+                }
+            } else {
+                WireAction::Take {
+                    item: old_destination,
+                    quantity: Some(1),
+                }
+            };
+            assert_eq!(
+                support::act_disclosed(&mut engine, actor, stale.clone())
+                    .unwrap_err()
+                    .code,
+                tor_protocol::ErrorCode::InvalidAction
+            );
+            assert_eq!(
+                engine.state(actor).unwrap(),
+                expected,
+                "stale destination cannot retarget or advance state"
+            );
+            assert_eq!(engine.history(actor, "player", None, 50).unwrap(), history);
+            let duplicate = engine
+                .command(
+                    "player",
+                    "another-client",
+                    actor,
+                    "merge-ammunition",
+                    &branch,
+                    command.clone(),
+                )
+                .unwrap();
+            assert!(duplicate.duplicate);
+            assert_eq!(duplicate.entry, committed.entry);
+            assert_eq!(engine.state(actor).unwrap(), expected);
+            assert_eq!(engine.history(actor, "player", None, 50).unwrap(), history);
+            engine.flush().unwrap();
+            drop(engine);
+            // The authored source is unavailable; the saved closure supplies ProjectileSpec.
+            std::fs::remove_dir_all(&source).unwrap();
+            let mut reopened =
+                Engine::open_with_policy(&database, Scenario::two_room(999), policy).unwrap();
+            if checkpoint_interval == 4096 {
+                assert!(
+                    reopened.recovery_profile().records_replayed > 0,
+                    "fresh result must survive actual journal replay"
+                );
+            }
+            assert_eq!(reopened.state(actor).unwrap(), expected);
+            assert_eq!(
+                reopened.history(actor, "player", None, 50).unwrap(),
+                history
+            );
+            let duplicate = reopened
+                .command(
+                    "player",
+                    "reopened",
+                    actor,
+                    "merge-ammunition",
+                    &branch,
+                    command,
+                )
+                .unwrap();
+            assert!(duplicate.duplicate);
+            assert_eq!(duplicate.entry, committed.entry);
+            assert_eq!(
+                reopened.state(actor).unwrap(),
+                expected,
+                "retry preserves the exact fresh result"
+            );
+            assert_eq!(
+                support::act_disclosed(&mut reopened, actor, stale)
+                    .unwrap_err()
+                    .code,
+                tor_protocol::ErrorCode::InvalidAction
+            );
+            assert_eq!(reopened.state(actor).unwrap(), expected);
+            assert_eq!(
+                reopened.history(actor, "player", None, 50).unwrap(),
+                history
+            );
+        }
+    }
+}
+
 #[test]
 fn package_validation_rejects_bad_counts_properties_and_objective_stacks() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");

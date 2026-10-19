@@ -56,6 +56,26 @@ pub struct SelectedAttack {
     pub check_bonus: i64,
 }
 
+impl SelectedAttack {
+    pub(crate) fn refresh_operands(
+        &mut self,
+        binding: crate::attributes::ManaBinding,
+        attributes: Attributes,
+        skills: SkillRanks,
+    ) {
+        self.attribute = self.attack.skill().attribute(binding);
+        self.attribute_value = attributes.get(self.attribute);
+        self.rank = skills.get(self.attack.skill());
+        self.check_bonus = crate::attributes::SkillCheck {
+            skill: self.attack.skill(),
+            binding,
+            modifier: self.attack.bonus(),
+            threshold: 0,
+        }
+        .bonus(attributes, skills);
+    }
+}
+
 /// One equipped weapon's compiled actor operands. Opponent-dependent filters
 /// remain part of invocation capture, never this sheet.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -358,6 +378,56 @@ impl DerivedCreature {
                 },
             ],
         )
+    }
+    /// A targetless physical release combines its frozen outgoing rows with
+    /// this live recipient in the same fold used by ordinary attack capture.
+    pub(crate) fn projectile_edges(
+        &self,
+        captured: &super::CapturedAttackEdges,
+        rules: &Ruleset,
+        context: CheckContext<'_>,
+        policy: crate::rules::OutgoingEdgePolicy,
+        selected: &[crate::conditions::TokenReservation],
+    ) -> Result<(i64, i64), BuildError> {
+        let sources = captured.sources();
+        let check = fold_edges(
+            rules,
+            EdgeUse::Check,
+            [
+                EdgeContext {
+                    sources: &sources,
+                    role: Some(context.roller_role),
+                    opponent: context.opponent,
+                    ability: context.ability,
+                    incoming: None,
+                    tokens: Some((context.roller, selected)),
+                    policy,
+                },
+                EdgeContext {
+                    sources: &self.sources,
+                    role: None,
+                    opponent: context.roller,
+                    ability: None,
+                    incoming: Some(context.defense),
+                    tokens: Some((context.opponent, selected)),
+                    policy: crate::rules::OutgoingEdgePolicy::Ordinary,
+                },
+            ],
+        )?;
+        let effect = fold_edges(
+            rules,
+            EdgeUse::Shared,
+            [EdgeContext {
+                sources: &sources,
+                role: None,
+                opponent: context.opponent,
+                ability: None,
+                incoming: None,
+                tokens: None,
+                policy,
+            }],
+        )?;
+        Ok((check, effect))
     }
     /// The separately frozen shared budget keeps its magnitude for effects.
     /// Per-check talent and family caps do not limit an authored damage budget.
@@ -1815,7 +1885,8 @@ fn fold(
                     )
                     .map_err(interaction_error)?;
             }
-            crate::rules::StrikeSource::SelectedMelee => {}
+            crate::rules::StrikeSource::SelectedMelee
+            | crate::rules::StrikeSource::Projectile { .. } => {}
         }
         let reach = match definition.reach {
             crate::rules::Reach::MutualSight { range } => {
@@ -1966,15 +2037,7 @@ fn fold_attribute_dependents(
                 .map(|weapon| &mut weapon.attack),
         )
     {
-        selected.attribute_value = derived.attributes.get(selected.attribute);
-        selected.rank = derived.skills.get(selected.attack.skill());
-        selected.check_bonus = crate::attributes::SkillCheck {
-            skill: selected.attack.skill(),
-            binding: derived.binding,
-            modifier: selected.attack.bonus(),
-            threshold: 0,
-        }
-        .bonus(derived.attributes, derived.skills);
+        selected.refresh_operands(derived.binding, derived.attributes, derived.skills);
     }
     Ok(())
 }

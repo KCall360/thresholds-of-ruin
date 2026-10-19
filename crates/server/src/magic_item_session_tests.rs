@@ -511,6 +511,109 @@ fn equipment_scenario() -> crate::Scenario {
 }
 
 #[test]
+fn equipment_only_action_broadcast_redacts_spectator_wire_and_retained_state() {
+    let mut wire = Wire::new(Engine::memory(equipment_scenario()).unwrap());
+    let initial = wire.snapshot(OWNER);
+    let worn = initial
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory
+        .iter()
+        .find(|row| row.equipped_slot == Some(1))
+        .unwrap()
+        .item;
+    let mut spectator = wire
+        .service
+        .connect(
+            &Account {
+                user: "equipment-observer".into(),
+                token: "fixture".into(),
+                role: AccessRole::Spectator,
+                actors: BTreeSet::from([OWNER]),
+            },
+            "encoded-equipment-observer".into(),
+        )
+        .unwrap();
+    spectator.messages.try_recv_frame().unwrap();
+    wire.service.handle(
+        spectator.id,
+        "attach".into(),
+        Request::Attach { actor: OWNER },
+    );
+    let attached = decode_response(&spectator.messages.try_recv_frame().unwrap().text).unwrap();
+    let ServerMessage::Snapshot { snapshot, .. } = attached else {
+        panic!("snapshot expected")
+    };
+    let mut received = snapshot.state.as_ref().clone();
+    while spectator.messages.try_recv_frame().is_ok() {}
+
+    wire.act("learn-cursed-removal", Action::Unequip { item: worn });
+    let owner = wire.service.engine.state(OWNER).unwrap();
+    let owner_items = owner.observation.interactions.as_ref().unwrap();
+    assert!(owner_items.identification.is_none());
+    assert!(owner_items
+        .inventory
+        .iter()
+        .all(|row| row.charges.is_none()));
+    assert_eq!(
+        owner_items
+            .inventory
+            .iter()
+            .find(|row| row.item == worn)
+            .unwrap()
+            .known_cursed,
+        Some(true)
+    );
+    assert!(owner_items.curse_blocked.contains(&worn));
+    let mut expected = owner.clone();
+    restrict_item_disclosure(&mut expected, AccessRole::Spectator);
+    let mut observations = 0;
+    while let Ok(frame) = spectator.messages.try_recv_frame() {
+        if let ServerMessage::Update { update } = decode_response(&frame.text).unwrap() {
+            match update.body {
+                UpdateBody::Observation { state, .. } => received = state.as_ref().clone(),
+                UpdateBody::ObservationDelta { state, .. } => {
+                    received = state.apply(&received).unwrap()
+                }
+                _ => continue,
+            }
+            observations += 1;
+            let items = received.observation.interactions.as_ref().unwrap();
+            assert!(
+                items.curse_blocked.is_empty(),
+                "curse block leaked on the action wire"
+            );
+            assert!(
+                items
+                    .inventory
+                    .iter()
+                    .all(|row| row.known_equipment.is_none()
+                        && row.known_cursed.is_none()
+                        && row.known_protected.is_none()),
+                "private equipment facts leaked on the action wire"
+            );
+        }
+    }
+    assert!(
+        observations > 0,
+        "the action must actually publish an observation"
+    );
+    assert_eq!(received, expected);
+    assert_eq!(
+        wire.service.clients[&spectator.id]
+            .last_observation
+            .as_ref()
+            .unwrap()
+            .state
+            .as_ref(),
+        &expected
+    );
+}
+
+#[test]
 fn encoded_equipment_curse_identify_enchant_retry_and_reopen_preserve_exact_facts() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("equipment.db");

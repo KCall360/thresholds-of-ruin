@@ -197,6 +197,97 @@ pub async fn preview_weapon(
     Ok(result)
 }
 
+/// Obtain one bounded source/ammunition page without retrying or sending gameplay.
+pub async fn projectile_choices(
+    link: &mut impl Link,
+    chronicler: &mut Chronicler,
+    record: &mut Record,
+    menu: &mut tor_client_common::projectiles::ProjectileMenu,
+) -> Result<bool, Error> {
+    let request = link.client().command_request(menu.command()?);
+    if !link.role().permits(&request) {
+        record.say("Spectator access is read-only.");
+        return Ok(false);
+    }
+    let id = link.send(request).await?;
+    menu.bind_request(&id)?;
+    let deadline = tokio::time::Instant::now() + ANSWER;
+    let mut reader = Reader {
+        chronicler,
+        beats: Vec::new(),
+        pages: Vec::new(),
+        resynced: false,
+        waiting: None,
+    };
+    let result = loop {
+        if tokio::time::Instant::now() >= deadline {
+            record.say("Projectile choices timed out. Choose again; no action was sent.");
+            break false;
+        }
+        let before = link.client().state().clone();
+        let Some(message) = link
+            .next(deadline.saturating_duration_since(tokio::time::Instant::now()))
+            .await?
+        else {
+            record.say("Projectile choices timed out. Choose again; no action was sent.");
+            break false;
+        };
+        reader.record(&before, link, &message);
+        if !link.is_synchronized() || !menu.current(link.client()) {
+            record.say(
+                "Things changed while choosing a projectile. Choose again; no action was sent.",
+            );
+            break false;
+        }
+        match message {
+            ServerMessage::ProjectileChoices {
+                context,
+                request_id,
+                page: value,
+            } if request_id == id => {
+                match menu.accept(link.client(), &context, &request_id, &value) {
+                    Ok(()) => {
+                        record.say(crate::projectiles::lines(menu).join("\n"));
+                        break true;
+                    }
+                    Err(reason) => {
+                        record.say(reason);
+                        break false;
+                    }
+                }
+            }
+            ServerMessage::Error {
+                request_id: Some(request_id),
+                message,
+                code,
+                ..
+            } if request_id == id => {
+                record.say(crate::safe(&message));
+                if matches!(
+                    code,
+                    ErrorCode::StaleRevision | ErrorCode::StaleContext | ErrorCode::WrongBranch
+                ) {
+                    settle(link, &mut reader, Request::Snapshot, Until::Answered).await?;
+                    record.say("Observation refreshed. Choose the exact action again.");
+                }
+                break false;
+            }
+            _ => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            record.say("Projectile choices timed out. Choose again; no action was sent.");
+            break false;
+        }
+    };
+    if !reader.beats.is_empty() {
+        record.entries.push(Entry::Beats(reader.beats));
+    }
+    if !reader.pages.is_empty() {
+        record.say(reader.pages.join("\n"));
+    }
+    Ok(result)
+}
+
 /// What a request waits for before it counts as finished.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Until {
@@ -677,6 +768,14 @@ fn object(goal: &Goal, scene: &Scene) -> String {
                 }
                 | tor_protocol::AbilityInvocation {
                     aim: tor_protocol::AbilityAim::DirectionalRay { direction },
+                    ..
+                },
+            ..
+        } => Some(direction_name(*direction).to_owned()),
+        Goal::UseAbility {
+            invocation:
+                tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::DirectionalProjectile { direction, .. },
                     ..
                 },
             ..

@@ -65,6 +65,39 @@ fn open(app: &mut App) {
     assert!(app.supply_selection.is_some());
 }
 #[test]
+fn supply_purposes_keep_ability_details_out_of_the_inline_footprint() {
+    // Keep the invocation inline, with only a pointer and tag for ability details;
+    // a pending respec should not reserve the full ability payload too.
+    let limit = std::mem::size_of::<AbilityInvocation>() + 2 * std::mem::size_of::<usize>();
+    assert!(
+        std::mem::size_of::<tor_client_ascii::SupplyPurpose>() <= limit,
+        "supply purpose exceeds its {limit}-byte inline budget: {}",
+        std::mem::size_of::<tor_client_ascii::SupplyPurpose>()
+    );
+}
+
+#[test]
+fn supply_purposes_preserve_the_diagnostic_json_shape() {
+    let mut app = app();
+    let view = &app.state.as_ref().unwrap().state().observation;
+    let expected = serde_json::json!({
+        "Ability": {
+            "ability": view.combat.as_ref().unwrap().own_stats.as_ref().unwrap().abilities[0],
+            "invocation": AbilityInvocation::actor_target(view.self_target),
+        }
+    });
+    open(&mut app);
+    assert_eq!(
+        serde_json::to_value(&app.supply_selection.as_ref().unwrap().purpose).unwrap(),
+        expected
+    );
+    assert_eq!(
+        serde_json::to_value(tor_client_ascii::SupplyPurpose::Respec).unwrap(),
+        serde_json::json!("Respec")
+    );
+}
+
+#[test]
 fn phase5_supply_menu_defaults_to_carried_and_never_pays_locally() {
     let mut app = app();
     let before = app.state.as_ref().unwrap().snapshot();
@@ -230,6 +263,7 @@ fn with_weapons(mut app: App, permitted: bool) -> App {
             equipped_slot: Some(socket),
             known_cursed: None,
             known_protected: None,
+            known_projectile_bonus: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -527,6 +561,327 @@ fn selected_preview_cancellation_mismatch_and_staleness_never_commit() {
                 }
                 app.set_state(ClientState::from_snapshot(snapshot).unwrap());
             }
+            assert!(app.weapon_confirmation.is_none());
+            assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+        }
+    }
+}
+
+#[test]
+fn projectile_menu_queries_without_bogus_target_or_direction_selection() {
+    let mut app = app();
+    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
+    let ability = &mut view
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities[0];
+    ability.target_kind = AbilityTargetKind::DirectionalProjectile;
+    ability.reach = AbilityReach::Projectile;
+    ability.weapon_selection = false;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    app.messages.skip();
+    let before = app.state.as_ref().unwrap().snapshot();
+    assert_eq!(
+        app.input(Input::Key {
+            key: Key::Abilities
+        }),
+        Effect::None
+    );
+    assert!(matches!(
+        super::request(app.input(Input::Key { key: Key::Enter })),
+        Some(Request::Command {
+            command: Command::ProjectileChoices {
+                query: ProjectileChoiceQuery {
+                    phase: ProjectileChoicePhase::Sources {},
+                    offset: 0,
+                    ..
+                },
+                ..
+            },
+            ..
+        })
+    ));
+    assert!(app.projectile_selection.is_some());
+    assert!(app.attack_targets.is_empty());
+    assert!(app.selected_ability.is_none());
+    assert!(app.supply_selection.is_none());
+    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+}
+
+fn projectile_app() -> App {
+    let mut app = with_weapons(app(), false);
+    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
+    let ability = &mut view
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities[0];
+    ability.target_kind = AbilityTargetKind::DirectionalProjectile;
+    ability.reach = AbilityReach::Projectile;
+    ability.supply_costs.clear();
+    for item in &mut view.inventory {
+        item.identified = true;
+    }
+    view.interactions.as_mut().unwrap().inventory[0].equipped_slot = None;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    app.messages.skip();
+    app
+}
+fn projectile_query(effect: Effect) -> ProjectileChoiceQuery {
+    let Some(Request::Command {
+        command: Command::ProjectileChoices { query, .. },
+        ..
+    }) = super::request(effect)
+    else {
+        panic!("read-only projectile choice query")
+    };
+    query
+}
+fn projectile_open(app: &mut App) -> ProjectileChoiceQuery {
+    app.input(Input::Key {
+        key: Key::Abilities,
+    });
+    projectile_query(app.input(Input::Key { key: Key::Enter }))
+}
+fn projectile_reply(
+    app: &mut App,
+    query: ProjectileChoiceQuery,
+    choices: Vec<ProjectileChoice>,
+    next_offset: Option<u32>,
+    id: &str,
+) {
+    app.bind_projectile_request(id).unwrap();
+    let context = app.state.as_ref().unwrap().snapshot().reply_context();
+    app.show_projectile_choices(
+        &context,
+        id,
+        &ProjectileChoicePage {
+            query,
+            choices,
+            next_offset,
+        },
+    )
+    .unwrap();
+    app.ready();
+}
+fn projectile_throw() -> ProjectileChoice {
+    ProjectileChoice::Throw {
+        source: ThrownSourceSelection::Carried {
+            item: super::item_target(80),
+            socket: 0,
+        },
+    }
+}
+#[test]
+fn projectile_throw_shows_server_terms_before_one_confirmed_exact_action() {
+    let mut app = projectile_app();
+    let before = app.state.as_ref().unwrap().snapshot();
+    let query = projectile_open(&mut app);
+    assert_eq!(
+        app.input(Input::Key { key: Key::Enter }),
+        Effect::None,
+        "cannot select before reply"
+    );
+    projectile_reply(&mut app, query, vec![projectile_throw()], None, "sources");
+    assert!(app.projectile_rows().join(" ").contains("primary sword"));
+    assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+    let preview = preview_reply(app.input(Input::Key {
+        key: Key::NorthEast,
+    }));
+    assert_eq!(
+        preview.invocation,
+        AbilityInvocation::directional_projectile(
+            Direction::NorthEast,
+            ProjectileDeliverySelection::Throw {
+                source: ThrownSourceSelection::Carried {
+                    item: super::item_target(80),
+                    socket: 0
+                }
+            }
+        )
+    );
+    assert_eq!(preview.supplies, SupplySelection::Carried);
+    assert_eq!(
+        app.input(Input::Key { key: Key::Enter }),
+        Effect::None,
+        "cannot confirm before preview reply"
+    );
+    app.bind_weapon_preview("terms").unwrap();
+    let context = app.state.as_ref().unwrap().snapshot().reply_context();
+    app.show_weapon_preview(&context, "terms", &preview)
+        .unwrap();
+    app.ready();
+    let rows = app.weapon_preview_rows().join(" ");
+    assert!(rows.contains("300 ticks"));
+    assert!(rows.contains("100 ticks"));
+    assert!(rows.contains("Focus"));
+    assert!(rows.contains("Mana"));
+    let Some(Request::Command {
+        command: Command::Act { action, .. },
+        ..
+    }) = super::request(app.input(Input::Key { key: Key::Enter }))
+    else {
+        panic!("one confirmed action")
+    };
+    assert_eq!(
+        action,
+        Action::UseAbility {
+            id: preview.ability,
+            invocation: preview.invocation,
+            supplies: preview.supplies
+        }
+    );
+    assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+    assert!(app.weapon_confirmation.is_none());
+    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+}
+#[test]
+fn projectile_launch_queries_exact_launcher_ammunition_then_direction_and_preview() {
+    let mut app = projectile_app();
+    let launcher = EquippedProjectileWeapon {
+        item: super::item_target(81),
+        socket: 10,
+    };
+    let query = projectile_open(&mut app);
+    projectile_reply(
+        &mut app,
+        query,
+        vec![ProjectileChoice::Launcher { launcher }],
+        None,
+        "launcher",
+    );
+    let query = projectile_query(app.input(Input::Key { key: Key::Enter }));
+    assert_eq!(query.phase, ProjectileChoicePhase::Ammunition { launcher });
+    assert_eq!(query.offset, 0);
+    projectile_reply(
+        &mut app,
+        query,
+        vec![ProjectileChoice::Ammunition {
+            item: super::item_target(80),
+        }],
+        None,
+        "ammo",
+    );
+    assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+    let preview = preview_reply(app.input(Input::Key { key: Key::Ascend }));
+    assert_eq!(
+        preview.invocation,
+        AbilityInvocation::directional_projectile(
+            Direction::Up,
+            ProjectileDeliverySelection::Launch {
+                launcher,
+                ammunition: super::item_target(80)
+            }
+        )
+    );
+    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
+    assert!(app.weapon_confirmation.is_none());
+}
+#[test]
+fn projectile_empty_pages_are_navigable_and_cancelled_replies_never_reopen() {
+    let mut app = projectile_app();
+    let query = projectile_open(&mut app);
+    projectile_reply(&mut app, query.clone(), vec![], Some(128), "empty");
+    assert!(app
+        .projectile_rows()
+        .join(" ")
+        .contains("Right: more choices"));
+    assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+    let next = projectile_query(app.input(Input::Key { key: Key::Right }));
+    assert_eq!(next.offset, 128);
+    projectile_reply(&mut app, next, vec![projectile_throw()], None, "next");
+    let previous = projectile_query(app.input(Input::Key { key: Key::Left }));
+    assert_eq!(previous, query);
+    app.input(Input::Key { key: Key::Escape });
+    assert!(app.projectile_selection.is_none());
+    let context = app.state.as_ref().unwrap().snapshot().reply_context();
+    app.bind_projectile_request("late").unwrap();
+    app.show_projectile_choices(
+        &context,
+        "late",
+        &ProjectileChoicePage {
+            query,
+            choices: vec![projectile_throw()],
+            next_offset: None,
+        },
+    )
+    .unwrap();
+    assert!(app.projectile_selection.is_none());
+}
+#[test]
+fn projectile_observation_equipment_control_and_ability_changes_clear_selection_and_preview() {
+    for phase in 0..3 {
+        for change in 0..7 {
+            let mut app = projectile_app();
+            let query = projectile_open(&mut app);
+            if phase > 0 {
+                projectile_reply(&mut app, query, vec![projectile_throw()], None, "source");
+                app.input(Input::Key { key: Key::Enter });
+            }
+            if phase > 1 {
+                let preview = preview_reply(app.input(Input::Key { key: Key::Up }));
+                app.bind_weapon_preview("terms").unwrap();
+                let context = app.state.as_ref().unwrap().snapshot().reply_context();
+                app.show_weapon_preview(&context, "terms", &preview)
+                    .unwrap();
+                app.ready();
+            }
+            let mut snapshot = app.state.as_ref().unwrap().snapshot();
+            match change {
+                0 => {
+                    snapshot.has_control = false;
+                    snapshot.readiness.admission = false;
+                }
+                1 => snapshot.branch.0.push('x'),
+                2 => snapshot.context.epoch += 1,
+                3 => std::sync::Arc::make_mut(&mut snapshot.state).revision += 1,
+                4 => {
+                    let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
+                    view.inventory
+                        .retain(|item| item.id != super::item_target(80));
+                    view.interactions
+                        .as_mut()
+                        .unwrap()
+                        .inventory
+                        .retain(|row| row.item != super::item_target(80));
+                }
+                5 => {
+                    std::sync::Arc::make_mut(&mut snapshot.state)
+                        .observation
+                        .interactions
+                        .as_mut()
+                        .unwrap()
+                        .inventory[0]
+                        .equipped_slot = Some(0)
+                }
+                _ => std::sync::Arc::make_mut(&mut snapshot.state)
+                    .observation
+                    .combat
+                    .as_mut()
+                    .unwrap()
+                    .own_stats
+                    .as_mut()
+                    .unwrap()
+                    .abilities
+                    .clear(),
+            }
+            app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+            app.ready();
+            assert!(
+                app.projectile_selection.is_none(),
+                "phase {phase}, change {change}"
+            );
             assert!(app.weapon_confirmation.is_none());
             assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
         }

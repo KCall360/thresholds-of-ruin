@@ -214,7 +214,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                         if attempt["kind"] == "placed":
                             item = saved["items"][str(attempt["entity"]["id"])]
                             self.assertEqual(item["location"], {"Ground": attempt["location"]})
-                            self.assertEqual(item["quantity"], 1)
+                            self.assertEqual(item["quantity"], attempt["entity"]["quantity"])
                             assert_finite_item_identity(self, item, attempt["content"])
             for row in placed:
                 recipe = source[row["content"]]["creature"]
@@ -520,28 +520,31 @@ class RogueEquipmentReceiptTests(unittest.TestCase):
             "kind": "evaluated", "requested": 1, "attempts": [{
                 "kind": "placed", "content": content,
                 "location": {"region": 1, "position": {"x": index, "y": 2, "z": 0}},
-                "entity": {"kind": "item", "id": 100 + index, "quantity": 1}}]}}
+                "entity": {"kind": "item", "id": 100 + index, "quantity": 6 if index == 2 else 1}}]}}
             for index, (identity, content) in enumerate((
                 ("rogue.equipment", "rogue.generated_mace"),
-                ("rogue.equipment_scrolls", "rogue.enchant_armor")))]
+                ("rogue.equipment_scrolls", "rogue.enchant_armor"),
+                ("rogue.ammunition", "rogue.arrow")))]
 
-    def test_both_equipment_stages_return_every_placed_identity_for_cross_stage_duplicate_checks(self):
+    def test_equipment_and_ammunition_stages_preserve_cross_stage_identity_checks(self):
         self.assertEqual(assert_equipment_item_receipts(self, self.receipts(), require_placed=True),
-                         [("item", 100), ("item", 101)])
+                         [("item", 100), ("item", 101), ("item", 102)])
 
     def test_every_reviewed_subtype_is_eligible_only_in_its_equipment_stage(self):
         for index, choices in enumerate((
                 ("rogue.generated_mace", "rogue.long_sword", "rogue.dagger", "rogue.two_handed_sword",
                  "rogue.spear", "rogue.leather_armor", "rogue.generated_ring_mail", "rogue.studded_leather",
-                 "rogue.scale_mail", "rogue.chain_mail", "rogue.splint_mail", "rogue.banded_mail", "rogue.plate_mail"),
+                 "rogue.scale_mail", "rogue.chain_mail", "rogue.splint_mail", "rogue.banded_mail", "rogue.plate_mail",
+                 "rogue.shortbow"),
                 ("rogue.enchant_armor", "rogue.protect_armor", "rogue.enchant_weapon", "rogue.remove_curse",
-                 "rogue.identify_weapon", "rogue.identify_armor"))):
+                 "rogue.identify_weapon", "rogue.identify_armor"),
+                ("rogue.arrow",))):
             for choice in choices:
                 with self.subTest(stage=index, content=choice):
                     receipts = self.receipts()
                     receipts[index]["result"]["attempts"][0]["content"] = choice
-                    self.assertEqual(len(assert_equipment_item_receipts(self, receipts)), 2)
-                    receipts[(index + 1) % 2]["result"]["attempts"][0]["content"] = choice
+                    self.assertEqual(len(assert_equipment_item_receipts(self, receipts)), 3)
+                    receipts[(index + 1) % 3]["result"]["attempts"][0]["content"] = choice
                     with self.assertRaises(AssertionError):
                         assert_equipment_item_receipts(self, receipts)
 
@@ -592,6 +595,14 @@ class RogueEquipmentReceiptTests(unittest.TestCase):
             with self.subTest(path=path, value=value), self.assertRaises(AssertionError):
                 assert_equipment_item_receipts(self, receipts)
 
+
+    def test_ammunition_quantity_is_exactly_six_and_duplicate_identity_is_rejected(self):
+        for field, invalid in (("quantity", 0), ("quantity", 1), ("quantity", 5),
+                               ("quantity", 7), ("quantity", True), ("id", 100)):
+            receipts = self.receipts()
+            receipts[2]["result"]["attempts"][0]["entity"][field] = invalid
+            with self.subTest(field=field, value=invalid), self.assertRaises(AssertionError):
+                assert_equipment_item_receipts(self, receipts)
 
     def test_generated_aliases_require_exact_archetype_and_shared_identity(self):
         for content, identity in (("rogue.generated_mace", "rogue.mace"),

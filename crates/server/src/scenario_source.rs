@@ -52,6 +52,7 @@ struct ItemDefinition {
     #[serde(default)]
     class: ItemClass,
     equipment: Option<EquipmentSpec>,
+    projectile: Option<ProjectileSpec>,
     equipment_generation: Option<EquipmentGeneration>,
     consumable: Option<ConsumableSpec>,
     readable: Option<ReadableSpec>,
@@ -110,6 +111,7 @@ fn normalize_catalog_views(
                     name: item.name,
                     class: item.class,
                     equipment: item.equipment,
+                    projectile: item.projectile,
                     equipment_generation: item.equipment_generation,
                     consumable: item.consumable,
                     readable: item.readable,
@@ -969,5 +971,37 @@ domain = { kind = "finite", count = 3 }
         )
         .is_err());
         assert!(!namespace("demo..actor"));
+    }
+}
+
+#[cfg(test)]
+mod projectile_catalog_tests {
+    use super::*;
+
+    #[test]
+    fn item_catalog_lowering_preserves_projectile_without_equipment() {
+        let mut value: toml::Value = toml::from_str(
+            r#"
+            [items.arrow]
+            class = "weapon"
+            stackable = true
+            [items.arrow.projectile]
+            family = "fixture.arrow"
+            recovery = "consumed_on_hit"
+            [items.arrow.projectile.damage.primary]
+            category = "keen"
+            [[items.arrow.projectile.damage.components]]
+            category = "keen"
+            amount = { type = "fixed", value = 2 }
+        "#,
+        )
+        .unwrap();
+        let (changed, origins) = normalize_catalog_views(&mut value, "fixture.toml").unwrap();
+        assert!(changed);
+        assert_eq!(origins["arrow"], "items");
+        let archetype: Archetype = value["archetypes"]["arrow"].clone().try_into().unwrap();
+        assert!(archetype.stackable);
+        assert!(archetype.equipment.is_none());
+        assert_eq!(archetype.projectile.unwrap().family, "fixture.arrow");
     }
 }

@@ -382,10 +382,8 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
             .disclose_entry(&paused.entry)
             .expect("completed command has history")
             .content,
-        tor_protocol::HistoryContent::Action {
-            event: tor_protocol::Event::PreparationPaused,
-            ..
-        }
+        tor_protocol::HistoryContent::Action { event, .. }
+            if matches!(*event, tor_protocol::Event::PreparationPaused)
     ));
     assert!(engine.pause_preparation(ActorId(1)).unwrap().is_none());
     let expected = engine.state(ActorId(1)).unwrap();

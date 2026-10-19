@@ -112,6 +112,13 @@ impl InspectionPages {
             },
         ];
         for (summary, ability) in report.ability_strikes.iter().zip(&report.stats.abilities) {
+            if matches!(
+                summary.source,
+                StrikeSourceInspectionView::Projectile { .. }
+            ) {
+                // Profile-dependent detail has no unselected catalog page.
+                continue;
+            }
             sources.push(Source {
                 choice: StrikeSourceChoice {
                     source: StrikeSourceSelector::Ability {
@@ -136,7 +143,8 @@ impl InspectionPages {
                 count: match summary.source {
                     StrikeSourceInspectionView::Authored { strike_count }
                     | StrikeSourceInspectionView::NaturalMelee { strike_count, .. } => strike_count,
-                    StrikeSourceInspectionView::SelectedMelee {} => 0,
+                    StrikeSourceInspectionView::SelectedMelee {}
+                    | StrikeSourceInspectionView::Projectile { .. } => 0,
                 },
             });
         }
@@ -684,6 +692,37 @@ mod ordered_strikes_detail_state_tests {
             .unwrap();
         state
     }
+    #[test]
+    fn projectile_summary_is_descriptive_without_an_unselected_detail_choice() {
+        let mut report = crate::inspection::tests::report();
+        let mut ability = crate::test_support::ability("fixture_projectile");
+        ability.target_kind = AbilityTargetKind::DirectionalProjectile;
+        ability.reach = AbilityReach::Projectile;
+        ability.weapon_selection = false;
+        report.stats.abilities.push(ability);
+        report.ability_strikes.push(AbilityStrikesView {
+            ability: "fixture_projectile".into(),
+            source: StrikeSourceInspectionView::Projectile {
+                delivery: ProjectileDeliveryKind::Throw,
+            },
+        });
+        report.validate().unwrap();
+        let rows = crate::inspection::lines(&report).unwrap();
+        assert!(rows.iter().any(|row| row
+            .contains("Throw projectile; strike details require an exact delivery selection")));
+        let mut inspector = InspectionPages::default();
+        inspector.set_report(&report, &context()).unwrap();
+        assert!(!inspector.sources().iter().any(|choice| matches!(&choice.source, StrikeSourceSelector::Ability { id } if id == "fixture_projectile")));
+        assert!(inspector
+            .select(
+                StrikeSourceSelector::Ability {
+                    id: "fixture_projectile".into()
+                },
+                &context()
+            )
+            .is_err());
+    }
+
     #[test]
     fn natural_melee_navigation_pins_species_rider_boundaries_across_pages() {
         let mut value = serde_json::to_value(crate::inspection::tests::report()).unwrap();

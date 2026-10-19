@@ -604,6 +604,11 @@ impl Connection {
                 self.advancement_pages.clear();
                 return Err("Private advancement page sent without current control".into());
             }
+            if matches!(message, ServerMessage::ProjectileChoices { .. })
+                && (!self.state.has_control() || self.role == AccessRole::Spectator)
+            {
+                return Err("Private projectile choices sent without current control".into());
+            }
             if let ServerMessage::MapPage {
                 context,
                 request_id,
@@ -686,6 +691,7 @@ impl Connection {
                             | ServerMessage::CreatureStrikePage { .. }
                             | ServerMessage::AdvancementPage { .. }
                             | ServerMessage::AbilityWeaponPreview { .. }
+                            | ServerMessage::ProjectileChoices { .. }
                             | ServerMessage::CombatDiagnostics { .. }
                     )
                 {
@@ -912,6 +918,14 @@ async fn receive_sized(
                 {
                     return Err(DecodeError::TooLarge {
                         limit: MAX_ADVANCEMENT_PAGE_BYTES,
+                    }
+                    .into());
+                }
+                if matches!(decoded, ServerMessage::ProjectileChoices { .. })
+                    && text.len() > MAX_PROJECTILE_CHOICE_PAGE_BYTES
+                {
+                    return Err(DecodeError::TooLarge {
+                        limit: MAX_PROJECTILE_CHOICE_PAGE_BYTES,
                     }
                     .into());
                 }

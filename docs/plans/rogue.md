@@ -276,14 +276,15 @@ alterations retain no-auto-identification and consume on no eligible gear;
 class-identification uses on-use discovery without direct effects. See
 [equipment birth contracts](../reference/items.md#equipment-birth-and-the-finite-rogue-catalog)
 for bounded policy schemas, immutable definitions, atomic sampling and adaptations.
-Remaining catalog specials stay separate. Throw and launch still need their own
-projectile work. The selected next slice adopts weapon expertise and short/long
+Remaining catalog specials stay separate. The current branch implements physical
+throw and launch, adopting weapon expertise and short/long
 ranges from the [Plotweaver Open Alpha v0.3](https://drive.google.com/file/d/11v0ujMTuXNdwkHEPAcPZqY29I3ZdmlJn/view)
 and [Stormlight Starter Rules](https://www.cosmererpg.com/s/SL015_Stormlight_StarterRules_Digital.pdf),
 while retaining TOR's existing attack checks and damage rules. Durable thrown
 weapons are recoverable after hits. The dagger's ranged profile requires knife
-expertise; source ranges are 20/60 feet. Full weapon-trait behavior, ordinary
-client actions and recovery remain implementation work, not shipped capabilities.
+expertise; source ranges are 20/60 feet. Thrown, Offhand, Quickdraw and Two-Handed
+have shared behavior. Discreet and other unsupported published traits remain
+explicit gaps; this is not full tabletop weapon parity.
 
 Expertise acquisition is a third ordinary HD point purchase competing with skill
 ranks and talents. Permanent talents may also grant expertise. The shared
@@ -301,18 +302,102 @@ consistency while replay establishes historical chronology. Timed modifiers,
 equipment and restorable attribute damage neither grant nor disable these choices.
 Privileged baseline rewrites are rejected once choices or later acquisition
 receipts exist; before learning, the unchosen baseline is reconciled explicitly.
-The source-only ordinary bonus-choice path uses a distinct threshold/expertise
+The ordinary bonus-choice path uses a distinct threshold/expertise
 operation with existing admission, preview, stale-basis checks and replay. Compact
 paginated threshold rows preserve dormant choices; Text and ASCII can browse,
 preview and confirm the entitlement without spending an HD point. Owning tests
-cover source-free reopening and idempotence but remain unrun at this checkpoint.
-Full qualification and weapon behavior remain pending before this can be described
-as a playable expertise system. Growth assessment
+cover source-free reopening and idempotence with focused local qualification.
+The broader published trait catalog and full required CI remain pending. Growth assessment
 uses an explicit zero expertise baseline with authored combat-benefit overrides;
 pure-grant talent contributions must not price the same unlock twice. These
 assessment values remain TOR tuning, not imported tabletop rules. PCs and AI use the same ordinary
 actions with knowledge-limited decisions; the conservative device AI fallback
 requires an identified type and explicitly known positive instance charges.
+
+The current development branch also implements explicit primary/secondary weapon
+selection through one frozen invocation context. Empty primary sockets use the
+natural attack; selecting a secondary weapon costs Focus (two normally, one with
+Offhand), added to the ability's existing resource bundle. Admission validates the
+plan; preparation start atomically funds and reserves the entire bundle. First
+strike pays resolution costs once. Exact item/socket ownership remains live,
+while captured traits, costs and timing survive later expertise changes.
+
+Text and ASCII request an exact-action server preview before confirming an
+explicit weapon selection. Its displayed costs, time to next strike, recovery,
+and fresh/resuming/paid-prefix status come from the same read-only planner that
+captures or resumes the action. The preview is revision-bound and does not promise
+funding. It exposes no private target checks or hidden weapon facts.
+
+Quickdraw makes an ordinary draw into an empty compatible socket take zero
+preparation time. Pickup, replacement, sheathing and attacks retain their normal
+rules. A paid draw captures the relevant resource pool's complete allocation and
+legal profiles. Expertise loss may increase current demand without dropping gear
+or invalidating that paid allocation; changed occupancy or capacity refuses the
+completion. Unrelated pools do not interfere. Resulting deficits block new
+weapon actions using the deficient pool, while natural and unrelated actions
+remain available. Restore checks minimum legal aggregate demand and captured
+source consistency; replay establishes actual historical ownership.
+
+Independent ammunition definitions now carry exact launcher family, shared typed
+base damage and deterministic hit recovery without fake equipment sockets.
+Condition-aware splits and fresh-identity merges preserve exact held units and
+conservative owner-only remembered facts; matching hidden values never identify
+the result. Public transfer identity, persistence and ordinary projectile release
+are separate qualification boundaries. Ordinary authored Throw/Launch work now
+owns one exact-unit reservation and releases it only at paid completion.
+
+The physical projectile kernel has real authored Throw/Launch definitions,
+closed exact delivery selectors, profile-derived range bands, and frozen source
+capture. Launcher and ammunition enchantments combine once while ammunition
+replaces the launcher base damage. Qualified next-attack candidates retain their
+captured condition instance identity; they are conditional collision-time
+resources, not promised bonuses or advance reservations. Actor-local persisted
+condition generations prevent expired tokens from being mistaken for later
+reapplications. Generation exhaustion rejects the whole effect transaction,
+including earlier effects, payment and random draws. Ordinary condition capacity
+rejection retains its existing behavior.
+
+Capture uses only perceived ordinary melee geometry for the threatened ranged
+penalty. Extended hostile reach needs a separate knowledge-safe representation
+before long-reach content can claim support. Physical flight reuses normal TOR
+geometry: open doors pass and closed doors stop, with no reflections. The first
+actual live creature stops travel even on a miss. Durable successful throws
+recover at the collision cell, including loaded air and returning self-hits;
+ordinary ammunition may explicitly consume on a successful hit. Misses choose
+among legal horizontal 3-by-3 cells around the final clear cell, excluding the
+shooter's body; no eligible miss landing loses the unit without a random draw.
+Extraction, payment, equipment refresh, collision and landing share one rollback
+boundary. Hidden cursed equipped throws are paid blocked attempts and retain the
+weapon. Carried throws use a real free compatible socket without equipping it.
+Paid Throw/Launch session tests cover pending and completed source-free reopening,
+replay, explicit resume and idempotent exact-unit settlement. Actual Text script
+and adventure process owners also cover ordinary expertise acquisition, preview
+cancellation and exact confirmation, payment, recovery, finite ammunition and
+source-free restart. Native ASCII acceptance is registered in CI; its graphical
+run is waived locally. Existing sight-cell range adjustments are
+rejected for projectile definitions rather than silently interpreted as feet.
+Authored projectile bands are bounded to 4,096 five-foot steps (20,480 feet)
+per release; over-budget definitions reject rather than silently truncate.
+Launcher and ammunition hit contributions use the wide compiled check lane, not
+the narrower per-weapon authored bonus bound. The existing shared final check
+and total damage budgets remain 1,000,000; extreme compositions beyond those
+budgets reject atomically without saturation or disclosing numeric operands.
+
+These foundations have focused local metadata and owning-test coverage.
+Server-authored revision-scoped source/ammunition menus now drive Text and ASCII
+direction selection and exact cost/timing preview before explicit confirmation.
+Their strict protocol, shared client, Text and ASCII model owners have focused
+local coverage. Authored, equipped NPC projectile selection also has owning tests;
+ranged loot valuation and stock Rogue ranged loadouts remain separate work. Final
+formats are frozen and current-writer fixtures generated; complete required CI
+is still required before merge. Production dagger/shortbow/arrow definitions
+now preserve the existing dagger damage, use published 20/60 and 80/320 foot
+bands, and supply arrows with the pinned Rogue 2d3 payload. Shortbows join the
+ordinary equipment pool; a finite six-arrow stack is attempted once per newly
+entered floor. Timing, stock and combat-expertise threat prices remain provisional
+TOR tuning. Knife and shortbow expertise require ordinary HD or Intellect choices,
+with no free grant. Discreet has no noncombat
+consumer yet and is explicitly unsupported rather than an inert displayed trait.
 
 Acceptance: capacity/anatomy constraints, unknown-property disclosure, naming
 without identification, allowed observed-use learning, resource consumption,

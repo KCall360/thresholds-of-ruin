@@ -736,10 +736,18 @@ pub enum TimingSource {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reach {
     Melee,
-    Sight { range: u16 },
-    MutualSight { range: u16 },
+    /// Short/long distances come from the exact effective delivery profile.
+    Projectile,
+    Sight {
+        range: u16,
+    },
+    MutualSight {
+        range: u16,
+    },
     SelfOnly,
-    SelfOrAlly { range: AllyRange },
+    SelfOrAlly {
+        range: AllyRange,
+    },
 }
 impl<'de> Deserialize<'de> for Reach {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -747,6 +755,7 @@ impl<'de> Deserialize<'de> for Reach {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             Melee,
+            Projectile {},
             Sight { range: u16 },
             MutualSight { range: u16 },
             SelfOnly,
@@ -754,6 +763,7 @@ impl<'de> Deserialize<'de> for Reach {
         }
         Ok(match crate::bounded::named_map(d)? {
             Fields::Melee => Self::Melee,
+            Fields::Projectile {} => Self::Projectile,
             Fields::Sight { range } => Self::Sight { range },
             Fields::MutualSight { range } => Self::MutualSight { range },
             Fields::SelfOnly => Self::SelfOnly,
@@ -1914,7 +1924,7 @@ impl Ruleset {
                     .iter()
                     .flat_map(|rider| &rider.effects)
                     .any(|effect| matches!(effect, Effect::SearchAdjacentGuises)),
-                StrikeSource::SelectedMelee => false,
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => false,
             };
             bound(
                 !searches
@@ -2020,7 +2030,7 @@ impl Ruleset {
                 StrikeSource::NaturalMelee { additional_riders } => {
                     refs.riders(additional_riders, &mut pool)?;
                 }
-                StrikeSource::SelectedMelee => {}
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => {}
             }
         }
         let talent_order = topological(
@@ -2125,12 +2135,14 @@ impl Ruleset {
                 "permanent_modifier_scope",
             )?;
             rules.expanded_modifier_count(modifiers)?;
+            rules.validate_projectile_range_modifiers(modifiers)?;
         }
         for definition in &rules.document.talents {
             rules.validate_edge_source(&definition.modifiers)?;
         }
         for definition in &rules.document.conditions {
             rules.validate_edge_source(&definition.modifiers)?;
+            rules.validate_projectile_range_modifiers(&definition.modifiers)?;
             let expanded = rules.expanded_modifier_count(&definition.modifiers)?;
             let stacks = match definition.stacking {
                 Stacking::Stack { maximum } => usize::from(maximum),
@@ -2149,7 +2161,7 @@ impl Ruleset {
                 StrikeSource::NaturalMelee { additional_riders } => {
                     rules.validate_rider_interaction(ability.interaction, additional_riders)?
                 }
-                StrikeSource::SelectedMelee => bound(
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => bound(
                     ability.interaction == Interaction::HostileToTarget,
                     "non_hostile_direct_harm",
                 )?,
@@ -2769,8 +2781,48 @@ impl Ruleset {
         self.validate_condition_modifiers(modifiers)
     }
 
+    // Existing range modifiers are sight-cell adjustments, not physical feet
+    // band adjustments. Reject unsupported authoring before any actor uses it.
+    fn validate_projectile_range_modifiers(
+        &self,
+        modifiers: &[Modifier],
+    ) -> Result<(), RulesetError> {
+        for modifier in modifiers {
+            let (ModifierOp::Add { stat, value } | ModifierOp::Set { stat, value }) = &modifier.op
+            else {
+                continue;
+            };
+            if *value == 0 {
+                continue;
+            }
+            let projectile = match stat {
+                Stat::Ability {
+                    ability,
+                    stat: AbilityStat::Range,
+                } => self.ability(ability).is_some_and(|ability| {
+                    ability.invocation == crate::abilities::InvocationKind::DirectionalProjectile
+                }),
+                Stat::AbilityTag {
+                    tag,
+                    stat: AbilityStat::Range,
+                } => self.abilities_with_tag(tag).is_some_and(|members| {
+                    members.iter().any(|id| {
+                        self.ability(id).is_some_and(|ability| {
+                            ability.invocation
+                                == crate::abilities::InvocationKind::DirectionalProjectile
+                        })
+                    })
+                }),
+                _ => false,
+            };
+            bound(!projectile, "projectile_range_adjustment_unsupported")?;
+        }
+        Ok(())
+    }
+
     /// Condition contributions carry a causer, allowing the supported scoped edge operators.
     pub fn validate_condition_modifiers(&self, modifiers: &[Modifier]) -> Result<(), RulesetError> {
+        self.validate_projectile_range_modifiers(modifiers)?;
         let abilities = self.indexes.abilities.keys().cloned().collect();
         let ability_tags = self.indexes.ability_tags.keys().cloned().collect();
         let types = self.indexes.creature_types.keys().cloned().collect();
@@ -3455,8 +3507,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v45\"",
-                "id = \"interactions-v45\"\nunknown = true"
+                "id = \"interactions-v46\"",
+                "id = \"interactions-v46\"\nunknown = true"
             ))
             .is_err()
         );

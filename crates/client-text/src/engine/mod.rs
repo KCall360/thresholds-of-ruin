@@ -51,7 +51,7 @@ enum Asked {
     Confirm(Interpretation),
     WeaponConfirm {
         then: Interpretation,
-        preview: tor_client_common::weapon_preview::WeaponPreview,
+        preview: Box<tor_client_common::weapon_preview::WeaponPreview>,
     },
 }
 
@@ -84,6 +84,7 @@ pub struct Engine {
     pub referents: Referents,
     pending: Option<Pending>,
     confirmed_weapon: Option<tor_client_common::weapon_preview::WeaponPreview>,
+    projectile_selection: Option<tor_client_common::projectiles::ProjectileMenu>,
     last_line: Option<String>,
     chronicler: Chronicler,
     verbosity: Verbosity,
@@ -333,6 +334,7 @@ fn answer<'q>(question: &'q Question, line: &str) -> Option<&'q verbs::Choice> {
 impl Engine {
     /// Forget everything tied to the old state, as after a rewind.
     pub fn reset(&mut self) {
+        self.projectile_selection = None;
         self.referents.clear();
         self.pending = None;
         self.last_sentence = None;
@@ -491,6 +493,65 @@ impl Engine {
         if line.is_empty() {
             return Ok(Outcome::Passage(String::new()));
         }
+        if let Some(mut menu) = self.projectile_selection.take() {
+            if !menu.current(link.client()) {
+                record.say("Projectile choices changed. Choose the ability again.");
+                return Ok(Outcome::Passage(narrate::compose(&record)));
+            }
+            let mut handled = true;
+            match crate::projectiles::input(&mut menu, link.client(), &line) {
+                Ok(Some(crate::projectiles::Progress::Cancel)) => record.say("All right."),
+                Ok(Some(crate::projectiles::Progress::Query)) => {
+                    if turn::projectile_choices(link, &mut self.chronicler, &mut record, &mut menu)
+                        .await?
+                    {
+                        self.projectile_selection = Some(menu);
+                    }
+                }
+                Ok(Some(crate::projectiles::Progress::Direction)) => {
+                    record.say(crate::projectiles::lines(&menu).join("\n"));
+                    self.projectile_selection = Some(menu);
+                }
+                Ok(Some(crate::projectiles::Progress::Action(Action::UseAbility {
+                    id,
+                    invocation,
+                    supplies,
+                }))) => {
+                    let start = self.place_key(link);
+                    self.carry_out(
+                        link,
+                        &mut record,
+                        Interpretation::Goals(vec![verbs::Goal::UseAbility {
+                            ability: id,
+                            invocation,
+                            supplies,
+                        }]),
+                        &mut VecDeque::new(),
+                    )
+                    .await?;
+                    self.finish(link, &mut record, start.as_deref());
+                }
+                Ok(Some(crate::projectiles::Progress::Action(_))) => {
+                    unreachable!("projectile ability action")
+                }
+                Err(reason) => {
+                    record.say(reason);
+                    self.projectile_selection = Some(menu);
+                }
+                Ok(None) if !commands(&line, &link.client().state().observation) => {
+                    record.say(crate::projectiles::lines(&menu).join("\n"));
+                    self.projectile_selection = Some(menu);
+                }
+                Ok(None) => {
+                    // A new command cancels the old selection. Never reinterpret
+                    // its source number against another ability or observation.
+                    handled = false;
+                }
+            }
+            if handled {
+                return Ok(Outcome::Passage(narrate::compose(&record)));
+            }
+        }
         let normalized = idiom::normalize(&line).0;
         let repeat = matches!(line.to_lowercase().as_str(), "again" | "g")
             || matches!(idiom::read(&normalized), Some(Reading::Command(c)) if c == "again");
@@ -635,7 +696,7 @@ impl Engine {
                 }
                 Asked::WeaponConfirm { then, preview } => match yes_or_no(&line) {
                     Some(true) if current && preview.current(link.client()) => {
-                        self.confirmed_weapon = Some(preview);
+                        self.confirmed_weapon = Some(*preview);
                         chain.push_back(Ok(then));
                         chain.extend(pending.rest.into_iter().map(Err));
                     }
@@ -947,7 +1008,7 @@ impl Engine {
                                     "Use this exact weapon action? (yes/no)",
                                     Asked::WeaponConfirm {
                                         then: Interpretation::Goals(goals),
-                                        preview,
+                                        preview: Box::new(preview),
                                     },
                                     chain,
                                 ));
@@ -1279,6 +1340,21 @@ impl Engine {
         input: Input,
     ) -> Result<Flow, Error> {
         let request = match input {
+            Input::Projectile(ability) => {
+                self.pending = None;
+                self.confirmed_weapon = None;
+                match tor_client_common::projectiles::ProjectileMenu::new(link.client(), &ability) {
+                    Ok(mut menu) => {
+                        if turn::projectile_choices(link, &mut self.chronicler, record, &mut menu)
+                            .await?
+                        {
+                            self.projectile_selection = Some(menu);
+                        }
+                    }
+                    Err(reason) => record.say(reason),
+                }
+                return Ok(Flow::Stop);
+            }
             Input::Advancement(input) => match link.advancement_request(input) {
                 Ok(Some(request)) => request,
                 Ok(None) => {

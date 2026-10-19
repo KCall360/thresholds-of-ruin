@@ -146,6 +146,20 @@ completion time for the whole sequence. Previewing reserves nothing and does
 not promise affordability. A stale response refreshes the observation and
 requires choosing again. The default row retains the ordinary immediate path.
 
+Projectile abilities use a separate server-authored source picker. Choose the
+ability with `z`, then use Up/Down and Enter to select a listed source. For a
+launch, select the equipped launcher first, then compatible ammunition. Left and
+Right request previous/next pages; an empty filtered page can still have more
+choices. Movement keys then choose the direction. Esc cancels at every stage.
+The server chooses one equipped or carried throwing source/socket per listed
+item; the client never chooses an alternative socket or computes compatibility.
+These menus use known item types and current inventory names, without requiring
+instance-enchantment knowledge. Source selection does not promise affordability.
+Every projectile enters the exact action preview above, including its full
+source, direction and carried supplies, and requires Enter before sending one
+gameplay command. Any changed observation, authority, equipment or ability clears
+the pending choice; it is never automatically retried.
+
 For an ability that requires finite supplies, confirming its target opens the
 SUPPLIES screen. The first choice uses carried inventory automatically. Up/Down
 focuses an exact known carried or touch-reachable ground stack; Space toggles

@@ -508,3 +508,180 @@ mod form_tests {
         assert!(Ruleset::validate(missing).is_err());
     }
 }
+
+#[cfg(test)]
+mod projectile_definition_tests {
+    use super::*;
+    use tor_simulation::abilities::InvocationKind;
+    use tor_simulation::projectile_profiles::ProjectileDeliveryKind;
+    use tor_simulation::rules::{Reach, StrikeSource, TimingSource};
+
+    fn projectile_source(delivery: &str, timing: &str) -> String {
+        format!(
+            r#"import = "{RULESET}"
+[[overrides]]
+op = "add"
+path = ["abilities", "test_projectile"]
+value = {{ id = "test_projectile", name = "Test projectile", tags = [], basic_attack = false, invocation = "directional_projectile", interaction = "hostile_to_target", outgoing_edge_policy = {{ kind = "ordinary" }}, supply_costs = [], timing = {{ source = {timing}, scaled_by = "speed" }}, reach = {{ kind = "projectile" }}, strikes = {{ kind = "projectile", delivery = "{delivery}" }}, ai = {{ priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" }} }}
+"#
+        )
+    }
+
+    #[test]
+    fn projectile_definitions_compile_exact_delivery_and_selected_weapon_timing() {
+        for (delivery, expected) in [
+            ("throw", ProjectileDeliveryKind::Throw),
+            ("launch", ProjectileDeliveryKind::Launch),
+        ] {
+            for (timing, expected_timing) in [
+                (
+                    "{ kind = \"selected_weapon\" }",
+                    TimingSource::SelectedWeapon,
+                ),
+                (
+                    "{ kind = \"selected_weapon_adjusted\", preparation = 10, recovery = 20 }",
+                    TimingSource::SelectedWeaponAdjusted {
+                        preparation: 10,
+                        recovery: 20,
+                    },
+                ),
+            ] {
+                let authored = projectile_source(delivery, timing);
+                let rules = super::super::parse_rules(&authored, "rules.toml").unwrap();
+                let id = tor_simulation::content_ids::AbilityId::new("test_projectile").unwrap();
+                let ability = rules.ability(&id).unwrap();
+                assert_eq!(ability.invocation, InvocationKind::DirectionalProjectile);
+                assert_eq!(ability.reach, Reach::Projectile);
+                assert_eq!(
+                    ability.strikes,
+                    StrikeSource::Projectile { delivery: expected }
+                );
+                assert_eq!(ability.timing.source, expected_timing);
+                assert!(!ability.basic_attack && ability.supply_costs.is_empty());
+                let resolved = resolve_rules_source(&authored, "rules.toml").unwrap();
+                assert_eq!(
+                    super::super::parse_rules(&resolved.source, "resolved.toml")
+                        .unwrap()
+                        .document(),
+                    rules.document(),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn projectile_package_compilation_pins_delivery_without_source_defaults() {
+        let base = crate::advancement_test_support::scenario();
+        let package = base.package.as_ref().unwrap();
+        let compile = |delivery| {
+            crate::scenario_package::Package::from_parts(
+                package.manifest.clone(),
+                package.region_defs().unwrap(),
+                &projectile_source(delivery, "{ kind = \"selected_weapon\" }"),
+            )
+            .unwrap()
+        };
+        let thrown = compile("throw");
+        let repeated = compile("throw");
+        let launched = compile("launch");
+        assert_eq!(
+            thrown.certificate.model_hash,
+            repeated.certificate.model_hash
+        );
+        assert_eq!(
+            thrown.certificate.ruleset_hash,
+            repeated.certificate.ruleset_hash
+        );
+        assert_ne!(
+            thrown.certificate.ruleset_hash,
+            launched.certificate.ruleset_hash
+        );
+        assert_ne!(
+            thrown.certificate.model_hash,
+            launched.certificate.model_hash
+        );
+    }
+
+    fn replace_ability_field(source: &str, field: &str, value: Option<&str>) -> String {
+        let mut source: toml::Value = toml::from_str(source).unwrap();
+        let ability = source["overrides"][0]["value"].as_table_mut().unwrap();
+        if let Some(value) = value {
+            let replacement: toml::Value = toml::from_str(&format!("value = {value}")).unwrap();
+            ability.insert(field.into(), replacement["value"].clone());
+        } else {
+            ability.remove(field).unwrap();
+        }
+        toml::to_string(&source).unwrap()
+    }
+
+    #[test]
+    fn projectile_definitions_reject_every_mixed_spatial_shape() {
+        let good = projectile_source("throw", "{ kind = \"selected_weapon\" }");
+        for (field, value) in [
+            ("invocation", Some("'actor_target'")),
+            ("invocation", Some("'self_step'")),
+            ("invocation", Some("'directional_ray'")),
+            ("invocation", None),
+            ("reach", Some("{ kind = 'melee' }")),
+            ("reach", Some("{ kind = 'sight', range = 6 }")),
+            ("reach", Some("{ kind = 'mutual_sight', range = 6 }")),
+            ("reach", Some("{ kind = 'self_only' }")),
+            ("reach", Some("{ kind = 'self_or_ally', range = { kind = 'touch' } }")),
+            ("strikes", Some("{ kind = 'selected_melee' }")),
+            ("strikes", Some("{ kind = 'natural_melee', additional_riders = [] }")),
+            ("strikes", Some("{ kind = 'authored', strikes = [{ offset = 0, on_success = [], on_failure = [], descriptors = [], riders = [] }] }")),
+            ("timing", Some("{ source = { kind = 'fixed', prepare = 100, recover = 100 } }")),
+            ("interaction", Some("'non_hostile'")),
+            ("supply_costs", Some("[{ supply = 'bandage', quantity = 1, access = 'carried_only', spend_at = 'first_resolution' }]")),
+            ("basic_attack", Some("true")),
+        ] {
+            let mut bad = replace_ability_field(&good, field, value);
+            if field == "basic_attack" {
+                bad.push_str("\n[[overrides]]\nop = 'set'\npath = ['abilities', 'basic_melee', 'basic_attack']\nvalue = false\n");
+            }
+            let error = super::super::parse_rules(&bad, "rules.toml").unwrap_err();
+            assert!(error.message.contains("ability_spatial_shape"), "{field}: {}", error.message);
+        }
+    }
+
+    #[test]
+    fn projectile_source_rejects_missing_unknown_duplicate_and_surplus_fields() {
+        let good = projectile_source("throw", "{ kind = \"selected_weapon\" }");
+        for (field, value) in [
+            ("invocation", Some("'projectile'")),
+            ("reach", None),
+            ("reach", Some("{ kind = 'ranged' }")),
+            ("reach", Some("{ kind = 'projectile', range = 6 }")),
+            ("reach", Some("['projectile']")),
+            ("strikes", None),
+            ("strikes", Some("{ kind = 'projectile' }")),
+            ("strikes", Some("{ delivery = 'throw' }")),
+            ("strikes", Some("['projectile', 'throw']")),
+            ("strikes", Some("{ kind = 'projectile', delivery = 'lob' }")),
+            (
+                "strikes",
+                Some("{ kind = 'projectile', delivery = 'Throw' }"),
+            ),
+            (
+                "strikes",
+                Some("{ kind = 'projectile', delivery = 'thrown' }"),
+            ),
+            (
+                "strikes",
+                Some("{ kind = 'projectile', delivery = 'throw', range = 6 }"),
+            ),
+            (
+                "strikes",
+                Some("{ kind = 'projectile', delivery = 'throw', additional_riders = [] }"),
+            ),
+        ] {
+            let bad = replace_ability_field(&good, field, value);
+            assert!(resolve(&bad, "rules.toml").is_err(), "{field}: {value:?}");
+        }
+        let duplicate = good.replace(
+            "delivery = \"throw\"",
+            "delivery = \"throw\", delivery = \"launch\"",
+        );
+        assert!(resolve(&duplicate, "rules.toml").is_err());
+    }
+}

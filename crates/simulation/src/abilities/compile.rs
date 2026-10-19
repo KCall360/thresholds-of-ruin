@@ -402,6 +402,20 @@ impl Game {
             }
             return self.compile_ray_plan(actor, ability, direction, supplies);
         }
+        if let super::AbilityAim::DirectionalProjectile {
+            direction,
+            delivery,
+        } = invocation.aim
+        {
+            if invocation.weapon != super::WeaponSelection::Default
+                || supplies != crate::supplies::SupplySelection::Carried
+            {
+                return Err(invalid());
+            }
+            return self
+                .capture_projectile_plan(actor, ability, direction, delivery)
+                .map(|plan| Plan::Projectile(tor_world::Shared::new(plan)));
+        }
         let target = invocation.target(actor);
         let caster = self.creature(actor).ok_or(GameError::UnknownActor)?;
         // The original reference domain is an admission operand, not a hint.
@@ -474,6 +488,7 @@ impl Game {
         };
         let mut strikes = Vec::new();
         match &definition.strikes {
+            StrikeSource::Projectile { .. } => return Err(invalid()),
             StrikeSource::Authored { strikes: authored } => {
                 for (ordinal, strike) in authored.iter().enumerate() {
                     if strike

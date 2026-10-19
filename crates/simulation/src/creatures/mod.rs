@@ -15,6 +15,7 @@ mod intellect;
 #[cfg(test)]
 mod intellect_tests;
 mod losses;
+mod projectile_edges;
 pub(crate) use derive::{ability_timing_for_attack, scaled_duration};
 pub use displacement::{CreatureSize, DisplacementProfile};
 pub use losses::{HitDieRestorationBlocker, RestorableLossOutcome, RestorableLosses};
@@ -32,6 +33,7 @@ pub use derive::{
     AbilityTiming, AbilityValues, CheckContext, DerivedCreature, DormantReason, EquippedAttack,
     HitDiceSummary, SelectedAttack,
 };
+pub use projectile_edges::CapturedAttackEdges;
 pub use replacement::{
     AdvancementReplacementPreview, PointRefund, PurchaseLocation, RemovedPurchase,
 };

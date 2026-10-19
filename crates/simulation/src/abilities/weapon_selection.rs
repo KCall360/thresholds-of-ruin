@@ -38,7 +38,7 @@ impl<'de> Deserialize<'de> for CapturedWeaponProfile {
     }
 }
 impl CapturedWeaponProfile {
-    fn resolve(
+    pub(crate) fn resolve(
         &self,
         rules: &crate::rules::Ruleset,
     ) -> Result<Option<EffectiveWeaponProfile>, GameError> {
@@ -129,8 +129,10 @@ fn check_uses_weapon(check: &crate::rules::CheckDef) -> bool {
 impl crate::rules::AbilityDef {
     /// Callers select the emitted rows, never a locked-only authored branch.
     pub(crate) fn consumes_caster_weapon(&self, included: impl Fn(usize) -> bool) -> bool {
-        if self.invocation == super::InvocationKind::DirectionalRay
-            || matches!(self.strikes, StrikeSource::NaturalMelee { .. })
+        if matches!(
+            self.invocation,
+            super::InvocationKind::DirectionalRay | super::InvocationKind::DirectionalProjectile
+        ) || matches!(self.strikes, StrikeSource::NaturalMelee { .. })
         {
             return false;
         }
@@ -160,6 +162,35 @@ impl crate::rules::AbilityDef {
         })
     }
 }
+pub(crate) fn selected_weapon_cost(
+    rules: &crate::rules::Ruleset,
+    profile: &CapturedWeaponProfile,
+    secondary: bool,
+    base: Option<CostBundle>,
+) -> Result<Option<CostBundle>, GameError> {
+    let profile = profile.resolve(rules)?;
+    if !secondary {
+        return Ok(base);
+    }
+    let surcharge = CostBundle::single(ResourceCost {
+        resource: crate::resources::Resource::Focus,
+        start: 0,
+        resolution: if profile
+            .as_ref()
+            .is_some_and(EffectiveWeaponProfile::offhand)
+        {
+            1
+        } else {
+            2
+        },
+    })
+    .map_err(|_| invalid())?;
+    Ok(Some(match base {
+        Some(base) => base.checked_add(surcharge).map_err(|_| invalid())?,
+        None => surcharge,
+    }))
+}
+
 impl FrozenWeaponSelection {
     pub(crate) fn cost(
         &self,
@@ -172,33 +203,13 @@ impl FrozenWeaponSelection {
         else {
             return Ok(base);
         };
-        let profile = profile.resolve(rules)?;
-        if !secondary {
-            return Ok(base);
-        }
-        let surcharge = CostBundle::single(ResourceCost {
-            resource: crate::resources::Resource::Focus,
-            start: 0,
-            resolution: if profile
-                .as_ref()
-                .is_some_and(EffectiveWeaponProfile::offhand)
-            {
-                1
-            } else {
-                2
-            },
-        })
-        .map_err(|_| invalid())?;
-        Ok(Some(match base {
-            Some(base) => base.checked_add(surcharge).map_err(|_| invalid())?,
-            None => surcharge,
-        }))
+        selected_weapon_cost(rules, profile, *secondary, base)
     }
     pub(crate) fn valid_for(&self, plan: &AbilityPlan, rules: &crate::rules::Ruleset) -> bool {
         let Some(definition) = rules.ability(&plan.ability) else {
             return false;
         };
-        if !plan.invocation.weapon.valid() {
+        if !plan.invocation.valid() {
             return false;
         }
         let consumes = definition.consumes_caster_weapon(|ordinal| plan.strikes.iter().any(|strike| matches!(strike.origin, super::StrikeOrigin::Ability { ordinal: actual } if usize::from(actual) == ordinal)));
@@ -318,9 +329,7 @@ impl Game {
                 .is_none_or(|id| creature.derived().active_talents.contains(id)),
             _ => true,
         });
-        if !invocation.weapon.valid()
-            || (!consumes && invocation.weapon != WeaponSelection::Default)
-        {
+        if !invocation.valid() || (!consumes && invocation.weapon != WeaponSelection::Default) {
             return Err(invalid());
         }
         if matches!(definition.strikes, StrikeSource::NaturalMelee { .. }) {
@@ -335,7 +344,18 @@ impl Game {
                 frozen: FrozenWeaponSelection::Unselected,
             });
         }
-        let selected = match invocation.weapon {
+        self.capture_selected_weapon(actor, invocation.weapon)
+    }
+    pub(super) fn capture_selected_weapon(
+        &self,
+        actor: ActorId,
+        selection: WeaponSelection,
+    ) -> Result<InvocationWeapon, GameError> {
+        if !selection.valid() {
+            return Err(invalid());
+        }
+        let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
+        let selected = match selection {
             WeaponSelection::Default => &creature.derived().selected_attack,
             WeaponSelection::Equipped { item, socket } => {
                 let attack = &creature
@@ -463,6 +483,9 @@ impl Game {
             }
         };
         item.0 < self.next_item_id
+            && crate::equipment_capture::captured_profile_matches_surviving_item(
+                self, *item, &slot.id, profile,
+            )
             && slot.requires_attack
             && fits
             && *secondary

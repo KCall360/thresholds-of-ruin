@@ -207,6 +207,12 @@ pub fn equipment_details(view: &Observation, item: ItemTarget) -> Option<String>
             parts.extend(crate::combat_diagnostics::trace_lines(modifier));
         }
     }
+    if let Some(bonus) = &offer.known_projectile_bonus {
+        parts.push(format!(
+            "remembered projectile hit bonus {:+}, damage bonus {:+}",
+            bonus.hit, bonus.damage
+        ));
+    }
     if let Some(cursed) = offer.known_cursed {
         parts.push(if cursed { "cursed" } else { "uncursed" }.into());
     }

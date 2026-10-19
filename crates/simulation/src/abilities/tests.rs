@@ -1125,6 +1125,13 @@ fn typed_item_plans_round_trip_and_reject_ability_only_fields_at_decode() {
             actor,
             item,
             slot: EquipmentSlotId(0),
+            allocation: crate::equipment_capture::FrozenEquipAllocation {
+                anatomy: crate::equipment_capture::EquipAnatomySource::Configured {
+                    anatomy: crate::AnatomySpec::from_rules(&rules),
+                },
+                target: CapturedWeaponProfile::Ordinary,
+                occupants: vec![],
+            },
             preparation: 10,
         },
         Plan::Unequip {
@@ -1357,6 +1364,7 @@ fn token_vectors_are_bounded_during_checkpoint_decoding() {
             condition: ConditionId::new("readied").unwrap(),
             source: ActorId(1),
             order: order as u64,
+            generation: order as u64,
             qualification: None,
         })
         .collect::<Vec<_>>());

@@ -132,6 +132,30 @@ impl<'de> Deserialize<'de> for ItemCondition {
     }
 }
 impl ItemCondition {
+    /// Validate each authored weapon payload independently. A dual-capability
+    /// item may not hide an invalid attack behind its other delivery mode.
+    pub(crate) fn weapon_capabilities_valid(
+        self,
+        equipment: Option<&crate::EquipmentSpec>,
+        projectile: Option<&crate::projectile_profiles::ProjectileSpec>,
+    ) -> bool {
+        let attack = equipment.and_then(|gear| gear.attack.as_ref());
+        (attack.is_some()
+            || projectile.is_some()
+            || (self.hit_enchantment == 0 && self.damage_enchantment == 0))
+            && attack.is_none_or(|attack| {
+                attack
+                    .with_enchantment(self.hit_enchantment, self.damage_enchantment)
+                    .is_ok()
+            })
+            && projectile.is_none_or(|projectile| {
+                projectile.validate_shape().is_ok()
+                    && projectile
+                        .damage
+                        .with_melee_modifiers(0, self.damage_enchantment, 0)
+                        .is_ok()
+            })
+    }
     pub(crate) fn valid(self) -> bool {
         self.corrosion <= crate::limits::NUMERIC as u32
             && self.armor_penalty <= crate::limits::NUMERIC as u32
@@ -248,16 +272,11 @@ impl Item {
                     && !self.condition.protected
             }
         };
-        let weapon_valid = match gear.and_then(|gear| gear.attack.as_ref()) {
-            Some(attack) => attack
-                .with_enchantment(
-                    self.condition.hit_enchantment,
-                    self.condition.damage_enchantment,
-                )
-                .is_ok(),
-            None => self.condition.hit_enchantment == 0 && self.condition.damage_enchantment == 0,
-        };
-        armor_valid && weapon_valid && (gear.is_some() || !self.condition.cursed)
+        armor_valid
+            && self
+                .condition
+                .weapon_capabilities_valid(gear, self.spec.projectile.as_ref())
+            && (self.spec.has_instance_condition() || !self.condition.cursed)
     }
 
     /// Identified equipment shows its current contribution, not unworn catalog values.

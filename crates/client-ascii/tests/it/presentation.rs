@@ -252,10 +252,10 @@ fn ability_preparation_history_names_the_technique() {
                     },
                     supplies: Default::default(),
                 },
-                event: Event::AbilityStarted {
+                event: Box::new(Event::AbilityStarted {
                     ability: ability.content(),
                     target,
-                },
+                }),
             },
         };
         assert_eq!(tor_client_ascii::history_text(&entry), text);
@@ -291,6 +291,7 @@ fn carried_rings() -> Snapshot {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -2240,6 +2241,7 @@ fn eat_picker_and_hunger_status_use_only_disclosed_nutrition() {
             equipped_slot: None,
             known_cursed: None,
             known_protected: None,
+            known_projectile_bonus: None,
             known_equipment: None,
             drinkable: false,
             edible: true,

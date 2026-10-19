@@ -790,3 +790,334 @@ fn encoded_exact_weapon_preview_matches_capture_and_reservations_and_refusals_do
     );
     assert_eq!(saved(&wire.service), before);
 }
+
+fn carried_secondary_scenario() -> crate::Scenario {
+    let mut scenario = scenario();
+    let package = scenario.package.take().unwrap();
+    let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    let secondary = manifest["characters"][0]["loadout"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|item| item["archetype"] == "fixture.secondary")
+        .unwrap();
+    secondary["equipped_slot"] = Value::Null;
+    scenario.package = Some(Arc::new(
+        crate::scenario_package::Package::from_parts(
+            serde_json::from_value(manifest).unwrap(),
+            package.region_defs().unwrap(),
+            &toml::to_string(package.rules().unwrap().document()).unwrap(),
+        )
+        .unwrap(),
+    ));
+    scenario
+}
+
+#[test]
+fn encoded_frozen_equip_allocation_pending_completed_source_free_reopen_is_exact() {
+    use tor_simulation::abilities::{CapturedWeaponProfile, Plan};
+    use tor_simulation::{EquipmentSlotId, ItemId};
+
+    for interval in [1, 4096] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("frozen-equip.db");
+        let policy = crate::SavePolicy {
+            checkpoint_interval: interval,
+            ..Default::default()
+        };
+        let mut wire = Wire::connect(
+            Engine::open_with_policy(&path, carried_secondary_scenario(), policy.clone()).unwrap(),
+        );
+        let observation = wire.service.engine.observation(SOURCE).unwrap();
+        let item = observation
+            .inventory
+            .iter()
+            .find(|item| item.name == "secondary sword")
+            .unwrap()
+            .id;
+        let primary = observation
+            .inventory
+            .iter()
+            .find(|item| item.name == "primary sword")
+            .unwrap()
+            .id;
+        let interactions = observation.interactions.as_ref().unwrap();
+        assert_eq!(
+            interactions
+                .inventory
+                .iter()
+                .find(|offer| offer.item == item)
+                .unwrap()
+                .equipped_slot,
+            None
+        );
+        assert_eq!(
+            interactions
+                .inventory
+                .iter()
+                .find(|offer| offer.item == primary)
+                .unwrap()
+                .equipped_slot,
+            Some(0)
+        );
+        assert!(interactions.slots[10].requires_attack);
+        let action = Action::Equip { item, slot: 10 };
+        let backend = wire.service.engine.decode_action(SOURCE, &action).unwrap();
+        let crate::actions::Action::Equip {
+            item: internal_item,
+            slot: 10,
+        } = backend
+        else {
+            panic!("exact equip adapter")
+        };
+        let request = wire.request(SOURCE, action.clone());
+        let queued_receipt = ack(wire.send(SOURCE, "draw-secondary", request.clone()));
+        let identity = exact_receipt(&queued_receipt);
+        let queued = saved(&wire.service);
+        assert_eq!(
+            ack(wire.send(SOURCE, "draw-secondary", request.clone())),
+            queued_receipt
+        );
+        assert_eq!(saved(&wire.service), queued, "queued retry is a no-op");
+        wire.service.run_until_blocked();
+        for actor in ACTORS {
+            wire.drain(actor);
+        }
+        let started = ack(wire.send(SOURCE, "draw-secondary", request.clone()));
+        assert_eq!(exact_receipt(&started), identity);
+        assert!(matches!(
+            started,
+            RequestReceipt::Admitted {
+                phase: IntentionPhase::Started,
+                ..
+            }
+        ));
+        let pending = saved(&wire.service);
+        let previous = live_actor(&pending, SOURCE);
+        let frozen: Plan = serde_json::from_value(previous["pending"]["plan"].clone()).unwrap();
+        let Plan::Equip {
+            actor,
+            item: captured_item,
+            slot,
+            allocation,
+            preparation,
+        } = &frozen
+        else {
+            panic!("pending Equip carries its required allocation")
+        };
+        assert_eq!(*actor, tor_simulation::ActorId(SOURCE.0));
+        assert_eq!(*captured_item, ItemId(internal_item));
+        assert_eq!(*slot, EquipmentSlotId(10));
+        assert!(
+            *preparation > 0,
+            "ordinary draw must reach a pending save boundary"
+        );
+        assert_eq!(previous["pending"]["remaining"], *preparation);
+        assert_eq!(previous["pending"]["active"], true);
+        assert_eq!(allocation.target, CapturedWeaponProfile::Ordinary);
+        assert_eq!(
+            allocation.occupants.len(),
+            1,
+            "the complete pool includes the existing primary"
+        );
+        let occupant = &allocation.occupants[0];
+        assert_eq!(occupant.socket, EquipmentSlotId(0));
+        assert_eq!(occupant.profile, CapturedWeaponProfile::Ordinary);
+        assert_eq!(
+            wire.service.engine.target_scope(SOURCE).item(occupant.item),
+            primary
+        );
+        let primary_item = occupant.item;
+        let equipment: BTreeMap<EquipmentSlotId, ItemId> =
+            serde_json::from_value(previous["equipment"].clone()).unwrap();
+        assert_eq!(equipment, [(EquipmentSlotId(0), primary_item)].into());
+        assert_eq!(
+            ack(wire.send(SOURCE, "draw-secondary", request.clone())),
+            started
+        );
+        assert_eq!(
+            saved(&wire.service),
+            pending,
+            "started retry preserves the frozen allocation"
+        );
+        wire.service.engine.flush().unwrap();
+        drop(wire);
+
+        let engine =
+            Engine::open_with_policy(&path, crate::Scenario::two_room(999), policy.clone())
+                .unwrap();
+        if interval == 4096 {
+            assert!(
+                engine.recovery_profile().records_replayed > 0,
+                "pending allocation must traverse actual journal replay"
+            );
+        }
+        assert_eq!(
+            saved_engine(&engine),
+            pending,
+            "source-free restore preserves the complete pending Engine before session startup"
+        );
+        let service = Service::new(engine);
+        let paused_state = saved(&service);
+        let paused_actor = live_actor(&paused_state, SOURCE);
+        assert_eq!(
+            paused_actor["pending"]["active"], false,
+            "ordinary reconnect deliberately suspends human preparation"
+        );
+        for field in [
+            "plan",
+            "hold",
+            "origin",
+            "intention",
+            "progress",
+            "item_payment",
+            "threats",
+            "remaining",
+        ] {
+            assert_eq!(
+                paused_actor["pending"][field], previous["pending"][field],
+                "startup retains frozen Equip {field}"
+            );
+        }
+        for field in ["combat", "equipment", "location"] {
+            assert_eq!(
+                paused_actor[field], previous[field],
+                "startup preserves {field}"
+            );
+        }
+        for field in ["rules_rng", "tick"] {
+            assert_eq!(
+                paused_state["game"][field], pending["game"][field],
+                "startup preserves {field}"
+            );
+        }
+        let restored: Plan =
+            serde_json::from_value(paused_actor["pending"]["plan"].clone()).unwrap();
+        assert_eq!(restored, frozen);
+        let mut wire = Wire::connect_service(service);
+        assert_eq!(
+            saved(&wire.service),
+            paused_state,
+            "owner connection never auto-resumes Equip"
+        );
+        let paused_receipt = ack(wire.send(SOURCE, "draw-secondary", request.clone()));
+        assert_eq!(exact_receipt(&paused_receipt), identity);
+        assert!(matches!(
+            paused_receipt,
+            RequestReceipt::Admitted {
+                phase: IntentionPhase::Paused,
+                ..
+            }
+        ));
+        assert_eq!(saved(&wire.service), paused_state);
+        let snapshot = wire
+            .send(SOURCE, "equip-resume-snapshot", Request::Snapshot)
+            .into_iter()
+            .find_map(|message| match message {
+                ServerMessage::Snapshot { snapshot, .. } => Some(snapshot),
+                _ => None,
+            })
+            .unwrap();
+        assert!(snapshot.readiness.resume.contains(&identity.0));
+        let resume = Request::Command {
+            context: snapshot.reply_context().input,
+            branch: snapshot.branch.clone(),
+            command: Command::ResumeIntention {
+                expected_revision: snapshot.state.revision,
+                intention: identity.0.clone(),
+            },
+        };
+        ack(wire.send(SOURCE, "resume-draw-secondary", resume));
+        let mut completed = None;
+        for ordinal in 0..32 {
+            wire.service.run_until_blocked();
+            for actor in ACTORS {
+                wire.drain(actor);
+            }
+            let receipt = ack(wire.send(SOURCE, "draw-secondary", request.clone()));
+            assert_eq!(exact_receipt(&receipt), identity);
+            if matches!(
+                receipt,
+                RequestReceipt::Admitted {
+                    phase: IntentionPhase::Resolved,
+                    ..
+                }
+            ) {
+                completed = Some(receipt);
+                break;
+            }
+            let actor = wire.service.engine.next_actor().unwrap();
+            let wait = wire.request(actor, Action::Wait);
+            ack(wire.send(actor, &format!("equip-clock-{ordinal}"), wait));
+        }
+        let completed = completed.expect("ordinary scheduler resolves the original frozen Equip");
+        let settled = saved(&wire.service);
+        let equipment: BTreeMap<EquipmentSlotId, ItemId> =
+            serde_json::from_value(live_actor(&settled, SOURCE)["equipment"].clone()).unwrap();
+        assert_eq!(
+            equipment,
+            [
+                (EquipmentSlotId(0), primary_item),
+                (EquipmentSlotId(10), ItemId(internal_item))
+            ]
+            .into(),
+            "only the captured secondary socket changes; primary is never displaced"
+        );
+        let observation = wire.service.engine.observation(SOURCE).unwrap();
+        let interactions = observation.interactions.as_ref().unwrap();
+        assert_eq!(
+            interactions
+                .inventory
+                .iter()
+                .find(|offer| offer.item == item)
+                .unwrap()
+                .equipped_slot,
+            Some(10)
+        );
+        assert_eq!(
+            interactions
+                .inventory
+                .iter()
+                .find(|offer| offer.item == primary)
+                .unwrap()
+                .equipped_slot,
+            Some(0)
+        );
+        assert_eq!(
+            ack(wire.send(SOURCE, "draw-secondary", request.clone())),
+            completed
+        );
+        assert_eq!(
+            saved(&wire.service),
+            settled,
+            "completed retry changes no equipment, time, RNG or receipt"
+        );
+        wire.service.engine.flush().unwrap();
+        drop(wire);
+
+        let engine =
+            Engine::open_with_policy(&path, crate::Scenario::two_room(999), policy).unwrap();
+        if interval == 4096 {
+            assert!(
+                engine.recovery_profile().records_replayed > 0,
+                "completed allocation must traverse actual journal replay"
+            );
+        }
+        assert_eq!(
+            saved_engine(&engine),
+            settled,
+            "source-free completed restore retains exact socket mapping and receipt"
+        );
+        let mut wire = Wire::connect(engine);
+        assert_eq!(saved(&wire.service), settled);
+        assert_eq!(ack(wire.send(SOURCE, "draw-secondary", request)), completed);
+        assert_eq!(
+            saved(&wire.service),
+            settled,
+            "completed reopened retry is a no-op"
+        );
+    }
+}
+
+#[path = "projectile_session_tests.rs"]
+mod projectile_tests;

@@ -297,6 +297,59 @@ impl From<WeaponRangeBands> for tor_simulation::weapon_profiles::RangeBands {
         }
     }
 }
+/// Source-owned launcher identity and physical range, independent of runtime serde.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherProfile {
+    pub family: String,
+    pub range: WeaponRangeBands,
+}
+impl LauncherProfile {
+    fn compile(&self) -> Result<tor_simulation::weapon_profiles::LauncherProfile, crate::Failure> {
+        Ok(tor_simulation::weapon_profiles::LauncherProfile {
+            family: tor_simulation::content_ids::LauncherFamilyId::new(&self.family)
+                .map_err(|_| super::fail("Invalid launcher family ID"))?,
+            range: self.range.into(),
+        })
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HitRecovery {
+    ConsumedOnHit,
+    Recoverable,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectileSpec {
+    pub family: String,
+    pub damage: crate::creature_authoring::Damage,
+    pub recovery: HitRecovery,
+}
+impl ProjectileSpec {
+    pub(crate) fn compile(
+        &self,
+        rules: &tor_simulation::rules::Ruleset,
+    ) -> Result<tor_simulation::projectile_profiles::ProjectileSpec, crate::Failure> {
+        let result = tor_simulation::projectile_profiles::ProjectileSpec {
+            family: tor_simulation::content_ids::LauncherFamilyId::new(&self.family)
+                .map_err(|_| super::fail("Invalid projectile family ID"))?,
+            damage: self.damage.compile(rules)?,
+            recovery: match self.recovery {
+                HitRecovery::ConsumedOnHit => {
+                    tor_simulation::projectile_profiles::HitRecovery::ConsumedOnHit
+                }
+                HitRecovery::Recoverable => {
+                    tor_simulation::projectile_profiles::HitRecovery::Recoverable
+                }
+            },
+        };
+        result
+            .validate_shape()
+            .map_err(|_| super::fail("Invalid projectile definition"))?;
+        Ok(result)
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WeaponTrait {
@@ -345,7 +398,7 @@ pub struct WeaponTraitChanges {
 #[serde(deny_unknown_fields)]
 pub struct WeaponProfileSpec {
     pub expertise: String,
-    pub ranged: Option<WeaponRangeBands>,
+    pub launcher: Option<LauncherProfile>,
     pub base_traits: Vec<WeaponTrait>,
     pub expert_traits: WeaponTraitChanges,
 }
@@ -356,7 +409,11 @@ impl WeaponProfileSpec {
         Ok(tor_simulation::weapon_profiles::WeaponProfileSpec {
             expertise: tor_simulation::content_ids::ExpertiseId::new(&self.expertise)
                 .map_err(|_| super::fail("Invalid weapon expertise ID"))?,
-            ranged: self.ranged.map(Into::into),
+            launcher: self
+                .launcher
+                .as_ref()
+                .map(LauncherProfile::compile)
+                .transpose()?,
             base_traits: self.base_traits.iter().copied().map(Into::into).collect(),
             expert_traits: tor_simulation::weapon_profiles::WeaponTraitChanges {
                 add: self
@@ -1630,7 +1687,7 @@ mod weapon_profile_authoring_tests {
     #[test]
     fn authored_weapon_profile_round_trips_toml_with_omitted_nullable_ranges() {
         let value = equipment();
-        assert!(value.weapon_profile.as_ref().unwrap().ranged.is_none());
+        assert!(value.weapon_profile.as_ref().unwrap().launcher.is_none());
         let encoded = toml::to_string(&value).unwrap();
         assert_eq!(toml::from_str::<EquipmentSpec>(&encoded).unwrap(), value);
         let legacy: EquipmentSpec = toml::from_str("slot = 'weapon'").unwrap();
@@ -1695,12 +1752,64 @@ mod weapon_profile_authoring_tests {
             },
         ] {
             let mut malformed = value.clone();
-            malformed.weapon_profile.as_mut().unwrap().ranged = Some(range);
+            malformed.weapon_profile.as_mut().unwrap().launcher = Some(LauncherProfile {
+                family: "fixture.arrow".into(),
+                range,
+            });
             assert!(malformed
                 .compile(&valid)
                 .unwrap()
                 .validate_rules(tor_simulation::ItemClass::Weapon, &valid)
                 .is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod projectile_authoring_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn projectile() -> ProjectileSpec {
+        serde_json::from_value(json!({"family":"fixture.arrow", "recovery":"recoverable",
+            "damage":{"components":[{"category":"keen","descriptor":null,
+                "amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}],
+                "primary":{"category":"keen","descriptor":null,"sides":6}}}))
+        .unwrap()
+    }
+
+    #[test]
+    fn projectile_source_round_trips_and_compiles_shared_damage_without_equipment() {
+        let source = projectile();
+        let encoded = toml::to_string(&source).unwrap();
+        assert_eq!(toml::from_str::<ProjectileSpec>(&encoded).unwrap(), source);
+        let rules = tor_simulation::rules::Ruleset::validate(
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap(),
+        )
+        .unwrap();
+        let compiled = source.compile(&rules).unwrap();
+        let launcher = LauncherProfile {
+            family: "fixture.arrow".into(),
+            range: WeaponRangeBands {
+                short_feet: 20,
+                long_feet: 60,
+            },
+        }
+        .compile()
+        .unwrap();
+        assert!(compiled.compatible_with(&launcher));
+        for change in 0..4 {
+            let mut bad = source.clone();
+            match change {
+                0 => bad.family = "bad family".into(),
+                1 => bad.damage.primary = None,
+                2 => bad.damage.primary.as_mut().unwrap().sides = Some(8),
+                _ => bad.damage.components[0].descriptor = Some("unknown".into()),
+            }
+            assert!(bad.compile(&rules).is_err());
+        }
+        let mut bad = serde_json::to_value(&source).unwrap();
+        bad["attack"] = json!({});
+        assert!(serde_json::from_value::<ProjectileSpec>(bad).is_err());
     }
 }
