@@ -4549,6 +4549,7 @@ mod tests {
             "creature",
             "anatomy",
             "equipment",
+            "equipment_generation",
             "consumable",
             "readable",
             "device",
