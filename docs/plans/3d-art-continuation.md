@@ -119,6 +119,14 @@ waist/shoulder/hip relationships survive all supported builds; arm movement does
 not expose broad disconnected surfaces. Review both sexes and all three builds
 collectively, with unchanged families as controls.
 
+Progress: limbs now have the first reusable cloth rule. A sculpt can be
+inflated, so a sleeve or trouser leg is the anatomy beneath it grown by an
+ease (filling the muscle hollows), with soft rolls gathered at the elbow and
+below the knee; cuffs and bracers sit over that ease. Every clothed person
+uses it, including the Rogue folk, and contract tests require the cloth to
+clear the limb all round for every build. Torso regions, free hems and plate
+articulation remain to be done.
+
 ### 3. Separate composition concerns without a new content format
 
 Keep body morphology, outfit selection, material roles and motion constraints

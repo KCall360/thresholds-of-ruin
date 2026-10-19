@@ -48,6 +48,9 @@ impl Shape {
 pub enum Step {
     Add(Shape, f32),
     Carve(Shape, f32),
+    /// Grow everything sculpted so far outward by a distance: a garment
+    /// laid over the form it covers, its small hollows filled.
+    Inflate(f32),
 }
 
 fn smooth_min(a: f32, b: f32, k: f32) -> f32 {
@@ -79,6 +82,11 @@ impl Sculpt {
         self
     }
 
+    pub fn inflate(&mut self, amount: f32) -> &mut Self {
+        self.steps.push(Step::Inflate(amount));
+        self
+    }
+
     pub fn distance(&self, p: Vec3) -> f32 {
         let mut d = f32::MAX;
         for step in &self.steps {
@@ -91,6 +99,7 @@ impl Sculpt {
                     }
                 }
                 Step::Carve(s, k) => d = smooth_max(d, -s.distance(p), k),
+                Step::Inflate(amount) => d -= amount,
             }
         }
         d
