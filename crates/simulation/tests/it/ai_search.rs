@@ -36,6 +36,7 @@ fn autonomous_healing_intention_survives_checkpoint_and_consumes_only_on_complet
     potion.concealed = true;
     potion.appearance = "red potion".into();
     potion.consumable = Some(ConsumableSpec {
+        discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![tor_simulation::rules::Effect::Heal {
             amount: tor_simulation::rules::AmountExpr::Fixed { amount: 10 },
         }],
@@ -200,6 +201,7 @@ fn autonomous_loot_checkpoint_preserves_split_stack_and_does_not_collect_spares(
     potion.class = ItemClass::Potion;
     potion.stackable = true;
     potion.consumable = Some(ConsumableSpec {
+        discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![tor_simulation::rules::Effect::Heal {
             amount: tor_simulation::rules::AmountExpr::Fixed { amount: 10 },
         }],

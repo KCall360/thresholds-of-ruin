@@ -2,8 +2,8 @@
 
 Items support quantity-aware pickup/drop, compatible stacking, character-owned
 identity knowledge, anatomy-based equipment, timed consumption with explicit edibility,
-and ordinary currency/theft transfers. Capacity, containers and
-ordinary identification actions remain deferred. NetHack informs the interaction style;
+readable scrolls, charged directional devices, and ordinary currency/theft transfers.
+Capacity and containers remain deferred. NetHack informs the interaction style;
 these are this project's explicit rules, not a claim of exact NetHack behavior.
 
 ## Ordinary play
@@ -125,7 +125,7 @@ is separate from pickup reach. Frozen/detached records retain reciprocal
 actor/item claims; incomplete or contradictory restored relationships reject.
 
 Under the shared default rules, body armor changes take three actor turns;
-other equipment changes, drinking and eating take one. Equip/remove multipliers belong
+other equipment changes, drinking, eating, reading and zapping take one. Equip/remove multipliers belong
 to each rules-defined slot, and consume timing is a ruleset constant; validated
 scenario overrides can change these defaults. Effects apply only on completion. Equipped armor protects during
 removal, occupied slots require removal before replacement, and equipped items
@@ -150,6 +150,70 @@ other actors' inventory are absent. This state reconstructs exactly through full
 observations, deltas, checkpoints and replay. The validated
 `scenarios/tests/interactions` package and `test_interactions_process.py` cover
 starting gear, timing, disclosure, consumption and checkpoint restart.
+
+## Reading, identification and charged devices
+
+Read and Zap are explicit item capabilities, independent of an item's name or
+physical class. `read <carried name or #id>` spends one scroll unit at completion.
+`zap <carried name or #id> <direction>` reserves the exact nonstackable device and
+spends one charge on resolution. Devices keep quantity one; each instance owns
+its charge balance, sampled once on creation. Empty devices retain the same
+unknown affordance and take the same time, but launch nothing and cannot underflow.
+No target, a successful dodge or immunity still spends a charged launch. Pausing,
+resuming, dropping, death, checkpoint restoration and transaction rollback reuse
+the existing exact-item hold and preparation rules.
+
+An unknown identify scroll is consumed before its permitted category appears.
+Its owner gets one persisted choice among at most 64 current carried items of that
+category. `identify <name or #id>` resolves it; `identify cancel` declines without
+refund. Both require the original opaque choice token. A stale, wrong-category or
+other actor's target rejects atomically. Another Read cannot bank another choice;
+death clears it. Declining is an explicit TOR usability adaptation: pinned Rogue
+insists on an eligible selection. Reading while blind is permitted, as in that
+source. ASCII uses F6 to Read and F12 to select a device and direction. Escape
+before submission cancels freely; Escape in the paid choice declines the spent
+scroll. R still releases control and Z still opens abilities.
+
+Type identity and exact-instance charge knowledge are separate actor-owned facts.
+Identifying one device learns its type for matching instances, but only that
+selected device's charges. A charged elemental launch recognizes its type even
+without a target, but does not reveal its remaining charges. A known owner observes
+their own charge payment. Ownership transfer does not give the recipient another
+actor's knowledge, and another actor's hidden use cannot refresh an old charge
+fact. Spectator responses omit charge balances and identification choices. Queries
+and client selection never identify anything.
+
+Rogue's fire, cold and lightning devices use Intellect + Lore against each
+recipient's Speed + Agility, using the existing opposed-ray executor. Rank zero
+is usable. Activation has no separate check or Mana cost, and owning or using the
+device never grants an ability to the actor. Definitions currently author six
+clear-cell visits, 6d6 typed Energy damage and 3–7 initial charges. These are
+explicit TOR check/timing adaptations on the pinned Rogue content; geometry,
+reflection and repeat-check disadvantage remain the shared ray rules.
+
+The generic effects also support independent per-HD healing dice (the compiled
+HD count is frozen at preparation), rolled actor-turn condition durations,
+condition removal, and additive duration extension. A turn is converted through
+the prepared actor's turn-tick value. Repeatable potion confusion has a separate
+condition from the gaze's expiry-protected condition. Ordinary Rogue healing uses strict overflow: when its independent HDd4 sum
+exceeds the prior injury, one point improves the earliest active owned HD with
+acquisition-time headroom. Exact fill does not improve a roll. The original seed,
+source, acquisition type/die and template witness stay fixed; the first HD is
+already maximized. At the cap the potion simply heals. This bounded owned-roll
+policy is an explicit TOR adaptation of Rogue's uncapped permanent maximum-HP
+increase, not a loose permanent Health modifier.
+
+Improvement credit survives level drain only for that exact owned HD. Restoring
+the same source/ordinal/seed restores its original credit; choosing a different
+replacement retires that dormant row and cannot transfer or later resurrect its
+credit. A smaller current form die or explicit Health override can temporarily
+mask the benefit, but cannot enlarge the acquisition cap. Credit becomes effective
+again when the masking form or override ends. Eligibility comes from compiled
+permanent facts; ordinary healing does not scan the HD ledger, and permanent
+recompilation occurs only when an owned record actually changes. Resolved
+improvement claims also bind the current build epoch, so a later replacement
+that repeats the same source and seed cannot reuse an old claim. The `scenarios/tests/magic-items` package and bounded process
+witness exercise the ordinary drink/read/identify/zap path and source-free reopen.
 
 ## Quantity expressions
 
@@ -266,7 +330,7 @@ change the actor's hostile acquisition and memory contracts. See
 
 Archetypes declare an optional physical `class` (default `misc`); item placements
 may override it for ordinary items. Concealed items retain their archetype class,
-and appearance pools share one class and the same equipment-slot/drink/eat affordances
+and appearance pools share one class and the same equipment-slot/drink/eat/read/zap affordances
 so these facts cannot reveal a hidden effect.
 Classes are appearance facts, independent of mechanics, and survive transfer,
 identification, rewind and persistence. They participate in stack compatibility.
@@ -303,8 +367,8 @@ survives dropping and persists independently of item ownership and existence.
 The privileged `wizard identify <actor> <item>` command exercises knowledge
 updates through the ordinary journal and rewind path. It requires existing wizard
 authorization and marks the lineage through the existing wizard rules. Drinking
-can teach identity through an observable effect; standalone ordinary
-identification actions remain deferred. Rogue's concealed restore-strength potion
+can teach identity through an observable self effect. Ordinary identification is
+a single paid scroll continuation, described above; it is not a free identify endpoint. Rogue's concealed restore-strength potion
 uses this same path: positive actual deficit removal teaches identity; a no-deficit
 dose is consumed without learning. Its sole effect is bounded Strength restoration,
 with no extra healing or resource refill; see [Rogue restoration](../play/rogue.md#strength-loss-and-ordinary-restoration).

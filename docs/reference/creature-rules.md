@@ -1314,10 +1314,13 @@ share one effect-state kernel; this adds no whole-game clone to an action.
 
 ## Conditions and active time
 
-Conditions define a family, lifecycle, keep/refresh/longest/bounded stacking behavior,
-source scope, descriptors, explicit actor-active timing, operation restrictions,
-preparation response and a capacity policy. `keep` preserves the first application's
-remaining time and provenance without refreshing or stacking. Each family contributes at most
+Conditions define a family, lifecycle, keep/refresh/longest/extend/bounded stacking
+behavior, source scope, descriptors, explicit actor-active timing, operation
+restrictions, preparation response and a capacity policy. `keep` preserves the first
+application's remaining time and provenance without refreshing or stacking. `extend`
+adds another application's duration to the remaining time of the same single entry,
+retaining its original causer; exceeding the timer bound rejects without changing it.
+Each family contributes at most
 one signed edge to a check, after selecting applicable causers. Fear and Rattled
 penalize checks against their source; Braced penalizes incoming Physical checks.
 Multiple instances and aliases in one family cannot multiply that edge. Talent
@@ -1380,8 +1383,12 @@ rebuild atomically rather than removing or reinterpreting its paid claim.
 Restrictions are a bounded, unique set of operation kinds: `voluntary_actions`,
 `ordinary_movement` and `movement_abilities`. The required preparation response is
 `preserve` or `pause`; pause applies only to work matching the condition's
-restrictions. Protected lifecycle/restriction entries must be timed, target-wide,
-nonrefreshing and modifier-free. Independent ordinary modifier conditions compose
+restrictions. Protected lifecycle/restriction entries must be timed and target-wide.
+Their only permitted modifiers are unconditional bounded confusion locomotion;
+other modifiers use ordinary evictable conditions. Post-expiry protection requires
+`keep`, so neither the active application nor protection can refresh. Restrictions
+with `remove` expiry may instead use `extend`, retaining their non-evictable book
+slot while adding bounded duration. Independent ordinary modifier conditions compose
 with them; ordinary `keep` modifiers remain legal and normally evictable.
 
 For Frozen, content supplies a 200-tick application and 400-tick protection.

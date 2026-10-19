@@ -148,6 +148,8 @@ pub(super) struct PreparedArchetype {
     pub anatomy: Option<tor_simulation::AnatomySpec>,
     pub equipment: Option<tor_simulation::EquipmentSpec>,
     pub consumable: Option<tor_simulation::ConsumableSpec>,
+    pub readable: Option<tor_simulation::ReadableSpec>,
+    pub device: Option<tor_simulation::DeviceSpec>,
     pub edible: Option<tor_simulation::EdibleSpec>,
     pub supply: Option<tor_simulation::content_ids::SupplyId>,
     pub magical: bool,
@@ -191,6 +193,16 @@ impl PreparedArchetype {
                 .consumable
                 .as_ref()
                 .map(|consumable| consumable.compile(catalog.content().rules()))
+                .transpose()?,
+            readable: author
+                .readable
+                .as_ref()
+                .map(|readable| readable.compile(catalog.content().rules()))
+                .transpose()?,
+            device: author
+                .device
+                .as_ref()
+                .map(|device| device.compile(catalog.content().rules()))
                 .transpose()?,
             edible: author.edible.clone(),
             supply: author
@@ -601,6 +613,8 @@ impl PreparedDefinitions {
         let spec = tor_simulation::ItemSpec {
             equipment: inherited.equipment.clone(),
             consumable: inherited.consumable.clone(),
+            readable: inherited.readable.clone(),
+            device: inherited.device.clone(),
             edible: inherited.edible.clone(),
             supply: inherited.supply.clone(),
             magical: inherited.magical,
@@ -615,6 +629,10 @@ impl PreparedDefinitions {
             properties,
             asset: inherited.item_asset.clone(),
         };
+        require(
+            spec.device.is_none() || (!stackable && author.quantity == 1),
+            "Device instances must be non-stackable single items",
+        )?;
         require(
             author.quantity > 0 && (stackable || author.quantity == 1),
             "Invalid item quantity or non-stackable count",
@@ -1324,6 +1342,8 @@ mod tests {
                 anatomy: None,
                 equipment: None,
                 consumable: None,
+                readable: None,
+                device: None,
                 edible: None,
                 supply: None,
                 magical: false,

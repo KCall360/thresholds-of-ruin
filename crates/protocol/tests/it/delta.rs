@@ -83,6 +83,7 @@ fn equipped_state(requires_attack: bool) -> StateView {
         known_supply: None,
     }];
     state.observation.interactions = Some(InteractionView {
+        identification: None,
         completed: vec![],
         slots: vec![slot.clone()],
         preparation: None,
@@ -96,6 +97,9 @@ fn equipped_state(requires_attack: bool) -> StateView {
             }),
             drinkable: false,
             edible: false,
+            readable: false,
+            zappable: false,
+            charges: None,
         }],
     });
     state
@@ -172,6 +176,7 @@ fn prepared_ability_snapshots_validate_and_round_trip_deltas() {
         let mut next = base.clone();
         next.revision = 2;
         next.observation.interactions = Some(InteractionView {
+            identification: None,
             completed: vec![],
             slots: vec![],
             inventory: vec![],
@@ -207,6 +212,7 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
     let mut next = base.clone();
     next.revision = 2;
     next.observation.interactions = Some(InteractionView {
+        identification: None,
         completed: vec![Action::Drink {
             item: ItemTarget::from_digest(synthetic_digest(3)),
         }],
@@ -1359,6 +1365,7 @@ fn health_recovery_progress_validates_against_full_and_dead_combat_and_deltas() 
 fn phase5_preparation_supply_shape_is_validated_for_direct_values() {
     let mut state = room(5, 5, 1);
     state.observation.interactions = Some(InteractionView {
+        identification: None,
         completed: vec![],
         slots: vec![],
         inventory: vec![],
@@ -1403,5 +1410,84 @@ fn phase5_preparation_supply_shape_is_validated_for_direct_values() {
         };
         *supplies = SupplySelection::Explicit { items: rows };
         assert_eq!(invalid.validate(), Err(InvalidState::InvalidInteraction));
+    }
+}
+
+#[test]
+fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement() {
+    let base = room(5, 5, 1);
+    let mut next = base.clone();
+    next.revision += 1;
+    let item = ItemTarget::from_digest([75; 32]);
+    next.observation.inventory.push(ItemView {
+        id: item,
+        class: ItemClass::Wand,
+        quantity: 1,
+        name: "ivory wand".into(),
+        appearance: "ivory wand".into(),
+        identified: false,
+        corpse: None,
+        description: String::new(),
+        asset: None,
+        known_supply: None,
+    });
+    next.observation.interactions = Some(InteractionView {
+        identification: Some(IdentificationChoiceView {
+            choice: IntentionId("opaque-paid-choice".into()),
+            class: ItemClass::Wand,
+            items: vec![item],
+        }),
+        completed: vec![Action::Read {
+            item: ItemTarget::from_digest([76; 32]),
+        }],
+        slots: vec![],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item,
+            slot: None,
+            equipped_slot: None,
+            known_equipment: None,
+            drinkable: false,
+            edible: false,
+            readable: false,
+            zappable: true,
+            charges: None,
+        }],
+    });
+    round_trip(&base, &next);
+    let mut identified = next.clone();
+    identified.revision += 1;
+    identified.observation.inventory[0].identified = true;
+    let interaction = identified.observation.interactions.as_mut().unwrap();
+    interaction.identification = None;
+    interaction.inventory[0].charges = Some(0);
+    round_trip(&next, &identified);
+    for case in 0..5 {
+        let mut invalid = next.clone();
+        let interaction = invalid.observation.interactions.as_mut().unwrap();
+        match case {
+            0 => {
+                interaction.identification.as_mut().unwrap().items =
+                    vec![ItemTarget::from_digest([77; 32])]
+            }
+            1 => interaction.identification.as_mut().unwrap().class = ItemClass::Potion,
+            2 => interaction
+                .identification
+                .as_mut()
+                .unwrap()
+                .items
+                .push(item),
+            3 => interaction.inventory[0].charges = Some(0),
+            4 => interaction.completed.push(Action::Identify {
+                choice: IntentionId("opaque-paid-choice".into()),
+                item: None,
+            }),
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            invalid.validate(),
+            Err(InvalidState::InvalidInteraction),
+            "case {case}"
+        );
     }
 }

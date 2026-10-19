@@ -373,3 +373,56 @@ fn corrosion_diagnostics_are_closed_bounded_and_roundtrip_actual_loss() {
         );
     }
 }
+
+#[test]
+fn condition_removal_is_named_closed_and_bound_to_report_target() {
+    let effect = serde_json::json!({"type":"condition_removed","target":"2","condition":{"id":"haste","name":"Haste"}});
+    let decoded: DiagnosticEffect = serde_json::from_value(effect.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), effect);
+    for bad in [
+        serde_json::json!(["condition_removed", "2", {"id":"haste","name":"Haste"}]),
+        serde_json::json!({"type":"condition_removed","target":"2","condition":["haste","Haste"]}),
+        serde_json::json!({"type":"condition_removed","target":"2","condition":{"id":"haste","name":"Haste"},"duration":"1"}),
+    ] {
+        assert!(serde_json::from_value::<DiagnosticEffect>(bad).is_err());
+    }
+    let mut value = report();
+    value.records[0].outcome.effects.push(decoded);
+    assert!(value.validate().is_ok());
+    if let DiagnosticEffect::ConditionRemoved { target, .. } =
+        &mut value.records[0].outcome.effects[0]
+    {
+        *target = ActorId(3);
+    }
+    assert!(value.validate().is_err());
+}
+
+#[test]
+fn healing_improvement_diagnostic_discloses_no_owned_seed_or_selection_claim() {
+    let effect = serde_json::json!({"type":"heal_and_improve_hit_die","target":"2","amount":8});
+    let decoded: DiagnosticEffect = serde_json::from_value(effect.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), effect);
+    for field in [
+        "source",
+        "seed",
+        "health_seed",
+        "ordinal",
+        "improvement",
+        "origin",
+    ] {
+        let mut bad = effect.clone();
+        bad[field] = serde_json::json!(1);
+        assert!(
+            serde_json::from_value::<DiagnosticEffect>(bad).is_err(),
+            "{field}"
+        );
+    }
+    let mut value = report();
+    value.records[0].outcome.effects = vec![decoded];
+    assert!(value.validate().is_ok());
+    value.records[0].outcome.effects = vec![DiagnosticEffect::HealAndImproveHitDie {
+        target: ActorId(0),
+        amount: 8,
+    }];
+    assert!(value.validate().is_err());
+}

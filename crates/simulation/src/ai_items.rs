@@ -616,6 +616,7 @@ mod tests {
         let mut item = crate::ItemSpec::ordinary("known restorative".into());
         item.class = crate::ItemClass::Potion;
         item.consumable = Some(crate::ConsumableSpec {
+            discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![crate::rules::Effect::Heal {
                 amount: crate::rules::AmountExpr::Fixed { amount: 2 },
             }],

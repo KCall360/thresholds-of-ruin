@@ -2,6 +2,7 @@
 //! links one test executable instead of one per file.
 
 mod linked_holds;
+mod magic_items;
 mod map_memory;
 mod presentation;
 mod public_plan_observation;

@@ -4,7 +4,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 50;
+pub const PROTOCOL_VERSION: u32 = 51;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -97,7 +97,7 @@ pub struct EntryId(pub String);
 #[serde(transparent)]
 pub struct BranchId(pub String);
 
-/// Opaque admission identity. Backend scheduling counters never cross the wire.
+/// Opaque admission or paid-choice identity. Scheduling counters never cross the wire.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct IntentionId(pub String);
@@ -260,6 +260,17 @@ pub enum Action {
     Eat {
         item: ItemTarget,
     },
+    Read {
+        item: ItemTarget,
+    },
+    Zap {
+        item: ItemTarget,
+        direction: Direction,
+    },
+    Identify {
+        choice: IntentionId,
+        item: Option<ItemTarget>,
+    },
     SetDoor {
         door: DoorTarget,
         open: bool,
@@ -318,6 +329,19 @@ impl<'de> Deserialize<'de> for Action {
             Eat {
                 item: ItemTarget,
             },
+            Read {
+                item: ItemTarget,
+            },
+            Zap {
+                item: ItemTarget,
+                #[serde(deserialize_with = "read_direction_token")]
+                direction: Direction,
+            },
+            Identify {
+                choice: IntentionId,
+                #[serde(deserialize_with = "required_nullable")]
+                item: Option<ItemTarget>,
+            },
             SetDoor {
                 door: DoorTarget,
                 open: bool,
@@ -372,6 +396,9 @@ impl<'de> Deserialize<'de> for Action {
             Fields::Unequip { item } => Self::Unequip { item },
             Fields::Drink { item } => Self::Drink { item },
             Fields::Eat { item } => Self::Eat { item },
+            Fields::Read { item } => Self::Read { item },
+            Fields::Zap { item, direction } => Self::Zap { item, direction },
+            Fields::Identify { choice, item } => Self::Identify { choice, item },
             Fields::SetDoor { door, open } => Self::SetDoor { door, open },
             Fields::Move { direction } => Self::Move { direction },
             Fields::Take { item, quantity } => Self::Take { item, quantity },
@@ -648,7 +675,64 @@ pub struct ItemInteractionView {
     pub known_equipment: Option<EquipmentView>,
     pub drinkable: bool,
     pub edible: bool,
+    pub readable: bool,
+    pub zappable: bool,
+    #[serde(deserialize_with = "required_nullable")]
+    pub charges: Option<u16>,
 }
+/// An owner-only paid selection. Items are current carried opaque references.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct IdentificationChoiceView {
+    pub choice: IntentionId,
+    pub class: ItemClass,
+    pub items: Vec<ItemTarget>,
+}
+impl<'de> Deserialize<'de> for IdentificationChoiceView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            choice: IntentionId,
+            #[serde(deserialize_with = "read_item_class_token")]
+            class: ItemClass,
+            #[serde(deserialize_with = "crate::bounded::bounded::<_, _, 64>")]
+            items: Vec<ItemTarget>,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        let mut seen = std::collections::BTreeSet::new();
+        if fields.choice.0.is_empty()
+            || fields.choice.0.len() > 256
+            || !fields.items.iter().all(|item| seen.insert(*item))
+        {
+            return Err(serde::de::Error::custom("invalid identification choice"));
+        }
+        Ok(Self {
+            choice: fields.choice,
+            class: fields.class,
+            items: fields.items,
+        })
+    }
+}
+
+fn read_direction_token<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Direction, D::Error> {
+    let token = String::deserialize(d)?;
+    Direction::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(token))
+}
+
+fn read_item_class_token<'de, D: serde::Deserializer<'de>>(d: D) -> Result<ItemClass, D::Error> {
+    let token = String::deserialize(d)?;
+    ItemClass::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(token))
+}
+
+fn required_nullable<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreparationView {
@@ -660,6 +744,8 @@ pub struct PreparationView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InteractionView {
+    #[serde(deserialize_with = "required_nullable")]
+    pub identification: Option<IdentificationChoiceView>,
     /// This observer's completed item actions, including consumed final units.
     pub completed: Vec<Action>,
     pub slots: Vec<EquipmentSlot>,

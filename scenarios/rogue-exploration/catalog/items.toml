@@ -52,11 +52,11 @@ magical = true
 class = "potion"
 stackable = true
 appearance_pool = "rogue.potions"
-consumable = { effects = [{ kind = "restore_attribute", attribute = "strength", amount = { kind = "fixed", amount = 1000 } }] }
+consumable = { discovery = "self_effect", effects = [{ kind = "restore_attribute", attribute = "strength", amount = { kind = "fixed", amount = 1000 } }] }
 
 [appearance_pools."rogue.potions"]
 asset = "item.potion"
-appearances = ["amber potion", "smoky potion", "violet potion"]
+appearances = ["amber potion", "smoky potion", "violet potion", "azure potion"]
 
 # Ordinary recoverable stacks; neither a purse abstraction nor a supply item.
 [items."rogue.gold"]
@@ -67,3 +67,120 @@ class = "coin"
 stackable = true
 currency = "gold"
 magical = false
+
+# Ordinary healing keeps the source's independent level-d4 rolls, sight cure,
+# on-use recognition and strict overflow trigger. TOR uses active owned HD and
+# improves the earliest eligible acquisition roll by one, bounded by its original
+# die maximum. An improved drained row keeps its bonus only on same-row restoration.
+[items."rogue.healing"]
+asset = "item.potion"
+name = "potion of healing"
+identity = "rogue.healing"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "heal_per_hit_die", sides = 4, bonus = 0, overflow = "improve_earliest_hit_die" }, { kind = "remove_condition", condition = "rogue.blindness" }] }
+
+# Ordinary timed potion conditions have no gaze-expiry protection. Durations
+# preserve source ranges in actor turns; TOR actor-active ticks are an adaptation.
+[items."rogue.confusion"]
+asset = "item.potion"
+name = "potion of confusion"
+identity = "rogue.confusion"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.potion_confusion", duration = { kind = "rolled", dice = { count = 1, sides = 2, bonus = 18 } } }] }
+
+[items."rogue.blindness"]
+asset = "item.potion"
+name = "potion of blindness"
+identity = "rogue.blindness"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.blindness", duration = { kind = "rolled", dice = { count = 1, sides = 85, bonus = 807 } } }] }
+
+# Initial identify supports one physical category per scroll. The identified
+# type and selected exact instance are separate knowledge facts.
+[items."rogue.identify_potion"]
+asset = "item.scroll"
+name = "scroll of identify potion"
+identity = "rogue.identify_potion"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { identify = "potion", discovery = "on_use" }
+
+[items."rogue.sleep"]
+asset = "item.scroll"
+name = "scroll of sleep"
+identity = "rogue.sleep"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.sleep", duration = { kind = "rolled", dice = { count = 1, sides = 5, bonus = 3 } } }] }
+
+[appearance_pools."rogue.scrolls"]
+asset = "item.scroll"
+appearances = ["scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA"]
+
+[items."rogue.identify_scroll"]
+asset = "item.scroll"
+name = "scroll of identify scroll"
+identity = "rogue.identify_scroll"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { identify = "scroll", discovery = "on_use" }
+
+# Wand-only is the initial TOR subset of the source's ring-or-wand category.
+[items."rogue.identify_wand"]
+asset = "item.scroll"
+name = "scroll of identify wand"
+identity = "rogue.identify_wand"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { identify = "wand", discovery = "on_use" }
+
+[items."rogue.wand_fire"]
+asset = "item.wand"
+name = "wand of fire"
+identity = "rogue.wand_fire"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_fire", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
+
+[items."rogue.wand_cold"]
+asset = "item.wand"
+name = "wand of cold"
+identity = "rogue.wand_cold"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_cold", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
+
+[items."rogue.wand_lightning"]
+asset = "item.wand"
+name = "wand of lightning"
+identity = "rogue.wand_lightning"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_lightning", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
+
+[appearance_pools."rogue.wands"]
+asset = "item.wand"
+appearances = ["ash wand", "copper wand", "ivory wand"]

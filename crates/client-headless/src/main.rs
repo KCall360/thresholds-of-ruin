@@ -626,3 +626,30 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod magic_item_tests {
+    use super::*;
+    #[test]
+    fn ordinary_json_lines_preserve_read_zap_and_bound_identification() {
+        let item = ItemTarget::from_digest([74; 32]);
+        for value in [
+            serde_json::json!({"type":"read","item":item}),
+            serde_json::json!({"type":"zap","item":item,"direction":"north"}),
+            serde_json::json!({"type":"identify","choice":"paid-choice","item":item}),
+            serde_json::json!({"type":"identify","choice":"paid-choice","item":null}),
+        ] {
+            let input: Input =
+                serde_json::from_value(serde_json::json!({"type":"act","action":value})).unwrap();
+            let Input::Act { action } = input else {
+                panic!("ordinary action expected");
+            };
+            assert_eq!(serde_json::to_value(action).unwrap(), value);
+        }
+        assert!(serde_json::from_value::<Input>(
+            serde_json::json!({"type":"act","action":{"type":"identify","choice":"paid-choice"}})
+        )
+        .is_err());
+        assert!(serde_json::from_value::<Input>(serde_json::json!({"type":"act","action":{"type":"zap","item":item,"direction":"north","charges":10}})).is_err());
+    }
+}

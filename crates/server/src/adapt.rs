@@ -200,6 +200,17 @@ pub fn action(action: &a::Action) -> s::Action {
         a::Action::Eat { item } => s::Action::Eat {
             item: s::ItemId(*item),
         },
+        a::Action::Read { item } => s::Action::Read {
+            item: s::ItemId(*item),
+        },
+        a::Action::Zap { item, direction } => s::Action::Zap {
+            item: s::ItemId(*item),
+            direction: step_direction(*direction),
+        },
+        a::Action::Identify { choice, item } => s::Action::Identify {
+            choice: *choice,
+            item: item.map(s::ItemId),
+        },
         a::Action::Wait => s::Action::Wait,
     }
 }
@@ -245,7 +256,15 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
         a::Action::Eat { item } => s::Work::Eat {
             item: s::ItemId(*item),
         },
-        a::Action::SetDoor { .. }
+        a::Action::Read { item } => s::Work::Read {
+            item: s::ItemId(*item),
+        },
+        a::Action::Zap { item, direction } => s::Work::Zap {
+            item: s::ItemId(*item),
+            direction: step_direction(*direction),
+        },
+        a::Action::Identify { .. }
+        | a::Action::SetDoor { .. }
         | a::Action::Move { .. }
         | a::Action::Take { .. }
         | a::Action::TouchApparentObject { .. }
@@ -363,12 +382,27 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
         s::Action::Unequip { item } => a::Action::Unequip { item: item.0 },
         s::Action::Drink { item } => a::Action::Drink { item: item.0 },
         s::Action::Eat { item } => a::Action::Eat { item: item.0 },
+        s::Action::Read { item } => a::Action::Read { item: item.0 },
+        s::Action::Zap { item, direction } => a::Action::Zap {
+            item: item.0,
+            direction: recorded_step_direction(direction),
+        },
+        s::Action::Identify { choice, item } => a::Action::Identify {
+            choice,
+            item: item.map(|item| item.0),
+        },
         s::Action::Wait => a::Action::Wait,
     })
 }
 
 pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
     match kind {
+        s::OutcomeKind::IdentificationResolved { choice, item } => {
+            crate::journal::Event::IdentificationResolved {
+                choice,
+                item: item.map(|item| item.0),
+            }
+        }
         s::OutcomeKind::EscapeStarted { hold } => crate::journal::Event::EscapeStarted { hold },
         s::OutcomeKind::GrowthSourceChosen { .. } => crate::journal::Event::GrowthSourceChosen,
         s::OutcomeKind::Purchased { .. } => crate::journal::Event::Purchased,
@@ -591,6 +625,17 @@ pub fn observation(
         }),
         linked_holds,
         interactions: view.interactions.map(|interaction| p::InteractionView {
+            identification: interaction
+                .identification
+                .map(|choice| p::IdentificationChoiceView {
+                    choice: targets.identification_choice(choice.choice),
+                    class: item_class(choice.class),
+                    items: choice
+                        .items
+                        .into_iter()
+                        .map(|item| targets.item(item))
+                        .collect(),
+                }),
             completed: interaction
                 .completed
                 .into_iter()
@@ -636,6 +681,9 @@ pub fn observation(
                     }),
                     drinkable: item.drinkable,
                     edible: item.edible,
+                    readable: item.readable,
+                    zappable: item.zappable,
+                    charges: item.charges,
                 })
                 .collect(),
         }),
@@ -915,5 +963,35 @@ mod ordered_strike_privacy_tests {
                 assert!(value.get(key).is_none(), "private {key}");
             }
         }
+    }
+}
+
+fn step_direction(direction: a::Direction) -> s::abilities::StepDirection {
+    match direction {
+        a::Direction::North => s::abilities::StepDirection::North,
+        a::Direction::East => s::abilities::StepDirection::East,
+        a::Direction::South => s::abilities::StepDirection::South,
+        a::Direction::West => s::abilities::StepDirection::West,
+        a::Direction::NorthEast => s::abilities::StepDirection::NorthEast,
+        a::Direction::SouthEast => s::abilities::StepDirection::SouthEast,
+        a::Direction::SouthWest => s::abilities::StepDirection::SouthWest,
+        a::Direction::NorthWest => s::abilities::StepDirection::NorthWest,
+        a::Direction::Up => s::abilities::StepDirection::Up,
+        a::Direction::Down => s::abilities::StepDirection::Down,
+    }
+}
+
+fn recorded_step_direction(direction: s::abilities::StepDirection) -> a::Direction {
+    match direction {
+        s::abilities::StepDirection::North => a::Direction::North,
+        s::abilities::StepDirection::East => a::Direction::East,
+        s::abilities::StepDirection::South => a::Direction::South,
+        s::abilities::StepDirection::West => a::Direction::West,
+        s::abilities::StepDirection::NorthEast => a::Direction::NorthEast,
+        s::abilities::StepDirection::SouthEast => a::Direction::SouthEast,
+        s::abilities::StepDirection::SouthWest => a::Direction::SouthWest,
+        s::abilities::StepDirection::NorthWest => a::Direction::NorthWest,
+        s::abilities::StepDirection::Up => a::Direction::Up,
+        s::abilities::StepDirection::Down => a::Direction::Down,
     }
 }

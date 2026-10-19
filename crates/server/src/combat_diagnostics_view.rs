@@ -165,6 +165,12 @@ fn record(
                                 amount: *amount,
                             }
                         }
+                        s::abilities::ResolvedEffect::HealAndImproveHitDie { amount, .. } => {
+                            p::DiagnosticEffect::HealAndImproveHitDie {
+                                target,
+                                amount: *amount,
+                            }
+                        }
                         s::abilities::ResolvedEffect::LoseAttribute { attribute, amount } => {
                             p::DiagnosticEffect::LoseAttribute {
                                 target,
@@ -217,6 +223,12 @@ fn record(
                             resource: resource(*value),
                             amount: *amount,
                         },
+                        s::abilities::ResolvedEffect::RemoveCondition { id } => {
+                            p::DiagnosticEffect::ConditionRemoved {
+                                target,
+                                condition: condition(id, rules),
+                            }
+                        }
                         s::abilities::ResolvedEffect::ApplyCondition { id, duration } => {
                             p::DiagnosticEffect::Condition {
                                 target,

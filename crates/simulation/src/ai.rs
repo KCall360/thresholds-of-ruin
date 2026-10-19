@@ -683,6 +683,68 @@ impl Game {
                 return Some(plan);
             }
         }
+        if !basic_only {
+            return self.choose_ai_known_device(actor, target, sight, view);
+        }
+        None
+    }
+
+    /// A device is a carried capability, not a granted build ability. Restrict
+    /// this conservative fallback to explicitly known positive instance charges.
+    /// Unknown balances cannot become a free AI-only empty-device oracle.
+    fn choose_ai_known_device(
+        &self,
+        actor: ActorId,
+        target: ActorId,
+        sight: &[tor_world::SightCell],
+        view: &crate::Observation,
+    ) -> Option<crate::abilities::Plan> {
+        let rows = &view.interactions.as_ref()?.inventory;
+        let rules = self.content.rules();
+        let mut candidates = Vec::new();
+        for disclosed in &view.inventory {
+            if !disclosed.identified
+                || !rows.iter().any(|row| {
+                    row.item == disclosed.id
+                        && row.zappable
+                        && row.charges.is_some_and(|count| count > 0)
+                })
+            {
+                continue;
+            }
+            let device = self.items.get(&disclosed.id)?.spec.device.as_ref()?;
+            let definition = rules.ability(&device.ability)?;
+            if !definition.ai.hostile {
+                continue;
+            }
+            let crate::rules::Reach::Sight { range } = definition.reach else {
+                continue;
+            };
+            let Some(direction) = disclosed_ray_direction(
+                target,
+                sight,
+                view,
+                self.actors.get(&actor)?.body.eye,
+                range,
+            ) else {
+                continue;
+            };
+            candidates.push((definition.ai.priority, disclosed.id, direction));
+        }
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        for (_, item, direction) in candidates {
+            let work = crate::Work::Zap { item, direction };
+            if let Some(pending) = self.preparation(actor).filter(|pending| {
+                !pending.active
+                    && pending.plan.work() == work
+                    && self.preparation_still_available(pending, Some(sight))
+            }) {
+                return Some(pending.plan.clone());
+            }
+            if let Ok(plan) = self.plan_work(actor, work) {
+                return self.physical_ai_plan(plan, view);
+            }
+        }
         None
     }
 
@@ -1253,6 +1315,7 @@ mod tests {
         let mut potion = crate::ItemSpec::ordinary("healing".into());
         potion.class = crate::ItemClass::Potion;
         potion.consumable = Some(crate::ConsumableSpec {
+            discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![heal(10)],
         });
         game.place_item_stack(20, at(1, 4, 2), None, 1, potion.clone())
@@ -1297,6 +1360,7 @@ mod tests {
         potion.concealed = true;
         potion.appearance = "red potion".into();
         potion.consumable = Some(crate::ConsumableSpec {
+            discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![heal(10)],
         });
         game.place_item_stack(20, at(1, 2, 1), None, 3, potion)
@@ -1325,6 +1389,7 @@ mod tests {
             let mut potion = crate::ItemSpec::ordinary(format!("healing {id}"));
             potion.class = crate::ItemClass::Potion;
             potion.consumable = Some(crate::ConsumableSpec {
+                discovery: crate::ItemDiscovery::SelfEffect,
                 effects: vec![heal(10)],
             });
             game.place_item_stack(id, at(1, x, 1), None, 1, potion)
@@ -1453,6 +1518,7 @@ mod tests {
         potion.concealed = true;
         potion.appearance = "red potion".into();
         potion.consumable = Some(crate::ConsumableSpec {
+            discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![heal(10)],
         });
         game.place_item_stack(20, at(1, 2, 1), Some(actor), 1, potion)
@@ -1477,6 +1543,7 @@ mod tests {
         let mut potion = crate::ItemSpec::ordinary("mixed".into());
         potion.class = crate::ItemClass::Potion;
         potion.consumable = Some(crate::ConsumableSpec {
+            discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![
                 heal(10),
                 crate::rules::Effect::Damage {
@@ -1497,6 +1564,7 @@ mod tests {
         let mut healing = crate::ItemSpec::ordinary("healing".into());
         healing.class = crate::ItemClass::Potion;
         healing.consumable = Some(crate::ConsumableSpec {
+            discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![heal(20)],
         });
         game.place_item_stack(21, at(1, 2, 1), Some(actor), 1, healing)

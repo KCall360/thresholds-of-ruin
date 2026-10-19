@@ -72,3 +72,22 @@ mod corrosion_tests;
 
 #[cfg(test)]
 mod ray_tests;
+
+pub(crate) fn device_definition_valid(
+    rules: &crate::rules::Ruleset,
+    id: &crate::content_ids::AbilityId,
+) -> bool {
+    rules.ability(id).is_some_and(|d| {
+        d.invocation == InvocationKind::DirectionalRay
+            && ray::definition_shape_valid(d)
+            && d.cost.is_none()
+            && d.cooldown.is_none()
+            && d.supply_costs.is_empty()
+    })
+}
+
+#[cfg(test)]
+mod consumable_effect_tests;
+
+#[cfg(test)]
+mod magic_item_tests;

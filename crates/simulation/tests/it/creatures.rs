@@ -588,9 +588,44 @@ fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
     value.add_hit_die(HdSource::Racial, 123).unwrap();
     assert_eq!(&value.ledger().entries()[..2], before.ledger().entries());
     assert_eq!(&value.choices()[..2], before.choices());
-    let expected =
+    let seeded =
         HdLedger::seeded(vec![class("warrior"), class("mage"), HdSource::Racial], 123).unwrap();
-    assert_eq!(value.ledger().entries()[2], expected.entries()[2]);
+    let actual = serde_json::to_value(tor_simulation::creatures::record::BuildRecord::capture(
+        &value,
+    ))
+    .unwrap();
+    // Retained rows have explicit seed 42; only the new ordinal uses root 123.
+    // Pin acquisition facts without asking the build compiler to supply them.
+    let mut expected = actual.clone();
+    expected["hd"] = serde_json::json!([
+        {
+            "source": {"kind": "class", "id": "warrior"},
+            "health_seed": 42,
+            "health_origin": {"templates": [], "kind": "humanoid", "die": 10},
+            "health_improvement": 0,
+        },
+        {
+            "source": {"kind": "class", "id": "mage"},
+            "health_seed": 42,
+            "health_origin": {"templates": [], "kind": "humanoid", "die": 6},
+            "health_improvement": 0,
+        },
+        {
+            "source": {"kind": "racial"},
+            "health_seed": seeded.entries()[2].health_seed(),
+            "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
+            "health_improvement": 0,
+        },
+    ]);
+    expected["health_root_seed"] = serde_json::json!(null);
+    expected["drained_hd"] = serde_json::json!([]);
+    for field in ["hd", "health_root_seed", "drained_hd"] {
+        assert_eq!(actual[field], expected[field], "exact owned ledger {field}");
+    }
+    let expected: tor_simulation::creatures::record::BuildRecord =
+        serde_json::from_value(expected).unwrap();
+    let expected = expected.restore(value.content().clone()).unwrap();
+    assert_eq!(value.ledger(), expected.ledger());
     value
         .train(tor_simulation::HdIndex(2), Skill::Lore)
         .unwrap();
@@ -605,7 +640,24 @@ fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
         removed.choices.skills().collect::<Vec<_>>(),
         vec![Skill::Lore]
     );
-    assert_eq!(value, before);
+    // Removal restores the prior build while preserving the exact dormant row.
+    let mut expected = serde_json::to_value(
+        tor_simulation::creatures::record::BuildRecord::capture(&before),
+    )
+    .unwrap();
+    expected["drained_hd"] = serde_json::json!([{
+        "ordinal": 2,
+        "hit_die": {
+            "source": {"kind": "racial"},
+            "health_seed": seeded.entries()[2].health_seed(),
+            "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
+            "health_improvement": 0,
+        },
+    }]);
+    let expected: tor_simulation::creatures::record::BuildRecord =
+        serde_json::from_value(expected).unwrap();
+    let expected = expected.restore(before.content().clone()).unwrap();
+    assert_eq!(value, expected);
     value.add_hit_die(HdSource::Racial, 123).unwrap();
     assert_eq!(value.ledger().entries()[2], removed.hit_die);
 }
@@ -683,6 +735,131 @@ fn unknown_references_fail_without_changing_the_build() {
         Err(BuildError::UnknownClass)
     );
     assert_eq!(value, before);
+}
+
+#[test]
+fn fresh_hit_dice_report_unknown_classes_before_binding_health_origins() {
+    let value = build(&[HdSource::Racial]);
+    for ledger in [
+        HdLedger::seeded(vec![class("missing")], 42).unwrap(),
+        HdLedger::new(vec![tor_simulation::progression::HitDie::new(
+            class("missing"),
+            42,
+        )])
+        .unwrap(),
+    ] {
+        assert_eq!(
+            CreatureBuild::new(
+                value.content().clone(),
+                value.species_id().clone(),
+                ledger.clone(),
+                value.binding(),
+                value.advancement().starting_skills,
+            ),
+            Err(BuildError::UnknownClass)
+        );
+        assert_eq!(
+            CreatureBuild::from_recorded(
+                value.content().clone(),
+                value.species_id().clone(),
+                value.initial_attributes(),
+                ledger,
+                value.binding(),
+                value.advancement().clone(),
+                vec![],
+            ),
+            Err(BuildError::UnknownClass)
+        );
+    }
+}
+
+#[test]
+fn recorded_unknown_classes_remain_invalid_bound_provenance() {
+    use tor_simulation::creatures::record::BuildRecord;
+
+    for drained in [false, true] {
+        let mut value = build(&[class("mage"), class("mage")]);
+        if drained {
+            value.remove_latest().unwrap();
+        }
+        let record = BuildRecord::capture(&value);
+        assert_eq!(record.restore(value.content().clone()).unwrap(), value);
+        let mut record = serde_json::to_value(record).unwrap();
+        let row = if drained {
+            &mut record["drained_hd"][0]["hit_die"]
+        } else {
+            &mut record["hd"][0]
+        };
+        row["source"] = serde_json::json!({"kind": "class", "id": "missing"});
+        let record: BuildRecord = serde_json::from_value(record).unwrap();
+        assert_eq!(
+            record.restore(value.content().clone()),
+            Err(BuildError::InvalidDefinition)
+        );
+    }
+}
+
+#[test]
+fn unknown_classes_preserve_append_error_precedence_and_dormant_rows() {
+    let fixture = build(&[HdSource::Racial]);
+    let mut value = CreatureBuild::new(
+        fixture.content().clone(),
+        fixture.species_id().clone(),
+        HdLedger::seeded(vec![HdSource::Racial; 256], 42).unwrap(),
+        fixture.binding(),
+        fixture.advancement().starting_skills,
+    )
+    .unwrap();
+    let full = value.clone();
+    for root in [42, 43] {
+        assert_eq!(
+            value.add_hit_die(class("missing"), root),
+            Err(BuildError::TooManyHitDice)
+        );
+        assert_eq!(value, full);
+    }
+    value.remove_latest().unwrap();
+    let drained = value.clone();
+    assert_eq!(
+        value.add_hit_die(class("missing"), 43),
+        Err(BuildError::InvalidHealthRoot)
+    );
+    assert_eq!(value, drained);
+    assert_eq!(
+        value.add_hit_die(class("missing"), 42),
+        Err(BuildError::UnknownClass)
+    );
+    assert_eq!(value, drained);
+    value.add_hit_die(HdSource::Racial, 42).unwrap();
+    assert_eq!(value, full);
+
+    let mut advancement = fixture.advancement().clone();
+    advancement.restoration = tor_simulation::creatures::RestorationPolicy::Authored(vec![
+        tor_simulation::creatures::PlannedAdvancement {
+            source: HdSource::Racial,
+            choices: fixture.choices()[0].clone(),
+        },
+    ]);
+    let mut value = CreatureBuild::from_recorded(
+        fixture.content().clone(),
+        fixture.species_id().clone(),
+        fixture.initial_attributes(),
+        HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+        fixture.binding(),
+        advancement,
+        vec![],
+    )
+    .unwrap();
+    value.remove_latest().unwrap();
+    let before = value.clone();
+    for root in [42, 43] {
+        assert_eq!(
+            value.add_hit_die(class("missing"), root),
+            Err(BuildError::InvalidOwnership)
+        );
+        assert_eq!(value, before);
+    }
+    value.restore_hit_die(42).unwrap();
 }
 
 #[test]

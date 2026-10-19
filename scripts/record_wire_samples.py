@@ -132,6 +132,10 @@ CLIENT = [
                 {"type": "equip", "item": "i_" + "04" * 32, "slot": 1},
                 {"type": "unequip", "item": "i_" + "04" * 32},
                 {"type": "drink", "item": "i_" + "04" * 32},
+                {"type": "read", "item": "i_" + "04" * 32},
+                {"type": "zap", "item": "i_" + "04" * 32, "direction": "east"},
+                {"type": "identify", "choice": "choice-sample", "item": "i_" + "04" * 32},
+                {"type": "identify", "choice": "choice-sample", "item": None},
                 {"type": "eat", "item": "i_" + "04" * 32},
                 *({"type": "use_ability", "id": ability, "invocation": {"kind": "actor_target", "target": "a_" + "02" * 32},
                    "supplies": {"kind": "carried"}}
@@ -181,6 +185,38 @@ class Recorder(ProcessTestCase):
             and message["snapshot"]["state"]["observation"]["combat"]["public_plan"] is not None)
         observer.stop()
         subject.stop()
+        server.stop()
+
+    def record_magic_items(self, server_samples):
+        self.save = self.save.parent / "magic-item-samples.db"
+        server = self.server(scenario="magic-items")
+        player, initial = self.client()
+        current = initial
+        for row in initial["state"]["observation"]["ground_items"]:
+            current = self.act(player, {"type": "take", "item": row["item"]["id"], "quantity": None})
+            self.assertIsNone(current["error"])
+        inventory = current["state"]["observation"]["inventory"]
+        scroll = next(row["id"] for row in inventory if row["class"] == "scroll")
+        wand = next(row["id"] for row in inventory if row["class"] == "wand")
+        current = self.act(player, {"type": "read", "item": scroll})
+        self.assertIsNone(current["error"])
+        pending = current["state"]["observation"]["interactions"]["identification"]
+        self.assertEqual(pending["class"], "wand")
+        self.request(player, {"type": "snapshot"})
+        messages = [json.loads(line).get("message") for line in player.transcript if line.startswith("{")]
+        server_samples["zz.magic_paid_choice"] = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot")
+        current = self.act(player, {"type": "identify", "choice": pending["choice"], "item": wand})
+        self.assertIsNone(current["error"])
+        current = self.act(player, {"type": "zap", "item": wand, "direction": "east"})
+        self.assertIsNone(current["error"])
+        rows = current["state"]["observation"]["interactions"]["inventory"]
+        self.assertEqual(next(row["charges"] for row in rows if row["item"] == wand), 2)
+        self.request(player, {"type": "snapshot"})
+        messages = [json.loads(line).get("message") for line in player.transcript if line.startswith("{")]
+        server_samples["zz.magic_known_charges"] = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot")
+        player.stop()
         server.stop()
 
     def record_nutrition(self, server_samples):
@@ -449,6 +485,7 @@ class Recorder(ProcessTestCase):
         self.record_advancement(server_samples)
         self.record_public_plan(server_samples)
         self.record_nutrition(server_samples)
+        self.record_magic_items(server_samples)
         self.record_personal_conditions(server_samples)
         self.record_amulet_escape(server_samples)
         self.server_samples = server_samples

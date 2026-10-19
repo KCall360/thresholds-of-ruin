@@ -84,6 +84,8 @@ pub fn completed_items(before: &Observation, after: &Observation) -> Vec<String>
                 tor_protocol::Action::Unequip { item } => ("removing", item),
                 tor_protocol::Action::Drink { item } => ("drinking", item),
                 tor_protocol::Action::Eat { item } => ("eating", item),
+                tor_protocol::Action::Read { item } => ("reading", item),
+                tor_protocol::Action::Zap { item, .. } => ("zapping", item),
                 _ => return None,
             };
             let name = before
@@ -421,6 +423,8 @@ pub fn action(event: &Event, view: &Observation) -> String {
                 tor_protocol::Action::Unequip { item } => ("remove", item),
                 tor_protocol::Action::Drink { item } => ("drink", item),
                 tor_protocol::Action::Eat { item } => ("eat", item),
+                tor_protocol::Action::Read { item } => ("read", item),
+                tor_protocol::Action::Zap { item, .. } => ("zap", item),
                 _ => return "You begin preparing.".into(),
             };
             let name = view
@@ -558,6 +562,7 @@ mod tests {
         assert_eq!(action(&event, &view), "You begin to drink the item.");
         let before = view.clone();
         view.interactions = Some(tor_protocol::InteractionView {
+            identification: None,
             completed: vec![tor_protocol::Action::Drink { item }],
             slots: vec![],
             preparation: None,

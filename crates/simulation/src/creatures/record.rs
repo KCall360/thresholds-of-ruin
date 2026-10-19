@@ -312,6 +312,7 @@ pub struct BuildRecord {
     #[serde(deserialize_with = "required_option")]
     health_root_seed: Option<u64>,
     hd: Bounded<HdRecord, { limits::HIT_DICE }>,
+    drained_hd: Bounded<DrainedHdRecord, { limits::HIT_DICE }>,
     choices: Bounded<ChoiceRecord, { limits::HIT_DICE }>,
     templates: Bounded<TemplateId, { limits::TEMPLATES }>,
 }
@@ -352,11 +353,95 @@ enum SourceRecord {
     Racial,
     Class(ClassId),
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct HdRecord {
+    #[serde(deserialize_with = "named_map")]
     source: SourceRecord,
     health_seed: u64,
+    #[serde(deserialize_with = "named_map")]
+    health_origin: HealthOriginRecord,
+    health_improvement: u16,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HealthOriginRecord {
+    templates: Bounded<TemplateId, { limits::TEMPLATES }>,
+    kind: crate::content_ids::TypeId,
+    die: u16,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct DrainedHdRecord {
+    ordinal: crate::HdIndex,
+    #[serde(deserialize_with = "named_map")]
+    hit_die: HdRecord,
+}
+impl<'de> Deserialize<'de> for HdRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "named_map")]
+            source: SourceRecord,
+            health_seed: u64,
+            #[serde(deserialize_with = "named_map")]
+            health_origin: HealthOriginRecord,
+            health_improvement: u16,
+        }
+        let fields: Fields = named_map(deserializer)?;
+        Ok(Self {
+            source: fields.source,
+            health_seed: fields.health_seed,
+            health_origin: fields.health_origin,
+            health_improvement: fields.health_improvement,
+        })
+    }
+}
+impl<'de> Deserialize<'de> for DrainedHdRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            ordinal: crate::HdIndex,
+            hit_die: HdRecord,
+        }
+        let fields: Fields = named_map(deserializer)?;
+        Ok(Self {
+            ordinal: fields.ordinal,
+            hit_die: fields.hit_die,
+        })
+    }
+}
+impl HdRecord {
+    fn capture(die: &HitDie) -> Self {
+        let origin = die
+            .health_origin()
+            .expect("owned build binds every original Health die");
+        Self {
+            source: SourceRecord::capture(die.source()),
+            health_seed: die.health_seed(),
+            health_origin: HealthOriginRecord {
+                templates: Bounded(origin.templates.clone()),
+                kind: origin.kind.clone(),
+                die: origin.die,
+            },
+            health_improvement: die.health_improvement(),
+        }
+    }
+    fn restore(&self, ordinal: usize) -> Result<HitDie, crate::progression::HdError> {
+        HitDie::from_recorded(
+            self.source.restore(),
+            self.health_seed,
+            crate::progression::HealthOrigin {
+                templates: self.health_origin.templates.0.clone(),
+                kind: self.health_origin.kind.clone(),
+                die: self.health_origin.die,
+            },
+            self.health_improvement,
+            ordinal,
+        )
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -525,9 +610,16 @@ impl BuildRecord {
                     .ledger()
                     .entries()
                     .iter()
-                    .map(|die| HdRecord {
-                        source: SourceRecord::capture(die.source()),
-                        health_seed: die.health_seed(),
+                    .map(HdRecord::capture)
+                    .collect(),
+            ),
+            drained_hd: Bounded(
+                build
+                    .ledger()
+                    .drained()
+                    .map(|(ordinal, die)| DrainedHdRecord {
+                        ordinal: crate::HdIndex(ordinal as u64),
+                        hit_die: HdRecord::capture(die),
                     })
                     .collect(),
             ),
@@ -536,15 +628,36 @@ impl BuildRecord {
         }
     }
     pub fn restore(&self, content: Arc<Content>) -> Result<CreatureBuild, BuildError> {
-        let ledger = HdLedger::from_recorded(
+        let mut ledger = HdLedger::from_recorded(
             self.hd
                 .0
                 .iter()
-                .map(|die| HitDie::new(die.source.restore(), die.health_seed))
-                .collect(),
+                .enumerate()
+                .map(|(ordinal, die)| die.restore(ordinal))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(BuildError::from)?,
             self.health_root_seed,
         )
         .map_err(BuildError::from)?;
+        let mut previous = None;
+        let drained = self
+            .drained_hd
+            .0
+            .iter()
+            .map(|row| {
+                let ordinal = usize::try_from(row.ordinal.get())
+                    .map_err(|_| BuildError::InvalidDefinition)?;
+                if previous.is_some_and(|previous| ordinal <= previous) {
+                    return Err(BuildError::InvalidDefinition);
+                }
+                previous = Some(ordinal);
+                Ok((
+                    ordinal,
+                    row.hit_die.restore(ordinal).map_err(BuildError::from)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, BuildError>>()?;
+        ledger.restore_drained(drained).map_err(BuildError::from)?;
         let choices = self.choices.0.iter().map(ChoiceRecord::restore).collect();
         let mut build = CreatureBuild::from_recorded(
             content,

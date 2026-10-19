@@ -422,7 +422,15 @@ impl Engine {
             self.trail = vec![(key.clone(), name)];
             self.places.visited.insert(key.clone());
         }
-        crate::adventure::describe_in(&seen(link.client()), link.palette(), &self.places)
+        let mut text =
+            crate::adventure::describe_in(&seen(link.client()), link.palette(), &self.places);
+        if let Some(prompt) =
+            tor_client_common::items::identification_prompt(&link.client().state().observation)
+        {
+            text.push('\n');
+            text.push_str(&prompt);
+        }
+        text
     }
 
     /// The key of the place the character is in, as first seen.
@@ -515,6 +523,27 @@ impl Engine {
                     }
                     Err(error) => record.say(error),
                     _ => unreachable!("hold input produces only an Escape action"),
+                }
+                return Ok(Outcome::Passage(narrate::compose(&record)));
+            }
+        }
+        if sentences(&line).len() == 1 {
+            if let Some(input) = crate::magic_input(&line, link.client().state()) {
+                self.pending = None;
+                match input {
+                    Ok(Input::Command(Command::Act { action, .. })) => {
+                        let start = self.place_key(link);
+                        self.carry_out(
+                            link,
+                            &mut record,
+                            Interpretation::Goals(vec![verbs::Goal::MagicItem { action }]),
+                            &mut VecDeque::new(),
+                        )
+                        .await?;
+                        self.finish(link, &mut record, start.as_deref());
+                    }
+                    Err(error) => record.say(error),
+                    _ => unreachable!("magic input produces only item actions"),
                 }
                 return Ok(Outcome::Passage(narrate::compose(&record)));
             }
@@ -674,6 +703,21 @@ impl Engine {
                                 break;
                             }
                             _ => unreachable!("hold input produces only an Escape action"),
+                        }
+                        continue;
+                    }
+                    if let Some(input) = crate::magic_input(&text, link.client().state()) {
+                        match input {
+                            Ok(Input::Command(Command::Act { action, .. })) => {
+                                chain.push_front(Ok(Interpretation::Goals(vec![
+                                    verbs::Goal::MagicItem { action },
+                                ])))
+                            }
+                            Err(error) => {
+                                record.say(error);
+                                break;
+                            }
+                            _ => unreachable!("magic input produces only item actions"),
                         }
                         continue;
                     }
@@ -1297,6 +1341,11 @@ impl Engine {
     /// End-of-turn additions: a description after a snapshot or on arriving
     /// somewhere new. `start` is the place the turn began in, if any.
     fn finish(&mut self, link: &impl Link, record: &mut Record, start: Option<&str>) {
+        if let Some(prompt) =
+            tor_client_common::items::identification_prompt(&link.client().state().observation)
+        {
+            record.say(prompt);
+        }
         let resynced = record.entries.iter().any(|e| match e {
             Entry::Episode(e) => e.beats.contains(&Beat::Resync),
             Entry::Beats(beats) => beats.contains(&Beat::Resync),

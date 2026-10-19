@@ -29,12 +29,16 @@ fn public_plan_authoring_effects_have_strict_named_payloads() {
 #[test]
 fn public_plan_authoring_consumable_wrapper_requires_a_named_object() {
     use tor_server::scenario_package::ConsumableSpec;
-    let canonical = serde_json::json!({"effects":[{"kind":"observe_public_plan"}]});
+    let canonical =
+        serde_json::json!({"effects":[{"kind":"observe_public_plan"}],"discovery":"self_effect"});
     let value: ConsumableSpec = serde_json::from_value(canonical.clone()).unwrap();
     assert_eq!(serde_json::to_value(value).unwrap(), canonical);
     for raw in [
         r#"[[{"kind":"observe_public_plan"}]]"#,
         r#"{"effects":[{"kind":"observe_public_plan"}],"effects":[]}"#,
+        r#"{"effects":[{"kind":"observe_public_plan"}],"discovery":"self_effect","discovery":"on_use"}"#,
+        r#"{"effects":[{"kind":"observe_public_plan"}],"discovery":"infer_name"}"#,
+        r#"{"effects":[{"kind":"observe_public_plan"}],"discovery":null}"#,
         r#"{"private_actor":2,"effects":[{"kind":"observe_public_plan"}]}"#,
         r#"{"effects":[{"kind":"observe_public_plan"}],"private_actor":2}"#,
     ] {

@@ -157,6 +157,8 @@ impl<'a> ResolutionPlan<'a> {
                 }
                 let id = match effect {
                     PlannedEffect::ApplyCondition { id, .. }
+                    | PlannedEffect::ApplyConditionForTurns { id, .. }
+                    | PlannedEffect::RemoveCondition { id }
                     | PlannedEffect::ApplyQualifiedConditionToSource { id, .. } => id,
                     _ => return false,
                 };
@@ -279,6 +281,11 @@ pub enum ResolvedEffect {
     Heal {
         amount: u32,
     },
+    HealAndImproveHitDie {
+        amount: u32,
+        improvement: crate::progression::HitDieHealthImprovement,
+        build_epoch: crate::creatures::BuildEpoch,
+    },
     Nourish {
         amount: u32,
     },
@@ -305,6 +312,9 @@ pub enum ResolvedEffect {
     ApplyCondition {
         id: ConditionId,
         duration: u64,
+    },
+    RemoveCondition {
+        id: ConditionId,
     },
     Restore {
         resource: Resource,
@@ -347,8 +357,10 @@ impl ResolvedEffect {
             | Self::RestoreMaximumHealth { amount }
             | Self::Restore { amount, .. } => *amount > 0,
             Self::SearchAdjacentGuises
+            | Self::HealAndImproveHitDie { .. }
             | Self::ApplyLinkedHold { .. }
             | Self::ApplyCondition { .. }
+            | Self::RemoveCondition { .. }
             | Self::ObservePublicPlan { .. }
             | Self::ApplyQualifiedConditionToSource { .. } => true,
         }
@@ -386,6 +398,15 @@ impl ResolvedEffect {
             }
             Self::Damage { amount } => Self::Damage {
                 amount: creature.damage_without_reset(*amount).applied,
+            },
+            Self::HealAndImproveHitDie {
+                amount,
+                improvement,
+                build_epoch,
+            } => Self::HealAndImproveHitDie {
+                amount: creature.heal_and_improve_hit_die(*amount, improvement, *build_epoch)?,
+                improvement: improvement.clone(),
+                build_epoch: *build_epoch,
             },
             Self::Heal { amount } => Self::Heal {
                 amount: creature.heal(*amount),
@@ -460,6 +481,18 @@ impl ResolvedEffect {
                 resource: *resource,
                 amount: creature.restore_resource(*resource, *amount),
             },
+            Self::RemoveCondition { id } => {
+                let changed = if let Some(context) = state.recovery_context {
+                    creature
+                        .with_recovery_context(context, |creature| creature.remove_condition(id))?
+                } else {
+                    creature.remove_condition(id)?
+                };
+                if !changed {
+                    return Ok(None);
+                }
+                self.clone()
+            }
             Self::ApplyCondition { id, duration } => {
                 let before = creature.clone();
                 if let Some(sensed) = state.recovery_context {
@@ -984,6 +1017,39 @@ pub(super) fn resolve_batch<'a>(
                     amount: resolved.total,
                 }
             }
+            PlannedEffect::HealPerHitDie {
+                dice,
+                bonus,
+                overflow,
+            } => {
+                if !super::plan::valid_hit_die_healing(dice, *bonus) {
+                    return Err(crate::creatures::CreatureStateError::Inconsistent.into());
+                }
+                let total: i64 = dice
+                    .iter()
+                    .map(|pool| i64::from(pool.roll(rng, Edge::default()).total))
+                    .sum();
+                let amount = (total + i64::from(*bonus)).max(0) as u32;
+                let improvement = (*overflow
+                    == crate::rules::HealingOverflow::ImproveEarliestHitDie
+                    && u64::from(amount) > application.creature.health().injury())
+                .then(|| {
+                    application
+                        .creature
+                        .derived()
+                        .next_health_improvement
+                        .clone()
+                })
+                .flatten();
+                match improvement {
+                    Some(improvement) => ResolvedEffect::HealAndImproveHitDie {
+                        amount,
+                        improvement,
+                        build_epoch: application.creature.build_epoch(),
+                    },
+                    None => ResolvedEffect::Heal { amount },
+                }
+            }
             PlannedEffect::Heal { amount } => ResolvedEffect::Heal {
                 amount: amount.roll(rng),
             },
@@ -1009,6 +1075,27 @@ pub(super) fn resolve_batch<'a>(
                 ResolvedEffect::RestoreMaximumHealth {
                     amount: amount.roll(rng),
                 }
+            }
+            PlannedEffect::ApplyConditionForTurns {
+                id,
+                duration,
+                turn_ticks,
+            } => {
+                // Check the entire pool before consuming RNG, not only the sampled value.
+                if !duration.valid_turn_duration(*turn_ticks) {
+                    return Err(crate::conditions::ConditionError::InvalidDuration.into());
+                }
+                let duration = u64::from(duration.roll(rng))
+                    .checked_mul(*turn_ticks)
+                    .filter(|ticks| (1..=crate::limits::NUMERIC as u64).contains(ticks))
+                    .ok_or(crate::conditions::ConditionError::InvalidDuration)?;
+                ResolvedEffect::ApplyCondition {
+                    id: id.clone(),
+                    duration,
+                }
+            }
+            PlannedEffect::RemoveCondition { id } => {
+                ResolvedEffect::RemoveCondition { id: id.clone() }
             }
             PlannedEffect::ApplyCondition { id, duration } => ResolvedEffect::ApplyCondition {
                 id: id.clone(),
@@ -1117,6 +1204,11 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Heal {
                 amount: u32,
             },
+            HealAndImproveHitDie {
+                amount: u32,
+                improvement: crate::progression::HitDieHealthImprovement,
+                build_epoch: crate::creatures::BuildEpoch,
+            },
             Nourish {
                 amount: u32,
             },
@@ -1143,6 +1235,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             ApplyCondition {
                 id: ConditionId,
                 duration: u64,
+            },
+            RemoveCondition {
+                id: ConditionId,
             },
             Restore {
                 resource: Resource,
@@ -1171,6 +1266,15 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Damage { amount } => Self::Damage { amount },
             Fields::Heal { amount } => Self::Heal { amount },
+            Fields::HealAndImproveHitDie {
+                amount,
+                improvement,
+                build_epoch,
+            } => Self::HealAndImproveHitDie {
+                amount,
+                improvement,
+                build_epoch,
+            },
             Fields::Nourish { amount } => Self::Nourish { amount },
             Fields::LoseAttribute { attribute, amount } => {
                 Self::LoseAttribute { attribute, amount }
@@ -1183,6 +1287,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::LoseMaximumHealth { amount } => Self::LoseMaximumHealth { amount },
             Fields::RestoreMaximumHealth { amount } => Self::RestoreMaximumHealth { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
+            Fields::RemoveCondition { id } => Self::RemoveCondition { id },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
             Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
             Fields::ObservePublicPlan { observation } => Self::ObservePublicPlan { observation },
@@ -1201,6 +1306,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Self::CorrodeArmor { amount, .. } => {
                 (1..=crate::limits::NUMERIC as u32).contains(&amount)
             }
+            Self::HealAndImproveHitDie { amount, .. } => amount <= crate::limits::NUMERIC as u32,
             Self::DrainLatestHitDie { amount } | Self::RestoreHitDie { amount } => amount <= 1,
             Self::LoseAttribute { amount, .. } | Self::RestoreAttribute { amount, .. } => {
                 amount <= u32::from(crate::limits::DERIVED_ATTRIBUTE)

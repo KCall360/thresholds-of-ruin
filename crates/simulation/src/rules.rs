@@ -880,8 +880,28 @@ pub struct DamageComponentExpr {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AmountExpr {
-    Fixed { amount: u32 },
-    Rolled { dice: DiceExpr },
+    Fixed {
+        amount: u32,
+    },
+    Rolled {
+        #[serde(deserialize_with = "crate::bounded::named_map")]
+        dice: DiceExpr,
+    },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HealingOverflow {
+    None,
+    ImproveEarliestHitDie,
+}
+impl<'de> Deserialize<'de> for HealingOverflow {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "none" => Ok(Self::None),
+            "improve_earliest_hit_die" => Ok(Self::ImproveEarliestHitDie),
+            _ => Err(serde::de::Error::custom("unknown healing overflow policy")),
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EffectRecipient {
@@ -918,6 +938,11 @@ pub enum Effect {
     Heal {
         amount: AmountExpr,
     },
+    HealPerHitDie {
+        sides: u16,
+        bonus: i32,
+        overflow: HealingOverflow,
+    },
     Nourish {
         amount: AmountExpr,
     },
@@ -938,6 +963,13 @@ pub enum Effect {
     ApplyCondition {
         condition: ConditionId,
         duration: u64,
+    },
+    ApplyConditionForTurns {
+        condition: ConditionId,
+        duration: AmountExpr,
+    },
+    RemoveCondition {
+        condition: ConditionId,
     },
     Restore {
         resource: Resource,
@@ -995,6 +1027,11 @@ impl<'de> Deserialize<'de> for Effect {
             Heal {
                 amount: AmountExpr,
             },
+            HealPerHitDie {
+                sides: u16,
+                bonus: i32,
+                overflow: HealingOverflow,
+            },
             Nourish {
                 amount: AmountExpr,
             },
@@ -1015,6 +1052,13 @@ impl<'de> Deserialize<'de> for Effect {
             ApplyCondition {
                 condition: ConditionId,
                 duration: u64,
+            },
+            ApplyConditionForTurns {
+                condition: ConditionId,
+                duration: AmountExpr,
+            },
+            RemoveCondition {
+                condition: ConditionId,
             },
             Restore {
                 resource: Resource,
@@ -1051,6 +1095,15 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
+            Fields::HealPerHitDie {
+                sides,
+                bonus,
+                overflow,
+            } => Self::HealPerHitDie {
+                sides,
+                bonus,
+                overflow,
+            },
             Fields::Nourish { amount } => Self::Nourish { amount },
             Fields::LoseAttribute { attribute, amount } => {
                 Self::LoseAttribute { attribute, amount }
@@ -1067,6 +1120,14 @@ impl<'de> Deserialize<'de> for Effect {
                 condition,
                 duration,
             },
+            Fields::ApplyConditionForTurns {
+                condition,
+                duration,
+            } => Self::ApplyConditionForTurns {
+                condition,
+                duration,
+            },
+            Fields::RemoveCondition { condition } => Self::RemoveCondition { condition },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
             Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
             Fields::ObservePublicPlan {} => Self::ObservePublicPlan,
@@ -1294,7 +1355,11 @@ pub enum Stacking {
     Keep,
     Refresh,
     Longest,
-    Stack { maximum: u16 },
+    /// Add another application's duration, bounded by the ordinary timer limit.
+    Extend,
+    Stack {
+        maximum: u16,
+    },
 }
 impl<'de> Deserialize<'de> for Stacking {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -1304,12 +1369,14 @@ impl<'de> Deserialize<'de> for Stacking {
             Keep {},
             Refresh {},
             Longest {},
+            Extend {},
             Stack { maximum: u16 },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::Keep {} => Self::Keep,
             Fields::Refresh {} => Self::Refresh,
             Fields::Longest {} => Self::Longest,
+            Fields::Extend {} => Self::Extend,
             Fields::Stack { maximum } => Self::Stack { maximum },
         })
     }
@@ -1689,11 +1756,15 @@ impl Ruleset {
             // pressure. Only the bounded confusion probability is also safe:
             // it cannot invalidate numeric stats, reach, grants or interactions.
             // Other modifier folds still require an ordinary evictable source.
+            // Restrictions without follow-up protection can extend their bounded
+            // duration; protection-bearing entries remain nonrefreshing.
             bound(
                 !d.protected_lifecycle()
                     || (d.lifecycle == ConditionLifecycle::Timed
                         && !d.source_scoped
-                        && d.stacking == Stacking::Keep
+                        && (d.stacking == Stacking::Keep
+                            || (d.stacking == Stacking::Extend
+                                && d.timing.protection().is_none()))
                         && d.modifiers.iter().all(|modifier| {
                             matches!(
                                 modifier,
@@ -2001,7 +2072,7 @@ impl Ruleset {
             let expanded = rules.expanded_modifier_count(&definition.modifiers)?;
             let stacks = match definition.stacking {
                 Stacking::Stack { maximum } => usize::from(maximum),
-                Stacking::Keep | Stacking::Refresh | Stacking::Longest => 1,
+                Stacking::Keep | Stacking::Refresh | Stacking::Longest | Stacking::Extend => 1,
             };
             bound(
                 stacks.saturating_mul(expanded) <= crate::limits::MODIFIERS_PER_SOURCE,
@@ -2334,6 +2405,23 @@ impl References<'_> {
                             field: "damage_components".into(),
                         }
                     })?;
+                }
+                Effect::HealPerHitDie { sides, bonus, .. } => {
+                    DicePool::new(1, *sides, *bonus).map_err(|_| RulesetError::Bound {
+                        field: "heal_per_hit_die".into(),
+                    })?;
+                }
+                Effect::ApplyConditionForTurns {
+                    condition,
+                    duration,
+                } => {
+                    reference(self.conditions, condition, "condition")?;
+                    condition.intern(pool);
+                    bound(positive_duration_shape(duration), "condition_duration")?;
+                }
+                Effect::RemoveCondition { condition } => {
+                    reference(self.conditions, condition, "condition")?;
+                    condition.intern(pool);
                 }
                 Effect::Heal { amount }
                 | Effect::Nourish { amount }
@@ -2839,6 +2927,14 @@ impl std::fmt::Display for RulesetError {
 }
 impl std::error::Error for RulesetError {}
 
+fn positive_duration_shape(value: &AmountExpr) -> bool {
+    match value {
+        AmountExpr::Fixed { amount } => (1..=crate::limits::NUMERIC as u32).contains(amount),
+        AmountExpr::Rolled { dice } => {
+            DicePool::new(dice.count, dice.sides, dice.bonus).is_ok_and(|pool| pool.minimum() > 0)
+        }
+    }
+}
 impl Effect {
     pub fn valid_shape(&self) -> bool {
         let amount = |value: &AmountExpr| match value {
@@ -2861,6 +2957,9 @@ impl Effect {
             | Self::PushTargetOneCell { .. }
             | Self::DrainLatestHitDie
             | Self::RestoreHitDie => true,
+            Self::HealPerHitDie { sides, bonus, .. } => DicePool::new(1, *sides, *bonus).is_ok(),
+            Self::ApplyConditionForTurns { duration, .. } => positive_duration_shape(duration),
+            Self::RemoveCondition { .. } => true,
             Self::Heal { amount: value }
             | Self::Nourish { amount: value }
             | Self::LoseAttribute { amount: value, .. }
@@ -2940,6 +3039,70 @@ mod tests {
     }
     fn ruleset() -> Arc<Ruleset> {
         Ruleset::validate(document()).unwrap()
+    }
+    fn repeatable_restriction_document() -> RulesetDocument {
+        let mut document = document();
+        document.conditions.push(ConditionDef {
+            id: ConditionId::new("fixture_repeatable_lock").unwrap(),
+            family: ConditionFamilyId::new("fixture_repeatable_lock").unwrap(),
+            lifecycle: ConditionLifecycle::Timed,
+            name: "Repeatable lock".into(),
+            modifiers: vec![],
+            stacking: Stacking::Extend,
+            source_scoped: false,
+            descriptors: vec![],
+            capacity: Eviction::Reject,
+            timing: ConditionTiming::expiring(),
+            restrictions: vec![ConditionRestriction::VoluntaryActions],
+            preparation: ConditionPreparation::Pause,
+        });
+        document
+    }
+    #[test]
+    fn repeatable_expiring_restrictions_are_valid_rule_definitions() {
+        let result = Ruleset::validate(repeatable_restriction_document());
+        assert!(
+            result.is_ok(),
+            "bounded duration extension must be valid for target-wide restrictions without post-expiry protection: {result:?}"
+        );
+    }
+    #[test]
+    fn repeatable_restrictions_keep_protected_shape_limits() {
+        for invalid in 0..7 {
+            let mut document = repeatable_restriction_document();
+            let definition = document.conditions.last_mut().unwrap();
+            match invalid {
+                0 => definition.source_scoped = true,
+                1 => definition.lifecycle = ConditionLifecycle::NextCheck,
+                2 => {
+                    definition.modifiers.push(Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Add {
+                            stat: Stat::Health,
+                            value: 1,
+                        },
+                    });
+                }
+                3 => {
+                    definition.timing = ConditionTiming::ActorActive {
+                        on_expiry: ConditionExpiry::Protect {
+                            duration: ConditionTicks::new(400).unwrap(),
+                        },
+                    };
+                }
+                4 => definition.stacking = Stacking::Refresh,
+                5 => definition.stacking = Stacking::Longest,
+                6 => definition.stacking = Stacking::Stack { maximum: 2 },
+                _ => unreachable!(),
+            }
+            assert!(
+                matches!(
+                    Ruleset::validate(document),
+                    Err(RulesetError::Bound { field }) if field == "protected_condition_shape"
+                ),
+                "invalid protected shape {invalid}"
+            );
+        }
     }
     #[test]
     fn basic_attack_cannot_target_only_self() {
@@ -3185,8 +3348,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v43\"",
-                "id = \"interactions-v43\"\nunknown = true"
+                "id = \"interactions-v44\"",
+                "id = \"interactions-v44\"\nunknown = true"
             ))
             .is_err()
         );

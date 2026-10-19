@@ -1,4 +1,4 @@
-format = 21
+format = 22
 id = "rogue-exploration"
 version = "1.0"
 ruleset = "rules.toml"
@@ -193,6 +193,33 @@ chance = { numerator = 1, denominator = 2 }
 bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.gold", weight = 1 }] }]
 quantity = { kind = "depth_scaled_uniform", minimum = 2, maximum_base = 51, per_depth = 10 }
 
+# Bounded finite first-entry item stock is provisional TOR tuning, not Rogue's
+# item probability table. Append after the existing stages to retain their RNG
+# stream ownership. Each stage makes one placement attempt, without replenishment.
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.magic_potions"
+version = 1
+kind = "items"
+count = [1, 1]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.healing", weight = 1 }, { archetype = "rogue.confusion", weight = 1 }, { archetype = "rogue.blindness", weight = 1 }] }]
+quantity = 1
+
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.magic_scrolls"
+version = 1
+kind = "items"
+count = [1, 1]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.identify_potion", weight = 1 }, { archetype = "rogue.identify_scroll", weight = 1 }, { archetype = "rogue.identify_wand", weight = 1 }, { archetype = "rogue.sleep", weight = 1 }] }]
+quantity = 1
+
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.magic_devices"
+version = 1
+kind = "items"
+count = [1, 1]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.wand_fire", weight = 1 }, { archetype = "rogue.wand_cold", weight = 1 }, { archetype = "rogue.wand_lightning", weight = 1 }] }]
+quantity = 1
+
 # Structure-only forecast, independent of depth, spawn rolls and hidden contents.
 [assets]
 dungeon = [
@@ -228,5 +255,7 @@ dungeon = [
   "item.food.ration",
   "item.amulet",
   "item.potion",
+  "item.scroll",
+  "item.wand",
   "item.coin",
 ]

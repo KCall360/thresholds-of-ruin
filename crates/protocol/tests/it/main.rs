@@ -26,3 +26,5 @@ mod creature_catalog;
 
 mod linked_holds;
 mod map_pages;
+
+mod magic_items;

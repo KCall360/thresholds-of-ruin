@@ -7,7 +7,7 @@ pub mod engine;
 pub mod narrative;
 pub mod parser;
 
-pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor>, <disclosed ability name> <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor>, <disclosed ability name> <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -129,7 +129,83 @@ pub fn intention_request(
     }
 }
 
+/// Paid magic-item controls derive only from current disclosed inventory.
+pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String>> {
+    let (verb, rest) = word(line.trim());
+    let verb = verb.to_ascii_lowercase();
+    if !matches!(verb.as_str(), "zap" | "identify") {
+        return None;
+    }
+    Some((|| {
+        let view = &state.observation;
+        if verb == "identify" && rest.eq_ignore_ascii_case("cancel") {
+            return tor_client_common::items::identification_action(view, None).map(|action| {
+                Input::Command(Command::Act {
+                    expected_revision: state.revision,
+                    action,
+                })
+            });
+        }
+        let (noun, direction) = if verb == "zap" {
+            let (noun, direction) = rest
+                .rsplit_once(char::is_whitespace)
+                .ok_or("Use zap <item> <direction>.")?;
+            let direction = parser::lexicon::parse_direction(&direction.to_ascii_lowercase())
+                .ok_or("Choose a direction to zap.")?;
+            (
+                noun.trim_end_matches(" toward").trim_end_matches(" to"),
+                Some(direction),
+            )
+        } else {
+            (rest, None)
+        };
+        if noun.is_empty() {
+            return Err("Use identify <item> or identify cancel.".into());
+        }
+        let noun = noun.to_ascii_lowercase();
+        let noun = noun
+            .strip_prefix("the ")
+            .or_else(|| noun.strip_prefix("my "))
+            .unwrap_or(&noun);
+        let matches: Vec<_> = view
+            .inventory
+            .iter()
+            .filter(|item| item_matches(noun, item))
+            .collect();
+        let item = match matches.as_slice() {
+            [item] => item.id,
+            [] => return Err("No carried item matches that name.".into()),
+            _ => {
+                return Err(format!(
+                    "Which item? Use {verb} #id{}: {}",
+                    if direction.is_some() {
+                        " <direction>"
+                    } else {
+                        ""
+                    },
+                    matches
+                        .iter()
+                        .map(|item| format!("{} (#{})", safe(&item.name), item.id))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            }
+        };
+        let action = match direction {
+            Some(direction) => tor_client_common::items::zap_action(view, item, direction)?,
+            None => tor_client_common::items::identification_action(view, Some(item))?,
+        };
+        Ok(Input::Command(Command::Act {
+            expected_revision: state.revision,
+            action,
+        }))
+    })())
+}
+
 pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
+    if let Some(input) = magic_input(line, state) {
+        return input;
+    }
     if let Some(input) = advancement_input(line) {
         return input;
     }
@@ -212,13 +288,15 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         )?);
     }
     match (verb.as_str(), rest) {
-        ("equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff" | "eat", noun)
-            if !noun.is_empty() =>
-        {
+        (
+            "equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff" | "eat" | "read",
+            noun,
+        ) if !noun.is_empty() => {
             let operation = match verb.as_str() {
                 "remove" | "unequip" => tor_client_common::items::ItemOperation::Unequip,
                 "drink" | "quaff" => tor_client_common::items::ItemOperation::Drink,
                 "eat" => tor_client_common::items::ItemOperation::Eat,
+                "read" => tor_client_common::items::ItemOperation::Read,
                 _ => tor_client_common::items::ItemOperation::Equip,
             };
             let noun = noun.to_lowercase();
@@ -384,7 +462,16 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                     verb,
                     matches
                         .iter()
-                        .map(|i| format!("{} x {} (#{})", i.quantity, safe(&i.name), i.id))
+                        .map(|i| format!(
+                            "{} x {} (#{}){}",
+                            i.quantity,
+                            safe(&i.name),
+                            i.id,
+                            tor_client_common::items::charges(&state.observation, i.id)
+                                .map_or_else(String::new, |charges| format!(
+                                    " [{charges} charges]"
+                                ))
+                        ))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )),
@@ -615,16 +702,25 @@ pub fn item_matches(noun: &str, item: &tor_protocol::ItemView) -> bool {
 }
 
 pub fn inventory(state: &StateView) -> String {
+    let prompt = tor_client_common::items::identification_prompt(&state.observation);
+    let suffix = prompt.map_or_else(String::new, |prompt| format!("\n{prompt}"));
     if state.observation.inventory.is_empty() {
-        return "Inventory: empty.".into();
+        return format!("Inventory: empty.{suffix}");
     }
     format!(
-        "Inventory: {}.",
+        "Inventory: {}.{suffix}",
         state
             .observation
             .inventory
             .iter()
-            .map(|i| format!("{} x {} (#{})", i.quantity, safe(&i.name), i.id))
+            .map(|i| format!(
+                "{} x {} (#{}){}",
+                i.quantity,
+                safe(&i.name),
+                i.id,
+                tor_client_common::items::charges(&state.observation, i.id)
+                    .map_or_else(String::new, |charges| format!(" [{charges} charges]"))
+            ))
             .collect::<Vec<_>>()
             .join(", ")
     )

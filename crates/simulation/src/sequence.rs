@@ -207,7 +207,7 @@ impl PreparationProgress {
             Self::Escape {}
         } else if matches!(plan, Plan::Respec(_)) {
             Self::Respec {}
-        } else if matches!(plan, Plan::Ray(_)) {
+        } else if plan.as_ray().is_some() {
             Self::Ray {}
         } else if plan.as_ability().is_some() {
             Self::Ability {
@@ -428,12 +428,13 @@ impl Preparation {
         matches!(
             (&self.plan, self.progress),
             (Plan::Escape(_), PreparationProgress::Escape {})
-                | (Plan::Ray(_), PreparationProgress::Ray {})
+                | (Plan::Ray(_) | Plan::Zap { .. }, PreparationProgress::Ray {})
                 | (Plan::Respec(_), PreparationProgress::Respec {})
                 | (Plan::Ability(_), PreparationProgress::Ability { .. })
                 | (
                     Plan::Equip { .. }
                         | Plan::Unequip { .. }
+                        | Plan::Read { .. }
                         | Plan::Drink { .. }
                         | Plan::Eat { .. },
                     PreparationProgress::Item {}

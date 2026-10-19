@@ -544,7 +544,7 @@ fn living_carrier_game(chance: [u32; 2], healing_stock: bool) -> Game {
     if healing_stock {
         let spec = &mut plan.carried_item_pools.get_mut("supplies").unwrap().choices[0].spec;
         spec.class = crate::ItemClass::Potion;
-        spec.consumable = Some(crate::ConsumableSpec {
+        spec.consumable = Some(crate::ConsumableSpec { discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![crate::rules::Effect::Heal {
                 amount: crate::rules::AmountExpr::Fixed { amount: 10 },
             }],

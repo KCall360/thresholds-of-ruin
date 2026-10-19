@@ -68,7 +68,10 @@ impl SurvivalFlows {
         use crate::abilities::ResolvedEffect;
         let mut flow = Self::default();
         match effect {
-            ResolvedEffect::Heal { amount } => flow.direct_health = u64::from(*amount),
+            ResolvedEffect::Heal { amount }
+            | ResolvedEffect::HealAndImproveHitDie { amount, .. } => {
+                flow.direct_health = u64::from(*amount)
+            }
             ResolvedEffect::Restore { resource, amount } => {
                 *flow.direct_resources.get_mut(*resource) = u64::from(*amount)
             }

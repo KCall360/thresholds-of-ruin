@@ -435,6 +435,20 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
         None => Step::Finish(End::Refused("You can't see a way to get there.".into())),
     };
     match goal {
+        Goal::MagicItem { action } => {
+            let view = &scene.state.observation;
+            let current = match action {
+                Action::Zap { item, direction } => tor_client_common::items::zap_action(view, *item, *direction),
+                Action::Identify { choice, item } => tor_client_common::items::identification_action(view, *item).and_then(|current| {
+                    if matches!(&current, Action::Identify { choice: active, .. } if active == choice) { Ok(current) } else { Err("That identification choice is no longer available.".into()) }
+                }),
+                _ => Err("That item action is unavailable.".into()),
+            };
+            match current {
+                Ok(action) => act(action),
+                Err(reason) => Step::Finish(End::Refused(reason)),
+            }
+        }
         Goal::Escape { hold } => {
             if scene
                 .state
@@ -565,7 +579,12 @@ fn object(goal: &Goal, scene: &Scene) -> String {
             Some(direction_name(*direction).to_owned())
         }
         Goal::Escape { .. } => Some("the hold".into()),
-        Goal::Wait => None,
+        Goal::MagicItem {
+            action: Action::Identify {
+                item: Some(item), ..
+            },
+        } => named(Key::Item(*item)),
+        Goal::MagicItem { .. } | Goal::Wait => None,
     }
     .unwrap_or_else(|| "it".into())
 }
@@ -596,6 +615,7 @@ fn refusal(code: ErrorCode, goal: &Goal) -> String {
                 "You can't find a way there."
             }
             Goal::Escape { .. } => "That hold is no longer available.",
+            Goal::MagicItem { .. } => "That item action is no longer available.",
             Goal::Wait => "You can't wait right now.",
         },
         ErrorCode::NotController | ErrorCode::ControlTaken => {
@@ -886,7 +906,7 @@ pub async fn run_goal(
     }
     episode.beats = std::mem::take(&mut reader.beats);
     let resynced = reader.resynced;
-    record.entries.push(Entry::Episode(episode));
+    record.entries.push(Entry::Episode(Box::new(episode)));
     Ok(done && !resynced)
 }
 

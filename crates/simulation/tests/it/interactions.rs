@@ -271,6 +271,7 @@ fn drinking_consumes_at_completion_and_identifies_only_observable_effects() {
     spec.appearance = "red vial".into();
     spec.stackable = true;
     spec.consumable = Some(ConsumableSpec {
+        discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 10 },
         }],
@@ -311,6 +312,7 @@ fn consumed_objective_remains_unmet_and_its_checkpoint_is_valid() {
     let mut spec = ItemSpec::ordinary("objective potion".into());
     spec.class = ItemClass::Potion;
     spec.consumable = Some(ConsumableSpec {
+        discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 1 },
         }],
@@ -377,6 +379,7 @@ fn lethal_final_potion_reports_completion_without_anatomy_or_remaining_inventory
     potion.concealed = true;
     potion.appearance = "red potion".into();
     potion.consumable = Some(ConsumableSpec {
+        discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![super::abilities::damage(100, DamageType::Vital)],
     });
     game.place_item_stack(20, at(1), Some(actor), 1, potion)
@@ -637,6 +640,7 @@ fn saved_item_preparation_rejects_missing_ground_and_foreign_items() {
     let mut potion = ItemSpec::ordinary("saved-potion".into());
     potion.class = ItemClass::Potion;
     potion.consumable = Some(ConsumableSpec {
+        discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 1 },
         }],
@@ -797,6 +801,7 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
     let mut potion = ItemSpec::ordinary("potion".into());
     potion.class = ItemClass::Potion;
     potion.consumable = Some(ConsumableSpec {
+        discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 1 },
         }],

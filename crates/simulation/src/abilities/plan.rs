@@ -108,6 +108,11 @@ pub enum PlannedEffect {
     Heal {
         amount: PlannedAmount,
     },
+    HealPerHitDie {
+        dice: Vec<DicePool>,
+        bonus: i32,
+        overflow: crate::rules::HealingOverflow,
+    },
     Nourish {
         amount: PlannedAmount,
     },
@@ -128,6 +133,14 @@ pub enum PlannedEffect {
     ApplyCondition {
         id: ConditionId,
         duration: u64,
+    },
+    ApplyConditionForTurns {
+        id: ConditionId,
+        duration: PlannedAmount,
+        turn_ticks: u64,
+    },
+    RemoveCondition {
+        id: ConditionId,
     },
     Restore {
         resource: Resource,
@@ -177,6 +190,17 @@ impl<'de> Deserialize<'de> for PlannedAmount {
     }
 }
 impl PlannedAmount {
+    pub(crate) fn valid_turn_duration(&self, turn_ticks: u64) -> bool {
+        let maximum = match self {
+            Self::Fixed { amount } => *amount,
+            Self::Rolled { dice } => dice.maximum(),
+        };
+        self.strictly_positive()
+            && turn_ticks > 0
+            && u64::from(maximum)
+                .checked_mul(turn_ticks)
+                .is_some_and(|ticks| ticks <= crate::limits::NUMERIC as u64)
+    }
     pub(crate) fn strictly_positive(&self) -> bool {
         match self {
             Self::Fixed { amount } => *amount > 0,
@@ -203,6 +227,11 @@ pub enum Plan {
     Escape(tor_world::Shared<crate::escape::EscapePlan>),
     Ability(tor_world::Shared<AbilityPlan>),
     Ray(tor_world::Shared<super::RayPlan>),
+    Zap {
+        item: ItemId,
+        charges: u16,
+        ray: tor_world::Shared<super::RayPlan>,
+    },
     Respec(tor_world::Shared<crate::player_respec::RespecPlan>),
     Equip {
         actor: ActorId,
@@ -215,7 +244,18 @@ pub enum Plan {
         item: ItemId,
         preparation: u64,
     },
+    Read {
+        actor: ActorId,
+        item: ItemId,
+        preparation: u64,
+        #[serde(deserialize_with = "read_item_effects")]
+        effects: Vec<PlannedEffect>,
+        #[serde(deserialize_with = "crate::bounded::required_option")]
+        identify: Option<crate::ItemClass>,
+        discovery: crate::ItemDiscovery,
+    },
     Drink {
+        discovery: crate::ItemDiscovery,
         actor: ActorId,
         item: ItemId,
         preparation: u64,
@@ -319,7 +359,7 @@ impl Plan {
     ) -> impl ExactSizeIterator<Item = &crate::conditions::TokenReservation> + Clone {
         match self {
             Self::Ability(plan) => plan.tokens.as_slice(),
-            Self::Ray(plan) => plan.tokens.as_slice(),
+            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.tokens.as_slice(),
             Self::Escape(plan) => plan.tokens.as_slice(),
             _ => &[],
         }
@@ -330,10 +370,11 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.actor,
             Self::Ability(plan) => plan.actor,
-            Self::Ray(plan) => plan.actor,
+            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
+            | Self::Read { actor, .. }
             | Self::Drink { actor, .. }
             | Self::Eat { actor, .. } => *actor,
         }
@@ -343,10 +384,11 @@ impl Plan {
             Self::Escape(plan) => plan.holder,
             Self::Ability(plan) => plan.target,
             // Legacy actor-local bookkeeping only; a ray has no persisted target.
-            Self::Ray(plan) => plan.actor,
+            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
+            | Self::Read { actor, .. }
             | Self::Drink { actor, .. }
             | Self::Eat { actor, .. } => *actor,
         }
@@ -358,6 +400,10 @@ impl Plan {
                 basis: plan.basis.clone(),
                 replacement: plan.replacement.clone(),
                 supplies: plan.supplies.clone(),
+            },
+            Self::Zap { item, ray, .. } => Work::Zap {
+                item: *item,
+                direction: ray.direction,
             },
             Self::Ray(plan) => Work::UseAbility {
                 id: plan.ability.clone(),
@@ -377,6 +423,7 @@ impl Plan {
             },
             Self::Unequip { item, .. } => Work::Unequip { item: *item },
             Self::Drink { item, .. } => Work::Drink { item: *item },
+            Self::Read { item, .. } => Work::Read { item: *item },
             Self::Eat { item, .. } => Work::Eat { item: *item },
         }
     }
@@ -384,10 +431,11 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.preparation,
             Self::Ability(plan) => plan.preparation,
-            Self::Ray(plan) => plan.preparation,
+            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.preparation,
             Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
             | Self::Unequip { preparation, .. }
+            | Self::Read { preparation, .. }
             | Self::Drink { preparation, .. }
             | Self::Eat { preparation, .. } => *preparation,
         }
@@ -396,19 +444,25 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.recovery,
             Self::Ability(plan) => plan.recovery + plan.step.map_or(0, |step| step.duration),
-            Self::Ray(plan) => plan.recovery,
+            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.recovery,
             Self::Respec(plan) => plan.recovery,
-            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => 0,
+            Self::Equip { .. }
+            | Self::Unequip { .. }
+            | Self::Read { .. }
+            | Self::Drink { .. }
+            | Self::Eat { .. } => 0,
         }
     }
     pub fn cost(&self) -> Option<ResourceCost> {
         match self {
             Self::Ability(plan) => plan.cost,
-            Self::Ray(plan) => plan.cost,
+            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.cost,
             Self::Escape(_) | Self::Respec(_) => None,
-            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => {
-                None
-            }
+            Self::Equip { .. }
+            | Self::Unequip { .. }
+            | Self::Read { .. }
+            | Self::Drink { .. }
+            | Self::Eat { .. } => None,
         }
     }
     pub fn on_success(&self) -> &[PlannedEffect] {
@@ -417,8 +471,11 @@ impl Plan {
                 .strikes
                 .first()
                 .map_or(&[], |strike| strike.on_success.as_slice()),
-            Self::Drink { effects, .. } | Self::Eat { effects, .. } => effects,
+            Self::Read { effects, .. }
+            | Self::Drink { effects, .. }
+            | Self::Eat { effects, .. } => effects,
             Self::Ray(_)
+            | Self::Zap { .. }
             | Self::Escape(_)
             | Self::Respec(_)
             | Self::Equip { .. }
@@ -428,15 +485,17 @@ impl Plan {
     pub fn as_ability(&self) -> Option<&AbilityPlan> {
         match self {
             Self::Ability(plan) => Some(plan),
-            Self::Ray(_) | Self::Escape(_) | Self::Respec(_) => None,
-            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => {
-                None
-            }
+            Self::Ray(_) | Self::Zap { .. } | Self::Escape(_) | Self::Respec(_) => None,
+            Self::Equip { .. }
+            | Self::Unequip { .. }
+            | Self::Read { .. }
+            | Self::Drink { .. }
+            | Self::Eat { .. } => None,
         }
     }
     pub fn as_ray(&self) -> Option<&super::RayPlan> {
         match self {
-            Self::Ray(plan) => Some(plan),
+            Self::Ray(plan) | Self::Zap { ray: plan, .. } => Some(plan),
             _ => None,
         }
     }
@@ -458,14 +517,15 @@ impl Plan {
     pub fn resolution(&self) -> Option<ResolutionPlan<'_>> {
         match self {
             Self::Ability(plan) => Some(ResolutionPlan::Ability(plan)),
-            Self::Drink { actor, effects, .. } | Self::Eat { actor, effects, .. } => {
-                Some(ResolutionPlan::Effects {
-                    actor: *actor,
-                    target: *actor,
-                    effects,
-                })
-            }
+            Self::Read { actor, effects, .. }
+            | Self::Drink { actor, effects, .. }
+            | Self::Eat { actor, effects, .. } => Some(ResolutionPlan::Effects {
+                actor: *actor,
+                target: *actor,
+                effects,
+            }),
             Self::Ray(_)
+            | Self::Zap { .. }
             | Self::Escape(_)
             | Self::Respec(_)
             | Self::Equip { .. }
@@ -479,11 +539,34 @@ impl Plan {
                 Self::Escape(plan) => plan.valid(rules),
                 Self::Ability(plan) => plan.valid(rules),
                 Self::Ray(plan) => plan.valid(rules),
+                Self::Zap { item, ray, .. } => {
+                    valid_item(*item)
+                        && ray.valid(rules)
+                        && ray.cost.is_none()
+                        && ray.cooldown.is_none()
+                        && ray.supply_costs.is_empty()
+                }
                 Self::Respec(plan) => plan.valid(rules),
                 Self::Equip { item, slot, .. } => {
                     valid_item(*item) && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
                 }
                 Self::Unequip { item, .. } => valid_item(*item),
+                Self::Read {
+                    item,
+                    effects,
+                    identify,
+                    discovery,
+                    ..
+                } => {
+                    valid_item(*item)
+                        && effects_valid(effects, rules)
+                        && match identify {
+                            Some(_) => {
+                                effects.is_empty() && *discovery == crate::ItemDiscovery::OnUse
+                            }
+                            None => !effects.is_empty(),
+                        }
+                }
                 Self::Drink { item, effects, .. } => {
                     valid_item(*item) && effects_valid(effects, rules)
                 }
@@ -501,6 +584,64 @@ pub(super) fn valid_actor(id: ActorId) -> bool {
 }
 fn valid_item(id: ItemId) -> bool {
     id.0 > 0 && id.0 != u64::MAX
+}
+/// HD scales a healing roll, not a damage expression. Chunking reuses the
+/// bounded dice kernel without widening the independent damage/check limit.
+pub(super) fn compile_hit_die_healing(
+    count: u64,
+    sides: u16,
+    bonus: i32,
+) -> Result<Vec<DicePool>, GameError> {
+    if !(1..=crate::limits::HIT_DICE as u64).contains(&count) {
+        return Err(invalid());
+    }
+    let mut left = count;
+    let mut pools = Vec::new();
+    while left > 0 {
+        let chunk = left.min(u64::from(crate::limits::DICE)) as u16;
+        pools.push(DicePool::new(chunk, sides, 0).map_err(|_| invalid())?);
+        left -= u64::from(chunk);
+    }
+    if !valid_hit_die_healing(&pools, bonus) {
+        return Err(invalid());
+    }
+    Ok(pools)
+}
+pub(super) fn valid_hit_die_healing(pools: &[DicePool], bonus: i32) -> bool {
+    !pools.is_empty()
+        && pools.len() <= crate::limits::HIT_DICE.div_ceil(usize::from(crate::limits::DICE))
+        && pools.iter().enumerate().all(|(index, pool)| {
+            pool.bonus() == 0
+                && pool.sides() == pools[0].sides()
+                && (index + 1 == pools.len() || pool.count() == crate::limits::DICE)
+        })
+        && pools
+            .iter()
+            .map(|pool| usize::from(pool.count()))
+            .sum::<usize>()
+            <= crate::limits::HIT_DICE
+        && (-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(bonus))
+        && pools
+            .iter()
+            .map(|pool| i64::from(pool.maximum()))
+            .sum::<i64>()
+            + i64::from(bonus)
+            <= crate::limits::NUMERIC
+}
+fn read_hit_die_pools<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<DicePool>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(transparent)]
+    struct NamedPool(#[serde(deserialize_with = "crate::bounded::named_map")] DicePool);
+    Ok(crate::bounded::Bounded::<
+        NamedPool,
+        { crate::limits::HIT_DICE.div_ceil(crate::limits::DICE as usize) },
+    >::deserialize(deserializer)?
+    .0
+    .into_iter()
+    .map(|pool| pool.0)
+    .collect())
 }
 pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Ruleset) -> bool {
     effects.len() <= crate::limits::EFFECTS_PER_BRANCH
@@ -531,6 +672,13 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 .as_ref()
                 .is_none_or(|id| rules.descriptor(id).is_some()),
             PlannedEffect::Damage { damage } => rules.validate_damage(damage).is_ok(),
+            PlannedEffect::HealPerHitDie { dice, bonus, .. } => valid_hit_die_healing(dice, *bonus),
+            PlannedEffect::ApplyConditionForTurns {
+                id,
+                duration,
+                turn_ticks,
+            } => rules.condition(id).is_some() && duration.valid_turn_duration(*turn_ticks),
+            PlannedEffect::RemoveCondition { id } => rules.condition(id).is_some(),
             PlannedEffect::Heal { amount }
             | PlannedEffect::Nourish { amount }
             | PlannedEffect::LoseAttribute { amount, .. }
@@ -664,6 +812,42 @@ pub(super) fn effects_match_definition_scoped(
                 ) => expected == actual,
                 (Effect::Damage { damage: expected }, PlannedEffect::Damage { damage: actual }) => {
                     damage_matches_definition(expected, actual, primary_effect == Some(index))
+                }
+                (
+                    Effect::HealPerHitDie {
+                        sides,
+                        bonus,
+                        overflow,
+                    },
+                    PlannedEffect::HealPerHitDie {
+                        dice,
+                        bonus: actual_bonus,
+                        overflow: actual_overflow,
+                    },
+                ) => {
+                    overflow == actual_overflow
+                        && bonus == actual_bonus
+                        && valid_hit_die_healing(dice, *actual_bonus)
+                        && dice.iter().all(|pool| pool.sides() == *sides)
+                }
+                (Effect::RemoveCondition { condition }, PlannedEffect::RemoveCondition { id }) => {
+                    condition == id
+                }
+                (
+                    Effect::ApplyConditionForTurns {
+                        condition,
+                        duration,
+                    },
+                    PlannedEffect::ApplyConditionForTurns {
+                        id,
+                        duration: actual,
+                        turn_ticks,
+                    },
+                ) => {
+                    condition == id
+                        && actual.valid_turn_duration(*turn_ticks)
+                        && PlannedAmount::compile(duration)
+                            .is_ok_and(|expected| &expected == actual)
                 }
                 (Effect::Heal { amount: expected }, PlannedEffect::Heal { amount: actual })
                 | (
@@ -1048,6 +1232,47 @@ impl Game {
                     };
                     Ok(PlannedEffect::Damage { damage })
                 }
+                Effect::HealPerHitDie {
+                    sides,
+                    bonus,
+                    overflow,
+                } => {
+                    let count = self
+                        .creature(actor)
+                        .ok_or_else(invalid)?
+                        .derived()
+                        .total_hd()
+                        .0;
+                    let dice = compile_hit_die_healing(count, *sides, *bonus)?;
+                    Ok(PlannedEffect::HealPerHitDie {
+                        dice,
+                        bonus: *bonus,
+                        overflow: *overflow,
+                    })
+                }
+                Effect::RemoveCondition { condition } => Ok(PlannedEffect::RemoveCondition {
+                    id: condition.clone(),
+                }),
+                Effect::ApplyConditionForTurns {
+                    condition,
+                    duration,
+                } => {
+                    let duration = PlannedAmount::compile(duration)?;
+                    let turn_ticks = self
+                        .actors
+                        .get(&actor)
+                        .ok_or_else(invalid)?
+                        .turn_ticks
+                        .get();
+                    if !duration.valid_turn_duration(turn_ticks) {
+                        return Err(invalid());
+                    }
+                    Ok(PlannedEffect::ApplyConditionForTurns {
+                        id: condition.clone(),
+                        duration,
+                        turn_ticks,
+                    })
+                }
                 Effect::Heal { amount } => Ok(PlannedEffect::Heal {
                     amount: PlannedAmount::compile(amount)?,
                 }),
@@ -1162,6 +1387,12 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Heal {
                 amount: PlannedAmount,
             },
+            HealPerHitDie {
+                #[serde(deserialize_with = "read_hit_die_pools")]
+                dice: Vec<DicePool>,
+                bonus: i32,
+                overflow: crate::rules::HealingOverflow,
+            },
             Nourish {
                 amount: PlannedAmount,
             },
@@ -1183,6 +1414,14 @@ impl<'de> Deserialize<'de> for PlannedEffect {
                 id: ConditionId,
                 duration: u64,
             },
+            ApplyConditionForTurns {
+                id: ConditionId,
+                duration: PlannedAmount,
+                turn_ticks: u64,
+            },
+            RemoveCondition {
+                id: ConditionId,
+            },
             Restore {
                 resource: Resource,
                 amount: PlannedAmount,
@@ -1195,7 +1434,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
                 ability_tag: crate::content_ids::AbilityTagId,
             },
         }
-        Ok(match crate::bounded::named_map(deserializer)? {
+        let effect = match crate::bounded::named_map(deserializer)? {
             Fields::Theft { theft } => Self::Theft { theft },
             Fields::CorrodeArmor { slot, amount } => Self::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
@@ -1212,6 +1451,15 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
+            Fields::HealPerHitDie {
+                dice,
+                bonus,
+                overflow,
+            } => Self::HealPerHitDie {
+                dice,
+                bonus,
+                overflow,
+            },
             Fields::Nourish { amount } => Self::Nourish { amount },
             Fields::LoseAttribute { attribute, amount } => {
                 Self::LoseAttribute { attribute, amount }
@@ -1222,6 +1470,16 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::LoseMaximumHealth { amount } => Self::LoseMaximumHealth { amount },
             Fields::RestoreMaximumHealth { amount } => Self::RestoreMaximumHealth { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
+            Fields::ApplyConditionForTurns {
+                id,
+                duration,
+                turn_ticks,
+            } => Self::ApplyConditionForTurns {
+                id,
+                duration,
+                turn_ticks,
+            },
+            Fields::RemoveCondition { id } => Self::RemoveCondition { id },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
             Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
             Fields::ObservePublicPlan {} => Self::ObservePublicPlan,
@@ -1234,6 +1492,25 @@ impl<'de> Deserialize<'de> for PlannedEffect {
                 duration,
                 ability_tag,
             },
-        })
+        };
+        let valid = match &effect {
+            Self::ApplyConditionForTurns {
+                duration,
+                turn_ticks,
+                ..
+            } => duration.valid_turn_duration(*turn_ticks),
+            Self::HealPerHitDie { dice, bonus, .. } => valid_hit_die_healing(dice, *bonus),
+            _ => true,
+        };
+        if !valid {
+            return Err(serde::de::Error::custom("invalid frozen effect operands"));
+        }
+        Ok(effect)
     }
+}
+
+fn read_item_effects<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<PlannedEffect>, D::Error> {
+    Ok(crate::bounded::Bounded::<PlannedEffect, {crate::limits::CONSUMABLE_EFFECTS}>::deserialize(d)?.0)
 }

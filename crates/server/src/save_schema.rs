@@ -104,6 +104,18 @@ pub(crate) enum Action {
     Drink {
         item: u64,
     },
+    Read {
+        item: u64,
+    },
+    Zap {
+        item: u64,
+        direction: Direction,
+    },
+    Identify {
+        choice: tor_simulation::IntentionId,
+        #[serde(deserialize_with = "required_option")]
+        item: Option<u64>,
+    },
     Eat {
         item: u64,
     },
@@ -422,6 +434,15 @@ impl From<&crate::actions::Action> for Action {
             },
             Backend::Unequip { item } => Self::Unequip { item: *item },
             Backend::Drink { item } => Self::Drink { item: *item },
+            Backend::Read { item } => Self::Read { item: *item },
+            Backend::Zap { item, direction } => Self::Zap {
+                item: *item,
+                direction: (*direction).into(),
+            },
+            Backend::Identify { choice, item } => Self::Identify {
+                choice: *choice,
+                item: *item,
+            },
             Backend::Eat { item } => Self::Eat { item: *item },
             Backend::Wait => Self::Wait,
         }
@@ -466,6 +487,12 @@ impl From<Action> for crate::actions::Action {
             Action::Equip { item, slot } => Self::Equip { item, slot },
             Action::Unequip { item } => Self::Unequip { item },
             Action::Drink { item } => Self::Drink { item },
+            Action::Read { item } => Self::Read { item },
+            Action::Zap { item, direction } => Self::Zap {
+                item,
+                direction: direction.into(),
+            },
+            Action::Identify { choice, item } => Self::Identify { choice, item },
             Action::Eat { item } => Self::Eat { item },
             Action::Wait => Self::Wait,
         }

@@ -257,6 +257,7 @@ mod tests {
         Item {
             corpse: None,
             condition: ItemCondition::default(),
+            charges: None,
             motion: Default::default(),
             orientation: 0,
             spec: tor_world::Shared::new(spec),

@@ -105,10 +105,31 @@ impl EquipmentSpec {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsumableSpec {
+    pub discovery: crate::ItemDiscovery,
     pub effects: Vec<crate::rules::Effect>,
+}
+impl<'de> Deserialize<'de> for ConsumableSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            discovery: crate::ItemDiscovery,
+            #[serde(deserialize_with = "crate::magic_items::read_readable_effects")]
+            effects: Vec<crate::rules::Effect>,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        let spec = Self {
+            discovery: f.discovery,
+            effects: f.effects,
+        };
+        if !spec.valid() {
+            return Err(serde::de::Error::custom("invalid consumable capability"));
+        }
+        Ok(spec)
+    }
 }
 
 /// Edibility is an explicit capability, independent of item class or identity.
@@ -195,6 +216,7 @@ impl From<&crate::rules::EquipmentSlotDef> for EquipmentSlotView {
 /// remain absent until that actor knows the item's identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InteractionView {
+    pub identification: Option<crate::IdentificationChoiceView>,
     pub completed: Vec<Work>,
     pub slots: Vec<EquipmentSlotView>,
     pub preparation: Option<PreparationView>,
@@ -213,6 +235,9 @@ pub struct ItemInteractionView {
     pub equipped_slot: Option<EquipmentSlotId>,
     pub known_equipment: Option<EquipmentSpec>,
     pub drinkable: bool,
+    pub readable: bool,
+    pub zappable: bool,
+    pub charges: Option<u16>,
     pub edible: bool,
 }
 impl ConsumableSpec {
@@ -252,6 +277,13 @@ pub enum Work {
     Drink {
         item: ItemId,
     },
+    Read {
+        item: ItemId,
+    },
+    Zap {
+        item: ItemId,
+        direction: crate::abilities::StepDirection,
+    },
     Eat {
         item: ItemId,
     },
@@ -284,6 +316,13 @@ impl<'de> serde::Deserialize<'de> for Work {
             Drink {
                 item: ItemId,
             },
+            Read {
+                item: ItemId,
+            },
+            Zap {
+                item: ItemId,
+                direction: crate::abilities::StepDirection,
+            },
             Eat {
                 item: ItemId,
             },
@@ -311,6 +350,8 @@ impl<'de> serde::Deserialize<'de> for Work {
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
             Fields::Drink { item } => Self::Drink { item },
+            Fields::Read { item } => Self::Read { item },
+            Fields::Zap { item, direction } => Self::Zap { item, direction },
             Fields::Eat { item } => Self::Eat { item },
         })
     }
@@ -344,6 +385,11 @@ impl Work {
             },
             Self::Unequip { item } => Action::Unequip { item: *item },
             Self::Drink { item } => Action::Drink { item: *item },
+            Self::Read { item } => Action::Read { item: *item },
+            Self::Zap { item, direction } => Action::Zap {
+                item: *item,
+                direction: *direction,
+            },
             Self::Eat { item } => Action::Eat { item: *item },
         }
     }
@@ -365,6 +411,8 @@ impl Work {
             | Self::Respec { .. }
             | Self::Equip { .. }
             | Self::Unequip { .. }
+            | Self::Read { .. }
+            | Self::Zap { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => None,
         }
@@ -374,6 +422,8 @@ impl Work {
             Self::Escape { .. } | Self::UseAbility { .. } | Self::Respec { .. } => None,
             Self::Equip { item, .. }
             | Self::Unequip { item }
+            | Self::Read { item }
+            | Self::Zap { item, .. }
             | Self::Drink { item }
             | Self::Eat { item } => Some(*item),
         }
@@ -386,6 +436,8 @@ impl Work {
             Self::Equip { .. } => "equip",
             Self::Unequip { .. } => "remove",
             Self::Drink { .. } => "drink",
+            Self::Read { .. } => "read",
+            Self::Zap { .. } => "zap",
             Self::Eat { .. } => "eat",
         }
     }
@@ -403,7 +455,11 @@ impl Work {
             Self::Equip { item, slot } => {
                 item.0 > 0 && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
             }
-            Self::Unequip { item } | Self::Drink { item } | Self::Eat { item } => item.0 > 0,
+            Self::Unequip { item }
+            | Self::Read { item }
+            | Self::Zap { item, .. }
+            | Self::Drink { item }
+            | Self::Eat { item } => item.0 > 0,
         }
     }
 }
@@ -518,6 +574,12 @@ impl Game {
                 i.spec.equipment.is_some() && a.equipment.values().any(|id| *id == item)
             }
             Work::Drink { .. } => i.spec.consumable.is_some() && a.combat.is_some(),
+            Work::Read { .. } => {
+                i.spec.readable.is_some() && a.combat.is_some() && a.identification.is_none()
+            }
+            Work::Zap { .. } => {
+                i.spec.device.is_some() && i.charges.is_some() && a.combat.is_some()
+            }
             Work::Eat { .. } => i.spec.edible.is_some() && a.combat.is_some(),
             Work::Escape { .. } | Work::UseAbility { .. } | Work::Respec { .. } => false,
         }
@@ -582,6 +644,18 @@ impl Game {
                 }
                 timing.consume_turns
             }
+            Work::Read { .. } => {
+                if i.spec.readable.is_none() || a.combat.is_none() || a.identification.is_some() {
+                    return Err(GameError::ItemUnavailable);
+                }
+                timing.consume_turns
+            }
+            Work::Zap { .. } => {
+                if i.spec.device.is_none() || i.charges.is_none() || a.combat.is_none() {
+                    return Err(GameError::ItemUnavailable);
+                }
+                timing.consume_turns
+            }
             Work::Eat { .. } => {
                 if i.spec.edible.is_none() || a.combat.is_none() {
                     return Err(GameError::ItemUnavailable);
@@ -631,8 +705,15 @@ impl Game {
             return self.respec_plan(actor, basis, replacement, supplies);
         }
         let preparation = self.item_work_duration(actor, work.clone())?;
+        if let Work::Zap { item, direction } = work {
+            let ray = self.compile_device_ray_plan(actor, item, direction, preparation)?;
+            self.item_allocation(&ray)?;
+            return Ok(ray);
+        }
         let plan = match work {
-            Work::Escape { .. } | Work::Respec { .. } => unreachable!("distinct frozen plan"),
+            Work::Escape { .. } | Work::Respec { .. } | Work::Zap { .. } => {
+                unreachable!("distinct frozen plan")
+            }
             Work::Equip { item, slot } => crate::abilities::Plan::Equip {
                 actor,
                 item,
@@ -657,6 +738,21 @@ impl Game {
                     effects: self.effect_plan(actor, &edible.effects())?,
                 }
             }
+            Work::Read { item } => {
+                let readable = self
+                    .items
+                    .get(&item)
+                    .and_then(|i| i.spec.readable.as_ref())
+                    .ok_or(GameError::ItemUnavailable)?;
+                crate::abilities::Plan::Read {
+                    actor,
+                    item,
+                    preparation,
+                    effects: self.effect_plan(actor, &readable.effects)?,
+                    identify: readable.identify,
+                    discovery: readable.discovery,
+                }
+            }
             Work::Drink { item } => {
                 let effects = &self
                     .items
@@ -665,6 +761,12 @@ impl Game {
                     .ok_or(GameError::ItemUnavailable)?
                     .effects;
                 crate::abilities::Plan::Drink {
+                    discovery: self.items[&item]
+                        .spec
+                        .consumable
+                        .as_ref()
+                        .expect("validated consumable")
+                        .discovery,
                     actor,
                     item,
                     preparation,
@@ -867,17 +969,23 @@ impl Game {
                         crate::perception::AmbushState::Reserved { origin: owner };
                 }
             }
-            if let Some(ability) = plan.ability_id() {
-                if self
-                    .content
+            // Item-defined rays own hostile intent without making their private
+            // definition an actor ability or acquiring a cooldown entitlement.
+            let interaction_source = plan
+                .as_ray()
+                .map(|ray| &ray.ability)
+                .or_else(|| plan.ability_id());
+            if interaction_source.is_some_and(|ability| {
+                self.content
                     .rules
                     .ability(ability)
                     .is_some_and(|definition| {
                         definition.interaction == crate::rules::Interaction::HostileToTarget
                     })
-                {
-                    candidate.guise.reveal();
-                }
+            }) {
+                candidate.guise.reveal();
+            }
+            if let Some(ability) = plan.ability_id() {
                 if let Some(cooldown) = plan.ability_cooldown() {
                     candidate
                         .combat
@@ -985,7 +1093,7 @@ impl Game {
                 equipment.retain(|_, equipped| *equipped != item);
                 ItemChange::Equipment(self.equipment_candidate(actor, equipment)?)
             }
-            Work::Drink { .. } | Work::Eat { .. } => {
+            Work::Drink { .. } | Work::Eat { .. } | Work::Read { .. } | Work::Zap { .. } => {
                 let mut outcome = self.actor_outcome(actor)?;
                 if observed {
                     outcome
@@ -1075,6 +1183,8 @@ impl Game {
                     })
                     && p.plan.actor() == actor
                     && match p.plan.work() {
+                        Work::Read {item}=>self.items.get(&item).and_then(|i|i.spec.readable.as_ref()).is_some_and(|s|matches!(&p.plan,crate::abilities::Plan::Read {effects,identify,discovery,..} if *identify==s.identify&&*discovery==s.discovery&&crate::abilities::item_effects_match_definition(&s.effects,effects))),
+                        Work::Zap {item,..}=>self.items.get(&item).is_some_and(|i|matches!(&p.plan,crate::abilities::Plan::Zap {charges,ray,..} if i.charges==Some(*charges)&&i.spec.device.as_ref().is_some_and(|d|d.ability==ray.ability))),
                         Work::Eat { item } => self
                             .items
                             .get(&item)
@@ -1093,7 +1203,7 @@ impl Game {
                                 crate::abilities::item_effects_match_definition(
                                     &consumable.effects,
                                     p.plan.on_success(),
-                                )
+                                ) && matches!(&p.plan,crate::abilities::Plan::Drink{discovery,..} if *discovery==consumable.discovery)
                             }),
                         _ => true,
                     }

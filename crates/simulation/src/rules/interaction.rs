@@ -143,10 +143,15 @@ impl Ruleset {
                     }
                     PlannedEffect::LoseAttribute { amount, .. }
                     | PlannedEffect::LoseMaximumHealth { amount } => positive(amount),
-                    PlannedEffect::ApplyCondition { id, .. } => self.condition_directly_harms(id),
+                    PlannedEffect::ApplyCondition { id, .. }
+                    | PlannedEffect::ApplyConditionForTurns { id, .. } => {
+                        self.condition_directly_harms(id)
+                    }
                     PlannedEffect::StepSelfOneCell
                     | PlannedEffect::RestoreHitDie
                     | PlannedEffect::Heal { .. }
+                    | PlannedEffect::HealPerHitDie { .. }
+                    | PlannedEffect::RemoveCondition { .. }
                     | PlannedEffect::Nourish { .. }
                     | PlannedEffect::Restore { .. }
                     | PlannedEffect::RestoreAttribute { .. }
@@ -198,11 +203,16 @@ impl Ruleset {
             Effect::LoseAttribute { amount, .. } | Effect::LoseMaximumHealth { amount } => {
                 positive_amount(amount)
             }
-            Effect::ApplyCondition { condition, .. } => self.condition_directly_harms(condition),
+            Effect::ApplyCondition { condition, .. }
+            | Effect::ApplyConditionForTurns { condition, .. } => {
+                self.condition_directly_harms(condition)
+            }
             // Future consequences and source-only benefits do not imply intent.
             Effect::StepSelfOneCell
             | Effect::RestoreHitDie
             | Effect::Heal { .. }
+            | Effect::HealPerHitDie { .. }
+            | Effect::RemoveCondition { .. }
             | Effect::Nourish { .. }
             | Effect::Restore { .. }
             | Effect::RestoreAttribute { .. }

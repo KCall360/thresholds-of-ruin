@@ -216,6 +216,7 @@ impl std::ops::DerefMut for ConditionEntry {
 enum ConditionEnd {
     Expiry { elapsed_after: u64 },
     Immunity,
+    Removal,
 }
 fn end_active(entry: &mut ConditionEntry, reason: ConditionEnd) -> bool {
     if entry.phase == ConditionPhase::Protection {
@@ -226,7 +227,7 @@ fn end_active(entry: &mut ConditionEntry, reason: ConditionEnd) -> bool {
     };
     let elapsed_after = match reason {
         ConditionEnd::Expiry { elapsed_after } => elapsed_after,
-        ConditionEnd::Immunity => 0,
+        ConditionEnd::Immunity | ConditionEnd::Removal => 0,
     };
     entry.phase = ConditionPhase::Protection;
     entry.remaining = duration.get().saturating_sub(elapsed_after);
@@ -238,6 +239,24 @@ impl ConditionState {
     }
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+    /// End active applications through their normal expiry policy. Existing
+    /// protection is retained, and paid token reservations remain tombstones.
+    pub(crate) fn remove(&mut self, condition: &ConditionId) -> bool {
+        let mut changed = false;
+        self.entries.retain(|(id, _), entry| {
+            if id != condition || entry.phase != ConditionPhase::Active || entry.remaining == 0 {
+                return true;
+            }
+            changed = true;
+            if entry.reserved_by.is_some() {
+                entry.remaining = 0;
+                true
+            } else {
+                end_active(entry, ConditionEnd::Removal)
+            }
+        });
+        changed
     }
     pub fn clear(&mut self) {
         self.entries.clear();
@@ -276,12 +295,13 @@ impl ConditionState {
     }
     /// Called only after metadata reconciliation against validated definitions.
     /// False proves there are no live condition modifiers, including unexpired
-    /// reserved tokens. Otherwise the seed is necessarily ordinary and evictable:
-    /// protected definitions are modifier-free and reserved entries do not fold.
+    /// reserved tokens. Only ordinary, unreserved modifier sources are evictable:
+    /// protected definitions may carry safe confusion modifiers and must survive.
     /// Choosing any older eligible entry preserves ordinary oldest-first policy.
     pub(crate) fn evict_for_reconciliation(&mut self, rules: &Ruleset) -> bool {
         let Some((mut key, mut order)) = self.entries.iter().find_map(|(key, entry)| {
             (entry.phase == ConditionPhase::Active
+                && !entry.protected
                 && entry.reserved_by.is_none()
                 && rules
                     .condition(&entry.condition)
@@ -443,11 +463,27 @@ impl ConditionState {
             if def.stacking == Stacking::Keep {
                 return Ok(ConditionUpdate::Unchanged);
             }
+            // Bound extension before changing any field, including qualification.
+            let extended = if def.stacking == Stacking::Extend {
+                Some(
+                    entry
+                        .remaining
+                        .checked_add(duration)
+                        .filter(|ticks| *ticks <= crate::limits::NUMERIC as u64)
+                        .ok_or(ConditionError::InvalidDuration)?,
+                )
+            } else {
+                None
+            };
             entry.qualification = qualification;
             let update = match def.stacking {
                 Stacking::Keep => unreachable!("handled before mutation"),
                 Stacking::Refresh => {
                     entry.remaining = duration;
+                    ConditionUpdate::Refreshed
+                }
+                Stacking::Extend => {
+                    entry.remaining = extended.expect("validated extension");
                     ConditionUpdate::Refreshed
                 }
                 Stacking::Longest => {
@@ -761,6 +797,167 @@ fn validate(_: &ConditionDef, source: ActorId, duration: u64) -> Result<(), Cond
 mod tests {
     use super::*;
     use crate::rules::DEFAULT_RULESET_TOML;
+
+    #[test]
+    fn reconciliation_never_evicts_protected_confusion_with_repeatable_restrictions() {
+        for stacking in [Stacking::Keep, Stacking::Extend] {
+            let original = crate::test_creatures::ruleset();
+            let ordinary = original
+                .condition(&ConditionId::new("readied").unwrap())
+                .unwrap();
+            let mut protected = ordinary.clone();
+            // Deliberately first in both key and application-age order.
+            protected.id = ConditionId::new("aaa_protected_confusion").unwrap();
+            protected.family =
+                crate::content_ids::ConditionFamilyId::new("aaa_protected_confusion").unwrap();
+            protected.lifecycle = ConditionLifecycle::Timed;
+            protected.stacking = stacking;
+            protected.source_scoped = false;
+            protected.timing = crate::rules::ConditionTiming::expiring();
+            protected.restrictions = vec![ConditionRestriction::VoluntaryActions];
+            protected.preparation = ConditionPreparation::Pause;
+            protected.modifiers = vec![Modifier {
+                scope: crate::rules::Scope::Always,
+                op: crate::rules::ModifierOp::Locomotion {
+                    value: crate::locomotion::LocomotionValue::Confused {
+                        chance: Some(crate::locomotion::MovementChance {
+                            numerator: 1,
+                            denominator: 2,
+                        }),
+                    },
+                },
+            }];
+            let mut document = original.document().clone();
+            document.conditions.push(protected.clone());
+            let rules = Ruleset::validate(document).unwrap();
+            let mut state = ConditionState::default();
+            state.apply(&protected, ActorId(1), 200, false).unwrap();
+            state.apply(ordinary, ActorId(2), 100, false).unwrap();
+            let retained = state.instances().next().unwrap().clone();
+
+            assert!(state.evict_for_reconciliation(&rules));
+            assert_eq!(
+                state.instances().cloned().collect::<Vec<_>>(),
+                vec![retained],
+                "reconciliation must remove the ordinary source, never the older protected confusion"
+            );
+            let before = state.clone();
+            assert!(!state.evict_for_reconciliation(&rules));
+            assert_eq!(state, before);
+            assert!(state.restricts(&rules, ConditionRestriction::VoluntaryActions));
+        }
+    }
+
+    #[test]
+    fn extend_duration_preserves_one_application_and_expires_without_protection() {
+        let rules = crate::test_creatures::ruleset();
+        let mut definition = rules
+            .condition(&ConditionId::new("readied").unwrap())
+            .unwrap()
+            .clone();
+        definition.stacking = Stacking::Extend;
+        definition.lifecycle = ConditionLifecycle::Timed;
+        let mut state = ConditionState::default();
+        assert_eq!(
+            state.apply(&definition, ActorId(1), 1900, false),
+            Ok(ConditionUpdate::Applied)
+        );
+        state.advance_active(100);
+        assert_eq!(
+            state.apply(&definition, ActorId(2), 2000, false),
+            Ok(ConditionUpdate::Refreshed)
+        );
+        assert_eq!(state.instances().count(), 1);
+        let entry = state.instances().next().unwrap();
+        assert_eq!(
+            (entry.remaining, entry.stacks, entry.source),
+            (3800, 1, ActorId(1))
+        );
+        state.advance_active(3799);
+        assert_eq!(state.instances().next().unwrap().remaining, 1);
+        state.advance_active(1);
+        assert!(state.is_empty());
+        assert_eq!(
+            state.apply(&definition, ActorId(2), 1900, false),
+            Ok(ConditionUpdate::Applied)
+        );
+    }
+
+    #[test]
+    fn extend_duration_rejects_timer_overflow_without_partial_mutation() {
+        let rules = crate::test_creatures::ruleset();
+        let mut definition = rules
+            .condition(&ConditionId::new("readied").unwrap())
+            .unwrap()
+            .clone();
+        definition.stacking = Stacking::Extend;
+        let mut state = ConditionState::default();
+        state
+            .apply(
+                &definition,
+                ActorId(1),
+                crate::limits::NUMERIC as u64,
+                false,
+            )
+            .unwrap();
+        let before = state.clone();
+        assert_eq!(
+            state.apply(&definition, ActorId(2), 1, false),
+            Err(ConditionError::InvalidDuration)
+        );
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn removal_preserves_other_conditions_protection_and_paid_reservation_tombstones() {
+        let rules = crate::test_creatures::ruleset();
+        let ordinary = rules
+            .condition(&ConditionId::new("readied").unwrap())
+            .unwrap()
+            .clone();
+        let mut protected = ordinary.clone();
+        protected.id = ConditionId::new("fixture_protected").unwrap();
+        protected.lifecycle = ConditionLifecycle::Timed;
+        protected.timing = crate::rules::ConditionTiming::ActorActive {
+            on_expiry: crate::rules::ConditionExpiry::Protect {
+                duration: ConditionTicks::new(700).unwrap(),
+            },
+        };
+        let mut state = ConditionState::default();
+        state.apply(&ordinary, ActorId(1), 300, false).unwrap();
+        state.apply(&protected, ActorId(2), 100, false).unwrap();
+        assert!(state.remove(&protected.id));
+        assert!(!state.remove(&protected.id));
+        let entry = state
+            .instances()
+            .find(|entry| entry.condition == protected.id)
+            .unwrap();
+        assert_eq!(
+            (entry.phase, entry.remaining),
+            (ConditionPhase::Protection, 700)
+        );
+        assert_eq!(
+            state
+                .instances()
+                .find(|entry| entry.condition == ordinary.id)
+                .unwrap()
+                .remaining,
+            300
+        );
+        let token = state
+            .qualifying_tokens(&rules, ActorId(1), false)
+            .pop()
+            .unwrap();
+        state.reserve(&token, ActorId(3), &rules).unwrap();
+        assert!(state.remove(&ordinary.id));
+        let entry = state
+            .instances()
+            .find(|entry| entry.condition == ordinary.id)
+            .unwrap();
+        assert_eq!((entry.remaining, entry.reserved_by), (0, Some(ActorId(3))));
+        assert!(state.consume_reservation(&token, ActorId(3)));
+        assert_eq!(state.instances().count(), 1);
+    }
 
     #[test]
     fn qualified_readied_filters_contribution_and_reservation_before_family_deduplication() {

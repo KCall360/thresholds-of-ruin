@@ -110,6 +110,8 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::T => Key::Unequip,
         NativeKey::Q => Key::Drink,
         NativeKey::E => Key::Eat,
+        NativeKey::F6 => Key::Read,
+        NativeKey::F12 => Key::Zap,
         NativeKey::O => Key::OpenDoor,
         NativeKey::C => Key::CloseDoor,
         NativeKey::F3 => Key::Control,
@@ -357,7 +359,8 @@ fn window_loop(
                 || (app.advancement_open && app.supply_selection.is_none())
                 || app.wizard_command.is_some()
                 || app.place_name.is_some()
-                || !app.pickup.is_empty())
+                || !app.pickup.is_empty()
+                || app.identification_choice().is_some())
                 && !typed.is_empty()
             {
                 inputs.push(Input::Text {
@@ -384,7 +387,7 @@ fn window_loop(
             mouse_down = pressed;
             // In a menu, letters choose items (sent as text above) rather
             // than acting as commands.
-            let menu = !app.pickup.is_empty();
+            let menu = !app.pickup.is_empty() || app.identification_choice().is_some();
             inputs.extend(
                 window
                     .get_keys_pressed(KeyRepeat::No)
@@ -554,6 +557,8 @@ fn window_loop(
                 "stats_rows":if app.stats_open { Some(app.stats_rows()) } else { None },
                 "advancement_open":app.advancement_open,"advancement_rows":app.advancement_rows(),"advancement_command":app.advancement_command,
                 "ability_choices":app.ability_choices,"selected_ability":app.selected_ability,
+                "item_rows":app.item_rows(),"zap_item":app.zap_item(),
+                "identification":app.identification_choice(),"identification_rows":app.identification_rows(),
                 "hold_choices":app.hold_choice_offers(),"hold_rows":app.hold_rows(),
                 "supply_selection":app.supply_selection,"supply_rows":app.supply_rows(),
                 "status_lines":state.map(|s|tor_client_ascii::status_lines(&app,s)),
@@ -614,7 +619,10 @@ mod tests {
         assert_eq!(native_key(NativeKey::F11), Some(Key::EscapeHold));
         assert_eq!(native_key(NativeKey::F9), Some(Key::CancelIntention));
         assert_eq!(native_key(NativeKey::P), None);
-        assert_eq!(native_key(NativeKey::F6), None);
+        assert_eq!(native_key(NativeKey::F6), Some(Key::Read));
+        assert_eq!(native_key(NativeKey::F12), Some(Key::Zap));
+        assert_eq!(native_key(NativeKey::R), Some(Key::Release));
+        assert_eq!(native_key(NativeKey::Z), Some(Key::Abilities));
         assert_eq!(native_key(NativeKey::F7), Some(Key::Wizard));
         assert_eq!(native_key(NativeKey::I), Some(Key::Inventory));
         assert_eq!(native_key(NativeKey::Semicolon), Some(Key::Look));

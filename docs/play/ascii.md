@@ -107,6 +107,7 @@ Automatic server launch and packaged builds are not available; see [status](../s
 | `g` or `,` | Pick up. A lone object is taken at once; otherwise choose by letter (digits first set a count) |
 | `d` | Drop: choose by inventory letter, digits first set a count |
 | `w` / `t` / `q` / `e` | Equip / remove / drink / eat: always asks, by inventory letter |
+| `F6` / `F12` | Read a carried item / select a device then a direction |
 | `o` / `c`, then a direction | Open / close an adjacent door |
 | `i` | Inventory: letters, what's worn or in hand, and known equipment numbers |
 | `@` (Shift + 2) | Personal creature stats: attributes, skills, defenses, resources, talents and granted abilities. Up/Down scroll, Page Up/Down page; Esc or `@` closes |
@@ -329,3 +330,13 @@ not successful headless fallback coverage.
 Required nutrition appears as a hunger label on the status line and as reserve,
 capacity and active-time progress in personal stats. Exempt creatures have no
 hunger label. See [nutrition](../reference/creature-rules.md#shared-nutrition-eating-and-starvation).
+
+### Paid identification choices
+
+After an identify scroll is read and consumed, the server supplies one category
+and its eligible carried items. Choose by inventory letter or arrows and Enter.
+Escape declines this paid choice without refund; Escape in an ordinary item or
+direction picker before submission is free. The choice is restored from server
+state on reconnect. Selection clears on changed observations or control loss.
+Only the owning player sees the choice and explicitly learned instance charges;
+spectators see neither. R remains release-control and Z remains the ability menu.

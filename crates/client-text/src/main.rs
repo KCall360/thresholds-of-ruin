@@ -220,6 +220,11 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
                     println!("{}", history(entry));
                 }
                 println!("{}", describe(connection.state.state()));
+                if let Some(prompt) = tor_client_common::items::identification_prompt(
+                    &connection.state.state().observation,
+                ) {
+                    println!("{prompt}");
+                }
             }
             UpdateBody::Annotation { entry } => println!("{}", history(entry)),
             UpdateBody::Control { has_control } => println!(

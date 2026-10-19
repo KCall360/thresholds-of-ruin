@@ -35,10 +35,10 @@ pub use rules_source::{resolve_rules_source, ResolvedRules};
 #[path = "scenario_source.rs"]
 mod source;
 pub use authoring::{
-    AiProfile, AmountExpr, AnatomySpec, ArmorMaterial, ArmorSpec, BodySpec, ConsumableSpec,
-    CurrencyKind, DamageComponentExpr, DamageExpr, DamageType, DiceExpr, Effect, EquipmentSlot,
-    EquipmentSpec, HoldPolicy, ItemClass, PushDirection, RelocationGate, RelocationPolicy,
-    TheftSelection,
+    AiProfile, AmountExpr, AnatomySpec, ArmorMaterial, ArmorSpec, BodySpec, ChargeRange,
+    ConsumableSpec, CurrencyKind, DamageComponentExpr, DamageExpr, DamageType, DeviceSpec,
+    DiceExpr, Effect, EquipmentSlot, EquipmentSpec, HealingOverflow, HoldPolicy, ItemClass,
+    ItemDiscovery, PushDirection, ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -49,13 +49,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v43";
-const VALIDATOR: &str = "tor-scenario-33";
+pub const RULESET: &str = "interactions-v44";
+const VALIDATOR: &str = "tor-scenario-34";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 21;
+pub const FORMAT: u32 = 22;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -230,6 +230,8 @@ pub struct Archetype {
     pub anatomy: Option<AnatomySpec>,
     pub equipment: Option<EquipmentSpec>,
     pub consumable: Option<ConsumableSpec>,
+    pub readable: Option<ReadableSpec>,
+    pub device: Option<DeviceSpec>,
     pub edible: Option<EdibleSpec>,
     pub supply: Option<String>,
     #[serde(default)]
@@ -259,6 +261,8 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             anatomy: Option<AnatomySpec>,
             equipment: Option<EquipmentSpec>,
             consumable: Option<ConsumableSpec>,
+            readable: Option<ReadableSpec>,
+            device: Option<DeviceSpec>,
             edible: Option<EdibleSpec>,
             supply: Option<String>,
             #[serde(default)]
@@ -293,6 +297,8 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             anatomy: fields.anatomy,
             equipment: fields.equipment,
             consumable: fields.consumable,
+            readable: fields.readable,
+            device: fields.device,
             edible: fields.edible,
             supply: fields.supply,
             magical: fields.magical,
@@ -323,6 +329,8 @@ impl Clone for Archetype {
             creature: self.creature.clone(),
             equipment: self.equipment.clone(),
             consumable: self.consumable.clone(),
+            readable: self.readable.clone(),
+            device: self.device.clone(),
             edible: self.edible.clone(),
             supply: self.supply.clone(),
             magical: self.magical,
@@ -2980,6 +2988,8 @@ impl Package {
                 require(
                     !a.stackable
                         && a.consumable.is_none()
+                        && a.readable.is_none()
+                        && a.device.is_none()
                         && a.edible.is_none()
                         && a.supply.is_none()
                         && spec.validate_rules(a.class.into(), &rules).is_ok(),
@@ -2989,12 +2999,26 @@ impl Package {
             if let Some(consumable) = &a.consumable {
                 let spec = consumable.compile(&rules)?;
                 require(
-                    a.class == ItemClass::Potion && a.edible.is_none() && spec.valid(),
+                    a.class == ItemClass::Potion && a.edible.is_none() && a.readable.is_none() && a.device.is_none() && spec.valid(),
                     "Invalid consumable definition",
                 )?;
             }
+            if let Some(readable) = &a.readable {
+                readable.compile(&rules)?;
+                require(
+                    a.equipment.is_none() && a.consumable.is_none() && a.edible.is_none() && a.device.is_none() && a.supply.is_none() && a.currency.is_none(),
+                    "Invalid readable definition",
+                )?;
+            }
+            if let Some(device) = &a.device {
+                device.compile(&rules)?;
+                require(
+                    !a.stackable && a.equipment.is_none() && a.consumable.is_none() && a.edible.is_none() && a.readable.is_none() && a.supply.is_none() && a.currency.is_none(),
+                    "Invalid device definition",
+                )?;
+            }
             if let Some(edible) = &a.edible {
-                require(edible.valid() && a.equipment.is_none() && a.consumable.is_none(), "Invalid edible definition")?;
+                require(edible.valid() && a.equipment.is_none() && a.consumable.is_none() && a.readable.is_none() && a.device.is_none(), "Invalid edible definition")?;
             }
             let identity = a.identity.as_ref().unwrap_or(key);
             require(label(identity), "Invalid item identity")?;
@@ -3004,6 +3028,8 @@ impl Package {
                 a.class,
                 &a.equipment,
                 &a.consumable,
+                &a.readable,
+                &a.device,
                 &a.edible,
                 &a.supply,
             );
@@ -3051,6 +3077,8 @@ impl Package {
                         a.class,
                         a.equipment.as_ref().map(|e| e.slot.clone()),
                         a.consumable.is_some(),
+                        a.readable.is_some(),
+                        a.device.is_some(),
                         a.edible.is_some(),
                     )
                 })
@@ -4513,6 +4541,8 @@ mod tests {
             "anatomy",
             "equipment",
             "consumable",
+            "readable",
+            "device",
             "edible",
             "supply",
             "magical",
@@ -4602,8 +4632,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-33");
-        assert_eq!(original.certificate.ruleset, "interactions-v43");
+        assert_eq!(original.certificate.validator, "tor-scenario-34");
+        assert_eq!(original.certificate.ruleset, "interactions-v44");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -4658,6 +4688,226 @@ mod tests {
             },
         );
         Package::from_parts(manifest, vec![], &template.rules_source).unwrap()
+    }
+
+    #[test]
+    fn rogue_magic_catalog_uses_explicit_capabilities_and_appends_finite_stock() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+        let package = read_package(&root).unwrap();
+        let healing = &package.manifest.archetypes["rogue.healing"];
+        assert!(healing.magical && healing.stackable);
+        assert_eq!(healing.class, ItemClass::Potion);
+        assert_eq!(healing.appearance_pool.as_deref(), Some("rogue.potions"));
+        let dose = healing.consumable.as_ref().unwrap();
+        assert_eq!(dose.discovery, ItemDiscovery::OnUse);
+        assert_eq!(
+            dose.effects,
+            vec![
+                Effect::HealPerHitDie {
+                    sides: 4,
+                    bonus: 0,
+                    overflow: HealingOverflow::ImproveEarliestHitDie
+                },
+                Effect::RemoveCondition {
+                    condition: "rogue.blindness".into()
+                },
+            ]
+        );
+        assert!(dose.compile(&package.rules().unwrap()).is_ok());
+        for (id, condition, sides, bonus) in [
+            ("rogue.confusion", "rogue.potion_confusion", 2, 18),
+            ("rogue.blindness", "rogue.blindness", 85, 807),
+        ] {
+            let item = &package.manifest.archetypes[id];
+            assert!(item.magical && item.stackable);
+            assert_eq!(item.appearance_pool.as_deref(), Some("rogue.potions"));
+            let dose = item.consumable.as_ref().unwrap();
+            assert_eq!(dose.discovery, ItemDiscovery::OnUse);
+            assert_eq!(
+                dose.effects,
+                vec![Effect::ApplyConditionForTurns {
+                    condition: condition.into(),
+                    duration: AmountExpr::Rolled {
+                        dice: DiceExpr {
+                            count: 1,
+                            sides,
+                            bonus
+                        }
+                    },
+                }]
+            );
+        }
+        for (id, class) in [
+            ("rogue.identify_potion", ItemClass::Potion),
+            ("rogue.identify_scroll", ItemClass::Scroll),
+            ("rogue.identify_wand", ItemClass::Wand),
+        ] {
+            let item = &package.manifest.archetypes[id];
+            let readable = item.readable.as_ref().unwrap();
+            assert_eq!(readable.identify, Some(class));
+            assert!(readable.effects.is_empty());
+            assert_eq!(readable.discovery, ItemDiscovery::OnUse);
+        }
+        let sleep = package.manifest.archetypes["rogue.sleep"]
+            .readable
+            .as_ref()
+            .unwrap();
+        assert_eq!(sleep.discovery, ItemDiscovery::OnUse);
+        assert_eq!(
+            sleep.effects,
+            vec![Effect::ApplyConditionForTurns {
+                condition: "rogue.sleep".into(),
+                duration: AmountExpr::Rolled {
+                    dice: DiceExpr {
+                        count: 1,
+                        sides: 5,
+                        bonus: 3
+                    }
+                },
+            }]
+        );
+        assert_eq!(
+            package.manifest.archetypes["rogue.restore_strength"]
+                .consumable
+                .as_ref()
+                .unwrap()
+                .discovery,
+            ItemDiscovery::SelfEffect
+        );
+        let activation =
+            serde_json::to_value(package.manifest.floor_activation.as_ref().unwrap()).unwrap();
+        let stages = activation["profiles"]["rogue.low_depth"]["stages"]
+            .as_array()
+            .unwrap();
+        let ids: Vec<_> = stages
+            .iter()
+            .map(|stage| stage["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            &ids[..5],
+            &[
+                "rogue.eight_species_foes",
+                "rogue.bandages",
+                "rogue.rations",
+                "rogue.restore_strength",
+                "rogue.room_gold"
+            ]
+        );
+        assert_eq!(ids[5], "rogue.magic_potions");
+        assert_eq!(
+            stages[5]["bands"][0]["choices"],
+            serde_json::json!([
+                {"archetype":"rogue.healing","weight":1},
+                {"archetype":"rogue.confusion","weight":1},
+                {"archetype":"rogue.blindness","weight":1},
+            ])
+        );
+        assert_eq!(ids[6], "rogue.magic_scrolls");
+        assert_eq!(ids[7], "rogue.magic_devices");
+        for stage in &stages[5..] {
+            assert_eq!(stage["kind"], "items");
+            assert_eq!(stage["count"], serde_json::json!([1, 1]));
+        }
+        assert_eq!(
+            activation["carried_item_pools"].as_object().unwrap().len(),
+            2
+        );
+    }
+
+    #[test]
+    fn rogue_devices_compile_lore_rays_without_grants_or_non_charge_costs() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+        let package = read_package(&root).unwrap();
+        let rules = package.rules().unwrap();
+        for element in ["fire", "cold", "lightning"] {
+            let id = format!("rogue.wand_{element}");
+            let item = &package.manifest.archetypes[&id];
+            assert!(item.magical && !item.stackable);
+            assert_eq!(item.class, ItemClass::Wand);
+            assert_eq!(item.appearance_pool.as_deref(), Some("rogue.wands"));
+            let device = item.device.as_ref().unwrap();
+            assert_eq!(
+                device.initial_charges,
+                ChargeRange {
+                    minimum: 3,
+                    maximum: 7
+                }
+            );
+            assert_eq!(device.discovery, ItemDiscovery::OnUse);
+            let compiled = device.compile(&rules).unwrap();
+            let ability = rules.ability(&compiled.ability).unwrap();
+            assert!(
+                ability.cost.is_none()
+                    && ability.cooldown.is_none()
+                    && ability.supply_costs.is_empty()
+            );
+            assert_eq!(
+                ability.invocation,
+                tor_simulation::abilities::InvocationKind::DirectionalRay
+            );
+            let value = serde_json::to_value(ability).unwrap();
+            assert_eq!(
+                value["reach"],
+                serde_json::json!({"kind":"sight","range":6})
+            );
+            let strike = &value["strikes"]["strikes"][0];
+            assert_eq!(
+                strike["check"]["skill"],
+                serde_json::json!({"kind":"named","skill":"agility"})
+            );
+            assert_eq!(
+                strike["check"]["against"]["skill"],
+                serde_json::json!({"kind":"named","skill":"lore"})
+            );
+            let damage = &strike["on_failure"][0]["damage"]["components"][0];
+            assert_eq!(damage["descriptor"], element);
+            assert_eq!(
+                damage["amount"]["dice"],
+                serde_json::json!({"count":6,"sides":6,"bonus":0})
+            );
+            // The catalog authors an invocation reference, never a character or
+            // talent purchase that permanently grants the device's ability.
+            assert!(!rules
+                .document()
+                .constants
+                .default_abilities
+                .contains(&compiled.ability));
+            assert!(!rules.document().talents.iter().any(|talent| {
+                talent.modifiers.iter().any(|modifier| matches!(
+                    &modifier.op,
+                    tor_simulation::rules::ModifierOp::GrantAbility { ability } if ability == &compiled.ability
+                ))
+            }));
+        }
+    }
+
+    #[test]
+    fn device_catalog_is_class_independent_but_rejects_stackable_or_mixed_capabilities() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+        let mut package = read_package(&root).unwrap();
+        for id in ["rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning"] {
+            package.manifest.archetypes.get_mut(id).unwrap().class = ItemClass::Tool;
+        }
+        assert!(package.appearance_mapping(42).is_ok());
+        package
+            .manifest
+            .archetypes
+            .get_mut("rogue.wand_fire")
+            .unwrap()
+            .stackable = true;
+        assert!(package.appearance_mapping(42).is_err());
+        let device = package
+            .manifest
+            .archetypes
+            .get_mut("rogue.wand_fire")
+            .unwrap();
+        device.stackable = false;
+        device.readable = Some(ReadableSpec {
+            effects: vec![],
+            identify: Some(ItemClass::Wand),
+            discovery: ItemDiscovery::OnUse,
+        });
+        assert!(package.appearance_mapping(42).is_err());
     }
 
     #[test]
@@ -5517,6 +5767,51 @@ mod tests {
     }
 
     #[test]
+    fn readable_capability_is_class_independent_and_concealed_affordances_must_match() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
+        let mut package = read_package(&path).unwrap();
+        let readable = ReadableSpec {
+            effects: vec![],
+            identify: Some(ItemClass::Potion),
+            discovery: ItemDiscovery::OnUse,
+        };
+        package
+            .manifest
+            .archetypes
+            .get_mut("healing")
+            .unwrap()
+            .readable = Some(readable.clone());
+        // Both identities look alike, so one must not expose a unique Read action.
+        assert!(package.appearance_mapping(42).is_err());
+        package
+            .manifest
+            .archetypes
+            .get_mut("poison")
+            .unwrap()
+            .readable = Some(readable);
+        assert!(package.appearance_mapping(42).is_ok());
+        // Potion is a physical label here; the explicit capability grants Read.
+        package.manifest.archetypes.get_mut("poison").unwrap().class = ItemClass::Tool;
+        package
+            .manifest
+            .archetypes
+            .get_mut("healing")
+            .unwrap()
+            .class = ItemClass::Tool;
+        assert!(package.appearance_mapping(42).is_ok());
+        package
+            .manifest
+            .archetypes
+            .get_mut("healing")
+            .unwrap()
+            .readable
+            .as_mut()
+            .unwrap()
+            .identify = None;
+        assert!(package.appearance_mapping(42).is_err());
+    }
+
+    #[test]
     fn appearance_pools_share_affordances_while_effects_remain_distinct() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
         let mut package = read_package(&path).unwrap();
@@ -5526,6 +5821,7 @@ mod tests {
             .get_mut("healing")
             .unwrap()
             .consumable = Some(ConsumableSpec {
+            discovery: ItemDiscovery::SelfEffect,
             effects: vec![Effect::Heal {
                 amount: AmountExpr::Fixed { amount: 5 },
             }],
@@ -5537,6 +5833,7 @@ mod tests {
             .get_mut("poison")
             .unwrap()
             .consumable = Some(ConsumableSpec {
+            discovery: ItemDiscovery::SelfEffect,
             effects: vec![Effect::Damage {
                 damage: DamageExpr::Components {
                     components: vec![DamageComponentExpr {
@@ -5726,7 +6023,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v43"
+        let source = r#"import = "interactions-v44"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

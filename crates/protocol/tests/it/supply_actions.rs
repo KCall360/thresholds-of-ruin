@@ -23,11 +23,29 @@ fn disclosed_item() -> serde_json::Value {
 #[test]
 fn phase5_container_item_requires_a_named_object() {
     assert!(serde_json::from_value::<ItemView>(disclosed_item()).is_ok());
-    assert!(serde_json::from_value::<ItemView>(serde_json::json!([
-        "misc", "1", "bandage", true, "", ItemTarget::from_digest([1;32]), "Bandage", null,
-        {"id":"bandage","name":"Bandage"}
-    ]))
-    .is_err());
+    let mut named = disclosed_item();
+    named["corpse"] = serde_json::Value::Null;
+    named["asset"] = serde_json::Value::Null;
+    assert!(serde_json::from_value::<ItemView>(named.clone()).is_ok());
+    let fields = [
+        "class",
+        "corpse",
+        "quantity",
+        "appearance",
+        "identified",
+        "description",
+        "id",
+        "name",
+        "asset",
+        "known_supply",
+    ];
+    let object = named.as_object().unwrap();
+    assert_eq!(object.len(), fields.len());
+    assert!(fields.iter().all(|field| object.contains_key(*field)));
+    let positional =
+        serde_json::Value::Array(fields.iter().map(|field| object[*field].clone()).collect());
+    assert!(serde_json::from_slice::<ItemView>(&serde_json::to_vec(&positional).unwrap()).is_err());
+    assert!(serde_json::from_value::<ItemView>(positional).is_err());
 }
 
 #[test]
@@ -252,7 +270,7 @@ fn phase5_carried_selection_rejects_explicit_items_key() {
 
 fn recorded_care_request() -> serde_json::Value {
     let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v50.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/wire-v51.json")).unwrap();
     let value = samples["client"]
         .as_array()
         .unwrap()
@@ -295,7 +313,7 @@ fn phase5_codec_ability_action_rejects_outer_positional_tagged_alias() {
 
 fn recorded_ability_response(id: &str) -> (serde_json::Value, usize) {
     let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v50.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/wire-v51.json")).unwrap();
     let (value, index) = samples["server"]
         .as_array()
         .unwrap()

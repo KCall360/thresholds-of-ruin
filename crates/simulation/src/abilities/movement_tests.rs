@@ -1308,6 +1308,7 @@ fn consumables_cannot_author_context_dependent_spatial_effects() {
         },
     ] {
         let consumable = crate::ConsumableSpec {
+            discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![effect],
         };
         assert!(
@@ -1316,6 +1317,7 @@ fn consumables_cannot_author_context_dependent_spatial_effects() {
         );
     }
     assert!(crate::ConsumableSpec {
+        discovery: crate::ItemDiscovery::SelfEffect,
         effects: vec![crate::rules::Effect::Heal {
             amount: crate::rules::AmountExpr::Fixed { amount: 2 },
         }]

@@ -1,7 +1,7 @@
 use super::{BuildError, CreatureBuild, EquipmentSource, SourceId, Template};
 use crate::attributes::{Attribute, Attributes, ByAttribute, Defenses, SkillRanks};
 use crate::content_ids::{
-    AbilityId, ClassId, ConditionFamilyId, FlagId, SubtypeId, TalentId, TypeId,
+    AbilityId, ClassId, ConditionFamilyId, FlagId, SubtypeId, TalentId, TemplateId, TypeId,
 };
 use crate::damage::Protection;
 use crate::progression::HdSource;
@@ -138,6 +138,7 @@ pub struct DerivedCreature {
     pub health_recovery_reset_percent: u8,
     /// Exact sampled ordinals, shared across effective folds and snapshots.
     pub health_contributions: Shared<Vec<crate::progression::HealthContribution>>,
+    pub(crate) next_health_improvement: Option<crate::progression::HitDieHealthImprovement>,
     health_sum: u64,
     binding: crate::attributes::ManaBinding,
     base_health_recovery_period: u64,
@@ -883,9 +884,9 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         source: SourceId::Species(species.id.clone()),
         socket: None,
     };
-    let health_contributions = build
+    let (health_contributions, next_health_improvement) = build
         .ledger()
-        .health_provenance(&kind, rules)
+        .health_provenance_with_improvement(&kind, rules)
         .map_err(BuildError::from)?;
     let health_sum = health_contributions.iter().try_fold(0_u64, |sum, entry| {
         sum.checked_add(u64::from(entry.health))
@@ -907,6 +908,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         contextual_recovery: false,
         health_recovery_reset_percent: 100,
         health_contributions: Shared::new(health_contributions),
+        next_health_improvement,
         health_sum,
         binding: build.binding(),
         base_health_recovery_period: rules
@@ -1870,6 +1872,55 @@ fn ability_timing(
     })
 }
 
+/// Interpret only an immutable acquisition template witness. This never reads
+/// the HD ledger or substitutes the creature's current template selection.
+pub(super) fn kind_for_templates(
+    build: &CreatureBuild,
+    ids: &[TemplateId],
+) -> Result<TypeId, BuildError> {
+    if ids.len() > crate::limits::TEMPLATES
+        || ids.iter().collect::<BTreeSet<_>>().len() != ids.len()
+    {
+        return Err(BuildError::InvalidDefinition);
+    }
+    let mut templates = ids
+        .iter()
+        .map(|id| {
+            build
+                .content()
+                .catalog
+                .templates
+                .get(id)
+                .ok_or(BuildError::UnknownTemplate)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    templates.sort_by_key(|template| (template.priority, &template.id));
+    let mut kind = build.species().kind.clone();
+    let mut cursor = 0;
+    while cursor < templates.len() {
+        let end = cursor
+            + templates[cursor..]
+                .partition_point(|template| template.priority == templates[cursor].priority);
+        if let Some(next) = priority_kind(&templates[cursor..end])? {
+            kind = next;
+        }
+        cursor = end;
+    }
+    Ok(kind)
+}
+fn priority_kind(templates: &[&Template]) -> Result<Option<TypeId>, BuildError> {
+    let mut kind = None;
+    for next in templates
+        .iter()
+        .filter_map(|template| template.kind.as_ref())
+    {
+        if kind.as_ref().is_some_and(|previous| previous != next) {
+            return Err(BuildError::ConflictingTemplates);
+        }
+        kind = Some(next.clone());
+    }
+    Ok(kind)
+}
 fn apply_templates(
     templates: &[&Template],
     kind: &mut TypeId,
@@ -1882,21 +1933,12 @@ fn apply_templates(
     while cursor < ordered.len() {
         let end =
             cursor + ordered[cursor..].partition_point(|t| t.priority == ordered[cursor].priority);
-        let mut change_kind = None;
+        let change_kind = priority_kind(&ordered[cursor..end])?;
         let mut overrides = ByAttribute::<Option<u16>>::default();
         let mut additions = BTreeSet::new();
         let mut removals = BTreeSet::new();
         let mut adjustments = ByAttribute::<i16>::default();
         for template in &ordered[cursor..end] {
-            if let Some(change) = &template.kind {
-                if change_kind
-                    .as_ref()
-                    .is_some_and(|previous| previous != change)
-                {
-                    return Err(BuildError::ConflictingTemplates);
-                }
-                change_kind = Some(change.clone());
-            }
             for attribute in Attribute::ALL {
                 if let Some(value) = template.overrides.get(attribute) {
                     let previous = overrides.get_mut(attribute);

@@ -37,6 +37,17 @@ pub enum Action {
     Eat {
         item: u64,
     },
+    Read {
+        item: u64,
+    },
+    Zap {
+        item: u64,
+        direction: Direction,
+    },
+    Identify {
+        choice: tor_simulation::IntentionId,
+        item: Option<u64>,
+    },
     SetDoor {
         door: u64,
         open: bool,
@@ -97,6 +108,8 @@ impl Action {
                 | Self::Unequip { .. }
                 | Self::Drink { .. }
                 | Self::Eat { .. }
+                | Self::Read { .. }
+                | Self::Zap { .. }
         )
     }
 }
@@ -511,5 +524,44 @@ pub enum AbilityInvocation {
 impl From<tor_simulation::ActorId> for AbilityInvocation {
     fn from(target: tor_simulation::ActorId) -> Self {
         Self::ActorTarget { target }
+    }
+}
+
+#[cfg(test)]
+mod magic_item_adapter_tests {
+    use super::*;
+    use crate::adapt;
+    use tor_simulation as sim;
+    #[test]
+    fn magic_item_backend_and_simulation_facts_round_trip_without_ui_or_sources() {
+        let cases = [
+            Action::Read { item: u64::MAX },
+            Action::Zap {
+                item: 71,
+                direction: Direction::NorthWest,
+            },
+            Action::Identify {
+                choice: sim::IntentionId(17),
+                item: Some(71),
+            },
+            Action::Identify {
+                choice: sim::IntentionId(17),
+                item: None,
+            },
+        ];
+        for action in cases {
+            assert_eq!(
+                adapt::recorded_action(adapt::action(&action)).unwrap(),
+                action
+            );
+            assert_eq!(
+                adapt::work(&action).is_some(),
+                !matches!(action, Action::Identify { .. })
+            );
+            assert_eq!(
+                action.is_prepared(),
+                !matches!(action, Action::Identify { .. })
+            );
+        }
     }
 }

@@ -9,6 +9,7 @@ import unittest
 from process_harness import (
     ProcessTestCase, content_ids, disclosed_exploration_route, resource, settle_rogue_action, underfoot,
 )
+from rogue_magic_receipts import MAGIC_ITEM_STAGE_IDS, assert_magic_item_receipts
 
 from rogue_test_support import (
     assert_room_gold_receipt, care_combat_action, disclosed_actor_candidates,
@@ -57,8 +58,9 @@ class RogueTechniquesProcesses(ProcessTestCase):
             ("rogue.restore_strength", {"rogue.restore_strength"}, "item", 1),
         )
         self.assertEqual([row["id"] for row in receipt["decisions"]],
-                         [row[0] for row in expected] + ["rogue.room_gold"])
+                         [row[0] for row in expected] + ["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS])
         identities = assert_room_gold_receipt(self, receipt["decisions"][4], 1)
+        identities.extend(assert_magic_item_receipts(self, receipt["decisions"][5:], require_placed=True))
         for stage, (_, eligible, kind, count) in zip(receipt["decisions"][:4], expected, strict=True):
             self.assertEqual(stage["version"], 1)
             result = stage["result"]

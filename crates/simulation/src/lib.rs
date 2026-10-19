@@ -66,7 +66,11 @@ mod armor;
 mod item_store;
 pub use armor::{ArmorMaterial, ArmorSpec};
 mod items;
+mod magic_items;
 pub use items::{CurrencyKind, ItemClass, ItemSpec};
+pub use magic_items::{
+    ChargeRange, DeviceSpec, IdentificationChoiceView, ItemDiscovery, ReadableSpec,
+};
 mod interactions;
 pub use interactions::{
     AnatomySpec, ConsumableSpec, EdibleSpec, EquipmentSlot, EquipmentSlotId, EquipmentSlotView,
@@ -156,6 +160,18 @@ pub enum Action {
     Drink {
         item: ItemId,
     },
+    Read {
+        item: ItemId,
+    },
+    Zap {
+        item: ItemId,
+        direction: abilities::StepDirection,
+    },
+    Identify {
+        choice: IntentionId,
+        #[serde(deserialize_with = "crate::bounded::required_option")]
+        item: Option<ItemId>,
+    },
     Eat {
         item: ItemId,
     },
@@ -222,6 +238,18 @@ impl<'de> serde::Deserialize<'de> for Action {
             Drink {
                 item: ItemId,
             },
+            Read {
+                item: ItemId,
+            },
+            Zap {
+                item: ItemId,
+                direction: abilities::StepDirection,
+            },
+            Identify {
+                choice: IntentionId,
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                item: Option<ItemId>,
+            },
             Eat {
                 item: ItemId,
             },
@@ -268,6 +296,9 @@ impl<'de> serde::Deserialize<'de> for Action {
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
             Fields::Drink { item } => Self::Drink { item },
+            Fields::Read { item } => Self::Read { item },
+            Fields::Zap { item, direction } => Self::Zap { item, direction },
+            Fields::Identify { choice, item } => Self::Identify { choice, item },
             Fields::Eat { item } => Self::Eat { item },
             Fields::UseAbility {
                 id,
@@ -323,6 +354,10 @@ pub enum GameError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    IdentificationResolved {
+        choice: IntentionId,
+        item: Option<ItemId>,
+    },
     ApparentObjectTouched {
         subject: ActorId,
     },
@@ -408,6 +443,8 @@ struct Actor {
     ready_at: u64,
     visited: BTreeSet<RegionId>,
     knowledge: Shared<BTreeSet<String>>,
+    known_charges: Shared<crate::magic_items::ChargeKnowledge>,
+    identification: Option<magic_items::IdentificationChoice>,
     recognized_abilities: Shared<BTreeSet<content_ids::AbilityId>>,
     public_plan: Option<Shared<public_plan::PublicPlanObservation>>,
     /// The asset clients draw it with.
@@ -426,6 +463,8 @@ struct Item {
     /// Captured at death; authored item properties cannot create this provenance.
     corpse: Option<CorpseAppearance>,
     condition: armor::ItemCondition,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    charges: Option<u16>,
     motion: MotionState,
     orientation: u8,
     spec: Shared<ItemSpec>,
@@ -442,6 +481,8 @@ impl<'de> serde::Deserialize<'de> for Item {
             #[serde(deserialize_with = "crate::bounded::required_option")]
             corpse: Option<CorpseAppearance>,
             condition: armor::ItemCondition,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            charges: Option<u16>,
             motion: MotionState,
             orientation: u8,
             spec: Shared<ItemSpec>,
@@ -454,6 +495,7 @@ impl<'de> serde::Deserialize<'de> for Item {
         Ok(Self {
             corpse: fields.corpse,
             condition: fields.condition,
+            charges: fields.charges,
             motion: fields.motion,
             orientation: fields.orientation,
             spec: fields.spec,
@@ -726,6 +768,8 @@ impl Game {
                 ready_at: self.tick,
                 visited: BTreeSet::from([location.region]),
                 knowledge: Shared::default(),
+                known_charges: Shared::default(),
+                identification: None,
                 recognized_abilities: Shared::default(),
                 public_plan: None,
                 asset: None,
@@ -750,6 +794,7 @@ impl Game {
             id,
             Item {
                 condition: crate::armor::ItemCondition::default(),
+                charges: None,
                 corpse: None,
                 holds: vec![],
                 motion: MotionState::default(),

@@ -237,9 +237,20 @@ Existing rations share finite stock between ordinary eating and respec. The
 appended ordinary restore-strength stage supplies one finite placement attempt per
 floor from depth 1; this provisional rate is not a guaranteed cure or the complete
 potion catalog. Effective observed restoration identifies the concealed potion.
-Complete curses/enchantment/rust/charges, type/instance knowledge and the catalog's
-specials. Add throw/launch/zap with configurable bouncing and resource/timing
-rules. PCs and AI use the same ordinary actions with knowledge-limited decisions.
+The selected ordinary magic-item batch implements healing/confusion/blindness,
+class-restricted identify and sleep, and fire/cold/lightning charged devices.
+Read and Zap are explicit capabilities; exact instance charges and owner-only
+paid identification extend existing holds and knowledge without granting abilities.
+The device attack uses Intellect + Lore versus Speed + Agility, with no activation
+check or Mana cost. Healing overflow improves the earliest eligible active owned
+HD by one, bounded by its immutable acquisition roll; exact restoration retains
+that credit and a different-source replacement cannot inherit it. Smaller forms
+can temporarily mask the benefit. See [item contracts](../reference/items.md#reading-identification-and-charged-devices).
+
+Complete curses/enchantment and the remaining catalog specials separately. Throw
+and launch still need their own projectile work. PCs and AI use the same ordinary
+actions with knowledge-limited decisions; the conservative device AI fallback
+requires an identified type and explicitly known positive instance charges.
 
 Acceptance: capacity/anatomy constraints, unknown-property disclosure, naming
 without identification, allowed observed-use learning, resource consumption,

@@ -286,7 +286,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":50,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":51,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -1354,7 +1354,8 @@ opaque actor/item targets, and remaining ticks use exact decimal strings. Slot
 indices are bounded by the disclosed anatomy; duplicate kinds are distinct slots.
 Equipment statistics are absent for unidentified items. Consumable effect
 primitives stay in the backend. Deltas replace this optional snapshot, including
-removing it when no interaction facts remain. `equip`, `unequip`, `drink` and `eat` use
+removing it when no interaction facts remain. `equip`, `unequip`, `drink`, `eat`,
+`read` and `zap` use
 the same intention admission, authority and retry rules as other ordinary actions.
 The interaction snapshot also carries `completed`, a list of the observer's own
 completed item actions. These use opaque targets without item specifications;
@@ -1362,6 +1363,22 @@ the target may refer to a consumed final unit absent from the current inventory.
 Clients resolve narration from their consecutive disclosed inventories. Other
 actors' equipment and consumption completions are not included. This also works
 for actors with anatomy and equipment but no combat state.
+
+Read and Zap take an opaque carried `item`; Zap also takes a closed string
+`direction`. Each item interaction row includes `readable`, `zappable`, and an
+explicit nullable `charges` count. Unknown loaded and empty devices have identical
+affordances. Charges are present only for the owner's current exact-instance
+knowledge. They do not represent quantity, free units or reservations.
+
+An explicit nullable `identification` carries one opaque `choice`, its physical
+`class`, and at most 64 unique opaque current carried `items`. It appears only
+after the identifying scroll has been consumed. `identify` submits that `choice`
+and an explicit nullable `item` (null means decline without refund). Tokens are
+observer-scoped and cannot be substituted across actors, branches or stale reply
+contexts. The ordinary controller, receipt and retry contracts apply. Selection
+and charge facts are removed from spectator full snapshots and delta baselines;
+this is server authority, not a client display convention. Headless exposes the
+same actions as `act` JSON, including the explicit null for decline.
 
 Private `combat_diagnostics` replies carry the requesting observer's reply context,
 request ID and a validated `CombatDiagnosticsView`. Wizard commands `combat inspect

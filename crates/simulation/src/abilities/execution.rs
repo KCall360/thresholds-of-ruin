@@ -44,6 +44,8 @@ impl Game {
                 ),
                 Plan::Equip { .. }
                 | Plan::Unequip { .. }
+                | Plan::Read { .. }
+                | Plan::Zap { .. }
                 | Plan::Drink { .. }
                 | Plan::Eat { .. } => {
                     self.item_work_available(plan.actor(), &plan.work())
@@ -530,12 +532,13 @@ impl Game {
     ) -> Result<Outcome, GameError> {
         let plan = &preparation.plan;
         let intention = preparation.intention;
-        if !matches!(plan, Plan::Drink { .. } | Plan::Eat { .. })
-            || !matches!(
-                preparation.item_payment,
-                crate::supplies::ItemPayment::Settled
-            )
-            || !self.plan_actor_available(plan)
+        if !matches!(
+            plan,
+            Plan::Read { .. } | Plan::Drink { .. } | Plan::Eat { .. }
+        ) || !matches!(
+            preparation.item_payment,
+            crate::supplies::ItemPayment::Settled
+        ) || !self.plan_actor_available(plan)
         {
             return Err(GameError::Rule(RuleError::InvalidPlan));
         }

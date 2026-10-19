@@ -40,6 +40,10 @@ pub struct DiagnosticCost {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
+    ConditionRemoved {
+        target: ActorId,
+        condition: ContentRef,
+    },
     CorrodeArmor {
         target: ActorId,
         amount: u32,
@@ -58,6 +62,10 @@ pub enum DiagnosticEffect {
         amount: u32,
     },
     Heal {
+        target: ActorId,
+        amount: u32,
+    },
+    HealAndImproveHitDie {
         target: ActorId,
         amount: u32,
     },
@@ -225,6 +233,9 @@ impl CombatDiagnosticRecord {
             })
             && self.outcome.effects.len() <= 128
             && self.outcome.effects.iter().all(|effect| match effect {
+                DiagnosticEffect::ConditionRemoved { target, condition } => {
+                    *target == self.target && condition.valid()
+                }
                 DiagnosticEffect::Translate { target, .. } => *target == self.target,
                 DiagnosticEffect::LinkedHold { target, holder } => {
                     *target == self.target && *holder == self.actor && target != holder
@@ -233,6 +244,7 @@ impl CombatDiagnosticRecord {
                 DiagnosticEffect::CorrodeArmor { target, amount }
                 | DiagnosticEffect::Damage { target, amount }
                 | DiagnosticEffect::Heal { target, amount }
+                | DiagnosticEffect::HealAndImproveHitDie { target, amount }
                 | DiagnosticEffect::Nourish { target, amount } => {
                     target.0 != 0 && *amount <= 1_000_000
                 }
@@ -320,6 +332,11 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            ConditionRemoved {
+                target: ActorId,
+                #[serde(deserialize_with = "crate::bounded::named_map")]
+                condition: ContentRef,
+            },
             CorrodeArmor {
                 target: ActorId,
                 amount: u32,
@@ -338,6 +355,10 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
                 amount: u32,
             },
             Heal {
+                target: ActorId,
+                amount: u32,
+            },
+            HealAndImproveHitDie {
                 target: ActorId,
                 amount: u32,
             },
@@ -390,6 +411,9 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::ConditionRemoved { target, condition } => {
+                Self::ConditionRemoved { target, condition }
+            }
             Fields::CorrodeArmor { target, amount } => Self::CorrodeArmor { target, amount },
             Fields::LinkedHold { target, holder } => Self::LinkedHold { target, holder },
             Fields::Translate {
@@ -403,6 +427,9 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
             Fields::Damage { target, amount } => Self::Damage { target, amount },
             Fields::Heal { target, amount } => Self::Heal { target, amount },
+            Fields::HealAndImproveHitDie { target, amount } => {
+                Self::HealAndImproveHitDie { target, amount }
+            }
             Fields::LoseAttribute {
                 target,
                 attribute,

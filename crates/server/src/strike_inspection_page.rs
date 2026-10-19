@@ -42,14 +42,15 @@ fn check_fields(check: &s::rules::CheckDef) -> usize {
 }
 fn effect_fields(effect: &s::rules::Effect) -> usize {
     match effect {
-        s::rules::Effect::Theft { .. } => 3,
+        s::rules::Effect::Theft { .. } | s::rules::Effect::HealPerHitDie { .. } => 3,
         s::rules::Effect::CorrodeArmor { .. } => 2,
         s::rules::Effect::ApplyLinkedHold { .. } => 4,
         s::rules::Effect::HoldDamage { .. } => 2,
         s::rules::Effect::Damage {
             damage: s::rules::DamageExpr::Components { components },
         } => components.len(),
-        s::rules::Effect::Heal { .. }
+        s::rules::Effect::RemoveCondition { .. }
+        | s::rules::Effect::Heal { .. }
         | s::rules::Effect::Nourish { .. }
         | s::rules::Effect::LoseMaximumHealth { .. }
         | s::rules::Effect::RestoreMaximumHealth { .. } => 1,
@@ -195,6 +196,8 @@ impl Entry<'_> {
                         }
                     }
                     s::rules::Effect::ApplyCondition { condition, .. }
+                    | s::rules::Effect::ApplyConditionForTurns { condition, .. }
+                    | s::rules::Effect::RemoveCondition { condition }
                         if !rules
                             .condition(condition)
                             .is_some_and(|d| reference_valid(d.id.as_str(), &d.name)) =>

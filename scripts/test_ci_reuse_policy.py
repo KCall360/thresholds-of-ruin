@@ -203,12 +203,30 @@ class LeafPolicy(unittest.TestCase):
                 b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
             source[name] = [modes.get(name, '100755' if path.stat().st_mode & 0o111 else '100644'), digest]
         self.assertTrue(pinned <= source.keys(), 'missing reviewed input')
-        target = copy.deepcopy(source); target[self.path][1] = 'f' * 40
-        read = lambda path: (self.root / path).read_bytes()
+        # A synthetic API tree represents a previously reviewed baseline. The
+        # opaque owner/import entries use the immutable audit pins; only the
+        # eligible leaf and immutable provider need byte readers. This does not
+        # claim that today's checked owner bytes still match that baseline.
+        reviewed = copy.deepcopy(source)
+        pins = {**self.registry['owner_blobs'], **self.registry['import_blobs']}
+        for path, digest in pins.items():
+            reviewed[path] = ['100644', digest]
+        target = copy.deepcopy(reviewed); target[self.path][1] = 'f' * 40
+        def read(path):
+            self.assertIn(path, (self.path, 'scripts/rogue_roster_package.py'))
+            return (self.root / path).read_bytes()
         corrected = lambda path: self.corrected().encode() if path == self.path else read(path)
-        self.assertIn(self.path, policy.validate_trees(source, target, read, corrected))
+        self.assertIn(self.path, policy.validate_trees(reviewed, target, read, corrected))
+        # Every actual checked owner drift remains ineligible on BOTH sides.
+        # Include import-only pins as well as broad consumer owners.
+        for path in pins:
+            if source[path] != reviewed[path]:
+                before, after = copy.deepcopy(reviewed), copy.deepcopy(target)
+                before[path] = after[path] = source[path]
+                with self.subTest(checked_owner_drift=path), self.assertRaises(ValueError):
+                    policy.validate_trees(before, after, read, corrected)
         for change in ('owner', 'addition', 'nonleaf', 'mode', 'symlink'):
-            before, after = copy.deepcopy(source), copy.deepcopy(target)
+            before, after = copy.deepcopy(reviewed), copy.deepcopy(target)
             if change == 'owner': before['scripts/rogue_earned_route_process.py'][1] = after['scripts/rogue_earned_route_process.py'][1] = 'e' * 40
             elif change == 'addition': after['scripts/unknown.py'] = ['100644', 'e' * 40]
             elif change == 'nonleaf': after['Cargo.toml'][1] = 'e' * 40

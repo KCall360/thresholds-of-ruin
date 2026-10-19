@@ -25,6 +25,7 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
         ]
     })).unwrap();
     view.interactions = Some(InteractionView {
+        identification: None,
         completed: Vec::new(),
         slots: vec![slot.clone(), slot.clone()],
         preparation: None,
@@ -36,6 +37,9 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
+                readable: false,
+                zappable: false,
+                charges: None,
             },
             ItemInteractionView {
                 item: target(2),
@@ -44,6 +48,9 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
+                readable: false,
+                zappable: false,
+                charges: None,
             },
         ],
     });
@@ -139,4 +146,70 @@ fn eating_uses_only_explicit_disclosed_edibility_and_one_exact_item() {
     );
     view.interactions.as_mut().unwrap().inventory[1].edible = false;
     assert!(item_action(&view, target(2), ItemOperation::Eat).is_err());
+}
+
+#[test]
+fn magic_items_use_only_disclosed_affordances_and_never_test_unknown_charges() {
+    use tor_client_common::items::{charges, zap_action};
+    let mut view = paired_equipment(equipment_slot("ring", "on a finger", false));
+    view.combat = tor_client_common::test_support::observation().combat;
+    view.inventory[0].class = ItemClass::Scroll;
+    view.inventory[1].class = ItemClass::Wand;
+    assert!(item_action(&view, target(1), ItemOperation::Read).is_err());
+    assert!(zap_action(&view, target(2), Direction::North).is_err());
+    view.interactions.as_mut().unwrap().inventory[0].readable = true;
+    view.interactions.as_mut().unwrap().inventory[1].zappable = true;
+    assert_eq!(
+        item_action(&view, target(1), ItemOperation::Read).unwrap(),
+        Action::Read { item: target(1) }
+    );
+    for known in [None, Some(0), Some(7)] {
+        view.interactions.as_mut().unwrap().inventory[1].charges = known;
+        assert_eq!(charges(&view, target(2)), known);
+        assert_eq!(
+            zap_action(&view, target(2), Direction::North).unwrap(),
+            Action::Zap {
+                item: target(2),
+                direction: Direction::North
+            }
+        );
+        assert_eq!(
+            item_choices(&view, ItemOperation::Zap)
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            vec![target(2)]
+        );
+    }
+    view.inventory.pop();
+    assert!(zap_action(&view, target(2), Direction::North).is_err());
+}
+
+#[test]
+fn identification_binds_exact_pending_choice_category_and_carried_instance() {
+    use tor_client_common::items::identification_action;
+    let mut view = paired_equipment(equipment_slot("ring", "on a finger", false));
+    let choice = IntentionId("opaque-paid-choice".into());
+    view.interactions.as_mut().unwrap().identification = Some(IdentificationChoiceView {
+        choice: choice.clone(),
+        class: ItemClass::Ring,
+        items: vec![target(2)],
+    });
+    assert_eq!(
+        identification_action(&view, Some(target(2))).unwrap(),
+        Action::Identify {
+            choice: choice.clone(),
+            item: Some(target(2))
+        }
+    );
+    assert_eq!(
+        identification_action(&view, None).unwrap(),
+        Action::Identify { choice, item: None }
+    );
+    assert!(identification_action(&view, Some(target(1))).is_err());
+    view.inventory[1].class = ItemClass::Potion;
+    assert!(identification_action(&view, Some(target(2))).is_err());
+    view.inventory.pop();
+    assert!(identification_action(&view, Some(target(2))).is_err());
+    view.interactions.as_mut().unwrap().identification = None;
+    assert!(identification_action(&view, None).is_err());
 }
