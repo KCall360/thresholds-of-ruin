@@ -165,6 +165,16 @@ mod art_contract_tests {
                     hem > waist,
                     "free hem must not collapse into a body coating"
                 );
+                let heights: Vec<f32> = (0..COLUMNS)
+                    .map(|column| neutral(&look, body, ROWS, column).y)
+                    .collect();
+                let range = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+                    - heights.iter().copied().fold(f32::INFINITY, f32::min);
+                assert!(range > 0.01, "the robe's hem hangs free, not level");
+                assert!(
+                    range < MAX_HEM_RISE,
+                    "its unevenness stays within the hem band"
+                );
             }
         }
     }
@@ -280,11 +290,15 @@ fn neutral(look: &Look, body: HumanoidBody, row: usize, column: usize) -> Vec3 {
         top.lerp(bottom, ease(t))
     };
     let phase = rand(u64::from(look.v.shade) + 73, 0) * 0.4;
-    let fold = (angle * 12.0 + phase).cos() * 0.007 * t.powf(1.2);
+    // A free hem: folds deepen toward the edge and the cloth hangs lower
+    // where each fold swings out, as on the draped skirts.
+    let wave = (angle * 12.0 + phase).cos();
+    let fold = wave * (0.007 * t.powf(1.2) + 0.01 * t.powi(3));
+    let drop = 0.013 * (0.5 + 0.5 * wave) * ease((t - 0.6) / 0.4);
     let y = if row < YOKE_ROWS {
         WAIST_TOP + (TOP - WAIST_TOP) * row as f32 / YOKE_ROWS as f32
     } else {
-        TOP + (HEM - TOP) * t
+        TOP + (HEM - TOP) * t - drop
     };
     let mut p = Vec3::new(angle.sin() * (r.x + fold), y, angle.cos() * (r.y + fold));
     if row > 0 && row <= YOKE_ROWS {
