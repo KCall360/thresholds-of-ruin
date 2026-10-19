@@ -178,7 +178,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             input_stages = [*stages, "rogue.room_gold"]
             if shape == "twenty_six":
                 input_stages.extend(["rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices",
-                                     "rogue.equipment", "rogue.equipment_scrolls"])
+                                     "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition"])
             self.assertEqual(result["input_population_scope"], {
                 "species": sorted([*species, *("rogue." + name for name in omitted)]),
                 "stage_ids": input_stages,
@@ -222,7 +222,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
 
     def test_twenty_six_rejects_finite_stock_count_choice_boundary_and_order_drift(self):
         for identity in ("rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices",
-                         "rogue.equipment", "rogue.equipment_scrolls"):
+                         "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition"):
             def stages(activation):
                 return activation["profiles"]["rogue.low_depth"]["stages"]
             def stage(activation):
@@ -259,6 +259,8 @@ class RogueActivationCandidateTests(unittest.TestCase):
                 "weight": lambda a: band(a)["choices"][0].update(weight=2),
                 "boolean_weight": lambda a: band(a)["choices"][0].update(weight=True),
             }
+            if identity == "rogue.ammunition":
+                mutations.pop("choice_order")  # Reversing one choice is unchanged.
             for name, mutate in mutations.items():
                 with self.subTest(stage=identity, mutation=name):
                     source = encounter_sources()["manifest"]

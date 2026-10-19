@@ -34,6 +34,12 @@ pub fn decode_action(
             basis: Box::new(crate::advancement_adapter::basis(basis)?),
             source: crate::advancement_adapter::growth_source(source)?,
         },
+        p::Action::ChooseIntellectExpertise { basis, choice } => {
+            a::Action::ChooseIntellectExpertise {
+                basis: Box::new(crate::advancement_adapter::basis(basis)?),
+                choice: crate::advancement_adapter::intellect_expertise(choice)?,
+            }
+        }
         p::Action::Purchase { basis, purchase } => a::Action::Purchase {
             basis: Box::new(crate::advancement_adapter::basis(basis)?),
             purchase: crate::advancement_adapter::purchase(purchase)?,
@@ -53,8 +59,13 @@ pub fn decode_action(
             supplies,
         } => {
             let id = s::content_ids::AbilityId::new(id).map_err(|_| unavailable())?;
-            let invocation = match invocation {
-                p::AbilityInvocation::ActorTarget { target } => {
+            if matches!(invocation.aim, p::AbilityAim::DirectionalProjectile { .. })
+                && invocation.weapon != p::WeaponSelection::Default
+            {
+                return Err(unavailable());
+            }
+            let aim = match &invocation.aim {
+                p::AbilityAim::ActorTarget { target } => {
                     let (identity, reference) = std::iter::once((
                         observation.actor,
                         s::perception::ActorReferenceKind::Creature,
@@ -66,22 +77,55 @@ pub fn decode_action(
                     .ok_or_else(unavailable)?;
                     match reference {
                         s::perception::ActorReferenceKind::Creature => {
-                            a::AbilityInvocation::ActorTarget { target: identity }
+                            a::AbilityAim::ActorTarget { target: identity }
                         }
                         s::perception::ActorReferenceKind::Contact => {
-                            a::AbilityInvocation::ContactTarget { target: identity }
+                            a::AbilityAim::ContactTarget { target: identity }
                         }
                     }
                 }
-                p::AbilityInvocation::SelfStep { direction } => a::AbilityInvocation::SelfStep {
+                p::AbilityAim::DirectionalProjectile {
+                    direction,
+                    delivery,
+                } => a::AbilityAim::DirectionalProjectile {
+                    direction: crate::adapt::requested_direction(*direction),
+                    delivery: decode_projectile_delivery(*delivery, scope, observation)?,
+                },
+                p::AbilityAim::SelfStep { direction } => a::AbilityAim::SelfStep {
                     direction: crate::adapt::requested_direction(*direction),
                 },
-                p::AbilityInvocation::DirectionalRay { direction } => {
-                    a::AbilityInvocation::DirectionalRay {
-                        direction: crate::adapt::requested_direction(*direction),
+                p::AbilityAim::DirectionalRay { direction } => a::AbilityAim::DirectionalRay {
+                    direction: crate::adapt::requested_direction(*direction),
+                },
+            };
+            let weapon = match invocation.weapon {
+                p::WeaponSelection::Default => a::WeaponSelection::Default,
+                p::WeaponSelection::Equipped { item, socket } => {
+                    if usize::from(socket) >= p::MAX_EQUIPMENT_SLOTS {
+                        return Err(unavailable());
+                    }
+                    let identity = observation
+                        .inventory
+                        .iter()
+                        .find(|candidate| scope.item(candidate.id) == item)
+                        .ok_or_else(unavailable)?
+                        .id;
+                    let equipped = observation.interactions.as_ref().and_then(|interactions| {
+                        interactions.inventory.iter().find(|offer| {
+                            offer.item == identity
+                                && offer.equipped_slot == Some(s::EquipmentSlotId(socket))
+                        })
+                    });
+                    if equipped.is_none() {
+                        return Err(unavailable());
+                    }
+                    a::WeaponSelection::Equipped {
+                        item: identity.0,
+                        socket,
                     }
                 }
             };
+            let invocation = a::AbilityInvocation { aim, weapon };
             let supplies = decode_supplies(supplies, scope, observation)?;
             a::Action::UseAbility {
                 id,
@@ -199,6 +243,134 @@ pub fn decode_action(
     })
 }
 
+fn decode_projectile_delivery(
+    delivery: p::ProjectileDeliverySelection,
+    scope: &TargetScope,
+    observation: &s::Observation,
+) -> Result<a::ProjectileDeliverySelection, crate::Failure> {
+    let unavailable = || crate::Failure::new(p::ErrorCode::InvalidAction, "Target is unavailable");
+    let interactions = observation.interactions.as_ref().ok_or_else(unavailable)?;
+    let owned_item = |token: p::ItemTarget| {
+        observation
+            .inventory
+            .iter()
+            .find(|item| scope.item(item.id) == token)
+            .map(|item| item.id)
+            .ok_or_else(unavailable)
+    };
+    let owned = |token: p::ItemTarget| {
+        let item = owned_item(token)?;
+        let offer = interactions
+            .inventory
+            .iter()
+            .find(|offer| offer.item == item)
+            .ok_or_else(unavailable)?;
+        Ok::<_, crate::Failure>((item.0, offer.equipped_slot))
+    };
+    let socket_exists = |socket: u16| {
+        usize::from(socket) < p::MAX_EQUIPMENT_SLOTS
+            && usize::from(socket) < interactions.slots.len()
+    };
+    let equipped = |token: p::ItemTarget, socket: u16| {
+        let (item, equipped) = owned(token)?;
+        if !socket_exists(socket) || equipped != Some(s::EquipmentSlotId(socket)) {
+            return Err(unavailable());
+        }
+        Ok(item)
+    };
+    let carried = |token: p::ItemTarget| {
+        let (item, equipped) = owned(token)?;
+        if equipped.is_some() {
+            return Err(unavailable());
+        }
+        Ok(item)
+    };
+    let carried_ammunition = |token: p::ItemTarget| {
+        let item = owned_item(token)?;
+        // Plain ammunition has no equipment/use interaction row. The complete
+        // inventory still discloses its owner-scoped identity, and any equipped
+        // row would make this carried-only operand unavailable.
+        if interactions
+            .inventory
+            .iter()
+            .any(|offer| offer.item == item && offer.equipped_slot.is_some())
+        {
+            return Err(unavailable());
+        }
+        Ok(item.0)
+    };
+    Ok(match delivery {
+        p::ProjectileDeliverySelection::Throw { source } => a::ProjectileDeliverySelection::Throw {
+            source: match source {
+                p::ThrownSourceSelection::Equipped { item, socket } => {
+                    a::ThrownSourceSelection::Equipped {
+                        item: equipped(item, socket)?,
+                        socket,
+                    }
+                }
+                p::ThrownSourceSelection::Carried { item, socket } => {
+                    if !socket_exists(socket) {
+                        return Err(unavailable());
+                    }
+                    a::ThrownSourceSelection::Carried {
+                        item: carried(item)?,
+                        socket,
+                    }
+                }
+            },
+        },
+        p::ProjectileDeliverySelection::Launch {
+            launcher,
+            ammunition,
+        } => {
+            if launcher.item == ammunition {
+                return Err(unavailable());
+            }
+            a::ProjectileDeliverySelection::Launch {
+                launcher: a::EquippedProjectileWeapon {
+                    item: equipped(launcher.item, launcher.socket)?,
+                    socket: launcher.socket,
+                },
+                ammunition: carried_ammunition(ammunition)?,
+            }
+        }
+    })
+}
+
+fn encode_projectile_delivery(
+    delivery: a::ProjectileDeliverySelection,
+    scope: &TargetScope,
+) -> p::ProjectileDeliverySelection {
+    match delivery {
+        a::ProjectileDeliverySelection::Throw { source } => p::ProjectileDeliverySelection::Throw {
+            source: match source {
+                a::ThrownSourceSelection::Equipped { item, socket } => {
+                    p::ThrownSourceSelection::Equipped {
+                        item: scope.item(s::ItemId(item)),
+                        socket,
+                    }
+                }
+                a::ThrownSourceSelection::Carried { item, socket } => {
+                    p::ThrownSourceSelection::Carried {
+                        item: scope.item(s::ItemId(item)),
+                        socket,
+                    }
+                }
+            },
+        },
+        a::ProjectileDeliverySelection::Launch {
+            launcher,
+            ammunition,
+        } => p::ProjectileDeliverySelection::Launch {
+            launcher: p::EquippedProjectileWeapon {
+                item: scope.item(s::ItemId(launcher.item)),
+                socket: launcher.socket,
+            },
+            ammunition: scope.item(s::ItemId(ammunition)),
+        },
+    }
+}
+
 /// Encode backend action facts explicitly for the current wire schema.
 pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
     match action {
@@ -209,6 +381,12 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
             basis: Box::new(crate::advancement_adapter::wire_basis(basis)),
             source: crate::advancement_adapter::wire_growth_source(source),
         },
+        a::Action::ChooseIntellectExpertise { basis, choice } => {
+            p::Action::ChooseIntellectExpertise {
+                basis: Box::new(crate::advancement_adapter::wire_basis(basis)),
+                choice: crate::advancement_adapter::wire_intellect_expertise(choice),
+            }
+        }
         a::Action::Purchase { basis, purchase } => p::Action::Purchase {
             basis: Box::new(crate::advancement_adapter::wire_basis(basis)),
             purchase: crate::advancement_adapter::wire_purchase(purchase),
@@ -228,23 +406,35 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
             supplies,
         } => p::Action::UseAbility {
             id: id.to_string(),
-            invocation: match invocation {
-                a::AbilityInvocation::ActorTarget { target } => p::AbilityInvocation::ActorTarget {
-                    target: scope.actor(*target),
-                },
-                a::AbilityInvocation::ContactTarget { target } => {
-                    p::AbilityInvocation::ActorTarget {
+            invocation: p::AbilityInvocation {
+                aim: match &invocation.aim {
+                    a::AbilityAim::ActorTarget { target } => p::AbilityAim::ActorTarget {
+                        target: scope.actor(*target),
+                    },
+                    a::AbilityAim::ContactTarget { target } => p::AbilityAim::ActorTarget {
                         target: scope.contact(*target),
-                    }
-                }
-                a::AbilityInvocation::SelfStep { direction } => p::AbilityInvocation::SelfStep {
-                    direction: crate::adapt::wire_direction(*direction),
-                },
-                a::AbilityInvocation::DirectionalRay { direction } => {
-                    p::AbilityInvocation::DirectionalRay {
+                    },
+                    a::AbilityAim::DirectionalProjectile {
+                        direction,
+                        delivery,
+                    } => p::AbilityAim::DirectionalProjectile {
                         direction: crate::adapt::wire_direction(*direction),
-                    }
-                }
+                        delivery: encode_projectile_delivery(*delivery, scope),
+                    },
+                    a::AbilityAim::SelfStep { direction } => p::AbilityAim::SelfStep {
+                        direction: crate::adapt::wire_direction(*direction),
+                    },
+                    a::AbilityAim::DirectionalRay { direction } => p::AbilityAim::DirectionalRay {
+                        direction: crate::adapt::wire_direction(*direction),
+                    },
+                },
+                weapon: match invocation.weapon {
+                    a::WeaponSelection::Default => p::WeaponSelection::Default,
+                    a::WeaponSelection::Equipped { item, socket } => p::WeaponSelection::Equipped {
+                        item: scope.item(s::ItemId(item)),
+                        socket,
+                    },
+                },
             },
             supplies: encode_supplies(supplies, scope),
         },
@@ -305,6 +495,16 @@ pub enum CombatDiagnosticsOperation {
 /// Normalized request facts before any live target resolution.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodedCommand {
+    ProjectileChoices {
+        expected_revision: u64,
+        query: p::ProjectileChoiceQuery,
+    },
+    AbilityWeaponPreview {
+        expected_revision: u64,
+        ability: String,
+        invocation: p::AbilityInvocation,
+        supplies: p::SupplySelection,
+    },
     Advancement {
         expected_revision: u64,
         query: p::AdvancementQuery,
@@ -339,7 +539,10 @@ pub enum DecodedCommand {
 impl DecodedCommand {
     pub(crate) fn requires_control(&self) -> bool {
         match self {
-            Self::Gameplay { .. } | Self::Advancement { .. } => true,
+            Self::Gameplay { .. }
+            | Self::ProjectileChoices { .. }
+            | Self::Advancement { .. }
+            | Self::AbilityWeaponPreview { .. } => true,
             Self::CreatureCatalog { .. }
             | Self::CreatureInspection { .. }
             | Self::CombatDiagnostics { .. }
@@ -378,7 +581,13 @@ impl DecodedCommand {
     pub(crate) fn revision_requirement(&self) -> Option<(u64, &'static str)> {
         match self {
             Self::Backend(command) => command.revision_requirement(),
-            Self::Advancement {
+            Self::AbilityWeaponPreview {
+                expected_revision, ..
+            }
+            | Self::ProjectileChoices {
+                expected_revision, ..
+            }
+            | Self::Advancement {
                 expected_revision, ..
             }
             | Self::CreatureCatalog {
@@ -405,6 +614,42 @@ impl DecodedCommand {
 
 /// Normalize transport input; preserve gameplay references until fresh resolution.
 pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand, crate::Failure> {
+    if let p::Command::ProjectileChoices {
+        expected_revision,
+        query,
+    } = command
+    {
+        if !query.is_valid() {
+            return Err(crate::Failure::new(
+                p::ErrorCode::InvalidRequest,
+                "Invalid projectile choice query",
+            ));
+        }
+        return Ok(DecodedCommand::ProjectileChoices {
+            expected_revision: *expected_revision,
+            query: query.clone(),
+        });
+    }
+    if let p::Command::PreviewAbilityWeapon {
+        expected_revision,
+        ability,
+        invocation,
+        supplies,
+    } = command
+    {
+        if !p::valid_content_id(ability) {
+            return Err(crate::Failure::new(
+                p::ErrorCode::InvalidRequest,
+                "Invalid ability identity",
+            ));
+        }
+        return Ok(DecodedCommand::AbilityWeaponPreview {
+            expected_revision: *expected_revision,
+            ability: ability.clone(),
+            invocation: *invocation,
+            supplies: supplies.clone(),
+        });
+    }
     if let p::Command::Advancement {
         expected_revision,
         query,
@@ -593,7 +838,9 @@ pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand,
         },
         p::Command::Act { .. }
         | p::Command::InspectStrikeSource { .. }
-        | p::Command::Advancement { .. } => {
+        | p::Command::Advancement { .. }
+        | p::Command::ProjectileChoices { .. }
+        | p::Command::PreviewAbilityWeapon { .. } => {
             unreachable!("runtime request decoded above")
         }
         tor_protocol::Command::Annotate {
@@ -745,8 +992,9 @@ pub fn disclose_entry(
         | JournalContent::IntentionStarted { action, event, .. }
         | JournalContent::IntentionContinued { action, event, .. } => Content::Action {
             action: encode_action(action, scope),
-            event: match event {
+            event: Box::new(match event {
                 Event::GrowthSourceChosen
+                | Event::IntellectExpertiseChosen
                 | Event::Purchased
                 | Event::RespecStarted
                 | Event::IdentificationResolved { .. } => return None,
@@ -801,7 +1049,7 @@ pub fn disclose_entry(
                     item: scope.item(s::ItemId(*item)),
                 },
                 Event::Waited => VisibleEvent::Waited,
-            },
+            }),
         },
         JournalContent::Annotation {
             anchor,
@@ -1060,11 +1308,10 @@ mod retrieval_event_tests {
         assert!(disclosed.visible_to(p::ActorId(1), "spectator"));
         assert!(!disclosed.visible_to(p::ActorId(2), "player"));
         assert!(!disclosed.visible_to(p::ActorId(2), "spectator"));
-        let p::HistoryContent::Action {
-            event: p::Event::Escaped { item },
-            ..
-        } = disclosed.content
-        else {
+        let p::HistoryContent::Action { event, .. } = disclosed.content else {
+            panic!("terminal escape must remain an action");
+        };
+        let p::Event::Escaped { item } = *event else {
             panic!("terminal escape must remain distinct from movement");
         };
         assert_eq!(item, scope.item(id));

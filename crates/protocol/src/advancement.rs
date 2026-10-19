@@ -12,6 +12,9 @@ pub const MAX_ADVANCEMENT_CATALOG_ROWS: usize = 4096;
 pub const MAX_ADVANCEMENT_FORM_OPTIONS: usize = 16;
 pub const MAX_ADVANCEMENT_SKILL_ROWS: usize = 20;
 pub const MAX_ADVANCEMENT_TALENT_ROWS: usize = 256;
+pub const MAX_ADVANCEMENT_EXPERTISE_ROWS: usize = 256;
+pub const MAX_ADVANCEMENT_INTELLECT_EXPERTISE_ROWS: usize = 1000;
+pub const MAX_EXPERTISE_ORIGINS: usize = 257;
 pub const MAX_ADVANCEMENT_CONDITION_ROWS: usize = 128;
 
 trait Checked {
@@ -37,15 +40,15 @@ macro_rules! record {
     };
 }
 macro_rules! tagged {
-    ($name:ident { $($variant:ident { $($field:ident: $ty:ty),* $(,)? }),* $(,)? }) => {
+    ($name:ident { $($variant:ident { $($(#[$attribute:meta])* $field:ident: $ty:ty),* $(,)? }),* $(,)? }) => {
         #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
         #[serde(tag = "kind", rename_all = "snake_case")]
-        pub enum $name { $($variant { $($field: $ty,)* },)* }
+        pub enum $name { $($variant { $($(#[$attribute])* $field: $ty,)* },)* }
         impl<'de> Deserialize<'de> for $name {
             fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
                 #[derive(Deserialize)]
                 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-                enum Fields { $($variant { $($field: $ty,)* },)* }
+                enum Fields { $($variant { $($(#[$attribute])* $field: $ty,)* },)* }
                 let value = match crate::bounded::named_map(d)? {
                     $(Fields::$variant { $($field,)* } => Self::$variant { $($field,)* },)*
                 };
@@ -69,7 +72,7 @@ fn form_options<'de, D: serde::Deserializer<'de>>(
     crate::bounded::bounded::<D, _, MAX_ADVANCEMENT_FORM_OPTIONS>(d)
 }
 fn kinds<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<AdvancementKind>, D::Error> {
-    crate::bounded::bounded::<D, _, 2>(d)
+    crate::bounded::bounded::<D, _, 3>(d)
 }
 fn label(value: &str, maximum: usize) -> bool {
     crate::creature::valid_label(value, maximum)
@@ -103,10 +106,15 @@ pub enum AdvancementPreviewSection {
     Balances,
     Skills,
     Talents,
+    Expertises,
     RemovedConditions,
 }
 
-tagged!(PurchaseChoice { SkillRank { skill: String }, Talent { talent: String }, TalentForm { talent: String, form: String } });
+tagged!(PurchaseChoice { SkillRank { skill: String }, Talent { talent: String }, TalentForm { talent: String, form: String }, Expertise { expertise: String } });
+record!(IntellectExpertiseOperation {
+    threshold: u16,
+    expertise: String
+});
 record!(PurchaseOperation {
     #[serde(with = "crate::integers::unsigned")]
     owner: u64,
@@ -152,6 +160,7 @@ record!(AdvancementGrowth {
     future: FutureGrowth,
 });
 tagged!(AdvancementProposal {
+    IntellectExpertise { choice: IntellectExpertiseOperation },
     GrowthSource { source: GrowthSource },
     Purchase { purchase: PurchaseOperation },
     Replacement { replacement: ReplacementOperation },
@@ -159,6 +168,7 @@ tagged!(AdvancementProposal {
 tagged!(AdvancementQuery {
     Overview {},
     Ledger { basis: AdvancementBasis, offset: u16 },
+    IntellectExpertises { basis: AdvancementBasis, offset: u16 },
     Balances { basis: AdvancementBasis, offset: u16 },
     Catalog { basis: AdvancementBasis, catalog: AdvancementKind, offset: u16 },
     Preview { basis: AdvancementBasis, proposal: AdvancementProposal, section: AdvancementPreviewSection, offset: u16 },
@@ -184,6 +194,8 @@ tagged!(AdvancementEntry {
     Refund { value: AdvancementRefundRow },
     Skill { value: AdvancementSkillRow },
     Talent { value: AdvancementTalentRow },
+    Expertise { value: AdvancementExpertiseRow },
+    IntellectExpertise { value: AdvancementIntellectExpertiseRow },
     RemovedCondition { value: AdvancementRemovedConditionRow },
 });
 record!(AdvancementPoints {
@@ -263,6 +275,17 @@ record!(AdvancementTalentRow {
     talent: AdvancementContentRef,
     status: AdvancementStatus
 });
+record!(AdvancementIntellectExpertiseRow {
+    threshold: u16,
+    status: AdvancementStatus,
+    #[serde(deserialize_with = "required_option")]
+    expertise: Option<AdvancementContentRef>,
+});
+record!(AdvancementExpertiseRow {
+    expertise: AdvancementContentRef,
+    status: AdvancementStatus,
+    source_count: u16,
+});
 record!(AdvancementRemovedConditionRow {
     condition: AdvancementContentRef,
     applications: u16,
@@ -325,6 +348,7 @@ impl PurchaseChoice {
     pub fn kind(&self) -> AdvancementKind {
         match self {
             Self::SkillRank { .. } => AdvancementKind::SkillRank,
+            Self::Expertise { .. } => AdvancementKind::Expertise,
             Self::Talent { .. } | Self::TalentForm { .. } => AdvancementKind::Talent,
         }
     }
@@ -333,6 +357,7 @@ impl Checked for PurchaseChoice {
     fn checked(&self) -> bool {
         match self {
             Self::SkillRank { skill } => crate::valid_content_id(skill),
+            Self::Expertise { expertise } => crate::valid_content_id(expertise),
             Self::Talent { talent } => crate::valid_content_id(talent),
             Self::TalentForm { talent, form } => {
                 crate::valid_content_id(talent) && crate::valid_content_id(form)
@@ -397,6 +422,7 @@ impl Checked for AdvancementProposal {
     fn checked(&self) -> bool {
         match self {
             Self::GrowthSource { source } => source.checked(),
+            Self::IntellectExpertise { choice } => choice.checked(),
             Self::Purchase { purchase } => purchase.checked(),
             Self::Replacement { replacement } => replacement.checked(),
         }
@@ -407,6 +433,7 @@ impl AdvancementQuery {
         match self {
             Self::Overview {} => None,
             Self::Ledger { basis, .. }
+            | Self::IntellectExpertises { basis, .. }
             | Self::Balances { basis, .. }
             | Self::Catalog { basis, .. }
             | Self::Preview { basis, .. } => Some(basis),
@@ -416,6 +443,7 @@ impl AdvancementQuery {
         match self {
             Self::Overview {} => 0,
             Self::Ledger { offset, .. }
+            | Self::IntellectExpertises { offset, .. }
             | Self::Balances { offset, .. }
             | Self::Catalog { offset, .. }
             | Self::Preview { offset, .. } => *offset,
@@ -424,6 +452,7 @@ impl AdvancementQuery {
     /// A bound, never a promise that a given authoring catalog reaches it.
     pub fn row_limit(&self) -> usize {
         match self {
+            Self::IntellectExpertises { .. } => MAX_ADVANCEMENT_INTELLECT_EXPERTISE_ROWS,
             Self::Overview {}
             | Self::Preview {
                 section: AdvancementPreviewSection::Summary,
@@ -448,9 +477,13 @@ impl AdvancementQuery {
                 ..
             } => MAX_ADVANCEMENT_SKILL_ROWS,
             Self::Catalog {
-                catalog: AdvancementKind::Talent,
+                catalog: AdvancementKind::Talent | AdvancementKind::Expertise,
                 ..
             } => MAX_ADVANCEMENT_CATALOG_ROWS,
+            Self::Preview {
+                section: AdvancementPreviewSection::Expertises,
+                ..
+            } => MAX_ADVANCEMENT_EXPERTISE_ROWS,
             Self::Preview {
                 section: AdvancementPreviewSection::Talents,
                 ..
@@ -467,6 +500,7 @@ impl AdvancementQuery {
         match (self, entry) {
             (Self::Overview {}, E::Overview { .. })
             | (Self::Ledger { .. }, E::Purchase { .. })
+            | (Self::IntellectExpertises { .. }, E::IntellectExpertise { .. })
             | (
                 Self::Balances { .. }
                 | Self::Preview {
@@ -494,6 +528,13 @@ impl AdvancementQuery {
                     section: S::Skills, ..
                 },
                 E::Skill { .. },
+            )
+            | (
+                Self::Preview {
+                    section: S::Expertises,
+                    ..
+                },
+                E::Expertise { .. },
             )
             | (
                 Self::Preview {
@@ -591,6 +632,8 @@ impl Checked for AdvancementEntry {
             Self::Refund { value } => value.checked(),
             Self::Skill { value } => value.checked(),
             Self::Talent { value } => value.checked(),
+            Self::Expertise { value } => value.checked(),
+            Self::IntellectExpertise { value } => value.checked(),
             Self::RemovedCondition { value } => value.checked(),
         }
     }
@@ -651,8 +694,13 @@ impl Checked for AdvancementBalanceRow {
             && self.pool.checked()
             && self.granted <= 256
             && self.spent.checked_add(self.unspent) == Some(self.granted)
-            && (1..=2).contains(&self.allowed.len())
-            && (self.allowed.len() < 2 || self.allowed[0] != self.allowed[1])
+            && (1..=3).contains(&self.allowed.len())
+            && self
+                .allowed
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == self.allowed.len()
     }
 }
 impl Checked for AdvancementCatalogRow {
@@ -670,7 +718,9 @@ impl Checked for AdvancementCatalogRow {
                 == self.form_choices.len()
             && match self.selection {
                 PurchaseChoice::Talent { .. } => true,
-                PurchaseChoice::SkillRank { .. } => self.form_choices.is_empty(),
+                PurchaseChoice::SkillRank { .. } | PurchaseChoice::Expertise { .. } => {
+                    self.form_choices.is_empty()
+                }
                 PurchaseChoice::TalentForm { .. } => false,
             }
     }
@@ -787,6 +837,31 @@ pub(crate) fn read_page_reply<'de, D: serde::Deserializer<'de>>(
         ));
     }
     Ok((f.context, f.request_id, f.page))
+}
+
+impl Checked for IntellectExpertiseOperation {
+    fn checked(&self) -> bool {
+        (1..=MAX_ADVANCEMENT_INTELLECT_EXPERTISE_ROWS).contains(&usize::from(self.threshold))
+            && crate::valid_content_id(&self.expertise)
+    }
+}
+impl Checked for AdvancementIntellectExpertiseRow {
+    fn checked(&self) -> bool {
+        (1..=MAX_ADVANCEMENT_INTELLECT_EXPERTISE_ROWS).contains(&usize::from(self.threshold))
+            && self.expertise.as_ref().is_none_or(Checked::checked)
+    }
+}
+
+impl AdvancementExpertiseRow {
+    pub(crate) fn valid(&self) -> bool {
+        self.checked()
+    }
+}
+impl Checked for AdvancementExpertiseRow {
+    fn checked(&self) -> bool {
+        self.expertise.checked()
+            && (1..=MAX_EXPERTISE_ORIGINS).contains(&usize::from(self.source_count))
+    }
 }
 
 #[cfg(test)]

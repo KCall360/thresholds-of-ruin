@@ -53,7 +53,7 @@ class CreatureBehaviorProcesses(ProcessTestCase):
         still_calm = self.request(observer, {"type": "snapshot"})
         self.assertFalse(any(actor["hostile"] for actor in observation(still_calm)["combat"]["actors"]))
         result = self.act(player, {"type": "use_ability", "id": "basic_melee",
-                                  "invocation": {"kind": "actor_target", "target": target}})
+                                  "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         self.assertIsNone(result["error"])
         engaged = self.request(observer, {"type": "snapshot"})
         for _ in range(8):

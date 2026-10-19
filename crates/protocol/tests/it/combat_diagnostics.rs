@@ -426,3 +426,61 @@ fn healing_improvement_diagnostic_discloses_no_owned_seed_or_selection_claim() {
     }];
     assert!(value.validate().is_err());
 }
+
+#[test]
+fn fixed_resource_cost_bundle_is_complete_canonical_and_bounded() {
+    let cost = |id: &str| DiagnosticCost {
+        resource: content(id),
+        start: 1,
+        resolution: 2,
+    };
+    let bundle = DiagnosticCostBundle {
+        stamina: Some(cost("stamina")),
+        focus: Some(cost("focus")),
+        mana: None,
+    };
+    let mut valid = report();
+    valid.records[0].charge = Some(bundle.clone());
+    assert!(valid.validate().is_ok());
+    let canonical = serde_json::to_value(&bundle).unwrap();
+    assert_eq!(
+        serde_json::from_value::<DiagnosticCostBundle>(canonical.clone()).unwrap(),
+        bundle
+    );
+    for slot in ["stamina", "focus", "mana"] {
+        let mut bad = canonical.clone();
+        bad.as_object_mut().unwrap().remove(slot);
+        assert!(serde_json::from_value::<DiagnosticCostBundle>(bad).is_err());
+    }
+    let mut wrong_label = canonical.clone();
+    wrong_label["focus"]["resource"]["id"] = serde_json::json!("mana");
+    let mut overflow = canonical.clone();
+    overflow["focus"]["resolution"] = serde_json::json!(1_000_000);
+    let mut unnamed = canonical.clone();
+    unnamed["focus"] = serde_json::json!([content("focus"), 1, 2]);
+    for bad in [
+        wrong_label,
+        overflow,
+        unnamed,
+        serde_json::json!({"stamina":null,"focus":null,"mana":null}),
+        serde_json::json!([null, null, null]),
+    ] {
+        assert!(serde_json::from_value::<DiagnosticCostBundle>(bad).is_err());
+    }
+    assert!(serde_json::from_str::<DiagnosticCostBundle>(
+        r#"{"stamina":null,"focus":null,"focus":null,"mana":null}"#
+    )
+    .is_err());
+    let zero = DiagnosticCostBundle {
+        stamina: None,
+        focus: Some(DiagnosticCost {
+            resource: content("focus"),
+            start: 0,
+            resolution: 0,
+        }),
+        mana: None,
+    };
+    assert!(
+        serde_json::from_value::<DiagnosticCostBundle>(serde_json::to_value(zero).unwrap()).is_ok()
+    );
+}

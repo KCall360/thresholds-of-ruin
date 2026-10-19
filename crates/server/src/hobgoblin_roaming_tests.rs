@@ -215,8 +215,9 @@ fn roaming_hobgoblin_acquires_a_personally_perceived_hostile() {
         if matches!(
             commit_ai(&mut game),
             SimAction::UseAbility {
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                    target: Actor(1)
+                invocation: tor_simulation::abilities::AbilityInvocation {
+                    aim: tor_simulation::abilities::AbilityAim::ActorTarget { target: Actor(1) },
+                    weapon: tor_simulation::abilities::WeaponSelection::Default
                 },
                 ..
             }

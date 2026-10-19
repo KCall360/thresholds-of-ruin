@@ -708,7 +708,7 @@ fn sequence_rider_source_death_does_not_reinsert_the_preinstalled_tail() {
             ActorId(1),
             crate::Action::UseAbility {
                 id: ability_id,
-                invocation: super::AbilityInvocation::ActorTarget { target: ActorId(1) },
+                invocation: super::AbilityInvocation::actor_target(ActorId(1)),
                 supplies: Default::default(),
             },
             crate::IntentionOrigin::Human,

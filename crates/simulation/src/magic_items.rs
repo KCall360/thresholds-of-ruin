@@ -166,7 +166,7 @@ impl DeviceSpec {
 }
 impl crate::ItemSpec {
     pub(crate) fn magic_shape_valid(&self) -> bool {
-        let exclusive = usize::from(self.equipment.is_some())
+        let exclusive = usize::from(self.has_instance_condition())
             + usize::from(self.consumable.is_some())
             + usize::from(self.edible.is_some())
             + usize::from(self.readable.is_some())
@@ -321,7 +321,7 @@ impl Game {
             if self
                 .items
                 .get(&id)
-                .is_some_and(|i| i.spec.equipment.is_some())
+                .is_some_and(|i| i.spec.has_instance_condition())
                 && !owner.known_equipment.can_learn(id)
             {
                 return Err(GameError::ItemUnavailable);
@@ -348,7 +348,7 @@ impl Game {
                 id,
                 i.spec.identity.clone(),
                 i.charges,
-                i.spec.equipment.is_some().then_some(i.condition),
+                i.spec.has_instance_condition().then_some(i.condition),
             )
         });
         let mut outcome = self.actor_outcome(actor)?;

@@ -1,11 +1,14 @@
 //! Strict mutable creature records. Definitions live once in the save catalog.
+mod intellect;
 use super::{
     AdvancementPurchase, BuildAdvancement, BuildEpoch, BuildError, Content, CreatureBuild,
     HdChoices, PlannedAdvancement, PurchaseSelection, RestorationPolicy,
 };
 use crate::attributes::{Attribute, Attributes, ByAttribute, ManaBinding, Skill};
 use crate::bounded::{named_map, required_option, Bounded};
-use crate::content_ids::{AbilityId, ClassId, FormId, SpeciesId, TalentId, TemplateId};
+use crate::content_ids::{
+    AbilityId, ClassId, ExpertiseId, FormId, SpeciesId, TalentId, TemplateId,
+};
 use crate::limits;
 use crate::progression::{HdLedger, HdSource, HitDie};
 use crate::resources::{ByResource, Resource, Resources};
@@ -29,6 +32,7 @@ pub struct CreatureRecord {
     pools: ByResource<PoolRecord>,
     holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
     conditions: Bounded<crate::conditions::ConditionInstance, { limits::CONDITIONS }>,
+    next_condition_generation: u64,
     cooldowns: Bounded<CooldownRecord, { limits::CATALOG_ENTRIES }>,
 }
 impl<'de> serde::Deserialize<'de> for CreatureRecord {
@@ -50,6 +54,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             pools: ByResource<PoolRecord>,
             holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
             conditions: Bounded<crate::conditions::ConditionInstance, { limits::CONDITIONS }>,
+            next_condition_generation: u64,
             cooldowns: Bounded<CooldownRecord, { limits::CATALOG_ENTRIES }>,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
@@ -66,6 +71,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             pools: fields.pools,
             holds: fields.holds,
             conditions: fields.conditions,
+            next_condition_generation: fields.next_condition_generation,
             cooldowns: fields.cooldowns,
         })
     }
@@ -173,9 +179,69 @@ struct PoolRecord {
 #[serde(deny_unknown_fields)]
 struct HoldRecord {
     owner: u64,
-    resource: Resource,
+    #[serde(deserialize_with = "named_map")]
+    cost: CostBundleRecord,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CostPhaseRecord {
     start: u32,
     resolution: u32,
+}
+fn read_cost_phase<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<CostPhaseRecord>, D::Error> {
+    #[derive(Deserialize)]
+    struct Named(#[serde(deserialize_with = "named_map")] CostPhaseRecord);
+    required_option::<Named, D>(d).map(|value| value.map(|named| named.0))
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CostBundleRecord {
+    #[serde(deserialize_with = "read_cost_phase")]
+    stamina: Option<CostPhaseRecord>,
+    #[serde(deserialize_with = "read_cost_phase")]
+    focus: Option<CostPhaseRecord>,
+    #[serde(deserialize_with = "read_cost_phase")]
+    mana: Option<CostPhaseRecord>,
+}
+impl CostBundleRecord {
+    fn capture(bundle: crate::costs::CostBundle) -> Self {
+        let mut phases = ByResource::from_fn(|_| None);
+        for cost in bundle.entries() {
+            *phases.get_mut(cost.resource) = Some(CostPhaseRecord {
+                start: cost.start,
+                resolution: cost.resolution,
+            });
+        }
+        Self {
+            stamina: phases.stamina,
+            focus: phases.focus,
+            mana: phases.mana,
+        }
+    }
+    fn restore(&self) -> Result<crate::costs::CostBundle, crate::costs::CostError> {
+        let mut bundle: Option<crate::costs::CostBundle> = None;
+        for (resource, phases) in [
+            (Resource::Stamina, self.stamina),
+            (Resource::Focus, self.focus),
+            (Resource::Mana, self.mana),
+        ] {
+            if let Some(phases) = phases {
+                let next = crate::costs::CostBundle::single(crate::costs::ResourceCost {
+                    resource,
+                    start: phases.start,
+                    resolution: phases.resolution,
+                })?;
+                bundle = Some(match bundle {
+                    Some(existing) => existing.checked_add(next)?,
+                    None => next,
+                });
+            }
+        }
+        bundle.ok_or(crate::costs::CostError::Invalid)
+    }
 }
 
 impl CreatureRecord {
@@ -211,13 +277,12 @@ impl CreatureRecord {
                     .iter()
                     .map(|(id, cost)| HoldRecord {
                         owner: id.0,
-                        resource: cost.resource,
-                        start: cost.start,
-                        resolution: cost.resolution,
+                        cost: CostBundleRecord::capture(*cost),
                     })
                     .collect(),
             ),
             conditions: Bounded(creature.conditions().instances().cloned().collect()),
+            next_condition_generation: creature.conditions().next_generation(),
             cooldowns: Bounded(
                 creature
                     .cooldowns()
@@ -239,6 +304,7 @@ impl CreatureRecord {
         let build = self.build.restore(content).map_err(Error::Build)?;
         let conditions = crate::conditions::ConditionState::from_recorded(
             self.conditions.0.clone(),
+            self.next_condition_generation,
             build.ruleset(),
         )
         .map_err(Error::Condition)?;
@@ -267,17 +333,9 @@ impl CreatureRecord {
                     .holds
                     .0
                     .iter()
-                    .map(|hold| {
-                        (
-                            crate::IntentionId(hold.owner),
-                            crate::costs::ResourceCost {
-                                resource: hold.resource,
-                                start: hold.start,
-                                resolution: hold.resolution,
-                            },
-                        )
-                    })
-                    .collect();
+                    .map(|hold| Ok((crate::IntentionId(hold.owner), hold.cost.restore()?)))
+                    .collect::<Result<Vec<_>, crate::costs::CostError>>()
+                    .map_err(Error::Cost)?;
                 crate::costs::CostLedger::from_recorded(resources, holds).map_err(Error::Cost)
             },
         )?;
@@ -308,6 +366,7 @@ pub struct BuildRecord {
     starting_skills: [Skill; 2],
     restoration: RestorationRecord,
     initial_attributes: ByAttribute<u16>,
+    intellect_learning: intellect::Learning,
     binding: BindingRecord,
     #[serde(deserialize_with = "required_option")]
     health_root_seed: Option<u64>,
@@ -476,6 +535,7 @@ impl<'de> Deserialize<'de> for PurchaseRecord {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum SelectionRecord {
     SkillRank { skill: Skill },
+    Expertise { expertise: ExpertiseId },
     Talent { talent: TalentId },
     TalentForm { talent: TalentId, form: FormId },
 }
@@ -485,11 +545,13 @@ impl<'de> Deserialize<'de> for SelectionRecord {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             SkillRank { skill: Skill },
+            Expertise { expertise: ExpertiseId },
             Talent { talent: TalentId },
             TalentForm { talent: TalentId, form: FormId },
         }
         Ok(match named_map(deserializer)? {
             Fields::SkillRank { skill } => Self::SkillRank { skill },
+            Fields::Expertise { expertise } => Self::Expertise { expertise },
             Fields::Talent { talent } => Self::Talent { talent },
             Fields::TalentForm { talent, form } => Self::TalentForm { talent, form },
         })
@@ -537,6 +599,9 @@ impl ChoiceRecord {
                             PurchaseSelection::SkillRank(skill) => {
                                 SelectionRecord::SkillRank { skill: *skill }
                             }
+                            PurchaseSelection::Expertise(expertise) => SelectionRecord::Expertise {
+                                expertise: expertise.clone(),
+                            },
                             PurchaseSelection::Talent(talent) => SelectionRecord::Talent {
                                 talent: talent.clone(),
                             },
@@ -564,6 +629,9 @@ impl ChoiceRecord {
                     selection: match &purchase.selection {
                         SelectionRecord::SkillRank { skill } => {
                             PurchaseSelection::SkillRank(*skill)
+                        }
+                        SelectionRecord::Expertise { expertise } => {
+                            PurchaseSelection::Expertise(expertise.clone())
                         }
                         SelectionRecord::Talent { talent } => {
                             PurchaseSelection::Talent(talent.clone())
@@ -600,6 +668,12 @@ impl BuildRecord {
                     ),
                 },
             },
+            intellect_learning: intellect::Learning::capture(
+                build
+                    .intellect_learning
+                    .as_ref()
+                    .expect("validated birth learning"),
+            ),
             initial_attributes: ByAttribute::from_fn(|attribute| {
                 build.initial_attributes().get(attribute)
             }),
@@ -659,7 +733,9 @@ impl BuildRecord {
             .collect::<Result<Vec<_>, BuildError>>()?;
         ledger.restore_drained(drained).map_err(BuildError::from)?;
         let choices = self.choices.0.iter().map(ChoiceRecord::restore).collect();
-        let mut build = CreatureBuild::from_recorded(
+        // Saved learning must be installed before the one permanent validation
+        // fold; constructing fresh birth receipts here would be discarded work.
+        let mut build = CreatureBuild::recorded_structure(
             content,
             self.species.clone(),
             Attributes::new(self.initial_attributes).map_err(|_| BuildError::InvalidDefinition)?,
@@ -684,6 +760,8 @@ impl BuildRecord {
             },
             self.templates.0.clone(),
         )?;
+        build.intellect_learning = Some(Arc::new(self.intellect_learning.restore(&build)?));
+        build.derive()?;
         build.set_future_growth(self.future_growth.clone())?;
         Ok(build)
     }
@@ -702,6 +780,7 @@ mod tests {
         .unwrap();
         let equipment = if equipped {
             vec![EquipmentSource {
+                weapon_profile: None,
                 item: crate::ItemId(1),
                 socket: crate::EquipmentSlotId(0),
                 modifiers: vec![Modifier {
@@ -737,15 +816,93 @@ mod tests {
         creature
             .start_cost(
                 crate::IntentionId(1),
-                crate::costs::ResourceCost {
+                crate::costs::CostBundle::single(crate::costs::ResourceCost {
                     resource: Resource::Stamina,
                     start: 1,
                     resolution: 1,
-                },
+                })
+                .unwrap(),
             )
             .unwrap();
         creature.advance_active(3);
         (creature, equipment)
+    }
+
+    #[test]
+    fn empty_condition_restart_preserves_generation_and_rejects_expired_token_candidate() {
+        let (mut original, equipment) = subject(false, false);
+        let id = crate::content_ids::ConditionId::new("readied").unwrap();
+        let rules = original.build().ruleset().clone();
+        original
+            .apply_condition(&id, crate::ActorId(7), 40)
+            .unwrap();
+        let stale = original
+            .conditions()
+            .targetless_attack_tokens(
+                &rules,
+                crate::ActorId(1),
+                &AbilityId::new("basic_melee").unwrap(),
+            )
+            .pop()
+            .unwrap();
+        original.advance_active(40);
+        assert!(original.conditions().is_empty());
+        let record = CreatureRecord::capture(&original);
+        assert_eq!(record.next_condition_generation, 1);
+        let encoded = serde_json::to_vec(&record).unwrap();
+        let decoded: CreatureRecord = serde_json::from_slice(&encoded).unwrap();
+        let mut restored = decoded
+            .restore(original.build().content().clone(), equipment)
+            .unwrap();
+        assert_eq!(restored, original);
+        restored
+            .apply_condition(&id, crate::ActorId(7), 40)
+            .unwrap();
+        let fresh = restored
+            .conditions()
+            .qualifying_tokens(&rules, crate::ActorId(1), false)
+            .pop()
+            .unwrap();
+        assert_eq!(fresh.generation, 1);
+        assert_eq!(fresh.order, stale.order);
+        let before = restored.clone();
+        assert_eq!(
+            restored.reserve_tokens(std::slice::from_ref(&stale), crate::ActorId(2)),
+            Err(crate::conditions::ConditionError::InvalidReservation)
+        );
+        assert_eq!(restored, before);
+        restored
+            .reserve_tokens(std::slice::from_ref(&fresh), crate::ActorId(2))
+            .unwrap();
+        let held = restored.clone();
+        restored.consume_tokens(&[stale], crate::ActorId(2));
+        assert_eq!(restored, held);
+        restored.consume_tokens(&[fresh], crate::ActorId(2));
+        assert!(restored.conditions().is_empty());
+        assert_eq!(
+            CreatureRecord::capture(&restored).next_condition_generation,
+            2
+        );
+    }
+
+    #[test]
+    fn fresh_recorded_build_derives_once_and_retains_birth_learning() {
+        let (original, _) = subject(false, false);
+        let build = original.build();
+        let before = crate::creatures::derive::fold_count();
+        let fresh = CreatureBuild::from_recorded(
+            build.content.clone(),
+            build.species.clone(),
+            build.initial_attributes,
+            build.ledger.clone(),
+            build.binding,
+            build.advancement.clone(),
+            build.templates.clone(),
+        )
+        .unwrap();
+        assert_eq!(crate::creatures::derive::fold_count() - before, 1);
+        assert_eq!(&fresh, build);
+        assert!(fresh.intellect_learning.is_some());
     }
 
     #[test]
@@ -814,11 +971,12 @@ mod tests {
         original
             .start_cost(
                 crate::IntentionId(2),
-                crate::costs::ResourceCost {
+                crate::costs::CostBundle::single(crate::costs::ResourceCost {
                     resource: Resource::Stamina,
                     start: 0,
                     resolution: baseline + 1,
-                },
+                })
+                .unwrap(),
             )
             .unwrap();
         let record = CreatureRecord::capture(&original);
@@ -875,6 +1033,7 @@ mod tests {
             )
             .unwrap();
         let equipment = vec![EquipmentSource {
+            weapon_profile: None,
             item: crate::ItemId(1),
             socket: crate::EquipmentSlotId(0),
             attack: None,
@@ -942,10 +1101,11 @@ mod tests {
             changed.holds.0.push(changed.holds.0[0].clone());
             invalid.push(changed);
             let mut changed = record.clone();
-            changed.holds.0[0].resolution = u32::MAX;
+            changed.holds.0[0].cost.stamina.as_mut().unwrap().resolution = u32::MAX;
             invalid.push(changed);
             let mut changed = record.clone();
-            changed.holds.0[0].resolution = changed.pools.stamina.balance + 1;
+            changed.holds.0[0].cost.stamina.as_mut().unwrap().resolution =
+                changed.pools.stamina.balance + 1;
             invalid.push(changed);
             let mut changed = record.clone();
             changed.build.initial_attributes.strength = 6;
@@ -988,5 +1148,69 @@ mod tests {
                 assert!(changed.restore(content, vec![]).is_err());
             }
         }
+    }
+    #[test]
+    fn mixed_cost_bundle_record_restores_without_repaying_and_rejects_malformed_slots() {
+        let (mut original, equipment) = subject(false, false);
+        original.cancel_cost(crate::IntentionId(1));
+        let bundle = crate::costs::CostBundle::single(crate::costs::ResourceCost {
+            resource: Resource::Stamina,
+            start: 0,
+            resolution: 1,
+        })
+        .unwrap()
+        .checked_add(
+            crate::costs::CostBundle::single(crate::costs::ResourceCost {
+                resource: Resource::Focus,
+                start: 1,
+                resolution: 1,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        original.start_cost(crate::IntentionId(2), bundle).unwrap();
+        let record = CreatureRecord::capture(&original);
+        let encoded = serde_json::to_value(&record).unwrap();
+        assert_eq!(
+            encoded["holds"][0]["cost"],
+            serde_json::json!({
+                "stamina":{"start":0,"resolution":1}, "focus":{"start":1,"resolution":1}, "mana":null
+            })
+        );
+        let decoded: CreatureRecord = serde_json::from_value(encoded.clone()).unwrap();
+        let mut restored = decoded
+            .restore(original.build().content().clone(), equipment.clone())
+            .unwrap();
+        assert_eq!(restored, original);
+        assert_eq!(restored.finish_cost(crate::IntentionId(2)), Ok(bundle));
+        original.finish_cost(crate::IntentionId(2)).unwrap();
+        assert_eq!(restored, original);
+        for slot in ["stamina", "focus", "mana"] {
+            let mut invalid = encoded.clone();
+            invalid["holds"][0]["cost"]
+                .as_object_mut()
+                .unwrap()
+                .remove(slot);
+            assert!(serde_json::from_value::<CreatureRecord>(invalid).is_err());
+        }
+        for value in [
+            serde_json::json!([]),
+            serde_json::json!({"start":0}),
+            serde_json::json!({"start":0,"resolution":1,"extra":0}),
+        ] {
+            let mut invalid = encoded.clone();
+            invalid["holds"][0]["cost"]["stamina"] = value;
+            assert!(serde_json::from_value::<CreatureRecord>(invalid).is_err());
+        }
+        let mut empty = encoded;
+        empty["holds"][0]["cost"] = serde_json::json!({"stamina":null,"focus":null,"mana":null});
+        let empty: CreatureRecord = serde_json::from_value(empty).unwrap();
+        assert!(empty
+            .restore(original.build().content().clone(), equipment)
+            .is_err());
+        assert!(serde_json::from_str::<CostBundleRecord>(
+            r#"{"stamina":null,"focus":null,"focus":null,"mana":null}"#
+        )
+        .is_err());
     }
 }

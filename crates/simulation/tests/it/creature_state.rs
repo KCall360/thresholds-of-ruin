@@ -10,11 +10,12 @@ use tor_simulation::{ActorId, IntentionId};
 #[test]
 fn cost_preparation_checks_are_readonly_and_reject_dead_actors() {
     let mut creature = CreatureState::new(build()).unwrap();
-    let cost = ResourceCost {
+    let cost = tor_simulation::costs::CostBundle::single(ResourceCost {
         resource: Resource::Mana,
         start: 1,
         resolution: 1,
-    };
+    })
+    .unwrap();
     let before = creature.clone();
     assert_eq!(
         creature.validate_cost(IntentionId(1), cost),
@@ -48,11 +49,12 @@ fn next_timer_change_combines_recovery_and_expiry_and_stops_at_death() {
     creature
         .start_cost(
             IntentionId(1),
-            ResourceCost {
+            tor_simulation::costs::CostBundle::single(ResourceCost {
                 resource: Resource::Stamina,
                 start: 1,
                 resolution: 0,
-            },
+            })
+            .unwrap(),
         )
         .unwrap();
     creature.finish_cost(IntentionId(1)).unwrap();
@@ -180,11 +182,12 @@ fn rebuilding_preserves_injury_and_balances_and_clears_newly_immune_fear() {
     creature
         .start_cost(
             IntentionId(1),
-            ResourceCost {
+            tor_simulation::costs::CostBundle::single(ResourceCost {
                 resource: Resource::Stamina,
                 start: 1,
                 resolution: 1,
-            },
+            })
+            .unwrap(),
         )
         .unwrap();
     let balance = creature.costs().resources().balance(Resource::Stamina);
@@ -213,11 +216,12 @@ fn rebuilding_preserves_injury_and_balances_and_clears_newly_immune_fear() {
 #[test]
 fn reduced_resource_capacity_cancels_unfunded_holds_without_refunding_paid_costs() {
     let mut creature = CreatureState::new(build()).unwrap();
-    let cost = ResourceCost {
+    let cost = tor_simulation::costs::CostBundle::single(ResourceCost {
         resource: Resource::Mana,
         start: 1,
         resolution: 3,
-    };
+    })
+    .unwrap();
     assert_eq!(
         creature.start_cost(IntentionId(7), cost),
         Ok(StartCost::Started)
@@ -250,11 +254,12 @@ fn zero_hd_death_cancels_holds_and_never_revives_or_recovers() {
     creature
         .start_cost(
             IntentionId(7),
-            ResourceCost {
+            tor_simulation::costs::CostBundle::single(ResourceCost {
                 resource: Resource::Focus,
                 start: 1,
                 resolution: 1,
-            },
+            })
+            .unwrap(),
         )
         .unwrap();
     let mut drained = original.clone();
@@ -272,11 +277,12 @@ fn zero_hd_death_cancels_holds_and_never_revives_or_recovers() {
     assert!(creature
         .start_cost(
             IntentionId(8),
-            ResourceCost {
+            tor_simulation::costs::CostBundle::single(ResourceCost {
                 resource: Resource::Focus,
                 start: 1,
                 resolution: 1
-            }
+            })
+            .unwrap()
         )
         .is_err());
 }
@@ -292,11 +298,12 @@ fn creature_checkpoint_preserves_paid_costs_recovery_fear_and_next_outcomes() {
             300,
         )
         .unwrap();
-    let cost = ResourceCost {
+    let cost = tor_simulation::costs::CostBundle::single(ResourceCost {
         resource: Resource::Focus,
         start: 1,
         resolution: 1,
-    };
+    })
+    .unwrap();
     original.start_cost(IntentionId(7), cost).unwrap();
     original.advance_active(99);
     let data = serde_json::to_vec(&original).unwrap();
@@ -341,17 +348,20 @@ fn forged_cross_field_state_rejects_instead_of_clamping_or_repairing() {
         ),
         (
             "conditions",
-            serde_json::json!([{"condition":"fear","source":9,"remaining":300,"stacks":1,"order":0},{"condition":"fear","source":9,"remaining":200,"stacks":1,"order":1}]),
+            serde_json::json!([{"condition":"fear","source":9,"remaining":300,"stacks":1,"order":0,"generation":0,"phase":"active","reserved_by":null,"qualification":null},{"condition":"fear","source":9,"remaining":200,"stacks":1,"order":1,"generation":1,"phase":"active","reserved_by":null,"qualification":null}]),
         ),
     ] {
         let mut forged_value = value.clone();
         forged_value[field] = forged;
+        if field == "conditions" {
+            forged_value["next_condition_generation"] = serde_json::json!(2);
+        }
         assert!(restore_value(forged_value).is_none(), "{field}");
     }
     let mut forged = value.clone();
     forged["dead"] = serde_json::json!(true);
-    forged["conditions"] =
-        serde_json::json!([{"condition":"fear","source":9,"remaining":300,"stacks":1,"order":0}]);
+    forged["next_condition_generation"] = serde_json::json!(1);
+    forged["conditions"] = serde_json::json!([{"condition":"fear","source":9,"remaining":300,"stacks":1,"order":0,"generation":0,"phase":"active","reserved_by":null,"qualification":null}]);
     assert!(restore_value(forged).is_none());
     let mut forged = value;
     forged.as_object_mut().unwrap().remove("holds");
@@ -695,11 +705,12 @@ fn protected_and_reserved_books_keep_claims_when_ordinary_modifier_folds_reconci
             creature
                 .start_cost(
                     IntentionId(7),
-                    ResourceCost {
+                    tor_simulation::costs::CostBundle::single(ResourceCost {
                         resource: Resource::Focus,
                         start: 1,
                         resolution: 1,
-                    },
+                    })
+                    .unwrap(),
                 )
                 .unwrap();
             let mut recorded = serde_json::to_value(
@@ -763,11 +774,12 @@ fn expiring_capacity_cancels_holds_and_chunks_recovery_at_the_boundary() {
     creature
         .start_cost(
             IntentionId(7),
-            ResourceCost {
+            tor_simulation::costs::CostBundle::single(ResourceCost {
                 resource: Resource::Mana,
                 start: 0,
                 resolution: 6,
-            },
+            })
+            .unwrap(),
         )
         .unwrap();
     let transition = creature.advance_active(10);

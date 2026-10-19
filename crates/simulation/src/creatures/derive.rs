@@ -56,6 +56,34 @@ pub struct SelectedAttack {
     pub check_bonus: i64,
 }
 
+impl SelectedAttack {
+    pub(crate) fn refresh_operands(
+        &mut self,
+        binding: crate::attributes::ManaBinding,
+        attributes: Attributes,
+        skills: SkillRanks,
+    ) {
+        self.attribute = self.attack.skill().attribute(binding);
+        self.attribute_value = attributes.get(self.attribute);
+        self.rank = skills.get(self.attack.skill());
+        self.check_bonus = crate::attributes::SkillCheck {
+            skill: self.attack.skill(),
+            binding,
+            modifier: self.attack.bonus(),
+            threshold: 0,
+        }
+        .bonus(attributes, skills);
+    }
+}
+
+/// One equipped weapon's compiled actor operands. Opponent-dependent filters
+/// remain part of invocation capture, never this sheet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EquippedAttack {
+    pub attack: SelectedAttack,
+    pub profile: Option<crate::weapon_profiles::EffectiveWeaponProfile>,
+}
+
 /// Both participants in one check share the family and talent edge limits.
 pub struct CheckContext<'a> {
     pub ability: Option<&'a AbilityId>,
@@ -128,6 +156,11 @@ pub struct DerivedCreature {
     pub attributes: Attributes,
     pub skills: SkillRanks,
     pub anatomy: AnatomySpec,
+    pub equipped_attacks: BTreeMap<crate::EquipmentSlotId, EquippedAttack>,
+    pub equipment_capacity_deficits: BTreeMap<
+        crate::content_ids::EquipmentCapacityId,
+        crate::equipment_capacity::EquipmentCapacityDeficit,
+    >,
     /// Species-owned runtime metadata, refreshed only with permanent inputs.
     pub(crate) behavior: crate::behavior::BehaviorPolicy,
     pub(crate) displacement: Option<super::DisplacementProfile>,
@@ -149,9 +182,14 @@ pub struct DerivedCreature {
     /// Species-owned source and current check operands, independent of equipment.
     pub natural_attack: SelectedAttack,
     pub active_talents: BTreeSet<TalentId>,
+    pub expertises: crate::expertise::ExpertiseOwnership,
+    pub(super) intellect_sources: super::intellect::IntellectSources,
+    pub(super) intellect_capacity: u16,
     pub dormant_talents: BTreeSet<TalentId>,
     pub dormant_reasons: BTreeMap<TalentId, Vec<DormantReason>>,
     pub abilities: BTreeSet<AbilityId>,
+    /// Emitted caster weapon dependencies, compiled with current talent ownership.
+    pub weapon_abilities: BTreeSet<AbilityId>,
     pub ability_values: BTreeMap<AbilityId, AbilityValues>,
     pub ability_reaches: BTreeMap<AbilityId, crate::rules::Reach>,
     pub ability_timings: BTreeMap<AbilityId, AbilityTiming>,
@@ -165,6 +203,10 @@ pub struct DerivedCreature {
     scoped_edges: BTreeMap<crate::ActorId, crate::dice::Edge>,
 }
 impl DerivedCreature {
+    /// Eligible permanent learning capacity, unaffected by temporary state.
+    pub fn intellect_expertise_capacity(&self) -> u16 {
+        self.intellect_capacity
+    }
     pub fn binding(&self) -> crate::attributes::ManaBinding {
         self.binding
     }
@@ -336,6 +378,56 @@ impl DerivedCreature {
                 },
             ],
         )
+    }
+    /// A targetless physical release combines its frozen outgoing rows with
+    /// this live recipient in the same fold used by ordinary attack capture.
+    pub(crate) fn projectile_edges(
+        &self,
+        captured: &super::CapturedAttackEdges,
+        rules: &Ruleset,
+        context: CheckContext<'_>,
+        policy: crate::rules::OutgoingEdgePolicy,
+        selected: &[crate::conditions::TokenReservation],
+    ) -> Result<(i64, i64), BuildError> {
+        let sources = captured.sources();
+        let check = fold_edges(
+            rules,
+            EdgeUse::Check,
+            [
+                EdgeContext {
+                    sources: &sources,
+                    role: Some(context.roller_role),
+                    opponent: context.opponent,
+                    ability: context.ability,
+                    incoming: None,
+                    tokens: Some((context.roller, selected)),
+                    policy,
+                },
+                EdgeContext {
+                    sources: &self.sources,
+                    role: None,
+                    opponent: context.roller,
+                    ability: None,
+                    incoming: Some(context.defense),
+                    tokens: Some((context.opponent, selected)),
+                    policy: crate::rules::OutgoingEdgePolicy::Ordinary,
+                },
+            ],
+        )?;
+        let effect = fold_edges(
+            rules,
+            EdgeUse::Shared,
+            [EdgeContext {
+                sources: &sources,
+                role: None,
+                opponent: context.opponent,
+                ability: None,
+                incoming: None,
+                tokens: None,
+                policy,
+            }],
+        )?;
+        Ok((check, effect))
     }
     /// The separately frozen shared budget keeps its magnitude for effects.
     /// Per-check talent and family caps do not limit an authored damage budget.
@@ -556,33 +648,51 @@ impl DerivedCreature {
 }
 
 pub(super) struct PermanentFacts<'a> {
-    build: &'a CreatureBuild,
-    derived: &'a DerivedCreature,
+    pub(super) build: &'a CreatureBuild,
+    pub(super) hit_dice: &'a HitDiceSummary,
+    pub(super) kind: &'a TypeId,
+    pub(super) subtypes: &'a BTreeSet<SubtypeId>,
+    pub(super) skills: &'a SkillRanks,
+    pub(super) attributes: Attributes,
+    pub(super) flags: &'a BTreeSet<FlagId>,
+    pub(super) sources: &'a BTreeMap<SourceId, Vec<Modifier>>,
 }
 impl<'a> PermanentFacts<'a> {
     pub(super) fn new(build: &'a CreatureBuild, derived: &'a DerivedCreature) -> Self {
-        Self { build, derived }
+        Self {
+            build,
+            hit_dice: &derived.hit_dice,
+            kind: &derived.kind,
+            subtypes: &derived.subtypes,
+            skills: &derived.skills,
+            attributes: derived.permanent_attributes,
+            flags: &derived.permanent_flags,
+            sources: &derived.sources,
+        }
     }
 }
 impl crate::rules::TalentFacts for PermanentFacts<'_> {
     fn total_hd(&self) -> HdCount {
-        self.derived.total_hd()
+        self.hit_dice.total
     }
     fn racial_hd(&self) -> HdCount {
-        self.derived.racial_hd()
+        self.hit_dice.racial
     }
     fn class_level(&self, class: &ClassId) -> HdCount {
-        self.derived.class_level(class)
+        self.hit_dice
+            .classes
+            .get(class)
+            .copied()
+            .unwrap_or(HdCount::ZERO)
     }
     fn creature_type(&self) -> &TypeId {
-        &self.derived.kind
+        self.kind
     }
     fn has_subtype(&self, subtype: &SubtypeId) -> bool {
-        self.derived.subtypes.contains(subtype)
+        self.subtypes.contains(subtype)
     }
     fn species_has_flag(&self, flag: &FlagId) -> bool {
-        self.derived
-            .sources
+        self.sources
             .get(&SourceId::Species(self.build.species_id().clone()))
             .is_some_and(|modifiers| {
                 modifiers.iter().any(|modifier| {
@@ -591,7 +701,7 @@ impl crate::rules::TalentFacts for PermanentFacts<'_> {
             })
     }
     fn skill_rank(&self, skill: &SkillSelector) -> u16 {
-        u16::from(self.derived.skills.get(match skill {
+        u16::from(self.skills.get(match skill {
             SkillSelector::Named { skill } => *skill,
             SkillSelector::NaturalAttack | SkillSelector::SelectedWeapon => {
                 self.build.species().melee.skill()
@@ -599,10 +709,10 @@ impl crate::rules::TalentFacts for PermanentFacts<'_> {
         }))
     }
     fn attribute(&self, attribute: Attribute) -> u16 {
-        self.derived.permanent_attributes.get(attribute)
+        self.attributes.get(attribute)
     }
     fn has_flag(&self, flag: &FlagId) -> bool {
-        self.derived.permanent_flags.contains(flag)
+        self.flags.contains(flag)
     }
 }
 
@@ -732,33 +842,85 @@ impl PermanentCreature {
         FOLD_COUNT.with(|count| count.set(count.get() + 1));
         crate::diagnostics::dynamic_creature_fold();
         let mut derived = self.seed.clone();
-        // Socket order alone chooses the weapon, independent of source order.
-        for attack in equipment.iter().filter_map(|entry| entry.attack.as_ref()) {
-            build
+        let mut demands = Vec::new();
+        for entry in equipment {
+            let slot_id = derived
+                .anatomy
+                .slots
+                .get(usize::from(entry.socket.0))
+                .ok_or(BuildError::InvalidDefinition)?;
+            let slot = build
                 .ruleset()
-                .validate_damage(attack.damage())
-                .map_err(|_| BuildError::InvalidDefinition)?;
-        }
-        if let Some((socket, item, attack)) = equipment
-            .iter()
-            .filter_map(|entry| {
-                entry
-                    .attack
+                .equipment_slot(slot_id)
+                .ok_or(BuildError::InvalidDefinition)?;
+            if entry.weapon_profile.as_ref().is_some_and(|profile| {
+                !profile.compatible_with(build.ruleset())
+                    || entry.attack.is_none()
+                    || (profile.maximum_grip_demand() > 1
+                        && matches!(
+                            slot.capacity,
+                            crate::equipment_capacity::EquipmentCapacityUse::None
+                        ))
+            }) {
+                return Err(BuildError::InvalidDefinition);
+            }
+            let profile = entry
+                .weapon_profile
+                .as_ref()
+                .map(|profile| profile.resolve(&derived.expertises).clone());
+            if let crate::equipment_capacity::EquipmentCapacityUse::Shared { resource, units } =
+                &slot.capacity
+            {
+                let minimum = entry
+                    .weapon_profile
                     .as_ref()
-                    .map(|attack| (entry.socket, entry.item, attack))
-            })
-            .max_by_key(|(socket, _, _)| *socket)
+                    .map_or(1, |profile| profile.minimum_grip_demand());
+                let current = profile.as_ref().map_or(1, |profile| profile.grip_demand());
+                demands.push((
+                    resource.clone(),
+                    units
+                        .checked_mul(u16::from(minimum))
+                        .ok_or(BuildError::InvalidDefinition)?,
+                    units
+                        .checked_mul(u16::from(current))
+                        .ok_or(BuildError::InvalidDefinition)?,
+                ));
+            }
+            if let Some(attack) = &entry.attack {
+                build
+                    .ruleset()
+                    .validate_damage(attack.damage())
+                    .map_err(|_| BuildError::InvalidDefinition)?;
+                let attack = crate::attacks::SelectedMeleeAttack::Weapon(attack.clone());
+                derived.equipped_attacks.insert(
+                    entry.socket,
+                    EquippedAttack {
+                        attack: SelectedAttack {
+                            attribute: attack.skill().attribute(derived.binding),
+                            attribute_value: 0,
+                            rank: 0,
+                            check_bonus: 0,
+                            attack,
+                            source: SourceId::Equipment(entry.item),
+                            socket: Some(entry.socket),
+                        },
+                        profile,
+                    },
+                );
+            }
+        }
+        derived.equipment_capacity_deficits =
+            crate::equipment_capacity::capacity_deficits(&derived.anatomy.capacities, demands)
+                .ok_or(BuildError::InvalidDefinition)?;
+        // An empty or absent primary retains the natural attack, even if another
+        // socket contains a weapon.
+        if let Some(weapon) = derived
+            .anatomy
+            .primary_attack_socket
+            .socket()
+            .and_then(|socket| derived.equipped_attacks.get(&socket))
         {
-            let attack = crate::attacks::SelectedMeleeAttack::Weapon(attack.clone());
-            derived.selected_attack = SelectedAttack {
-                attribute: attack.skill().attribute(derived.binding),
-                attribute_value: 0,
-                rank: 0,
-                check_bonus: 0,
-                attack,
-                source: SourceId::Equipment(item),
-                socket: Some(socket),
-            };
+            derived.selected_attack = weapon.attack.clone();
         }
         for (source, modifiers) in extra {
             add_source(
@@ -772,6 +934,7 @@ impl PermanentCreature {
         if derived.total_hd() == HdCount::ZERO {
             derived.maximum_health = 0;
             derived.abilities.clear();
+            derived.weapon_abilities.clear();
             derived.ability_reaches.clear();
             derived.ability_timings.clear();
         }
@@ -808,6 +971,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         })
         .collect::<Result<_, _>>()?;
     let (mut attributes, skills, selected) = advancement_facts(build, build.initial_attributes())?;
+    let advancement_attributes = attributes;
     let mut kind = species.kind.clone();
     let mut subtypes = species.subtypes.clone();
     apply_templates(&templates, &mut kind, &mut subtypes, &mut attributes)?;
@@ -900,6 +1064,8 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         attributes,
         skills,
         anatomy: species.anatomy.clone(),
+        equipped_attacks: BTreeMap::new(),
+        equipment_capacity_deficits: BTreeMap::new(),
         behavior: species.behavior,
         displacement: species.displacement,
         maximum_health: 0,
@@ -933,6 +1099,9 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         natural_attack: selected_attack.clone(),
         selected_attack,
         active_talents: BTreeSet::new(),
+        expertises: crate::expertise::ExpertiseOwnership::default(),
+        intellect_sources: Default::default(),
+        intellect_capacity: 0,
         dormant_talents: BTreeSet::new(),
         dormant_reasons: BTreeMap::new(),
         abilities: rules
@@ -944,6 +1113,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         ability_values: BTreeMap::new(),
         ability_reaches: BTreeMap::new(),
         ability_timings: BTreeMap::new(),
+        weapon_abilities: BTreeSet::new(),
         sources,
         protection: Protection::default(),
         flags: BTreeSet::new(),
@@ -953,6 +1123,27 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         scoped_edges: BTreeMap::new(),
     };
     derived.active_talents = rules.active_talents(&selected, &PermanentFacts::new(build, &derived));
+    let birth_templates = build
+        .intellect_learning
+        .as_ref()
+        .map_or(build.template_ids(), |learning| {
+            learning.birth.templates.as_slice()
+        });
+    derived.intellect_sources = super::intellect::current_sources_from_facts(
+        build,
+        birth_templates,
+        advancement_attributes,
+        &derived.skills,
+        &selected,
+        &derived.hit_dice,
+    )?;
+    derived.intellect_capacity =
+        super::intellect::eligible_intellect(build, birth_templates, &derived.intellect_sources)?;
+    derived.expertises = crate::expertise::ExpertiseOwnership::compile(
+        build,
+        &derived.active_talents,
+        derived.intellect_capacity,
+    )?;
     derived.dormant_talents = selected
         .difference(&derived.active_talents)
         .cloned()
@@ -1008,7 +1199,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
     Ok(derived)
 }
 
-fn add_source(
+pub(super) fn add_source(
     sources: &mut BTreeMap<SourceId, Vec<Modifier>>,
     source: SourceId,
     modifiers: &[Modifier],
@@ -1041,7 +1232,7 @@ fn add_source(
     sources.insert(source, expanded);
     Ok(())
 }
-fn flags(sources: &BTreeMap<SourceId, Vec<Modifier>>) -> BTreeSet<FlagId> {
+pub(super) fn flags(sources: &BTreeMap<SourceId, Vec<Modifier>>) -> BTreeSet<FlagId> {
     sources
         .values()
         .flatten()
@@ -1219,6 +1410,38 @@ fn attribute_values(
     }
     Attributes::from_derived(attributes).map_err(|_| BuildError::DerivedLimit)
 }
+/// Attribute-only projection with the same Set/Add accumulator and bounds as
+/// the ordinary fold. Unrelated scalar conflicts cannot invent an Intellect loss.
+pub(super) fn source_attributes(
+    base: Attributes,
+    sources: &BTreeMap<SourceId, Vec<Modifier>>,
+    rules: &Ruleset,
+) -> Result<Attributes, BuildError> {
+    let mut values: BTreeMap<Stat, Accumulator> = BTreeMap::new();
+    for modifier in sources
+        .values()
+        .flatten()
+        .filter(|m| m.scope == Scope::Always)
+    {
+        match &modifier.op {
+            ModifierOp::Add {
+                stat: stat @ Stat::Attribute { .. },
+                value,
+            } => {
+                values.entry(stat.clone()).or_default().add(*value)?;
+            }
+            ModifierOp::Set {
+                stat: stat @ Stat::Attribute { .. },
+                value,
+            } => {
+                values.entry(stat.clone()).or_default().set(*value)?;
+            }
+            _ => {}
+        }
+    }
+    attribute_values(base, &values, rules)
+}
+
 /// One deterministic fold for outgoing, ability-specific and incoming check
 /// edge. Families are independent of causer and instance count, but selection
 /// precedes deduplication so Fear still applies only against its causer.
@@ -1588,6 +1811,7 @@ fn fold(
     ] {
         derived.incoming_check_edge(rules, crate::ActorId(0), defense)?;
     }
+    derived.weapon_abilities.clear();
     for ability in &derived.abilities {
         let stat = |stat| {
             value(
@@ -1661,7 +1885,8 @@ fn fold(
                     )
                     .map_err(interaction_error)?;
             }
-            crate::rules::StrikeSource::SelectedMelee => {}
+            crate::rules::StrikeSource::SelectedMelee
+            | crate::rules::StrikeSource::Projectile { .. } => {}
         }
         let reach = match definition.reach {
             crate::rules::Reach::MutualSight { range } => {
@@ -1698,8 +1923,25 @@ fn fold(
             ref reach => reach.clone(),
         };
         derived.ability_reaches.insert(ability.clone(), reach);
-        let timing = ability_timing(derived, build, definition, &modifiers)?;
+        let source = if matches!(
+            definition.strikes,
+            crate::rules::StrikeSource::NaturalMelee { .. }
+        ) {
+            &derived.natural_attack
+        } else {
+            &derived.selected_attack
+        };
+        let timing = ability_timing_for_attack(derived, build, definition, &modifiers, source)?;
         derived.ability_timings.insert(ability.clone(), timing);
+        if definition.consumes_caster_weapon(|ordinal| match &definition.strikes {
+            crate::rules::StrikeSource::Authored { strikes } => strikes[ordinal]
+                .unlock
+                .as_ref()
+                .is_none_or(|id| derived.active_talents.contains(id)),
+            _ => true,
+        }) {
+            derived.weapon_abilities.insert(ability.clone());
+        }
     }
     if losses.has_attribute_loss() {
         // First validate all ordinary computations above. Reduced attributes
@@ -1786,16 +2028,16 @@ fn fold_attribute_dependents(
             Resource::Mana => derived.resources.mana = maximum,
         }
     }
-    for selected in [&mut derived.selected_attack, &mut derived.natural_attack] {
-        selected.attribute_value = derived.attributes.get(selected.attribute);
-        selected.rank = derived.skills.get(selected.attack.skill());
-        selected.check_bonus = crate::attributes::SkillCheck {
-            skill: selected.attack.skill(),
-            binding: derived.binding,
-            modifier: selected.attack.bonus(),
-            threshold: 0,
-        }
-        .bonus(derived.attributes, derived.skills);
+    for selected in [&mut derived.selected_attack, &mut derived.natural_attack]
+        .into_iter()
+        .chain(
+            derived
+                .equipped_attacks
+                .values_mut()
+                .map(|weapon| &mut weapon.attack),
+        )
+    {
+        selected.refresh_operands(derived.binding, derived.attributes, derived.skills);
     }
     Ok(())
 }
@@ -1805,38 +2047,44 @@ fn fold_ability_timings(
     build: &CreatureBuild,
 ) -> Result<(), BuildError> {
     let rules = build.ruleset();
+    derived.weapon_abilities.clear();
     for ability in &derived.abilities {
         let definition = rules
             .ability(ability)
             .ok_or(BuildError::InvalidDefinition)?;
         let modifiers = derived.ability_values(ability);
-        let timing = ability_timing(derived, build, definition, &modifiers)?;
+        let source = if matches!(
+            definition.strikes,
+            crate::rules::StrikeSource::NaturalMelee { .. }
+        ) {
+            &derived.natural_attack
+        } else {
+            &derived.selected_attack
+        };
+        let timing = ability_timing_for_attack(derived, build, definition, &modifiers, source)?;
         derived.ability_timings.insert(ability.clone(), timing);
+        if definition.consumes_caster_weapon(|ordinal| match &definition.strikes {
+            crate::rules::StrikeSource::Authored { strikes } => strikes[ordinal]
+                .unlock
+                .as_ref()
+                .is_none_or(|id| derived.active_talents.contains(id)),
+            _ => true,
+        }) {
+            derived.weapon_abilities.insert(ability.clone());
+        }
     }
     Ok(())
 }
 
-fn ability_timing(
+pub(crate) fn ability_timing_for_attack(
     derived: &DerivedCreature,
     build: &CreatureBuild,
     definition: &crate::rules::AbilityDef,
     modifiers: &AbilityValues,
+    selected: &SelectedAttack,
 ) -> Result<AbilityTiming, BuildError> {
     let rules = build.ruleset();
-    let source_timing = if matches!(
-        definition.strikes,
-        crate::rules::StrikeSource::NaturalMelee { .. }
-    ) {
-        (
-            derived.natural_attack.attack.wind_up(),
-            derived.natural_attack.attack.recovery(),
-        )
-    } else {
-        (
-            derived.selected_attack.attack.wind_up(),
-            derived.selected_attack.attack.recovery(),
-        )
-    };
+    let source_timing = (selected.attack.wind_up(), selected.attack.recovery());
     let (prepare, recover) = match definition.timing.source {
         crate::rules::TimingSource::Fixed { prepare, recover } => (prepare, recover),
         crate::rules::TimingSource::SelectedWeapon => source_timing,
@@ -1921,7 +2169,7 @@ fn priority_kind(templates: &[&Template]) -> Result<Option<TypeId>, BuildError> 
     }
     Ok(kind)
 }
-fn apply_templates(
+pub(super) fn apply_templates(
     templates: &[&Template],
     kind: &mut TypeId,
     subtypes: &mut BTreeSet<SubtypeId>,
@@ -2135,6 +2383,7 @@ mod edge_tests {
         let mut creature = super::super::CreatureState::new(build).unwrap();
         let equipment = (1..=8)
             .map(|item| EquipmentSource {
+                weapon_profile: None,
                 item: crate::ItemId(item),
                 socket: crate::EquipmentSlotId(item as u16),
                 attack: None,
@@ -2242,6 +2491,7 @@ mod edge_tests {
             let before = creature.clone();
             let equipment = (1..=2)
                 .map(|value| EquipmentSource {
+                    weapon_profile: None,
                     item: crate::ItemId(value),
                     socket: crate::EquipmentSlotId(value as u16),
                     modifiers: vec![Modifier {

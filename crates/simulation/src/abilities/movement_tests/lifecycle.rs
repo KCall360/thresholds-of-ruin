@@ -50,7 +50,7 @@ pub(super) fn push_variant(
 pub(super) fn ability_action(id: &str, target: crate::ActorId) -> crate::Action {
     crate::Action::UseAbility {
         id: crate::content_ids::AbilityId::new(id).unwrap(),
-        invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+        invocation: crate::abilities::AbilityInvocation::actor_target(target),
         supplies: Default::default(),
     }
 }
@@ -251,7 +251,7 @@ fn pushed_carer_retires_original_claim_once_in_both_actor_orders_and_when_paused
                     .unwrap();
                 let care = crate::Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: crate::supplies::SupplySelection::Explicit {
                         items: vec![crate::supplies::SelectedSupply {
                             cost_ordinal: 0,

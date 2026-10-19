@@ -916,7 +916,7 @@ fn production_combat_fixture(name: &str) -> (Game, ActorId, ActorId) {
 
 #[test]
 fn production_flytrap_uses_ordinary_clutch_tightening_and_single_escape() {
-    use tor_simulation::abilities::{AbilityInvocation, ResolvedEffect};
+    use tor_simulation::abilities::ResolvedEffect;
     use tor_world::Direction;
     let (mut game, holder, subject) = production_combat_fixture("venus_flytrap");
     let at = |x| Location {
@@ -931,7 +931,10 @@ fn production_flytrap_uses_ordinary_clutch_tightening_and_single_escape() {
     );
     let clutch = || Action::UseAbility {
         id: AbilityId::new("clutch").unwrap(),
-        invocation: AbilityInvocation::ActorTarget { target: subject },
+        invocation: tor_simulation::abilities::AbilityInvocation {
+            aim: tor_simulation::abilities::AbilityAim::ActorTarget { target: subject },
+            weapon: tor_simulation::abilities::WeaponSelection::Default,
+        },
         supplies: Default::default(),
     };
     for _ in 0..12 {
@@ -955,7 +958,10 @@ fn production_flytrap_uses_ordinary_clutch_tightening_and_single_escape() {
     // Later qualifying attacks use the same live relationship regardless of ability ID.
     let basic_melee = || Action::UseAbility {
         id: AbilityId::new("basic_melee").unwrap(),
-        invocation: AbilityInvocation::ActorTarget { target: subject },
+        invocation: tor_simulation::abilities::AbilityInvocation {
+            aim: tor_simulation::abilities::AbilityAim::ActorTarget { target: subject },
+            weapon: tor_simulation::abilities::WeaponSelection::Default,
+        },
         supplies: Default::default(),
     };
     let mut tightened = false;
@@ -1021,7 +1027,7 @@ fn production_flytrap_uses_ordinary_clutch_tightening_and_single_escape() {
 
 #[test]
 fn production_flying_roster_executes_authored_basic_melee_primaries_and_damage() {
-    use tor_simulation::abilities::{AbilityInvocation, ResolvedEffect};
+    use tor_simulation::abilities::ResolvedEffect;
 
     for (name, primary_count) in [("bat", 1_u16), ("kestrel", 1), ("griffin", 2)] {
         let (mut game, attacker, subject) = production_combat_fixture(name);
@@ -1034,7 +1040,10 @@ fn production_flying_roster_executes_authored_basic_melee_primaries_and_damage()
                 attacker,
                 Action::UseAbility {
                     id: basic.clone(),
-                    invocation: AbilityInvocation::ActorTarget { target: subject },
+                    invocation: tor_simulation::abilities::AbilityInvocation {
+                        aim: tor_simulation::abilities::AbilityAim::ActorTarget { target: subject },
+                        weapon: tor_simulation::abilities::WeaponSelection::Default,
+                    },
                     supplies: Default::default(),
                 },
             );

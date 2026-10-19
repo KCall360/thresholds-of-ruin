@@ -229,9 +229,7 @@ fn plan(game: &Game) -> Plan {
     game.ability_plan_with_supplies(
         ActorId(1),
         &AbilityId::new("fixture_ray").unwrap(),
-        AbilityInvocation::DirectionalRay {
-            direction: StepDirection::East,
-        },
+        AbilityInvocation::directional_ray(StepDirection::East),
         Default::default(),
     )
     .unwrap()
@@ -555,9 +553,7 @@ fn paid_ray_scheduler_failure_preserves_holds_supplies_tokens_cooldown_queue_and
             ActorId(1),
             crate::Action::UseAbility {
                 id: ability.clone(),
-                invocation: AbilityInvocation::DirectionalRay {
-                    direction: StepDirection::East,
-                },
+                invocation: AbilityInvocation::directional_ray(StepDirection::East),
                 supplies: Default::default(),
             },
             crate::IntentionOrigin::Human,
@@ -1123,7 +1119,7 @@ fn unavailable_or_ambiguous_geometry_stops_without_reversing_or_checking() {
             .ability_plan_with_supplies(
                 ActorId(1),
                 &AbilityId::new("fixture_ray").unwrap(),
-                AbilityInvocation::DirectionalRay { direction },
+                AbilityInvocation::directional_ray(direction),
                 Default::default(),
             )
             .unwrap();

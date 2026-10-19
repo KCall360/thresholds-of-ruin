@@ -2,7 +2,7 @@
 # Two authored halls with two generated caves between them. The caves' rooms,
 # corridors, rats and coins come from their generator when first built. Each
 # cave's two entries share a row, so a corridor always joins them straight.
-format = 23
+format = 24
 id = "generated-filler"
 version = "1.0"
 ruleset = "rules.toml"
@@ -41,7 +41,7 @@ modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }
 [creatures.species.cave_rat]
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }
 kind = "animal"
-anatomy = { slots = [] }
+anatomy = { slots = [], capacities = {}, primary_attack_socket = { kind = "none" } }
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
 melee = { skill = "light_weaponry", bonus = 0, wind_up = 60, recovery = 80, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "fixed", amount = 1 } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = -2 } }]

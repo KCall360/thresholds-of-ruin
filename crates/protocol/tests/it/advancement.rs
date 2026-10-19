@@ -51,6 +51,7 @@ fn summary() -> Value {
 #[test]
 fn owner_advancement_actions_have_exact_basis_and_operation_without_client_candidates() {
     for action in [
+        json!({"type":"choose_intellect_expertise","basis":basis(),"choice":{"threshold":1,"expertise":"spear"}}),
         json!({"type":"purchase","basis":basis(),"purchase":purchase()}),
         json!({"type":"respec","basis":basis(),"replacement":replacement(),"supplies":{"kind":"carried"}}),
     ] {
@@ -73,6 +74,7 @@ fn owner_advancement_query_variants_roundtrip_without_arbitrary_actor_selector()
     for page in [
         json!({"kind":"overview"}),
         json!({"kind":"ledger","basis":basis(),"offset":0}),
+        json!({"kind":"intellect_expertises","basis":basis(),"offset":999}),
         json!({"kind":"balances","basis":basis(),"offset":0}),
         json!({"kind":"catalog","basis":basis(),"catalog":"talent","offset":32}),
         json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"removed","offset":0}),
@@ -878,4 +880,193 @@ fn hit_die_restoration_disclosure_is_bounded_by_applied_tier_and_has_a_closed_bl
     good["page"]["entries"][0]["value"]["growth"]["restoration_blocker"] =
         json!({"kind":"missing_health_root"});
     decode_response(&good.to_string()).expect("original Health provenance blocker");
+}
+
+#[test]
+fn expertise_summary_is_named_required_bounded_and_compact() {
+    use tor_protocol::AdvancementExpertiseRow;
+    let row =
+        json!({"expertise":{"id":"spear","name":"Spear"},"status":"active","source_count":257});
+    let value: AdvancementExpertiseRow = serde_json::from_value(row.clone()).unwrap();
+    assert_eq!(value.source_count, 257);
+    assert!(serde_json::to_vec(&value).unwrap().len() < 256);
+    for count in [0, 258] {
+        let mut bad = row.clone();
+        bad["source_count"] = json!(count);
+        assert!(serde_json::from_value::<AdvancementExpertiseRow>(bad).is_err());
+    }
+    for field in ["expertise", "status", "source_count"] {
+        let mut bad = row.clone();
+        bad.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<AdvancementExpertiseRow>(bad).is_err());
+    }
+    let mut bad = row.clone();
+    bad["origins"] = json!([]);
+    assert!(serde_json::from_value::<AdvancementExpertiseRow>(bad).is_err());
+    assert!(serde_json::from_value::<AdvancementExpertiseRow>(json!([
+        row["expertise"],
+        "active",
+        257
+    ]))
+    .is_err());
+    let text = serde_json::to_string(&row).unwrap();
+    assert!(
+        serde_json::from_str::<AdvancementExpertiseRow>(&text.replace(
+            "\"source_count\":257",
+            "\"source_count\":257,\"source_count\":1"
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn expertise_purchase_catalog_and_preview_use_server_disclosed_rows() {
+    let choice = json!({"kind":"expertise","expertise":"unknown_but_well_formed"});
+    let decoded: tor_protocol::PurchaseChoice = serde_json::from_value(choice.clone()).unwrap();
+    assert_eq!(decoded.kind(), tor_protocol::AdvancementKind::Expertise);
+    assert_eq!(serde_json::to_value(decoded).unwrap(), choice);
+    let catalog = json!({"selection":choice,"name":"Example","form_choices":[]});
+    assert!(serde_json::from_value::<tor_protocol::AdvancementCatalogRow>(catalog.clone()).is_ok());
+    let mut bad = catalog;
+    bad["form_choices"] = json!([{"id":"form","name":"Form"}]);
+    assert!(serde_json::from_value::<tor_protocol::AdvancementCatalogRow>(bad).is_err());
+    let balance = json!({"owner":"0","pool":{"id":"general","name":"General"},"granted":3,"spent":0,"unspent":3,"allowed":["skill_rank","talent","expertise"]});
+    assert!(serde_json::from_value::<tor_protocol::AdvancementBalanceRow>(balance.clone()).is_ok());
+    let mut bad = balance;
+    bad["allowed"] = json!(["expertise", "talent", "expertise"]);
+    assert!(serde_json::from_value::<tor_protocol::AdvancementBalanceRow>(bad).is_err());
+}
+
+#[test]
+fn expertise_preview_section_rejects_wrong_rows() {
+    let row =
+        json!({"expertise":{"id":"spear","name":"Spear"},"status":"dormant","source_count":257});
+    let q = json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"expertises","offset":0});
+    let valid = response(
+        q.clone(),
+        json!([{"kind":"expertise","value":row}]),
+        1,
+        None,
+    );
+    assert!(decode_response(&serde_json::to_string(&valid).unwrap()).is_ok());
+    let bad = response(
+        q,
+        json!([{"kind":"talent","value":{"talent":{"id":"training","name":"Training"},"status":"active"}}]),
+        1,
+        None,
+    );
+    assert!(decode_response(&serde_json::to_string(&bad).unwrap()).is_err());
+}
+
+#[test]
+fn intellect_expertise_action_and_preview_use_strict_distinct_operands() {
+    for threshold in [1, 1000] {
+        let choice = json!({"threshold":threshold,"expertise":"spear"});
+        let action = request(json!({"type":"act","expected_revision":"5","action":{
+            "type":"choose_intellect_expertise","basis":basis(),"choice":choice}}));
+        let preview = query(json!({"kind":"preview","basis":basis(),"proposal":{
+            "kind":"intellect_expertise","choice":choice},"section":"summary","offset":0}));
+        for value in [&action, &preview] {
+            assert_eq!(
+                serde_json::to_value(decode_request(&value.to_string()).unwrap()).unwrap(),
+                *value
+            );
+        }
+        for bad_choice in [
+            json!({"threshold":0,"expertise":"spear"}),
+            json!({"threshold":1001,"expertise":"spear"}),
+            json!({"threshold":"1","expertise":"spear"}),
+            json!({"threshold":1,"expertise":"bad id"}),
+            json!({"threshold":1}),
+            json!({"threshold":1,"expertise":"spear","pool":"general"}),
+            json!({"threshold":1,"expertise":"spear","owner":"0"}),
+        ] {
+            let mut bad = action.clone();
+            bad["request"]["command"]["action"]["choice"] = bad_choice.clone();
+            assert!(decode_request(&bad.to_string()).is_err());
+            let mut bad = preview.clone();
+            bad["request"]["command"]["query"]["proposal"]["choice"] = bad_choice;
+            assert!(decode_request(&bad.to_string()).is_err());
+        }
+    }
+}
+
+#[test]
+fn intellect_expertise_pages_bound_threshold_rows_and_require_nullable_choice() {
+    let make_page = |offset: u16, threshold, status, expertise| {
+        response(
+            json!({"kind":"intellect_expertises","basis":basis(),"offset":offset}),
+            json!([{"kind":"intellect_expertise","value":{"threshold":threshold,"status":status,"expertise":expertise}}]),
+            1000,
+            if offset == 999 {
+                None
+            } else {
+                Some(offset + 1)
+            },
+        )
+    };
+    for (offset, threshold, status, expertise) in [
+        (0, 1, "active", Value::Null),
+        (999, 1000, "dormant", json!({"id":"spear","name":"Spear"})),
+    ] {
+        let good = make_page(offset, threshold, status, expertise);
+        let typed = decode_response(&good.to_string()).unwrap();
+        assert_eq!(serde_json::to_value(&typed).unwrap(), good);
+        let encoded = encode_response(&typed, None, 32 * 1024).unwrap();
+        assert!(encode_response(&typed, None, encoded.text.len() - 1).is_err());
+        for field in ["expertise", "threshold", "status"] {
+            let mut bad = good.clone();
+            bad["page"]["entries"][0]["value"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                decode_response(&bad.to_string()).is_err(),
+                "required {field}"
+            );
+        }
+        for threshold in [0, 1001] {
+            let mut bad = good.clone();
+            bad["page"]["entries"][0]["value"]["threshold"] = json!(threshold);
+            assert!(decode_response(&bad.to_string()).is_err());
+        }
+        let mut bad = good.clone();
+        bad["page"]["total"] = json!(1001);
+        assert!(decode_response(&bad.to_string()).is_err());
+        let mut bad = good.clone();
+        bad["page"]["query"]["offset"] = json!(1000);
+        assert!(decode_response(&bad.to_string()).is_err());
+        let mut bad = good.clone();
+        bad["page"]["entries"][0]["value"]["history"] = json!([]);
+        assert!(decode_response(&bad.to_string()).is_err());
+        let mut bad = good;
+        bad["page"]["query"]["kind"] = json!("ledger");
+        assert!(decode_response(&bad.to_string()).is_err());
+    }
+}
+
+#[test]
+fn intellect_expertise_pages_keep_the_shared_entry_and_full_frame_budgets() {
+    let rows = |count| {
+        Value::Array(
+            (1..=count)
+                .map(|threshold| {
+                    json!({"kind":"intellect_expertise","value":{
+                        "threshold":threshold,"status":"active","expertise":null
+                    }})
+                })
+                .collect(),
+        )
+    };
+    let page_query = json!({"kind":"intellect_expertises","basis":basis(),"offset":0});
+    let good = response(page_query.clone(), rows(32), 1000, Some(32));
+    assert!(decode_response(&good.to_string()).is_ok());
+    let too_many = response(page_query, rows(33), 1000, Some(33));
+    assert!(decode_response(&too_many.to_string()).is_err());
+    let mut oversized = good;
+    oversized["page"]["entries"][0]["value"]["expertise"] =
+        json!({"id":"spear","name":"x".repeat(32768)});
+    assert!(
+        matches!(decode_response(&oversized.to_string()), Err(tor_protocol::DecodeError::TooLarge { limit }) if limit == 32 * 1024)
+    );
 }

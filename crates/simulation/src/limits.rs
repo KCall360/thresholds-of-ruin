@@ -16,6 +16,7 @@ pub const POINT_POOLS_PER_SOURCE: usize = 16;
 pub const POINTS_PER_HIT_DIE: usize = 256;
 /// Total purchased talents, whether active or dormant; independent of point grants.
 pub const OWNED_TALENTS: usize = 256;
+pub const OWNED_EXPERTISES: usize = 256;
 /// Acquisition operands per root; bounded separately from the global catalog.
 pub const FORMS_PER_TALENT: usize = 16;
 pub const COST_HOLDS: usize = 64;
@@ -44,3 +45,6 @@ pub const DESCRIPTORS_PER_SEQUENCE: usize = 256;
 /// Authoritative current-batch events and compact observer bindings.
 pub const EVENTS_PER_BATCH: usize = 65_536;
 pub const EVENT_RECEIPTS: usize = 262_144;
+
+/// Retained exact HD choice versions supporting first-earned Intellect thresholds.
+pub const EXPERTISE_HISTORY_ROWS: usize = 4096;

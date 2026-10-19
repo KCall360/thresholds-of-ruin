@@ -119,9 +119,7 @@ fn held_movement_and_stronger_movement_ability_restrictions_are_distinct_operati
         let attack = game.preparation(ActorId(1)).unwrap().plan.work().action();
         let movement = Action::UseAbility {
             id: crate::content_ids::AbilityId::new("guarded_step").unwrap(),
-            invocation: super::AbilityInvocation::SelfStep {
-                direction: super::StepDirection::West,
-            },
+            invocation: super::AbilityInvocation::self_step(super::StepDirection::West),
             supplies: Default::default(),
         };
         assert!(game.condition_blocks_action(ActorId(1), &ordinary));
@@ -1244,9 +1242,7 @@ fn movement_only_denial_suspends_queued_resume_without_discarding_paid_step() {
         });
         let action = Action::UseAbility {
             id: crate::content_ids::AbilityId::new("guarded_step_probe").unwrap(),
-            invocation: super::AbilityInvocation::SelfStep {
-                direction: super::StepDirection::North,
-            },
+            invocation: super::AbilityInvocation::self_step(super::StepDirection::North),
             supplies: Default::default(),
         };
         let intention = game

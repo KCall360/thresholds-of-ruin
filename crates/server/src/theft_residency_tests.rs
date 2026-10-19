@@ -220,8 +220,11 @@ fn start_theft(engine: &mut Engine) -> Value {
         "paid-theft",
         Action::UseAbility {
             id: AbilityId::new("filch_charm").unwrap(),
-            invocation: crate::actions::AbilityInvocation::ActorTarget {
-                target: SimActor(1),
+            invocation: crate::actions::AbilityInvocation {
+                aim: crate::actions::AbilityAim::ActorTarget {
+                    target: SimActor(1),
+                },
+                weapon: crate::actions::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },

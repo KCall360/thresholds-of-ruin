@@ -18,6 +18,8 @@ fn fixture() -> Engine {
         .unwrap()
         .anatomy = Some(author::AnatomySpec {
         slots: vec!["body_armor".into()],
+        capacities: Default::default(),
+        primary_attack_socket: author::PrimaryAttackSocket::None {},
     });
     manifest.archetypes.insert(
         "mail".into(),

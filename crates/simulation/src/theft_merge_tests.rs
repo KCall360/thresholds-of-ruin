@@ -211,3 +211,30 @@ fn empty_victim_does_not_build_a_recipient_merge_index() {
     assert_eq!(rng, 9);
     assert_eq!(game, before);
 }
+
+#[test]
+fn currency_merge_index_distinguishes_condition_and_reuses_matching_fragments() {
+    let mut game = game();
+    for (id, owner) in [(10, 1), (11, 1), (20, 2), (21, 2)] {
+        game.place_item_stack(
+            id,
+            at(owner as i32),
+            Some(ActorId(owner)),
+            2,
+            gold("same gold"),
+        )
+        .unwrap();
+    }
+    // Exercise exact-state indexing without authorizing mutable currency or
+    // stackable equipment content. The transfer kernel must not discard state.
+    for id in [11, 20, 21] {
+        game.items
+            .edit(ItemId(id), |item| item.condition.hit_enchantment = 1);
+    }
+    assert_eq!(steal(&mut game, 4), 4);
+    assert_eq!(game.items[&ItemId(10)].quantity, 2);
+    assert_eq!(game.items[&ItemId(11)].quantity, 6);
+    assert_eq!(game.items[&ItemId(11)].condition.hit_enchantment, 1);
+    assert!(!game.items.contains_key(&ItemId(20)));
+    assert!(!game.items.contains_key(&ItemId(21)));
+}

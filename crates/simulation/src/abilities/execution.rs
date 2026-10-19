@@ -10,9 +10,23 @@ struct BatchExecutionFacts<'a> {
 
 impl Game {
     pub(crate) fn plan_actor_available(&self, plan: &Plan) -> bool {
-        self.actors
-            .get(&plan.actor())
-            .is_some_and(|actor| actor.alive())
+        (match plan {
+            Plan::Projectile(plan) => plan.source.available(self, plan.actor),
+            Plan::Equip {
+                actor,
+                item,
+                slot,
+                allocation,
+                ..
+            } => self.frozen_equip_available(*actor, *item, *slot, allocation),
+            _ => true,
+        }) && plan
+            .as_ability()
+            .is_none_or(|ability| self.frozen_weapon_available(ability.actor, &ability.weapon))
+            && self
+                .actors
+                .get(&plan.actor())
+                .is_some_and(|actor| actor.alive())
             && self.creature(plan.actor()).map_or_else(
                 || {
                     matches!(plan, Plan::Equip { .. } | Plan::Unequip { .. })
@@ -35,7 +49,7 @@ impl Game {
             && match plan {
                 Plan::Escape(plan) => self.escape_plan_available(plan),
                 Plan::Respec(plan) => self.respec_environment_safe(plan.basis.actor),
-                Plan::Ray(_) => true,
+                Plan::Ray(_) | Plan::Projectile(_) => true,
                 Plan::Ability(ability) => self.target_in_reach_snapshot(
                     ability.actor,
                     ability.target,
@@ -135,8 +149,8 @@ impl Game {
             // An unavailable/dead/detached target has no mutation or RNG draw.
             let mut origin = self.capture_event_origin(outcome.actor, outcome.target);
             if matches!(
-                ability.invocation,
-                super::AbilityInvocation::ContactTarget { .. }
+                ability.invocation.aim,
+                super::AbilityAim::ContactTarget { .. }
             ) {
                 origin.cap_contact_target();
             }
@@ -292,13 +306,16 @@ impl Game {
             | ResolutionPlan::Strike { ability, .. }
             | ResolutionPlan::Rider { ability, .. } => (ability.actor, ability.target),
             ResolutionPlan::RayEncounter { ray, target, .. } => (ray.actor, target),
+            ResolutionPlan::ProjectileEncounter {
+                projectile, target, ..
+            } => (projectile.actor, target),
             ResolutionPlan::Effects { actor, target, .. } => (actor, target),
         };
         let mut disclosure_origin =
             self.reuse_event_origin(actor, target, facts.disclosure_origin.as_ref());
         if matches!(plan,
             ResolutionPlan::Ability(ability) | ResolutionPlan::Strike { ability, .. } | ResolutionPlan::Rider { ability, .. }
-                if matches!(ability.invocation, super::AbilityInvocation::ContactTarget { .. }))
+                if matches!(ability.invocation.aim, super::AbilityAim::ContactTarget { .. }))
         {
             disclosure_origin.cap_contact_target();
         }
@@ -513,7 +530,9 @@ impl Game {
             ResolutionPlan::Ability(ability)
             | ResolutionPlan::Strike { ability, .. }
             | ResolutionPlan::Rider { ability, .. } => Some(ability),
-            ResolutionPlan::RayEncounter { .. } | ResolutionPlan::Effects { .. } => None,
+            ResolutionPlan::RayEncounter { .. }
+            | ResolutionPlan::ProjectileEncounter { .. }
+            | ResolutionPlan::Effects { .. } => None,
         };
         let spatial = ability.and_then(|ability| match plan.spatial_effect()? {
             PlannedEffect::StepSelfOneCell => self.step_input(ability),

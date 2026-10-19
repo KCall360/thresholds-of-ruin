@@ -25,7 +25,7 @@ def start_subject_preparation(test, subject):
     target = next(actor["id"] for actor in current["state"]["observation"]["visible_actors"]
                   if actor["name"] == "observer")
     started = test.act(subject, {"type": "use_ability", "id": "slow_plan",
-                               "invocation": {"kind": "actor_target", "target": target}})
+                               "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
     test.assertIsNone(started["error"])
     return started
 
@@ -34,7 +34,7 @@ def paid_preparation(test, player, initial, subject):
     selected = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                     if actor["name"] == "subject")
     test.assertIsNone(test.act(player, {"type": "use_ability", "id": "read_the_rhythm",
-                                      "invocation": {"kind": "actor_target", "target": selected}})["error"])
+                                      "invocation": {"aim": {"kind": "actor_target", "target": selected}, "weapon": {"kind": "default"}}})["error"])
     start_subject_preparation(test, subject)
     observed = test.frame(player, lambda frame: frame.get("state") is not None
                          and frame["state"]["observation"]["combat"]["public_plan"] is not None)

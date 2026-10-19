@@ -1,7 +1,7 @@
 //! Ordinary advancement operands. The host authenticates branch/stream provenance;
 //! simulation independently rechecks actor, permanent-build identity and rules.
 use crate::attributes::Skill;
-use crate::content_ids::{FormId, PointPoolId, TalentId};
+use crate::content_ids::{ExpertiseId, FormId, PointPoolId, TalentId};
 use crate::creatures::{AdvancementPreview, BuildEpoch, BuildError, PurchaseSelection};
 use crate::{ActorId, Game, GameError};
 use serde::{Deserialize, Serialize};
@@ -55,6 +55,7 @@ impl<'de> Deserialize<'de> for AdvancementBasis {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PurchaseChoice {
     SkillRank { skill: Skill },
+    Expertise { expertise: ExpertiseId },
     Talent { talent: TalentId },
     TalentForm { talent: TalentId, form: FormId },
 }
@@ -64,11 +65,13 @@ impl<'de> Deserialize<'de> for PurchaseChoice {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             SkillRank { skill: Skill },
+            Expertise { expertise: ExpertiseId },
             Talent { talent: TalentId },
             TalentForm { talent: TalentId, form: FormId },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::SkillRank { skill } => Self::SkillRank { skill },
+            Fields::Expertise { expertise } => Self::Expertise { expertise },
             Fields::Talent { talent } => Self::Talent { talent },
             Fields::TalentForm { talent, form } => Self::TalentForm { talent, form },
         })
@@ -78,6 +81,7 @@ impl PurchaseChoice {
     pub fn selection(&self) -> PurchaseSelection {
         match self {
             Self::SkillRank { skill } => PurchaseSelection::SkillRank(*skill),
+            Self::Expertise { expertise } => PurchaseSelection::Expertise(expertise.clone()),
             Self::Talent { talent } => PurchaseSelection::Talent(talent.clone()),
             Self::TalentForm { talent, form } => PurchaseSelection::TalentForm {
                 talent: talent.clone(),
@@ -337,6 +341,101 @@ impl Game {
         let candidate = self.prepare_actor_outcome(candidate)?;
         let after = candidate.creature().ok_or(GameError::UnknownActor)?;
         let preview = PlayerGrowthPreview {
+            build: after.build().clone(),
+            derived: after.build().derive().map_err(GameError::Build)?,
+            runtime: AdvancementConsequences::between(&creature, after),
+        };
+        Ok((preview, candidate))
+    }
+}
+
+/// An exact retained Intellect threshold choice, independent of HD point pools.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct IntellectExpertiseOperation {
+    pub threshold: u16,
+    pub expertise: ExpertiseId,
+}
+impl IntellectExpertiseOperation {
+    pub(crate) fn structural_valid(&self, rules: &crate::rules::Ruleset) -> bool {
+        self.threshold > 0
+            && self.threshold <= crate::limits::DERIVED_ATTRIBUTE
+            && rules.expertise(&self.expertise).is_some_and(|definition| {
+                definition.category != crate::expertise::ExpertiseCategory::Specialist
+            })
+    }
+}
+impl<'de> Deserialize<'de> for IntellectExpertiseOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            threshold: u16,
+            expertise: ExpertiseId,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        if fields.threshold == 0 || fields.threshold > crate::limits::DERIVED_ATTRIBUTE {
+            return Err(serde::de::Error::custom("invalid Intellect threshold"));
+        }
+        Ok(Self {
+            threshold: fields.threshold,
+            expertise: fields.expertise,
+        })
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlayerIntellectExpertisePreview {
+    build: crate::creatures::CreatureBuild,
+    derived: crate::creatures::DerivedCreature,
+    runtime: AdvancementConsequences,
+}
+impl PlayerIntellectExpertisePreview {
+    pub fn build(&self) -> &crate::creatures::CreatureBuild {
+        &self.build
+    }
+    pub fn derived(&self) -> &crate::creatures::DerivedCreature {
+        &self.derived
+    }
+    pub fn runtime(&self) -> &AdvancementConsequences {
+        &self.runtime
+    }
+}
+impl Game {
+    pub fn preview_player_intellect_expertise(
+        &self,
+        actor: ActorId,
+        basis: &AdvancementBasis,
+        choice: &IntellectExpertiseOperation,
+    ) -> Result<PlayerIntellectExpertisePreview, GameError> {
+        self.prepare_player_intellect_expertise(actor, basis, choice)
+            .map(|(preview, _)| preview)
+    }
+    pub(crate) fn prepare_player_intellect_expertise(
+        &self,
+        actor: ActorId,
+        basis: &AdvancementBasis,
+        choice: &IntellectExpertiseOperation,
+    ) -> Result<
+        (
+            PlayerIntellectExpertisePreview,
+            crate::lifecycle::PreparedActorOutcome,
+        ),
+        GameError,
+    > {
+        let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
+        if !basis.valid() || basis.actor != actor || basis.build_epoch != creature.build_epoch() {
+            return Err(GameError::Build(BuildError::StaleAdvancementPreview));
+        }
+        if creature.health().dead() {
+            return Err(GameError::UnknownActor);
+        }
+        let mut build = creature.build().clone();
+        build
+            .select_intellect_expertise(choice.threshold, choice.expertise.clone())
+            .map_err(GameError::Build)?;
+        let (candidate, _) = self.prepare_creature_rebuild(actor, build)?;
+        let candidate = self.prepare_actor_outcome(candidate)?;
+        let after = candidate.creature().ok_or(GameError::UnknownActor)?;
+        let preview = PlayerIntellectExpertisePreview {
             build: after.build().clone(),
             derived: after.build().derive().map_err(GameError::Build)?,
             runtime: AdvancementConsequences::between(&creature, after),

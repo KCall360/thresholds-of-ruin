@@ -116,6 +116,9 @@ fn paused_self_step_keeps_the_original_destination_and_claim_through_checkpoint(
             .costs()
             .reservation(intention)
             .unwrap()
+            .entries()
+            .find(|cost| cost.resource == crate::resources::Resource::Stamina)
+            .unwrap()
             .resolution,
         1
     );

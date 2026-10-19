@@ -153,7 +153,7 @@ fn anonymous_contact_discloses_only_individually_reachable_body_cells() {
             .ability_plan_with_supplies(
                 OWNER,
                 &id("basic_melee"),
-                AbilityInvocation::ContactTarget { target: SUBJECT },
+                AbilityInvocation::contact_target(SUBJECT),
                 Default::default()
             )
             .is_ok());
@@ -174,31 +174,19 @@ fn anonymous_contact_allows_only_ordinary_basic_melee_in_its_own_domain() {
         attack(SUBJECT),
         action(
             "fixture_paid_melee",
-            AbilityInvocation::ContactTarget { target: SUBJECT },
+            AbilityInvocation::contact_target(SUBJECT),
         ),
-        action(
-            "fixture_sight",
-            AbilityInvocation::ContactTarget { target: SUBJECT },
-        ),
-        action(
-            "fixture_ally",
-            AbilityInvocation::ContactTarget { target: SUBJECT },
-        ),
+        action("fixture_sight", AbilityInvocation::contact_target(SUBJECT)),
+        action("fixture_ally", AbilityInvocation::contact_target(SUBJECT)),
         action(
             "fixture_read_plan",
-            AbilityInvocation::ContactTarget { target: SUBJECT },
+            AbilityInvocation::contact_target(SUBJECT),
         ),
-        action(
-            "fixture_sight",
-            AbilityInvocation::ActorTarget { target: SUBJECT },
-        ),
-        action(
-            "fixture_ally",
-            AbilityInvocation::ActorTarget { target: SUBJECT },
-        ),
+        action("fixture_sight", AbilityInvocation::actor_target(SUBJECT)),
+        action("fixture_ally", AbilityInvocation::actor_target(SUBJECT)),
         action(
             "fixture_read_plan",
-            AbilityInvocation::ActorTarget { target: SUBJECT },
+            AbilityInvocation::actor_target(SUBJECT),
         ),
     ] {
         let before = game.clone();
@@ -216,7 +204,7 @@ fn anonymous_contact_allows_only_ordinary_basic_melee_in_its_own_domain() {
     assert_eq!(pending.origin_intention(), Some(intention));
     assert_eq!(
         pending.plan.as_ability().unwrap().invocation,
-        AbilityInvocation::ContactTarget { target: SUBJECT }
+        AbilityInvocation::contact_target(SUBJECT)
     );
 }
 
@@ -534,10 +522,7 @@ fn search_pays_one_hundred_ticks_and_reveals_only_physical_adjacent_guises() {
     start(
         &mut game,
         OWNER,
-        action(
-            "fixture_search",
-            AbilityInvocation::ActorTarget { target: OWNER },
-        ),
+        action("fixture_search", AbilityInvocation::actor_target(OWNER)),
     );
     assert!(game.actors[&SUBJECT].guise.appearance().is_some());
     game.tick = 50;

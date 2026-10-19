@@ -708,6 +708,9 @@ pub(crate) fn project(
                     Body::Strikes(strikes),
                     p::StrikeSourceAttribution::Ability { ability },
                 ),
+                // The source requires exact action operands; a catalog row cannot
+                // substitute the selected melee body or invent a delivery profile.
+                s::rules::StrikeSource::Projectile { .. } => return Err(unavailable()),
                 s::rules::StrikeSource::SelectedMelee => (
                     Body::SelectedMelee,
                     p::StrikeSourceAttribution::Ability { ability },

@@ -712,3 +712,87 @@ fn weapon_damage_enchantment_is_an_explicit_signed_inspection_lane() {
     unknown["hidden_curse"] = serde_json::json!(true);
     assert!(serde_json::from_value::<AttackView>(unknown).is_err());
 }
+
+#[test]
+fn expertise_inspection_checks_paid_purchase_against_compact_summary() {
+    let mut view = report();
+    let reference = |id: &str| {
+        let value = content(id);
+        AdvancementContentRef {
+            id: value.id,
+            name: value.name,
+        }
+    };
+    view.hit_dice[0].point_pools[0].granted += 1;
+    view.hit_dice[0].point_pools[0].spent += 1;
+    view.hit_dice[0].point_pools[0]
+        .allowed
+        .push(AdvancementKind::Expertise);
+    view.hit_dice[0].purchases.push(InspectionPurchase {
+        pool: content("advancement"),
+        selection: InspectionPurchaseSelection::Expertise {
+            expertise: content("spear"),
+        },
+    });
+    view.stats.expertises.push(AdvancementExpertiseRow {
+        expertise: reference("spear"),
+        status: AdvancementStatus::Active,
+        source_count: 2,
+    });
+    assert!(view.validate().is_ok());
+    let mut bad = view.clone();
+    bad.stats.expertises.clear();
+    assert!(bad.validate().is_err());
+    let mut bad = view.clone();
+    bad.stats.expertises[0].status = AdvancementStatus::Dormant;
+    assert!(bad.validate().is_err());
+    let mut bad = view;
+    bad.stats.expertises.push(bad.stats.expertises[0].clone());
+    assert!(bad.validate().is_err());
+}
+
+#[test]
+fn projectile_inspection_binds_source_to_directional_profile_reach_catalog() {
+    let baseline = report();
+    baseline.validate().unwrap();
+    for delivery in [
+        ProjectileDeliveryKind::Throw,
+        ProjectileDeliveryKind::Launch,
+    ] {
+        let mut value = baseline.clone();
+        value.stats.abilities[0].target_kind = AbilityTargetKind::DirectionalProjectile;
+        value.stats.abilities[0].reach = AbilityReach::Projectile;
+        value.ability_strikes[0].source = StrikeSourceInspectionView::Projectile { delivery };
+        value.validate().unwrap();
+        let encoded = serde_json::to_value(&value).unwrap();
+        let decoded: CreatureInspectionView = serde_json::from_value(encoded).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(decoded, value);
+        for source in [
+            StrikeSourceInspectionView::SelectedMelee {},
+            StrikeSourceInspectionView::Authored { strike_count: 1 },
+            StrikeSourceInspectionView::NaturalMelee {
+                strike_count: value.natural_attack.strike_count,
+                additional_riders: 0,
+            },
+        ] {
+            let mut invalid = value.clone();
+            invalid.ability_strikes[0].source = source;
+            assert!(
+                invalid.stats.abilities[0].valid(),
+                "the catalog alone is valid"
+            );
+            assert!(
+                invalid.validate().is_err(),
+                "projectiles cannot claim an unrelated source"
+            );
+        }
+        let mut invalid = value.clone();
+        invalid.stats.abilities[0] = baseline.stats.abilities[0].clone();
+        assert!(invalid.stats.abilities[0].valid());
+        assert!(
+            invalid.validate().is_err(),
+            "ordinary targeting cannot claim projectile source authority"
+        );
+    }
+}

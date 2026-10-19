@@ -37,6 +37,7 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 equipped_slot: Some(0),
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -50,6 +51,7 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -217,4 +219,19 @@ fn identification_binds_exact_pending_choice_category_and_carried_instance() {
     assert!(identification_action(&view, Some(target(2))).is_err());
     view.interactions.as_mut().unwrap().identification = None;
     assert!(identification_action(&view, None).is_err());
+}
+
+#[test]
+fn projectile_details_label_remembered_bonuses_without_inventing_attack() {
+    let mut view = paired_equipment(equipment_slot("fixture", "worn", false));
+    let row = &mut view.interactions.as_mut().unwrap().inventory[0];
+    row.slot = None;
+    row.equipped_slot = None;
+    row.known_projectile_bonus = Some(ProjectileBonusView { hit: -2, damage: 3 });
+    assert_eq!(
+        tor_client_common::items::equipment_details(&view, target(1)).as_deref(),
+        Some("remembered projectile hit bonus -2, damage bonus +3")
+    );
+    view.interactions.as_mut().unwrap().inventory[0].known_projectile_bonus = None;
+    assert!(tor_client_common::items::equipment_details(&view, target(1)).is_none());
 }

@@ -84,6 +84,17 @@ may satisfy unchanged boundaries only with an explicit mapping of the relevant
 source paths, assertions and test IDs. New unique guarantees and interactions
 need new evidence; a generic invariant does not prove states it never reaches.
 
+For focused local qualification, follow the changed production dependencies as
+well as newly added tests. Include existing owners of affected restore fold
+counts, retained build provenance, frozen plan witnesses and complete schema
+field inventories even when their test files were not initially edited. Record
+the selected test IDs and the contracts they cover; a new feature's tests alone
+do not cover those older cross-cutting invariants. Check the CI target order too:
+fail-fast can hide later owning targets. For broad build, restore or schema
+changes, run the directly affected integration target as a whole when its
+runtime is small, instead of repeatedly filtering out older invariants. This
+does not require a full workspace matrix locally.
+
 Choose owners by the production boundary, not the test language. Python-authored
 Service contracts exercise the production Service and encoder. The current host
 does not prove socket behavior, authentication setup, durable-store recovery or
@@ -949,10 +960,11 @@ difference: every change in it is a change to the wire format. The required-kind
 manifest includes waiting messages and explicitly identifies the full
 `update.observation` kind as unrecorded by the delta-only sample scenario; full
 observation serialization remains covered by separate protocol tests. Changes to
-this exclusion require review. Keep only current golden fixtures. Test
-unsupported versions and malformed schemas by mutating current canonical
-fixtures or constructing minimal invalid cases, rather than retaining snapshots
-of earlier implementations. Independent fixture versions follow their own
+this exclusion require review. Current-writer comparisons must use the current
+golden fixture. Preserve published historical fixture bytes as evidence, never
+relabel or hand-edit them into current-format fixtures. Test unsupported versions
+and malformed schemas by mutating current canonical fixtures or constructing
+minimal invalid cases; historical evidence does not authorize compatibility readers. Independent fixture versions follow their own
 schema, not the aggregate protocol or save version.
 
 The project supports only the current protocol, save format, and ruleset (listed

@@ -111,7 +111,7 @@ pub struct NoteDraft {
 #[derive(serde::Serialize)]
 pub enum SupplyPurpose {
     Ability {
-        ability: AbilityView,
+        ability: Box<AbilityView>,
         invocation: AbilityInvocation,
     },
     Respec,
@@ -123,6 +123,13 @@ pub struct SupplyDraft {
     pub costs: Vec<AbilitySupplyCost>,
     pub candidates: Vec<tor_client_common::abilities::SupplyCandidate>,
     pub checked: std::collections::BTreeSet<ItemTarget>,
+}
+
+#[derive(serde::Serialize)]
+pub struct WeaponDraft {
+    pub choices: Vec<tor_client_common::weapons::WeaponChoice>,
+    previous_selected: usize,
+    previous_status: String,
 }
 
 pub struct App {
@@ -141,6 +148,10 @@ pub struct App {
     pub hold_choices: Vec<HoldChoice>,
     pub selected_ability: Option<AbilityView>,
     pub supply_selection: Option<SupplyDraft>,
+    pub selected_weapon: WeaponSelection,
+    pub weapon_selection: Option<WeaponDraft>,
+    pub weapon_confirmation: Option<tor_client_common::weapon_preview::WeaponPreview>,
+    pub projectile_selection: Option<tor_client_common::projectiles::ProjectileMenu>,
     /// The look cursor, while choosing a cell to describe.
     pub look_cursor: Option<Position>,
     pub inventory_open: bool,
@@ -212,6 +223,10 @@ impl App {
             hold_choices: Vec::new(),
             selected_ability: None,
             supply_selection: None,
+            selected_weapon: WeaponSelection::Default,
+            weapon_selection: None,
+            weapon_confirmation: None,
+            projectile_selection: None,
             look_cursor: None,
             inventory_open: false,
             help_open: false,
@@ -365,6 +380,32 @@ impl App {
     }
 
     fn state_changed(&mut self, old: Option<(BranchId, u64)>) {
+        if self
+            .projectile_selection
+            .as_ref()
+            .is_some_and(|menu| self.state.as_ref().is_none_or(|state| !menu.current(state)))
+        {
+            self.projectile_selection = None;
+            self.status = "Projectile choices changed; choose the ability again.".into();
+        }
+        if self.weapon_confirmation.as_ref().is_some_and(|preview| {
+            self.state
+                .as_ref()
+                .is_none_or(|state| !preview.current(state))
+        }) {
+            self.weapon_confirmation = None;
+            self.status = "Weapon preview changed; choose again before confirming.".into();
+        }
+        if (self.weapon_selection.is_some() || self.selected_weapon != WeaponSelection::Default)
+            && self.state.as_ref().is_some_and(|state| {
+                !state.has_control()
+                    || old.as_ref().is_some_and(|(branch, revision)| {
+                        branch != state.branch() || *revision != state.state().revision
+                    })
+            })
+        {
+            self.status = "Observation changed; choose your weapon again.".into();
+        }
         if let Some(state) = &self.state {
             let had_private_page = self.advancement_pages.page().is_some();
             self.advancement_pages
@@ -396,6 +437,8 @@ impl App {
             self.hold_choices.clear();
             self.selected_ability = None;
             self.supply_selection = None;
+            self.weapon_selection = None;
+            self.selected_weapon = WeaponSelection::Default;
             self.door_direction = None;
             self.places_open = false;
             self.place_name = None;
@@ -422,6 +465,8 @@ impl App {
             self.hold_choices.clear();
             self.selected_ability = None;
             self.supply_selection = None;
+            self.weapon_selection = None;
+            self.selected_weapon = WeaponSelection::Default;
             self.door_direction = None;
             self.travel_cursor = None;
         }
@@ -434,6 +479,8 @@ impl App {
             self.hold_choices.clear();
             self.selected_ability = None;
             self.supply_selection = None;
+            self.weapon_selection = None;
+            self.selected_weapon = WeaponSelection::Default;
             self.place_name = None;
             self.door_direction = None;
             self.travel_cursor = None;
@@ -467,6 +514,8 @@ impl App {
     /// The server refused a request: stop any run and say why, in terms of
     /// what the player tried.
     pub fn refused(&mut self, status: String) {
+        self.projectile_selection = None;
+        self.weapon_confirmation = None;
         if self.advancement_open {
             self.advancement_pages.invalidate();
             self.advancement_pending = None;
@@ -622,6 +671,7 @@ impl App {
     }
 
     pub fn disconnect(&mut self, message: String) {
+        self.projectile_selection = None;
         self.close_advancement();
         self.travel_cursor = None;
         self.place_name = None;
@@ -644,7 +694,10 @@ impl App {
         self.hold_choices.clear();
         self.selected_ability = None;
         self.supply_selection = None;
+        self.weapon_selection = None;
+        self.selected_weapon = WeaponSelection::Default;
         self.door_direction = None;
+        self.weapon_confirmation = None;
         self.status = message;
     }
 
@@ -954,6 +1007,8 @@ impl App {
         if self.attack_targets.is_empty() {
             self.selected_ability = None;
             self.supply_selection = None;
+            self.weapon_selection = None;
+            self.selected_weapon = WeaponSelection::Default;
         }
     }
 
@@ -966,19 +1021,162 @@ impl App {
             |ability| format!("Use {} on", ability.name),
         );
         format!(
-            "{operation} {}? Up/Down select, Enter confirms, Esc cancels.",
-            target.name
+            "{operation} {}{}? Up/Down select, {}Enter confirms, Esc cancels.",
+            target.name,
+            self.selected_weapon_label(),
+            if self.weapon_selection_available() {
+                "Tab chooses a weapon, "
+            } else {
+                ""
+            }
         )
     }
 
+    fn selected_weapon_label(&self) -> String {
+        let WeaponSelection::Equipped { item, socket } = self.selected_weapon else {
+            return String::new();
+        };
+        self.state
+            .as_ref()
+            .and_then(|state| {
+                tor_client_common::weapons::choices(&state.state().observation)
+                    .into_iter()
+                    .find(|row| row.item == item && row.socket == socket)
+            })
+            .map_or_else(
+                || " with a stale weapon selection".into(),
+                |row| format!(" with {}", row.name),
+            )
+    }
+
+    pub(crate) fn weapon_selection_available(&self) -> bool {
+        self.ability_choices
+            .get(self.selected)
+            .or(self.selected_ability.as_ref())
+            .map_or_else(
+                || {
+                    !self.attack_targets.is_empty()
+                        && self.state.as_ref().is_some_and(|state| {
+                            tor_client_common::abilities::available(&state.state().observation)
+                                .iter()
+                                .any(|ability| ability.basic_attack && ability.weapon_selection)
+                        })
+                },
+                |ability| ability.weapon_selection,
+            )
+    }
+
+    fn open_weapon_picker(&mut self) -> Effect {
+        if !self.weapon_selection_available() {
+            self.status = "That ability does not select a weapon.".into();
+            return Effect::None;
+        }
+        let Some(state) = self.state.as_ref().filter(|state| state.has_control()) else {
+            return Effect::None;
+        };
+        let choices = tor_client_common::weapons::choices(&state.state().observation);
+        let selected = choices
+            .iter()
+            .position(|row| {
+                self.selected_weapon
+                    == WeaponSelection::Equipped {
+                        item: row.item,
+                        socket: row.socket,
+                    }
+            })
+            .map_or(0, |index| index + 1);
+        self.weapon_selection = Some(WeaponDraft {
+            choices,
+            previous_selected: self.selected,
+            previous_status: self.status.clone(),
+        });
+        self.selected = selected;
+        self.status =
+            "Choose one weapon for this action. Enter selects; Esc keeps the previous choice."
+                .into();
+        Effect::None
+    }
+    pub fn weapon_rows(&self) -> Vec<String> {
+        let Some(draft) = &self.weapon_selection else {
+            return Vec::new();
+        };
+        let mut rows = vec![format!(
+            "{} Default primary weapon or natural attack",
+            if self.selected == 0 { ">" } else { " " }
+        )];
+        rows.extend(draft.choices.iter().enumerate().map(|(index, row)| {
+            format!(
+                "{} {} ({}, socket {})",
+                if self.selected == index + 1 { ">" } else { " " },
+                row.name,
+                row.equipped,
+                row.socket
+            )
+        }));
+        rows
+    }
+    fn weapon_input(&mut self, input: Input) -> Effect {
+        let Some(draft) = self.weapon_selection.take() else {
+            return Effect::None;
+        };
+        match input {
+            Input::Key { key: Key::Escape } => {
+                self.selected = draft.previous_selected;
+                self.status = draft.previous_status;
+                return Effect::None;
+            }
+            Input::Key { key: Key::Up } => self.selected = self.selected.saturating_sub(1),
+            Input::Key { key: Key::Down } => {
+                self.selected = (self.selected + 1).min(draft.choices.len())
+            }
+            Input::Key { key: Key::Enter } => {
+                let selected = if self.selected == 0 {
+                    WeaponSelection::Default
+                } else {
+                    let row = &draft.choices[self.selected - 1];
+                    WeaponSelection::Equipped {
+                        item: row.item,
+                        socket: row.socket,
+                    }
+                };
+                if let Some(state) = &self.state {
+                    match tor_client_common::weapons::validate(&state.state().observation, selected)
+                    {
+                        Ok(()) => {
+                            self.selected_weapon = selected;
+                            self.selected = draft.previous_selected;
+                            self.status = if self.attack_targets.is_empty() {
+                                format!("Weapon selected. {}", draft.previous_status)
+                            } else {
+                                self.target_prompt()
+                            };
+                            return Effect::None;
+                        }
+                        Err(reason) => self.status = reason,
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.weapon_selection = Some(draft);
+        Effect::None
+    }
+
     fn choose_ability_target(&mut self, ability: AbilityView, target: ActorTarget) -> Effect {
-        self.choose_ability_invocation(ability, AbilityInvocation::ActorTarget { target })
+        self.choose_ability_invocation(
+            ability,
+            tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::ActorTarget { target },
+                weapon: tor_protocol::WeaponSelection::Default,
+            },
+        )
     }
     fn choose_ability_invocation(
         &mut self,
         ability: AbilityView,
-        invocation: AbilityInvocation,
+        mut invocation: AbilityInvocation,
     ) -> Effect {
+        invocation.weapon = std::mem::replace(&mut self.selected_weapon, WeaponSelection::Default);
         let Some(state) = self.state.as_ref() else {
             return Effect::None;
         };
@@ -991,7 +1189,7 @@ impl App {
                 label: tor_client_common::abilities::ability_label(&ability),
                 costs: ability.supply_costs.clone(),
                 purpose: SupplyPurpose::Ability {
-                    ability,
+                    ability: Box::new(ability),
                     invocation,
                 },
                 candidates,
@@ -1109,7 +1307,10 @@ impl App {
                     match command {
                         Ok(command) => {
                             self.last_move = false;
-                            return self.command(command);
+                            return match command {
+                                Command::Act { action, .. } => self.act(action),
+                                other => self.command(other),
+                            };
                         }
                         Err(reason) => self.status = reason,
                     }
@@ -1133,6 +1334,8 @@ impl App {
             .is_some_and(|draft| matches!(draft.purpose, SupplyPurpose::Respec))
         {
             self.supply_selection = None;
+            self.weapon_selection = None;
+            self.selected_weapon = WeaponSelection::Default;
         }
     }
 
@@ -1473,6 +1676,15 @@ impl App {
     }
 
     pub fn input(&mut self, input: Input) -> Effect {
+        if self.projectile_selection.is_some() {
+            return self.projectile_input(input);
+        }
+        if self.weapon_confirmation.is_some() {
+            return self.weapon_confirmation_input(input);
+        }
+        if self.weapon_selection.is_some() {
+            return self.weapon_input(input);
+        }
         if self.identification_choice().is_some() {
             return self.identification_input(input);
         }
@@ -1661,19 +1873,35 @@ impl App {
             }
             return Effect::None;
         }
+        if matches!(input, Input::Key { key: Key::Tab })
+            && (!self.ability_choices.is_empty()
+                || !self.attack_targets.is_empty()
+                || self.selected_ability.is_some())
+        {
+            return self.open_weapon_picker();
+        }
         if !self.ability_choices.is_empty() {
             if let Input::Key { key } = input {
                 match key {
                     Key::Escape => {
                         self.ability_choices.clear();
+                        self.selected_weapon = WeaponSelection::Default;
                         self.status = "Never mind.".into();
                     }
-                    Key::Up => self.selected = self.selected.saturating_sub(1),
-                    Key::Down => {
-                        self.selected = self
-                            .selected
-                            .saturating_add(1)
-                            .min(self.ability_choices.len() - 1)
+                    Key::Up | Key::Down => {
+                        let next = if key == Key::Up {
+                            self.selected.saturating_sub(1)
+                        } else {
+                            self.selected
+                                .saturating_add(1)
+                                .min(self.ability_choices.len() - 1)
+                        };
+                        if next != self.selected && self.selected_weapon != WeaponSelection::Default
+                        {
+                            self.selected_weapon = WeaponSelection::Default;
+                            self.status = "Ability changed; using its default weapon.".into();
+                        }
+                        self.selected = next;
                     }
                     Key::Enter => {
                         let ability = self.ability_choices[self.selected].clone();
@@ -1682,13 +1910,18 @@ impl App {
                             tor_client_common::abilities::choices(&state.state().observation)
                                 .contains(&ability)
                         }) {
+                            if ability.target_kind == AbilityTargetKind::DirectionalProjectile {
+                                self.selected_weapon = WeaponSelection::Default;
+                                return self.open_projectile_picker(&ability.id);
+                            }
                             if matches!(
                                 ability.target_kind,
                                 AbilityTargetKind::SelfStep | AbilityTargetKind::DirectionalRay
                             ) {
                                 self.status = format!(
-                                    "Choose a direction for {}. Movement keys select; Esc cancels.",
-                                    ability.name
+                                    "Choose a direction for {}. Movement keys select; {}Esc cancels.",
+                                    ability.name,
+                                    if ability.weapon_selection { "Tab chooses a weapon; " } else { "" }
                                 );
                                 self.selected_ability = Some(ability);
                                 return Effect::None;
@@ -1717,6 +1950,7 @@ impl App {
             if let Input::Key { key } = input {
                 if key == Key::Escape {
                     self.selected_ability = None;
+                    self.selected_weapon = WeaponSelection::Default;
                     self.status = "Never mind.".into();
                 } else if let Some(direction) = key.step_direction() {
                     let ability = self
@@ -1724,9 +1958,15 @@ impl App {
                         .take()
                         .expect("selected directional ability");
                     let invocation = if ability.target_kind == AbilityTargetKind::DirectionalRay {
-                        AbilityInvocation::DirectionalRay { direction }
+                        tor_protocol::AbilityInvocation {
+                            aim: tor_protocol::AbilityAim::DirectionalRay { direction },
+                            weapon: tor_protocol::WeaponSelection::Default,
+                        }
                     } else {
-                        AbilityInvocation::SelfStep { direction }
+                        tor_protocol::AbilityInvocation {
+                            aim: tor_protocol::AbilityAim::SelfStep { direction },
+                            weapon: tor_protocol::WeaponSelection::Default,
+                        }
                     };
                     return self.choose_ability_invocation(ability, invocation);
                 }
@@ -1739,6 +1979,8 @@ impl App {
                     self.attack_targets.clear();
                     self.selected_ability = None;
                     self.supply_selection = None;
+                    self.weapon_selection = None;
+                    self.selected_weapon = WeaponSelection::Default;
                     return Effect::None;
                 }
                 Input::Key { key: Key::Up } => self.selected = self.selected.saturating_sub(1),
@@ -1752,10 +1994,13 @@ impl App {
                     if let Some(ability) = ability {
                         return self.choose_ability_target(ability, target);
                     }
+                    let weapon =
+                        std::mem::replace(&mut self.selected_weapon, WeaponSelection::Default);
                     let action = self.state.as_ref().map(|state| {
-                        tor_client_common::abilities::basic_action(
+                        tor_client_common::abilities::basic_action_with_weapon(
                             &state.state().observation,
                             target,
+                            weapon,
                         )
                     });
                     return match action {
@@ -2323,10 +2568,12 @@ impl App {
                 direction: Direction::North,
             }),
             Key::Attack => {
+                self.selected_weapon = WeaponSelection::Default;
                 self.select_targets(None);
                 Effect::None
             }
             Key::Abilities => {
+                self.selected_weapon = WeaponSelection::Default;
                 if let Some(state) = &self.state {
                     if !state.has_control() {
                         self.status = "You are observing. Press F3 to request control.".into();
@@ -2338,7 +2585,7 @@ impl App {
                     self.status = if self.ability_choices.is_empty() {
                         "No abilities are available.".into()
                     } else {
-                        "Choose an ability. Up/Down select, Enter confirms, Esc cancels.".into()
+                        "Choose an ability. Up/Down select, Tab chooses a weapon if permitted, Enter confirms, Esc cancels.".into()
                     };
                 }
                 Effect::None
@@ -2595,7 +2842,210 @@ impl App {
         self.command(command)
     }
 
-    fn act(&mut self, mut action: Action) -> Effect {
+    fn open_projectile_picker(&mut self, ability: &str) -> Effect {
+        let Some(state) = &self.state else {
+            return Effect::None;
+        };
+        match tor_client_common::projectiles::ProjectileMenu::new(state, ability) {
+            Ok(menu) => {
+                let command = menu.command().expect("new source query");
+                self.projectile_selection = Some(menu);
+                self.selected = 0;
+                self.command(command)
+            }
+            Err(reason) => {
+                self.status = reason;
+                Effect::None
+            }
+        }
+    }
+    pub fn bind_projectile_request(&mut self, id: &str) -> Result<(), String> {
+        if let Some(menu) = self.projectile_selection.as_mut() {
+            menu.bind_request(id)?;
+        }
+        Ok(())
+    }
+    pub fn show_projectile_choices(
+        &mut self,
+        context: &ReplyContext,
+        id: &str,
+        page: &ProjectileChoicePage,
+    ) -> Result<(), String> {
+        let Some(menu) = self.projectile_selection.as_mut() else {
+            return Ok(());
+        };
+        menu.accept(
+            self.state.as_ref().ok_or("No current observation.")?,
+            context,
+            id,
+            page,
+        )?;
+        self.selected = 0;
+        self.status = "Choose a source. Left/Right pages; Esc cancels.".into();
+        Ok(())
+    }
+    pub fn projectile_rows(&self) -> Vec<String> {
+        let Some(menu) = &self.projectile_selection else {
+            return vec![];
+        };
+        let mut rows: Vec<_> = menu
+            .rows()
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| format!("{} {row}", if i == self.selected { ">" } else { " " }))
+            .collect();
+        if menu.has_previous() {
+            rows.push("Left: previous choices".into());
+        }
+        if menu.has_next() {
+            rows.push("Right: more choices".into());
+        }
+        rows
+    }
+    fn projectile_input(&mut self, input: Input) -> Effect {
+        use tor_client_common::projectiles::Step;
+        if matches!(input, Input::Key { key: Key::Escape }) {
+            self.projectile_selection = None;
+            self.status = "Never mind.".into();
+            return Effect::None;
+        }
+        let Some(state) = self.state.as_ref() else {
+            self.projectile_selection = None;
+            return Effect::None;
+        };
+        let menu = self
+            .projectile_selection
+            .as_mut()
+            .expect("projectile picker");
+        if !menu.current(state) {
+            self.projectile_selection = None;
+            self.status = "Projectile choices changed; choose the ability again.".into();
+            return Effect::None;
+        }
+        if self.busy {
+            return Effect::None;
+        }
+        let Input::Key { key } = input else {
+            return Effect::None;
+        };
+        if menu.step() == Step::Direction {
+            if let Some(direction) = key.step_direction() {
+                let action = menu.action(state, direction);
+                self.projectile_selection = None;
+                return match action {
+                    Ok(action) => self.act(action),
+                    Err(reason) => {
+                        self.status = reason;
+                        Effect::None
+                    }
+                };
+            }
+            return Effect::None;
+        }
+        let command = match key {
+            Key::Up => {
+                self.selected = self.selected.saturating_sub(1);
+                return Effect::None;
+            }
+            Key::Down => {
+                self.selected = (self.selected + 1).min(menu.choices().len().saturating_sub(1));
+                return Effect::None;
+            }
+            Key::Left => menu.previous(state).map(Some),
+            Key::Right => menu.next(state).map(Some),
+            Key::Enter => menu.choose(state, self.selected),
+            _ => return Effect::None,
+        };
+        match command {
+            Ok(Some(command)) => {
+                self.selected = 0;
+                self.command(command)
+            }
+            Ok(None) => {
+                self.status = "Choose a direction. Movement keys select; Esc cancels.".into();
+                Effect::None
+            }
+            Err(reason) => {
+                self.status = reason;
+                Effect::None
+            }
+        }
+    }
+
+    pub fn bind_weapon_preview(&mut self, id: &str) -> Result<(), String> {
+        self.weapon_confirmation
+            .as_mut()
+            .ok_or("Weapon preview was cancelled.")?
+            .bind_request(id)
+    }
+    pub fn show_weapon_preview(
+        &mut self,
+        context: &ReplyContext,
+        id: &str,
+        preview: &AbilityWeaponPreview,
+    ) -> Result<(), String> {
+        let Some(pending) = self.weapon_confirmation.as_mut() else {
+            return Ok(());
+        };
+        let state = self.state.as_ref().ok_or("No current observation.")?;
+        pending.accept(state, context, id, preview)?;
+        self.status =
+            "Review the exact weapon terms. Enter commits this action; Esc cancels.".into();
+        Ok(())
+    }
+    pub fn weapon_preview_rows(&self) -> Vec<String> {
+        self.weapon_confirmation
+            .as_ref()
+            .map_or_else(Vec::new, |preview| preview.lines())
+    }
+    fn weapon_confirmation_input(&mut self, input: Input) -> Effect {
+        match input {
+            Input::Key { key: Key::Escape } => {
+                self.weapon_confirmation = None;
+                self.status = "Never mind.".into();
+            }
+            Input::Key { key: Key::Enter }
+                if !self.busy
+                    && self
+                        .weapon_confirmation
+                        .as_ref()
+                        .is_some_and(|preview| preview.ready()) =>
+            {
+                let preview = self.weapon_confirmation.take().expect("ready preview");
+                let confirmed = self
+                    .state
+                    .as_ref()
+                    .ok_or("No current observation.".into())
+                    .and_then(|state| preview.confirm(state));
+                match confirmed {
+                    Ok(action) => return self.act_confirmed(action),
+                    Err(error) => self.status = error,
+                }
+            }
+            _ => {}
+        }
+        Effect::None
+    }
+    fn act(&mut self, action: Action) -> Effect {
+        if tor_client_common::weapon_preview::explicit_action(&action) {
+            let Some(state) = self.state.as_ref() else {
+                return Effect::None;
+            };
+            match tor_client_common::weapon_preview::WeaponPreview::new(state, action) {
+                Ok(preview) => {
+                    let command = preview.command();
+                    self.weapon_confirmation = Some(preview);
+                    return self.command(command);
+                }
+                Err(error) => {
+                    self.status = error;
+                    return Effect::None;
+                }
+            }
+        }
+        self.act_confirmed(action)
+    }
+    fn act_confirmed(&mut self, mut action: Action) -> Effect {
         let Some(state) = &self.state else {
             return Effect::None;
         };
@@ -2791,7 +3241,7 @@ pub fn history_text(entry: &HistoryEntry) -> String {
         HistoryContent::PlaceRenamed { name, .. } => format!("Place named {}.", name),
         HistoryContent::Travel { .. } => "Travel requested.".into(),
         HistoryContent::Wizard { summary, .. } => summary.clone(),
-        HistoryContent::Action { event, .. } => match event {
+        HistoryContent::Action { event, .. } => match event.as_ref() {
             Event::Moved { direction } => format!("Moved {}.", direction_name(*direction)),
             Event::Escaped { .. } => "Escaped with the objective item.".into(),
             Event::Taken { quantity, .. } => {
@@ -3266,6 +3716,7 @@ pub const HELP: &[&str] = &[
     "ACTING                         SEEING",
     "a       attack a target         ;      look at a cell",
     "z       ability, then target    @      creature stats",
+    "Tab     choose weapon for an ability that permits it",
     ". space wait                    i      inventory",
     "g , d   pick up / drop          ^P     earlier messages",
     "w t q e equip/remove/drink/eat F2     game history",

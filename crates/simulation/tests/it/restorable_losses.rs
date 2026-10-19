@@ -23,6 +23,7 @@ fn losses_follow_ordinary_sets_and_leave_permanent_eligibility_unchanged() {
     let mut creature = CreatureState::new(creature_state::build()).unwrap();
     creature
         .set_equipment(vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(42),
             socket: EquipmentSlotId(0),
             modifiers: vec![strength_set(8)],
@@ -57,6 +58,7 @@ fn retained_deficits_survive_source_changes_and_partial_restoration_without_stat
     let mut creature = CreatureState::new(creature_state::build()).unwrap();
     creature
         .set_equipment(vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(42),
             socket: EquipmentSlotId(0),
             modifiers: vec![strength_set(8)],
@@ -108,6 +110,7 @@ fn losses_do_not_rescue_invalid_undrained_attribute_or_resource_totals() {
         let before = creature.clone();
         assert!(creature
             .set_equipment(vec![EquipmentSource {
+                weapon_profile: None,
                 item: ItemId(42),
                 socket: EquipmentSlotId(0),
                 modifiers: vec![creature_fixture::add(
@@ -277,6 +280,7 @@ fn a_reduced_source_record_retains_a_deficit_larger_than_its_current_capacity() 
     let mut creature = CreatureState::new(creature_state::build()).unwrap();
     creature
         .set_equipment(vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(42),
             socket: EquipmentSlotId(0),
             modifiers: vec![strength_set(8)],

@@ -33,6 +33,7 @@ pub struct InspectionHitDie {
 pub enum AdvancementKind {
     SkillRank,
     Talent,
+    Expertise,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,8 +49,8 @@ pub struct InspectionPurchase {
     pub pool: ContentRef,
     pub selection: InspectionPurchaseSelection,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InspectionPurchaseSelection {
     SkillRank {
         skill: ContentRef,
@@ -61,6 +62,36 @@ pub enum InspectionPurchaseSelection {
         talent: ContentRef,
         form: ContentRef,
     },
+    Expertise {
+        expertise: ContentRef,
+    },
+}
+impl<'de> Deserialize<'de> for InspectionPurchaseSelection {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            SkillRank {
+                skill: ContentRef,
+            },
+            Talent {
+                talent: ContentRef,
+            },
+            TalentForm {
+                talent: ContentRef,
+                form: ContentRef,
+            },
+            Expertise {
+                expertise: ContentRef,
+            },
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::SkillRank { skill } => Self::SkillRank { skill },
+            Fields::Talent { talent } => Self::Talent { talent },
+            Fields::TalentForm { talent, form } => Self::TalentForm { talent, form },
+            Fields::Expertise { expertise } => Self::Expertise { expertise },
+        })
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -86,7 +117,7 @@ impl InspectionHitDie {
                 && balance.granted > 0
                 && balance.spent <= balance.granted
                 && !balance.allowed.is_empty()
-                && balance.allowed.len() <= 2
+                && balance.allowed.len() <= 3
                 && balance.allowed.iter().collect::<BTreeSet<_>>().len() == balance.allowed.len()
                 && self
                     .purchases
@@ -109,6 +140,9 @@ impl InspectionHitDie {
                     (AdvancementKind::SkillRank, skill)
                 }
                 InspectionPurchaseSelection::Talent { talent } => (AdvancementKind::Talent, talent),
+                InspectionPurchaseSelection::Expertise { expertise } => {
+                    (AdvancementKind::Expertise, expertise)
+                }
                 InspectionPurchaseSelection::TalentForm { talent, form } => {
                     if !form.valid() {
                         return false;
@@ -291,7 +325,8 @@ impl CreatureInspectionView {
             .flat_map(|die| &die.purchases)
             .filter_map(|purchase| match &purchase.selection {
                 InspectionPurchaseSelection::SkillRank { skill } => Some(skill),
-                InspectionPurchaseSelection::Talent { .. }
+                InspectionPurchaseSelection::Expertise { .. }
+                | InspectionPurchaseSelection::Talent { .. }
                 | InspectionPurchaseSelection::TalentForm { .. } => None,
             });
         for skill in self.starting_skills.iter().chain(paid) {
@@ -330,6 +365,24 @@ impl CreatureInspectionView {
                 .chain(&self.stats.dormant_talents)
                 .all(|talent| purchases.get(talent.id.as_str()) == Some(&talent))
     }
+    fn valid_expertise_ownership(&self) -> bool {
+        let mut paid = BTreeSet::new();
+        self.hit_dice
+            .iter()
+            .flat_map(|die| &die.purchases)
+            .all(|purchase| {
+                let InspectionPurchaseSelection::Expertise { expertise } = &purchase.selection
+                else {
+                    return true;
+                };
+                paid.insert(&expertise.id)
+                    && self.stats.expertises.iter().any(|row| {
+                        row.expertise.id == expertise.id
+                            && row.expertise.name == expertise.name
+                            && row.status == crate::AdvancementStatus::Active
+                    })
+            })
+    }
     pub fn validate(&self) -> Result<(), InvalidCreatureInspection> {
         let mut templates = BTreeSet::new();
         let mut sources = BTreeSet::new();
@@ -364,6 +417,11 @@ impl CreatureInspectionView {
                 .all(|(source, ability)| {
                     source.valid()
                         && source.ability == ability.id
+                        && (matches!(
+                            source.source,
+                            crate::StrikeSourceInspectionView::Projectile { .. }
+                        ) == (ability.target_kind
+                            == crate::AbilityTargetKind::DirectionalProjectile))
                         && match source.source {
                             crate::StrikeSourceInspectionView::NaturalMelee {
                                 strike_count,
@@ -400,6 +458,7 @@ impl CreatureInspectionView {
             })
             && self.valid_skill_ownership()
             && self.valid_talent_ownership()
+            && self.valid_expertise_ownership()
             && self.sources.len() <= 4096
             && self.sources.iter().all(|source| {
                 crate::valid_content_id(&source.category)

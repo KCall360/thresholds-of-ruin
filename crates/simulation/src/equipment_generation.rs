@@ -118,23 +118,28 @@ impl EquipmentGeneration {
 
     /// Validate every possible outcome before accepting a definition. In
     /// particular a low-probability invalid bonus must not make births flaky.
-    pub fn valid_for(self, class: ItemClass, equipment: Option<&EquipmentSpec>) -> bool {
-        let Some(gear) = equipment else {
-            return false;
-        };
-        if !self.valid() {
+    pub fn valid_for(
+        self,
+        class: ItemClass,
+        equipment: Option<&EquipmentSpec>,
+        projectile: Option<&crate::projectile_profiles::ProjectileSpec>,
+    ) -> bool {
+        if !self.valid()
+            || (equipment.is_none() && projectile.is_none())
+            || projectile.is_some_and(|projectile| projectile.validate_shape().is_err())
+        {
             return false;
         }
         match self {
             Self::Authored {
                 hit_enchantment,
                 damage_enchantment,
-            } => match gear.attack.as_ref() {
-                Some(attack) => attack
-                    .with_enchantment(hit_enchantment, damage_enchantment)
-                    .is_ok(),
-                None => hit_enchantment == 0 && damage_enchantment == 0,
-            },
+            } => ItemCondition {
+                hit_enchantment,
+                damage_enchantment,
+                ..Default::default()
+            }
+            .weapon_capabilities_valid(equipment, projectile),
             Self::Weapon {
                 curse_percent,
                 enchant_percent,
@@ -142,12 +147,19 @@ impl EquipmentGeneration {
                 ..
             } => {
                 class == ItemClass::Weapon
-                    && gear.attack.as_ref().is_some_and(|attack| {
-                        (curse_percent == 0
-                            || attack.with_enchantment(-(maximum as i32), 0).is_ok())
-                            && (enchant_percent == 0
-                                || attack.with_enchantment(maximum as i32, 0).is_ok())
-                    })
+                    && (equipment.is_some_and(|gear| gear.attack.is_some()) || projectile.is_some())
+                    && (curse_percent == 0
+                        || ItemCondition {
+                            hit_enchantment: -(maximum as i32),
+                            ..Default::default()
+                        }
+                        .weapon_capabilities_valid(equipment, projectile))
+                    && (enchant_percent == 0
+                        || ItemCondition {
+                            hit_enchantment: maximum as i32,
+                            ..Default::default()
+                        }
+                        .weapon_capabilities_valid(equipment, projectile))
             }
             Self::Armor {
                 enchant_percent,
@@ -155,7 +167,8 @@ impl EquipmentGeneration {
                 ..
             } => {
                 class == ItemClass::Armor
-                    && gear.armor.is_some_and(|armor| {
+                    && projectile.is_none()
+                    && equipment.and_then(|gear| gear.armor).is_some_and(|armor| {
                         armor.valid()
                             && (enchant_percent == 0
                                 || ItemCondition {
@@ -173,9 +186,10 @@ impl EquipmentGeneration {
         self,
         class: ItemClass,
         equipment: Option<&EquipmentSpec>,
+        projectile: Option<&crate::projectile_profiles::ProjectileSpec>,
         rng: &mut u64,
     ) -> Result<ItemCondition, GameError> {
-        if !self.valid_for(class, equipment) {
+        if !self.valid_for(class, equipment, projectile) {
             return Err(GameError::Rule(
                 crate::abilities::RuleError::InvalidDefinition,
             ));
@@ -247,6 +261,7 @@ mod tests {
 
     fn armor() -> EquipmentSpec {
         EquipmentSpec {
+            weapon_profile: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             armor: Some(crate::ArmorSpec {
                 physical_reduction: 2,
@@ -284,7 +299,7 @@ mod tests {
                 hit_enchantment: 0,
                 damage_enchantment: 0
             }
-            .sample(ItemClass::Armor, Some(&gear), &mut rng)
+            .sample(ItemClass::Armor, Some(&gear), None, &mut rng)
             .unwrap(),
             ItemCondition::default()
         );
@@ -296,7 +311,7 @@ mod tests {
             maximum: 3,
         };
         let condition = policy
-            .sample(ItemClass::Armor, Some(&gear), &mut rng)
+            .sample(ItemClass::Armor, Some(&gear), None, &mut rng)
             .unwrap();
         assert!(condition.cursed);
         assert_eq!(condition.armor_penalty, 2);
@@ -316,12 +331,12 @@ mod tests {
         let mut outcomes = [false; 3];
         for _ in 0..1000 {
             let condition = policy
-                .sample(ItemClass::Armor, Some(&gear), &mut first)
+                .sample(ItemClass::Armor, Some(&gear), None, &mut first)
                 .unwrap();
             assert_eq!(
                 condition,
                 policy
-                    .sample(ItemClass::Armor, Some(&gear), &mut second)
+                    .sample(ItemClass::Armor, Some(&gear), None, &mut second)
                     .unwrap()
             );
             if condition.cursed {
@@ -339,11 +354,11 @@ mod tests {
         }
         assert_eq!(outcomes, [true; 3]);
         assert_eq!(first, second);
-        assert!(!policy.valid_for(ItemClass::Weapon, Some(&gear)));
-        assert!(!policy.valid_for(ItemClass::Armor, None));
+        assert!(!policy.valid_for(ItemClass::Weapon, Some(&gear), None));
+        assert!(!policy.valid_for(ItemClass::Armor, None, None));
         let mut extreme = gear;
         extreme.armor.as_mut().unwrap().physical_reduction = crate::limits::NUMERIC as u32;
-        assert!(!policy.valid_for(ItemClass::Armor, Some(&extreme)));
+        assert!(!policy.valid_for(ItemClass::Armor, Some(&extreme), None));
         let mut zero = armor();
         zero.armor.as_mut().unwrap().physical_reduction = 0;
         let cursed = EquipmentGeneration::Armor {
@@ -353,7 +368,7 @@ mod tests {
             maximum: 3,
         };
         let condition = cursed
-            .sample(ItemClass::Armor, Some(&zero), &mut first)
+            .sample(ItemClass::Armor, Some(&zero), None, &mut first)
             .unwrap();
         assert!(condition.cursed);
         assert_eq!(condition.armor_penalty, 0);
@@ -367,6 +382,7 @@ mod tests {
         );
         let primary = component.key();
         EquipmentSpec {
+            weapon_profile: None,
             slot: crate::EquipmentSlot::new("weapon").unwrap(),
             armor: None,
             attack: Some(
@@ -392,7 +408,7 @@ mod tests {
             hit_enchantment: 1,
             damage_enchantment: 1,
         }
-        .sample(ItemClass::Weapon, Some(&gear), &mut rng)
+        .sample(ItemClass::Weapon, Some(&gear), None, &mut rng)
         .unwrap();
         assert_eq!(rng, 42);
         assert!(!condition.cursed);
@@ -419,7 +435,7 @@ mod tests {
         };
         for _ in 0..1000 {
             let condition = policy
-                .sample(ItemClass::Weapon, Some(&gear), &mut rng)
+                .sample(ItemClass::Weapon, Some(&gear), None, &mut rng)
                 .unwrap();
             assert_eq!(condition.damage_enchantment, 0);
             assert_eq!(condition.armor_enchantment, 0);
@@ -440,10 +456,10 @@ mod tests {
             minimum: 1,
             maximum: crate::limits::NUMERIC as u32,
         };
-        assert!(!invalid.valid_for(ItemClass::Weapon, Some(&gear)));
+        assert!(!invalid.valid_for(ItemClass::Weapon, Some(&gear), None));
         let before = rng;
         assert!(invalid
-            .sample(ItemClass::Weapon, Some(&gear), &mut rng)
+            .sample(ItemClass::Weapon, Some(&gear), None, &mut rng)
             .is_err());
         assert_eq!(rng, before);
     }

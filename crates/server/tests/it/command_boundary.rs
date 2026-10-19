@@ -36,6 +36,19 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         }),
     };
     let mut commands = vec![
+        Wire::ProjectileChoices {
+            expected_revision: u64::MAX,
+            query: tor_protocol::ProjectileChoiceQuery {
+                ability: "fixture.launch".into(),
+                phase: tor_protocol::ProjectileChoicePhase::Ammunition {
+                    launcher: tor_protocol::EquippedProjectileWeapon {
+                        item: scope.item(tor_simulation::ItemId(u64::MAX)),
+                        socket: 63,
+                    },
+                },
+                offset: u32::MAX,
+            },
+        },
         Wire::Advancement {
             expected_revision: u64::MAX,
             query: tor_protocol::AdvancementQuery::Overview {},
@@ -87,8 +100,11 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         },
         Action::UseAbility {
             id: "basic_melee".into(),
-            invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                target: scope.actor(tor_simulation::ActorId(u64::MAX)),
+            invocation: tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::ActorTarget {
+                    target: scope.actor(tor_simulation::ActorId(u64::MAX)),
+                },
+                weapon: tor_protocol::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },
@@ -142,6 +158,13 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         let backend = tor_server::wire_adapter::decode_command(&wire).unwrap();
         let reconstructed = match backend {
             DecodedCommand::Backend(command) => engine.encode_command(ActorId(1), command).unwrap(),
+            DecodedCommand::ProjectileChoices {
+                expected_revision,
+                query,
+            } => Wire::ProjectileChoices {
+                expected_revision,
+                query,
+            },
             DecodedCommand::Advancement {
                 expected_revision,
                 query,
@@ -149,7 +172,8 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
                 expected_revision,
                 query,
             },
-            DecodedCommand::CreatureCatalog { .. }
+            DecodedCommand::AbilityWeaponPreview { .. }
+            | DecodedCommand::CreatureCatalog { .. }
             | DecodedCommand::CreatureInspection { .. }
             | DecodedCommand::StrikeInspection { .. }
             | DecodedCommand::CombatDiagnostics { .. } => {
@@ -240,8 +264,11 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
     assert_ne!(TypeId::of::<BackendDirection>(), TypeId::of::<Direction>());
     let action = BackendAction::UseAbility {
         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-        invocation: tor_server::journal::AbilityInvocation::ActorTarget {
-            target: tor_simulation::ActorId(u64::MAX),
+        invocation: tor_server::journal::AbilityInvocation {
+            aim: tor_server::journal::AbilityAim::ActorTarget {
+                target: tor_simulation::ActorId(u64::MAX),
+            },
+            weapon: tor_server::journal::WeaponSelection::Default,
         },
         supplies: Default::default(),
     };
@@ -252,9 +279,9 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
     let stored = serde_json::to_value(&command).unwrap();
     assert_eq!(
         stored["action"]["invocation"],
-        serde_json::json!({
+        serde_json::json!({"aim":{
             "kind": "actor_target", "target": u64::MAX,
-        })
+        },"weapon":{"kind":"default"}})
     );
     assert!(stored["action"].get("target").is_none());
     assert_eq!(serde_json::from_value::<Command>(stored).unwrap(), command);
@@ -265,11 +292,11 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
     let wire = serde_json::to_value(wire).unwrap();
     assert_eq!(
         wire["action"]["invocation"],
-        serde_json::json!({
+        serde_json::json!({"aim":{
             "kind": "actor_target",
             "target": engine.target_scope(ActorId(1))
                 .actor(tor_simulation::ActorId(u64::MAX)).to_string(),
-        })
+        },"weapon":{"kind":"default"}})
     );
     assert!(wire["action"].get("target").is_none());
 }

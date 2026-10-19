@@ -115,6 +115,7 @@ fn creature_combat(abilities: Vec<tor_protocol::AbilityView>) -> tor_protocol::C
                 reserved: 0,
             })
             .collect(),
+            expertises: vec![],
             active_talents: vec![],
             dormant_talents: vec![],
             abilities,

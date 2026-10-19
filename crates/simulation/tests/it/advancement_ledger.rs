@@ -588,11 +588,12 @@ fn authored_drain_and_restore_preserve_injury_condition_clocks_and_paid_reservat
     state
         .start_cost(
             IntentionId(70),
-            ResourceCost {
+            tor_simulation::costs::CostBundle::single(ResourceCost {
                 resource: Resource::Stamina,
                 start: 1,
                 resolution: 1,
-            },
+            })
+            .unwrap(),
         )
         .unwrap();
     state
@@ -735,6 +736,7 @@ fn ownership_limit_subject() -> CreatureBuild {
     document.talents = (0..257)
         .map(|index| TalentDef {
             form_choices: vec![],
+            expertise_grants: vec![],
             id: talent(&format!("limit_{index:03}")),
             name: format!("Limit {index}"),
             prerequisites: vec![],

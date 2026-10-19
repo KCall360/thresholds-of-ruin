@@ -1572,7 +1572,7 @@ mod tests {
             actor,
             Action::UseAbility {
                 id: AbilityId::new("borrowed_strike").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
         )
@@ -1609,7 +1609,7 @@ mod tests {
             actor,
             Action::UseAbility {
                 id: AbilityId::new("borrowed_strike").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
         )
@@ -1646,9 +1646,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: AbilityId::new("fixture_paid_melee").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget {
-                        target: ActorId(2),
-                    },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                     supplies: Default::default(),
                 },
                 crate::IntentionOrigin::Human,
@@ -1973,6 +1971,7 @@ mod growth_tests {
             .as_mut()
             .unwrap()
             .set_equipment(vec![crate::creatures::EquipmentSource {
+                weapon_profile: None,
                 item: crate::ItemId(1),
                 socket: crate::EquipmentSlotId(0),
                 attack: None,
@@ -2465,6 +2464,7 @@ mod growth_tests {
             .as_mut()
             .unwrap()
             .set_equipment(vec![crate::creatures::EquipmentSource {
+                weapon_profile: None,
                 item: crate::ItemId(2),
                 socket: crate::EquipmentSlotId(0),
                 attack: None,

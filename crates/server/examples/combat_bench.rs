@@ -179,10 +179,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             player,
                                             &tor_protocol::Action::UseAbility {
                                                 id: ability.id.clone(),
-                                                invocation:
-                                                    tor_protocol::AbilityInvocation::ActorTarget {
+                                                invocation: tor_protocol::AbilityInvocation {
+                                                    aim: tor_protocol::AbilityAim::ActorTarget {
                                                         target: a.id,
                                                     },
+                                                    weapon: tor_protocol::WeaponSelection::Default,
+                                                },
                                                 supplies: Default::default(),
                                             },
                                         )?,

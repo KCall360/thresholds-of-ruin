@@ -188,11 +188,11 @@ fn encoded_directional_ray_dodges_continues_intercepts_retries_and_replays() {
         let mut wire = Wire::connect(engine);
         let initial = ACTORS.map(|actor| hp(&wire.service, actor));
         let action: Action = serde_json::from_value(json!({"type":"use_ability","id":"fixture_directional_ray",
-            "invocation":{"kind":"directional_ray","direction":"east"},"supplies":{"kind":"carried"}})).unwrap();
+            "invocation":{"aim":{"kind":"directional_ray","direction":"east"},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}})).unwrap();
         let encoded_action = serde_json::to_value(&action).unwrap();
         assert_eq!(
             encoded_action["invocation"],
-            json!({"kind":"directional_ray","direction":"east"})
+            json!({"aim":{"kind":"directional_ray","direction":"east"},"weapon":{"kind":"default"}})
         );
         let request = wire.request(SOURCE, action);
         let first = ack(wire.send(SOURCE, "ray", request.clone()));

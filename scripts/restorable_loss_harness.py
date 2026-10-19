@@ -10,7 +10,7 @@ def losses(frame):
 
 def self_ability(frame, identity):
     return {"type": "use_ability", "id": identity,
-            "invocation": {"kind": "actor_target", "target": observation(frame)["self_target"]},
+            "invocation": {"aim": {"kind": "actor_target", "target": observation(frame)["self_target"]}, "weapon": {"kind": "default"}},
             "supplies": {"kind": "carried"}}
 
 

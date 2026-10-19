@@ -150,10 +150,10 @@ pub struct Choice {
 pub const HELP: &str = "\
 Look and ask: look, examine <thing>, look <direction>, exits, where am i, what now, inventory, stats, status.
 Handle things: take <thing>, take all, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, eat <food>, read <scroll>, zap <device> <direction>, identify <item> or identify cancel, open or close <door>.
-Fight: attack <creature>, fight <creature> to keep attacking, follow <creature>, flee, back.
+Fight: attack <creature> [with <equipped weapon>], fight <creature> to keep attacking, follow <creature>, flee, back.
 Move: a direction (north, ne, up...) walks until there's something to see; go to <thing or place>, go to exit, go to start, places, name room <name>.
 Time: wait, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, advancement.
-Techniques, if granted: rattling blow <creature>, measured cut <creature>, brace for impact, spark lance fire <creature>, falter <creature>, shell impact. stats lists yours; a first word is enough when it's unique, as in brace.
+Techniques, if granted: rattling blow <creature>, measured cut <creature>, brace for impact, spark lance fire <creature>, falter <creature>, shell impact. When the ability permits weapon selection, add with <equipped weapon> to choose its exact socket; optional using <supplies> comes last. Explicit choices show exact cost and next-strike/recovery timing, then ask yes/no before acting. For projectile abilities, enter the ability name, choose a numbered source (next/previous pages, cancel), ammunition if launching, then a direction. stats lists yours; a first word is enough when it's unique, as in brace.
 Talking to the game: again repeats a command (attack again repeats an attack); chain commands with then, commas or full stops; answer a question with a name or its number; it, them, him and her mean what was last mentioned.
 Settings: brief, verbose and superbrief choose how places are described when you arrive; all skips <kinds> chooses what take all leaves behind; options shows them. Type help session for more, and quit to save and leave.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds].\nstep <direction> makes one careful step. Developer commands require wizard authority. wizard creature list discovers named spawn recipes; add depth <N> or after <selector> to refine the listing. After creature inspection: strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.";
@@ -495,11 +495,21 @@ pub fn interpret(
     referents: &mut Referents,
 ) -> Interpretation {
     match command {
+        ParsedCommand::Projectile { id } => Interpretation::Tool(Input::Projectile(id.clone())),
         ParsedCommand::Ability {
             id,
             selection: operand,
             supplies,
+            weapon,
         } => {
+            let weapon = match weapon
+                .as_deref()
+                .map_or(Ok(WeaponSelection::Default), |text| {
+                    tor_client_common::weapons::selection_from_text(&scene.state.observation, text)
+                }) {
+                Ok(weapon) => weapon,
+                Err(reason) => return refuse(reason),
+            };
             let selection = match supplies {
                 None => SupplySelection::Carried,
                 Some(text) => {
@@ -536,13 +546,19 @@ pub fn interpret(
             let direct = match operand {
                 crate::parser::grammar::AbilitySelection::ActorTarget { direct } => direct,
                 crate::parser::grammar::AbilitySelection::SelfStep { direction } => {
-                    return invoke(AbilityInvocation::SelfStep {
-                        direction: *direction,
+                    return invoke(tor_protocol::AbilityInvocation {
+                        aim: tor_protocol::AbilityAim::SelfStep {
+                            direction: *direction,
+                        },
+                        weapon,
                     });
                 }
                 crate::parser::grammar::AbilitySelection::DirectionalRay { direction } => {
-                    return invoke(AbilityInvocation::DirectionalRay {
-                        direction: *direction,
+                    return invoke(tor_protocol::AbilityInvocation {
+                        aim: tor_protocol::AbilityAim::DirectionalRay {
+                            direction: *direction,
+                        },
+                        weapon,
                     });
                 }
             };
@@ -552,7 +568,10 @@ pub fn interpret(
                     Key::Me => scene.state.observation.self_target,
                     _ => return refuse("Choose a living creature."),
                 };
-                invoke(AbilityInvocation::ActorTarget { target })
+                invoke(tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::ActorTarget { target },
+                    weapon,
+                })
             })
         }
         ParsedCommand::Intransitive { verb } if needs_figure(*verb) => {
@@ -1320,20 +1339,45 @@ fn transitive_meaning(
             bind(direct, scene, referents, Domain::Doors, &|r| door(r, open))
         }
         (Verb::Attack, weapon) => {
-            if let Some((Preposition::With, weapon)) = weapon {
-                if let Resolution::Missing(text) =
-                    resolve(weapon, scene, referents, Domain::Carried)
-                {
-                    return refuse(text);
+            let selected = if let Some((Preposition::With, weapon)) = weapon {
+                match tor_client_common::weapons::selection_from_text(
+                    &scene.state.observation,
+                    &weapon.raw,
+                ) {
+                    Ok(selected) => Some(selected),
+                    Err(reason) => return refuse(reason),
                 }
-            }
+            } else {
+                None
+            };
             bind(
                 direct,
                 scene,
                 referents,
                 Domain::Figures,
                 &|r| match r.key {
-                    Key::Actor(target) => goal(Goal::Attack { target }),
+                    Key::Actor(target) => match selected {
+                        None => goal(Goal::Attack { target }),
+                        Some(weapon) => {
+                            match tor_client_common::abilities::basic_action_with_weapon(
+                                &scene.state.observation,
+                                target,
+                                weapon,
+                            ) {
+                                Ok(Action::UseAbility {
+                                    id,
+                                    invocation,
+                                    supplies,
+                                }) => goal(Goal::UseAbility {
+                                    ability: id,
+                                    invocation,
+                                    supplies,
+                                }),
+                                Ok(_) => unreachable!("basic attack is an ability"),
+                                Err(reason) => refuse(reason),
+                            }
+                        }
+                    },
                     Key::Me => refuse("You'd rather not hurt yourself."),
                     _ if r.class == Some(ItemClass::Corpse) || r.name.ends_with(" corpse") => {
                         refuse(format!(

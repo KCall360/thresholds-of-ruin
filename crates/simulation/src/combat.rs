@@ -970,7 +970,7 @@ mod tests {
             ActorId(1),
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
         )
@@ -990,7 +990,7 @@ mod tests {
             ActorId(1),
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
         )
@@ -999,7 +999,7 @@ mod tests {
             ActorId(2),
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(1)),
                 supplies: Default::default(),
             },
         )
@@ -1013,7 +1013,7 @@ mod tests {
             ActorId(1),
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
         )

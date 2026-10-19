@@ -60,13 +60,13 @@ class RogueStarterChillProcesses(ProcessTestCase):
             self.assertEqual(growth["advancement_page"]["entries"][0]["value"]["points"],
                              {"earned": "1", "spent": "0", "unspent": "1"})
             started = self.act(player, {"type": "use_ability", "id": "bind_wounds",
-                "invocation": {"kind": "actor_target", "target": view["self_target"]},
+                "invocation": {"aim": {"kind": "actor_target", "target": view["self_target"]}, "weapon": {"kind": "default"}},
                 "supplies": {"kind": "carried"}})
             self.assertIsNone(started["error"])
             target = next(row["id"] for row in ice_initial["state"]["observation"]["visible_actors"]
                           if row["name"] == "Mage")
             cast = self.act(ice, {"type": "use_ability", "id": "rogue.freezing_touch",
-                "invocation": {"kind": "actor_target", "target": target}})
+                "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
             self.assertIsNone(cast["error"])
             def ready(frame):
                 if frame.get("state") is None:

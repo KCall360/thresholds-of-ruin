@@ -109,7 +109,7 @@ pub struct RayPlan {
     pub tokens: Vec<TokenClaim>,
     pub preparation: u64,
     pub recovery: u64,
-    pub cost: Option<crate::costs::ResourceCost>,
+    pub cost: Option<crate::costs::CostBundle>,
     pub cooldown: Option<std::num::NonZeroU64>,
     pub supply_costs: Vec<crate::rules::SupplyCost>,
     pub supplies: crate::supplies::SupplySelection,
@@ -142,7 +142,7 @@ impl<'de> Deserialize<'de> for RayPlan {
             preparation: u64,
             recovery: u64,
             #[serde(deserialize_with = "crate::bounded::required_option")]
-            cost: Option<crate::costs::ResourceCost>,
+            cost: Option<crate::costs::CostBundle>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             cooldown: Option<std::num::NonZeroU64>,
             #[serde(deserialize_with = "crate::rules::read_supply_costs")]
@@ -244,7 +244,7 @@ impl RayPlan {
             && [self.source_bonus,self.source_edge,self.effect_edge].iter().all(|v| v.unsigned_abs() <= crate::limits::NUMERIC as u64)
             && (1..=crate::limits::NUMERIC as u64).contains(&self.preparation)
             && self.preparation.checked_add(self.recovery).is_some_and(|v| v <= crate::limits::NUMERIC as u64)
-            && self.cost == definition.cost.as_ref().map(|c| crate::costs::ResourceCost { resource:c.resource,start:c.start,resolution:c.resolution })
+            && definition.cost.as_ref().map(crate::costs::CostBundle::try_from).transpose().is_ok_and(|cost| self.cost == cost)
             && self.cooldown == definition.cooldown && self.supply_costs == definition.supply_costs
             && self.supplies.valid(self.supply_costs.len())
             && super::plan::effects_valid(&self.effects, rules)

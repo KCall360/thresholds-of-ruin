@@ -36,10 +36,11 @@ fn snapshot() -> Snapshot {
 fn plan(effects: Vec<PlannedEffect>) -> AbilityPlan {
     AbilityPlan {
         ambush: None,
+        weapon: crate::abilities::FrozenWeaponSelection::Unselected,
         initial_hold: None,
         hold_damage_increment: 0,
         actor: ActorId(1),
-        invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+        invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
         step: None,
         target: ActorId(2),
         public_aim: crate::public_plan::PublicAim::Unavailable,
@@ -536,7 +537,16 @@ fn saved_paid_plan_cannot_remove_or_change_immutable_rule_contract() {
         };
         match case {
             0 => ability.cost = None,
-            1 => ability.cost.as_mut().unwrap().resource = Resource::Stamina,
+            1 => {
+                let old = ability.cost.unwrap().entries().next().unwrap();
+                ability.cost = Some(
+                    crate::costs::CostBundle::single(ResourceCost {
+                        resource: Resource::Stamina,
+                        ..old
+                    })
+                    .unwrap(),
+                );
+            }
             2 => ability.strikes[0]
                 .descriptors
                 .push(DescriptorId::new("fire").unwrap()),
@@ -1006,11 +1016,12 @@ fn repeated_effects_report_sequential_actual_healing_and_restoration() {
         .creature
         .start_cost(
             crate::IntentionId(1),
-            ResourceCost {
+            crate::costs::CostBundle::single(ResourceCost {
                 resource: Resource::Stamina,
                 start: 3,
                 resolution: 0,
-            },
+            })
+            .unwrap(),
         )
         .unwrap();
     let result = resolve(
@@ -1114,6 +1125,13 @@ fn typed_item_plans_round_trip_and_reject_ability_only_fields_at_decode() {
             actor,
             item,
             slot: EquipmentSlotId(0),
+            allocation: crate::equipment_capture::FrozenEquipAllocation {
+                anatomy: crate::equipment_capture::EquipAnatomySource::Configured {
+                    anatomy: crate::AnatomySpec::from_rules(&rules),
+                },
+                target: CapturedWeaponProfile::Ordinary,
+                occupants: vec![],
+            },
             preparation: 10,
         },
         Plan::Unequip {
@@ -1346,6 +1364,7 @@ fn token_vectors_are_bounded_during_checkpoint_decoding() {
             condition: ConditionId::new("readied").unwrap(),
             source: ActorId(1),
             order: order as u64,
+            generation: order as u64,
             qualification: None,
         })
         .collect::<Vec<_>>());

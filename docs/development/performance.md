@@ -118,11 +118,15 @@ one commit only after journal admission and authoritative live publication.
 Queries, projections, rejected candidates, duplicate requests and restore replay
 add no gross flows. Collection is excluded from save and protocol schemas.
 
-Version 1 records contain a process-segment begin anchor, contiguous committed
+Version 2 records contain a process-segment begin anchor, contiguous committed
 history entries and save barriers. Each anchor identifies the initial lineage,
 current branch, history sequence, last entry and tick. Live publication is distinct
 from asynchronous durable saving. A save barrier does not flush the diagnostic
 queue, and this log is not crash-safe exactly-once storage.
+Version 2 requires the bounded `projectile_numeric_budget_refusals` counter,
+which counts only committed AI Wait fallbacks after a numeric-budget refusal;
+it exposes no hidden attack operands. The current reader rejects version 1
+evidence rather than supplying a missing counter or relabeling historical logs.
 
 Use `scripts/survival_diagnostics.py` to validate the output. Pass its
 `expected_final_anchor` argument from an independently read final durable save

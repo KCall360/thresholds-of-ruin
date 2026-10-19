@@ -121,11 +121,40 @@ fn hd_source_kind(value: &s::progression::HdSource) -> p::HitDieSourceKind {
 }
 #[path = "combat_diagnostics_view.rs"]
 mod diagnostics;
-pub(crate) use diagnostics::{combat_diagnostics, DiagnosticProjectionError};
+pub(crate) use diagnostics::{combat_diagnostics, cost_bundle, DiagnosticProjectionError};
 #[path = "creature_inspection_view.rs"]
 mod inspection;
 pub(crate) use inspection::pages::{project as strike_page, PageBudget, ProjectedPage};
 pub(crate) use inspection::{attack_view, inspect, modifier};
+
+pub(crate) fn expertise_rows(
+    ownership: &s::expertise::ExpertiseOwnership,
+    rules: &Ruleset,
+) -> Vec<p::AdvancementExpertiseRow> {
+    fn reference(id: impl ToString, name: Option<&str>) -> p::AdvancementContentRef {
+        let value = named(id, name);
+        p::AdvancementContentRef {
+            id: value.id,
+            name: value.name,
+        }
+    }
+    fn status(active: bool) -> p::AdvancementStatus {
+        if active {
+            p::AdvancementStatus::Active
+        } else {
+            p::AdvancementStatus::Dormant
+        }
+    }
+    ownership
+        .grants()
+        .iter()
+        .map(|(id, origins)| p::AdvancementExpertiseRow {
+            expertise: reference(id, rules.expertise(id).map(|def| def.name.as_str())),
+            status: status(ownership.active(id)),
+            source_count: u16::try_from(origins.len()).expect("bounded expertise sources"),
+        })
+        .collect()
+}
 
 pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
     let rules = &stats.rules;
@@ -147,6 +176,7 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
         });
     }
     p::OwnStats {
+        expertises: expertise_rows(&stats.expertises, rules),
         kind: kind(&stats.kind, rules),
         subtypes: stats
             .subtypes
@@ -253,6 +283,7 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                 id: def.id.to_string(),
                 name: def.name.clone(),
                 basic_attack: def.basic_attack,
+                weapon_selection: stats.weapon_abilities.contains(&def.id),
                 cooldown_remaining: stats.ability_cooldowns[&def.id],
                 supply_costs: def
                     .supply_costs
@@ -280,6 +311,7 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                 }),
                 reach: match stats.ability_reaches[&def.id] {
                     s::rules::Reach::Melee => p::AbilityReach::Melee,
+                    s::rules::Reach::Projectile => p::AbilityReach::Projectile,
                     s::rules::Reach::Sight { range } | s::rules::Reach::MutualSight { range } => {
                         p::AbilityReach::Sight { range }
                     }
@@ -295,10 +327,13 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                 },
                 target_kind: if def.invocation == s::abilities::InvocationKind::SelfStep {
                     p::AbilityTargetKind::SelfStep
+                } else if def.invocation == s::abilities::InvocationKind::DirectionalProjectile {
+                    p::AbilityTargetKind::DirectionalProjectile
                 } else if def.invocation == s::abilities::InvocationKind::DirectionalRay {
                     p::AbilityTargetKind::DirectionalRay
                 } else {
                     match def.reach {
+                        s::rules::Reach::Projectile => p::AbilityTargetKind::DirectionalProjectile,
                         s::rules::Reach::SelfOnly => p::AbilityTargetKind::SelfOnly,
                         s::rules::Reach::SelfOrAlly { .. } => p::AbilityTargetKind::SelfOrAlly,
                         s::rules::Reach::Melee
@@ -328,8 +363,35 @@ mod tests {
         game_with_reach(None)
     }
     fn game_with_reach(reach: Option<s::rules::Reach>) -> (s::Game, s::ActorId, s::ActorId) {
+        game_with_options(reach, None)
+    }
+    fn game_with_options(
+        reach: Option<s::rules::Reach>,
+        projectile: Option<s::projectile_profiles::ProjectileDeliveryKind>,
+    ) -> (s::Game, s::ActorId, s::ActorId) {
         let mut document: s::rules::RulesetDocument =
             toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap();
+        if let Some(delivery) = projectile {
+            let mut ability = document
+                .abilities
+                .iter()
+                .find(|ability| ability.basic_attack)
+                .unwrap()
+                .clone();
+            ability.id = AbilityId::new("fixture_projectile").unwrap();
+            ability.name = "Fixture Projectile".into();
+            ability.basic_attack = false;
+            ability.invocation = s::abilities::InvocationKind::DirectionalProjectile;
+            ability.reach = s::rules::Reach::Projectile;
+            ability.strikes = s::rules::StrikeSource::Projectile { delivery };
+            ability.timing.source = s::rules::TimingSource::SelectedWeapon;
+            ability.supply_costs.clear();
+            document
+                .constants
+                .default_abilities
+                .push(ability.id.clone());
+            document.abilities.push(ability);
+        }
         // Exact range and Focus arithmetic are fixture contracts, independent
         // of the shipped Mage form's reach or payment resource.
         let mut ability: s::rules::AbilityDef = serde_json::from_value(serde_json::json!({
@@ -616,7 +678,10 @@ mod tests {
                 attacker,
                 s::Action::UseAbility {
                     id: AbilityId::new("fixture_fear").unwrap(),
-                    invocation: s::abilities::AbilityInvocation::ActorTarget { target: subject },
+                    invocation: s::abilities::AbilityInvocation {
+                        aim: s::abilities::AbilityAim::ActorTarget { target: subject },
+                        weapon: s::abilities::WeaponSelection::Default,
+                    },
                     supplies: Default::default(),
                 },
                 s::IntentionOrigin::Human,
@@ -660,6 +725,101 @@ mod tests {
         let restored =
             s::Game::restore_checkpoint(snapshot, &shared, preparing.content().clone()).unwrap();
         assert_eq!(view(&restored, subject, 1), view(&preparing, subject, 1));
+    }
+
+    #[test]
+    fn projectile_views_use_exact_source_kind_and_no_unselected_melee_profile() {
+        for (delivery, public_delivery) in [
+            (
+                s::projectile_profiles::ProjectileDeliveryKind::Throw,
+                p::ProjectileDeliveryKind::Throw,
+            ),
+            (
+                s::projectile_profiles::ProjectileDeliveryKind::Launch,
+                p::ProjectileDeliveryKind::Launch,
+            ),
+        ] {
+            let (game, actor, _) = game_with_options(None, Some(delivery));
+            let snapshot = view(&game, actor, 1);
+            snapshot.validate().unwrap();
+            let stats = snapshot
+                .observation
+                .combat
+                .as_ref()
+                .unwrap()
+                .own_stats
+                .as_ref()
+                .unwrap();
+            let ability = stats
+                .abilities
+                .iter()
+                .find(|ability| ability.id == "fixture_projectile")
+                .unwrap();
+            assert_eq!(ability.reach, p::AbilityReach::Projectile);
+            assert_eq!(
+                ability.target_kind,
+                p::AbilityTargetKind::DirectionalProjectile
+            );
+            assert!(!ability.weapon_selection);
+            let report = inspect(&game, actor, 1).unwrap();
+            report.validate().unwrap();
+            let source = report
+                .ability_strikes
+                .iter()
+                .find(|row| row.ability == ability.id)
+                .unwrap();
+            assert_eq!(
+                source.source,
+                p::StrikeSourceInspectionView::Projectile {
+                    delivery: public_delivery
+                }
+            );
+            assert!(!serde_json::to_string(&report.selected_attack.abilities)
+                .unwrap()
+                .contains("fixture_projectile"));
+            let error = strike_page(
+                &game,
+                actor,
+                &p::StrikeSourceSelector::Ability {
+                    id: ability.id.clone(),
+                },
+                None,
+                None,
+            )
+            .err()
+            .unwrap();
+            let unknown = strike_page(
+                &game,
+                actor,
+                &p::StrikeSourceSelector::Ability {
+                    id: "unknown".into(),
+                },
+                None,
+                None,
+            )
+            .err()
+            .unwrap();
+            assert_eq!(
+                error, unknown,
+                "unselected source has no invented melee rows"
+            );
+            assert!(strike_page(
+                &game,
+                actor,
+                &p::StrikeSourceSelector::SelectedMelee {},
+                None,
+                None
+            )
+            .is_ok());
+            assert!(strike_page(
+                &game,
+                actor,
+                &p::StrikeSourceSelector::Natural {},
+                None,
+                None
+            )
+            .is_ok());
+        }
     }
 
     #[test]
@@ -728,8 +888,11 @@ mod tests {
             );
             let action = p::Action::UseAbility {
                 id: "fixture_fear".into(),
-                invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                    target: state.observation.self_target,
+                invocation: tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::ActorTarget {
+                        target: state.observation.self_target,
+                    },
+                    weapon: tor_protocol::WeaponSelection::Default,
                 },
                 supplies: Default::default(),
             };
@@ -737,7 +900,7 @@ mod tests {
             let scope = crate::wire_adapter::TargetScope::new(uuid::Uuid::nil(), actor);
             let decoded = crate::wire_adapter::decode_action(&action, &scope, &observed).unwrap();
             assert!(
-                matches!(decoded, crate::actions::Action::UseAbility { invocation: crate::actions::AbilityInvocation::ActorTarget { target }, .. } if target == actor)
+                matches!(decoded, crate::actions::Action::UseAbility { invocation: crate::actions::AbilityInvocation { aim: crate::actions::AbilityAim::ActorTarget { target }, weapon: crate::actions::WeaponSelection::Default }, .. } if target == actor)
             );
             let foreign_scope =
                 crate::wire_adapter::TargetScope::new(uuid::Uuid::from_u128(1), actor);
@@ -804,7 +967,10 @@ mod tests {
             actor,
             s::Action::UseAbility {
                 id: AbilityId::new("fixture_fear").unwrap(),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation {
+                    aim: tor_simulation::abilities::AbilityAim::ActorTarget { target },
+                    weapon: tor_simulation::abilities::WeaponSelection::Default,
+                },
                 supplies: Default::default(),
             },
             s::IntentionOrigin::Human,
@@ -895,6 +1061,7 @@ mod tests {
         document.talents = (0..count)
             .map(|index| s::rules::TalentDef {
                 form_choices: Vec::new(),
+                expertise_grants: Vec::new(),
                 id: TalentId::new(format!("talent_{index:04}")).unwrap(),
                 name: format!("Talent {index}"),
                 prerequisites: vec![],
@@ -1199,8 +1366,9 @@ mod tests {
             actor,
             s::Action::UseAbility {
                 id: AbilityId::new("bind_wounds").unwrap(),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                    target: actor,
+                invocation: tor_simulation::abilities::AbilityInvocation {
+                    aim: tor_simulation::abilities::AbilityAim::ActorTarget { target: actor },
+                    weapon: tor_simulation::abilities::WeaponSelection::Default,
                 },
                 supplies: s::supplies::SupplySelection::Carried,
             },

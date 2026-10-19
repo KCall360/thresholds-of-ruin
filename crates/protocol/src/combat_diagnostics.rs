@@ -37,6 +37,68 @@ pub struct DiagnosticCost {
     pub start: u32,
     pub resolution: u32,
 }
+/// Fixed-resource charge summary; each resource occurs in exactly one slot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DiagnosticCostBundle {
+    pub stamina: Option<DiagnosticCost>,
+    pub focus: Option<DiagnosticCost>,
+    pub mana: Option<DiagnosticCost>,
+}
+impl DiagnosticCostBundle {
+    pub fn entries(&self) -> impl Iterator<Item = &DiagnosticCost> {
+        [&self.stamina, &self.focus, &self.mana]
+            .into_iter()
+            .filter_map(Option::as_ref)
+    }
+    fn valid(&self) -> bool {
+        self.entries().next().is_some()
+            && [
+                ("stamina", &self.stamina),
+                ("focus", &self.focus),
+                ("mana", &self.mana),
+            ]
+            .into_iter()
+            .all(|(id, entry)| {
+                entry.as_ref().is_none_or(|cost| {
+                    cost.resource.valid()
+                        && cost.resource.id == id
+                        && u64::from(cost.start) + u64::from(cost.resolution) <= 1_000_000
+                })
+            })
+    }
+}
+fn read_diagnostic_cost<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<DiagnosticCost>, D::Error> {
+    #[derive(Deserialize)]
+    struct Named(#[serde(deserialize_with = "crate::bounded::named_map")] DiagnosticCost);
+    Option::<Named>::deserialize(d).map(|value| value.map(|named| named.0))
+}
+impl<'de> Deserialize<'de> for DiagnosticCostBundle {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "read_diagnostic_cost")]
+            stamina: Option<DiagnosticCost>,
+            #[serde(deserialize_with = "read_diagnostic_cost")]
+            focus: Option<DiagnosticCost>,
+            #[serde(deserialize_with = "read_diagnostic_cost")]
+            mana: Option<DiagnosticCost>,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        let value = Self {
+            stamina: fields.stamina,
+            focus: fields.focus,
+            mana: fields.mana,
+        };
+        if !value.valid() {
+            return Err(serde::de::Error::custom("invalid cost bundle"));
+        }
+        Ok(value)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
@@ -159,7 +221,7 @@ pub struct CombatDiagnosticRecord {
     pub remaining: u64,
     #[serde(with = "crate::integers::unsigned")]
     pub recovery: u64,
-    pub charge: Option<DiagnosticCost>,
+    pub charge: Option<DiagnosticCostBundle>,
     pub actor_before: DiagnosticCombatant,
     pub target_before: DiagnosticCombatant,
     pub actor_after: DiagnosticCombatant,
@@ -227,10 +289,7 @@ impl CombatDiagnosticRecord {
             ]
             .into_iter()
             .all(DiagnosticCombatant::valid)
-            && self.charge.as_ref().is_none_or(|cost| {
-                cost.resource.valid()
-                    && u64::from(cost.start) + u64::from(cost.resolution) <= 1_000_000
-            })
+            && self.charge.as_ref().is_none_or(DiagnosticCostBundle::valid)
             && self.outcome.effects.len() <= 128
             && self.outcome.effects.iter().all(|effect| match effect {
                 DiagnosticEffect::ConditionRemoved { target, condition } => {

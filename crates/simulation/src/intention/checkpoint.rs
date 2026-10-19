@@ -126,7 +126,7 @@ mod tests {
         queue.entries.get_mut(&ActorId(1)).unwrap().work = IntentionWork::ResumePreparation {
             work: crate::Work::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
         };

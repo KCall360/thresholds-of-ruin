@@ -75,6 +75,7 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
                 Action::Identify { .. }
                 | Action::TouchApparentObject { .. }
                 | Action::Drop { .. }
+                | Action::ChooseIntellectExpertise { .. }
                 | Action::Purchase { .. }
                 | Action::ChooseGrowthSource { .. }
                 | Action::Respec { .. } => {
@@ -222,6 +223,7 @@ fn remaining_family(index: usize) -> (Game, ActorId, Action, u64) {
                     timing.unequip_turns
                 };
             spec.equipment = Some(EquipmentSpec {
+                weapon_profile: None,
                 armor: None,
                 slot: kind,
                 attack: None,
@@ -262,9 +264,7 @@ fn remaining_family(index: usize) -> (Game, ActorId, Action, u64) {
             (
                 Action::UseAbility {
                     id,
-                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                        target,
-                    },
+                    invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 plan.preparation() + plan.recovery(),

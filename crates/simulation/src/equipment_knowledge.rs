@@ -99,10 +99,56 @@ impl<'de> Deserialize<'de> for EquipmentFact {
         })
     }
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct InheritedEquipmentFact(EquipmentFact);
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub(crate) struct EquipmentKnowledge(Vec<EquipmentFact>);
 impl EquipmentKnowledge {
+    /// Derive a small inherited record without cloning the shared memory table
+    /// or consulting authoritative condition. Retired identities remain stale.
+    pub(crate) fn inherited_transfer(
+        &self,
+        source: ItemId,
+        merge: Option<ItemId>,
+        result: ItemId,
+    ) -> Option<InheritedEquipmentFact> {
+        if source == result || self.index(result).is_ok() || !self.can_learn(result) {
+            return None;
+        }
+        let mut inherited = self.fact(source)?.clone();
+        if let Some(merge) = merge {
+            let other = self.fact(merge)?;
+            if inherited.numbers != other.numbers {
+                inherited.numbers = None;
+            }
+            if inherited.cursed != other.cursed {
+                inherited.cursed = None;
+            }
+            if inherited.protected != other.protected {
+                inherited.protected = None;
+            }
+        }
+        if inherited.numbers.is_none()
+            && inherited.cursed.is_none()
+            && inherited.protected.is_none()
+        {
+            return None;
+        }
+        inherited.item = result;
+        Some(InheritedEquipmentFact(inherited))
+    }
+    /// Bounded best-effort inheritance cannot prevent a physical transfer.
+    /// Explicit identification keeps its existing strict full-memory policy.
+    pub(crate) fn remember_inherited(&mut self, inherited: InheritedEquipmentFact) {
+        if !self.can_learn(inherited.0.item) {
+            return;
+        }
+        if let Err(index) = self.index(inherited.0.item) {
+            self.0.insert(index, inherited.0);
+        }
+    }
     fn index(&self, item: ItemId) -> Result<usize, usize> {
         self.0.binary_search_by_key(&item, |fact| fact.item)
     }
@@ -205,6 +251,24 @@ pub(crate) fn read_known_equipment<'de, D: serde::Deserializer<'de>>(
     Ok(tor_world::Shared::new(EquipmentKnowledge(facts)))
 }
 impl Game {
+    pub(crate) fn known_projectile_bonus_view(
+        &self,
+        actor: ActorId,
+        id: ItemId,
+    ) -> Option<crate::interactions::ProjectileBonusView> {
+        let owner = self.actors.get(&actor)?;
+        let item = self.items.get(&id)?;
+        if item.spec.projectile.is_none()
+            || (item.spec.concealed && !owner.knowledge.contains(&item.spec.identity))
+        {
+            return None;
+        }
+        let numbers = owner.known_equipment.fact(id)?.numbers?;
+        Some(crate::interactions::ProjectileBonusView {
+            hit: numbers.hit_enchantment,
+            damage: numbers.damage_enchantment,
+        })
+    }
     pub(crate) fn known_equipment_view(&self, actor: ActorId, id: ItemId) -> Option<EquipmentSpec> {
         let owner = self.actors.get(&actor)?;
         let item = self.items.get(&id)?;
@@ -222,7 +286,7 @@ impl Game {
                 fact.item.0 > 0
                     && fact.item.0 < self.next_item_id
                     && self.items.get(&fact.item).is_none_or(|item| {
-                        if item.spec.equipment.is_none() {
+                        if !item.spec.has_instance_condition() {
                             return false;
                         }
                         fact.numbers.is_none_or(|numbers| {

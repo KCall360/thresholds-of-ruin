@@ -256,7 +256,7 @@ fn an_elevated_hostiles_click_attacks_its_exact_target_instead_of_moving() {
     let request = request_from(&state, &state.reply_context(), intent.command().unwrap()).unwrap();
     assert!(
         matches!(request, Request::Command { command: Command::Act {
-        action: Action::UseAbility { invocation: AbilityInvocation::ActorTarget { target }, .. }, .. }, .. }
+        action: Action::UseAbility { invocation: AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target }, weapon: tor_protocol::WeaponSelection::Default }, .. }, .. }, .. }
         if target == foe),
         "the actor target must survive click interpretation: {request:?}"
     );

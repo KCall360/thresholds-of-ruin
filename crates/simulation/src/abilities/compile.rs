@@ -25,6 +25,7 @@ struct Compiler<'a> {
     outgoing_edge_policy: crate::rules::OutgoingEdgePolicy,
     claims: Vec<TokenClaim>,
     natural_source: bool,
+    selected_attack: &'a crate::creatures::SelectedAttack,
 }
 impl<'a> Compiler<'a> {
     fn subject(&self, subject: ActorId) -> Result<&'a crate::creatures::CreatureState, GameError> {
@@ -50,7 +51,11 @@ impl<'a> Compiler<'a> {
                 if self.natural_source && role == CheckActor::User {
                     return Ok(creature.derived().natural_attack.check_bonus);
                 }
-                return Ok(creature.derived().selected_attack.check_bonus);
+                return Ok(if role == CheckActor::User {
+                    self.selected_attack.check_bonus
+                } else {
+                    creature.derived().selected_attack.check_bonus
+                });
             }
         };
         Ok(crate::attributes::SkillCheck {
@@ -253,10 +258,16 @@ impl<'a> Compiler<'a> {
                     effects,
                     &self.modifiers,
                     self.natural_source,
+                    Some(self.selected_attack),
                 )
             } else {
-                self.game
-                    .compile_effects(self.actor, effects, &self.modifiers)
+                self.game.compile_effects_from_source(
+                    self.actor,
+                    effects,
+                    &self.modifiers,
+                    self.natural_source,
+                    Some(self.selected_attack),
+                )
             }
         };
         let on_success = capture_primary(&definition.on_success)?;
@@ -300,6 +311,7 @@ impl<'a> Compiler<'a> {
                     &rider.effects,
                     rider_modifiers.as_ref().unwrap_or(&self.modifiers),
                     self.natural_source,
+                    Some(self.selected_attack),
                 )?,
                 descriptors: rider.descriptors.clone(),
             });
@@ -355,6 +367,7 @@ impl Game {
             outgoing_edge_policy: crate::rules::OutgoingEdgePolicy::Ordinary,
             claims: Vec::new(),
             natural_source: false,
+            selected_attack: &caster.derived().selected_attack,
         };
         let skill = SkillSelector::Named {
             skill: crate::attributes::Skill::Athletics,
@@ -383,8 +396,25 @@ impl Game {
         supplies: crate::supplies::SupplySelection,
     ) -> Result<Plan, GameError> {
         crate::diagnostics::ability_plan();
-        if let super::AbilityInvocation::DirectionalRay { direction } = invocation {
+        if let super::AbilityAim::DirectionalRay { direction } = invocation.aim {
+            if invocation.weapon != super::WeaponSelection::Default {
+                return Err(invalid());
+            }
             return self.compile_ray_plan(actor, ability, direction, supplies);
+        }
+        if let super::AbilityAim::DirectionalProjectile {
+            direction,
+            delivery,
+        } = invocation.aim
+        {
+            if invocation.weapon != super::WeaponSelection::Default
+                || supplies != crate::supplies::SupplySelection::Carried
+            {
+                return Err(invalid());
+            }
+            return self
+                .capture_projectile_plan(actor, ability, direction, delivery)
+                .map(|plan| Plan::Projectile(tor_world::Shared::new(plan)));
         }
         let target = invocation.target(actor);
         let caster = self.creature(actor).ok_or(GameError::UnknownActor)?;
@@ -408,7 +438,7 @@ impl Game {
         if definition.invocation != invocation.kind() {
             return Err(invalid());
         }
-        if matches!(invocation, super::AbilityInvocation::ContactTarget { .. })
+        if matches!(invocation.aim, super::AbilityAim::ContactTarget { .. })
             && (!matches!(definition.reach, crate::rules::Reach::Melee)
                 || definition.interaction != crate::rules::Interaction::HostileToTarget
                 || !definition.basic_attack)
@@ -427,7 +457,15 @@ impl Game {
         if !supplies.valid(definition.supply_costs.len()) {
             return Err(GameError::ItemUnavailable);
         }
-        let timing = self.ability_timing(actor, ability)?;
+        let weapon = self.capture_invocation_weapon(actor, definition, invocation)?;
+        let timing = crate::creatures::ability_timing_for_attack(
+            caster.derived(),
+            caster.build(),
+            definition,
+            &caster.derived().ability_values(ability),
+            &weapon.attack,
+        )
+        .map_err(|_| invalid())?;
         let reach = caster
             .derived()
             .ability_reach(ability)
@@ -446,9 +484,11 @@ impl Game {
             outgoing_edge_policy: definition.outgoing_edge_policy,
             claims: vec![],
             natural_source: matches!(definition.strikes, StrikeSource::NaturalMelee { .. }),
+            selected_attack: &weapon.attack,
         };
         let mut strikes = Vec::new();
         match &definition.strikes {
+            StrikeSource::Projectile { .. } => return Err(invalid()),
             StrikeSource::Authored { strikes: authored } => {
                 for (ordinal, strike) in authored.iter().enumerate() {
                     if strike
@@ -504,11 +544,9 @@ impl Game {
                     )?);
                 }
             }
-            StrikeSource::SelectedMelee => match &caster.derived().selected_attack.attack {
+            StrikeSource::SelectedMelee => match &weapon.attack.attack {
                 crate::attacks::SelectedMeleeAttack::Natural(natural) => {
-                    let crate::creatures::SourceId::Species(species) =
-                        &caster.derived().selected_attack.source
-                    else {
+                    let crate::creatures::SourceId::Species(species) = &weapon.attack.source else {
                         return Err(invalid());
                     };
                     for (ordinal, strike) in natural.strikes().iter().enumerate() {
@@ -532,9 +570,7 @@ impl Game {
                     }
                 }
                 crate::attacks::SelectedMeleeAttack::Weapon(_) => {
-                    let crate::creatures::SourceId::Equipment(item) =
-                        &caster.derived().selected_attack.source
-                    else {
+                    let crate::creatures::SourceId::Equipment(item) = &weapon.attack.source else {
                         return Err(invalid());
                     };
                     let strike = StrikeDef {
@@ -598,6 +634,7 @@ impl Game {
             ambush,
             actor,
             invocation,
+            weapon: weapon.frozen.clone(),
             step,
             target,
             initial_hold: self
@@ -610,7 +647,7 @@ impl Game {
             ability: ability.clone(),
             preparation: timing.preparation,
             recovery: timing.recovery,
-            cost: self.ability_cost(ability)?,
+            cost: weapon.frozen.cost(rules, self.ability_cost(ability)?)?,
             cooldown: definition.cooldown,
             supply_costs: definition.supply_costs.clone(),
             supplies,
@@ -629,12 +666,13 @@ impl Game {
         effects: &[crate::rules::Effect],
         modifiers: &AbilityValues,
         natural_source: bool,
+        selected: Option<&crate::creatures::SelectedAttack>,
     ) -> Result<Vec<PlannedEffect>, GameError> {
         let mut captured = modifiers.clone();
         captured.dice = 0;
         captured.flat = 0;
         let mut effects =
-            self.compile_effects_from_source(actor, effects, &captured, natural_source)?;
+            self.compile_effects_from_source(actor, effects, &captured, natural_source, selected)?;
         if let Some(PlannedEffect::Damage { damage }) = effects
             .iter_mut()
             .find(|effect| matches!(effect, PlannedEffect::Damage { .. }))

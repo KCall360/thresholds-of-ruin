@@ -222,11 +222,11 @@ pub(super) fn action(name: &str, invocation: AbilityInvocation) -> Action {
 }
 
 pub(super) fn attack(target: ActorId) -> Action {
-    action("basic_melee", AbilityInvocation::ActorTarget { target })
+    action("basic_melee", AbilityInvocation::actor_target(target))
 }
 
 pub(super) fn contact(target: ActorId) -> Action {
-    action("basic_melee", AbilityInvocation::ContactTarget { target })
+    action("basic_melee", AbilityInvocation::contact_target(target))
 }
 
 pub(super) fn apply(game: &mut Game, actor: ActorId, name: &str, duration: u64) {

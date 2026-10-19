@@ -372,7 +372,7 @@ mod tests {
 
     fn survival_record(event: &str) -> serde_json::Value {
         serde_json::json!({
-            "survival_version": 1,
+            "survival_version": 2,
             "event": event,
             "flows": {"actors": {}, "incomplete": false},
         })

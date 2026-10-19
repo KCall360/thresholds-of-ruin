@@ -1,7 +1,7 @@
 //! Compile and validate owned action-specific plans; never resolve effects here.
 use super::{FrozenStrike, ResolutionPlan, TokenClaim};
 use crate::content_ids::{AbilityId, ConditionId};
-use crate::costs::ResourceCost;
+use crate::costs::CostBundle;
 use crate::damage::{DamageComponent, DamageSpec};
 use crate::dice::DicePool;
 use crate::resources::Resource;
@@ -18,6 +18,8 @@ pub enum RuleError {
     CoolingDown,
     InvalidDefinition,
     InvalidPlan,
+    /// Valid operands exceed the shared runtime numeric budget.
+    NumericBudget,
     ConditionCapacity,
 }
 fn invalid() -> GameError {
@@ -231,6 +233,7 @@ pub enum Plan {
     Escape(tor_world::Shared<crate::escape::EscapePlan>),
     Ability(tor_world::Shared<AbilityPlan>),
     Ray(tor_world::Shared<super::RayPlan>),
+    Projectile(tor_world::Shared<super::ProjectilePlan>),
     Zap {
         item: ItemId,
         charges: u16,
@@ -241,6 +244,7 @@ pub enum Plan {
         actor: ActorId,
         item: ItemId,
         slot: EquipmentSlotId,
+        allocation: crate::equipment_capture::FrozenEquipAllocation,
         preparation: u64,
     },
     Unequip {
@@ -280,6 +284,7 @@ pub struct AbilityPlan {
     pub ambush: Option<super::CheckSite>,
     pub actor: ActorId,
     pub invocation: super::AbilityInvocation,
+    pub weapon: super::FrozenWeaponSelection,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub step: Option<super::StepCommitment>,
     pub target: ActorId,
@@ -290,7 +295,7 @@ pub struct AbilityPlan {
     pub ability: AbilityId,
     pub preparation: u64,
     pub recovery: u64,
-    pub cost: Option<ResourceCost>,
+    pub cost: Option<CostBundle>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub cooldown: Option<std::num::NonZeroU64>,
     #[serde(deserialize_with = "crate::rules::read_supply_costs")]
@@ -311,6 +316,7 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
             ambush: Option<super::CheckSite>,
             actor: ActorId,
             invocation: super::AbilityInvocation,
+            weapon: super::FrozenWeaponSelection,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             step: Option<super::StepCommitment>,
             target: ActorId,
@@ -321,7 +327,7 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
             ability: AbilityId,
             preparation: u64,
             recovery: u64,
-            cost: Option<ResourceCost>,
+            cost: Option<CostBundle>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             cooldown: Option<std::num::NonZeroU64>,
             #[serde(deserialize_with = "crate::rules::read_supply_costs")]
@@ -338,6 +344,7 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
             ambush: fields.ambush,
             actor: fields.actor,
             invocation: fields.invocation,
+            weapon: fields.weapon,
             step: fields.step,
             target: fields.target,
             initial_hold: fields.initial_hold,
@@ -364,6 +371,7 @@ impl Plan {
         match self {
             Self::Ability(plan) => plan.tokens.as_slice(),
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.tokens.as_slice(),
+            Self::Projectile(plan) => plan.tokens.as_slice(),
             Self::Escape(plan) => plan.tokens.as_slice(),
             _ => &[],
         }
@@ -375,6 +383,7 @@ impl Plan {
             Self::Escape(plan) => plan.actor,
             Self::Ability(plan) => plan.actor,
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.actor,
+            Self::Projectile(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
@@ -389,6 +398,7 @@ impl Plan {
             Self::Ability(plan) => plan.target,
             // Legacy actor-local bookkeeping only; a ray has no persisted target.
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.actor,
+            Self::Projectile(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
@@ -409,11 +419,17 @@ impl Plan {
                 item: *item,
                 direction: ray.direction,
             },
+            Self::Projectile(plan) => Work::UseAbility {
+                id: plan.ability.clone(),
+                invocation: super::AbilityInvocation::directional_projectile(
+                    plan.direction,
+                    plan.selection,
+                ),
+                supplies: crate::supplies::SupplySelection::Carried,
+            },
             Self::Ray(plan) => Work::UseAbility {
                 id: plan.ability.clone(),
-                invocation: super::AbilityInvocation::DirectionalRay {
-                    direction: plan.direction,
-                },
+                invocation: super::AbilityInvocation::directional_ray(plan.direction),
                 supplies: plan.supplies.clone(),
             },
             Self::Ability(plan) => Work::UseAbility {
@@ -436,6 +452,7 @@ impl Plan {
             Self::Escape(plan) => plan.preparation,
             Self::Ability(plan) => plan.preparation,
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.preparation,
+            Self::Projectile(plan) => plan.preparation,
             Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
             | Self::Unequip { preparation, .. }
@@ -449,6 +466,7 @@ impl Plan {
             Self::Escape(plan) => plan.recovery,
             Self::Ability(plan) => plan.recovery + plan.step.map_or(0, |step| step.duration),
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.recovery,
+            Self::Projectile(plan) => plan.recovery,
             Self::Respec(plan) => plan.recovery,
             Self::Equip { .. }
             | Self::Unequip { .. }
@@ -457,10 +475,11 @@ impl Plan {
             | Self::Eat { .. } => 0,
         }
     }
-    pub fn cost(&self) -> Option<ResourceCost> {
+    pub fn cost(&self) -> Option<CostBundle> {
         match self {
             Self::Ability(plan) => plan.cost,
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.cost,
+            Self::Projectile(plan) => plan.cost,
             Self::Escape(_) | Self::Respec(_) => None,
             Self::Equip { .. }
             | Self::Unequip { .. }
@@ -478,7 +497,8 @@ impl Plan {
             Self::Read { effects, .. }
             | Self::Drink { effects, .. }
             | Self::Eat { effects, .. } => effects,
-            Self::Ray(_)
+            Self::Projectile(_)
+            | Self::Ray(_)
             | Self::Zap { .. }
             | Self::Escape(_)
             | Self::Respec(_)
@@ -489,12 +509,22 @@ impl Plan {
     pub fn as_ability(&self) -> Option<&AbilityPlan> {
         match self {
             Self::Ability(plan) => Some(plan),
-            Self::Ray(_) | Self::Zap { .. } | Self::Escape(_) | Self::Respec(_) => None,
+            Self::Projectile(_)
+            | Self::Ray(_)
+            | Self::Zap { .. }
+            | Self::Escape(_)
+            | Self::Respec(_) => None,
             Self::Equip { .. }
             | Self::Unequip { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => None,
+        }
+    }
+    pub fn as_projectile(&self) -> Option<&super::ProjectilePlan> {
+        match self {
+            Self::Projectile(plan) => Some(plan),
+            _ => None,
         }
     }
     pub fn as_ray(&self) -> Option<&super::RayPlan> {
@@ -507,6 +537,7 @@ impl Plan {
         match self {
             Self::Ability(plan) => Some(&plan.ability),
             Self::Ray(plan) => Some(&plan.ability),
+            Self::Projectile(plan) => Some(&plan.ability),
             _ => None,
         }
     }
@@ -514,6 +545,7 @@ impl Plan {
         match self {
             Self::Ability(plan) => plan.cooldown,
             Self::Ray(plan) => plan.cooldown,
+            Self::Projectile(plan) => plan.cooldown,
             _ => None,
         }
     }
@@ -528,7 +560,8 @@ impl Plan {
                 target: *actor,
                 effects,
             }),
-            Self::Ray(_)
+            Self::Projectile(_)
+            | Self::Ray(_)
             | Self::Zap { .. }
             | Self::Escape(_)
             | Self::Respec(_)
@@ -538,11 +571,14 @@ impl Plan {
     }
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
         valid_actor(self.actor())
-            && (1..=crate::limits::NUMERIC as u64).contains(&self.preparation())
+            && self.preparation() <= crate::limits::NUMERIC as u64
+            && (self.preparation() > 0
+                || matches!(self, Self::Equip { allocation, .. } if allocation.quickdraw(rules)))
             && match self {
                 Self::Escape(plan) => plan.valid(rules),
                 Self::Ability(plan) => plan.valid(rules),
                 Self::Ray(plan) => plan.valid(rules),
+                Self::Projectile(plan) => plan.valid(rules),
                 Self::Zap { item, ray, .. } => {
                     valid_item(*item)
                         && ray.valid(rules)
@@ -551,8 +587,16 @@ impl Plan {
                         && ray.supply_costs.is_empty()
                 }
                 Self::Respec(plan) => plan.valid(rules),
-                Self::Equip { item, slot, .. } => {
-                    valid_item(*item) && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
+                Self::Equip {
+                    item,
+                    slot,
+                    allocation,
+                    ..
+                } => {
+                    valid_item(*item)
+                        && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
+                        && allocation.valid_shape(rules, *item, *slot)
+                        && allocation.quickdraw(rules) == (self.preparation() == 0)
                 }
                 Self::Unequip { item, .. } => valid_item(*item),
                 Self::Read {
@@ -1009,19 +1053,16 @@ impl Game {
             })
             .cloned()
     }
-    pub fn ability_cost(&self, ability: &AbilityId) -> Result<Option<ResourceCost>, GameError> {
-        Ok(self
-            .content
+    pub fn ability_cost(&self, ability: &AbilityId) -> Result<Option<CostBundle>, GameError> {
+        self.content
             .rules
             .ability(ability)
             .ok_or(GameError::Rule(RuleError::UnknownAbility))?
             .cost
             .as_ref()
-            .map(|cost| ResourceCost {
-                resource: cost.resource,
-                start: cost.start,
-                resolution: cost.resolution,
-            }))
+            .map(CostBundle::try_from)
+            .transpose()
+            .map_err(|_| invalid())
     }
     pub(super) fn target_in_reach_snapshot(
         &self,
@@ -1039,6 +1080,8 @@ impl Game {
             return false;
         }
         match reach {
+            // Physical projectile reach is resolved along its released flight.
+            Reach::Projectile => false,
             Reach::SelfOnly => actor == target,
             Reach::SelfOrAlly { range } => {
                 actor == target
@@ -1105,9 +1148,9 @@ impl Game {
     ) -> Result<Plan, GameError> {
         let reference = self.actor_disclosure(actor, target)?.reference();
         let invocation = if reference == Some(crate::perception::ActorReferenceKind::Contact) {
-            super::AbilityInvocation::ContactTarget { target }
+            super::AbilityInvocation::contact_target(target)
         } else {
-            super::AbilityInvocation::ActorTarget { target }
+            super::AbilityInvocation::actor_target(target)
         };
         self.compile_strike_plan(
             actor,
@@ -1127,7 +1170,7 @@ impl Game {
         self.compile_strike_plan(
             actor,
             ability,
-            super::AbilityInvocation::ActorTarget { target },
+            super::AbilityInvocation::actor_target(target),
             sight,
             crate::supplies::SupplySelection::Carried,
         )
@@ -1162,7 +1205,7 @@ impl Game {
         effects: &[Effect],
         modifiers: &crate::creatures::AbilityValues,
     ) -> Result<Vec<PlannedEffect>, GameError> {
-        self.compile_effects_from_source(actor, effects, modifiers, false)
+        self.compile_effects_from_source(actor, effects, modifiers, false, None)
     }
     pub(crate) fn compile_effects_from_source(
         &self,
@@ -1170,6 +1213,7 @@ impl Game {
         effects: &[Effect],
         modifiers: &crate::creatures::AbilityValues,
         natural_source: bool,
+        selected: Option<&crate::creatures::SelectedAttack>,
     ) -> Result<Vec<PlannedEffect>, GameError> {
         if effects.len() > crate::limits::EFFECTS_PER_BRANCH {
             return Err(invalid());
@@ -1236,8 +1280,9 @@ impl Game {
                             .map_err(|_| invalid())?
                             .with_melee_modifiers(modifiers.dice, modifiers.flat, *impact_bonus)
                             .map_err(|_| invalid())?,
-                        DamageExpr::SelectedWeapon { impact_bonus } => self
-                            .selected_melee_attack(actor)
+                        DamageExpr::SelectedWeapon { impact_bonus } => selected
+                            .map(|selected| &selected.attack)
+                            .or_else(|| self.selected_melee_attack(actor))
                             .ok_or_else(invalid)?
                             .damage_with_modifiers(modifiers.dice, modifiers.flat, *impact_bonus)
                             .map_err(|_| invalid())?,

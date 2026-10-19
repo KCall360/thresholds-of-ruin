@@ -36,8 +36,11 @@ fn before_wait_completion_with(known: bool) -> Engine {
         ActorId(2),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("slow_plan").unwrap(),
-            invocation: crate::journal::AbilityInvocation::ActorTarget {
-                target: SimActor(1),
+            invocation: crate::journal::AbilityInvocation {
+                aim: crate::journal::AbilityAim::ActorTarget {
+                    target: SimActor(1),
+                },
+                weapon: crate::journal::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },
@@ -273,8 +276,11 @@ fn before_streaming_completion() -> Engine {
         ActorId(2),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("slow_plan").unwrap(),
-            invocation: crate::journal::AbilityInvocation::ActorTarget {
-                target: SimActor(1),
+            invocation: crate::journal::AbilityInvocation {
+                aim: crate::journal::AbilityAim::ActorTarget {
+                    target: SimActor(1),
+                },
+                weapon: crate::journal::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },
@@ -595,8 +601,11 @@ fn public_plan_idle_and_private_work_have_equal_paid_replies_and_later_snapshots
             ActorId(1),
             Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("fixture_observe_plan").unwrap(),
-                invocation: crate::journal::AbilityInvocation::ActorTarget {
-                    target: SimActor(2),
+                invocation: crate::journal::AbilityInvocation {
+                    aim: crate::journal::AbilityAim::ActorTarget {
+                        target: SimActor(2),
+                    },
+                    weapon: crate::journal::WeaponSelection::Default,
                 },
                 supplies: Default::default(),
             },
@@ -804,8 +813,11 @@ fn complete_asymmetric_action(engine: &mut Engine) {
         ActorId(1),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("fixture_observe_plan").unwrap(),
-            invocation: crate::journal::AbilityInvocation::ActorTarget {
-                target: SimActor(2),
+            invocation: crate::journal::AbilityInvocation {
+                aim: crate::journal::AbilityAim::ActorTarget {
+                    target: SimActor(2),
+                },
+                weapon: crate::journal::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },
@@ -1489,8 +1501,11 @@ fn pay_growth_observation(engine: &mut Engine) {
                     expected_revision: engine.revision(ActorId(actor)).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new(id).unwrap(),
-                        invocation: crate::journal::AbilityInvocation::ActorTarget {
-                            target: SimActor(target),
+                        invocation: crate::journal::AbilityInvocation {
+                            aim: crate::journal::AbilityAim::ActorTarget {
+                                target: SimActor(target),
+                            },
+                            weapon: crate::journal::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -1511,8 +1526,11 @@ fn growth_finisher(engine: &Engine) -> Command {
         expected_revision: engine.revision(ActorId(1)).unwrap(),
         action: Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("growth_finisher").unwrap(),
-            invocation: crate::journal::AbilityInvocation::ActorTarget {
-                target: SimActor(2),
+            invocation: crate::journal::AbilityInvocation {
+                aim: crate::journal::AbilityAim::ActorTarget {
+                    target: SimActor(2),
+                },
+                weapon: crate::journal::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },

@@ -11,23 +11,66 @@ pub use crate::content_ids::EquipmentSlot;
 #[serde(transparent)]
 pub struct EquipmentSlotId(pub u16);
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct AnatomySpec {
     pub slots: Vec<EquipmentSlot>,
+    pub capacities: crate::equipment_capacity::EquipmentCapacities,
+    pub primary_attack_socket: crate::equipment_capacity::PrimaryAttackSocket,
+}
+impl<'de> Deserialize<'de> for AnatomySpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            slots: crate::bounded::Bounded<EquipmentSlot, { crate::limits::EQUIPMENT_SOCKETS }>,
+            capacities: crate::equipment_capacity::EquipmentCapacities,
+            primary_attack_socket: crate::equipment_capacity::PrimaryAttackSocket,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        let result = Self {
+            slots: fields.slots.0,
+            capacities: fields.capacities,
+            primary_attack_socket: fields.primary_attack_socket,
+        };
+        if result
+            .primary_attack_socket
+            .socket()
+            .is_some_and(|slot| usize::from(slot.0) >= result.slots.len())
+        {
+            return Err(serde::de::Error::custom(
+                "primary attack socket outside anatomy",
+            ));
+        }
+        Ok(result)
+    }
 }
 impl AnatomySpec {
     pub fn from_rules(rules: &crate::rules::Ruleset) -> Self {
-        Self {
-            slots: rules.constants().default_anatomy.clone(),
-        }
+        rules.constants().default_anatomy.clone()
     }
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
+        self.valid_with(|id| rules.equipment_slot(id))
+    }
+    pub(crate) fn valid_with<'a>(
+        &self,
+        slot_definition: impl Fn(&EquipmentSlot) -> Option<&'a crate::rules::EquipmentSlotDef>,
+    ) -> bool {
         self.slots.len() <= crate::limits::EQUIPMENT_SOCKETS
-            && self
-                .slots
-                .iter()
-                .all(|id| rules.equipment_slot(id).is_some())
+            && self.slots.iter().all(|id| {
+                slot_definition(id).is_some_and(|slot| {
+                    slot.capacity.valid()
+                        && slot
+                            .capacity
+                            .resource()
+                            .is_none_or(|resource| self.capacities.get(resource).is_some())
+                })
+            })
+            && self.primary_attack_socket.socket().is_none_or(|index| {
+                self.slots
+                    .get(usize::from(index.0))
+                    .and_then(&slot_definition)
+                    .is_some_and(|slot| slot.requires_attack)
+            })
     }
 }
 
@@ -38,6 +81,7 @@ pub struct EquipmentSpec {
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub armor: Option<crate::ArmorSpec>,
     pub attack: Option<crate::attacks::MeleeAttack>,
+    pub weapon_profile: Option<crate::weapon_profiles::WeaponProfileSpec>,
     pub modifiers: Vec<crate::rules::Modifier>,
 }
 impl<'de> Deserialize<'de> for EquipmentSpec {
@@ -50,6 +94,8 @@ impl<'de> Deserialize<'de> for EquipmentSpec {
             armor: Option<crate::ArmorSpec>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             attack: Option<crate::attacks::MeleeAttack>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            weapon_profile: Option<crate::weapon_profiles::WeaponProfileSpec>,
             modifiers: Vec<crate::rules::Modifier>,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
@@ -57,6 +103,7 @@ impl<'de> Deserialize<'de> for EquipmentSpec {
             slot: fields.slot,
             armor: fields.armor,
             attack: fields.attack,
+            weapon_profile: fields.weapon_profile,
             modifiers: fields.modifiers,
         };
         if !equipment.valid_shape() {
@@ -68,6 +115,7 @@ impl<'de> Deserialize<'de> for EquipmentSpec {
 impl EquipmentSpec {
     pub fn valid_shape(&self) -> bool {
         self.armor.is_none_or(crate::ArmorSpec::valid)
+            && (self.weapon_profile.is_none() || self.attack.is_some())
             && self
                 .modifiers_with_armor(0)
                 .is_some_and(|modifiers| crate::rules::validate_modifier_shapes(&modifiers).is_ok())
@@ -98,6 +146,24 @@ impl EquipmentSpec {
                 field: "armor_reduction".into(),
             }
         })?)?;
+        if let Some(profile) = &self.weapon_profile {
+            let validated =
+                profile
+                    .validate(rules)
+                    .map_err(|_| crate::rules::RulesetError::Bound {
+                        field: "weapon_profile".into(),
+                    })?;
+            if validated.maximum_grip_demand() > 1
+                && matches!(
+                    slot.capacity,
+                    crate::equipment_capacity::EquipmentCapacityUse::None
+                )
+            {
+                return Err(crate::rules::RulesetError::Bound {
+                    field: "weapon_profile_capacity".into(),
+                });
+            }
+        }
         if let Some(attack) = &self.attack {
             if attack.damage_enchantment() != 0 {
                 return Err(crate::rules::RulesetError::Bound {
@@ -234,12 +300,19 @@ pub struct PreparationView {
     pub remaining: u64,
     pub active: bool,
 }
+/// Remembered instance enchantments, not a resolved attack or damage total.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProjectileBonusView {
+    pub hit: i32,
+    pub damage: i32,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemInteractionView {
     pub item: ItemId,
     pub slot: Option<EquipmentSlotView>,
     pub equipped_slot: Option<EquipmentSlotId>,
     pub known_equipment: Option<EquipmentSpec>,
+    pub known_projectile_bonus: Option<ProjectileBonusView>,
     pub known_cursed: Option<bool>,
     pub known_protected: Option<bool>,
     pub drinkable: bool,
@@ -403,19 +476,12 @@ impl Work {
     }
     pub fn target(&self) -> Option<ActorId> {
         match self {
-            Self::UseAbility {
-                invocation:
-                    crate::abilities::AbilityInvocation::ActorTarget { target }
-                    | crate::abilities::AbilityInvocation::ContactTarget { target },
-                ..
-            } => Some(*target),
-            Self::UseAbility {
-                invocation:
-                    crate::abilities::AbilityInvocation::SelfStep { .. }
-                    | crate::abilities::AbilityInvocation::DirectionalRay { .. },
-                ..
-            }
-            | Self::Escape { .. }
+            Self::UseAbility { invocation, .. } => match invocation.aim {
+                crate::abilities::AbilityAim::ActorTarget { target }
+                | crate::abilities::AbilityAim::ContactTarget { target } => Some(target),
+                _ => None,
+            },
+            Self::Escape { .. }
             | Self::Respec { .. }
             | Self::Equip { .. }
             | Self::Unequip { .. }
@@ -518,18 +584,117 @@ impl Game {
         self.set_actor_equipment(actor, equipment)
     }
 
+    /// Structural occupancy is checked independently of the actor's optional
+    /// combat component. This is the shared boundary for resource demand.
+    fn equipment_capacity_state(
+        &self,
+        actor: ActorId,
+        equipment: &BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Option<
+        BTreeMap<
+            crate::content_ids::EquipmentCapacityId,
+            crate::equipment_capacity::EquipmentCapacityDeficit,
+        >,
+    > {
+        let owner = self.actors.get(&actor)?;
+        let anatomy = &owner.anatomy;
+        let no_expertise = crate::expertise::ExpertiseOwnership::default();
+        let expertises = owner.combat.as_ref().map_or(&no_expertise, |combat| {
+            &combat.creature().derived().expertises
+        });
+        let mut demands = Vec::new();
+        for (socket, item) in equipment {
+            let slot = self
+                .content
+                .rules
+                .equipment_slot(anatomy.slots.get(usize::from(socket.0))?)?;
+            let item = self.items.get(item)?;
+            if item.location != ItemLocation::Carried(actor)
+                || item.spec.equipment.as_ref()?.slot != slot.id
+            {
+                return None;
+            }
+            if let crate::equipment_capacity::EquipmentCapacityUse::Shared { resource, units } =
+                &slot.capacity
+            {
+                let profile = item
+                    .spec
+                    .equipment
+                    .as_ref()?
+                    .weapon_profile
+                    .as_ref()
+                    .map(|profile| profile.validate(&self.content.rules))
+                    .transpose()
+                    .ok()?;
+                let minimum = profile
+                    .as_ref()
+                    .map_or(1, |profile| profile.minimum_grip_demand());
+                let current = profile
+                    .as_ref()
+                    .map_or(1, |profile| profile.resolve(expertises).grip_demand());
+                demands.push((
+                    resource.clone(),
+                    units.checked_mul(u16::from(minimum))?,
+                    units.checked_mul(u16::from(current))?,
+                ));
+            }
+        }
+        crate::equipment_capacity::capacity_deficits(&anatomy.capacities, demands)
+    }
+
     fn equipment_candidate(
         &self,
         actor: ActorId,
         equipment: BTreeMap<EquipmentSlotId, ItemId>,
     ) -> Result<crate::lifecycle::ActorOutcome, GameError> {
+        self.equipment_candidate_with_frozen_pool(actor, equipment, None)
+    }
+    fn equipment_candidate_with_frozen_pool(
+        &self,
+        actor: ActorId,
+        equipment: BTreeMap<EquipmentSlotId, ItemId>,
+        frozen_pool: Option<&crate::content_ids::EquipmentCapacityId>,
+    ) -> Result<crate::lifecycle::ActorOutcome, GameError> {
+        let deficits = self
+            .equipment_capacity_state(actor, &equipment)
+            .ok_or(GameError::ItemUnavailable)?;
+        let original = self.actors.get(&actor).ok_or(GameError::UnknownActor)?;
+        for (socket, item) in &equipment {
+            if original.equipment.get(socket) == Some(item) {
+                continue;
+            }
+            let slot = self
+                .content
+                .rules
+                .equipment_slot(&original.anatomy.slots[usize::from(socket.0)])
+                .ok_or(GameError::ItemUnavailable)?;
+            if slot.capacity.resource().is_some_and(|resource| {
+                Some(resource) != frozen_pool && deficits.contains_key(resource)
+            }) {
+                return Err(GameError::ItemUnavailable);
+            }
+        }
         let mut outcome = self.settled_actor_outcome(actor)?;
+        self.refresh_equipment_outcome(&mut outcome, equipment)?;
+        Ok(outcome)
+    }
+
+    /// Recompile equipment on the caller's owned state, preserving already-paid
+    /// resources and lifecycle changes in the same completion transaction.
+    pub(crate) fn refresh_equipment_outcome(
+        &self,
+        outcome: &mut crate::lifecycle::ActorOutcome,
+        equipment: BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Result<(), GameError> {
+        let actor = outcome.id;
+        self.equipment_capacity_state(actor, &equipment)
+            .ok_or(GameError::ItemUnavailable)?;
         if let Some(combat) = outcome.state.combat.as_mut() {
             let sources = equipment
                 .iter()
                 .map(|(socket, id)| {
                     let item = self.items.get(id).ok_or(GameError::ItemUnavailable)?;
-                    item.equipment_source(*id, *socket)
+                    item.equipment_source(*id, *socket, &self.content.rules)
                         .ok_or(GameError::ItemUnavailable)
                 })
                 .collect::<Result<Vec<_>, GameError>>()?;
@@ -544,7 +709,7 @@ impl Game {
             }
         }
         outcome.state.equipment = equipment;
-        Ok(outcome)
+        Ok(())
     }
 
     fn set_actor_equipment(
@@ -722,12 +887,20 @@ impl Game {
             Work::Escape { .. } | Work::Respec { .. } | Work::Zap { .. } => {
                 unreachable!("distinct frozen plan")
             }
-            Work::Equip { item, slot } => crate::abilities::Plan::Equip {
-                actor,
-                item,
-                slot,
-                preparation,
-            },
+            Work::Equip { item, slot } => {
+                let allocation = self.capture_equip_allocation(actor, item, slot)?;
+                crate::abilities::Plan::Equip {
+                    actor,
+                    item,
+                    slot,
+                    preparation: if allocation.quickdraw(&self.content.rules) {
+                        0
+                    } else {
+                        preparation
+                    },
+                    allocation,
+                }
+            }
             Work::Unequip { item } => crate::abilities::Plan::Unequip {
                 actor,
                 item,
@@ -862,6 +1035,12 @@ impl Game {
             return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
         }
         let actor = plan.actor();
+        if plan
+            .as_ability()
+            .is_some_and(|ability| !self.frozen_weapon_available(actor, &ability.weapon))
+        {
+            return Err(GameError::ItemUnavailable);
+        }
         self.settle_actor_time(actor)?;
         if let crate::abilities::Plan::Escape(escape) = &plan {
             self.settle_actor_time(escape.holder)?;
@@ -958,11 +1137,13 @@ impl Game {
                 .ok_or(GameError::UnknownActor)?
                 .start_preparation_cost(owner, cost)?;
             if self.survival_diagnostics.is_some() && started == crate::costs::StartCost::Started {
-                crate::survival_diagnostics::checked_add(
-                    outcome.survival.paid_start.get_mut(cost.resource),
-                    u64::from(cost.start),
-                    &mut outcome.survival.incomplete,
-                );
+                for cost in cost.entries() {
+                    crate::survival_diagnostics::checked_add(
+                        outcome.survival.paid_start.get_mut(cost.resource),
+                        u64::from(cost.start),
+                        &mut outcome.survival.incomplete,
+                    );
+                }
             }
         }
         if !resuming {
@@ -1073,12 +1254,13 @@ impl Game {
     pub(crate) fn finish_item_work(
         &mut self,
         actor: ActorId,
-        work: Work,
+        plan: &crate::abilities::Plan,
         intention: Option<crate::IntentionId>,
         observed: bool,
         consumed_identity: Option<String>,
     ) -> Result<(), GameError> {
         use crate::lifecycle::{ItemChange, ItemOutcome};
+        let work = plan.work();
         let item = work.item().ok_or(GameError::ItemUnavailable)?;
         let change = match work {
             Work::Equip { slot, .. } => {
@@ -1089,7 +1271,17 @@ impl Game {
                     .equipment
                     .clone();
                 equipment.insert(slot, item);
-                let mut outcome = self.equipment_candidate(actor, equipment)?;
+                let crate::abilities::Plan::Equip { allocation, .. } = plan else {
+                    return Err(GameError::ItemUnavailable);
+                };
+                if !self.frozen_equip_available(actor, item, slot, allocation) {
+                    return Err(GameError::ItemUnavailable);
+                }
+                let mut outcome = self.equipment_candidate_with_frozen_pool(
+                    actor,
+                    equipment,
+                    allocation.resource(self, actor, slot),
+                )?;
                 if let Some(gear) = self.items.get(&item).filter(|item| {
                     item.spec
                         .equipment
@@ -1156,6 +1348,7 @@ impl Game {
                 && entry.source == token.source
                 && entry.qualification == token.qualification
                 && entry.order == token.order
+                && entry.generation == token.generation
         };
         let claims_valid = state.pending.as_ref().is_none_or(|preparation| {
             preparation.plan.tokens().all(|token| {
@@ -1194,6 +1387,7 @@ impl Game {
         let a = &self.actors[&actor];
         let equipped: BTreeSet<_> = a.equipment.values().collect();
         a.anatomy.valid(&self.content.rules)
+            && self.equipment_capacity_state(actor, &a.equipment).is_some()
             && equipped.len() == a.equipment.len()
             && a.equipment.iter().all(|(slot, item)| {
                 self.items.get(item).is_some_and(|i| {

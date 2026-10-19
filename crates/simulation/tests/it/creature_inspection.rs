@@ -95,9 +95,7 @@ fn trusted_inspection_preserves_paid_preparation_and_exposes_owned_sources() {
         ActorId(1),
         Action::UseAbility {
             id: AbilityId::new("spark_lance_fire").unwrap(),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: ActorId(2),
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
             supplies: Default::default(),
         },
         IntentionOrigin::Human,

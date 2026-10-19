@@ -74,7 +74,7 @@ class PublicPlanProcesses(ProcessTestCase):
         self.assertIsNone(historical["state"]["ability"])
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "subject")
-        result = self.act(player, {"type": "use_ability", "id": "growth_finisher", "invocation": {"kind": "actor_target", "target": target}})
+        result = self.act(player, {"type": "use_ability", "id": "growth_finisher", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         self.assertIsNone(result["error"])
         overview = self.command(player, {"type": "advancement", "command": "overview"})
         self.assertIsNone(overview["error"])

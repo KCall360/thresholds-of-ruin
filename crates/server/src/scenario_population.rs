@@ -11,6 +11,56 @@ const MAX_ATTEMPTS: u16 = runtime::MAX_ATTEMPTS;
 const MAX_LOADOUT: usize = 64;
 const MAX_CARRIED_ITEM_POOLS: usize = runtime::MAX_CARRIED_ITEM_POOLS;
 
+/// Fixed prepared definitions and content for one population-plan compilation.
+/// A label locates at most one candidate; every compiled recipe field must match.
+struct PopulationBirthValidation<'a> {
+    index: &'a PackageIndex,
+    successful: BTreeMap<String, runtime::PreparedActorChoice>,
+    #[cfg(test)]
+    checks: usize,
+}
+impl<'a> PopulationBirthValidation<'a> {
+    fn new(index: &'a PackageIndex) -> Self {
+        Self {
+            index,
+            successful: BTreeMap::new(),
+            #[cfg(test)]
+            checks: 0,
+        }
+    }
+    fn validate(&mut self, choice: &runtime::PreparedActorChoice) -> Result<(), Failure> {
+        if self
+            .successful
+            .get(&choice.content)
+            .is_some_and(|previous| previous.same_spawn_recipe(choice))
+        {
+            return Ok(());
+        }
+        #[cfg(test)]
+        {
+            self.checks += 1;
+        }
+        choice
+            .actor
+            .validate_birth_advancement(
+                self.index.creature_catalog().content().clone(),
+                choice.depth_growth,
+                &choice.advancement,
+            )
+            .map_err(|error| {
+                fail(format!(
+                    "Invalid population depth-growth prototype: {error:?}"
+                ))
+            })?;
+        // Never retain more than one band's capacity. Failures are not retained.
+        if self.successful.len() < MAX_CHOICES || self.successful.contains_key(&choice.content) {
+            self.successful
+                .insert(choice.content.clone(), choice.clone());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioCapabilities {
@@ -613,6 +663,14 @@ impl Package {
         &self,
         index: &PackageIndex,
     ) -> Result<Option<runtime::PopulationPlan>, Failure> {
+        self.population_plan_with_births(&mut PopulationBirthValidation::new(index))
+    }
+
+    fn population_plan_with_births(
+        &self,
+        births: &mut PopulationBirthValidation<'_>,
+    ) -> Result<Option<runtime::PopulationPlan>, Failure> {
+        let index = births.index;
         let Some(plan) = &self.manifest.floor_activation else {
             return Ok(None);
         };
@@ -691,9 +749,7 @@ impl Package {
                                                             choices: crate::creature_authoring::compile_choices(&entry.purchases, entry.attribute.as_ref(), index.creature_catalog().content().rules())?,
                                                         })
                                                     }).collect::<Result<_, Failure>>()?;
-                                                    prepared.actor.validate_birth_advancement(
-                                                        index.creature_catalog().content().clone(), prepared.depth_growth, &prepared.advancement,
-                                                    ).map_err(|error| fail(format!("Invalid population depth-growth prototype: {error:?}")))?;
+                                                    births.validate(&prepared)?;
                                                     Ok(prepared)
                                                 })
                                                 .collect::<Result<_, Failure>>()?,
@@ -1121,6 +1177,146 @@ mod tests {
             }]);
         })
         .unwrap()
+    }
+
+    fn repeated_population_package() -> Package {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+        let mut package = read_package(&root).unwrap();
+        let activation = package.manifest.floor_activation.as_mut().unwrap();
+        let (name, mut profile) = activation
+            .profiles
+            .iter()
+            .next()
+            .map(|(id, p)| (id.clone(), p.clone()))
+            .unwrap();
+        profile
+            .stages
+            .retain(|stage| matches!(stage, PopulationStage::Actors { .. }));
+        profile.stages.truncate(1);
+        let PopulationStage::Actors { bands, .. } = &mut profile.stages[0] else {
+            unreachable!()
+        };
+        let mut first = bands[0].clone();
+        first.choices.truncate(1);
+        *bands = (1..=16)
+            .map(|depth| {
+                let mut band = first.clone();
+                band.depth = PopulationDepth::Finite {
+                    minimum: depth,
+                    maximum: depth,
+                };
+                band.choices[0].weight = depth;
+                band
+            })
+            .collect();
+        activation.profiles = BTreeMap::from([(name, profile)]);
+        package
+    }
+
+    fn first_prepared_population_choice(
+        plan: &runtime::PopulationPlan,
+    ) -> &runtime::PreparedActorChoice {
+        let runtime::PopulationContent::Actors { bands, .. } =
+            &plan.profiles.values().next().unwrap().stages[0].population
+        else {
+            unreachable!()
+        };
+        &bands[0].choices[0]
+    }
+
+    #[test]
+    fn population_birth_validation_counts_once_without_sharing_character_or_seed_witnesses() {
+        let mut package = repeated_population_package();
+        let characters: Vec<_> = package.manifest.characters.iter().map(|c| c.id).collect();
+        let mut witnesses = 0;
+        for selected in &characters {
+            package.selected = *selected;
+            for seed in [0, 1, 42] {
+                let index = package.index(seed).unwrap();
+                for _ in 0..2 {
+                    let mut births = PopulationBirthValidation::new(&index);
+                    let plan = package
+                        .population_plan_with_births(&mut births)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(births.checks, 1);
+                    assert_eq!(plan.protagonist, tor_simulation::ActorId(*selected));
+                    let runtime::PopulationContent::Actors { bands, .. } =
+                        &plan.profiles.values().next().unwrap().stages[0].population
+                    else {
+                        unreachable!()
+                    };
+                    assert_eq!(bands.len(), 16);
+                    for (n, band) in bands.iter().enumerate() {
+                        assert_eq!(band.choices[0].weight, n as u32 + 1);
+                    }
+                    witnesses += 1;
+                }
+            }
+        }
+        assert_eq!(witnesses, characters.len() * 6);
+    }
+
+    #[test]
+    fn population_birth_validation_changed_recipe_and_failed_result_never_reuse_success() {
+        let package = repeated_population_package();
+        let index = package.index(42).unwrap();
+        let plan = package.population_plan(&index).unwrap().unwrap();
+        let original = first_prepared_population_choice(&plan);
+        assert!(original.actor.build.is_some());
+        for case in 0..3 {
+            let mut births = PopulationBirthValidation::new(&index);
+            births.validate(original).unwrap();
+            let mut changed = original.clone();
+            match case {
+                0 => {
+                    let mut build =
+                        serde_json::to_value(changed.actor.build.as_ref().unwrap()).unwrap();
+                    build["species"] = json!("missing-species");
+                    changed.actor.build = Some(serde_json::from_value(build).unwrap());
+                }
+                1 => {
+                    changed.depth_growth =
+                        tor_simulation::prepared_spawn::DepthGrowth::RacialAfter { depth: 0 }
+                }
+                2 => changed
+                    .advancement
+                    .push(tor_simulation::prepared_spawn::OrdinalAdvancement {
+                        ordinal: tor_simulation::HdCount(1),
+                        choices: Default::default(),
+                    }),
+                _ => unreachable!(),
+            }
+            for expected in [2, 3] {
+                assert!(births.validate(&changed).is_err(), "case {case}");
+                assert_eq!(births.checks, expected);
+            }
+            births.validate(original).unwrap();
+            assert_eq!(births.checks, 3);
+            assert_eq!(births.successful.len(), 1);
+        }
+    }
+
+    #[test]
+    fn population_birth_validation_is_bounded_and_content_local() {
+        let package = repeated_population_package();
+        let index = package.index(42).unwrap();
+        let plan = package.population_plan(&index).unwrap().unwrap();
+        let original = first_prepared_population_choice(&plan);
+        let mut births = PopulationBirthValidation::new(&index);
+        for n in 0..=MAX_CHOICES {
+            let mut choice = original.clone();
+            choice.content = format!("recipe-{n}");
+            births.validate(&choice).unwrap();
+        }
+        assert_eq!(births.successful.len(), MAX_CHOICES);
+        assert_eq!(births.checks, MAX_CHOICES + 1);
+        let other = fixture();
+        let other_index = other.index(42).unwrap();
+        let mut other_births = PopulationBirthValidation::new(&other_index);
+        assert!(other_births.validate(original).is_err());
+        assert_eq!(other_births.checks, 1);
+        assert!(other_births.successful.is_empty());
     }
 
     #[test]

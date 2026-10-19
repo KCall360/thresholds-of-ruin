@@ -606,6 +606,12 @@ pub(crate) fn inspect(
         abilities: derived
             .ability_timings
             .iter()
+            .filter(|(id, _)| {
+                !matches!(
+                    rules.ability(id).expect("validated ability").strikes,
+                    s::rules::StrikeSource::Projectile { .. }
+                )
+            })
             .map(|(id, timing)| {
                 let modifiers = derived.ability_values(id);
                 p::CombatTraceStep {
@@ -727,6 +733,18 @@ pub(crate) fn inspect(
                                 strike_count: strikes.len() as u16,
                             }
                         }
+                        s::rules::StrikeSource::Projectile { delivery } => {
+                            p::StrikeSourceInspectionView::Projectile {
+                                delivery: match delivery {
+                                    s::projectile_profiles::ProjectileDeliveryKind::Throw => {
+                                        p::ProjectileDeliveryKind::Throw
+                                    }
+                                    s::projectile_profiles::ProjectileDeliveryKind::Launch => {
+                                        p::ProjectileDeliveryKind::Launch
+                                    }
+                                },
+                            }
+                        }
                         s::rules::StrikeSource::SelectedMelee => {
                             p::StrikeSourceInspectionView::SelectedMelee {}
                         }
@@ -789,6 +807,9 @@ pub(crate) fn inspect(
                                         s::rules::PurchaseKind::SkillRank => {
                                             p::AdvancementKind::SkillRank
                                         }
+                                        s::rules::PurchaseKind::Expertise => {
+                                            p::AdvancementKind::Expertise
+                                        }
                                         s::rules::PurchaseKind::Talent => {
                                             p::AdvancementKind::Talent
                                         }
@@ -810,6 +831,14 @@ pub(crate) fn inspect(
                                     s::creatures::PurchaseSelection::SkillRank(value) => {
                                         p::InspectionPurchaseSelection::SkillRank {
                                             skill: skill(*value),
+                                        }
+                                    }
+                                    s::creatures::PurchaseSelection::Expertise(id) => {
+                                        p::InspectionPurchaseSelection::Expertise {
+                                            expertise: named(
+                                                id,
+                                                rules.expertise(id).map(|def| def.name.as_str()),
+                                            ),
                                         }
                                     }
                                     s::creatures::PurchaseSelection::Talent(id) => {

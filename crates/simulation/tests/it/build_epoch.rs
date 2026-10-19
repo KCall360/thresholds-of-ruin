@@ -84,11 +84,12 @@ fn phase5b_temporary_sources_damage_cooldowns_and_time_preserve_build_epoch() {
     creature
         .start_cost(
             tor_simulation::IntentionId(7),
-            tor_simulation::costs::ResourceCost {
+            tor_simulation::costs::CostBundle::single(tor_simulation::costs::ResourceCost {
                 resource,
                 start: 1,
                 resolution: 0,
-            },
+            })
+            .unwrap(),
         )
         .unwrap();
     creature
@@ -101,6 +102,7 @@ fn phase5b_temporary_sources_damage_cooldowns_and_time_preserve_build_epoch() {
     assert_eq!(epoch(&creature), 2);
     creature
         .set_equipment(vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(1),
             socket: EquipmentSlotId(0),
             modifiers: vec![Modifier {
@@ -261,6 +263,7 @@ fn phase5b_failed_combined_equipment_rebuild_does_not_increment_epoch() {
         .period(creature.build().ledger().total_hd());
     creature
         .set_equipment(vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(1),
             socket: EquipmentSlotId(0),
             // Both operands are legal; their fold reaches the bounded minimum.

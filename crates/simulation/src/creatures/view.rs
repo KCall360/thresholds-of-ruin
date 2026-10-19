@@ -28,10 +28,12 @@ pub struct OwnStats {
     pub conditions: Vec<PersonalCondition>,
     pub health_recovery_reset_percent: u8,
     pub active_talents: BTreeSet<TalentId>,
+    pub expertises: crate::expertise::ExpertiseOwnership,
     pub dormant_talents: BTreeSet<TalentId>,
     /// Granted techniques; target validity and affordability are checked when
     /// invoking them, rather than promised by an inspection snapshot.
     pub abilities: BTreeSet<AbilityId>,
+    pub weapon_abilities: BTreeSet<AbilityId>,
     pub ability_cooldowns: BTreeMap<AbilityId, u64>,
     pub ability_reaches: BTreeMap<AbilityId, crate::rules::Reach>,
 }
@@ -106,8 +108,10 @@ impl CreatureState {
                 })
                 .collect(),
             active_talents: derived.active_talents.clone(),
+            expertises: derived.expertises.clone(),
             dormant_talents: derived.dormant_talents.clone(),
             abilities: derived.abilities.clone(),
+            weapon_abilities: derived.weapon_abilities.clone(),
             ability_cooldowns: derived
                 .abilities
                 .iter()

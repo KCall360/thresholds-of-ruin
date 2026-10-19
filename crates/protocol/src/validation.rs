@@ -200,15 +200,19 @@ impl StateView {
                     let Some(item) = inventory.get(&interaction.item) else {
                         return true;
                     };
-                    (!item.identified && interaction.known_equipment.is_some())
+                    (!item.identified
+                        && (interaction.known_equipment.is_some()
+                            || interaction.known_projectile_bonus.is_some()))
+                        || interaction
+                            .known_projectile_bonus
+                            .as_ref()
+                            .is_some_and(|bonus| !bonus.valid())
                         || (interaction.charges.is_some()
                             && (!item.identified || !interaction.zappable))
                         || interaction.slot.as_ref().is_some_and(|slot| !slot.valid())
                         || (interaction.slot.is_none()
                             && (interaction.equipped_slot.is_some()
-                                || interaction.known_equipment.is_some()
-                                || interaction.known_cursed.is_some()
-                                || interaction.known_protected.is_some()))
+                                || interaction.known_equipment.is_some()))
                         || ((interaction.drinkable || interaction.edible)
                             && interaction.slot.is_some())
                         || (interaction.drinkable && interaction.edible)
@@ -318,6 +322,12 @@ impl crate::OwnStats {
                     && value.balance <= value.maximum
                     && value.available.checked_add(value.reserved) == Some(value.balance)
             })
+            && self.expertises.len() <= crate::MAX_ADVANCEMENT_EXPERTISE_ROWS
+            && unique(self.expertises.iter().map(|row| &row.expertise.id))
+            && self
+                .expertises
+                .iter()
+                .all(crate::AdvancementExpertiseRow::valid)
             && self.active_talents.len() + self.dormant_talents.len() <= crate::MAX_OWNED_TALENTS
             && self
                 .active_talents

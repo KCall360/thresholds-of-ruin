@@ -21,6 +21,7 @@ pub enum ConditionError {
     Duplicate,
     Capacity,
     InvalidOrder,
+    InvalidGeneration,
     InvalidReservation,
     InvalidQualification,
     InvalidPhase,
@@ -103,6 +104,8 @@ pub struct ConditionInstance {
     pub remaining: u64,
     pub stacks: u16,
     pub order: u64,
+    /// Actor-local lifetime identity; independent of compactable application age.
+    pub generation: u64,
     #[serde(deserialize_with = "read_reservation")]
     pub reserved_by: Option<ActorId>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -119,6 +122,7 @@ impl<'de> serde::Deserialize<'de> for ConditionInstance {
             remaining: u64,
             stacks: u16,
             order: u64,
+            generation: u64,
             #[serde(deserialize_with = "read_reservation")]
             reserved_by: Option<ActorId>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -132,6 +136,7 @@ impl<'de> serde::Deserialize<'de> for ConditionInstance {
             remaining: fields.remaining,
             stacks: fields.stacks,
             order: fields.order,
+            generation: fields.generation,
             reserved_by: fields.reserved_by,
             qualification: fields.qualification,
         })
@@ -153,6 +158,8 @@ pub struct TokenReservation {
     pub condition: ConditionId,
     pub source: ActorId,
     pub order: u64,
+    /// Actor-local lifetime identity; independent of compactable application age.
+    pub generation: u64,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub qualification: Option<TokenQualification>,
 }
@@ -165,6 +172,7 @@ impl<'de> serde::Deserialize<'de> for TokenReservation {
             condition: ConditionId,
             source: ActorId,
             order: u64,
+            generation: u64,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             qualification: Option<TokenQualification>,
         }
@@ -174,6 +182,7 @@ impl<'de> serde::Deserialize<'de> for TokenReservation {
             condition: fields.condition,
             source: fields.source,
             order: fields.order,
+            generation: fields.generation,
             qualification: fields.qualification,
         })
     }
@@ -182,6 +191,7 @@ impl<'de> serde::Deserialize<'de> for TokenReservation {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ConditionState {
     entries: BTreeMap<(ConditionId, ActorId), ConditionEntry>,
+    next_generation: u64,
 }
 /// Immutable definition-derived metadata stays beside its bounded book entry.
 /// Only the instance is saved; restore re-derives this metadata from pinned rules.
@@ -234,6 +244,11 @@ fn end_active(entry: &mut ConditionEntry, reason: ConditionEnd) -> bool {
     entry.remaining > 0
 }
 impl ConditionState {
+    /// Persist this counter even when no instances remain. Generations are never
+    /// reused within this actor's lifetime; `u64::MAX` means allocation is exhausted.
+    pub fn next_generation(&self) -> u64 {
+        self.next_generation
+    }
     pub fn instances(&self) -> impl Iterator<Item = &ConditionInstance> {
         self.entries.values().map(|entry| &entry.instance)
     }
@@ -353,13 +368,18 @@ impl ConditionState {
     }
     pub fn from_recorded(
         entries: Vec<ConditionInstance>,
+        next_generation: u64,
         rules: &Ruleset,
     ) -> Result<Self, ConditionError> {
         if entries.len() > crate::limits::CONDITIONS {
             return Err(ConditionError::Capacity);
         }
-        let mut state = Self::default();
+        let mut state = Self {
+            entries: BTreeMap::new(),
+            next_generation,
+        };
         let mut orders = std::collections::BTreeSet::new();
+        let mut generations = std::collections::BTreeSet::new();
         for entry in entries {
             let def = rules
                 .condition(&entry.condition)
@@ -402,6 +422,9 @@ impl ConditionState {
             }
             if !orders.insert(entry.order) {
                 return Err(ConditionError::InvalidOrder);
+            }
+            if entry.generation >= next_generation || !generations.insert(entry.generation) {
+                return Err(ConditionError::InvalidGeneration);
             }
             let key = key(def, entry.source);
             if state
@@ -498,6 +521,13 @@ impl ConditionState {
             };
             return Ok(update);
         }
+        // Check lifetime allocation before evicting or compacting any entry.
+        // Renewals above do not allocate a new instance and remain valid even
+        // after this counter is exhausted.
+        let generation = self.next_generation;
+        let next_generation = generation
+            .checked_add(1)
+            .ok_or(ConditionError::InvalidGeneration)?;
         if self.entries.values().any(|entry| entry.order == u64::MAX)
             && self
                 .entries
@@ -563,12 +593,14 @@ impl ConditionState {
                     remaining: duration,
                     stacks: 1,
                     order,
+                    generation,
                     reserved_by: None,
                     qualification,
                 },
                 def,
             ),
         );
+        self.next_generation = next_generation;
         Ok(update)
     }
     pub fn retain(&mut self, mut keep: impl FnMut(&ConditionId) -> bool) -> bool {
@@ -679,18 +711,39 @@ impl ConditionState {
         } else {
             ConditionLifecycle::NextCheck
         };
+        self.available_tokens(rules, holder, lifecycle, |scope| {
+            !incoming
+                && check.is_some_and(|(opponent, ability, role)| {
+                    role == crate::rules::CheckActor::User
+                        && scope.matches(opponent, Some(ability), rules)
+                })
+        })
+    }
+    /// Collect source candidates without looking at future collision occupants.
+    /// Actual opponent qualification remains a release-time participation check.
+    pub(crate) fn targetless_attack_tokens(
+        &self,
+        rules: &Ruleset,
+        holder: ActorId,
+        ability: &AbilityId,
+    ) -> Vec<TokenReservation> {
+        self.available_tokens(rules, holder, ConditionLifecycle::NextCheck, |scope| {
+            scope.matches(scope.opponent, Some(ability), rules)
+        })
+    }
+    fn available_tokens(
+        &self,
+        rules: &Ruleset,
+        holder: ActorId,
+        lifecycle: ConditionLifecycle,
+        qualifies: impl Fn(&TokenQualification) -> bool,
+    ) -> Vec<TokenReservation> {
         self.entries
             .values()
             .filter(|entry| {
                 entry.phase == ConditionPhase::Active
                     && entry.reserved_by.is_none()
-                    && entry.qualification.as_ref().is_none_or(|scope| {
-                        !incoming
-                            && check.is_some_and(|(opponent, ability, role)| {
-                                role == crate::rules::CheckActor::User
-                                    && scope.matches(opponent, Some(ability), rules)
-                            })
-                    })
+                    && entry.qualification.as_ref().is_none_or(&qualifies)
                     && rules
                         .condition(&entry.condition)
                         .is_some_and(|def| def.lifecycle == lifecycle)
@@ -700,6 +753,7 @@ impl ConditionState {
                 condition: entry.condition.clone(),
                 source: entry.source,
                 order: entry.order,
+                generation: entry.generation,
                 qualification: entry.qualification.clone(),
             })
             .collect()
@@ -726,6 +780,7 @@ impl ConditionState {
                 entry.condition == token.condition
                     && entry.source == token.source
                     && entry.order == token.order
+                    && entry.generation == token.generation
                     && entry.qualification == token.qualification
             })
             .ok_or(ConditionError::InvalidReservation)?;
@@ -745,6 +800,7 @@ impl ConditionState {
             !(entry.condition == token.condition
                 && entry.source == token.source
                 && entry.order == token.order
+                && entry.generation == token.generation
                 && entry.qualification == token.qualification
                 && entry.reserved_by == Some(owner))
         });
@@ -1105,6 +1161,84 @@ mod tests {
     }
 
     #[test]
+    fn expired_token_candidate_cannot_reserve_or_consume_reapplied_instance() {
+        assert_reapplied_token_has_distinct_identity(false);
+    }
+
+    #[test]
+    fn cleared_token_candidate_cannot_reserve_or_consume_reapplied_instance() {
+        assert_reapplied_token_has_distinct_identity(true);
+    }
+
+    fn assert_reapplied_token_has_distinct_identity(clear: bool) {
+        let rules = crate::test_creatures::ruleset();
+        let def = rules
+            .condition(&ConditionId::new("readied").unwrap())
+            .unwrap();
+        let mut state = ConditionState::default();
+        state.apply(def, ActorId(7), 40, false).unwrap();
+        let stale = state
+            .targetless_attack_tokens(&rules, ActorId(1), &AbilityId::new("basic_melee").unwrap())
+            .pop()
+            .unwrap();
+        if clear {
+            state.clear();
+        } else {
+            state.advance_active(40);
+        }
+        assert!(state.is_empty());
+        assert_eq!(state.next_generation(), 1);
+        state.apply(def, ActorId(7), 40, false).unwrap();
+        let fresh = state
+            .qualifying_tokens(&rules, ActorId(1), false)
+            .pop()
+            .unwrap();
+        assert_eq!(stale.order, fresh.order, "age deliberately repeats");
+        assert_ne!(stale.generation, fresh.generation);
+        let before = state.clone();
+        assert_eq!(
+            state.reserve(&stale, ActorId(2), &rules),
+            Err(ConditionError::InvalidReservation)
+        );
+        assert_eq!(state, before);
+        assert_eq!(state.reserve(&fresh, ActorId(2), &rules), Ok(true));
+        let held = state.clone();
+        assert!(!state.consume_reservation(&stale, ActorId(2)));
+        assert_eq!(state, held);
+        assert!(state.consume_reservation(&fresh, ActorId(2)));
+        assert_eq!(state.next_generation(), 2);
+    }
+
+    #[test]
+    fn condition_instance_and_token_records_require_generation() {
+        let rules = crate::test_creatures::ruleset();
+        let def = rules
+            .condition(&ConditionId::new("readied").unwrap())
+            .unwrap();
+        let mut state = ConditionState::default();
+        state.apply(def, ActorId(7), 40, false).unwrap();
+        let instance = state.instances().next().unwrap();
+        let token = state
+            .qualifying_tokens(&rules, ActorId(1), false)
+            .pop()
+            .unwrap();
+        let mut instance_value = serde_json::to_value(instance).unwrap();
+        let mut token_value = serde_json::to_value(&token).unwrap();
+        assert_eq!(
+            serde_json::from_value::<ConditionInstance>(instance_value.clone()).unwrap(),
+            *instance
+        );
+        assert_eq!(
+            serde_json::from_value::<TokenReservation>(token_value.clone()).unwrap(),
+            token
+        );
+        instance_value.as_object_mut().unwrap().remove("generation");
+        token_value.as_object_mut().unwrap().remove("generation");
+        assert!(serde_json::from_value::<ConditionInstance>(instance_value).is_err());
+        assert!(serde_json::from_value::<TokenReservation>(token_value).is_err());
+    }
+
+    #[test]
     fn reserved_tokens_cannot_be_reused_refreshed_or_evicted_and_expiry_keeps_the_hold() {
         let rules = Ruleset::validate(toml::from_str(DEFAULT_RULESET_TOML).unwrap()).unwrap();
         let def = rules
@@ -1133,8 +1267,12 @@ mod tests {
         assert_eq!(state.instances().next().unwrap().remaining, 0);
         assert!(state.next_expiry_in().is_none());
         assert!(state.sources(&rules).is_empty());
-        let restored =
-            ConditionState::from_recorded(state.instances().cloned().collect(), &rules).unwrap();
+        let restored = ConditionState::from_recorded(
+            state.instances().cloned().collect(),
+            state.next_generation(),
+            &rules,
+        )
+        .unwrap();
         assert_eq!(restored, state);
         assert!(state.consume_reservation(&token, ActorId(2)));
         assert!(state.is_empty());

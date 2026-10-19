@@ -162,10 +162,11 @@ fn frozen_strike(ordinal: u16, offset: u64) -> Value {
 fn frozen_plan(strikes: Vec<Value>) -> Value {
     json!({
         "ambush": null,
+        "weapon": {"kind":"unselected"},
         "actor": 1,
         "initial_hold": null,
         "hold_damage_increment": 0,
-        "invocation": {"kind": "actor_target", "target": 2},
+        "invocation": {"aim":{"kind": "actor_target", "target": 2},"weapon":{"kind":"default"}},
         "step": null,
         "target": 2,
         "ability": "basic_melee",
@@ -366,7 +367,7 @@ pub(super) fn sequence_game_on_world_configured(
             ActorId(1),
             Action::UseAbility {
                 id,
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -2967,6 +2968,7 @@ fn qualified_readied_does_not_contribute_or_reserve_for_defending_against_foes_a
             condition: instance.condition,
             source: instance.source,
             order: instance.order,
+            generation: instance.generation,
             qualification: instance.qualification,
         },
         site: super::CheckSite {
@@ -3672,9 +3674,7 @@ fn ordered_strikes_self_step_retreat_never_replaces_paid_prefix() {
         .ability_plan_with_supplies(
             ActorId(1),
             &crate::content_ids::AbilityId::new("prefix_step_probe").unwrap(),
-            crate::abilities::AbilityInvocation::SelfStep {
-                direction: direction.try_into().unwrap()
-            },
+            crate::abilities::AbilityInvocation::self_step(direction.try_into().unwrap()),
             Default::default()
         )
         .is_ok());
@@ -3855,6 +3855,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
                 id: talent_id.clone(),
                 name: "Nonmagical sequence training".into(),
                 form_choices: vec![],
+                expertise_grants: vec![],
                 prerequisites: vec![],
                 requirement: Requirement::Flag {
                     flag: FlagId::new("magical").unwrap(),
@@ -3904,7 +3905,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
             ActorId(1),
             Action::UseAbility {
                 id: ability_id.clone(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -4078,4 +4079,96 @@ fn nonfood_nourishment_counts_the_other_recipient_without_a_food_offer() {
         .all(|flow| flow.nourishment_offered == 0
             && flow.nourishment_wasted == 0
             && flow.food_consumed == 0));
+}
+
+#[test]
+fn exhausted_condition_generation_rolls_back_mixed_resolution_payment_and_rng() {
+    use crate::{rules::*, ActorId};
+    let (mut game, _) = sequence_game_custom(
+        &[0],
+        |ability| {
+            ability.cost = Some(crate::rules::Cost {
+                resource: crate::resources::Resource::Focus,
+                start: 0,
+                resolution: 1,
+            });
+            let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                unreachable!()
+            };
+            strikes[0].check = Some(CheckDef {
+                actor: CheckActor::User,
+                skill: SkillSelector::NaturalAttack,
+                against: Against::Difficulty {
+                    formula: Formula {
+                        base: -1000,
+                        skill: None,
+                        attribute: None,
+                    },
+                },
+            });
+            strikes[0].on_success.push(Effect::ApplyCondition {
+                condition: crate::content_ids::ConditionId::new("fear").unwrap(),
+                duration: 100,
+            });
+        },
+        |_, _| {},
+    );
+    let original = game.creature(ActorId(2)).unwrap();
+    let mut record =
+        serde_json::to_value(crate::creatures::record::CreatureRecord::capture(&original)).unwrap();
+    record["next_condition_generation"] = json!(u64::MAX);
+    let exhausted = serde_json::from_value::<crate::creatures::record::CreatureRecord>(record)
+        .unwrap()
+        .restore(game.content.clone(), vec![])
+        .unwrap();
+    let identity = game.actors[&ActorId(2)].combat.as_ref().unwrap().identity();
+    game.actors.get_mut(&ActorId(2)).unwrap().combat = Some(
+        crate::actor_creatures::CombatState::from_creature(identity, exhausted),
+    );
+    let before = game.clone();
+    let result = game.with_effect_publication(|candidate| {
+        candidate.tick = 10;
+        candidate.resolve_preparations()
+    });
+    assert!(result.is_err());
+    assert_eq!(
+        game, before,
+        "failed second effect must roll back damage, charge, RNG and publication"
+    );
+    let mut original_shared = crate::checkpoint::SharedState::default();
+    let original_snapshot = before.checkpoint(&mut original_shared);
+    let mut after_shared = crate::checkpoint::SharedState::default();
+    let after_snapshot = game.checkpoint(&mut after_shared);
+    assert_eq!(
+        serde_json::to_value((after_snapshot, after_shared)).unwrap(),
+        serde_json::to_value((original_snapshot, original_shared)).unwrap()
+    );
+    // The same authored action succeeds with an available generation.
+    let target = game.creature(ActorId(2)).unwrap();
+    let mut record =
+        serde_json::to_value(crate::creatures::record::CreatureRecord::capture(&target)).unwrap();
+    record["next_condition_generation"] = json!(0);
+    let restored = serde_json::from_value::<crate::creatures::record::CreatureRecord>(record)
+        .unwrap()
+        .restore(game.content.clone(), vec![])
+        .unwrap();
+    let identity = game.actors[&ActorId(2)].combat.as_ref().unwrap().identity();
+    game.actors.get_mut(&ActorId(2)).unwrap().combat = Some(
+        crate::actor_creatures::CombatState::from_creature(identity, restored),
+    );
+    let rng = game.rules_rng;
+    game.with_effect_publication(|candidate| {
+        candidate.tick = 10;
+        candidate.resolve_preparations()
+    })
+    .unwrap();
+    assert_ne!(game.rules_rng, rng);
+    assert!(game.creature(ActorId(2)).unwrap().health().injury() > 0);
+    assert_eq!(
+        game.creature(ActorId(2))
+            .unwrap()
+            .conditions()
+            .next_generation(),
+        1
+    );
 }

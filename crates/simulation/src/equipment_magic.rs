@@ -343,7 +343,7 @@ impl Game {
                 .map(|(socket, id)| {
                     self.items
                         .get(id)
-                        .and_then(|i| i.equipment_source(*id, *socket))
+                        .and_then(|i| i.equipment_source(*id, *socket, &self.content.rules))
                         .ok_or(GameError::ItemUnavailable)
                 })
                 .collect::<Result<Vec<_>, _>>()?;

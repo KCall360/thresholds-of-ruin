@@ -48,6 +48,7 @@ fn snapshot(identify: bool) -> Snapshot {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,

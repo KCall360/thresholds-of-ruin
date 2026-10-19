@@ -57,6 +57,8 @@ impl PendingRequest {
             | ServerMessage::CreatureInspection { request_id, .. }
             | ServerMessage::CreatureStrikePage { request_id, .. }
             | ServerMessage::AdvancementPage { request_id, .. }
+            | ServerMessage::AbilityWeaponPreview { request_id, .. }
+            | ServerMessage::ProjectileChoices { request_id, .. }
             | ServerMessage::MapPage { request_id, .. }
             | ServerMessage::CombatDiagnostics { request_id, .. } => request_id == &self.id,
             ServerMessage::Error {
@@ -95,7 +97,7 @@ mod tests {
     use super::*;
     use tor_protocol::*;
 
-    fn reply_context() -> ReplyContext {
+    pub(super) fn reply_context() -> ReplyContext {
         ReplyContext {
             input: InputContext {
                 stream: StreamContext {
@@ -199,6 +201,36 @@ mod tests {
         assert!(matches!(
             pending.record(&unrelated, true, true),
             Some(RequestCompletion::Unknown)
+        ));
+    }
+}
+
+#[cfg(test)]
+mod projectile_completion_tests {
+    use super::*;
+    use tor_protocol::*;
+    #[test]
+    fn projectile_page_completes_only_its_own_correlated_request_after_repair() {
+        let message = ServerMessage::ProjectileChoices {
+            context: super::tests::reply_context(),
+            request_id: "projectile".into(),
+            page: Box::new(ProjectileChoicePage {
+                query: ProjectileChoiceQuery {
+                    ability: "throw".into(),
+                    phase: ProjectileChoicePhase::Sources {},
+                    offset: 0,
+                },
+                choices: vec![],
+                next_offset: Some(128),
+            }),
+        };
+        let mut wrong = PendingRequest::new("other".into());
+        assert!(wrong.record(&message, true, false).is_none());
+        let mut pending = PendingRequest::new("projectile".into());
+        assert!(pending.record(&message, false, false).is_none());
+        assert!(matches!(
+            pending.record(&message, true, false),
+            Some(RequestCompletion::Reply(ConfirmedReply::Completed))
         ));
     }
 }

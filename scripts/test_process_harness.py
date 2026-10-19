@@ -495,7 +495,7 @@ class ActionCompletion(unittest.TestCase):
         harness = ProcessTestCase()
         player = object()
         action = {"type": "use_ability", "id": "basic_melee",
-                  "invocation": {"kind": "actor_target", "target": "disclosed-foe"},
+                  "invocation": {"aim": {"kind": "actor_target", "target": "disclosed-foe"}, "weapon": {"kind": "default"}},
                   "supplies": {"kind": "carried"}}
 
         def lifecycle(phase, *, identity="paid-1", revision="983", resume=()):

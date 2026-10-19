@@ -356,7 +356,7 @@ fn rejected(messages: Vec<ServerMessage>, code: ErrorCode) {
 fn attack(id: &str, target: ActorTarget) -> Action {
     Action::UseAbility {
         id: id.into(),
-        invocation: AbilityInvocation::ActorTarget { target },
+        invocation: tor_protocol::AbilityInvocation::actor_target(target),
         supplies: SupplySelection::Carried,
     }
 }
@@ -439,7 +439,8 @@ fn encoded_service_preserves_contact_and_apparent_object_authority() {
     let after = p.snapshot(OWNER);
     assert!(after.state.observation.tick > initial.state.observation.tick);
     assert!(after.history.entries.iter().any(|entry| matches!(&entry.content,
-        HistoryContent::Action { action, event: Event::AbilityStarted { target, .. } } if action == &melee && *target == contact)));
+        HistoryContent::Action { action, event } if action == &melee
+            && matches!(event.as_ref(), Event::AbilityStarted { target, .. } if *target == contact))));
     assert!(after.state.observation.combat.as_ref().unwrap().events.iter().any(|event| matches!(event, CombatEventView::Ability { target: Some(target), .. } if *target == contact)));
     for (message, text) in &p.owner_frames {
         // Theme palettes are public asset catalogs, not subject-linked disclosure.
@@ -481,8 +482,11 @@ fn encoded_service_preserves_contact_and_apparent_object_authority() {
                         item: requested,
                         quantity: None,
                     },
-                event: Event::Dropped { item, result, .. },
-            } if requested == item => Some(*result),
+                event,
+            } => match event.as_ref() {
+                Event::Dropped { item, result, .. } if requested == item => Some(*result),
+                _ => None,
+            },
             _ => None,
         })
         .expect("real ordinary drop provenance");
@@ -577,8 +581,13 @@ fn encoded_service_preserves_contact_and_apparent_object_authority() {
                 && row.asset.as_deref() == Some("creature.xeroc")
                 && row.appearance_seed.is_some()));
     }
-    assert!(revealed.history.entries.iter().any(|entry| matches!(&entry.content,
-        HistoryContent::Action { action: Action::Take { item, quantity: None }, event: Event::Waited } if *item == token)));
+    assert!(revealed
+        .history
+        .entries
+        .iter()
+        .any(|entry| matches!(&entry.content,
+        HistoryContent::Action { action: Action::Take { item, quantity: None }, event }
+            if *item == token && matches!(event.as_ref(), Event::Waited))));
     x.reject(
         "stale-apparent",
         Action::Take {

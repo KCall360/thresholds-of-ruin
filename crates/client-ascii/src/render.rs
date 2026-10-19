@@ -460,7 +460,11 @@ impl Canvas {
         if !app.ability_choices.is_empty() {
             self.screen(
                 "ABILITIES",
-                "UP/DOWN selects   ENTER chooses a target   ESC cancels",
+                if app.weapon_selection_available() {
+                    "UP/DOWN selects   TAB weapon   ENTER target   ESC cancels"
+                } else {
+                    "UP/DOWN selects   ENTER target   ESC cancels"
+                },
             );
             for (i, ability) in app.ability_choices.iter().enumerate() {
                 self.text(
@@ -539,6 +543,52 @@ impl Canvas {
                 "UP/DOWN selects   SPACE toggles exact items   ENTER uses   ESC cancels",
             );
             let rows = app.supply_rows();
+            let start = app.selected.saturating_sub(12);
+            for (index, row) in rows.iter().skip(start).take(15).enumerate() {
+                self.text(72, 152 + index * 26, row, TEXT, 2, 70);
+            }
+        }
+        if let Some(menu) = &app.projectile_selection {
+            self.screen(
+                &menu.title(),
+                if menu.step() == tor_client_common::projectiles::Step::Direction {
+                    "Movement keys choose direction   ESC cancels"
+                } else {
+                    "UP/DOWN selects   ENTER chooses   LEFT/RIGHT pages   ESC cancels"
+                },
+            );
+            let rows = app.projectile_rows();
+            let start = app.selected.saturating_sub(12);
+            for (index, row) in rows.iter().skip(start).take(18).enumerate() {
+                self.text(72, 152 + index * 26, row, TEXT, 2, 70);
+            }
+        }
+        if app.weapon_confirmation.is_some() {
+            self.screen(
+                "EXACT WEAPON ACTION PREVIEW",
+                "ENTER commits after reply   ESC cancels",
+            );
+            let mut line = 0;
+            for row in app.weapon_preview_rows() {
+                for chunk in row.chars().collect::<Vec<_>>().chunks(65) {
+                    self.text(
+                        72,
+                        152 + line * 24,
+                        &chunk.iter().collect::<String>(),
+                        TEXT,
+                        2,
+                        65,
+                    );
+                    line += 1;
+                }
+            }
+        }
+        if app.weapon_selection.is_some() {
+            self.screen(
+                "WEAPON FOR THIS ACTION",
+                "UP/DOWN selects   ENTER chooses   ESC keeps previous choice",
+            );
+            let rows = app.weapon_rows();
             let start = app.selected.saturating_sub(12);
             for (index, row) in rows.iter().skip(start).take(15).enumerate() {
                 self.text(72, 152 + index * 26, row, TEXT, 2, 70);

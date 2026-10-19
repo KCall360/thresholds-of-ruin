@@ -11,7 +11,7 @@ def source(name):
 
 
 class RogueEquipmentContent(unittest.TestCase):
-    def test_generated_gear_has_explicit_source_distribution_and_no_launchers(self):
+    def test_generated_gear_keeps_source_distributions_and_nonlauncher_damage(self):
         items = source("catalog/items.toml")["items"]
         weapons = {"generated_mace": (2, 4), "long_sword": (3, 4), "dagger": (1, 6),
                    "two_handed_sword": (4, 4), "spear": (2, 3)}
@@ -20,7 +20,7 @@ class RogueEquipmentContent(unittest.TestCase):
                  "banded_mail": 5, "plate_mail": 6}
         generated = {key for key, value in items.items()
                      if value.get("equipment_generation", {}).get("kind") in ("weapon", "armor")}
-        self.assertEqual(generated, {"rogue." + key for key in weapons | armor})
+        self.assertEqual(generated, {"rogue." + key for key in weapons | armor} | {"rogue.shortbow"})
         for key, dice in weapons.items():
             item = items["rogue." + key]
             self.assertEqual(item["class"], "weapon")
@@ -79,19 +79,28 @@ class RogueEquipmentContent(unittest.TestCase):
         stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([stage["id"] for stage in stages], ["rogue.eight_species_foes", "rogue.bandages",
                          "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions",
-                         "rogue.magic_scrolls", "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls"])
+                         "rogue.magic_scrolls", "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition"])
         expected = [
             ["healing", "confusion", "blindness"],
             ["identify_potion", "identify_scroll", "identify_wand", "sleep"],
             ["wand_fire", "wand_cold", "wand_lightning"],
             ["generated_mace", "long_sword", "dagger", "two_handed_sword", "spear", "leather_armor",
-             "generated_ring_mail", "studded_leather", "scale_mail", "chain_mail", "splint_mail", "banded_mail", "plate_mail"],
+             "generated_ring_mail", "studded_leather", "scale_mail", "chain_mail", "splint_mail", "banded_mail", "plate_mail", "shortbow"],
             ["enchant_armor", "protect_armor", "enchant_weapon", "remove_curse", "identify_weapon", "identify_armor"],
         ]
-        for stage, names in zip(stages[5:], expected, strict=True):
+        for stage, names in zip(stages[5:10], expected, strict=True):
             self.assertEqual(stage, {"id": stage["id"], "version": 1, "kind": "items", "count": [1, 1], "quantity": 1,
                              "bands": [{"depth": {"kind": "open", "minimum": 1}, "choices": [
                                  {"archetype": "rogue." + name, "weight": 1} for name in names]}]})
+
+
+    def test_ammunition_is_one_finite_six_arrow_stack_after_existing_stages(self):
+        stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
+        self.assertEqual(stages[10], {
+            "id": "rogue.ammunition", "version": 1, "kind": "items", "count": [1, 1],
+            "quantity": 6, "bands": [{"depth": {"kind": "open", "minimum": 1},
+            "choices": [{"archetype": "rogue.arrow", "weight": 1}]}]})
+
 
 
 if __name__ == "__main__":

@@ -5,9 +5,7 @@
 //! mutation between them. A prepared action is transient, never a saved job or a
 //! client-visible promise. Persisted attack progress revalidates at each boundary.
 
-use crate::{
-    movement_cost, Action, ActionOutcome, ActorId, Game, GameError, ItemLocation, OutcomeKind,
-};
+use crate::{movement_cost, Action, ActionOutcome, ActorId, Game, GameError, OutcomeKind};
 
 /// Valid only inside uninterrupted ordinary or queued AI action execution.
 /// Kept private so callers cannot retain an action across world changes.
@@ -22,6 +20,7 @@ struct PreparedAction {
     touches: Vec<ActorId>,
     ready_at: u64,
     plan: Option<crate::abilities::Plan>,
+    transfer: Option<crate::items::PreparedTransfer>,
 }
 
 /// Fresh actions never inherit paused respec progress. Only the separately
@@ -126,15 +125,19 @@ impl Game {
         movement_context: Option<crate::MovementContext>,
         entry: ActionEntry,
     ) -> Result<ActionOutcome, GameError> {
-        let decision = self.choose_executable_ai(id);
+        let decision = self.choose_executable_ai(id)?;
         if decision
             .as_ref()
             .is_some_and(|decision| decision.action != action)
         {
             return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
         }
-        let (ai, plan) = decision.map_or((None, None), |decision| {
-            (Some((decision.ai, decision.behavior)), decision.plan)
+        let (ai, plan, numeric_budget_refusal) = decision.map_or((None, None, false), |decision| {
+            (
+                Some((decision.ai, decision.behavior)),
+                decision.plan,
+                decision.numeric_budget_refusal,
+            )
         });
         if self.chosen_ai_escape(id, &action, ai.as_ref().map(|(ai, _)| ai)) {
             if self.next_actor() != Some(id) {
@@ -152,7 +155,9 @@ impl Game {
         let mut prepared = self.prepare_action(id, action.clone(), plan, entry)?;
         prepared.validate_movement_context(&self.actors[&id], movement_context)?;
         self.bind_preparation_owner(&mut prepared, intention)?;
-        self.commit_action(prepared, ai)
+        let outcome = self.commit_action(prepared, ai)?;
+        self.record_projectile_numeric_refusal(id, numeric_budget_refusal);
+        Ok(outcome)
     }
 
     /// Choose and execute an admitted AI decision in one uninterrupted call.
@@ -172,8 +177,9 @@ impl Game {
             ai,
             behavior,
             plan,
+            numeric_budget_refusal,
         } = self
-            .choose_executable_ai(id)
+            .choose_executable_ai(id)?
             .ok_or(GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
         if self.chosen_ai_escape(id, &action, Some(&ai)) {
             let Action::Move(direction) = action else {
@@ -196,15 +202,52 @@ impl Game {
         crate::diagnostics::ai_precommit_ordinary_scenes(
             crate::diagnostics::work_counts().ordinary_scenes - ordinary_scenes,
         );
-        Ok((action, self.commit_action(prepared, Some((ai, behavior)))?))
+        let outcome = self.commit_action(prepared, Some((ai, behavior)))?;
+        self.record_projectile_numeric_refusal(id, numeric_budget_refusal);
+        Ok((action, outcome))
     }
 
     /// Execution-only contention gate. The public decision preview sees physical
     /// candidates; a failed finite preflight changes nothing. An ordinary Wait
     /// is then validated and recorded through the same action boundary. Replay
     /// repeats this exact gate before comparing the recorded action.
-    fn choose_executable_ai(&self, actor: ActorId) -> Option<crate::ai::AiDecision> {
-        let mut decision = self.choose_ai(actor)?;
+    fn choose_executable_ai(
+        &self,
+        actor: ActorId,
+    ) -> Result<Option<crate::ai::AiDecision>, GameError> {
+        let Some(mut decision) = self.choose_ai(actor) else {
+            return Ok(None);
+        };
+        if self.condition_blocks_action(actor, &decision.action) {
+            decision.action = Action::Wait;
+            decision.plan = None;
+            return Ok(Some(decision));
+        }
+        if decision.plan.is_none() {
+            if let Action::UseAbility {
+                id,
+                invocation,
+                supplies,
+            } = &decision.action
+            {
+                if matches!(
+                    invocation.aim,
+                    crate::abilities::AbilityAim::DirectionalProjectile { .. }
+                ) {
+                    // This is the one request already selected from disclosed
+                    // structure. Never probe another unknown item after refusal.
+                    match self.ability_plan_with_supplies(actor, id, *invocation, supplies.clone())
+                    {
+                        Ok(plan) => decision.plan = Some(plan),
+                        Err(GameError::Rule(crate::abilities::RuleError::NumericBudget)) => {
+                            decision.action = Action::Wait;
+                            decision.numeric_budget_refusal = true;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+        }
         let unavailable = if let Some(plan) = decision
             .plan
             .as_ref()
@@ -222,11 +265,23 @@ impl Game {
         } else {
             false
         };
-        if unavailable || self.condition_blocks_action(actor, &decision.action) {
+        if unavailable {
             decision.action = Action::Wait;
             decision.plan = None;
         }
-        Some(decision)
+        Ok(Some(decision))
+    }
+
+    fn record_projectile_numeric_refusal(&mut self, actor: ActorId, refused: bool) {
+        if refused {
+            self.record_survival(
+                actor,
+                &crate::survival_diagnostics::SurvivalFlows {
+                    projectile_numeric_budget_refusals: 1,
+                    ..Default::default()
+                },
+            );
+        }
     }
 
     fn chosen_ai_escape(
@@ -462,7 +517,9 @@ impl Game {
         }
         if matches!(
             &action,
-            Action::Purchase { .. } | Action::ChooseGrowthSource { .. }
+            Action::Purchase { .. }
+                | Action::ChooseGrowthSource { .. }
+                | Action::ChooseIntellectExpertise { .. }
         ) && !self.player_advancement_ready(id)
         {
             return Err(GameError::ActorBusy);
@@ -488,6 +545,7 @@ impl Game {
             return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
         }
         let mut planned = None;
+        let mut transfer = None;
         let mut touches = Vec::new();
         let mut requested_destination = None;
         let (kind, duration) = match action.clone() {
@@ -500,6 +558,13 @@ impl Game {
                 (
                     OutcomeKind::GrowthSourceChosen { basis, source },
                     self.content.rules.document().growth.recovery,
+                )
+            }
+            Action::ChooseIntellectExpertise { basis, choice } => {
+                self.preview_player_intellect_expertise(id, &basis, &choice)?;
+                (
+                    OutcomeKind::IntellectExpertiseChosen { basis, choice },
+                    self.content.rules.document().advancement.purchase_recovery,
                 )
             }
             Action::Purchase { basis, purchase } => {
@@ -688,10 +753,10 @@ impl Game {
             }
             Action::Take { item, quantity } | Action::Drop { item, quantity } => {
                 let taking = matches!(action, Action::Take { .. });
-                (
-                    self.prepare_transfer(id, item, quantity, taking)?,
-                    actor.turn_ticks.get().div_ceil(2),
-                )
+                let captured = self.prepare_transfer(id, item, quantity, taking)?;
+                let outcome = captured.outcome(taking);
+                transfer = Some(captured);
+                (outcome, actor.turn_ticks.get().div_ceil(2))
             }
             Action::Wait => (OutcomeKind::Waited, actor.turn_ticks.get()),
         };
@@ -723,6 +788,7 @@ impl Game {
             new_orientation,
             ready_at,
             plan: planned,
+            transfer,
             ordinary_movement,
             requested_destination,
             touches,
@@ -748,11 +814,29 @@ impl Game {
         if let OutcomeKind::IdentificationResolved { choice, item } = kind {
             return self.resolve_identification(id, choice, item);
         }
+        if let OutcomeKind::IntellectExpertiseChosen { basis, choice } = &kind {
+            let (_, outcome) = self.prepare_player_intellect_expertise(id, basis, choice)?;
+            return self.publish_actor_outcome(outcome);
+        }
         if let OutcomeKind::Purchased { basis, purchase } = &kind {
             // Recheck the frozen proposal inside the current action transaction.
             // No saved full-state preview can overwrite earned runtime changes.
             let (_, outcome) = self.prepare_player_purchase(id, basis, purchase)?;
             return self.publish_actor_outcome(outcome);
+        }
+        // Compare and move only already-free units before our own cancellation
+        // releases claims. The enclosing action candidate rolls back both phases.
+        // Capture the actor outcome afterward so inherited memory is retained.
+        if matches!(
+            kind,
+            OutcomeKind::Taken { .. } | OutcomeKind::Dropped { .. }
+        ) {
+            self.apply_prepared_transfer(
+                prepared
+                    .transfer
+                    .as_ref()
+                    .ok_or(GameError::ItemUnavailable)?,
+            )?;
         }
         let new_orientation = prepared.new_orientation;
         let mut outcome = self.actor_outcome(id)?;
@@ -779,6 +863,9 @@ impl Game {
         match kind {
             OutcomeKind::GrowthSourceChosen { .. } => {
                 unreachable!("growth source uses one actor publication")
+            }
+            OutcomeKind::IntellectExpertiseChosen { .. } => {
+                unreachable!("Intellect expertise uses one actor publication")
             }
             OutcomeKind::Purchased { .. } => unreachable!("purchase uses one actor publication"),
             OutcomeKind::IdentificationResolved { .. } => {
@@ -808,21 +895,7 @@ impl Game {
             }
             OutcomeKind::Moved { .. } => {}
             OutcomeKind::Escaped { item } => self.commit_terminal_escape(id, item)?,
-            OutcomeKind::Taken {
-                item,
-                result,
-                quantity,
-            } => {
-                self.apply_transfer(item, result, quantity, ItemLocation::Carried(id))?;
-            }
-            OutcomeKind::Dropped {
-                item,
-                result,
-                quantity,
-            } => {
-                let location = self.actors[&id].location;
-                self.apply_transfer(item, result, quantity, ItemLocation::Ground(location))?;
-            }
+            OutcomeKind::Taken { .. } | OutcomeKind::Dropped { .. } => {}
             OutcomeKind::Waited => {}
         }
         Ok(())

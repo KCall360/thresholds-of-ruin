@@ -861,6 +861,9 @@ impl Game {
                                 && replacement.structural_valid(&self.content.rules)
                                 && supplies.valid(1)
                         }
+                        IntentionWork::Action(Action::ChooseIntellectExpertise { basis, choice }) => {
+                            basis.valid() && basis.actor == *actor && choice.structural_valid(&self.content.rules)
+                        }
                         IntentionWork::Action(Action::Purchase { basis, purchase }) => {
                             // Stale permanent builds remain queued until execution
                             // reports their ordinary terminal failure. Restore checks
@@ -880,14 +883,18 @@ impl Game {
                                     {
                                         return false;
                                     }
-                                    if matches!(invocation, crate::abilities::AbilityInvocation::DirectionalRay { .. }) {
+                                    if matches!(invocation.aim, crate::abilities::AbilityAim::DirectionalRay { .. }) {
                                         return matches!(definition.reach, crate::rules::Reach::Sight { .. });
+                                    }
+                                    if matches!(invocation.aim, crate::abilities::AbilityAim::DirectionalProjectile { .. }) {
+                                        return invocation.valid() && matches!(definition.reach, crate::rules::Reach::Projectile);
                                     }
                                     let target = invocation.target(*actor);
                                     if target.0 == 0 || target.0 >= self.next_actor_id {
                                         return false;
                                     }
                                     match definition.reach {
+                                        crate::rules::Reach::Projectile => false,
                                         crate::rules::Reach::SelfOnly => target == *actor,
                                         crate::rules::Reach::SelfOrAlly { .. } => true,
                                         crate::rules::Reach::Melee
@@ -1330,7 +1337,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1501,7 +1508,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1585,7 +1592,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1622,7 +1629,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1682,7 +1689,7 @@ mod tests {
             actor,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: crate::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
         )
@@ -1738,7 +1745,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1764,7 +1771,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -2112,7 +2119,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -2302,7 +2309,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: ability,
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(actor),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,

@@ -91,7 +91,7 @@ pub(crate) fn read_corrosion_amount<'de, D: serde::Deserializer<'de>>(
 }
 
 /// Exact owned condition, persisted with the item rather than its definition.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ItemCondition {
     pub corrosion: u32,
@@ -132,6 +132,30 @@ impl<'de> Deserialize<'de> for ItemCondition {
     }
 }
 impl ItemCondition {
+    /// Validate each authored weapon payload independently. A dual-capability
+    /// item may not hide an invalid attack behind its other delivery mode.
+    pub(crate) fn weapon_capabilities_valid(
+        self,
+        equipment: Option<&crate::EquipmentSpec>,
+        projectile: Option<&crate::projectile_profiles::ProjectileSpec>,
+    ) -> bool {
+        let attack = equipment.and_then(|gear| gear.attack.as_ref());
+        (attack.is_some()
+            || projectile.is_some()
+            || (self.hit_enchantment == 0 && self.damage_enchantment == 0))
+            && attack.is_none_or(|attack| {
+                attack
+                    .with_enchantment(self.hit_enchantment, self.damage_enchantment)
+                    .is_ok()
+            })
+            && projectile.is_none_or(|projectile| {
+                projectile.validate_shape().is_ok()
+                    && projectile
+                        .damage
+                        .with_melee_modifiers(0, self.damage_enchantment, 0)
+                        .is_ok()
+            })
+    }
     pub(crate) fn valid(self) -> bool {
         self.corrosion <= crate::limits::NUMERIC as u32
             && self.armor_penalty <= crate::limits::NUMERIC as u32
@@ -248,16 +272,11 @@ impl Item {
                     && !self.condition.protected
             }
         };
-        let weapon_valid = match gear.and_then(|gear| gear.attack.as_ref()) {
-            Some(attack) => attack
-                .with_enchantment(
-                    self.condition.hit_enchantment,
-                    self.condition.damage_enchantment,
-                )
-                .is_ok(),
-            None => self.condition.hit_enchantment == 0 && self.condition.damage_enchantment == 0,
-        };
-        armor_valid && weapon_valid && (gear.is_some() || !self.condition.cursed)
+        armor_valid
+            && self
+                .condition
+                .weapon_capabilities_valid(gear, self.spec.projectile.as_ref())
+            && (self.spec.has_instance_condition() || !self.condition.cursed)
     }
 
     /// Identified equipment shows its current contribution, not unworn catalog values.
@@ -301,6 +320,7 @@ impl Item {
         &self,
         id: ItemId,
         socket: EquipmentSlotId,
+        rules: &crate::rules::Ruleset,
     ) -> Option<crate::creatures::EquipmentSource> {
         if !self.condition_valid() {
             return None;
@@ -309,6 +329,12 @@ impl Item {
         Some(crate::creatures::EquipmentSource {
             item: id,
             socket,
+            weapon_profile: equipment
+                .weapon_profile
+                .as_ref()
+                .map(|profile| profile.validate(rules))
+                .transpose()
+                .ok()?,
             modifiers: equipment.modifiers,
             attack: equipment.attack,
         })
@@ -382,7 +408,7 @@ impl crate::Game {
                         .get(id)
                         .ok_or(crate::GameError::ItemUnavailable)?
                 };
-                item.equipment_source(*id, *socket)
+                item.equipment_source(*id, *socket, &self.content.rules)
                     .ok_or(crate::GameError::ItemUnavailable)
             })
             .collect::<Result<Vec<_>, crate::GameError>>()?;
@@ -416,6 +442,7 @@ mod tests {
         let mut spec = ItemSpec::ordinary("mail".into());
         spec.class = crate::ItemClass::Armor;
         spec.equipment = Some(EquipmentSpec {
+            weapon_profile: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             armor: Some(armor),
             attack: None,
@@ -508,7 +535,11 @@ mod tests {
         assert!(weapon.condition_valid());
         let view = weapon.equipment_view().unwrap();
         let source = weapon
-            .equipment_source(ItemId(1), EquipmentSlotId(0))
+            .equipment_source(
+                ItemId(1),
+                EquipmentSlotId(0),
+                &crate::test_creatures::ruleset(),
+            )
             .unwrap();
         assert_eq!(view.attack, source.attack);
         assert_eq!(view.attack, Some(adjusted));
@@ -665,7 +696,11 @@ mod tests {
         for loss in 0..=2 {
             worn.condition.corrosion = loss;
             let source = worn
-                .equipment_source(ItemId(1), EquipmentSlotId(0))
+                .equipment_source(
+                    ItemId(1),
+                    EquipmentSlotId(0),
+                    &crate::test_creatures::ruleset(),
+                )
                 .unwrap();
             let reductions = source
                 .modifiers
@@ -689,7 +724,11 @@ mod tests {
         worn.condition.corrosion = 3;
         assert!(!worn.condition_valid());
         assert!(worn
-            .equipment_source(ItemId(1), EquipmentSlotId(0))
+            .equipment_source(
+                ItemId(1),
+                EquipmentSlotId(0),
+                &crate::test_creatures::ruleset()
+            )
             .is_none());
     }
     #[test]

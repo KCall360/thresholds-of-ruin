@@ -296,6 +296,40 @@ fn window_loop(
                         }
                         Event::CreatureInspection(report) => app.show_inspection(&report)?,
                         Event::CreatureCatalog(page) => app.show_creature_catalog(&page)?,
+                        Event::ProjectileChoicesSent(id) => {
+                            if let Err(error) = app.bind_projectile_request(&id) {
+                                app.refused(error);
+                            }
+                        }
+                        Event::ProjectileChoices {
+                            context,
+                            request_id,
+                            page,
+                        } => {
+                            if let Err(error) =
+                                app.show_projectile_choices(&context, &request_id, &page)
+                            {
+                                app.refused(error);
+                            }
+                        }
+                        Event::WeaponPreviewSent(id) => {
+                            if app.weapon_confirmation.is_some() {
+                                if let Err(error) = app.bind_weapon_preview(&id) {
+                                    app.refused(error);
+                                }
+                            }
+                        }
+                        Event::AbilityWeaponPreview {
+                            context,
+                            request_id,
+                            preview,
+                        } => {
+                            if let Err(error) =
+                                app.show_weapon_preview(&context, &request_id, &preview)
+                            {
+                                app.refused(error);
+                            }
+                        }
                         Event::StrikeQuerySent(id) => app.bind_strike_request(&id),
                         Event::AdvancementQuerySent(id) => {
                             if let Err(error) = app.bind_advancement_request(&id) {
@@ -561,6 +595,9 @@ fn window_loop(
                 "identification":app.identification_choice(),"identification_rows":app.identification_rows(),
                 "hold_choices":app.hold_choice_offers(),"hold_rows":app.hold_rows(),
                 "supply_selection":app.supply_selection,"supply_rows":app.supply_rows(),
+                "weapon_preview":app.weapon_confirmation,"weapon_preview_rows":app.weapon_preview_rows(),
+                "projectile_selection":app.projectile_selection,"projectile_rows":app.projectile_rows(),
+                "selected_weapon":app.selected_weapon,"weapon_selection":app.weapon_selection,"weapon_rows":app.weapon_rows(),
                 "status_lines":state.map(|s|tor_client_ascii::status_lines(&app,s)),
                 "status":app.status,"input_done":done,"native_input_sequence":native_input_sequence,
                 "wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)});

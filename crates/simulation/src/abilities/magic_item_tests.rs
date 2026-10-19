@@ -1022,6 +1022,8 @@ fn read_self_sleep_while_blind_consumes_exactly_and_restores_without_protection(
 fn equipment_fact_fixture() -> Game {
     super::ray_tests::fixture_with(|_, _, species| {
         species.anatomy = crate::AnatomySpec {
+            capacities: Default::default(),
+            primary_attack_socket: crate::equipment_capacity::PrimaryAttackSocket::None,
             slots: vec![crate::EquipmentSlot::new("body_armor").unwrap()],
         };
     })
@@ -1030,6 +1032,7 @@ fn fact_armor(game: &mut Game, id: u64, cursed: bool) -> ItemId {
     let mut spec = ItemSpec::ordinary("test mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(crate::EquipmentSpec {
+        weapon_profile: None,
         slot: crate::EquipmentSlot::new("body_armor").unwrap(),
         armor: Some(crate::ArmorSpec {
             physical_reduction: 3,

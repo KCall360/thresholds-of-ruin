@@ -129,7 +129,7 @@ impl CombatState {
     pub(crate) fn start_preparation_cost(
         &mut self,
         owner: crate::IntentionId,
-        cost: crate::costs::ResourceCost,
+        cost: crate::costs::CostBundle,
     ) -> Result<crate::costs::StartCost, GameError> {
         self.creature
             .start_cost(owner, cost)
@@ -507,7 +507,7 @@ mod preparation_cost_tests {
                 actor,
                 Action::UseAbility {
                     id: AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -555,7 +555,7 @@ mod preparation_cost_tests {
                 actor,
                 Action::UseAbility {
                     id: AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -632,7 +632,7 @@ mod preparation_cost_tests {
                         actor,
                         Action::UseAbility {
                             id: AbilityId::new("free_strike").unwrap(),
-                            invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                            invocation: crate::abilities::AbilityInvocation::actor_target(target),
                             supplies: Default::default(),
                         },
                         IntentionOrigin::Human,

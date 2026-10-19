@@ -60,9 +60,12 @@ impl SelectedMeleeView {
         }
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StrikeSourceInspectionView {
+    Projectile {
+        delivery: ProjectileDeliveryKind,
+    },
     Authored {
         strike_count: u16,
     },
@@ -71,6 +74,37 @@ pub enum StrikeSourceInspectionView {
         strike_count: u16,
         additional_riders: u16,
     },
+}
+impl<'de> Deserialize<'de> for StrikeSourceInspectionView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Projectile {
+                delivery: ProjectileDeliveryKind,
+            },
+            Authored {
+                strike_count: u16,
+            },
+            SelectedMelee {},
+            NaturalMelee {
+                strike_count: u16,
+                additional_riders: u16,
+            },
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::Projectile { delivery } => Self::Projectile { delivery },
+            Fields::Authored { strike_count } => Self::Authored { strike_count },
+            Fields::SelectedMelee {} => Self::SelectedMelee {},
+            Fields::NaturalMelee {
+                strike_count,
+                additional_riders,
+            } => Self::NaturalMelee {
+                strike_count,
+                additional_riders,
+            },
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -85,7 +119,8 @@ impl AbilityStrikesView {
                 StrikeSourceInspectionView::Authored { strike_count } => {
                     (1..=crate::MAX_SEQUENCE_STRIKES).contains(strike_count)
                 }
-                StrikeSourceInspectionView::SelectedMelee {} => true,
+                StrikeSourceInspectionView::SelectedMelee {}
+                | StrikeSourceInspectionView::Projectile { .. } => true,
                 StrikeSourceInspectionView::NaturalMelee {
                     strike_count,
                     additional_riders,
@@ -94,5 +129,22 @@ impl AbilityStrikesView {
                         && *additional_riders <= 8
                 }
             }
+    }
+}
+
+/// Which exact physical profile supplies an ability's projectile strike.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectileDeliveryKind {
+    Throw,
+    Launch,
+}
+impl<'de> Deserialize<'de> for ProjectileDeliveryKind {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match String::deserialize(d)?.as_str() {
+            "throw" => Ok(Self::Throw),
+            "launch" => Ok(Self::Launch),
+            _ => Err(serde::de::Error::custom("invalid projectile delivery kind")),
+        }
     }
 }

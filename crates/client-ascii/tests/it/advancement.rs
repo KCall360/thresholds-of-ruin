@@ -309,3 +309,62 @@ fn a_stale_queued_query_preserves_focus_and_requires_explicit_fresh_navigation()
     assert!(app.supply_selection.is_none());
     assert!(!app.advancement_rows().join(" ").contains("deception"));
 }
+
+#[test]
+fn expertise_catalog_uses_shared_ordinary_query_without_local_rules() {
+    let mut app = app(true);
+    key(&mut app, Key::Advancement);
+    let context = app.state.as_ref().unwrap().snapshot().reply_context();
+    app.bind_advancement_request("overview").unwrap();
+    app.show_advancement_page(&context, "overview", &page(&context))
+        .unwrap();
+    app.ready();
+    app.input(Input::Text {
+        text: "expertises".into(),
+    });
+    assert!(matches!(
+        super::request(key(&mut app, Key::Enter)),
+        Some(Request::Command {
+            command: Command::Advancement {
+                query: AdvancementQuery::Catalog {
+                    catalog: AdvancementKind::Expertise,
+                    offset: 0,
+                    ..
+                },
+                ..
+            },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn intellect_expertise_navigation_and_choice_use_ordinary_shared_preview() {
+    for text in ["intellect-expertises", "intellect-expertise 3 spear"] {
+        let mut app = app(true);
+        key(&mut app, Key::Advancement);
+        let context = app.state.as_ref().unwrap().snapshot().reply_context();
+        app.bind_advancement_request("overview").unwrap();
+        app.show_advancement_page(&context, "overview", &page(&context))
+            .unwrap();
+        app.ready();
+        app.input(Input::Text { text: text.into() });
+        let Some(Request::Command {
+            command: Command::Advancement { query, .. },
+            ..
+        }) = super::request(key(&mut app, Key::Enter))
+        else {
+            panic!("ordinary advancement query")
+        };
+        if text == "intellect-expertises" {
+            assert!(matches!(
+                query,
+                AdvancementQuery::IntellectExpertises { offset: 0, .. }
+            ));
+        } else {
+            assert!(
+                matches!(query, AdvancementQuery::Preview { proposal: AdvancementProposal::IntellectExpertise { choice: IntellectExpertiseOperation { threshold: 3, expertise } }, section: AdvancementPreviewSection::Summary, offset: 0, .. } if expertise == "spear")
+            );
+        }
+    }
+}

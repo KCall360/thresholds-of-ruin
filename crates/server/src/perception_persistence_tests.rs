@@ -164,12 +164,18 @@ fn admit_attack(engine: &mut Engine, actor: u64, target: u64, contact: bool) {
             action: Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
                 invocation: if contact {
-                    crate::actions::AbilityInvocation::ContactTarget {
-                        target: SimActor(target),
+                    crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ContactTarget {
+                            target: SimActor(target),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     }
                 } else {
-                    crate::actions::AbilityInvocation::ActorTarget {
-                        target: SimActor(target),
+                    crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: SimActor(target),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     }
                 },
                 supplies: Default::default(),

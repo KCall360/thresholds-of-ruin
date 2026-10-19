@@ -2,10 +2,29 @@
 mod compile;
 mod execution;
 mod invocation;
+mod projectile;
+mod projectile_choices;
+pub use projectile_choices::{ProjectileChoice, ProjectileChoiceQuery};
+mod projectile_execution;
+mod projectile_flight;
+mod projectile_release;
+mod projectile_selection;
+pub use projectile::{ProjectilePlan, ProjectileSource};
+pub use projectile_selection::{
+    EquippedProjectileWeapon, ProjectileDeliverySelection, ThrownSourceSelection,
+};
+mod weapon_selection;
+pub(crate) use weapon_selection::selected_weapon_cost;
+pub use weapon_selection::{
+    AbilityWeaponPreview, AbilityWeaponPreviewPhase, CapturedWeaponProfile, FrozenWeaponSelection,
+};
 mod participation;
-pub use invocation::{AbilityInvocation, InvocationKind, PushDirection, StepDirection};
+pub use invocation::{
+    AbilityAim, AbilityInvocation, InvocationKind, PushDirection, StepDirection, WeaponSelection,
+};
 mod plan;
 mod plan_validation;
+pub(crate) use plan_validation::PlanSourceContext;
 mod ray;
 mod resolve;
 pub use ray::{RayIncomingOwner, RayIncomingSource, RayPlan};
@@ -94,3 +113,6 @@ mod magic_item_tests;
 
 #[cfg(test)]
 mod equipment_magic_tests;
+
+#[cfg(test)]
+mod weapon_selection_tests;

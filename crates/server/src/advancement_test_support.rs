@@ -233,6 +233,7 @@ pub(crate) fn form_scenario(count: usize, maximum_labels: bool) -> Scenario {
         })
         .collect();
     rules.talents.push(tor_simulation::rules::TalentDef {
+        expertise_grants: Vec::new(),
         id: tor_simulation::content_ids::TalentId::new(root).unwrap(),
         name: label("Choice Root".into()),
         prerequisites: Vec::new(),
@@ -245,6 +246,40 @@ pub(crate) fn form_scenario(count: usize, maximum_labels: bool) -> Scenario {
     rules.forms.extend(forms);
     let package = Package::from_parts(
         package.manifest.clone(),
+        package.region_defs().unwrap(),
+        &toml::to_string(&rules).unwrap(),
+    )
+    .unwrap();
+    Scenario {
+        package: Some(Arc::new(package)),
+        ..base
+    }
+}
+
+pub(crate) fn expertise_scenario() -> Scenario {
+    expertise_scenario_with_intellect(0)
+}
+
+pub(crate) fn expertise_scenario_with_intellect(intellect: u16) -> Scenario {
+    use crate::scenario_package::Package;
+    use tor_simulation::{
+        content_ids::ExpertiseId,
+        expertise::{ExpertiseCategory, ExpertiseDef},
+        rules::RulesetDocument,
+    };
+    let base = scenario();
+    let package = base.package.as_ref().unwrap();
+    let mut rules: RulesetDocument =
+        toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+    rules.expertises.push(ExpertiseDef {
+        id: ExpertiseId::new("fixture.knife").unwrap(),
+        name: "Knife".into(),
+        category: ExpertiseCategory::Equipment,
+    });
+    let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    manifest["creatures"]["species"]["learner"]["attributes"]["intellect"] = json!(intellect);
+    let package = Package::from_parts(
+        serde_json::from_value(manifest).unwrap(),
         package.region_defs().unwrap(),
         &toml::to_string(&rules).unwrap(),
     )

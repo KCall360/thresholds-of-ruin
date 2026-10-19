@@ -188,7 +188,12 @@ const CORPUS: &[(&str, Means)] = &[
     ("charge the goblin", Means::Attack),
     ("strike the goblin", Means::Attack),
     ("slash goblin", Means::Attack),
-    ("attack the goblin with my sword", Means::Attack),
+    // The fixture sword is carried, not equipped: an explicit weapon must
+    // not silently fall back to the ordinary attack.
+    (
+        "attack the goblin with my sword",
+        Means::Refuses("No equipped weapon matches that name."),
+    ),
     ("attack the creature", Means::Attack),
     ("attack the monster", Means::Attack),
     ("attack the enemy", Means::Attack),

@@ -1021,6 +1021,9 @@ impl Game {
                 // Keep only the frozen launch cells resident, never a forecast path.
                 live.extend(ray.launch_footprint.iter().map(|cell| cell.region));
             }
+            if let Some(projectile) = pending.plan.as_projectile() {
+                live.extend(projectile.launch_footprint.iter().map(|cell| cell.region));
+            }
             if let Some(step) = pending.plan.as_ability().and_then(|plan| plan.step) {
                 // Frozen/paused work still owns this exact destination. Its live
                 // body footprint can cross more regions than the anchor alone.
@@ -1985,14 +1988,20 @@ impl Game {
         }
         let mut actors: BTreeMap<_, _> =
             self.actors.iter().map(|(id, actor)| (*id, actor)).collect();
+        let mut items: BTreeMap<_, _> = self.items.iter().map(|(id, item)| (*id, item)).collect();
         for record in &retained {
             for (id, actor) in &record.actors {
                 if actors.insert(*id, actor).is_some() {
                     return false;
                 }
             }
+            for (id, item) in &record.items {
+                if items.insert(*id, item).is_some() {
+                    return false;
+                }
+            }
         }
-        self.all_hold_records_valid(&actors) && {
+        self.all_hold_records_valid(&actors, &items) && {
             // Unbuilt regions' identities are declared, not recorded.
             let mut directory = (*l.directory).clone();
             for region in l.unbuilt.iter() {
@@ -2160,7 +2169,7 @@ mod tests {
             owner,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: owner },
+                invocation: crate::abilities::AbilityInvocation::actor_target(owner),
                 supplies: SupplySelection::Explicit {
                     items: vec![SelectedSupply {
                         cost_ordinal: 0,
@@ -2221,7 +2230,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(actor),
                     supplies: crate::supplies::SupplySelection::Carried,
                 },
                 crate::IntentionOrigin::Human,
@@ -2312,7 +2321,7 @@ mod tests {
             owner,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: owner },
+                invocation: crate::abilities::AbilityInvocation::actor_target(owner),
                 supplies: crate::supplies::SupplySelection::Explicit {
                     items: vec![crate::supplies::SelectedSupply {
                         cost_ordinal: 0,

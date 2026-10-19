@@ -1,5 +1,8 @@
 //! Backend-only journal and developer setup types. Never sent to a frontend.
-pub use crate::actions::{AbilityInvocation, Action, Direction, SelectedSupply, SupplySelection};
+pub use crate::actions::{
+    AbilityAim, AbilityInvocation, Action, Direction, SelectedSupply, SupplySelection,
+    WeaponSelection,
+};
 use serde::{Deserialize, Serialize};
 use tor_protocol::{
     ActorId, Anchor, AnnotationCategory, Audience, Author, BranchId, ClientSource, EntryId,
@@ -100,6 +103,7 @@ pub enum Event {
     },
     /// Private lifecycle markers; exact operands stay in the owning journal action.
     GrowthSourceChosen,
+    IntellectExpertiseChosen,
     Purchased,
     RespecStarted,
     AbilityStarted {
@@ -162,6 +166,10 @@ pub enum CreatureAdvancement {
         owner: u64,
         attribute: crate::creature_authoring::Attribute,
     },
+    SelectExpertise {
+        owner: u64,
+        expertise: String,
+    },
     SelectTalent {
         owner: u64,
         talent: crate::creature_authoring::Talent,
@@ -179,6 +187,7 @@ pub enum PurchaseReplacement {
     Refund {},
     SkillRank { pool: String, skill: String },
     Talent { pool: String, talent: String },
+    Expertise { pool: String, expertise: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -24,6 +24,7 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
             equipped_slot: None,
             known_cursed: None,
             known_protected: None,
+            known_projectile_bonus: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -68,6 +69,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 equipped_slot: Some(0),
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -81,6 +83,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -347,6 +350,7 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
             equipped_slot: None,
             known_cursed: None,
             known_protected: None,
+            known_projectile_bonus: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -399,7 +403,7 @@ fn directional_ray_commands_select_direction_without_a_visible_creature() {
     ] {
         assert!(
             matches!(parse(&format!("arbitrary ray {token}"), &state).unwrap(), Input::Command(Command::Act {
-            action: Action::UseAbility { invocation: AbilityInvocation::DirectionalRay { direction: selected }, supplies: SupplySelection::Carried, .. }, ..
+            action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::DirectionalRay { direction: selected }, weapon: tor_protocol::WeaponSelection::Default }, supplies: SupplySelection::Carried, .. }, ..
         }) if selected == direction)
         );
     }
@@ -434,6 +438,7 @@ fn magic_state() -> StateView {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -447,6 +452,7 @@ fn magic_state() -> StateView {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -556,4 +562,94 @@ fn identification_commands_bind_current_choice_and_exact_category() {
         .unwrap()
         .identification = None;
     assert!(parse("identify cancel", &view).is_err());
+}
+
+#[test]
+fn expertise_commands_delegate_to_shared_ordinary_advancement() {
+    use tor_client_common::advancement::AdvancementInput;
+    assert_eq!(
+        parse("advancement expertises", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Catalog(AdvancementKind::Expertise))
+    );
+    assert_eq!(
+        parse("advancement details expertises", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Details(
+            AdvancementPreviewSection::Expertises
+        ))
+    );
+    assert!(matches!(
+        parse("advancement purchase 1 general expertise spear", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Preview(AdvancementProposal::Purchase {
+            purchase: PurchaseOperation {
+                selection: PurchaseChoice::Expertise { .. },
+                ..
+            }
+        }))
+    ));
+}
+
+#[test]
+fn intellect_expertise_commands_use_distinct_ordinary_entitlements() {
+    use tor_client_common::advancement::AdvancementInput;
+    assert_eq!(
+        parse("advancement intellect-expertises", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::IntellectExpertises)
+    );
+    assert_eq!(
+        parse("advancement intellect-expertise 3 spear", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Preview(
+            AdvancementProposal::IntellectExpertise {
+                choice: IntellectExpertiseOperation {
+                    threshold: 3,
+                    expertise: "spear".into()
+                }
+            }
+        ))
+    );
+    assert!(parse("advancement intellect-expertise 0 spear", &state()).is_err());
+}
+
+#[test]
+fn projectile_commands_open_source_picker_without_actor_ray_or_step_fallback() {
+    let mut state = StateView {
+        wizard_game: false,
+        revision: 0,
+        observation: tor_client_common::test_support::observation(),
+    };
+    let mut ability = tor_client_common::test_support::ability("fixture_projectile");
+    ability.name = "Fixture Projectile".into();
+    ability.target_kind = AbilityTargetKind::DirectionalProjectile;
+    ability.reach = AbilityReach::Projectile;
+    ability.weapon_selection = false;
+    state
+        .observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities = vec![ability];
+    let before = state.clone();
+    assert_eq!(
+        parse("fixture projectile", &state).unwrap(),
+        Input::Projectile("fixture_projectile".into())
+    );
+    let tokens = tor_client_text::parser::tokenize("fixture projectile");
+    assert!(
+        matches!(tor_client_text::parser::match_disclosed_sentence(&tokens, "fixture projectile", &state.observation).unwrap(), tor_client_text::parser::grammar::ParsedCommand::Projectile { id } if id == "fixture_projectile")
+    );
+    for line in [
+        "fixture projectile north",
+        "fixture projectile me",
+        "fixture projectile with weapon",
+    ] {
+        assert!(parse(line, &state).unwrap_err().contains("choose a source"));
+        let tokens = tor_client_text::parser::tokenize(line);
+        assert!(
+            matches!(tor_client_text::parser::match_disclosed_sentence(&tokens, line, &state.observation).unwrap(),
+            tor_client_text::parser::grammar::ParsedCommand::Refused(reason) if reason.contains("choose a source"))
+        );
+    }
+    assert_eq!(state, before);
 }

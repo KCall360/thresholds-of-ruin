@@ -43,6 +43,8 @@ pub struct RulesetDocument {
     pub forms: Vec<FormDef>,
     pub ability_tags: Vec<AbilityTagDef>,
     pub talents: Vec<TalentDef>,
+    #[serde(deserialize_with = "strikes::bounded_vec::<_, _, { crate::limits::CATALOG_ENTRIES }>")]
+    pub expertises: Vec<crate::expertise::ExpertiseDef>,
     pub creature_types: Vec<TypeDef>,
     pub subtypes: Vec<SubtypeDef>,
     pub classes: Vec<ClassDef>,
@@ -76,6 +78,10 @@ impl<'de> serde::Deserialize<'de> for RulesetDocument {
             forms: Vec<FormDef>,
             ability_tags: Vec<AbilityTagDef>,
             talents: Vec<TalentDef>,
+            #[serde(
+                deserialize_with = "strikes::bounded_vec::<_, _, { crate::limits::CATALOG_ENTRIES }>"
+            )]
+            expertises: Vec<crate::expertise::ExpertiseDef>,
             creature_types: Vec<TypeDef>,
             subtypes: Vec<SubtypeDef>,
             classes: Vec<ClassDef>,
@@ -100,6 +106,7 @@ impl<'de> serde::Deserialize<'de> for RulesetDocument {
             forms: fields.forms,
             ability_tags: fields.ability_tags,
             talents: fields.talents,
+            expertises: fields.expertises,
             creature_types: fields.creature_types,
             subtypes: fields.subtypes,
             classes: fields.classes,
@@ -129,7 +136,7 @@ pub struct Constants {
     pub duration_scale_offset: u16,
     pub default_abilities: Vec<AbilityId>,
     pub item_timing: ItemTiming,
-    pub default_anatomy: Vec<EquipmentSlot>,
+    pub default_anatomy: crate::AnatomySpec,
 }
 /// Point economies are rules data; each purchase spends one point in its named pool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -137,6 +144,7 @@ pub struct Constants {
 pub enum PurchaseKind {
     SkillRank,
     Talent,
+    Expertise,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -160,6 +168,7 @@ pub struct EquipmentSlotDef {
     pub equipped_phrase: String,
     pub compatible_classes: Vec<crate::ItemClass>,
     pub requires_attack: bool,
+    pub capacity: crate::equipment_capacity::EquipmentCapacityUse,
     pub equip_turns: u64,
     pub unequip_turns: u64,
 }
@@ -253,6 +262,7 @@ pub struct TalentDef {
     pub requirement: Requirement,
     pub modifiers: Vec<Modifier>,
     pub form_choices: Vec<FormId>,
+    pub expertise_grants: Vec<ExpertiseId>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -726,10 +736,18 @@ pub enum TimingSource {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reach {
     Melee,
-    Sight { range: u16 },
-    MutualSight { range: u16 },
+    /// Short/long distances come from the exact effective delivery profile.
+    Projectile,
+    Sight {
+        range: u16,
+    },
+    MutualSight {
+        range: u16,
+    },
     SelfOnly,
-    SelfOrAlly { range: AllyRange },
+    SelfOrAlly {
+        range: AllyRange,
+    },
 }
 impl<'de> Deserialize<'de> for Reach {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -737,6 +755,7 @@ impl<'de> Deserialize<'de> for Reach {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             Melee,
+            Projectile {},
             Sight { range: u16 },
             MutualSight { range: u16 },
             SelfOnly,
@@ -744,6 +763,7 @@ impl<'de> Deserialize<'de> for Reach {
         }
         Ok(match crate::bounded::named_map(d)? {
             Fields::Melee => Self::Melee,
+            Fields::Projectile {} => Self::Projectile,
             Fields::Sight { range } => Self::Sight { range },
             Fields::MutualSight { range } => Self::MutualSight { range },
             Fields::SelfOnly => Self::SelfOnly,
@@ -1333,7 +1353,10 @@ impl ConditionRestriction {
             Self::MovementAbilities => matches!(
                 action,
                 crate::Action::UseAbility {
-                    invocation: crate::abilities::AbilityInvocation::SelfStep { .. },
+                    invocation: crate::abilities::AbilityInvocation {
+                        aim: crate::abilities::AbilityAim::SelfStep { .. },
+                        ..
+                    },
                     ..
                 }
             ),
@@ -1428,6 +1451,7 @@ struct Indexes {
     ability_tags: BTreeMap<AbilityTagId, usize>,
     tag_members: BTreeMap<AbilityTagId, Vec<AbilityId>>,
     talents: BTreeMap<TalentId, usize>,
+    expertises: BTreeMap<ExpertiseId, usize>,
     creature_types: BTreeMap<TypeId, usize>,
     subtypes: BTreeMap<SubtypeId, usize>,
     classes: BTreeMap<ClassId, usize>,
@@ -1471,6 +1495,12 @@ impl Ruleset {
     /// Membership is compiled once; modifier folds do not rescan the catalog.
     pub fn abilities_with_tag(&self, id: &AbilityTagId) -> Option<&[AbilityId]> {
         self.indexes.tag_members.get(id).map(Vec::as_slice)
+    }
+    pub fn expertise(&self, id: &ExpertiseId) -> Option<&crate::expertise::ExpertiseDef> {
+        self.indexes
+            .expertises
+            .get(id)
+            .and_then(|&index| self.document.expertises.get(index))
     }
     pub fn talent(&self, id: &TalentId) -> Option<&TalentDef> {
         self.indexes
@@ -1586,6 +1616,7 @@ impl Ruleset {
         let supplies = catalog!(supplies);
         let ability_tags = catalog!(ability_tags);
         let talents = catalog!(talents);
+        let expertises = catalog!(expertises);
         let types = catalog!(creature_types);
         let subtypes = catalog!(subtypes);
         let classes = catalog!(classes);
@@ -1623,14 +1654,21 @@ impl Ruleset {
             "item_timing",
         )?;
         bound(
-            c.default_anatomy.len() <= crate::limits::EQUIPMENT_SOCKETS,
+            c.default_anatomy.slots.len() <= crate::limits::EQUIPMENT_SOCKETS,
             "default_anatomy",
         )?;
-        for id in &mut c.default_anatomy {
+        for id in &mut c.default_anatomy.slots {
             reference(&equipment_slots, id, "equipment_slot")?;
             id.intern(&mut pool);
         }
+        bound(
+            c.default_anatomy
+                .valid_with(|id| equipment_slot_definitions.get(id).copied()),
+            "default_anatomy",
+        )?;
+        c.default_anatomy.capacities.intern(&mut pool);
         for slot in &document.equipment_slots {
+            bound(slot.capacity.valid(), "equipment_capacity")?;
             bound(
                 !slot.equipped_phrase.trim().is_empty()
                     && slot.equipped_phrase.len() <= crate::limits::DISPLAY_NAME_BYTES
@@ -1729,6 +1767,18 @@ impl Ruleset {
             refs.modifiers(&mut d.modifiers, &mut pool)?;
         }
         for d in &mut document.talents {
+            bound(
+                d.expertise_grants.len() <= crate::limits::MODIFIERS_PER_SOURCE,
+                "talent_expertise_grants",
+            )?;
+            let mut seen_expertises = BTreeSet::new();
+            for expertise in &mut d.expertise_grants {
+                reference(&expertises, expertise, "expertise")?;
+                if !seen_expertises.insert(expertise.clone()) {
+                    return Err(RulesetError::DuplicateId(expertise.to_string()));
+                }
+                expertise.intern(&mut pool);
+            }
             bound(
                 d.form_choices.len() <= crate::limits::FORMS_PER_TALENT,
                 "form_choices",
@@ -1874,7 +1924,7 @@ impl Ruleset {
                     .iter()
                     .flat_map(|rider| &rider.effects)
                     .any(|effect| matches!(effect, Effect::SearchAdjacentGuises)),
-                StrikeSource::SelectedMelee => false,
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => false,
             };
             bound(
                 !searches
@@ -1980,7 +2030,7 @@ impl Ruleset {
                 StrikeSource::NaturalMelee { additional_riders } => {
                     refs.riders(additional_riders, &mut pool)?;
                 }
-                StrikeSource::SelectedMelee => {}
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => {}
             }
         }
         let talent_order = topological(
@@ -2053,6 +2103,7 @@ impl Ruleset {
             ability_tags: index!(ability_tags),
             tag_members,
             talents: index!(talents),
+            expertises: index!(expertises),
             creature_types: index!(creature_types),
             subtypes: index!(subtypes),
             classes: index!(classes),
@@ -2084,12 +2135,14 @@ impl Ruleset {
                 "permanent_modifier_scope",
             )?;
             rules.expanded_modifier_count(modifiers)?;
+            rules.validate_projectile_range_modifiers(modifiers)?;
         }
         for definition in &rules.document.talents {
             rules.validate_edge_source(&definition.modifiers)?;
         }
         for definition in &rules.document.conditions {
             rules.validate_edge_source(&definition.modifiers)?;
+            rules.validate_projectile_range_modifiers(&definition.modifiers)?;
             let expanded = rules.expanded_modifier_count(&definition.modifiers)?;
             let stacks = match definition.stacking {
                 Stacking::Stack { maximum } => usize::from(maximum),
@@ -2108,7 +2161,7 @@ impl Ruleset {
                 StrikeSource::NaturalMelee { additional_riders } => {
                     rules.validate_rider_interaction(ability.interaction, additional_riders)?
                 }
-                StrikeSource::SelectedMelee => bound(
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => bound(
                     ability.interaction == Interaction::HostileToTarget,
                     "non_hostile_direct_harm",
                 )?,
@@ -2728,8 +2781,48 @@ impl Ruleset {
         self.validate_condition_modifiers(modifiers)
     }
 
+    // Existing range modifiers are sight-cell adjustments, not physical feet
+    // band adjustments. Reject unsupported authoring before any actor uses it.
+    fn validate_projectile_range_modifiers(
+        &self,
+        modifiers: &[Modifier],
+    ) -> Result<(), RulesetError> {
+        for modifier in modifiers {
+            let (ModifierOp::Add { stat, value } | ModifierOp::Set { stat, value }) = &modifier.op
+            else {
+                continue;
+            };
+            if *value == 0 {
+                continue;
+            }
+            let projectile = match stat {
+                Stat::Ability {
+                    ability,
+                    stat: AbilityStat::Range,
+                } => self.ability(ability).is_some_and(|ability| {
+                    ability.invocation == crate::abilities::InvocationKind::DirectionalProjectile
+                }),
+                Stat::AbilityTag {
+                    tag,
+                    stat: AbilityStat::Range,
+                } => self.abilities_with_tag(tag).is_some_and(|members| {
+                    members.iter().any(|id| {
+                        self.ability(id).is_some_and(|ability| {
+                            ability.invocation
+                                == crate::abilities::InvocationKind::DirectionalProjectile
+                        })
+                    })
+                }),
+                _ => false,
+            };
+            bound(!projectile, "projectile_range_adjustment_unsupported")?;
+        }
+        Ok(())
+    }
+
     /// Condition contributions carry a causer, allowing the supported scoped edge operators.
     pub fn validate_condition_modifiers(&self, modifiers: &[Modifier]) -> Result<(), RulesetError> {
+        self.validate_projectile_range_modifiers(modifiers)?;
         let abilities = self.indexes.abilities.keys().cloned().collect();
         let ability_tags = self.indexes.ability_tags.keys().cloned().collect();
         let types = self.indexes.creature_types.keys().cloned().collect();
@@ -3312,6 +3405,7 @@ mod tests {
         let mut doc = document();
         doc.talents.push(TalentDef {
             form_choices: vec![],
+            expertise_grants: vec![],
             id: TalentId::new("fixture_hardiness").unwrap(),
             name: "Fixture Hardiness".into(),
             prerequisites: vec![],
@@ -3413,8 +3507,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v45\"",
-                "id = \"interactions-v45\"\nunknown = true"
+                "id = \"interactions-v46\"",
+                "id = \"interactions-v46\"\nunknown = true"
             ))
             .is_err()
         );
@@ -3556,9 +3650,9 @@ mod tests {
         value["equipment_slots"] = serde_json::json!([{
             "id": "tentacle", "name": "Tentacle", "equipped_phrase": "held by a tentacle",
             "compatible_classes": ["tool"], "requires_attack": true,
-            "equip_turns": 2, "unequip_turns": 4
+            "capacity": {"kind":"none"}, "equip_turns": 2, "unequip_turns": 4
         }]);
-        value["constants"]["default_anatomy"] = serde_json::json!(["tentacle", "tentacle"]);
+        value["constants"]["default_anatomy"] = serde_json::json!({"slots":["tentacle", "tentacle"],"capacities":{},"primary_attack_socket":{"kind":"none"}});
         value["constants"]["item_timing"] = serde_json::json!({"consume_turns": 1});
         let parsed = serde_json::from_value::<RulesetDocument>(value);
         assert!(parsed.is_ok(), "custom slot data rejected: {parsed:?}");
@@ -3585,6 +3679,7 @@ mod tests {
             "equipped_phrase",
             "compatible_classes",
             "requires_attack",
+            "capacity",
             "equip_turns",
             "unequip_turns",
         ] {
@@ -3607,6 +3702,7 @@ mod tests {
         let mut doc = document();
         doc.constants
             .default_anatomy
+            .slots
             .push(EquipmentSlot::new("missing_slot").unwrap());
         assert!(matches!(
             Ruleset::validate(doc),

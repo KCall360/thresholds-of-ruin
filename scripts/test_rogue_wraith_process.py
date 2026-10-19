@@ -258,8 +258,8 @@ class RogueWraithProcesses(ProcessTestCase):
                 self.assertIsNotNone(ration, "The unchanged finite ration supply is exhausted")
                 action = {"type": "eat", "item": ration["id"]}
             elif injury >= 2 and quantity(current, "clean bandage") and int(care["cooldown_remaining"]) == 0:
-                action = {"type": "use_ability", "id": "bind_wounds", "invocation": {
-                    "kind": "actor_target", "target": observation(current)["self_target"]}}
+                action = {"type": "use_ability", "id": "bind_wounds", "invocation": {"aim": {
+                    "kind": "actor_target", "target": observation(current)["self_target"]}, "weapon": {"kind": "default"}}}
             else:
                 action = {"type": "wait"}
             current, _ = self.action(player, current, action)
@@ -286,7 +286,7 @@ class RogueWraithProcesses(ProcessTestCase):
             paid = stamina["available"] >= cost["start"] + cost["resolution"]
             current, events = self.action(player, current, {"type": "use_ability",
                 "id": "rattling_blow" if paid else "basic_melee",
-                "invocation": {"kind": "actor_target", "target": target}})
+                "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
             if name == "wraith" and u64(stats(current)["hit_dice"]["total"]) == 1:
                 # action() already required a live actor and audited the real
                 # contact/row loss. Choose this stop only from disclosed own HD.
@@ -336,7 +336,7 @@ class RogueWraithProcesses(ProcessTestCase):
             if ordinal == 0:
                 before_retry = self.saved
                 refused = self.act(player, {"type": "use_ability", "id": "basic_melee",
-                    "invocation": {"kind": "actor_target", "target": target}})
+                    "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
                 self.assertIsNotNone(refused["error"], "An observed dead target cannot be killed twice")
                 self.assertEqual(checkpoint(self, player), before_retry)
                 current = self.request(player, {"type": "snapshot"})

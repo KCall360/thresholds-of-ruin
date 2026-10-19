@@ -34,7 +34,7 @@ fn own_stats_disclose_current_build_and_reserved_resources_only_to_the_owner() {
             actor,
             Action::UseAbility {
                 id: ability_id("fixture_focus_fear"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -156,9 +156,7 @@ fn paid_abilities_queue_free_then_pay_split_cost_through_preparation_and_restore
                 actor,
                 Action::UseAbility {
                     id: ability.clone(),
-                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                        target,
-                    },
+                    invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -187,7 +185,16 @@ fn paid_abilities_queue_free_then_pay_split_cost_through_preparation_and_restore
         let costs = creature.costs();
         assert_eq!(costs.resources().balance(resource), balance - 1);
         assert_eq!(costs.available(resource), balance - 2);
-        assert_eq!(costs.reservation(intention).unwrap().resolution, 1);
+        assert_eq!(
+            costs
+                .reservation(intention)
+                .unwrap()
+                .entries()
+                .find(|cost| cost.resource == resource)
+                .unwrap()
+                .resolution,
+            1
+        );
         let mut shared = tor_simulation::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
         let mut restored =
@@ -213,7 +220,7 @@ fn paused_paid_work_resumes_under_a_new_receipt_without_repayment_then_cancels()
             actor,
             Action::UseAbility {
                 id: ability_id("fixture_mana_ray"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -240,7 +247,7 @@ fn paused_paid_work_resumes_under_a_new_receipt_without_repayment_then_cancels()
             actor,
             Action::UseAbility {
                 id: ability_id("fixture_mana_ray"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -281,7 +288,7 @@ fn paid_actions_reject_unowned_direct_execution_without_mutation() {
             actor,
             Action::UseAbility {
                 id: ability_id("fixture_mana_ray"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             }
         ),
@@ -295,7 +302,7 @@ fn paid_actions_reject_unowned_direct_execution_without_mutation() {
             actor,
             Action::UseAbility {
                 id: ability_id("basic_melee"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -326,9 +333,7 @@ fn queue_execution_rechecks_grants_and_paid_preparation_cancels_on_grant_loss() 
                 actor,
                 Action::UseAbility {
                     id: ability_id("fixture_paid_melee"),
-                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                        target,
-                    },
+                    invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -365,9 +370,7 @@ fn affordability_is_rechecked_at_start_and_queueing_remains_free() {
                 actor,
                 Action::UseAbility {
                     id: ability_id("fixture_mana_ray"),
-                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                        target,
-                    },
+                    invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -389,7 +392,7 @@ fn affordability_is_rechecked_at_start_and_queueing_remains_free() {
             actor,
             Action::UseAbility {
                 id: ability_id("fixture_mana_ray"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -414,7 +417,7 @@ fn paid_melee_probe_applies_the_shared_bonus_and_ray_matches_the_seeded_kernel()
             actor,
             Action::UseAbility {
                 id: ability_id("basic_melee"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
         )
@@ -424,7 +427,7 @@ fn paid_melee_probe_applies_the_shared_bonus_and_ray_matches_the_seeded_kernel()
             actor,
             Action::UseAbility {
                 id: ability_id("fixture_paid_melee"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -454,7 +457,7 @@ fn paid_melee_probe_applies_the_shared_bonus_and_ray_matches_the_seeded_kernel()
         actor,
         Action::UseAbility {
             id: ability_id("fixture_mana_ray"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -473,7 +476,7 @@ fn replacing_paid_work_can_use_the_hold_released_by_that_replacement() {
     let (mut game, actor, target) = game();
     let action = Action::UseAbility {
         id: ability_id("fixture_mana_ray"),
-        invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+        invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
         supplies: Default::default(),
     };
     let first = game
@@ -516,9 +519,7 @@ fn replacing_paid_work_can_use_the_hold_released_by_that_replacement() {
             actor,
             Action::UseAbility {
                 id: ability_id("fixture_mana_ray"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                    target: other,
-                },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(other),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -540,7 +541,7 @@ fn paid_preparation_records_reject_orphan_mismatched_and_unissued_holds() {
         actor,
         Action::UseAbility {
             id: ability_id("fixture_mana_ray"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -558,7 +559,8 @@ fn paid_preparation_records_reject_orphan_mismatched_and_unissued_holds() {
             0 => state["pending"] = serde_json::Value::Null,
             1 => state["combat"]["creature"]["holds"] = serde_json::json!([]),
             2 => {
-                state["pending"]["plan"]["cost"]["resource"] = serde_json::json!("focus");
+                let old = state["pending"]["plan"]["cost"]["mana"].take();
+                state["pending"]["plan"]["cost"]["focus"] = old;
             }
             3 => {
                 state["pending"]["hold"] = serde_json::json!(100);
@@ -590,7 +592,7 @@ fn checkpoint_rejects_paid_plan_with_all_payment_state_stripped_together() {
         actor,
         Action::UseAbility {
             id: ability_id("fixture_mana_ray"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -673,9 +675,7 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
                 actor,
                 Action::UseAbility {
                     id: ability_id("fixture_focus_fear"),
-                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                        target,
-                    },
+                    invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -711,7 +711,7 @@ fn ability_history_preserves_event_time_identity_without_licensing_late_observer
         actor,
         Action::UseAbility {
             id: ability_id("fixture_mana_ray"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -784,13 +784,13 @@ fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_c
         let action = if ability == ability_id("basic_melee") {
             Action::UseAbility {
                 id: ability_id("basic_melee"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             }
         } else {
             Action::UseAbility {
                 id: ability.clone(),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             }
         };
@@ -853,7 +853,11 @@ fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_c
                 ))
             );
         }
-        if let Some(charge) = record.charge {
+        for charge in record
+            .charge
+            .into_iter()
+            .flat_map(|bundle| bundle.entries())
+        {
             let before = record
                 .actor_before
                 .resources
@@ -893,7 +897,7 @@ fn transient_combat_capture_replays_from_checkpoint_but_is_not_persisted() {
         actor,
         Action::UseAbility {
             id: ability_id("fixture_mana_ray"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -931,7 +935,7 @@ fn combat_capture_preserves_resumed_receipt_and_original_payment_owner() {
     game.set_combat_diagnostics(true);
     let action = Action::UseAbility {
         id: ability_id("fixture_mana_ray"),
-        invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+        invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
         supplies: Default::default(),
     };
     let original = game
@@ -981,7 +985,7 @@ fn combat_capture_does_not_fabricate_resolution_for_cancelled_work() {
             actor,
             Action::UseAbility {
                 id: ability_id("fixture_mana_ray"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -1004,7 +1008,7 @@ fn combat_capture_forks_keep_their_own_retained_windows() {
         actor,
         Action::UseAbility {
             id: ability_id("basic_melee"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
     )
@@ -1023,7 +1027,7 @@ fn combat_capture_forks_keep_their_own_retained_windows() {
         actor,
         Action::UseAbility {
             id: ability_id("basic_melee"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
     )

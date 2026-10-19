@@ -67,6 +67,7 @@ pub enum PreparationProgress {
     },
     Escape {},
     Ray {},
+    Projectile {},
     Item {},
     Respec {},
 }
@@ -84,6 +85,7 @@ impl<'de> Deserialize<'de> for PreparationProgress {
             },
             Escape {},
             Ray {},
+            Projectile {},
             Item {},
             Respec {},
         }
@@ -108,6 +110,7 @@ impl<'de> Deserialize<'de> for PreparationProgress {
             }
             Fields::Escape {} => Self::Escape {},
             Fields::Ray {} => Self::Ray {},
+            Fields::Projectile {} => Self::Projectile {},
             Fields::Item {} => Self::Item {},
             Fields::Respec {} => Self::Respec {},
         })
@@ -207,6 +210,8 @@ impl PreparationProgress {
             Self::Escape {}
         } else if matches!(plan, Plan::Respec(_)) {
             Self::Respec {}
+        } else if plan.as_projectile().is_some() {
+            Self::Projectile {}
         } else if plan.as_ray().is_some() {
             Self::Ray {}
         } else if plan.as_ability().is_some() {
@@ -373,6 +378,7 @@ impl Preparation {
         match self.progress {
             PreparationProgress::Ability { next_strike, .. } => Some(usize::from(next_strike)),
             PreparationProgress::Escape {}
+            | PreparationProgress::Projectile {}
             | PreparationProgress::Ray {}
             | PreparationProgress::Item {}
             | PreparationProgress::Respec {} => None,
@@ -428,6 +434,7 @@ impl Preparation {
         matches!(
             (&self.plan, self.progress),
             (Plan::Escape(_), PreparationProgress::Escape {})
+                | (Plan::Projectile(_), PreparationProgress::Projectile {})
                 | (Plan::Ray(_) | Plan::Zap { .. }, PreparationProgress::Ray {})
                 | (Plan::Respec(_), PreparationProgress::Respec {})
                 | (Plan::Ability(_), PreparationProgress::Ability { .. })

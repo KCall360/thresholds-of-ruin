@@ -46,7 +46,7 @@ class InteractionProcesses(ProcessTestCase):
         server = self.server("--checkpoint-interval", 1, scenario="interactions")
         player, initial = self.client()
         view = initial["state"]["observation"]
-        self.assertEqual([slot["id"] for slot in view["interactions"]["slots"]], ["weapon", "body_armor", "ring", "ring"])
+        self.assertEqual([slot["id"] for slot in view["interactions"]["slots"]], ["weapon", "body_armor", "ring", "ring", "weapon"])
         items = {item["name"]: item["id"] for item in view["inventory"]}
         ring = next(item for item in view["interactions"]["inventory"] if item["item"] == items["silver ring"])
         self.assertEqual(ring["equipped_slot"], 2)

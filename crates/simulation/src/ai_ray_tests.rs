@@ -87,8 +87,11 @@ fn hostile_ai_selects_disclosed_alignment_without_target_or_hidden_collision_pre
     assert!(matches!(
         selected,
         Action::UseAbility {
-            invocation: AbilityInvocation::DirectionalRay {
-                direction: StepDirection::East
+            invocation: AbilityInvocation {
+                aim: crate::abilities::AbilityAim::DirectionalRay {
+                    direction: StepDirection::East
+                },
+                ..
             },
             ..
         }
@@ -217,7 +220,10 @@ fn queued_ray_restores_without_target_and_starts_with_directional_work() {
         execution.outcome.unwrap().kind,
         crate::OutcomeKind::ItemStarted {
             work: crate::Work::UseAbility {
-                invocation: AbilityInvocation::DirectionalRay { .. },
+                invocation: AbilityInvocation {
+                    aim: crate::abilities::AbilityAim::DirectionalRay { .. },
+                    ..
+                },
                 ..
             }
         }

@@ -130,9 +130,7 @@ fn observe_preparing(
         observer,
         Action::UseAbility {
             id: super::abilities::id("fixture_public_plan_read"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: subject,
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(subject),
             supplies: Default::default(),
         },
         tor_simulation::IntentionOrigin::Human,
@@ -143,9 +141,7 @@ fn observe_preparing(
         subject,
         Action::UseAbility {
             id: super::abilities::id("slow_plan"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: observer,
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(observer),
             supplies: Default::default(),
         },
     )
@@ -219,18 +215,28 @@ fn outgoing_token_qualification_is_named_and_cannot_broaden_incoming_tokens() {
     let build = super::creature_state::build();
     let value = json!({
         "condition":"readied", "source":1, "remaining":300, "stacks":1,
-        "order":0, "reserved_by":null, "phase":"active",
+        "order":0, "generation":0, "reserved_by":null, "phase":"active",
         "qualification":{"opponent":2,"ability_tag":"weapon_attack"}
     });
     let entry: ConditionInstance = serde_json::from_slice(&serde_json::to_vec(&value).unwrap())
         .expect("an existing outgoing token can carry an explicit bounded qualification");
-    assert!(ConditionState::from_recorded(vec![entry], build.ruleset()).is_ok());
+    assert!(ConditionState::from_recorded(
+        vec![entry.clone()],
+        entry.generation + 1,
+        build.ruleset()
+    )
+    .is_ok());
     for condition in ["exposed", "fear"] {
         let mut invalid = value.clone();
         invalid["condition"] = json!(condition);
         let entry: ConditionInstance =
             serde_json::from_slice(&serde_json::to_vec(&invalid).unwrap()).unwrap();
-        assert!(ConditionState::from_recorded(vec![entry], build.ruleset()).is_err());
+        assert!(ConditionState::from_recorded(
+            vec![entry.clone()],
+            entry.generation + 1,
+            build.ruleset()
+        )
+        .is_err());
     }
     for invalid in [
         json!({"opponent":0,"ability_tag":"weapon_attack"}),
@@ -240,7 +246,12 @@ fn outgoing_token_qualification_is_named_and_cannot_broaden_incoming_tokens() {
         malformed["qualification"] = invalid;
         let entry: ConditionInstance =
             serde_json::from_slice(&serde_json::to_vec(&malformed).unwrap()).unwrap();
-        assert!(ConditionState::from_recorded(vec![entry], build.ruleset()).is_err());
+        assert!(ConditionState::from_recorded(
+            vec![entry.clone()],
+            entry.generation + 1,
+            build.ruleset()
+        )
+        .is_err());
     }
     for qualifier in [
         r#"[2,"weapon_attack"]"#,
@@ -249,7 +260,7 @@ fn outgoing_token_qualification_is_named_and_cannot_broaden_incoming_tokens() {
         r#"{"opponent":2,"opponent":3,"ability_tag":"weapon_attack"}"#,
     ] {
         let encoded = format!(
-            r#"{{"condition":"readied","source":1,"remaining":300,"stacks":1,"order":0,"reserved_by":null,"phase":"active","qualification":{qualifier}}}"#
+            r#"{{"condition":"readied","source":1,"remaining":300,"stacks":1,"order":0,"generation":0,"reserved_by":null,"phase":"active","qualification":{qualifier}}}"#
         );
         assert!(
             serde_json::from_slice::<ConditionInstance>(encoded.as_bytes()).is_err(),
@@ -291,7 +302,7 @@ fn ability_preparation_captures_a_visible_public_aim_once() {
         actor,
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
     )
@@ -789,7 +800,7 @@ fn public_plan_review_forged_pending_participation_fails_authored_and_natural_re
             actor,
             Action::UseAbility {
                 id: super::abilities::id(ability),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             tor_simulation::IntentionOrigin::Human,

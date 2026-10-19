@@ -286,7 +286,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":52,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":53,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -1352,7 +1352,19 @@ An optional observation `interactions` describes the attached actor's anatomy
 slots, actor-owned preparation and carried-item affordances. Prepared actions use
 opaque actor/item targets, and remaining ticks use exact decimal strings. Slot
 indices are bounded by the disclosed anatomy; duplicate kinds are distinct slots.
-Equipment statistics are absent for unidentified items. Consumable effect
+Equipment statistics are absent for unidentified items. Every interaction row
+includes required-nullable `known_projectile_bonus`: either null or a strict named
+`{hit, damage}` record of signed remembered instance enchantments, each bounded
+from -1,000,000 through 1,000,000. Only known projectile identities with stored
+numeric knowledge disclose this record; plain ammunition does not acquire an
+equipment socket or full attack view. Hidden live condition changes never refresh
+these remembered values. Spectator snapshots and delta baselines remove the
+record, and another actor's observation does not inherit the owner's memory.
+Clients label these as remembered bonuses, not resolved hit or damage totals.
+Remembered `known_cursed` and `known_protected` are independent exact-instance
+facts: they require neither an equipment slot nor numeric or type knowledge.
+Actual `equipped_slot` and `known_equipment` still require a disclosed slot.
+Consumable effect
 primitives stay in the backend. Deltas replace this optional snapshot, including
 removing it when no interaction facts remain. `equip`, `unequip`, `drink`, `eat`,
 `read` and `zap` use

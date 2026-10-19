@@ -62,6 +62,7 @@ pub struct AbilityCost {
 pub enum AbilityTargetKind {
     SelfStep,
     DirectionalRay,
+    DirectionalProjectile,
     SelfOnly,
     SelfOrAlly,
     Actor,
@@ -70,9 +71,15 @@ pub enum AbilityTargetKind {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AbilityReach {
     Melee,
-    Sight { range: u16 },
+    /// Range comes from the exact selected physical delivery profile.
+    Projectile,
+    Sight {
+        range: u16,
+    },
     SelfOnly,
-    SelfOrAlly { range: AbilityAllyRange },
+    SelfOrAlly {
+        range: AbilityAllyRange,
+    },
 }
 impl<'de> Deserialize<'de> for AbilityReach {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -80,12 +87,14 @@ impl<'de> Deserialize<'de> for AbilityReach {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             Melee,
+            Projectile {},
             Sight { range: u16 },
             SelfOnly,
             SelfOrAlly { range: AbilityAllyRange },
         }
         Ok(match crate::bounded::named_map(d)? {
             Fields::Melee => Self::Melee,
+            Fields::Projectile {} => Self::Projectile,
             Fields::Sight { range } => Self::Sight { range },
             Fields::SelfOnly => Self::SelfOnly,
             Fields::SelfOrAlly { range } => Self::SelfOrAlly { range },
@@ -122,6 +131,7 @@ pub struct AbilityView {
     pub reach: AbilityReach,
     pub target_kind: AbilityTargetKind,
     pub basic_attack: bool,
+    pub weapon_selection: bool,
     #[serde(with = "crate::integers::unsigned")]
     pub cooldown_remaining: u64,
     #[serde(deserialize_with = "crate::supplies::read_supply_costs")]
@@ -138,6 +148,7 @@ impl<'de> Deserialize<'de> for AbilityView {
             reach: AbilityReach,
             target_kind: AbilityTargetKind,
             basic_attack: bool,
+            weapon_selection: bool,
             #[serde(with = "crate::integers::unsigned")]
             cooldown_remaining: u64,
             #[serde(deserialize_with = "crate::supplies::read_supply_costs")]
@@ -151,6 +162,7 @@ impl<'de> Deserialize<'de> for AbilityView {
             reach: f.reach,
             target_kind: f.target_kind,
             basic_attack: f.basic_attack,
+            weapon_selection: f.weapon_selection,
             cooldown_remaining: f.cooldown_remaining,
             supply_costs: f.supply_costs,
         })
@@ -190,6 +202,9 @@ impl AbilityView {
                         }
                 }
                 (AbilityReach::Melee, AbilityTargetKind::Actor) => true,
+                (AbilityReach::Projectile, AbilityTargetKind::DirectionalProjectile) => {
+                    !self.basic_attack && !self.weapon_selection
+                }
                 (AbilityReach::Sight { range }, AbilityTargetKind::DirectionalRay) => {
                     !self.basic_attack && (1..=16).contains(&range)
                 }
@@ -327,6 +342,7 @@ pub struct OwnStats {
     pub nutrition: NutritionView,
     pub restorable_losses: RestorableLossesView,
     pub conditions: Vec<PersonalCondition>,
+    pub expertises: Vec<crate::AdvancementExpertiseRow>,
     pub active_talents: Vec<ContentRef>,
     pub dormant_talents: Vec<ContentRef>,
     pub abilities: Vec<AbilityView>,
@@ -349,6 +365,8 @@ impl<'de> Deserialize<'de> for OwnStats {
             restorable_losses: RestorableLossesView,
             #[serde(deserialize_with = "crate::bounded::bounded::<_, _, 128>")]
             conditions: Vec<PersonalCondition>,
+            #[serde(deserialize_with = "crate::bounded::bounded::<_, _, 256>")]
+            expertises: Vec<crate::AdvancementExpertiseRow>,
             active_talents: Vec<ContentRef>,
             dormant_talents: Vec<ContentRef>,
             abilities: Vec<AbilityView>,
@@ -367,6 +385,7 @@ impl<'de> Deserialize<'de> for OwnStats {
             nutrition: fields.nutrition,
             restorable_losses: fields.restorable_losses,
             conditions: fields.conditions,
+            expertises: fields.expertises,
             active_talents: fields.active_talents,
             dormant_talents: fields.dormant_talents,
             abilities: fields.abilities,

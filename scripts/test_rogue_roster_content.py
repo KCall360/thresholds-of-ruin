@@ -289,8 +289,12 @@ class RogueRosterContent(unittest.TestCase):
             "reward_base": 25, "reward_per_relative_tier": 5, "minimum_reward": 1,
             "maximum_reward": 1000, "recovery": 0, "threat": {"points_per_tier": 100,
                 "hit_die": 70, "trained_rank": 5, "species": 10, "creature_type": 10,
-                "subtype": 5, "class": 10, "template": 20, "talent": 10, "overrides": []}})
-        self.assertFalse(any(row["path"][0] == "growth" for row in source("rules.toml")["overrides"]))
+                "subtype": 5, "class": 10, "template": 20, "talent": 10, "expertise": 0, "overrides": []}})
+        self.assertEqual([row for row in source("rules.toml")["overrides"] if row["path"][0] == "growth"], [{
+            "op": "set", "path": ["growth", "threat", "overrides"], "value": [
+                {"source": {"kind": "expertise", "id": "rogue.knife"}, "points": 10},
+                {"source": {"kind": "expertise", "id": "rogue.shortbow"}, "points": 10}]}])
+        # Neither E nor W owns equipment expertise; their threat stays unchanged.
         # E: 70 HD + 10 two ranks + 10 species + 10 type = tier 1.
         # W: 350 HD + 10 ranks + 10 species + 10 type + 10 DR2 = tier 4.
         # Retained highest-earned HD2: E awards20, W awards35; regrowth costs200.
@@ -364,7 +368,7 @@ class RogueRosterContent(unittest.TestCase):
         stages = profile["stages"]
         self.assertEqual([row["id"] for row in stages],
                          ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions", "rogue.magic_scrolls",
-            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls"])
+            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition"])
         self.assertEqual([row["count"] for row in stages[:4]], [[4, 4], [1, 1], [1, 1], [1, 1]])
         actor = stages[0]
         self.assertEqual(actor["kind"], "actors")

@@ -579,7 +579,7 @@ fn phase5_supportive_target_is_rechecked_at_queued_start_and_resolution() {
             actor,
             Action::UseAbility {
                 id: id("fixture_mana_ray"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,

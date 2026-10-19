@@ -89,6 +89,7 @@ fn loot_respects_care_and_equipment_overrides_independently() {
     let mut armor = ItemSpec::ordinary("known armor".into());
     armor.class = crate::ItemClass::Armor;
     armor.equipment = Some(crate::EquipmentSpec {
+        weapon_profile: None,
         armor: Some(crate::ArmorSpec {
             physical_reduction: 2,
             material: crate::ArmorMaterial::Metal,

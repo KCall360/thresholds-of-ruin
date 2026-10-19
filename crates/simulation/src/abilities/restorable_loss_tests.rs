@@ -877,6 +877,9 @@ fn loss_capacity_cancels_a_live_hold_without_refunding_paid_start_or_cooldown() 
             .costs()
             .reservation(hold)
             .unwrap()
+            .entries()
+            .find(|cost| cost.resource == crate::resources::Resource::Stamina)
+            .unwrap()
             .resolution,
         6
     );
@@ -1325,6 +1328,7 @@ fn hit_die_grant_loss_cancels_only_the_unresolved_tail_and_never_refunds_or_repl
                     minimum: crate::HdCount(2),
                 },
                 form_choices: vec![],
+                expertise_grants: vec![],
                 modifiers: vec![Modifier {
                     scope: Scope::Always,
                     op: ModifierOp::GrantAbility {
@@ -1374,7 +1378,7 @@ fn hit_die_grant_loss_cancels_only_the_unresolved_tail_and_never_refunds_or_repl
                 ActorId(1),
                 crate::Action::UseAbility {
                     id: ability.clone(),
-                    invocation: super::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                    invocation: super::AbilityInvocation::actor_target(ActorId(2)),
                     supplies: Default::default(),
                 },
                 crate::IntentionOrigin::Human,

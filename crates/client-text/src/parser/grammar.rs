@@ -56,10 +56,14 @@ pub enum AbilitySelection {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParsedCommand {
+    Projectile {
+        id: String,
+    },
     Ability {
         id: String,
         selection: AbilitySelection,
         supplies: Option<String>,
+        weapon: Option<String>,
     },
     Intransitive {
         verb: Verb,

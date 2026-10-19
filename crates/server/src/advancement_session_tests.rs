@@ -343,6 +343,7 @@ fn owner_advancement_active_paused_and_resumed_respec_stays_out_of_ordinary_view
     let package = fixture.package.as_ref().unwrap();
     let mut rules = package.rules().unwrap().document().clone();
     rules.talents.push(tor_simulation::rules::TalentDef {
+        expertise_grants: Vec::new(),
         form_choices: Vec::new(),
         id: tor_simulation::content_ids::TalentId::new(CANARY).unwrap(),
         name: "Private confirmation choice".into(),
@@ -709,8 +710,11 @@ fn earned_growth_private_totals_stay_controller_only_alongside_shared_paid_histo
                     expected_revision: engine.revision(ActorId(actor)).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new(ability).unwrap(),
-                        invocation: crate::journal::AbilityInvocation::ActorTarget {
-                            target: tor_simulation::ActorId(target),
+                        invocation: crate::journal::AbilityInvocation {
+                            aim: crate::journal::AbilityAim::ActorTarget {
+                                target: tor_simulation::ActorId(target),
+                            },
+                            weapon: crate::journal::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -787,8 +791,11 @@ fn admit_capacity_ability(
         actor,
         &crate::journal::Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new(id).unwrap(),
-            invocation: crate::journal::AbilityInvocation::ActorTarget {
-                target: tor_simulation::ActorId(target),
+            invocation: crate::journal::AbilityInvocation {
+                aim: crate::journal::AbilityAim::ActorTarget {
+                    target: tor_simulation::ActorId(target),
+                },
+                weapon: crate::journal::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },
@@ -1635,7 +1642,7 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
                     OWNER,
                     json!({"type":"use_ability","supplies":{"kind":"carried"},
                     "id":if paid {"rattling_blow"} else {"basic_melee"},
-                    "invocation":{"kind":"actor_target","target":target}}),
+                    "invocation":{"aim":{"kind":"actor_target","target":target},"weapon":{"kind":"default"}}}),
                 );
                 let deaths: Vec<_> = events
                     .iter()
@@ -1663,7 +1670,7 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
                     assert_eq!(latest.actor, OWNER);
                     assert!(matches!(&latest.content,
                         HistoryContent::Action { action: tor_protocol::Action::UseAbility {
-                            id, invocation: AbilityInvocation::ActorTarget { target: victim }, .. }, .. }
+                            id, invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target: victim }, weapon: tor_protocol::WeaponSelection::Default }, .. }, .. }
                             if *victim == target && matches!(id.as_str(), "rattling_blow" | "basic_melee")));
                     progress(&self.service, earned + reward, spent, hd);
                     return target;
@@ -1705,7 +1712,7 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
                         .any(|item| item.name == "clean bandage" && item.quantity > 0)
                 {
                     json!({"type":"use_ability","supplies":{"kind":"carried"},"id":"bind_wounds",
-                        "invocation":{"kind":"actor_target","target":view.self_target}})
+                        "invocation":{"aim":{"kind":"actor_target","target":view.self_target},"weapon":{"kind":"default"}}})
                 } else {
                     waits += 1;
                     assert!(
@@ -1885,7 +1892,7 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
                 json!({"type":"act",
                 "expected_revision":case.service.engine.revision(OWNER).unwrap().to_string(),
                 "action":{"type":"use_ability","supplies":{"kind":"carried"},"id":"basic_melee",
-                    "invocation":{"kind":"actor_target","target":target}}}),
+                    "invocation":{"aim":{"kind":"actor_target","target":target},"weapon":{"kind":"default"}}}}),
             );
             case.service
                 .handle(client, "dead-target-no-credit".into(), request);
@@ -1915,7 +1922,7 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
         let events = case.act(
             WRAITH,
             json!({"type":"use_ability","supplies":{"kind":"carried"},"id":DRAIN,
-            "invocation":{"kind":"actor_target","target":victim}}),
+            "invocation":{"aim":{"kind":"actor_target","target":victim},"weapon":{"kind":"default"}}}),
         );
         let actual_hd = case
             .service

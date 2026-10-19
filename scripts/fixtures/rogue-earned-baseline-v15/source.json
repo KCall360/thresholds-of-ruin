@@ -1,0 +1,13 @@
+{
+  "package_inputs": {
+    "catalog/actors.toml": "9aa3f2ae65a5b5370ca624a89a0ba2fad02aa94b244655c2c9314fcb57132abd",
+    "catalog/creatures.toml": "43460a6543e04413d4eab64c05a66ce8f9b45ac2b6fb06cf39714b81ab0557e2",
+    "catalog/items.toml": "f3c2bf4a9e6ef56725dfaf6da486db0095f70eede4eb8d7e28ee84b152c6ec7c",
+    "rules.toml": "793630a031cdbb0c6b8cc7cf61417a8624a005fb144e8509416ce0853f31b84f",
+    "scenario.toml": "ff9f496cfd6a4cac2ea24f0fb5b58a39515ab052fcb59edb050298bfb870ee28"
+  },
+  "reference": "8d09063840c51aa4189b146c287829102856b279:scenarios/rogue-exploration (current-format preactivation E/S source; certificates regenerated); current scenario 15 format-only adaptation; transition-sha256:24eb0c424f1e33d370bcb758560f950556f71671234da145327ecf829317da4c; current wide-scalar rules identity adaptation; transition-sha256:ca89c547beda7a895b46937516700d4871f017ae00cce2ad4e51cba9770f82d9; source-only sequence-rider format-forward adaptation (compiler and route qualification pending); transition-sha256:c2b887c926e4821307cf95e0ddadb9156ac36959a891623672b5187ce2750f4c; source-only complete-idle AI scenario-format adaptation (compiler and route qualification pending); transition-sha256:57338c27cdc8f70f2f0c889f19696e97011a83c29ee56eb8844d22de9cd12119; source-only locomotion/linked-hold format-forward adaptation (compiler and route qualification pending); transition-sha256:3846185d5e8743c789c47e193a1bc9437590440a1db5cda34c9e970b34a3681a; source-only theft and room-gold format-forward adaptation (compiler and route qualification pending); transition-sha256:758e6f2630373b99827db84eb61982930ba93c06d9892be9c74454acac2b9131; source-only perception/gaze/mimic format-forward adaptation (compiler and route qualification pending); transition-sha256:40b97d8b158ffb1ba8dc31161b4d7f9373cb328c0a5b991c4e8e477c432b9f7a; source-only corrosion/ray format-forward adaptation (compiler and route qualification pending); transition-sha256:367763705d8200651f23bdaec0e841a7e8fdd5c10d9f2c76581b6c92228ee968; source-only magic-item format-forward adaptation (compiler and route qualification pending); transition-sha256:c2a5437cff062788961321d531fadfa1fedd90c3a18400203abadcf4a027bba4; source-only equipment-magic/Psychic format-forward adaptation (compiler and route qualification pending); transition-sha256:f64a31712cc3412f37be7f1f64f0c6912b99421df9ce6569d8ad5e1a105d1673; source-only physical-projectile/anatomy format-forward adaptation (compiler and route qualification pending); transition-sha256:1df4a2ef7969335c509ccfd90733b08e083474cd05d77acfbdae05571a4be9a0",
+  "rules_dependencies": {
+    "interactions-v46": "e3eda113c6dadf96bb350df1900c1ed08e63e0a69f049a9703be25237748e907"
+  }
+}

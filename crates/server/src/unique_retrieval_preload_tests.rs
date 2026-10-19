@@ -139,8 +139,11 @@ fn wizard_preload_physical_entry_and_teleport_share_one_saved_retrieval_batch() 
                 expected_revision: engine.revision(ActorId(2)).unwrap(),
                 action: Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("preload_sequence").unwrap(),
-                    invocation: crate::actions::AbilityInvocation::ActorTarget {
-                        target: SimActor(3),
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: SimActor(3),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },

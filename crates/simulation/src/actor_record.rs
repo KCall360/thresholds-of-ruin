@@ -151,7 +151,7 @@ impl ActorRecord {
             .map(|(socket, id)| {
                 items
                     .get(id)
-                    .and_then(|item| item.equipment_source(*id, *socket))
+                    .and_then(|item| item.equipment_source(*id, *socket, content.rules()))
                     .ok_or(crate::checkpoint::PersistError::Equipment { actor, item: *id })
             })
             .collect::<Result<Vec<_>, crate::checkpoint::PersistError>>()?;

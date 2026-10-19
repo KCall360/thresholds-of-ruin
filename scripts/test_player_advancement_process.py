@@ -233,7 +233,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.assertEqual(selected["growth"]["future"], {"kind": "selected", "source": {"kind": "racial"}})
         self.assertEqual(selected["growth"]["earned_xp"], "0")
         target = next(row["id"] for row in observation(initial)["visible_actors"] if row["name"] == "partner")
-        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})["error"])
+        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})["error"])
         # The normal opponent turn advances the authored 100-tick wind-up.
         self.assertIsNone(self.act(partner, {"type": "wait"})["error"])
         result = self.advance(player, "overview")

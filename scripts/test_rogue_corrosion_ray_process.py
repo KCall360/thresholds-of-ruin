@@ -214,7 +214,7 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
             start = len(foe.transcript)
             accepted = self.command(foe, {"type": "act", "action": {
                 "type": "use_ability", "id": "rogue.corrode",
-                "invocation": {"kind": "actor_target", "target": target},
+                "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}},
                 "supplies": {"kind": "carried"}}})
             self.assertIsNone(accepted["error"])
             current, _ = self.advance_until(clients, lambda frames: not frames[1]["intentions"])
@@ -262,7 +262,7 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
         start = len(dragon.transcript)
         self.assertIsNone(self.command(dragon, {"type":"act", "action":{
             "type":"use_ability", "id":ability_id,
-            "invocation":{"kind":"directional_ray", "direction":"north"},
+            "invocation":{"aim": {"kind":"directional_ray", "direction":"north"}, "weapon": {"kind": "default"}},
             "supplies":{"kind":"carried"}}})["error"])
         current, returned = self.advance_until(clients, lambda frames: not frames[1]["intentions"])
         receipts = list(resolved_events(disclosed_frames(dragon, start), before,
@@ -283,7 +283,7 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
         hp = u64(combat(self.snapshot(player))["hp"])
         self.assertIsNone(self.command(dragon, {"type":"act", "action":{
             "type":"use_ability", "id":ability_id,
-            "invocation":{"kind":"directional_ray", "direction":"west"},
+            "invocation":{"aim": {"kind":"directional_ray", "direction":"west"}, "weapon": {"kind": "default"}},
             "supplies":{"kind":"carried"}}})["error"])
         hit, after = self.advance_until(clients, lambda frames: not frames[1]["intentions"], allow_dead=True)
         receipts = list(resolved_events(disclosed_frames(dragon, start), before, ability_id, target))

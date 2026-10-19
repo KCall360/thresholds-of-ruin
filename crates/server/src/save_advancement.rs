@@ -66,6 +66,7 @@ pub(super) mod basis {
 enum Choice {
     SkillRank { skill: String },
     Talent { talent: String },
+    Expertise { expertise: String },
     TalentForm { talent: String, form: String },
 }
 impl<'de> Deserialize<'de> for Choice {
@@ -75,10 +76,12 @@ impl<'de> Deserialize<'de> for Choice {
         enum Fields {
             SkillRank { skill: String },
             Talent { talent: String },
+            Expertise { expertise: String },
             TalentForm { talent: String, form: String },
         }
         Ok(match named_map(d)? {
             Fields::SkillRank { skill } => Self::SkillRank { skill },
+            Fields::Expertise { expertise } => Self::Expertise { expertise },
             Fields::Talent { talent } => Self::Talent { talent },
             Fields::TalentForm { talent, form } => Self::TalentForm { talent, form },
         })
@@ -89,6 +92,9 @@ impl From<&a::PurchaseChoice> for Choice {
         match value {
             a::PurchaseChoice::SkillRank { skill } => Self::SkillRank {
                 skill: skill.as_str().into(),
+            },
+            a::PurchaseChoice::Expertise { expertise } => Self::Expertise {
+                expertise: expertise.to_string(),
             },
             a::PurchaseChoice::Talent { talent } => Self::Talent {
                 talent: talent.to_string(),
@@ -108,6 +114,10 @@ impl Choice {
                     .into_iter()
                     .find(|value| value.as_str() == skill)
                     .ok_or_else(|| E::custom("invalid stored skill"))?,
+            },
+            Self::Expertise { expertise } => a::PurchaseChoice::Expertise {
+                expertise: s::content_ids::ExpertiseId::new(expertise)
+                    .map_err(|_| E::custom("invalid stored expertise"))?,
             },
             Self::Talent { talent } => a::PurchaseChoice::Talent {
                 talent: s::content_ids::TalentId::new(talent)
@@ -259,6 +269,59 @@ pub(super) mod replacement {
     }
 }
 // Narrow named payload readers cover only the new save variants.
+pub(super) mod intellect_expertise {
+    use super::*;
+    pub(crate) fn serialize<S: serde::Serializer>(
+        value: &a::IntellectExpertiseOperation,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Fields<'a> {
+            threshold: u16,
+            expertise: &'a str,
+        }
+        Fields {
+            threshold: value.threshold,
+            expertise: value.expertise.as_str(),
+        }
+        .serialize(serializer)
+    }
+    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<a::IntellectExpertiseOperation, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            threshold: u16,
+            expertise: String,
+        }
+        let f: Fields = named_map(d)?;
+        if f.threshold == 0 || f.threshold > s::limits::DERIVED_ATTRIBUTE {
+            return Err(serde::de::Error::custom(
+                "invalid stored Intellect threshold",
+            ));
+        }
+        Ok(a::IntellectExpertiseOperation {
+            threshold: f.threshold,
+            expertise: s::content_ids::ExpertiseId::new(f.expertise)
+                .map_err(|_| serde::de::Error::custom("invalid stored expertise"))?,
+        })
+    }
+}
+pub(super) fn read_intellect_expertise<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<(Box<a::AdvancementBasis>, a::IntellectExpertiseOperation), D::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fields {
+        #[serde(with = "basis")]
+        basis: Box<a::AdvancementBasis>,
+        #[serde(with = "intellect_expertise")]
+        choice: a::IntellectExpertiseOperation,
+    }
+    let f: Fields = named_map(d)?;
+    Ok((f.basis, f.choice))
+}
 pub(super) fn read_purchase<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<(Box<a::AdvancementBasis>, a::PurchaseOperation), D::Error> {
@@ -512,5 +575,58 @@ mod growth_tests {
             "\"class\":\"warrior\",\"class\":\"mage\"",
         );
         assert!(serde_json::from_str::<Action>(&duplicate).is_err());
+    }
+}
+
+#[cfg(test)]
+mod expertise_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn saved_expertise_purchase_has_exact_independent_operand() {
+        let domain = a::PurchaseChoice::Expertise {
+            expertise: s::content_ids::ExpertiseId::new("fixture.knife").unwrap(),
+        };
+        let good = serde_json::to_value(Choice::from(&domain)).unwrap();
+        assert_eq!(
+            good,
+            json!({"kind":"expertise","expertise":"fixture.knife"})
+        );
+        let stored: Choice = serde_json::from_value(good).unwrap();
+        assert_eq!(stored.domain::<serde_json::Error>().unwrap(), domain);
+        for bad in [
+            json!({"kind":"expertise"}),
+            json!({"kind":"expertise","expertise":"fixture.knife","free":true}),
+            json!(["expertise", "fixture.knife"]),
+        ] {
+            assert!(serde_json::from_value::<Choice>(bad).is_err());
+        }
+        let invalid: Choice =
+            serde_json::from_value(json!({"kind":"expertise","expertise":"INVALID"})).unwrap();
+        assert!(invalid.domain::<serde_json::Error>().is_err());
+    }
+}
+
+#[cfg(test)]
+mod intellect_expertise_tests {
+    use super::super::Action;
+    use serde_json::json;
+    #[test]
+    fn saved_intellect_choice_is_named_bounded_and_has_no_grant_authority() {
+        let good = json!({"type":"choose_intellect_expertise","basis":{"actor":1,"branch":"main","stream":"owner","reset":0,"build_epoch":1},"choice":{"threshold":1,"expertise":"fixture.knife"}});
+        let stored: Action = serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(serde_json::to_value(stored).unwrap(), good);
+        for choice in [
+            json!({"threshold":0,"expertise":"fixture.knife"}),
+            json!({"threshold":1001,"expertise":"fixture.knife"}),
+            json!({"threshold":1}),
+            json!({"threshold":1,"expertise":"INVALID"}),
+            json!({"threshold":1,"expertise":"fixture.knife","capacity":4}),
+            json!([1, "fixture.knife"]),
+        ] {
+            let mut bad = good.clone();
+            bad["choice"] = choice;
+            assert!(serde_json::from_value::<Action>(bad).is_err());
+        }
     }
 }

@@ -161,6 +161,20 @@ class LeafPolicy(unittest.TestCase):
             acted = policy.normalize_leaf(source.replace(action, changed).encode(), entry, immutable)
             self.assertNotEqual(acted['skeleton'], entry['skeleton'])
 
+    def test_weapon_invocation_migration_is_not_expectation_only_reuse(self):
+        for path in ('scripts/test_rogue_roster_process.py', 'scripts/test_rogue_chill_process.py'):
+            with self.subTest(path=path):
+                entry = self.registry['leaves'][path]
+                current = (self.root / path).read_text()
+                old = current.replace('"invocation": {"aim": {"kind": "actor_target", "target":',
+                                      '"invocation": {"kind": "actor_target", "target":').replace(
+                                          '}, "weapon": {"kind": "default"}}', '}')
+                self.assertNotEqual(old, current)
+                self.assertEqual(policy.normalize_leaf(current.encode(), entry, {'SPECIES': ('emu', 'quagga')})['skeleton'],
+                                 entry['skeleton'])
+                self.assertNotEqual(policy.normalize_leaf(old.encode(), entry, {'SPECIES': ('emu', 'quagga')})['skeleton'],
+                                    entry['skeleton'])
+
     def test_provider_allows_only_literal_tuple_data_drift(self):
         raw = (self.root / 'scripts/rogue_roster_package.py').read_bytes()
         values, shape = policy.immutable_provider(raw)

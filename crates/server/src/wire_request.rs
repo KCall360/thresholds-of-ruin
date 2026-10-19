@@ -4,6 +4,72 @@ use crate::wire_adapter::{self, DecodedCommand, TargetScope};
 use tor_protocol::ErrorCode;
 
 impl Engine {
+    pub(crate) fn ability_weapon_preview(
+        &self,
+        actor: ActorId,
+        branch: &BranchId,
+        revision: u64,
+        ability: &str,
+        invocation: tor_protocol::AbilityInvocation,
+        supplies: &tor_protocol::SupplySelection,
+    ) -> Result<tor_protocol::AbilityWeaponPreview, Failure> {
+        self.check_metadata(
+            actor,
+            branch,
+            Some((revision, "Refresh the observation before previewing")),
+        )?;
+        let action = self.decode_action(
+            actor,
+            &tor_protocol::Action::UseAbility {
+                id: ability.into(),
+                invocation,
+                supplies: supplies.clone(),
+            },
+        )?;
+        let tor_simulation::Action::UseAbility {
+            id,
+            invocation: selected,
+            supplies: selected_supplies,
+        } = crate::adapt::action(&action)
+        else {
+            unreachable!("ability decoder preserves action kind")
+        };
+        let value = self
+            .game
+            .preview_ability_weapon(
+                tor_simulation::ActorId(actor.0),
+                &id,
+                selected,
+                selected_supplies,
+            )
+            .map_err(|_| {
+                Failure::new(
+                    ErrorCode::InvalidAction,
+                    "Ability weapon preview is unavailable",
+                )
+            })?;
+        let phase = match value.phase {
+            tor_simulation::abilities::AbilityWeaponPreviewPhase::Fresh => {
+                tor_protocol::AbilityWeaponPreviewPhase::Fresh
+            }
+            tor_simulation::abilities::AbilityWeaponPreviewPhase::Resuming => {
+                tor_protocol::AbilityWeaponPreviewPhase::Resuming
+            }
+            tor_simulation::abilities::AbilityWeaponPreviewPhase::PaidPrefix => {
+                tor_protocol::AbilityWeaponPreviewPhase::PaidPrefix
+            }
+        };
+        Ok(tor_protocol::AbilityWeaponPreview {
+            ability: ability.into(),
+            invocation,
+            supplies: supplies.clone(),
+            phase,
+            cost: value.cost.map(crate::creature_view::cost_bundle),
+            preparation: value.preparation,
+            recovery: value.recovery,
+        })
+    }
+
     /// Derivation is independent of current actor/target existence for history and retries.
     pub fn target_scope(&self, actor: ActorId) -> TargetScope {
         TargetScope::new(
@@ -213,7 +279,9 @@ impl Engine {
         self.check_metadata(actor, branch, command.revision_requirement())?;
         match command {
             DecodedCommand::Backend(command) => Ok(command),
-            DecodedCommand::Advancement { .. }
+            DecodedCommand::AbilityWeaponPreview { .. }
+            | DecodedCommand::ProjectileChoices { .. }
+            | DecodedCommand::Advancement { .. }
             | DecodedCommand::CreatureCatalog { .. }
             | DecodedCommand::CreatureInspection { .. }
             | DecodedCommand::StrikeInspection { .. }
@@ -284,8 +352,11 @@ mod tests {
         );
         let actor_action = wire::Action::UseAbility {
             id: "basic_melee".into(),
-            invocation: wire::AbilityInvocation::ActorTarget {
-                target: scope.actor(sim::ActorId(99)),
+            invocation: wire::AbilityInvocation {
+                aim: wire::AbilityAim::ActorTarget {
+                    target: scope.actor(sim::ActorId(99)),
+                },
+                weapon: wire::WeaponSelection::Default,
             },
             supplies: Default::default(),
         };
@@ -386,8 +457,11 @@ mod tests {
                 },
                 WizardResult::ActorSpawned { actor } => Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::actions::AbilityInvocation::ActorTarget {
-                        target: tor_simulation::ActorId(actor.0),
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: tor_simulation::ActorId(actor.0),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },
@@ -535,8 +609,11 @@ mod tests {
             Action::SetDoor { door, open: false },
             Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: crate::actions::AbilityInvocation::ActorTarget {
-                    target: tor_simulation::ActorId(actor.0),
+                invocation: crate::actions::AbilityInvocation {
+                    aim: crate::actions::AbilityAim::ActorTarget {
+                        target: tor_simulation::ActorId(actor.0),
+                    },
+                    weapon: crate::actions::WeaponSelection::Default,
                 },
                 supplies: Default::default(),
             },

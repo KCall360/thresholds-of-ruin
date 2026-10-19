@@ -206,9 +206,7 @@ fn stopping_cancels_paid_preparation_without_refunding_its_start_charge() {
             execution.action,
             Some(Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("fixture_focus_fear").unwrap(),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                    target: ActorId(3)
-                },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(3)),
                 supplies: Default::default(),
             })
         );

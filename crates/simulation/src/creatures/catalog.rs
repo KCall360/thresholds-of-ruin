@@ -171,6 +171,7 @@ impl Content {
                 ThreatSource::Class { id } => rules.class(id).is_some(),
                 ThreatSource::Template { id } => catalog.templates.contains_key(id),
                 ThreatSource::Talent { id } => rules.talent(id).is_some(),
+                ThreatSource::Expertise { id } => rules.expertise(id).is_some(),
             };
             if !known {
                 return Err(BuildError::InvalidDefinition);

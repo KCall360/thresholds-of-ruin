@@ -92,7 +92,7 @@ def ability(identity, target):
     # Contact targets intentionally use the ordinary opaque actor_target wire
     # variant; only the server may resolve its private target domain.
     return {"type": "use_ability", "id": identity,
-            "invocation": {"kind": "actor_target", "target": target},
+            "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}},
             "supplies": {"kind": "carried"}}
 
 

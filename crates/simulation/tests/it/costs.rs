@@ -1,4 +1,4 @@
-use tor_simulation::costs::{CostError, CostLedger, ResourceCost, StartCost};
+use tor_simulation::costs::{CostBundle, CostError, CostLedger, ResourceCost, StartCost};
 use tor_simulation::resources::{Resource, ResourceMaxima, Resources};
 use tor_simulation::IntentionId;
 
@@ -50,12 +50,9 @@ fn invalid_duplicate_and_unfunded_restored_holds_reject() {
     }
     let invalid = ResourceCost {
         resolution: u32::MAX,
-        ..cost()
+        ..scalar_cost()
     };
-    assert_eq!(
-        CostLedger::from_recorded(resources.clone(), vec![(IntentionId(1), invalid)]),
-        Err(CostError::Invalid)
-    );
+    assert_eq!(CostBundle::single(invalid), Err(CostError::Invalid));
     assert_eq!(
         CostLedger::from_recorded(
             resources,
@@ -75,12 +72,16 @@ fn ledger(stamina: u32) -> CostLedger {
         &super::creature_fixture::ruleset(),
     ))
 }
-fn cost() -> ResourceCost {
+fn scalar_cost() -> ResourceCost {
     ResourceCost {
         resource: Resource::Stamina,
         start: 1,
         resolution: 1,
     }
+}
+
+fn cost() -> CostBundle {
+    CostBundle::single(scalar_cost()).unwrap()
 }
 
 #[test]
@@ -98,7 +99,11 @@ fn readonly_start_validation_matches_commit_without_charging_or_holding() {
         ledger.validate_start(IntentionId(1), cost()),
         Ok(StartCost::Resumed)
     );
-    let conflicting = ResourceCost { start: 2, ..cost() };
+    let conflicting = CostBundle::single(ResourceCost {
+        start: 2,
+        ..scalar_cost()
+    })
+    .unwrap();
     assert_eq!(
         ledger.validate_start(IntentionId(1), conflicting),
         Err(CostError::Conflict)
@@ -112,13 +117,10 @@ fn readonly_start_validation_matches_commit_without_charging_or_holding() {
         Err(CostError::Invalid)
     );
     assert_eq!(
-        ledger.validate_start(
-            IntentionId(2),
-            ResourceCost {
-                start: u32::MAX,
-                ..cost()
-            }
-        ),
+        CostBundle::single(ResourceCost {
+            start: u32::MAX,
+            ..scalar_cost()
+        }),
         Err(CostError::Invalid)
     );
     assert_eq!(ledger, before);
@@ -186,10 +188,11 @@ fn reservation_prevents_double_spending_and_cost_conflicts_are_atomic() {
     assert_eq!(
         ledger.start(
             IntentionId(1),
-            ResourceCost {
+            CostBundle::single(ResourceCost {
                 resolution: 0,
-                ..cost()
-            }
+                ..scalar_cost()
+            })
+            .unwrap()
         ),
         Err(CostError::Conflict)
     );
@@ -204,10 +207,11 @@ fn capacity_loss_cancels_newest_unfunded_reservation_without_refund() {
     ledger
         .start(
             IntentionId(3),
-            ResourceCost {
+            CostBundle::single(ResourceCost {
                 resource: Resource::Focus,
-                ..cost()
-            },
+                ..scalar_cost()
+            })
+            .unwrap(),
         )
         .unwrap();
     assert_eq!(
@@ -242,14 +246,11 @@ fn malformed_costs_ids_and_reservation_counts_are_bounded() {
         Err(CostError::Invalid)
     );
     assert_eq!(
-        ledger.start(
-            IntentionId(1),
-            ResourceCost {
-                start: u32::MAX,
-                resolution: 1,
-                ..cost()
-            }
-        ),
+        CostBundle::single(ResourceCost {
+            start: u32::MAX,
+            resolution: 1,
+            ..scalar_cost()
+        }),
         Err(CostError::Invalid)
     );
     for id in 1..=64 {
@@ -275,11 +276,12 @@ fn malformed_costs_ids_and_reservation_counts_are_bounded() {
 fn runtime_and_restore_share_the_named_hold_limit() {
     let limit = tor_simulation::limits::COST_HOLDS;
     let mut state = ledger((limit + 1) as u32);
-    let held = ResourceCost {
+    let held = CostBundle::single(ResourceCost {
         resource: Resource::Stamina,
         start: 0,
         resolution: 1,
-    };
+    })
+    .unwrap();
     for id in 1..=limit {
         state.start(IntentionId(id as u64), held).unwrap();
     }

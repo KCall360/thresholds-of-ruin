@@ -268,6 +268,11 @@ pub struct RestoreContext<'a> {
     navigation: BTreeMap<usize, Shared<Navigation>>,
     /// Validation is reusable only for these immutable decoded pool entries.
     validated_navigation: BTreeSet<(usize, usize)>,
+    /// Plan validity depends only on this decoded pool and immutable Content.
+    /// Snapshot-specific population validation is never cached.
+    validated_population_plans: BTreeSet<usize>,
+    #[cfg(test)]
+    population_plan_validations: usize,
     unique_explored_map_owners: bool,
     explored_maps: Option<explored_map_regions::RestoreValidation>,
     items: BTreeMap<usize, crate::item_store::ItemStore>,
@@ -286,6 +291,9 @@ impl<'a> RestoreContext<'a> {
             worlds: BTreeMap::new(),
             navigation: BTreeMap::new(),
             validated_navigation: BTreeSet::new(),
+            validated_population_plans: BTreeSet::new(),
+            #[cfg(test)]
+            population_plan_validations: 0,
             unique_explored_map_owners: shared.explored_map_owners_unique(),
             explored_maps: None,
             items: BTreeMap::new(),
@@ -299,6 +307,29 @@ impl<'a> RestoreContext<'a> {
 
     pub fn restore(&mut self, snapshot: Snapshot) -> Result<Game, PersistError> {
         Game::restore_with_context(snapshot, self)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn population_plan_validation_count(&self) -> usize {
+        self.population_plan_validations
+    }
+
+    fn activation_state_valid(&mut self, game: &Game, index: Option<usize>) -> bool {
+        let Some(index) = index else {
+            return game.activation_state_valid();
+        };
+        if self.validated_population_plans.contains(&index) {
+            return game.activation_boundary_valid();
+        }
+        #[cfg(test)]
+        {
+            self.population_plan_validations += 1;
+        }
+        if !game.activation_state_valid() {
+            return false;
+        }
+        self.validated_population_plans.insert(index);
+        true
     }
 
     fn floor_activation(
@@ -703,7 +734,7 @@ impl Game {
         if !game.retrieval_state_valid() {
             return Err(PersistError::Retrieval);
         }
-        if !game.activation_state_valid() {
+        if !context.activation_state_valid(&game, snapshot.floor_activation) {
             return Err(PersistError::Population);
         }
         if !game.intentions_valid() {
@@ -1275,6 +1306,7 @@ mod tests {
         let mut modifier = crate::ItemSpec::ordinary("armor".into());
         modifier.class = crate::ItemClass::Armor;
         modifier.equipment = Some(crate::EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
@@ -1297,6 +1329,7 @@ mod tests {
         let mut attack = crate::ItemSpec::ordinary("weapon".into());
         attack.class = crate::ItemClass::Weapon;
         attack.equipment = Some(crate::EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("weapon").unwrap(),
             modifiers: vec![],
@@ -1316,6 +1349,7 @@ mod tests {
         let mut slot = crate::ItemSpec::ordinary("unknown slot armor".into());
         slot.class = crate::ItemClass::Armor;
         slot.equipment = Some(crate::EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("missing_slot").unwrap(),
             attack: None,

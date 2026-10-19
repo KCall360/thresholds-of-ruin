@@ -30,6 +30,7 @@ fn has_private_item_disclosure(state: &StateView) -> bool {
             || view.inventory.iter().any(|item| {
                 item.charges.is_some()
                     || item.known_equipment.is_some()
+                    || item.known_projectile_bonus.is_some()
                     || item.known_cursed.is_some()
                     || item.known_protected.is_some()
             })
@@ -46,6 +47,7 @@ fn restrict_item_disclosure(state: &mut StateView, role: AccessRole) {
             for item in &mut interaction.inventory {
                 item.charges = None;
                 item.known_equipment = None;
+                item.known_projectile_bonus = None;
                 item.known_cursed = None;
                 item.known_protected = None;
             }
@@ -68,6 +70,8 @@ struct DisclosedReadiness {
 
 /// Payloads prepared by a request and published after its ordered effects.
 enum RequestReply {
+    ProjectileChoices(Box<ProjectileChoicePage>),
+    AbilityWeaponPreview(Box<tor_protocol::AbilityWeaponPreview>),
     Receipt(RequestReceipt),
     History(HistoryPage),
     Palette(PaletteUpdate),
@@ -81,6 +85,16 @@ enum RequestReply {
 impl RequestReply {
     fn message(self, request_id: String, context: ReplyContext) -> ServerMessage {
         match self {
+            Self::ProjectileChoices(page) => ServerMessage::ProjectileChoices {
+                context,
+                request_id,
+                page,
+            },
+            Self::AbilityWeaponPreview(preview) => ServerMessage::AbilityWeaponPreview {
+                context,
+                request_id,
+                preview,
+            },
             Self::Receipt(receipt) => ServerMessage::Ack {
                 context,
                 request_id,
@@ -674,6 +688,7 @@ impl Service {
                 if let crate::wire_adapter::DecodedCommand::Gameplay { action, .. } = &command {
                     let basis = match action {
                         Action::ChooseGrowthSource { basis, .. }
+                        | Action::ChooseIntellectExpertise { basis, .. }
                         | Action::Purchase { basis, .. }
                         | Action::Respec { basis, .. } => Some(basis.as_ref()),
                         _ => None,
@@ -684,6 +699,69 @@ impl Service {
                         })?;
                         self.engine.check_advancement_basis(&reply, basis)?;
                     }
+                }
+                if let crate::wire_adapter::DecodedCommand::ProjectileChoices {
+                    expected_revision,
+                    query,
+                } = &command
+                {
+                    let context = self.reply_context(id).ok_or_else(|| {
+                        Failure::new(ErrorCode::StaleContext, "Input context changed")
+                    })?;
+                    let budget = crate::engine::ProjectileChoicePageBudget {
+                        context: &context,
+                        request_id,
+                        limit: self.outbound.capabilities().max_response_bytes as usize,
+                    };
+                    let page = self.engine.projectile_choices(
+                        actor,
+                        &branch,
+                        *expected_revision,
+                        query,
+                        &budget,
+                    )?;
+                    return Ok(ProcessedRequest::Reply(RequestReply::ProjectileChoices(
+                        Box::new(page),
+                    )));
+                }
+                if let crate::wire_adapter::DecodedCommand::AbilityWeaponPreview {
+                    expected_revision,
+                    ability,
+                    invocation,
+                    supplies,
+                } = &command
+                {
+                    let preview = self.engine.ability_weapon_preview(
+                        actor,
+                        &branch,
+                        *expected_revision,
+                        ability,
+                        *invocation,
+                        supplies,
+                    )?;
+                    let context = self.reply_context(id).ok_or_else(|| {
+                        Failure::new(ErrorCode::StaleContext, "Input context changed")
+                    })?;
+                    let message = ServerMessage::AbilityWeaponPreview {
+                        context,
+                        request_id: request_id.into(),
+                        preview: Box::new(preview.clone()),
+                    };
+                    if tor_protocol::encoded_length(
+                        &message,
+                        self.outbound.capabilities().max_response_bytes as usize,
+                    )
+                    .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Invalid preview"))?
+                    .is_none()
+                    {
+                        return Err(Failure::new(
+                            ErrorCode::ResourceLimit,
+                            "Preview exceeds response limit",
+                        ));
+                    }
+                    return Ok(ProcessedRequest::Reply(RequestReply::AbilityWeaponPreview(
+                        Box::new(preview),
+                    )));
                 }
                 if let crate::wire_adapter::DecodedCommand::Advancement {
                     expected_revision,
@@ -3375,6 +3453,7 @@ mod tests {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: Some(ProjectileBonusView { hit: -2, damage: 3 }),
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -3449,6 +3528,26 @@ mod tests {
                 "ordinary preparation remains visible"
             );
             assert!(interaction.inventory[0].zappable);
+            assert_eq!(
+                interaction.inventory[0].known_projectile_bonus,
+                owner.then_some(ProjectileBonusView { hit: -2, damage: 3 })
+            );
+            // Bonus alone must trigger the shared-observation sanitation fast path.
+            let mut bonus_only = state.clone();
+            let facts = bonus_only.observation.interactions.as_mut().unwrap();
+            facts.identification = None;
+            facts.inventory[0].charges = None;
+            let projected = service.item_observation(Arc::new(bonus_only), role);
+            assert_eq!(
+                projected
+                    .observation
+                    .interactions
+                    .as_ref()
+                    .unwrap()
+                    .inventory[0]
+                    .known_projectile_bonus,
+                owner.then_some(ProjectileBonusView { hit: -2, damage: 3 })
+            );
             // The same restriction owns snapshots as well as delta bases.
             let mut snapshot_state = state.clone();
             restrict_item_disclosure(&mut snapshot_state, role);
@@ -3489,6 +3588,7 @@ mod tests {
                 }),
                 equipped_slot: None,
                 known_equipment: None,
+                known_projectile_bonus: None,
                 known_cursed: None,
                 known_protected: None,
                 drinkable: false,
@@ -4584,3 +4684,7 @@ mod ray_tests;
 #[cfg(test)]
 #[path = "magic_item_session_tests.rs"]
 mod magic_item_tests;
+
+#[cfg(test)]
+#[path = "weapon_selection_session_tests.rs"]
+mod weapon_selection_tests;

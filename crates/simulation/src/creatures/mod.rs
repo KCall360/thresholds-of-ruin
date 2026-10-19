@@ -4,12 +4,19 @@ mod build_epoch;
 mod catalog;
 mod derive;
 mod displacement;
+mod expertise_learning;
+#[cfg(test)]
+mod expertise_learning_tests;
 #[cfg(test)]
 mod growth_failure_tests;
 #[cfg(test)]
 mod hit_die_effect_tests;
+mod intellect;
+#[cfg(test)]
+mod intellect_tests;
 mod losses;
-pub(crate) use derive::scaled_duration;
+mod projectile_edges;
+pub(crate) use derive::{ability_timing_for_attack, scaled_duration};
 pub use displacement::{CreatureSize, DisplacementProfile};
 pub use losses::{HitDieRestorationBlocker, RestorableLossOutcome, RestorableLosses};
 pub mod record;
@@ -23,9 +30,10 @@ pub use advancement::{
 pub use build_epoch::BuildEpoch;
 pub use catalog::{Content, ScenarioCatalog, SourceId, Species, Template};
 pub use derive::{
-    AbilityTiming, AbilityValues, CheckContext, DerivedCreature, DormantReason, HitDiceSummary,
-    SelectedAttack,
+    AbilityTiming, AbilityValues, CheckContext, DerivedCreature, DormantReason, EquippedAttack,
+    HitDiceSummary, SelectedAttack,
 };
+pub use projectile_edges::CapturedAttackEdges;
 pub use replacement::{
     AdvancementReplacementPreview, PointRefund, PurchaseLocation, RemovedPurchase,
 };
@@ -49,6 +57,9 @@ pub enum BuildError {
     UnknownSpecies,
     UnknownTemplate,
     UnknownTalent,
+    UnknownExpertise,
+    DuplicateExpertise,
+    TooManyOwnedExpertises,
     InvalidTalentForm,
     UnknownClass,
     ConflictingTemplates,
@@ -103,6 +114,7 @@ pub struct CreatureBuild {
     ledger: HdLedger,
     binding: ManaBinding,
     advancement: BuildAdvancement,
+    intellect_learning: Option<Arc<expertise_learning::IntellectLearning>>,
     future_growth: crate::earned_growth::FutureGrowth,
     templates: Vec<TemplateId>,
 }
@@ -116,6 +128,7 @@ impl Clone for CreatureBuild {
             ledger: self.ledger.clone(),
             binding: self.binding,
             advancement: self.advancement.clone(),
+            intellect_learning: self.intellect_learning.clone(),
             future_growth: self.future_growth.clone(),
             templates: self.templates.clone(),
         }
@@ -159,6 +172,36 @@ impl CreatureBuild {
         advancement: BuildAdvancement,
         templates: Vec<TemplateId>,
     ) -> Result<Self, BuildError> {
+        let mut build = Self::recorded_structure(
+            content,
+            species,
+            initial_attributes,
+            ledger,
+            binding,
+            advancement,
+            templates,
+        )?;
+        let derived = build.derive()?;
+        build.intellect_learning = Some(Arc::new(expertise_learning::IntellectLearning::new(
+            &build,
+            derived.intellect_sources.clone(),
+            derived.intellect_capacity,
+        )?));
+        Ok(build)
+    }
+
+    /// Resolve and validate recorded ownership before either creating birth
+    /// learning or installing independently validated saved learning. Callers
+    /// must derive the completed build before returning it to ordinary code.
+    fn recorded_structure(
+        content: Arc<Content>,
+        species: SpeciesId,
+        initial_attributes: Attributes,
+        ledger: HdLedger,
+        binding: ManaBinding,
+        advancement: BuildAdvancement,
+        templates: Vec<TemplateId>,
+    ) -> Result<Self, BuildError> {
         let species = content
             .catalog
             .species
@@ -184,12 +227,12 @@ impl CreatureBuild {
             ledger,
             binding,
             advancement,
+            intellect_learning: None,
             future_growth: crate::earned_growth::FutureGrowth::Disabled {},
             templates,
         };
         let kind = derive::kind_for_templates(&build, &build.templates)?;
         build.bind_health_origins(&kind)?;
-        build.derive()?;
         if let RestorationPolicy::Authored(plan) = build.restoration_policy() {
             if plan.is_empty() || plan.len() > crate::limits::HIT_DICE {
                 return Err(BuildError::InvalidDefinition);
@@ -264,6 +307,11 @@ impl CreatureBuild {
             && self.advancement.starting_skills == other.advancement.starting_skills
             && self.advancement.choices == other.advancement.choices
             && self.templates == other.templates
+            && match (&self.intellect_learning, &other.intellect_learning) {
+                (Some(left), Some(right)) => Arc::ptr_eq(left, right) || left == right,
+                (None, None) => true,
+                _ => false,
+            }
     }
     pub fn content(&self) -> &Arc<Content> {
         &self.content
@@ -355,12 +403,116 @@ impl CreatureBuild {
         *self = candidate;
         Ok(derived)
     }
-    pub fn set_initial_attributes(&mut self, attributes: Attributes) -> Result<(), BuildError> {
+    fn preview_intellect_advancement(
+        &self,
+        f: impl FnOnce(&mut Self) -> Result<(), BuildError>,
+    ) -> Result<(Self, DerivedCreature), BuildError> {
+        let (mut candidate, derived) = self.preview_edit(f)?;
+        candidate.retain_intellect_acquisition(self, &derived)?;
+        Ok((candidate, derived))
+    }
+    fn retain_intellect_acquisition(
+        &mut self,
+        before: &Self,
+        derived: &DerivedCreature,
+    ) -> Result<(), BuildError> {
+        if self.intellect_learning.as_ref().is_some_and(|learning| {
+            usize::from(derived.intellect_capacity) <= learning.thresholds.len()
+        }) {
+            return Ok(());
+        }
+        let Some(mut learning) = self.intellect_learning.take() else {
+            return Ok(());
+        };
+        let previous = intellect::current_sources(before, &learning.birth.templates)?;
+        Arc::make_mut(&mut learning).record_acquisition(
+            before,
+            self,
+            previous,
+            derived.intellect_sources.clone(),
+            derived.intellect_capacity,
+        )?;
+        self.intellect_learning = Some(learning);
+        Ok(())
+    }
+    fn edit_intellect_advancement(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<(), BuildError>,
+    ) -> Result<DerivedCreature, BuildError> {
+        let (candidate, derived) = self.preview_intellect_advancement(f)?;
+        *self = candidate;
+        Ok(derived)
+    }
+    pub fn select_intellect_expertise(
+        &mut self,
+        threshold: u16,
+        expertise: crate::content_ids::ExpertiseId,
+    ) -> Result<(), BuildError> {
+        let derived = self.derive()?;
+        if self.ruleset().expertise(&expertise).is_none() {
+            return Err(BuildError::UnknownExpertise);
+        }
+        if derived.expertises.owns(&expertise) {
+            return Err(BuildError::DuplicateExpertise);
+        }
+        if self
+            .ruleset()
+            .expertise(&expertise)
+            .is_some_and(|definition| {
+                definition.category == crate::expertise::ExpertiseCategory::Specialist
+            })
+        {
+            return Err(BuildError::PurchaseNotAllowed);
+        }
         self.edit(|build| {
-            build.initial_attributes = attributes;
-            Ok(())
+            Arc::make_mut(
+                build
+                    .intellect_learning
+                    .as_mut()
+                    .ok_or(BuildError::InvalidOwnership)?,
+            )
+            .choose(threshold, expertise, derived.intellect_capacity)
         })
         .map(|_| ())
+    }
+    pub fn intellect_expertise_choices(
+        &self,
+    ) -> impl Iterator<Item = (u16, Option<&crate::content_ids::ExpertiseId>)> {
+        self.intellect_learning
+            .iter()
+            .flat_map(|learning| learning.thresholds.iter().enumerate())
+            .map(|(index, row)| ((index + 1) as u16, row.expertise.as_ref()))
+    }
+    pub fn set_initial_attributes(&mut self, attributes: Attributes) -> Result<(), BuildError> {
+        if attributes == self.initial_attributes {
+            return Ok(());
+        }
+        if self.intellect_learning.as_ref().is_some_and(|learning| {
+            !learning.acquisitions.is_empty()
+                || learning
+                    .thresholds
+                    .iter()
+                    .any(|row| row.expertise.is_some())
+        }) {
+            // Privileged baseline rewrites cannot rewrite already learned history.
+            return Err(BuildError::InvalidOwnership);
+        }
+        let (mut candidate, _) = self.preview_edit(|build| {
+            build.initial_attributes = attributes;
+            Ok(())
+        })?;
+        let templates = self.intellect_learning.as_ref().map_or_else(
+            || self.template_ids().to_vec(),
+            |learning| learning.birth.templates.clone(),
+        );
+        let sources = intellect::current_sources(&candidate, &templates)?;
+        let capacity = intellect::eligible_intellect(&candidate, &templates, &sources)?;
+        let mut learning =
+            expertise_learning::IntellectLearning::new(&candidate, sources, capacity)?;
+        learning.birth.templates = templates;
+        candidate.intellect_learning = Some(Arc::new(learning));
+        *self = candidate;
+        Ok(())
     }
     pub fn increase_attribute(
         &mut self,
@@ -369,7 +521,7 @@ impl CreatureBuild {
     ) -> Result<(), BuildError> {
         let ordinal = owner.ordinal().map_err(BuildError::from)?.get();
         let owner = owner.to_usize().map_err(BuildError::from)?;
-        self.edit(|build| {
+        self.edit_intellect_advancement(|build| {
             let interval = u64::from(build.ruleset().constants().attribute_opportunity_interval);
             let choice = build
                 .advancement
@@ -441,7 +593,7 @@ impl CreatureBuild {
                 return self.restore_hit_die(root_seed);
             }
         }
-        self.edit(|build| {
+        self.edit_intellect_advancement(|build| {
             build
                 .ledger
                 .append_seeded(source, root_seed)

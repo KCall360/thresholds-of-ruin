@@ -63,7 +63,7 @@ class PerformanceProcesses(ProcessTestCase):
         initial, _ = client.until(lambda frame: frame.get("type") == "ready")
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "ruin guard")
-        completed, *_ = client.send({"type": "act", "action": {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}, "supplies": {"kind": "carried"}}},
+        completed, *_ = client.send({"type": "act", "action": {"type": "use_ability", "id": "basic_melee", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}}},
                                     wait_for_completion=True)
         timing = client.action_timing.copy()
         self.assertIsNone(completed["error"])

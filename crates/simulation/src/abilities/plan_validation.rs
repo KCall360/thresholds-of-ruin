@@ -3,8 +3,48 @@ use super::*;
 use crate::rules::{
     Against, AllyRange, CheckActor, ConditionLifecycle, Reach, StrikeDef, StrikeSource,
 };
-use crate::{Game, ItemId};
-use std::collections::BTreeSet;
+use crate::{Actor, ActorId, Game, Item, ItemId};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Source authority is either the loaded game or one complete, duplicate-checked
+/// record audit. Missing merged entries never fall back to loaded state.
+#[derive(Clone, Copy)]
+pub(crate) enum PlanSourceContext<'a> {
+    Loaded,
+    Records {
+        actors: &'a BTreeMap<ActorId, &'a Actor>,
+        items: &'a BTreeMap<ItemId, &'a Item>,
+    },
+}
+impl<'a> PlanSourceContext<'a> {
+    pub(crate) fn actor(self, game: &'a Game, id: ActorId) -> Option<&'a Actor> {
+        match self {
+            Self::Loaded => game.actors.get(&id),
+            Self::Records { actors, .. } => actors.get(&id).copied(),
+        }
+    }
+    pub(crate) fn item(self, game: &'a Game, id: ItemId) -> Option<&'a Item> {
+        match self {
+            Self::Loaded => game.items.get(&id),
+            Self::Records { items, .. } => items.get(&id).copied(),
+        }
+    }
+    pub(crate) fn condition_generation(self, game: &'a Game, id: ActorId) -> Option<u64> {
+        match self {
+            Self::Loaded => game
+                .creature(id)
+                .map(|creature| creature.conditions().next_generation()),
+            Self::Records { .. } => Some(
+                self.actor(game, id)?
+                    .combat
+                    .as_ref()?
+                    .creature()
+                    .conditions()
+                    .next_generation(),
+            ),
+        }
+    }
+}
 
 fn check_matches(expected: Option<&crate::rules::CheckDef>, actual: Option<&PlannedCheck>) -> bool {
     match (expected, actual) {
@@ -84,40 +124,42 @@ impl AbilityPlan {
         let Some(definition) = rules.ability(&self.ability) else {
             return false;
         };
-        let cost = definition
+        let Ok(cost) = definition
             .cost
             .as_ref()
-            .map(|cost| crate::costs::ResourceCost {
-                resource: cost.resource,
-                start: cost.start,
-                resolution: cost.resolution,
-            });
-        if self.ambush.is_some_and(|site| {
-            site != (super::CheckSite {
-                strike: 0,
-                check: super::CheckPhase::Primary {
-                    side: super::CheckSide::Initiating,
-                },
-            }) || !definition.basic_attack
-                || definition.interaction != crate::rules::Interaction::HostileToTarget
-                || !matches!(self.reach, Reach::Melee)
-                || self
-                    .strikes
-                    .first()
-                    .and_then(|strike| strike.check.as_ref())
-                    .is_none_or(|check| check.actor != crate::rules::CheckActor::User)
-        }) || matches!(self.invocation, AbilityInvocation::ContactTarget { .. })
-            && (!definition.basic_attack
-                || definition.interaction != crate::rules::Interaction::HostileToTarget
-                || !matches!(self.reach, Reach::Melee))
+            .map(crate::costs::CostBundle::try_from)
+            .transpose()
+        else {
+            return false;
+        };
+        let Ok(cost) = self.weapon.cost(rules, cost) else {
+            return false;
+        };
+        if !self.weapon.valid_for(self, rules)
+            || self.ambush.is_some_and(|site| {
+                site != (super::CheckSite {
+                    strike: 0,
+                    check: super::CheckPhase::Primary {
+                        side: super::CheckSide::Initiating,
+                    },
+                }) || !definition.basic_attack
+                    || definition.interaction != crate::rules::Interaction::HostileToTarget
+                    || !matches!(self.reach, Reach::Melee)
+                    || self
+                        .strikes
+                        .first()
+                        .and_then(|strike| strike.check.as_ref())
+                        .is_none_or(|check| check.actor != crate::rules::CheckActor::User)
+            })
+            || matches!(self.invocation.aim, AbilityAim::ContactTarget { .. })
+                && (!definition.basic_attack
+                    || definition.interaction != crate::rules::Interaction::HostileToTarget
+                    || !matches!(self.reach, Reach::Melee))
             || self.invocation.kind() != definition.invocation
             || self.invocation.target(self.actor) != self.target
-            || match (self.invocation, self.step) {
-                (
-                    AbilityInvocation::ActorTarget { .. } | AbilityInvocation::ContactTarget { .. },
-                    None,
-                ) => false,
-                (AbilityInvocation::SelfStep { direction }, Some(step)) => {
+            || match (self.invocation.aim, self.step) {
+                (AbilityAim::ActorTarget { .. } | AbilityAim::ContactTarget { .. }, None) => false,
+                (AbilityAim::SelfStep { direction }, Some(step)) => {
                     direction != step.direction || !step.valid()
                 }
                 _ => true,
@@ -238,6 +280,7 @@ impl AbilityPlan {
             return false;
         }
         let source = match &definition.strikes {
+            StrikeSource::Projectile { .. } => false,
             StrikeSource::Authored { strikes } => {
                 self.strikes
                     .iter()
@@ -342,6 +385,26 @@ impl AbilityPlan {
 }
 impl Game {
     pub(crate) fn plan_source_valid(&self, plan: &Plan) -> bool {
+        self.plan_source_valid_with_context(plan, PlanSourceContext::Loaded)
+    }
+    pub(crate) fn plan_source_valid_with_context(
+        &self,
+        plan: &Plan,
+        sources: PlanSourceContext<'_>,
+    ) -> bool {
+        if let Some(projectile) = plan.as_projectile() {
+            return self.projectile_plan_source_valid_with_context(projectile, sources);
+        }
+        if let Plan::Equip {
+            actor,
+            item,
+            slot,
+            allocation,
+            ..
+        } = plan
+        {
+            return allocation.source_valid_with_context(self, *actor, *item, *slot, sources);
+        }
         if let Some(ray) = plan.as_ray() {
             return self.world.knows(ray.origin.location)
                 && ray
@@ -369,7 +432,9 @@ impl Game {
         let Some(ability) = plan.as_ability() else {
             return true;
         };
-        if !self.theft_contexts_valid(ability) {
+        if !self.frozen_weapon_source_valid_with_context(&ability.weapon, sources)
+            || !self.theft_contexts_valid(ability)
+        {
             return false;
         }
         if ability

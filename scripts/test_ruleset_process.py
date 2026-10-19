@@ -55,13 +55,13 @@ class RulesetProcesses(ProcessTestCase):
         for source in [
             'import = "../general.toml"\n',
             'import = "interactions-v35"\n',
-            'import = "interactions-v45"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v46"\n[[overrides]]\nop="set"\n'
             'path=["talents","brace_for_impact","id"]\nvalue="renamed"\n',
-            'import = "interactions-v45"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v46"\n[[overrides]]\nop="set"\n'
             'path=["resources","mana","missing"]\nvalue=1\n',
-            'import = "interactions-v45"\n[[overrides]]\nop="remove"\n'
+            'import = "interactions-v46"\n[[overrides]]\nop="remove"\n'
             'path=["abilities","spark_lance_fire"]\n',
-            'import = "interactions-v45"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v46"\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=12\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=13\n',
         ]:
@@ -152,7 +152,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         self.assertEqual(disclosed["reach"], {"kind": "sight", "range": ability["reach"]["range"] + 3})
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
-        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "mark_target", "invocation": {"kind": "actor_target", "target": target}})["error"])
+        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "mark_target", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})["error"])
         self.frame(player, lambda frame: frame.get("state") is not None
                    and frame["state"]["observation"]["ready"]
                    and int(frame["state"]["observation"]["tick"]) > 0
@@ -265,7 +265,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         report("combat capture on", "combat_diagnostics")
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
-        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "fixture_sweep", "invocation": {"kind": "actor_target", "target": target}})["error"])
+        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "fixture_sweep", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})["error"])
         self.frame(player, lambda frame: frame.get("state") is not None
                    and frame["state"]["observation"]["ready"]
                    and int(frame["state"]["observation"]["tick"]) > 0
@@ -285,7 +285,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         rules["equipment_slots"].append({
             "id": "tentacle", "name": "Tentacle", "equipped_phrase": "held by a tentacle",
             "compatible_classes": ["tool"], "requires_attack": True,
-            "equip_turns": 2, "unequip_turns": 4})
+            "capacity": {"kind": "none"}, "equip_turns": 2, "unequip_turns": 4})
         rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         path = package / "scenario.toml"
         manifest = tomllib.loads(path.read_text(encoding="utf-8"))

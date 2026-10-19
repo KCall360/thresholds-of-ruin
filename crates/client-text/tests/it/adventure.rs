@@ -124,7 +124,10 @@ fn starter_catalog_names_select_only_disclosed_variants_in_both_text_modes() {
             goals(command, &s),
             [Goal::UseAbility {
                 ability: ability.into(),
-                invocation: AbilityInvocation::ActorTarget { target },
+                invocation: tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::ActorTarget { target },
+                    weapon: tor_protocol::WeaponSelection::Default
+                },
                 supplies: Default::default(),
             }],
             "{command}"
@@ -132,7 +135,7 @@ fn starter_catalog_names_select_only_disclosed_variants_in_both_text_modes() {
         assert!(
             matches!(tor_client_text::parse(command, &s),
             Ok(Input::Command(Command::Act { action: Action::UseAbility {
-                id, invocation: AbilityInvocation::ActorTarget { target: selected }, ..
+                id, invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target: selected }, weapon: tor_protocol::WeaponSelection::Default }, ..
             }, .. })) if id == ability && selected == target),
             "{command}"
         );
@@ -176,12 +179,15 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
             goals(&format!("{verb} goblin"), &s),
             [Goal::UseAbility {
                 ability: ability.into(),
-                invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
+                invocation: tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::ActorTarget { target },
+                    weapon: tor_protocol::WeaponSelection::Default
+                },
                 supplies: Default::default(),
             }]
         );
         assert!(
-            matches!(tor_client_text::parse(&format!("{verb} goblin"), &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { id: selected, invocation: tor_protocol::AbilityInvocation::ActorTarget { target: selected_target }, ..}, .. })) if selected == ability && selected_target == target)
+            matches!(tor_client_text::parse(&format!("{verb} goblin"), &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { id: selected, invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target: selected_target }, weapon: tor_protocol::WeaponSelection::Default }, ..}, .. })) if selected == ability && selected_target == target)
         );
         assert!(
             tor_client_text::parse(&format!("{verb} #{}", super::actor_target(99)), &s).is_err()
@@ -196,7 +202,10 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
             goals(command, &s),
             [Goal::UseAbility {
                 ability: ability.into(),
-                invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
+                invocation: tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::ActorTarget { target },
+                    weapon: tor_protocol::WeaponSelection::Default
+                },
                 supplies: Default::default(),
             }]
         );
@@ -236,6 +245,7 @@ fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() 
             equipped_slot: None,
             known_cursed: None,
             known_protected: None,
+            known_projectile_bonus: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -848,16 +858,14 @@ fn carried_things_drop_and_unusable_actions_are_refused() {
     ] {
         assert_eq!(said(line, &s), answer, "{line}");
     }
-    // The weapon must be carried; the game has no weapon choice yet.
+    // Naming an unequipped item never falls back to the default attack.
     assert_eq!(
-        goals("attack goblin with sword", &s),
-        [Goal::Attack {
-            target: super::actor_target(42)
-        }]
+        said("attack goblin with sword", &s),
+        "No equipped weapon matches that name."
     );
     assert_eq!(
         said("attack goblin with axe", &s),
-        "You aren't carrying any axe."
+        "No equipped weapon matches that name."
     );
 }
 
@@ -1621,12 +1629,15 @@ fn an_arbitrary_disclosed_ability_needs_no_lexicon_entry() {
         goals("shimmer wave sentinel", &s),
         vec![Goal::UseAbility {
             ability: "shimmer_wave".into(),
-            invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
+            invocation: tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::ActorTarget { target },
+                weapon: tor_protocol::WeaponSelection::Default
+            },
             supplies: Default::default(),
         }]
     );
     assert!(
-        matches!(tor_client_text::parse("shimmer_wave sentinel",&s),Ok(Input::Command(Command::Act{action:Action::UseAbility{id,invocation: tor_protocol::AbilityInvocation::ActorTarget { target: selected },..},..})) if id=="shimmer_wave"&&selected==target)
+        matches!(tor_client_text::parse("shimmer_wave sentinel",&s),Ok(Input::Command(Command::Act{action:Action::UseAbility{id,invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target: selected }, weapon: tor_protocol::WeaponSelection::Default },..},..})) if id=="shimmer_wave"&&selected==target)
     );
 }
 
@@ -1686,7 +1697,7 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
     s.observation.combat.as_mut().unwrap().hp = 5;
     for command in ["mend", "mend me", "mend self", "mend myself"] {
         assert!(
-            matches!(tor_client_text::parse(command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, .. }, .. })) if target == s.observation.self_target),
+            matches!(tor_client_text::parse(command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target }, weapon: tor_protocol::WeaponSelection::Default }, .. }, .. })) if target == s.observation.self_target),
             "{command}"
         );
     }
@@ -1694,8 +1705,11 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
         goals("mend", &s),
         vec![Goal::UseAbility {
             ability: "mend".into(),
-            invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                target: s.observation.self_target
+            invocation: tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::ActorTarget {
+                    target: s.observation.self_target
+                },
+                weapon: tor_protocol::WeaponSelection::Default
             },
             supplies: Default::default(),
         }]
@@ -1704,8 +1718,11 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
         goals("mend me", &s),
         vec![Goal::UseAbility {
             ability: "mend".into(),
-            invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                target: s.observation.self_target
+            invocation: tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::ActorTarget {
+                    target: s.observation.self_target
+                },
+                weapon: tor_protocol::WeaponSelection::Default
             },
             supplies: Default::default(),
         }]
@@ -1714,7 +1731,10 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
         goals("mend companion", &s),
         vec![Goal::UseAbility {
             ability: "mend".into(),
-            invocation: tor_protocol::AbilityInvocation::ActorTarget { target: ally },
+            invocation: tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::ActorTarget { target: ally },
+                weapon: tor_protocol::WeaponSelection::Default
+            },
             supplies: Default::default(),
         }]
     );
@@ -1768,14 +1788,17 @@ fn phase5_using_clause_keeps_exact_ground_supply_through_both_text_modes() {
         format!("mend using #{item}"),
     ] {
         assert!(
-            matches!(tor_client_text::parse(&command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, supplies, .. }, .. })) if target == s.observation.self_target && supplies == expected)
+            matches!(tor_client_text::parse(&command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target }, weapon: tor_protocol::WeaponSelection::Default }, supplies, .. }, .. })) if target == s.observation.self_target && supplies == expected)
         );
         assert_eq!(
             goals(&command, &s),
             vec![Goal::UseAbility {
                 ability: "mend".into(),
-                invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                    target: s.observation.self_target
+                invocation: tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::ActorTarget {
+                        target: s.observation.self_target
+                    },
+                    weapon: tor_protocol::WeaponSelection::Default
                 },
                 supplies: expected.clone()
             }]
@@ -1808,7 +1831,7 @@ fn phase5_scripted_opaque_self_works_without_a_scene_occurrence() {
     let command = format!("mend #{}", s.observation.self_target);
     assert!(
         matches!(tor_client_text::parse(&command, &s), Ok(Input::Command(Command::Act {
-        action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, supplies: SupplySelection::Carried, .. }, ..
+        action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target }, weapon: tor_protocol::WeaponSelection::Default }, supplies: SupplySelection::Carried, .. }, ..
     })) if target == s.observation.self_target)
     );
 }
@@ -1917,8 +1940,11 @@ fn disclosed_ray_sentence_builds_a_directional_goal_and_prompts_for_direction() 
         goals("arbitrary ray west", &state),
         vec![Goal::UseAbility {
             ability: "arbitrary_ray".into(),
-            invocation: AbilityInvocation::DirectionalRay {
-                direction: Direction::West
+            invocation: tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::DirectionalRay {
+                    direction: Direction::West
+                },
+                weapon: tor_protocol::WeaponSelection::Default
             },
             supplies: SupplySelection::Carried,
         }]
@@ -1938,4 +1964,201 @@ fn disclosed_ray_sentence_builds_a_directional_goal_and_prompts_for_direction() 
         .is_err());
     }
     assert_eq!(state, before);
+}
+
+#[test]
+fn explicit_weapons_use_observed_equipped_pairs_in_both_text_modes() {
+    let mut s = state();
+    carrying(&mut s);
+    goblin(&mut s);
+    let sword = super::item_target(13);
+    let slot = equipment_slot("fixture_wing", "fastened to a wing", true);
+    s.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
+        identification: None,
+        completed: vec![],
+        slots: vec![slot.clone(); 11],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item: sword,
+            slot: Some(slot),
+            equipped_slot: Some(10),
+            known_cursed: None,
+            known_protected: None,
+            known_projectile_bonus: None,
+            known_equipment: None,
+            drinkable: false,
+            edible: false,
+            readable: false,
+            zappable: false,
+            charges: None,
+        }],
+    });
+    let mut technique = tor_client_common::test_support::ability("custom_cut");
+    technique.weapon_selection = true;
+    s.observation.combat = Some(super::creature_combat(vec![
+        tor_client_common::test_support::ability("basic_melee"),
+        technique,
+    ]));
+    let target = super::actor_target(42);
+    let selected = AbilityInvocation {
+        aim: AbilityAim::ActorTarget { target },
+        weapon: WeaponSelection::Equipped {
+            item: sword,
+            socket: 10,
+        },
+    };
+    let before = s.clone();
+    for (command, ability) in [
+        ("attack goblin with my sword".to_owned(), "basic_melee"),
+        (format!("attack goblin with #{sword}"), "basic_melee"),
+        ("custom cut goblin with iron sword".to_owned(), "custom_cut"),
+    ] {
+        assert_eq!(
+            goals(&command, &s),
+            vec![Goal::UseAbility {
+                ability: ability.into(),
+                invocation: selected,
+                supplies: SupplySelection::Carried,
+            }]
+        );
+        assert!(
+            matches!(tor_client_text::parse(&command, &s), Ok(Input::Command(Command::Act {
+            action: Action::UseAbility { id, invocation, supplies: SupplySelection::Carried }, ..
+        })) if id == ability && invocation == selected)
+        );
+    }
+    assert_eq!(goals("attack goblin", &s), vec![Goal::Attack { target }]);
+    assert!(matches!(
+        tor_client_text::parse("attack goblin", &s),
+        Ok(Input::Command(Command::Act {
+            action: Action::UseAbility {
+                invocation: AbilityInvocation {
+                    weapon: WeaponSelection::Default,
+                    ..
+                },
+                ..
+            },
+            ..
+        }))
+    ));
+    assert_eq!(
+        s, before,
+        "selection does not equip, spend or attack locally"
+    );
+    s.observation.inventory.reverse();
+    assert_eq!(
+        goals("attack goblin with sword", &s),
+        vec![Goal::UseAbility {
+            ability: "basic_melee".into(),
+            invocation: selected,
+            supplies: SupplySelection::Carried,
+        }]
+    );
+    s.observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities[1]
+        .weapon_selection = false;
+    assert_eq!(
+        said("custom cut goblin with sword", &s),
+        "That ability does not select a weapon."
+    );
+    assert!(tor_client_text::parse("custom cut goblin with sword", &s).is_err());
+    s.observation.interactions.as_mut().unwrap().inventory[0].equipped_slot = None;
+    assert_eq!(
+        said("attack goblin with sword", &s),
+        "No equipped weapon matches that name."
+    );
+    assert!(tor_client_text::parse("attack goblin with sword", &s).is_err());
+    assert!(tor_client_text::parse("attack goblin with sword with sword", &s).is_err());
+}
+
+#[test]
+fn text_weapon_clause_stays_exact_through_explicit_supply_selection() {
+    let mut s = state();
+    carrying(&mut s);
+    goblin(&mut s);
+    let sword = super::item_target(13);
+    let ration = super::item_target(11);
+    s.observation
+        .inventory
+        .iter_mut()
+        .find(|item| item.id == ration)
+        .unwrap()
+        .known_supply = Some(SupplyView {
+        id: "ration".into(),
+        name: "Ration".into(),
+    });
+    let slot = equipment_slot("weapon", "in hand", true);
+    s.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
+        identification: None,
+        completed: vec![],
+        slots: vec![slot.clone(); 11],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item: sword,
+            slot: Some(slot),
+            equipped_slot: Some(10),
+            known_cursed: None,
+            known_protected: None,
+            known_projectile_bonus: None,
+            known_equipment: None,
+            drinkable: false,
+            edible: false,
+            readable: false,
+            zappable: false,
+            charges: None,
+        }],
+    });
+    let mut ability = tor_client_common::test_support::ability("custom_cut");
+    ability.weapon_selection = true;
+    ability.supply_costs = vec![AbilitySupplyCost {
+        supply: "ration".into(),
+        name: "Ration".into(),
+        quantity: 1,
+        access: SupplyAccess::CarriedOnly,
+    }];
+    s.observation.combat = Some(super::creature_combat(vec![ability]));
+    let invocation = AbilityInvocation {
+        aim: AbilityAim::ActorTarget {
+            target: super::actor_target(42),
+        },
+        weapon: WeaponSelection::Equipped {
+            item: sword,
+            socket: 10,
+        },
+    };
+    let supplies = SupplySelection::Explicit {
+        items: vec![SelectedSupply {
+            cost_ordinal: 0,
+            item: ration,
+        }],
+    };
+    let command = "custom cut goblin with sword using iron ration";
+    assert_eq!(
+        goals(command, &s),
+        vec![Goal::UseAbility {
+            ability: "custom_cut".into(),
+            invocation,
+            supplies: supplies.clone()
+        }]
+    );
+    assert!(
+        matches!(tor_client_text::parse(command, &s), Ok(Input::Command(Command::Act {
+        action: Action::UseAbility { invocation: actual, supplies: selected, .. }, ..
+    })) if actual == invocation && selected == supplies)
+    );
+    let tokens = tokenize("custom cut goblin with sword with sword");
+    assert!(tor_client_text::parser::match_disclosed_sentence(
+        &tokens,
+        "custom cut goblin with sword with sword",
+        &s.observation
+    )
+    .is_err());
 }

@@ -354,8 +354,8 @@ impl Game {
                 p.actor == actor
                     && p.target == target
                     && matches!(
-                        p.invocation,
-                        crate::abilities::AbilityInvocation::ContactTarget { .. }
+                        p.invocation.aim,
+                        crate::abilities::AbilityAim::ContactTarget { .. }
                     )
             })
         {

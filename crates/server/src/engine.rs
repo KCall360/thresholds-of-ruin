@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 50;
+pub(crate) const ARCHIVE_VERSION: u32 = 51;
 #[path = "action_resolution.rs"]
 mod action_resolution;
 #[path = "advancement_query.rs"]
@@ -67,9 +67,12 @@ mod package_invariant_tests;
 #[cfg(test)]
 #[path = "perception_persistence_tests.rs"]
 mod perception_persistence_tests;
+#[path = "projectile_choice_query.rs"]
+mod projectile_choice_query;
 #[cfg(test)]
 #[path = "engine_region_count_tests.rs"]
 mod region_count_tests;
+pub(crate) use projectile_choice_query::PageBudget as ProjectileChoicePageBudget;
 #[path = "wire_request.rs"]
 mod wire_request;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -3191,6 +3194,7 @@ impl Engine {
             Action::Move { .. }
             | Action::Escape { .. }
             | Action::ChooseGrowthSource { .. }
+            | Action::ChooseIntellectExpertise { .. }
             | Action::Purchase { .. }
             | Action::Respec { .. }
             | Action::UseAbility { .. }
@@ -4177,6 +4181,14 @@ impl Candidate {
                             owner_index(*owner)?,
                             crate::creature_authoring::attribute(attribute)?,
                         ),
+                    CreatureAdvancement::SelectExpertise { owner, expertise } => build
+                        .select_expertise(
+                            owner_index(*owner)?,
+                            crate::creature_authoring::expertise(
+                                expertise,
+                                build.content().rules(),
+                            )?,
+                        ),
                     CreatureAdvancement::SelectTalent { owner, talent } => build.select_talent(
                         owner_index(*owner)?,
                         crate::creature_authoring::talent(talent, build.content().rules())?,
@@ -4200,6 +4212,15 @@ impl Candidate {
                                 pool: point_pool(pool)?,
                                 selection: PurchaseSelection::SkillRank(
                                     crate::creature_authoring::skill(skill)?,
+                                ),
+                            }),
+                            R::Expertise { pool, expertise } => Some(AdvancementPurchase {
+                                pool: point_pool(pool)?,
+                                selection: PurchaseSelection::Expertise(
+                                    crate::creature_authoring::expertise(
+                                        expertise,
+                                        build.content().rules(),
+                                    )?,
                                 ),
                             }),
                             R::Talent { pool, talent } => Some(AdvancementPurchase {
@@ -4859,8 +4880,11 @@ mod frozen_plan_profile_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -4972,8 +4996,8 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 50);
-        assert_eq!(engine.archive.ruleset, "interactions-v45");
+        assert_eq!(engine.archive.version, 51);
+        assert_eq!(engine.archive.ruleset, "interactions-v46");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {

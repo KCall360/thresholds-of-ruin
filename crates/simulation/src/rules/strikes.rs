@@ -19,6 +19,9 @@ pub enum StrikeSource {
         strikes: Vec<StrikeDef>,
     },
     SelectedMelee,
+    Projectile {
+        delivery: crate::projectile_profiles::ProjectileDeliveryKind,
+    },
     /// Reconstructed reusable source: the invoking species, then declared riders.
     NaturalMelee {
         additional_riders: Vec<RiderDef>,
@@ -33,16 +36,20 @@ impl<'de> Deserialize<'de> for StrikeSource {
                 strikes: Bounded<StrikeDef, { crate::limits::STRIKES }>,
             },
             SelectedMelee {},
+            Projectile {
+                delivery: crate::projectile_profiles::ProjectileDeliveryKind,
+            },
             NaturalMelee {
                 additional_riders: Bounded<RiderDef, { crate::limits::RIDERS_PER_STRIKE }>,
             },
         }
-        match Record::deserialize(deserializer)? {
+        match crate::bounded::named_map::<_, Record>(deserializer)? {
             Record::Authored { strikes } => {
                 validate_strike_shapes(&strikes.0).map_err(serde::de::Error::custom)?;
                 Ok(Self::Authored { strikes: strikes.0 })
             }
             Record::SelectedMelee {} => Ok(Self::SelectedMelee),
+            Record::Projectile { delivery } => Ok(Self::Projectile { delivery }),
             Record::NaturalMelee { additional_riders } => {
                 validate_rider_shapes(&additional_riders.0).map_err(serde::de::Error::custom)?;
                 Ok(Self::NaturalMelee {

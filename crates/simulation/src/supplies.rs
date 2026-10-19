@@ -205,6 +205,10 @@ impl Plan {
                 selection: &plan.supplies,
                 spend_at: SupplySpendAt::FirstResolution,
             },
+            Self::Projectile(plan) => plan
+                .source
+                .item()
+                .map_or(ItemContract::None, |item| ItemContract::ExactUnit { item }),
             Self::Ray(plan) => ItemContract::Supplies {
                 costs: &plan.supply_costs,
                 selection: &plan.supplies,
@@ -366,6 +370,9 @@ impl Game {
                                     .is_some_and(|d| d.ability == ray.ability)
                         }
                         Plan::Eat { .. } => item.spec.edible.is_some(),
+                        Plan::Projectile(projectile) => {
+                            projectile.source.available(self, projectile.actor)
+                        }
                         _ => false,
                     }
             }
@@ -506,6 +513,9 @@ impl Game {
             pending.plan == plan && self.preparation_still_available(pending, None)
         }) {
             return Some(plan);
+        }
+        if !self.ai_plan_resources_available(&plan) {
+            return None;
         }
         if self.physical_item_allocation(&plan).is_ok() {
             return Some(plan);
@@ -990,7 +1000,7 @@ mod tests {
             actor,
             crate::Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
+                invocation: crate::abilities::AbilityInvocation::actor_target(actor),
                 supplies: SupplySelection::Carried,
             },
             crate::IntentionOrigin::Human,
@@ -1039,7 +1049,7 @@ mod tests {
             actor,
             crate::Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
+                invocation: crate::abilities::AbilityInvocation::actor_target(actor),
                 supplies: SupplySelection::Carried,
             },
             crate::IntentionOrigin::Human,

@@ -41,6 +41,7 @@ fn context_growth_game_with_rules(
             },
         }],
         form_choices: vec![],
+        expertise_grants: vec![],
     });
     configure(&mut document);
     let mut species = crate::test_creatures::species();
@@ -426,6 +427,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
     let mut item = crate::ItemSpec::ordinary("clock mail".into());
     item.class = crate::ItemClass::Armor;
     item.equipment = Some(crate::EquipmentSpec {
+        weapon_profile: None,
         armor: None,
         slot: slot.clone(),
         attack: None,

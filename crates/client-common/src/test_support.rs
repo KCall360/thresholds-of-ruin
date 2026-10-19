@@ -36,6 +36,7 @@ pub fn ability(id: &str) -> AbilityView {
         },
         target_kind: AbilityTargetKind::Actor,
         basic_attack: id == "basic_melee",
+        weapon_selection: id == "basic_melee",
         cooldown_remaining: 0,
         supply_costs: vec![],
     }
@@ -88,6 +89,7 @@ pub fn stats() -> OwnStats {
             reset_percent: 100,
         },
         resources: vec![],
+        expertises: vec![],
         active_talents: vec![],
         dormant_talents: vec![],
         abilities: vec![ability("basic_melee")],

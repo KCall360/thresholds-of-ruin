@@ -100,6 +100,25 @@ accepted as spaces; `stats` lists your grants. Examples above do not grant missi
 forms. Techniques validate reach and resources when executed and do not approach
 for you.
 
+For an ability marked “weapon choice” in stats, append `with <equipped weapon>`
+to choose a currently equipped attack item by full name or opaque `#item` handle.
+For example, `attack goblin with silver sword` retains that exact item and
+observed socket. If a granted ability also requires supplies, the `with` clause
+comes before its `using <supplies>` clause.
+Omitting it preserves the default primary weapon or natural attack. Selection
+adds no extra attack and does not equip a carried item. A stale, missing or
+unequipped choice is refused, never silently replaced. An explicit weapon attack
+acts from your current position, like a named ability; it does not approach.
+After the target and supplies are chosen, the server previews that exact action's
+resource costs, time to the next strike, and separate recovery. Both text modes
+ask for `yes` before sending it; `no` or a new command cancels. Fresh costs are
+paid/reserved at preparation start. A resumed action labels its already-paid
+start and reserved resolution; a paid sequence prefix labels its settled costs
+and no new resource charge. The preview neither reserves resources nor promises
+affordability. Changed authority or observation requires a fresh choice and
+preview; a stale server reply refreshes the observation without retrying the
+action. Omitting `with` keeps the ordinary immediate default action.
+
 Finite-supply abilities use carried inventory automatically unless you add
 `using <item>`. For example, `bind wounds me using clean bandage` selects that
 exact known, touch-reachable ground or carried stack. Use full item names or
@@ -135,8 +154,21 @@ binding, resources and reservations, talents and abilities. They are free and
 available to observers. Diagnostic actors without creature builds show their
 available health information instead.
 
+For a granted projectile ability, enter its name alone. The server lists exact
+throwing sources or equipped launchers using your current inventory names.
+Choose a numbered row; launching then asks for compatible ammunition. Use `next`
+and `previous` for pages, including empty filtered pages with a continuation, or
+`cancel` to leave. After selecting the source, enter a direction (`north`, `ne`,
+`up`, and the usual abbreviations). The server's exact cost, time to next strike
+and recovery appear before a separate `yes`/`no` confirmation. Only `yes` sends
+that exact action once. Source selection and preview are read-only and do not
+promise affordability. Changed observation, equipment, ability or authority
+requires choosing again; no action is retried automatically. The same flow is
+available in script mode. The menu requires known item types, not knowledge of
+instance enchantment, and never calculates projectile physics or hidden bonuses.
+
 The parser recognizes more verbs than the engine implements. Containers,
-locks/keys, throwing and conversation are examples of unsupported
+locks/keys, free-form throwing outside granted abilities and conversation are examples of unsupported
 interactions; recognizing their grammar does not make an effect available.
 Missing objects are reported before an unsupported interaction is refused, and
 the refusal is said in the world's terms ("No one here seems inclined to talk.")

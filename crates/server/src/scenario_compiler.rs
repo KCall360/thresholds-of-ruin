@@ -147,6 +147,7 @@ pub(super) struct PreparedArchetype {
     pub recipe: Option<Recipe>,
     pub anatomy: Option<tor_simulation::AnatomySpec>,
     pub equipment: Option<tor_simulation::EquipmentSpec>,
+    pub projectile: Option<tor_simulation::projectile_profiles::ProjectileSpec>,
     pub equipment_generation: Option<tor_simulation::EquipmentGeneration>,
     pub consumable: Option<tor_simulation::ConsumableSpec>,
     pub readable: Option<tor_simulation::ReadableSpec>,
@@ -189,6 +190,11 @@ impl PreparedArchetype {
                 .equipment
                 .as_ref()
                 .map(|equipment| equipment.compile(catalog.content().rules()))
+                .transpose()?,
+            projectile: author
+                .projectile
+                .as_ref()
+                .map(|value| value.compile(catalog.content().rules()))
                 .transpose()?,
             equipment_generation: author
                 .equipment_generation
@@ -617,6 +623,7 @@ impl PreparedDefinitions {
         properties.extend(author.properties.clone());
         let spec = tor_simulation::ItemSpec {
             equipment: inherited.equipment.clone(),
+            projectile: inherited.projectile.clone(),
             equipment_generation: inherited.equipment_generation,
             consumable: inherited.consumable.clone(),
             readable: inherited.readable.clone(),
@@ -657,6 +664,45 @@ impl PreparedDefinitions {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn projectile_archetype_reaches_stackable_item_without_equipment() {
+        let mut manifest = creature_manifest();
+        let projectile = serde_json::from_value(serde_json::json!({"family":"fixture.arrow",
+            "recovery":"consumed_on_hit", "damage":{"components":[{"category":"keen",
+            "descriptor":null,"amount":{"type":"fixed","value":2}}],
+            "primary":{"category":"keen","descriptor":null,"sides":null}}}))
+        .unwrap();
+        manifest.archetypes.insert(
+            "arrow".into(),
+            super::Archetype {
+                class: super::super::ItemClass::Weapon,
+                name: Some("Fixture arrow".into()),
+                projectile: Some(projectile),
+                stackable: true,
+                equipment_generation: Some(super::super::EquipmentGeneration::Authored {
+                    hit_enchantment: 1,
+                    damage_enchantment: 2,
+                }),
+                ..Default::default()
+            },
+        );
+        let definitions = super::PreparedDefinitions::new(&manifest, 1).unwrap();
+        let item = serde_json::from_value(serde_json::json!({"id":100,"at":[1,1,0],
+            "archetype":"arrow","quantity":12}))
+        .unwrap();
+        let compiled = definitions.item(&item, 42, &Default::default()).unwrap();
+        assert!(compiled.equipment.is_none());
+        assert!(compiled.stackable);
+        assert_eq!(
+            compiled.projectile.as_ref().unwrap().family.as_str(),
+            "fixture.arrow"
+        );
+        assert!(compiled.equipment_generation.unwrap().valid_for(
+            compiled.class,
+            compiled.equipment.as_ref(),
+            compiled.projectile.as_ref()
+        ));
+    }
     #[test]
     fn authored_supply_identity_compiles_and_rejects_unknown_or_equipment_supplies() {
         let mut manifest = creature_manifest();
@@ -1090,7 +1136,11 @@ mod tests {
     #[test]
     fn creature_preparation_rejects_external_anatomy_and_unknown_factions() {
         let mut manifest = creature_manifest();
-        manifest.characters[0].anatomy = Some(super::super::AnatomySpec { slots: vec![] });
+        manifest.characters[0].anatomy = Some(super::super::AnatomySpec {
+            slots: vec![],
+            capacities: Default::default(),
+            primary_attack_socket: super::super::PrimaryAttackSocket::None {},
+        });
         assert!(super::PreparedDefinitions::new(&manifest, 1).is_err());
         manifest.characters[0].anatomy = None;
         manifest.factions.insert("other".into(), Default::default());
@@ -1105,7 +1155,7 @@ mod tests {
         let prepared = super::PreparedDefinitions::new(&manifest, 1).unwrap();
         assert!(prepared.characters[0].creature.recipe.is_some());
 
-        let actor: super::Actor = serde_json::from_value(serde_json::json!({"id": 2, "at": [2, 1, 0], "creature": manifest.characters[0].creature, "anatomy": {"slots": []}})).unwrap();
+        let actor: super::Actor = serde_json::from_value(serde_json::json!({"id": 2, "at": [2, 1, 0], "creature": manifest.characters[0].creature, "anatomy": {"slots": [], "capacities": {}, "primary_attack_socket": {"kind": "none"}}})).unwrap();
         assert!(prepared.actor(&actor).is_err());
     }
     use super::*;
@@ -1347,6 +1397,7 @@ mod tests {
                 creature: Some(creature),
                 anatomy: None,
                 equipment: None,
+                projectile: None,
                 equipment_generation: None,
                 consumable: None,
                 readable: None,

@@ -18,6 +18,7 @@ import unittest
 
 from process_harness import ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, ProcessTestCase
 from stream_relay import StreamRelay
+from projectile_package import projectile_package
 from strike_sequence_package import sequence_package
 from supply_package import prepare as supply_package
 from public_plan_package import paid_preparation, public_plan_package
@@ -84,6 +85,8 @@ def has_condition_event(message, condition):
 SAMPLE_BASIS = {"actor": "1", "branch": "branch-1", "stream": "sample-attachment",
                 "reset": "1", "build_epoch": "1"}
 SAMPLE_ADVANCEMENT_COMMANDS = [
+    {"type": "act", "expected_revision": "3", "action": {"type": "choose_intellect_expertise",
+        "basis": SAMPLE_BASIS, "choice": {"threshold": 1, "expertise": "rogue.knife"}}},
     {"type": "act", "expected_revision": "3", "action": {"type": "choose_growth_source", "basis": SAMPLE_BASIS,
         "source": {"kind": "racial"}}},
     {"type": "advancement", "expected_revision": "3", "query": {"kind": "overview"}},
@@ -120,6 +123,11 @@ CLIENT = [
             "stream": {"stream": "sample-attachment", "epoch": "1"}, "readiness_revision": "3"},
             "branch": "branch-1", "command": command} for command in [
             *SAMPLE_ADVANCEMENT_COMMANDS,
+            {"type": "preview_ability_weapon", "expected_revision": "3", "ability": "basic_melee",
+             "invocation": {"aim": {"kind": "actor_target", "target": "a_" + "02" * 32}, "weapon": {"kind": "default"}},
+             "supplies": {"kind": "carried"}},
+            {"type": "projectile_choices", "expected_revision": "3",
+             "query": {"ability": "rogue.throw", "phase": {"kind": "sources"}, "offset": 0}},
             {"type": "rename_place", "expected_revision": "3", "key": "place-key", "name": "Lantern Hall"},
             {"type": "resume_intention", "expected_revision": "3", "intention": "admission-1"},
             {"type": "cancel_intention", "expected_revision": "3", "intention": "admission-1", "step": None},
@@ -137,15 +145,15 @@ CLIENT = [
                 {"type": "identify", "choice": "choice-sample", "item": "i_" + "04" * 32},
                 {"type": "identify", "choice": "choice-sample", "item": None},
                 {"type": "eat", "item": "i_" + "04" * 32},
-                *({"type": "use_ability", "id": ability, "invocation": {"kind": "actor_target", "target": "a_" + "02" * 32},
+                *({"type": "use_ability", "id": ability, "invocation": {"aim": {"kind": "actor_target", "target": "a_" + "02" * 32}, "weapon": {"kind": "default"}},
                    "supplies": {"kind": "carried"}}
                   for ability in ("basic_melee", "rattling_blow", "spark_lance_fire", "falter")),
-                {"type": "use_ability", "id": "guarded_step", "invocation": {"kind": "self_step", "direction": "north_east"},
+                {"type": "use_ability", "id": "guarded_step", "invocation": {"aim": {"kind": "self_step", "direction": "north_east"}, "weapon": {"kind": "default"}},
                  "supplies": {"kind": "carried"}},
                 {"type": "use_ability", "id": "fixture_directional_ray",
-                 "invocation": {"kind": "directional_ray", "direction": "east"},
+                 "invocation": {"aim": {"kind": "directional_ray", "direction": "east"}, "weapon": {"kind": "default"}},
                  "supplies": {"kind": "carried"}},
-                {"type": "use_ability", "id": "bind_wounds", "invocation": {"kind": "actor_target", "target": "a_" + "02" * 32},
+                {"type": "use_ability", "id": "bind_wounds", "invocation": {"aim": {"kind": "actor_target", "target": "a_" + "02" * 32}, "weapon": {"kind": "default"}},
                  "supplies": {"kind": "explicit", "items": [
                      {"cost_ordinal": 0, "item": "i_" + "04" * 32}]}},
                 {"type": "set_door", "door": "d_" + "07" * 32, "open": True},
@@ -165,6 +173,26 @@ CLIENT = [
 
 
 class Recorder(ProcessTestCase):
+    def record_projectile_choices(self, server_samples):
+        self.save = self.save.parent / "projectile-samples.db"
+        server = self.server(scenario=projectile_package(self))
+        owner, current = self.client()
+        query = {"ability": "rogue.throw", "phase": {"kind": "sources"}, "offset": 0}
+        result = self.request(owner, {"type": "command", "context": current["input_context"],
+            "branch": current["branch"], "command": {"type": "projectile_choices",
+                "expected_revision": current["state"]["revision"], "query": query}})
+        self.assertIsNone(result["error"])
+        messages = [json.loads(line).get("message") for line in owner.transcript if line.startswith("{")]
+        sample = next(message for message in reversed(messages)
+                      if message and message["type"] == "projectile_choices")
+        self.assertEqual(sample["page"]["query"], query)
+        # This ordinary character has not purchased knife expertise yet: an
+        # actual empty owner page records the capability gate without auto-grants.
+        self.assertEqual(sample["page"]["choices"], [])
+        server_samples["projectile_choices"] = sample
+        owner.stop()
+        server.stop()
+
     def record_amulet_escape(self, server_samples):
         sample = run_recording_case(amulet_recording_case(), "escape_sample")
         self.assertEqual(sample["type"], "snapshot")
@@ -444,7 +472,17 @@ class Recorder(ProcessTestCase):
         defender, _ = self.client(actor=2)
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "Sequence sentinel")
-        admitted = self.act(attacker, {"type": "use_ability", "id": "triple_strike", "invocation": {"kind": "actor_target", "target": target}})
+        current = self.request(attacker, {"type": "snapshot"})
+        preview = self.request(attacker, {"type": "command", "context": current["input_context"],
+            "branch": current["branch"], "command": {"type": "preview_ability_weapon",
+                "expected_revision": current["state"]["revision"], "ability": "triple_strike",
+                "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}},
+                "supplies": {"kind": "carried"}}})
+        self.assertIsNone(preview["error"])
+        messages = [json.loads(line).get("message") for line in attacker.transcript if line.startswith("{")]
+        server_samples["ability_weapon_preview"] = next(message for message in reversed(messages)
+            if message and message["type"] == "ability_weapon_preview")
+        admitted = self.act(attacker, {"type": "use_ability", "id": "triple_strike", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         self.assertIsNone(admitted["error"])
         self.assertIsNone(self.act(defender, {"type": "wait"})["error"])
         self.frame(attacker, lambda frame: frame.get("state") is not None
@@ -472,7 +510,7 @@ class Recorder(ProcessTestCase):
         bandage = next(row["item"]["id"] for row in observation["ground_items"]
                        if (row["item"]["known_supply"] or {}).get("id") == "bandage")
         accepted = self.act(carer, {"type": "use_ability", "id": "bind_wounds",
-            "invocation": {"kind": "actor_target", "target": observation["self_target"]}, "supplies": {"kind": "explicit", "items": [
+            "invocation": {"aim": {"kind": "actor_target", "target": observation["self_target"]}, "weapon": {"kind": "default"}}, "supplies": {"kind": "explicit", "items": [
                 {"cost_ordinal": 0, "item": bandage}]}})
         self.assertIsNone(accepted["error"])
         prepared = self.request(carer, {"type": "snapshot"})
@@ -496,6 +534,7 @@ class Recorder(ProcessTestCase):
         carer.stop()
         partner.stop()
         care_server.stop()
+        self.record_projectile_choices(server_samples)
         self.record_advancement(server_samples)
         self.record_public_plan(server_samples)
         self.record_nutrition(server_samples)

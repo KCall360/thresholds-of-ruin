@@ -44,6 +44,14 @@ fn state(rows: &mut Vec<String>, label: &str, value: &DiagnosticCombatant) {
         ));
     }
 }
+pub fn cost_lines(rows: &mut Vec<String>, bundle: &DiagnosticCostBundle) {
+    for cost in bundle.entries() {
+        rows.push(format!(
+            "  Cost {}: start {}, resolution {}",
+            cost.resource.name, cost.start, cost.resolution
+        ));
+    }
+}
 pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidCombatDiagnostics> {
     report.validate()?;
     let mut rows = vec![format!(
@@ -79,11 +87,8 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
             record.remaining,
             record.recovery
         ));
-        if let Some(cost) = &record.charge {
-            rows.push(format!(
-                "  Cost {}: start {}, resolution {}",
-                cost.resource.name, cost.start, cost.resolution
-            ));
+        if let Some(bundle) = &record.charge {
+            cost_lines(&mut rows, bundle);
         }
         state(&mut rows, "Actor before", &record.actor_before);
         state(&mut rows, "Target before", &record.target_before);
@@ -225,6 +230,31 @@ pub(crate) mod tests {
         assert_eq!(
             trace_lines(&step),
             ["Custom mechanism", "  Seed: 18446744073709551615"]
+        );
+    }
+    #[test]
+    fn mixed_cost_bundle_renders_every_captured_resource_once() {
+        let cost = |id: &str, name: &str, start, resolution| DiagnosticCost {
+            resource: ContentRef {
+                id: id.into(),
+                name: name.into(),
+            },
+            start,
+            resolution,
+        };
+        let bundle = DiagnosticCostBundle {
+            stamina: Some(cost("stamina", "Stamina", 1, 2)),
+            focus: Some(cost("focus", "Focus", 0, 1)),
+            mana: None,
+        };
+        let mut rows = vec![];
+        cost_lines(&mut rows, &bundle);
+        assert_eq!(
+            rows,
+            [
+                "  Cost Stamina: start 1, resolution 2",
+                "  Cost Focus: start 0, resolution 1"
+            ]
         );
     }
 }

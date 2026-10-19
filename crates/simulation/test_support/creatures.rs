@@ -34,6 +34,7 @@ pub(crate) fn talent(id: &str, modifiers: Vec<Modifier>) -> tor_simulation::rule
         },
         modifiers,
         form_choices: vec![],
+        expertise_grants: vec![],
     }
 }
 

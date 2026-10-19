@@ -75,6 +75,7 @@ fn phase5_maximum_health_changes_and_rebuild_do_not_manufacture_received_loss() 
     let before = subject.health().current();
     subject
         .set_equipment(vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(1),
             socket: EquipmentSlotId(0),
             attack: None,

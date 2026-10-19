@@ -173,7 +173,7 @@ class AiInteractionProcesses(ProcessTestCase):
         observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
         player, initial = self.client()
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"] if actor["name"] == "ruin guard")
-        self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
+        self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         for _ in range(4):
             self.act(player, {"type": "wait"})
         state = self.request(observer, {"type": "snapshot"})["state"]["observation"]
@@ -188,7 +188,7 @@ class AiInteractionProcesses(ProcessTestCase):
         observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
         player, initial = self.client()
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"] if actor["name"] == "ruin guard")
-        self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
+        self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         healed = None
         for _ in range(5):
             state = self.request(observer, {"type": "snapshot"})

@@ -140,7 +140,7 @@ pub struct CombatDiagnostic {
     pub started: u64,
     pub remaining: u64,
     pub recovery: u64,
-    pub charge: Option<crate::costs::ResourceCost>,
+    pub charge: Option<crate::costs::CostBundle>,
     pub actor_before: CombatantDiagnostic,
     pub target_before: CombatantDiagnostic,
     pub actor_after: CombatantDiagnostic,
@@ -184,7 +184,7 @@ pub(crate) struct PendingCombatDiagnostic {
     started: u64,
     remaining: u64,
     recovery: u64,
-    charge: Option<crate::costs::ResourceCost>,
+    charge: Option<crate::costs::CostBundle>,
     actor_before: CombatantDiagnostic,
     target_before: CombatantDiagnostic,
 }
@@ -324,9 +324,7 @@ mod tests {
             origin_intention: None,
             work: crate::Work::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget {
-                    target: crate::ActorId(2),
-                },
+                invocation: crate::abilities::AbilityInvocation::actor_target(crate::ActorId(2)),
                 supplies: Default::default(),
             },
             preparation: 1,

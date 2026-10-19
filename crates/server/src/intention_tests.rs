@@ -557,8 +557,11 @@ mod intention_admission_tests {
                             action: Action::UseAbility {
                                 id: tor_simulation::content_ids::AbilityId::new("basic_melee")
                                     .unwrap(),
-                                invocation: crate::actions::AbilityInvocation::ActorTarget {
-                                    target: SimActor(2),
+                                invocation: crate::actions::AbilityInvocation {
+                                    aim: crate::actions::AbilityAim::ActorTarget {
+                                        target: SimActor(2),
+                                    },
+                                    weapon: crate::actions::WeaponSelection::Default,
                                 },
                                 supplies: Default::default(),
                             },
@@ -761,8 +764,11 @@ mod intention_admission_tests {
                 };
                 *action = Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::actions::AbilityInvocation::ActorTarget {
-                        target: SimActor(actor.0),
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: SimActor(actor.0),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 };
@@ -1303,8 +1309,11 @@ mod intention_admission_tests {
                         expected_revision: engine.revision(actor).unwrap(),
                         action: Action::UseAbility {
                             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                            invocation: crate::actions::AbilityInvocation::ActorTarget {
-                                target: SimActor(2),
+                            invocation: crate::actions::AbilityInvocation {
+                                aim: crate::actions::AbilityAim::ActorTarget {
+                                    target: SimActor(2),
+                                },
+                                weapon: crate::actions::WeaponSelection::Default,
                             },
                             supplies: Default::default(),
                         },
@@ -1429,8 +1438,11 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -1612,8 +1624,11 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -1741,8 +1756,11 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -1886,8 +1904,11 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -2006,8 +2027,11 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -2070,8 +2094,11 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -2234,8 +2261,11 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -2320,8 +2350,11 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -2421,8 +2454,11 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -2531,8 +2567,11 @@ mod intention_admission_tests {
                     expected_revision: 0,
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -3387,8 +3426,11 @@ mod ordered_strikes_terminal_tests {
                     intention,
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -3684,8 +3726,11 @@ mod ordered_strikes_ai_replay_tests {
                 "interrupt-sentinel",
                 Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("interrupt_strike").unwrap(),
-                    invocation: crate::actions::AbilityInvocation::ActorTarget {
-                        target: SimActor(2),
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: SimActor(2),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },
@@ -3847,8 +3892,11 @@ mod finite_supply_publication_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("paid_care").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(1),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(1),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: SupplySelection::Explicit {
                             items: vec![SelectedSupply {
@@ -3916,7 +3964,10 @@ mod finite_supply_publication_tests {
             expected_revision: engine.revision(actor).unwrap(),
             action: Action::UseAbility {
                 id: ability.clone(),
-                invocation: crate::actions::AbilityInvocation::ActorTarget { target: sim_actor },
+                invocation: crate::actions::AbilityInvocation {
+                    aim: crate::actions::AbilityAim::ActorTarget { target: sim_actor },
+                    weapon: crate::actions::WeaponSelection::Default,
+                },
                 supplies: SupplySelection::Explicit {
                     items: vec![SelectedSupply {
                         cost_ordinal: 0,
@@ -4022,7 +4073,17 @@ mod finite_supply_publication_tests {
             original_balance - u32::from(!resume)
         );
         assert_eq!(creature.costs().reservations().len(), 1);
-        assert_eq!(creature.costs().reservation(origin).unwrap().resolution, 1);
+        assert_eq!(
+            creature
+                .costs()
+                .reservation(origin)
+                .unwrap()
+                .entries()
+                .find(|cost| cost.resource == Resource::Stamina)
+                .unwrap()
+                .resolution,
+            1
+        );
 
         for _ in 0..2 {
             let failure = rejected.execute_next_intention().unwrap_err();
@@ -4270,7 +4331,10 @@ mod finite_supply_publication_tests {
             expected_revision: engine.revision(actor).unwrap(),
             action: Action::UseAbility {
                 id: ability.clone(),
-                invocation: crate::actions::AbilityInvocation::ActorTarget { target: sim_actor },
+                invocation: crate::actions::AbilityInvocation {
+                    aim: crate::actions::AbilityAim::ActorTarget { target: sim_actor },
+                    weapon: crate::actions::WeaponSelection::Default,
+                },
                 supplies: SupplySelection::Explicit {
                     items: vec![SelectedSupply {
                         cost_ordinal: 0,

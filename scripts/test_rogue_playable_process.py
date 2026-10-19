@@ -500,7 +500,7 @@ class RogueChecks:
                 before, start = current, len(player.transcript)
                 earned_before = int(growth["growth"]["earned_xp"])
                 current = self.settled_action(player, {"type": "use_ability", "id": "basic_melee",
-                                                      "invocation": {"kind": "actor_target", "target": nearby["id"]}})
+                                                      "invocation": {"aim": {"kind": "actor_target", "target": nearby["id"]}, "weapon": {"kind": "default"}}})
                 # Only a lethal attack can add XP in this walkthrough. Walking
                 # and taking finite stock do not need another private page.
                 growth = self.overview(player)
@@ -588,7 +588,7 @@ class RogueChecks:
                            if row["id"] in hostile and disclosed_melee_candidate(view, row)), None)
             if nearby:
                 current = self.settled_action(player, {"type": "use_ability", "id": "basic_melee",
-                    "invocation": {"kind": "actor_target", "target": nearby["id"]}})
+                    "invocation": {"aim": {"kind": "actor_target", "target": nearby["id"]}, "weapon": {"kind": "default"}}})
                 continue
             route = floor_graph.route_to_any(here["key"], floor_graph.stairs_down)
             if route is None:
@@ -983,7 +983,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         # Care and paid replacement consume the real collected stock in a safe
         # cleared floor. Neither operation grants inventory on return or reopen.
         current = self.settled_action(player, {"type": "use_ability", "id": "bind_wounds",
-            "invocation": {"kind": "actor_target", "target": observation(returned)["self_target"]}, "supplies": {"kind": "carried"}})
+            "invocation": {"aim": {"kind": "actor_target", "target": observation(returned)["self_target"]}, "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}})
         self.assertEqual(carried_stock(current, "bandage"), 4)
         self.assertEqual(carried_stock(current, "ration"), 1)
         quiet = self.overview(player)

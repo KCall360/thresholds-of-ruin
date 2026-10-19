@@ -96,12 +96,18 @@ impl Game {
                 };
                 if self.survival_diagnostics.is_some() {
                     if let Some(cost) = paid {
-                        crate::survival_diagnostics::checked_add(
-                            completion.survival.paid_resolution.get_mut(cost.resource),
-                            u64::from(cost.resolution),
-                            &mut completion.survival.incomplete,
-                        );
+                        for cost in cost.entries() {
+                            crate::survival_diagnostics::checked_add(
+                                completion.survival.paid_resolution.get_mut(cost.resource),
+                                u64::from(cost.resolution),
+                                &mut completion.survival.incomplete,
+                            );
+                        }
                     }
+                }
+                if resolved.plan.as_projectile().is_some() {
+                    self.complete_projectile_release(resolved, completion, due)?;
+                    break;
                 }
                 // Capture identification before an exact last unit disappears. Effects
                 // may kill the drinker and drop only the unconsumed remainder.
@@ -216,7 +222,7 @@ impl Game {
                         }
                         self.finish_item_work(
                             id,
-                            resolved.plan.work(),
+                            &resolved.plan,
                             resolved.intention,
                             launched,
                             consumed_identity,
@@ -233,7 +239,7 @@ impl Game {
                     {
                         self.finish_item_work(
                             id,
-                            resolved.plan.work(),
+                            &resolved.plan,
                             resolved.intention,
                             true,
                             consumed_identity,
@@ -261,7 +267,7 @@ impl Game {
                     Work::Drink { .. } if resolved.plan.on_success().is_empty() => {
                         self.finish_item_work(
                             id,
-                            resolved.plan.work(),
+                            &resolved.plan,
                             resolved.intention,
                             false,
                             consumed_identity,
@@ -271,7 +277,7 @@ impl Game {
                         let outcome = self.resolve_consumed_item(&resolved)?;
                         self.finish_item_work(
                             id,
-                            resolved.plan.work(),
+                            &resolved.plan,
                             resolved.intention,
                             matches!(
                                 &resolved.plan,
@@ -300,7 +306,7 @@ impl Game {
                     Work::Equip { .. } | Work::Unequip { .. } => {
                         self.finish_item_work(
                             id,
-                            resolved.plan.work(),
+                            &resolved.plan,
                             resolved.intention,
                             false,
                             consumed_identity,

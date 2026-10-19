@@ -26,6 +26,8 @@ pub struct SurvivalFlows {
     pub nourishment_debt_cleared: u64,
     pub nourishment_offered: u64,
     pub nourishment_wasted: u64,
+    /// Selected AI projectile exceeded a numeric budget and paid a normal Wait.
+    pub projectile_numeric_budget_refusals: u64,
     pub items_consumed: u64,
     pub food_consumed: u64,
     pub consumed_items: BTreeMap<crate::ItemId, u64>,
@@ -102,11 +104,13 @@ impl SurvivalFlows {
         if let Some(old) = old {
             for (id, cost) in old {
                 if new.is_none_or(|new| !new.contains_key(id)) {
-                    checked_add(
-                        self.holds_released.get_mut(cost.resource),
-                        u64::from(cost.resolution),
-                        &mut self.incomplete,
-                    );
+                    for cost in cost.entries() {
+                        checked_add(
+                            self.holds_released.get_mut(cost.resource),
+                            u64::from(cost.resolution),
+                            &mut self.incomplete,
+                        );
+                    }
                 }
             }
         }
@@ -120,11 +124,13 @@ impl SurvivalFlows {
         if let Some(new) = new {
             for (id, cost) in new {
                 if old.is_none_or(|old| !old.contains_key(id)) {
-                    checked_add(
-                        self.holds_acquired.get_mut(cost.resource),
-                        u64::from(cost.resolution),
-                        &mut self.incomplete,
-                    );
+                    for cost in cost.entries() {
+                        checked_add(
+                            self.holds_acquired.get_mut(cost.resource),
+                            u64::from(cost.resolution),
+                            &mut self.incomplete,
+                        );
+                    }
                 }
             }
         }
@@ -153,6 +159,7 @@ impl SurvivalFlows {
             nourishment_debt_cleared,
             nourishment_offered,
             nourishment_wasted,
+            projectile_numeric_budget_refusals,
             items_consumed,
             food_consumed
         );
@@ -424,11 +431,12 @@ mod flow_tests {
             .unwrap()
             .start_preparation_cost(
                 crate::IntentionId(90),
-                crate::costs::ResourceCost {
+                crate::costs::CostBundle::single(crate::costs::ResourceCost {
                     resource: crate::resources::Resource::Stamina,
                     start: 1,
                     resolution: 0,
-                },
+                })
+                .unwrap(),
             )
             .unwrap();
         outcome
@@ -468,5 +476,91 @@ mod flow_tests {
         assert_eq!(flows.actors[&id].direct_resources.stamina, 1);
         assert_eq!(flows.actors[&id].periodic_resources.stamina, 0);
         assert_eq!(flows.actors[&id].nutrition_regeneration_demand, 0);
+    }
+    #[test]
+    fn mixed_cost_holds_report_all_pools_and_paid_settlement_is_not_release() {
+        let mut game = Game::two_room(42, crate::test_creatures::content());
+        let id = game
+            .spawn_actor(
+                tor_world::Location {
+                    region: tor_world::RegionId(1),
+                    position: tor_world::Position { x: 1, y: 1, z: 0 },
+                },
+                std::num::NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        crate::test_creatures::configure(
+            &mut game,
+            id,
+            "neutral",
+            crate::test_creatures::species(),
+        );
+        let before = game.actors[&id].clone();
+        let mut held = before.clone();
+        let bundle = crate::costs::CostBundle::single(crate::costs::ResourceCost {
+            resource: crate::resources::Resource::Stamina,
+            start: 0,
+            resolution: 1,
+        })
+        .unwrap()
+        .checked_add(
+            crate::costs::CostBundle::single(crate::costs::ResourceCost {
+                resource: crate::resources::Resource::Focus,
+                start: 0,
+                resolution: 1,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        held.combat
+            .as_mut()
+            .unwrap()
+            .start_preparation_cost(crate::IntentionId(90), bundle)
+            .unwrap();
+        let mut acquired = SurvivalFlows::default();
+        acquired.boundary(&before, &held);
+        assert_eq!(
+            (
+                acquired.holds_acquired.stamina,
+                acquired.holds_acquired.focus
+            ),
+            (1, 1)
+        );
+        let mut canceled = held.clone();
+        canceled
+            .combat
+            .as_mut()
+            .unwrap()
+            .with_recovery_context(None, |creature| {
+                creature.cancel_cost(crate::IntentionId(90));
+                Ok::<_, crate::GameError>(())
+            })
+            .unwrap();
+        let mut released = SurvivalFlows::default();
+        released.boundary(&held, &canceled);
+        assert_eq!(
+            (
+                released.holds_released.stamina,
+                released.holds_released.focus
+            ),
+            (1, 1)
+        );
+        let mut paid = held.clone();
+        paid.combat
+            .as_mut()
+            .unwrap()
+            .with_recovery_context(None, |creature| {
+                creature.finish_cost(crate::IntentionId(90)).unwrap();
+                Ok::<_, crate::GameError>(())
+            })
+            .unwrap();
+        let mut settled = SurvivalFlows::default();
+        settled.paid_resolution.stamina = 1;
+        settled.paid_resolution.focus = 1;
+        settled.boundary(&held, &paid);
+        assert_eq!(
+            (settled.holds_released.stamina, settled.holds_released.focus),
+            (0, 0)
+        );
     }
 }

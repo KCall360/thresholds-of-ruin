@@ -75,11 +75,12 @@ fn spend(creature: &mut CreatureState, resource: Resource, amount: u32) {
     creature
         .start_cost(
             id,
-            ResourceCost {
+            tor_simulation::costs::CostBundle::single(ResourceCost {
                 resource,
                 start: amount,
                 resolution: 0,
-            },
+            })
+            .unwrap(),
         )
         .unwrap();
     creature.finish_cost(id).unwrap();

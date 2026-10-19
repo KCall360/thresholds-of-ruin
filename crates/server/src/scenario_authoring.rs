@@ -142,10 +142,67 @@ impl EquipmentGeneration {
 }
 
 pub type EquipmentSlot = String;
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct AnatomySpec {
     pub slots: Vec<EquipmentSlot>,
+    pub capacities: std::collections::BTreeMap<String, u16>,
+    pub primary_attack_socket: PrimaryAttackSocket,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PrimaryAttackSocket {
+    None {},
+    Socket { slot: u16 },
+}
+impl<'de> Deserialize<'de> for AnatomySpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            slots: Vec<EquipmentSlot>,
+            #[serde(deserialize_with = "anatomy_capacities")]
+            capacities: std::collections::BTreeMap<String, u16>,
+            primary_attack_socket: PrimaryAttackSocket,
+        }
+        let f: Fields = crate::creature_authoring::named_map(d)?;
+        if f.slots.len() > tor_simulation::limits::EQUIPMENT_SOCKETS
+            || matches!(f.primary_attack_socket, PrimaryAttackSocket::Socket { slot } if usize::from(slot) >= f.slots.len())
+        {
+            return Err(serde::de::Error::custom("invalid anatomy sockets"));
+        }
+        Ok(Self {
+            slots: f.slots,
+            capacities: f.capacities,
+            primary_attack_socket: f.primary_attack_socket,
+        })
+    }
+}
+fn anatomy_capacities<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<std::collections::BTreeMap<String, u16>, D::Error> {
+    struct Capacities;
+    impl<'de> serde::de::Visitor<'de> for Capacities {
+        type Value = std::collections::BTreeMap<String, u16>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("bounded unique anatomy capacities")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut values = std::collections::BTreeMap::new();
+            while let Some((id, units)) = map.next_entry::<String, u16>()? {
+                if values.len() >= tor_simulation::limits::EQUIPMENT_SOCKETS
+                    || usize::from(units) > tor_simulation::limits::EQUIPMENT_SOCKETS
+                    || values.insert(id, units).is_some()
+                {
+                    return Err(serde::de::Error::custom("invalid anatomy capacities"));
+                }
+            }
+            Ok(values)
+        }
+    }
+    d.deserialize_map(Capacities)
 }
 impl AnatomySpec {
     pub(crate) fn compile(
@@ -164,7 +221,32 @@ impl AnatomySpec {
                 Ok(id)
             })
             .collect::<Result<Vec<_>, crate::Failure>>()?;
-        let anatomy = tor_simulation::AnatomySpec { slots };
+        let capacities = self
+            .capacities
+            .iter()
+            .map(|(id, units)| {
+                tor_simulation::content_ids::EquipmentCapacityId::new(id)
+                    .map(|id| (id, *units))
+                    .map_err(|_| super::fail(format!("Invalid equipment capacity ID {id:?}")))
+            })
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let capacities = tor_simulation::equipment_capacity::EquipmentCapacities::new(capacities)
+            .ok_or_else(|| super::fail("Invalid anatomy capacities"))?;
+        let primary_attack_socket = match self.primary_attack_socket {
+            PrimaryAttackSocket::None {} => {
+                tor_simulation::equipment_capacity::PrimaryAttackSocket::None
+            }
+            PrimaryAttackSocket::Socket { slot } => {
+                tor_simulation::equipment_capacity::PrimaryAttackSocket::Socket {
+                    slot: tor_simulation::EquipmentSlotId(slot),
+                }
+            }
+        };
+        let anatomy = tor_simulation::AnatomySpec {
+            slots,
+            capacities,
+            primary_attack_socket,
+        };
         if !anatomy.valid(rules) {
             return Err(super::fail("Invalid anatomy"));
         }
@@ -201,9 +283,161 @@ impl ArmorSpec {
         Ok(armor)
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeaponRangeBands {
+    pub short_feet: u32,
+    pub long_feet: u32,
+}
+impl From<WeaponRangeBands> for tor_simulation::weapon_profiles::RangeBands {
+    fn from(value: WeaponRangeBands) -> Self {
+        Self {
+            short_feet: value.short_feet,
+            long_feet: value.long_feet,
+        }
+    }
+}
+/// Source-owned launcher identity and physical range, independent of runtime serde.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherProfile {
+    pub family: String,
+    pub range: WeaponRangeBands,
+}
+impl LauncherProfile {
+    fn compile(&self) -> Result<tor_simulation::weapon_profiles::LauncherProfile, crate::Failure> {
+        Ok(tor_simulation::weapon_profiles::LauncherProfile {
+            family: tor_simulation::content_ids::LauncherFamilyId::new(&self.family)
+                .map_err(|_| super::fail("Invalid launcher family ID"))?,
+            range: self.range.into(),
+        })
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HitRecovery {
+    ConsumedOnHit,
+    Recoverable,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectileSpec {
+    pub family: String,
+    pub damage: crate::creature_authoring::Damage,
+    pub recovery: HitRecovery,
+}
+impl ProjectileSpec {
+    pub(crate) fn compile(
+        &self,
+        rules: &tor_simulation::rules::Ruleset,
+    ) -> Result<tor_simulation::projectile_profiles::ProjectileSpec, crate::Failure> {
+        let result = tor_simulation::projectile_profiles::ProjectileSpec {
+            family: tor_simulation::content_ids::LauncherFamilyId::new(&self.family)
+                .map_err(|_| super::fail("Invalid projectile family ID"))?,
+            damage: self.damage.compile(rules)?,
+            recovery: match self.recovery {
+                HitRecovery::ConsumedOnHit => {
+                    tor_simulation::projectile_profiles::HitRecovery::ConsumedOnHit
+                }
+                HitRecovery::Recoverable => {
+                    tor_simulation::projectile_profiles::HitRecovery::Recoverable
+                }
+            },
+        };
+        result
+            .validate_shape()
+            .map_err(|_| super::fail("Invalid projectile definition"))?;
+        Ok(result)
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WeaponTrait {
+    TwoHanded {},
+    Offhand {},
+    Quickdraw {},
+    Thrown { range: WeaponRangeBands },
+}
+impl From<WeaponTrait> for tor_simulation::weapon_profiles::WeaponTrait {
+    fn from(value: WeaponTrait) -> Self {
+        match value {
+            WeaponTrait::TwoHanded {} => Self::TwoHanded,
+            WeaponTrait::Offhand {} => Self::Offhand,
+            WeaponTrait::Quickdraw {} => Self::Quickdraw,
+            WeaponTrait::Thrown { range } => Self::Thrown {
+                range: range.into(),
+            },
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WeaponTraitKind {
+    TwoHanded,
+    Offhand,
+    Quickdraw,
+    Thrown,
+}
+impl From<WeaponTraitKind> for tor_simulation::weapon_profiles::WeaponTraitKind {
+    fn from(value: WeaponTraitKind) -> Self {
+        match value {
+            WeaponTraitKind::TwoHanded => Self::TwoHanded,
+            WeaponTraitKind::Offhand => Self::Offhand,
+            WeaponTraitKind::Quickdraw => Self::Quickdraw,
+            WeaponTraitKind::Thrown => Self::Thrown,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeaponTraitChanges {
+    pub add: Vec<WeaponTrait>,
+    pub remove: Vec<WeaponTraitKind>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeaponProfileSpec {
+    pub expertise: String,
+    pub launcher: Option<LauncherProfile>,
+    pub base_traits: Vec<WeaponTrait>,
+    pub expert_traits: WeaponTraitChanges,
+}
+impl WeaponProfileSpec {
+    fn compile(
+        &self,
+    ) -> Result<tor_simulation::weapon_profiles::WeaponProfileSpec, crate::Failure> {
+        Ok(tor_simulation::weapon_profiles::WeaponProfileSpec {
+            expertise: tor_simulation::content_ids::ExpertiseId::new(&self.expertise)
+                .map_err(|_| super::fail("Invalid weapon expertise ID"))?,
+            launcher: self
+                .launcher
+                .as_ref()
+                .map(LauncherProfile::compile)
+                .transpose()?,
+            base_traits: self.base_traits.iter().copied().map(Into::into).collect(),
+            expert_traits: tor_simulation::weapon_profiles::WeaponTraitChanges {
+                add: self
+                    .expert_traits
+                    .add
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect(),
+                remove: self
+                    .expert_traits
+                    .remove
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect(),
+            },
+        })
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EquipmentSpec {
+    pub weapon_profile: Option<WeaponProfileSpec>,
     pub slot: EquipmentSlot,
     pub armor: Option<ArmorSpec>,
     pub attack: Option<crate::creature_authoring::Melee>,
@@ -232,6 +466,11 @@ impl EquipmentSpec {
             )));
         }
         Ok(tor_simulation::EquipmentSpec {
+            weapon_profile: self
+                .weapon_profile
+                .as_ref()
+                .map(WeaponProfileSpec::compile)
+                .transpose()?,
             armor: self.armor.map(ArmorSpec::compile).transpose()?,
             slot,
             attack: self
@@ -979,6 +1218,36 @@ mod tests {
     }
 
     #[test]
+    fn anatomy_requires_explicit_resources_and_primary_socket() {
+        let value = serde_json::json!({"slots": ["weapon"], "capacities": {"grip": 2}, "primary_attack_socket": {"kind": "socket", "slot": 0}});
+        let anatomy: AnatomySpec = serde_json::from_value(value.clone()).unwrap();
+        assert!(anatomy.compile(&rules()).is_ok());
+        for field in ["slots", "capacities", "primary_attack_socket"] {
+            let mut malformed = value.clone();
+            malformed.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<AnatomySpec>(malformed).is_err(),
+                "{field}"
+            );
+        }
+        for malformed in [
+            serde_json::json!([[], {}, {"kind": "none"}]),
+            serde_json::json!({"slots": [], "capacities": {}, "primary_attack_socket": {"kind": "socket", "slot": 0}}),
+            serde_json::json!({"slots": [], "capacities": {"grip": 65}, "primary_attack_socket": {"kind": "none"}}),
+            serde_json::json!({"slots": [], "capacities": {}, "primary_attack_socket": {"kind": "none", "slot": 0}}),
+        ] {
+            assert!(serde_json::from_value::<AnatomySpec>(malformed).is_err());
+        }
+        assert!(serde_json::from_str::<AnatomySpec>(r#"{"slots":[],"capacities":{"grip":1,"grip":2},"primary_attack_socket":{"kind":"none"}}"#).is_err());
+        let none: AnatomySpec = toml::from_str(
+            "slots = []\ncapacities = {}\nprimary_attack_socket = { kind = 'none' }",
+        )
+        .unwrap();
+        assert!(none.capacities.is_empty());
+        assert!(none.compile(&rules()).is_ok());
+    }
+
+    #[test]
     fn equipment_slot_references_compile_from_data_and_reject_unknown_ids() {
         let mut document = rules().document().clone();
         document
@@ -989,16 +1258,20 @@ mod tests {
                 equipped_phrase: "held by a tentacle".into(),
                 compatible_classes: vec![tor_simulation::ItemClass::Tool],
                 requires_attack: false,
+                capacity: tor_simulation::equipment_capacity::EquipmentCapacityUse::None,
                 equip_turns: 2,
                 unequip_turns: 4,
             });
         let rules = tor_simulation::rules::Ruleset::validate(document).unwrap();
         let anatomy = AnatomySpec {
             slots: vec!["tentacle".into(), "tentacle".into()],
+            capacities: Default::default(),
+            primary_attack_socket: PrimaryAttackSocket::None {},
         };
         let compiled = anatomy.compile(&rules).unwrap();
         assert_eq!(compiled.slots[0].as_str(), "tentacle");
         let equipment = EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: "tentacle".into(),
             attack: None,
@@ -1011,7 +1284,9 @@ mod tests {
             .is_ok());
         for slot in ["missing_slot", "invalid slot"] {
             assert!(AnatomySpec {
-                slots: vec![slot.into()]
+                slots: vec![slot.into()],
+                capacities: Default::default(),
+                primary_attack_socket: PrimaryAttackSocket::None {},
             }
             .compile(&rules)
             .is_err());
@@ -1392,5 +1667,149 @@ mod equipment_generation_tests {
             serde_json::json!({"kind":"authored","curse_percent":1})
         )
         .is_err());
+    }
+}
+
+#[cfg(test)]
+mod weapon_profile_authoring_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn equipment() -> EquipmentSpec {
+        serde_json::from_value(json!({
+            "slot":"weapon", "attack":{"skill":"light_weaponry","bonus":0,"wind_up":1,"recovery":1,
+                "damage":{"components":[{"category":"keen","descriptor":null,"amount":{"type":"fixed","value":1}}],"primary":{"category":"keen","descriptor":null}}},
+            "weapon_profile":{"expertise":"fixture.knife", "base_traits":[{"kind":"offhand"}],
+                "expert_traits":{"add":[{"kind":"quickdraw"}],"remove":[]}}
+        })).unwrap()
+    }
+
+    #[test]
+    fn authored_weapon_profile_round_trips_toml_with_omitted_nullable_ranges() {
+        let value = equipment();
+        assert!(value.weapon_profile.as_ref().unwrap().launcher.is_none());
+        let encoded = toml::to_string(&value).unwrap();
+        assert_eq!(toml::from_str::<EquipmentSpec>(&encoded).unwrap(), value);
+        let legacy: EquipmentSpec = toml::from_str("slot = 'weapon'").unwrap();
+        assert!(legacy.weapon_profile.is_none());
+    }
+
+    #[test]
+    fn compiled_weapon_profile_resolves_equipment_expertise_in_regular_validation() {
+        use tor_simulation::{
+            content_ids::ExpertiseId,
+            expertise::{ExpertiseCategory, ExpertiseDef},
+            rules::{Ruleset, RulesetDocument},
+        };
+        let mut document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let value = equipment();
+        let unknown = Ruleset::validate(document.clone()).unwrap();
+        assert!(value
+            .compile(&unknown)
+            .unwrap()
+            .validate_rules(tor_simulation::ItemClass::Weapon, &unknown)
+            .is_err());
+        document.expertises.push(ExpertiseDef {
+            id: ExpertiseId::new("fixture.knife").unwrap(),
+            name: "Knife".into(),
+            category: ExpertiseCategory::Equipment,
+        });
+        let valid = Ruleset::validate(document.clone()).unwrap();
+        assert!(value
+            .compile(&valid)
+            .unwrap()
+            .validate_rules(tor_simulation::ItemClass::Weapon, &valid)
+            .is_ok());
+        document.expertises.last_mut().unwrap().category = ExpertiseCategory::Utility;
+        let wrong = Ruleset::validate(document).unwrap();
+        assert!(value
+            .compile(&wrong)
+            .unwrap()
+            .validate_rules(tor_simulation::ItemClass::Weapon, &wrong)
+            .is_err());
+        for traits in [
+            json!([{"kind":"finesse"}]),
+            json!([{"kind":"offhand","extra":true}]),
+            json!([{"kind":"thrown"}]),
+        ] {
+            let mut malformed = serde_json::to_value(&value).unwrap();
+            malformed["weapon_profile"]["base_traits"] = traits;
+            assert!(serde_json::from_value::<EquipmentSpec>(malformed).is_err());
+        }
+        for range in [
+            WeaponRangeBands {
+                short_feet: 0,
+                long_feet: 10,
+            },
+            WeaponRangeBands {
+                short_feet: 6,
+                long_feet: 10,
+            },
+            WeaponRangeBands {
+                short_feet: 20,
+                long_feet: 10,
+            },
+        ] {
+            let mut malformed = value.clone();
+            malformed.weapon_profile.as_mut().unwrap().launcher = Some(LauncherProfile {
+                family: "fixture.arrow".into(),
+                range,
+            });
+            assert!(malformed
+                .compile(&valid)
+                .unwrap()
+                .validate_rules(tor_simulation::ItemClass::Weapon, &valid)
+                .is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod projectile_authoring_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn projectile() -> ProjectileSpec {
+        serde_json::from_value(json!({"family":"fixture.arrow", "recovery":"recoverable",
+            "damage":{"components":[{"category":"keen","descriptor":null,
+                "amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}],
+                "primary":{"category":"keen","descriptor":null,"sides":6}}}))
+        .unwrap()
+    }
+
+    #[test]
+    fn projectile_source_round_trips_and_compiles_shared_damage_without_equipment() {
+        let source = projectile();
+        let encoded = toml::to_string(&source).unwrap();
+        assert_eq!(toml::from_str::<ProjectileSpec>(&encoded).unwrap(), source);
+        let rules = tor_simulation::rules::Ruleset::validate(
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap(),
+        )
+        .unwrap();
+        let compiled = source.compile(&rules).unwrap();
+        let launcher = LauncherProfile {
+            family: "fixture.arrow".into(),
+            range: WeaponRangeBands {
+                short_feet: 20,
+                long_feet: 60,
+            },
+        }
+        .compile()
+        .unwrap();
+        assert!(compiled.compatible_with(&launcher));
+        for change in 0..4 {
+            let mut bad = source.clone();
+            match change {
+                0 => bad.family = "bad family".into(),
+                1 => bad.damage.primary = None,
+                2 => bad.damage.primary.as_mut().unwrap().sides = Some(8),
+                _ => bad.damage.components[0].descriptor = Some("unknown".into()),
+            }
+            assert!(bad.compile(&rules).is_err());
+        }
+        let mut bad = serde_json::to_value(&source).unwrap();
+        bad["attack"] = json!({});
+        assert!(serde_json::from_value::<ProjectileSpec>(bad).is_err());
     }
 }

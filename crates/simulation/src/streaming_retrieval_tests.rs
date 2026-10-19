@@ -118,7 +118,7 @@ fn retrieval_residency_fixture_with_destination_member(
             owner,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: owner },
+                invocation: crate::abilities::AbilityInvocation::actor_target(owner),
                 supplies: crate::supplies::SupplySelection::Explicit {
                     items: vec![crate::supplies::SelectedSupply {
                         cost_ordinal: 0,

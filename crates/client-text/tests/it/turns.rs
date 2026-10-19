@@ -25,6 +25,9 @@ enum Frame {
     Waiting(Waiting),
     Resync,
     CreatureCatalog(CreatureCatalogPage),
+    WeaponPreview(AbilityWeaponPreview),
+    ProjectileChoices(ProjectileChoicePage),
+    SnapshotReply,
     Control(bool),
 }
 
@@ -181,6 +184,25 @@ impl Link for Scripted {
         };
         for frame in frames {
             let message = match frame {
+                Frame::SnapshotReply => {
+                    let mut snapshot = self.client.snapshot();
+                    snapshot.context.epoch += 1;
+                    self.context = snapshot.context.clone();
+                    ServerMessage::Snapshot {
+                        request_id: id.clone(),
+                        snapshot: Box::new(snapshot),
+                    }
+                }
+                Frame::ProjectileChoices(page) => ServerMessage::ProjectileChoices {
+                    context: self.reply_context(),
+                    request_id: id.clone(),
+                    page: Box::new(page),
+                },
+                Frame::WeaponPreview(preview) => ServerMessage::AbilityWeaponPreview {
+                    context: self.reply_context(),
+                    request_id: id.clone(),
+                    preview: Box::new(preview),
+                },
                 Frame::CreatureCatalog(page) => ServerMessage::CreatureCatalog {
                     context: self.reply_context(),
                     request_id: id.clone(),
@@ -274,7 +296,7 @@ impl Link for Scripted {
                             tick,
                             HistoryContent::Action {
                                 action: Action::Wait,
-                                event,
+                                event: Box::new(event),
                             },
                         ))
                     });
@@ -559,6 +581,7 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
             equipped_slot: None,
             known_cursed: None,
             known_protected: None,
+            known_projectile_bonus: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -640,7 +663,10 @@ async fn ability_goals_submit_once_from_the_current_position_and_tell_preparatio
                     request,
                     &Action::UseAbility {
                         id: ability.into(),
-                        invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
+                        invocation: tor_protocol::AbilityInvocation {
+                            aim: tor_protocol::AbilityAim::ActorTarget { target },
+                            weapon: tor_protocol::WeaponSelection::Default
+                        },
                         supplies: Default::default(),
                     }
                 ),
@@ -2607,7 +2633,11 @@ fn attacked(link: &Scripted) -> Vec<ActorTarget> {
                     Command::Act {
                         action:
                             Action::UseAbility {
-                                invocation: AbilityInvocation::ActorTarget { target },
+                                invocation:
+                                    tor_protocol::AbilityInvocation {
+                                        aim: tor_protocol::AbilityAim::ActorTarget { target },
+                                        weapon: tor_protocol::WeaponSelection::Default,
+                                    },
                                 ..
                             },
                         ..
@@ -2628,7 +2658,11 @@ fn sparring(kill: usize) -> impl FnMut(&Request, &StateView) -> Vec<Frame> {
                 Command::Act {
                     action:
                         Action::UseAbility {
-                            invocation: AbilityInvocation::ActorTarget { target },
+                            invocation:
+                                tor_protocol::AbilityInvocation {
+                                    aim: tor_protocol::AbilityAim::ActorTarget { target },
+                                    weapon: tor_protocol::WeaponSelection::Default,
+                                },
                             ..
                         },
                     ..
@@ -3594,6 +3628,7 @@ fn magic_turn_state() -> StateView {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -3607,6 +3642,7 @@ fn magic_turn_state() -> StateView {
                 equipped_slot: None,
                 known_cursed: None,
                 known_protected: None,
+                known_projectile_bonus: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -3746,4 +3782,456 @@ async fn ordinary_zap_and_paid_abort_use_current_authority_and_no_hidden_names()
     let refused = play(&mut link, &mut engine, "zap ivory wand east").await;
     assert!(refused.to_lowercase().contains("spectator"), "{refused}");
     assert_eq!(link.sent.len(), 2);
+}
+
+fn weapon_preview_state() -> StateView {
+    let mut state = with_figures(&[(2, "ruin scout", 1)]);
+    let mut weapon = state.observation.ground_items[0].item.clone();
+    weapon.id = super::item_target(81);
+    weapon.name = "secondary sword".into();
+    weapon.class = ItemClass::Weapon;
+    weapon.identified = false;
+    state.observation.inventory.push(weapon.clone());
+    let slot = equipment_slot("weapon", "in hand", true);
+    state.observation.interactions = Some(InteractionView {
+        identification: None,
+        completed: vec![],
+        curse_blocked: vec![],
+        slots: vec![slot.clone(); 11],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item: weapon.id,
+            slot: Some(slot),
+            equipped_slot: Some(10),
+            known_projectile_bonus: None,
+            known_equipment: None,
+            known_cursed: None,
+            known_protected: None,
+            drinkable: false,
+            edible: false,
+            readable: false,
+            zappable: false,
+            charges: None,
+        }],
+    });
+    state
+}
+fn weapon_preview_response(request: &Request) -> Option<AbilityWeaponPreview> {
+    let Request::Command {
+        command:
+            Command::PreviewAbilityWeapon {
+                ability,
+                invocation,
+                supplies,
+                ..
+            },
+        ..
+    } = request
+    else {
+        return None;
+    };
+    Some(AbilityWeaponPreview {
+        ability: ability.clone(),
+        invocation: *invocation,
+        supplies: supplies.clone(),
+        phase: AbilityWeaponPreviewPhase::Fresh,
+        cost: Some(DiagnosticCostBundle {
+            stamina: None,
+            focus: Some(DiagnosticCost {
+                resource: tor_client_common::test_support::content("focus"),
+                start: 0,
+                resolution: 2,
+            }),
+            mana: Some(DiagnosticCost {
+                resource: tor_client_common::test_support::content("mana"),
+                start: 1,
+                resolution: 2,
+            }),
+        }),
+        preparation: 300,
+        recovery: 100,
+    })
+}
+fn ability_actions(link: &Scripted) -> Vec<Action> {
+    link.sent
+        .iter()
+        .filter_map(|request| match request {
+            Request::Command {
+                command:
+                    Command::Act {
+                        action: action @ Action::UseAbility { .. },
+                        ..
+                    },
+                ..
+            } => Some(action.clone()),
+            _ => None,
+        })
+        .collect()
+}
+#[tokio::test]
+async fn explicit_weapon_text_shows_exact_terms_then_yes_sends_one_original_action() {
+    let mut link = Scripted::new(weapon_preview_state(), |request, now| {
+        if let Some(preview) = weapon_preview_response(request) {
+            vec![Frame::WeaponPreview(preview)]
+        } else {
+            vec![Frame::View(now.clone(), None), Frame::Ack]
+        }
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "attack scout with secondary sword").await;
+    assert!(text.contains("Time to next strike: 300 ticks"), "{text}");
+    assert!(text.contains("Focus"));
+    assert!(text.contains("Mana"));
+    assert!(text.contains("yes/no"));
+    assert!(ability_actions(&link).is_empty());
+    let expected = link.sent.iter().find_map(weapon_preview_response).unwrap();
+    play(&mut link, &mut engine, "yes").await;
+    assert_eq!(
+        ability_actions(&link),
+        vec![Action::UseAbility {
+            id: expected.ability,
+            invocation: expected.invocation,
+            supplies: expected.supplies
+        }]
+    );
+}
+#[tokio::test]
+async fn explicit_weapon_text_no_wrong_echo_and_changed_revision_send_no_action() {
+    for failure in 0..3 {
+        let mut link = Scripted::new(weapon_preview_state(), move |request, _| {
+            let mut preview = weapon_preview_response(request).expect("only preview query");
+            if failure == 1 {
+                preview.invocation.weapon = WeaponSelection::Default;
+            }
+            vec![Frame::WeaponPreview(preview)]
+        });
+        let mut engine = Engine::default();
+        let text = play(&mut link, &mut engine, "attack scout with secondary sword").await;
+        if failure == 1 {
+            assert!(text.contains("does not match"), "{text}");
+        } else if failure == 2 {
+            let mut snapshot = link.client.snapshot();
+            std::sync::Arc::make_mut(&mut snapshot.state).revision += 1;
+            link.client = ClientState::from_snapshot(snapshot).unwrap();
+            let text = play(&mut link, &mut engine, "yes").await;
+            assert!(text.contains("changed"), "{text}");
+        } else {
+            play(&mut link, &mut engine, "no").await;
+        }
+        assert!(ability_actions(&link).is_empty());
+        assert_eq!(link.sent.len(), 1);
+    }
+}
+#[tokio::test]
+async fn omitted_weapon_keeps_immediate_default_text_action() {
+    let mut link = Scripted::new(weapon_preview_state(), sparring(99));
+    play(&mut link, &mut Engine::default(), "attack scout").await;
+    assert!(link
+        .sent
+        .iter()
+        .all(|request| weapon_preview_response(request).is_none()));
+    assert!(matches!(
+        ability_actions(&link).as_slice(),
+        [Action::UseAbility {
+            invocation: AbilityInvocation {
+                weapon: WeaponSelection::Default,
+                ..
+            },
+            ..
+        }]
+    ));
+}
+
+#[tokio::test]
+async fn stale_weapon_preview_refreshes_snapshot_without_rebinding_or_action() {
+    let mut link = Scripted::new(weapon_preview_state(), |request, _| match request {
+        Request::Command {
+            command: Command::PreviewAbilityWeapon { .. },
+            ..
+        } => vec![Frame::Reject(ErrorCode::StaleRevision)],
+        Request::Snapshot => vec![Frame::SnapshotReply],
+        _ => panic!("stale preview must not retry gameplay"),
+    });
+    let text = play(
+        &mut link,
+        &mut Engine::default(),
+        "attack scout with secondary sword",
+    )
+    .await;
+    assert!(text.contains("Observation refreshed"), "{text}");
+    assert!(ability_actions(&link).is_empty());
+    assert_eq!(link.sent.len(), 2);
+    assert_eq!(link.sent[1], Request::Snapshot);
+}
+
+fn projectile_state() -> StateView {
+    let mut state = weapon_preview_state();
+    let mut ability = tor_client_common::test_support::ability("fixture_projectile");
+    ability.name = "Fixture Projectile".into();
+    ability.target_kind = AbilityTargetKind::DirectionalProjectile;
+    ability.reach = AbilityReach::Projectile;
+    state
+        .observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities
+        .push(ability);
+    let weapon = state
+        .observation
+        .inventory
+        .iter_mut()
+        .find(|item| item.id == super::item_target(81))
+        .unwrap();
+    weapon.identified = true;
+    let mut ammunition = weapon.clone();
+    ammunition.id = super::item_target(82);
+    ammunition.name = "known arrows".into();
+    state.observation.inventory.push(ammunition);
+    let mut interaction = state.observation.interactions.as_ref().unwrap().inventory[0].clone();
+    interaction.item = super::item_target(82);
+    interaction.equipped_slot = None;
+    state
+        .observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .inventory
+        .push(interaction);
+    state
+}
+fn projectile_page(request: &Request, launch: bool) -> Option<ProjectileChoicePage> {
+    let Request::Command {
+        command: Command::ProjectileChoices { query, .. },
+        ..
+    } = request
+    else {
+        return None;
+    };
+    let choices = match query.phase {
+        ProjectileChoicePhase::Sources {} if launch => vec![ProjectileChoice::Launcher {
+            launcher: EquippedProjectileWeapon {
+                item: super::item_target(81),
+                socket: 10,
+            },
+        }],
+        ProjectileChoicePhase::Sources {} => vec![ProjectileChoice::Throw {
+            source: ThrownSourceSelection::Carried {
+                item: super::item_target(82),
+                socket: 0,
+            },
+        }],
+        ProjectileChoicePhase::Ammunition { .. } => vec![ProjectileChoice::Ammunition {
+            item: super::item_target(82),
+        }],
+    };
+    Some(ProjectileChoicePage {
+        query: query.clone(),
+        choices,
+        next_offset: None,
+    })
+}
+fn projectile_link(launch: bool) -> Scripted {
+    Scripted::new(projectile_state(), move |request, now| {
+        if let Some(page) = projectile_page(request, launch) {
+            vec![Frame::ProjectileChoices(page)]
+        } else if let Some(preview) = weapon_preview_response(request) {
+            vec![Frame::WeaponPreview(preview)]
+        } else {
+            vec![Frame::View(now.clone(), None), Frame::Ack]
+        }
+    })
+}
+#[tokio::test]
+async fn projectile_text_throw_and_launch_show_terms_before_one_identical_confirmed_action() {
+    for launch in [false, true] {
+        let mut link = projectile_link(launch);
+        let mut engine = Engine::default();
+        let text = play(&mut link, &mut engine, "fixture projectile").await;
+        assert!(
+            text.contains(if launch {
+                "secondary sword"
+            } else {
+                "known arrows"
+            }),
+            "{text}"
+        );
+        assert!(ability_actions(&link).is_empty());
+        let text = play(&mut link, &mut engine, "1").await;
+        if launch {
+            assert!(text.contains("compatible ammunition"));
+            assert!(text.contains("known arrows"));
+            assert!(
+                matches!(link.sent.last().unwrap(), Request::Command { command: Command::ProjectileChoices { query: ProjectileChoiceQuery { phase: ProjectileChoicePhase::Ammunition { launcher: EquippedProjectileWeapon { item, socket: 10 } }, offset: 0, .. }, .. }, .. } if *item == super::item_target(81))
+            );
+            play(&mut link, &mut engine, "1").await;
+        } else {
+            assert!(text.contains("Which direction?"), "{text}");
+        }
+        let text = play(&mut link, &mut engine, "n").await;
+        assert!(text.contains("Time to next strike: 300 ticks"), "{text}");
+        assert!(text.contains("recovery: 100 ticks"));
+        assert!(text.contains("Focus"));
+        assert!(text.contains("Mana"));
+        assert!(text.contains("yes/no"));
+        assert!(ability_actions(&link).is_empty());
+        let expected = link.sent.iter().find_map(weapon_preview_response).unwrap();
+        assert_eq!(expected.invocation.weapon, WeaponSelection::Default);
+        assert_eq!(expected.supplies, SupplySelection::Carried);
+        assert!(matches!(
+            expected.invocation.aim,
+            AbilityAim::DirectionalProjectile {
+                direction: Direction::North,
+                ..
+            }
+        ));
+        play(&mut link, &mut engine, "yes").await;
+        assert_eq!(
+            ability_actions(&link),
+            vec![Action::UseAbility {
+                id: expected.ability,
+                invocation: expected.invocation,
+                supplies: expected.supplies
+            }]
+        );
+        play(&mut link, &mut engine, "yes").await;
+        assert_eq!(ability_actions(&link).len(), 1);
+    }
+}
+#[tokio::test]
+async fn projectile_text_empty_pages_navigation_and_cancel_never_send_gameplay() {
+    let mut link = Scripted::new(projectile_state(), |request, _| {
+        let mut page = projectile_page(request, false).expect("only read-only menu queries");
+        if page.query.offset == 0 {
+            page.choices.clear();
+            page.next_offset = Some(128);
+        }
+        vec![Frame::ProjectileChoices(page)]
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "fixture projectile").await;
+    assert!(text.contains("No choices on this page"));
+    assert!(text.contains("next"));
+    let requests = link.sent.len();
+    play(&mut link, &mut engine, "1").await;
+    assert_eq!(link.sent.len(), requests);
+    let text = play(&mut link, &mut engine, "next").await;
+    assert!(text.contains("known arrows"));
+    assert!(text.contains("previous"));
+    let text = play(&mut link, &mut engine, "previous").await;
+    assert!(text.contains("No choices on this page"));
+    play(&mut link, &mut engine, "cancel").await;
+    let requests = link.sent.len();
+    play(&mut link, &mut engine, "1").await;
+    assert_eq!(link.sent.len(), requests);
+    assert!(ability_actions(&link).is_empty());
+}
+#[tokio::test]
+async fn projectile_text_stale_or_mismatched_choice_pages_do_not_retry_or_proceed() {
+    for fault in 0..4 {
+        let mut link = Scripted::new(projectile_state(), move |request, now| {
+            let mut page = projectile_page(request, false).expect("one source query");
+            match fault {
+                0 => {
+                    page.query.ability = "another".into();
+                    vec![Frame::ProjectileChoices(page)]
+                }
+                1 => {
+                    page.query.offset += 1;
+                    vec![Frame::ProjectileChoices(page)]
+                }
+                2 => vec![Frame::Control(false), Frame::ProjectileChoices(page)],
+                _ => {
+                    let mut next = now.clone();
+                    next.revision += 1;
+                    vec![Frame::View(next, None), Frame::ProjectileChoices(page)]
+                }
+            }
+        });
+        let mut engine = Engine::default();
+        play(&mut link, &mut engine, "fixture projectile").await;
+        play(&mut link, &mut engine, "1").await;
+        assert_eq!(link.sent.len(), 1, "no retry for fault {fault}");
+        assert!(ability_actions(&link).is_empty());
+    }
+}
+#[tokio::test]
+async fn projectile_text_cancel_wrong_preview_and_changed_inventory_never_commit() {
+    for fault in 0..5 {
+        let mut link = Scripted::new(projectile_state(), move |request, now| {
+            if let Some(page) = projectile_page(request, false) {
+                return vec![Frame::ProjectileChoices(page)];
+            }
+            if let Some(mut preview) = weapon_preview_response(request) {
+                if fault == 1 {
+                    preview.invocation = AbilityInvocation::directional_projectile(
+                        Direction::South,
+                        ProjectileDeliverySelection::Throw {
+                            source: ThrownSourceSelection::Carried {
+                                item: super::item_target(82),
+                                socket: 0,
+                            },
+                        },
+                    );
+                }
+                if fault == 2 {
+                    preview.invocation = AbilityInvocation::directional_projectile(
+                        Direction::North,
+                        ProjectileDeliverySelection::Throw {
+                            source: ThrownSourceSelection::Carried {
+                                item: super::item_target(82),
+                                socket: 1,
+                            },
+                        },
+                    );
+                }
+                return vec![Frame::WeaponPreview(preview)];
+            }
+            vec![Frame::View(now.clone(), None), Frame::Ack]
+        });
+        let mut engine = Engine::default();
+        play(&mut link, &mut engine, "fixture projectile").await;
+        play(&mut link, &mut engine, "1").await;
+        play(&mut link, &mut engine, "north").await;
+        if fault == 3 || fault == 4 {
+            let mut snapshot = link.client.snapshot();
+            let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
+            if fault == 3 {
+                view.inventory
+                    .retain(|item| item.id != super::item_target(82));
+                view.interactions
+                    .as_mut()
+                    .unwrap()
+                    .inventory
+                    .retain(|row| row.item != super::item_target(82));
+            } else {
+                view.interactions
+                    .as_mut()
+                    .unwrap()
+                    .inventory
+                    .iter_mut()
+                    .find(|row| row.item == super::item_target(82))
+                    .unwrap()
+                    .equipped_slot = Some(0);
+            }
+            link.client = ClientState::from_snapshot(snapshot).unwrap();
+        }
+        play(
+            &mut link,
+            &mut engine,
+            if fault == 0 { "no" } else { "yes" },
+        )
+        .await;
+        assert!(ability_actions(&link).is_empty(), "fault {fault}");
+        assert_eq!(
+            link.sent
+                .iter()
+                .filter(|r| weapon_preview_response(r).is_some())
+                .count(),
+            1
+        );
+    }
 }

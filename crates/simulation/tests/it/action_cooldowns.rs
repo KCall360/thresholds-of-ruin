@@ -241,6 +241,7 @@ fn cooldowns_survive_temporary_and_equipment_grant_changes() {
     assert_eq!(recorded(&creature)["cooldowns"], expected);
     creature
         .set_equipment(vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(1),
             socket: EquipmentSlotId(0),
             modifiers: vec![
@@ -284,11 +285,12 @@ fn cooldown_expiry_coexists_with_condition_resource_and_health_recovery() {
     creature
         .start_cost(
             IntentionId(1),
-            ResourceCost {
+            tor_simulation::costs::CostBundle::single(ResourceCost {
                 resource: Resource::Stamina,
                 start: 1,
                 resolution: 0,
-            },
+            })
+            .unwrap(),
         )
         .unwrap();
     creature.finish_cost(IntentionId(1)).unwrap();
@@ -536,11 +538,12 @@ fn canceling_a_resource_hold_does_not_reset_started_cooldowns() {
     let ability = AbilityId::new("spark_lance_fire").unwrap();
     let mut creature = subject();
     creature.start_cooldown(&ability, 100).unwrap();
-    let cost = ResourceCost {
+    let cost = tor_simulation::costs::CostBundle::single(ResourceCost {
         resource: Resource::Stamina,
         start: 1,
         resolution: 1,
-    };
+    })
+    .unwrap();
     creature.start_cost(IntentionId(1), cost).unwrap();
     creature.advance_active(3);
     assert_eq!(creature.cancel_cost(IntentionId(1)), Some(cost));

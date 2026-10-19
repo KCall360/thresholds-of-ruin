@@ -181,7 +181,7 @@ class RogueRestorationProcesses(ProcessTestCase):
                 break
             self.assertTrue(cardinal_melee_candidate(target))
             current = self.execute(player, {"type": "use_ability", "id": "basic_melee",
-                "invocation": {"kind": "actor_target", "target": target["id"]}}, survive=False)
+                "invocation": {"aim": {"kind": "actor_target", "target": target["id"]}, "weapon": {"kind": "default"}}}, survive=False)
             attacks += 1
         events = [event for line in player.transcript[start:] if line.startswith("{")
                   for frame in [json.loads(line)] if frame.get("state") is not None

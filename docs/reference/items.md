@@ -31,16 +31,52 @@ places items at that cell. Each successful transfer costs half the actor's turn,
 rounded upward, independent of quantity. Zero, excessive, overflowing, unavailable,
 and unauthorized requests do not partially mutate state or spend simulation time.
 
-Only explicitly stackable items merge. Archetype, true identity, name, appearance,
-concealment and authored instance properties must match. Character knowledge is
-not a physical stack property. If several destination stacks match, the lowest
-ID survives. A whole transfer retains its ID when it does not merge. Partial
-transfers retain the source ID and allocate a new monotonic ID only when there is
-no destination stack. Retired IDs are not reused. History records source ID, result ID and
-transferred quantity. Rewind restores the saved items with their existing
-identities, but keeps allocation high-water marks beyond the abandoned future.
-New stacks cannot reuse IDs from that future; see
+Only explicitly stackable items merge. The complete immutable definition, exact
+per-unit condition and charge state must match. Corpse provenance is never
+interchangeable stack state. Equipment and devices remain nonstackable; independent
+ammunition payloads can be stackable without acquiring equipment sockets.
+
+Ordinary fungible stacks retain the lowest matching destination ID. Instance-sensitive
+stacks, such as ammunition with hit/damage enchantments, instead retire the matching
+destination and allocate a fresh result ID. Held or equipped instance-sensitive
+destinations are skipped, preserving exact pending claims. A whole transfer without
+a merge retains its ID; a partial transfer preserves the source remainder and its
+holds. Only already-free units move. The ordinary transfer validates those exact
+witnesses before cancelling the acting character's previous preparation and
+releasing its claims, within the same atomic action.
+
+Physical equality does not identify either input. On an entitled pickup/drop split,
+only the acting character's stored partial instance facts can follow the new ID.
+On a fresh merge, only fields remembered equally for both inputs survive in the
+acting character's new record; unknown or conflicting fields remain unknown. Numeric
+knowledge is currently one composite field. This compares memories, never hidden
+condition values. Other observers and stale retired-ID memories are untouched;
+ordinary owned transfers such as theft do not copy the victim's private facts.
+If bounded memory is full, the new inherited record is omitted without blocking the
+physical transfer. Explicit identification retains its existing full-memory behavior.
+
+Retired IDs are not reused. History records source ID, actual result ID and
+transferred quantity, rather than the merged stack's total. Rewind restores the
+saved items with their existing identities, but keeps allocation high-water marks
+beyond the abandoned future. New stacks cannot reuse IDs from that future; see
 [persistence and rewind](../architecture/persistence.md).
+
+### Independent projectile definitions
+
+The development schema gives ammunition an independent projectile capability:
+exact launcher-family ID, the shared typed base-damage expression with a required
+primary component, and deterministic hit recovery. A launcher's effective weapon
+profile owns its family and short/long range. Payload and launcher families must
+match exactly. Both source compilation and direct placement/restoration validate
+damage descriptor references. A dual equipment/projectile definition validates
+both capabilities and remains subject to equipment nonstackability.
+
+Ammunition supports homogeneous birth, curse and signed hit/damage enchantments;
+plain ammunition cannot acquire armor penalties, armor enchantment, corrosion or
+protection. This foundation does not yet expose ordinary launch/throw actions or
+production ammunition content. The planned Rogue arrow policy consumes ammunition
+on successful hits and permits miss recovery; durable thrown weapons remain
+recoverable after hits. No percentage breakage rule is implied.
 
 ## Timed equipment and effects
 
@@ -177,7 +213,41 @@ using the [pinned weapon dice](https://github.com/phs/rogue/blob/c7c119f893bd2f8
 mace 2d4, long sword 3d4, dagger 1d6, two handed sword 4d4 and spear 2d3.
 All currently use 60 wind-up / 40 recovery ticks. This common timing and the TOR
 skill/damage-category mapping are conservative provisional tuning, not Rogue
-attack-speed claims. Throwing, launchers and ammunition remain separate work.
+attack-speed claims. The dagger's typed profile adds Thrown 20/60 feet and
+Offhand only while Knife expertise is active; its existing LightWeaponry 1d6 Keen
+melee math and 60/40 timing are unchanged. A thrown dagger remains recoverable
+on a successful hit.
+
+The shortbow uses LightWeaponry, a base TwoHanded requirement and expert-only
+Quickdraw. Its launcher range is 80/320 feet; incidental melee deals fixed
+1 Impact, without a damage die. The separate stackable arrow supplies 2d3 Keen
+from the pinned Rogue launched payload, replacing the bow's incidental melee
+base damage. Arrows have no equipment socket and begin mundane without a new
+birth-condition roll. One arrow is consumed on a successful hit; misses use the
+shared recoverable-landing policy, which may lose a unit when no legal landing
+exists. Shortbow birth conditions use the ordinary generated-weapon policy.
+
+Traits and short/long ranges follow the selected
+[Plotweaver Open Alpha v0.3](https://drive.google.com/file/d/11v0ujMTuXNdwkHEPAcPZqY29I3ZdmlJn/view)
+and [Stormlight Starter Rules](https://www.cosmererpg.com/s/SL015_Stormlight_StarterRules_Digital.pdf)
+mapping. Shared 60/40 timing, TOR checks, damage-category mapping and the
+combination with Rogue damage remain explicit adaptations, not source RAW.
+Discreet is unsupported because no noncombat consumer exists; no item authors it
+as a functional trait.
+
+Knife and Shortbow are equipment expertise choices. Either can use the ordinary
+HD advancement point or an earned permanent-Intellect entitlement; neither is
+freely granted to the player, a species or an NPC. Existing NPC purchases remain
+explicit and contain no new expertise choices. Their combat-benefit assessment
+is 10 points each, provisional TOR tuning over the shared zero expertise baseline.
+No pure-grant talent is added or counted twice.
+
+Rogue defaults grant actual Throw and Launch abilities, tagged Attack and Ranged,
+with exact projectile delivery and selected-weapon timing. Both are non-basic
+attacks and add no base resource or supply cost. The shared secondary-weapon
+Focus cost still applies when selecting that socket. Ordinary item ownership,
+profile eligibility, expertise and available capacity still determine whether a
+particular action can be prepared.
 
 The eight armor identities are leather armor, ring mail, studded leather armor,
 scale mail, chain mail, splint mail, banded mail and plate mail. Their base physical
@@ -195,16 +265,19 @@ Starting equipment consumes no birth randomness. Starting and generated archetyp
 may share an identity while differing in birth policy; their underlying equipment
 behavior must still agree exactly.
 
-Production appends `rogue.equipment` and `rogue.equipment_scrolls` after the eight
-existing population stages, for ten stages total. Each new stage makes one
-quantity-one placement attempt per first entered floor from depth 1, with no
-replenishment or retry after a recorded skip. The gear stage has thirteen equally
-weighted choices; the scroll stage has enchant armor, protect armor, enchant
-weapon, remove curse, identify weapon and identify armor, also equally weighted.
+Production keeps `rogue.equipment` and `rogue.equipment_scrolls` after the eight
+preceding population stages, then appends `rogue.ammunition`, for eleven stages.
+Each makes one placement attempt per first-entered floor from depth 1, with no
+replenishment or retry after a recorded skip. Equipment and scroll attempts have
+quantity one; ammunition attempts place one finite six-arrow stack. The gear
+stage has fourteen equally weighted choices including shortbow; the scroll stage
+has enchant armor, protect armor, enchant weapon, remove curse, identify weapon
+and identify armor, also equally weighted.
 These finite rates and equal subtype weights are provisional TOR tuning, not
-Rogue's complete item probability table. Prior stage IDs, order and choices remain
-unchanged, retaining their independent generation streams. The four alteration
-scrolls use `discovery = "never"`; the two class-identification scrolls use
+Rogue's complete item probability table. Shortbow changes the existing equipment
+pool's choices and its resulting outcomes; it is not a guaranteed bow per floor.
+Earlier stage IDs, order and choices remain unchanged, preserving their
+independent generation streams. The four alteration scrolls use `discovery = "never"`; the two class-identification scrolls use
 `discovery = "on_use"` and no direct effects.
 
 One unit of a supply stack provides one unit of its named supply. Supply identity
@@ -434,6 +507,31 @@ after self-preservation and retaliation and before idle exploration. It does not
 infer hidden currency from an appearance, imply general looting permission or
 change the actor's hostile acquisition and memory contracts. See
 [behavior defaults](scenario-packages.md#behavior-defaults-and-ai-overrides).
+
+Physical projectile AI first chooses one exact request from identified type
+capabilities, active expertise, its own remembered curse facts, available grips,
+known resources and disclosed target geometry. It considers at most 128 carried
+rows and 16 launcher candidates; these are conservative NPC search limits, not
+limits on the player's paginated chooser. It does not probe real attack numbers
+or hidden occupants to choose another weapon. A paused paid projectile resumes
+its exact frozen terms before fresh expertise, cooldown or funding gates.
+
+Actual numeric capture happens once at execution. A valid launcher/ammunition
+combination outside the engine's checked numeric budget produces a typed refusal
+and the actor takes an ordinary positive-time Wait, without trying an alternative
+weapon. Failed capture changes no items, payment or randomness. Successful Wait
+publication increments an optional bounded diagnostic counter; it exposes no
+hidden operands. Invariant failures remain errors. Ordinary journal replay uses
+the same request and refusal boundary. Unknown curse is discovered only by the
+paid blocked equipped throw; remembered cursed equipped weapons are then avoided.
+Invisible intervening creatures still stop and resolve the actual projectile.
+
+This supports appropriately equipped NPCs using their authored abilities and
+expertise. The current Rogue roster receives no new ranged loadouts or free
+expertise. Equipment acquisition still compares the existing melee utility;
+it does not yet value a bow for its ranged option. General ranged-loot valuation
+is a separate follow-up, so this does not imply new ranged behavior throughout
+the Rogue roster.
 
 ## Authoring and disclosure
 

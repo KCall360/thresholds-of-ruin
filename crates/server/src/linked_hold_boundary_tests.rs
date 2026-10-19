@@ -112,8 +112,11 @@ pub(super) fn establish_with_holders(engine: &mut Engine, holders: &[ActorId]) {
             expected_revision: engine.revision(actor).unwrap(),
             action: Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("fixture_linked_hold").unwrap(),
-                invocation: crate::actions::AbilityInvocation::ActorTarget {
-                    target: SimActor(1),
+                invocation: crate::actions::AbilityInvocation {
+                    aim: crate::actions::AbilityAim::ActorTarget {
+                        target: SimActor(1),
+                    },
+                    weapon: crate::actions::WeaponSelection::Default,
                 },
                 supplies: Default::default(),
             },
