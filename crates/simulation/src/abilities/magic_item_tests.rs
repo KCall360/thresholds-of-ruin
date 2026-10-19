@@ -730,12 +730,53 @@ fn identification_choices_and_owned_charge_facts_are_bounded_named_records() {
         #[serde(deserialize_with = "crate::magic_items::read_known_charges")]
         _facts: tor_world::Shared<crate::magic_items::ChargeKnowledge>,
     }
+    let choice = serde_json::json!({"choice":1,"class":"tool"});
+    assert!(
+        serde_json::from_value::<crate::magic_items::IdentificationChoice>(choice.clone()).is_ok()
+    );
+    assert!(
+        serde_json::from_slice::<crate::magic_items::IdentificationChoice>(
+            &serde_json::to_vec(&choice).unwrap()
+        )
+        .is_ok()
+    );
+    for raw in [
+        r#"{"choice":0,"class":"tool"}"#,
+        r#"{"choice":18446744073709551615,"class":"tool"}"#,
+        r#"{"class":"tool"}"#,
+        r#"{"choice":1}"#,
+        r#"{"choice":1,"class":"tool","extra":0}"#,
+        r#"{"choice":1,"choice":2,"class":"tool"}"#,
+        r#"{"choice":1,"class":"tool","class":"potion"}"#,
+        r#"[1,"tool"]"#,
+    ] {
+        assert!(
+            serde_json::from_str::<crate::magic_items::IdentificationChoice>(raw).is_err(),
+            "{raw}"
+        );
+    }
     let named = serde_json::json!({"_facts":[{"item":10,"charges":3}]});
-    assert!(serde_json::from_value::<Facts>(named).is_ok());
+    assert!(serde_json::from_value::<Facts>(named.clone()).is_ok());
+    assert!(serde_json::from_slice::<Facts>(&serde_json::to_vec(&named).unwrap()).is_ok());
+    let full = serde_json::json!({"_facts":(1..=4096)
+        .map(|id| serde_json::json!({"item":id,"charges":3}))
+        .collect::<Vec<_>>()});
+    assert!(serde_json::from_value::<Facts>(full.clone()).is_ok());
+    assert!(serde_json::from_slice::<Facts>(&serde_json::to_vec(&full).unwrap()).is_ok());
+    for raw in [
+        r#"{"_facts":[{"item":10,"item":11,"charges":3}]}"#,
+        r#"{"_facts":[{"item":10,"charges":3,"charges":4}]}"#,
+    ] {
+        assert!(serde_json::from_str::<Facts>(raw).is_err(), "{raw}");
+    }
     for facts in [
         serde_json::json!([[10, 3]]),
         serde_json::json!([{"item":10,"charges":3},{"item":10,"charges":2}]),
         serde_json::json!([{"item":10}]),
+        serde_json::json!([{"charges":3}]),
+        serde_json::json!([{"item":0,"charges":3}]),
+        serde_json::json!([{"item":u64::MAX,"charges":3}]),
+        serde_json::json!([{"item":11,"charges":3},{"item":10,"charges":3}]),
         serde_json::json!([{"item":10,"charges":3,"identity":"hidden"}]),
         serde_json::Value::Array(
             (1..=4097)
@@ -743,7 +784,9 @@ fn identification_choices_and_owned_charge_facts_are_bounded_named_records() {
                 .collect(),
         ),
     ] {
-        assert!(serde_json::from_value::<Facts>(serde_json::json!({"_facts":facts})).is_err());
+        let malformed = serde_json::json!({"_facts":facts});
+        assert!(serde_json::from_slice::<Facts>(&serde_json::to_vec(&malformed).unwrap()).is_err());
+        assert!(serde_json::from_value::<Facts>(malformed).is_err());
     }
 }
 

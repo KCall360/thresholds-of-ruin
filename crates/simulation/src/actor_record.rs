@@ -231,6 +231,8 @@ mod public_plan_record_tests {
             "ready_at",
             "visited",
             "knowledge",
+            "known_charges",
+            "identification",
             "recognized_abilities",
             "public_plan",
             "asset",
@@ -260,7 +262,12 @@ mod public_plan_record_tests {
             "current actor wrapper must reject positional aliases"
         );
         assert!(serde_json::from_value::<ActorRecord>(positional).is_err());
-        for key in ["recognized_abilities", "public_plan"] {
+        for key in [
+            "known_charges",
+            "identification",
+            "recognized_abilities",
+            "public_plan",
+        ] {
             let mut missing = value.clone();
             missing.as_object_mut().unwrap().remove(key);
             assert!(
