@@ -186,3 +186,39 @@ pub fn charges(view: &Observation, item: ItemTarget) -> Option<u16> {
         .find(|candidate| candidate.item == item)?
         .charges
 }
+
+/// Display only the owner's remembered instance facts, never inferred bonuses.
+pub fn equipment_details(view: &Observation, item: ItemTarget) -> Option<String> {
+    let offer = view
+        .interactions
+        .as_ref()?
+        .inventory
+        .iter()
+        .find(|offer| offer.item == item)?;
+    let mut parts = Vec::new();
+    if let Some(known) = &offer.known_equipment {
+        if let Some(attack) = &known.attack {
+            parts.push(format!(
+                "attack {:+}, damage enchantment {:+}",
+                attack.bonus, attack.damage_enchantment
+            ));
+        }
+        for modifier in &known.modifiers {
+            parts.extend(crate::combat_diagnostics::trace_lines(modifier));
+        }
+    }
+    if let Some(cursed) = offer.known_cursed {
+        parts.push(if cursed { "cursed" } else { "uncursed" }.into());
+    }
+    if let Some(protected) = offer.known_protected {
+        parts.push(
+            if protected {
+                "rust protected"
+            } else {
+                "not rust protected"
+            }
+            .into(),
+        );
+    }
+    (!parts.is_empty()).then(|| parts.join(", "))
+}

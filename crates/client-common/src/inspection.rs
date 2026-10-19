@@ -66,7 +66,15 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
         selected.attack.bonus()
     ));
     match &selected.attack {
-        SelectedMeleeView::Weapon { attack } => damage_rows(&mut rows, "Selected", &attack.damage),
+        SelectedMeleeView::Weapon { attack } => {
+            damage_rows(&mut rows, "Selected", &attack.damage);
+            if attack.damage_enchantment != 0 {
+                rows.push(format!(
+                    "Selected damage enchantment: {:+}",
+                    attack.damage_enchantment
+                ));
+            }
+        }
         SelectedMeleeView::Natural { attack } => {
             rows.push(format!(
                 "Selected: {} authored strikes; strikes selected",
@@ -417,6 +425,12 @@ pub fn page_lines(page: &CreatureStrikePage) -> Result<Vec<String>, InvalidStrik
                     attack.skill.name, attack.bonus, attack.wind_up, attack.recovery
                 ));
                 damage_rows(&mut rows, "Selected", &attack.damage);
+                if attack.damage_enchantment != 0 {
+                    rows.push(format!(
+                        "Selected damage enchantment: {:+}",
+                        attack.damage_enchantment
+                    ));
+                }
             }
             StrikePageEntry::SelectedMelee {} => {
                 rows.push("Uses selected melee; strikes selected".into())
@@ -485,6 +499,7 @@ pub(crate) mod tests {
             },
         };
         let attack = AttackView {
+            damage_enchantment: 0,
             skill: reference("heavy_weaponry", "Heavy weaponry"),
             bonus: 0,
             wind_up: 60,

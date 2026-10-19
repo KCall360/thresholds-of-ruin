@@ -152,8 +152,8 @@ pub(super) fn derive_intention_ends(
                 tor_simulation::combat::CombatEvent::SequenceEnded { actor: owner, intention: Some(id), reason: tor_simulation::combat::SequenceEnd::Completed } => *owner == actor && *id == intention,
                 tor_simulation::combat::CombatEvent::Resolved { .. }
                 | tor_simulation::combat::CombatEvent::SequenceEnded { .. } => false,
-                tor_simulation::combat::CombatEvent::ItemCompleted {actor:owner,intention:Some(id),..} => *owner==actor && *id==intention,
-                tor_simulation::combat::CombatEvent::ItemCompleted {intention:None,..}|tor_simulation::combat::CombatEvent::Interrupted{..}|tor_simulation::combat::CombatEvent::Died{..}=>false,
+                tor_simulation::combat::CombatEvent::ItemCurseBlocked {actor:owner,intention:Some(id),..} | tor_simulation::combat::CombatEvent::ItemCompleted {actor:owner,intention:Some(id),..} => *owner==actor && *id==intention,
+                tor_simulation::combat::CombatEvent::ItemCurseBlocked {intention:None,..}|tor_simulation::combat::CombatEvent::ItemCompleted {intention:None,..}|tor_simulation::combat::CombatEvent::Interrupted{..}|tor_simulation::combat::CombatEvent::Died{..}=>false,
             });
             let immediate = current == Some(intention) && matches!(&entry.content,
                 JournalContent::IntentionStarted { action, .. } if !action.is_prepared());

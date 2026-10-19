@@ -375,7 +375,7 @@ fn known_weapon_views_validate_full_source_and_keep_identification_boundary() {
             continue;
         };
         let full: AttackView = serde_json::from_value(serde_json::json!({
-            "skill":{"id":"light_weaponry","name":"Light Weaponry"}, "bonus":2, "wind_up":90, "recovery":70,
+            "skill":{"id":"light_weaponry","name":"Light Weaponry"}, "bonus":2, "damage_enchantment":0, "wind_up":90, "recovery":70,
             "damage":{"primary":{"category":"energy","descriptor":{"id":"fire","name":"Fire"},"sides":6},
                 "components":[{"category":"energy","descriptor":{"id":"fire","name":"Fire"},"amount":{
                     "type":"rolled","count":2,"sides":6,"bonus":-1}},

@@ -85,6 +85,9 @@ pub enum PlannedEffect {
     Theft {
         theft: crate::theft::PlannedTheft,
     },
+    AlterEquipment {
+        alteration: crate::PlannedEquipmentAlteration,
+    },
     CorrodeArmor {
         slot: crate::EquipmentSlot,
         amount: u32,
@@ -157,7 +160,8 @@ pub enum PlannedEffect {
 impl PlannedEffect {
     pub(crate) fn recipient(&self) -> crate::rules::EffectRecipient {
         match self {
-            Self::SearchAdjacentGuises
+            Self::AlterEquipment { .. }
+            | Self::SearchAdjacentGuises
             | Self::ObservePublicPlan
             | Self::ApplyQualifiedConditionToSource { .. } => crate::rules::EffectRecipient::Source,
             _ => crate::rules::EffectRecipient::Target,
@@ -657,6 +661,7 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
         })
         && effects.iter().all(|effect| match effect {
             PlannedEffect::Theft { theft } => theft.valid(),
+            PlannedEffect::AlterEquipment { alteration } => alteration.valid(rules),
             PlannedEffect::CorrodeArmor { slot, amount } => {
                 rules.equipment_slot(slot).is_some()
                     && (1..=crate::limits::NUMERIC as u32).contains(amount)
@@ -780,6 +785,15 @@ pub(super) fn effects_match_definition_scoped(
                     },
                     PlannedEffect::Theft { theft },
                 ) => theft.matches(selection, relocation.as_ref()),
+                (
+                    Effect::AlterEquipment {
+                        selection,
+                        alteration,
+                    },
+                    PlannedEffect::AlterEquipment {
+                        alteration: planned,
+                    },
+                ) => &planned.selection == selection && planned.alteration == *alteration,
                 (
                     Effect::CorrodeArmor {
                         slot: expected_slot,
@@ -1170,6 +1184,12 @@ impl Game {
                 } => Ok(PlannedEffect::Theft {
                     theft: self.compile_theft(actor, selection, relocation.as_ref())?,
                 }),
+                Effect::AlterEquipment {
+                    selection,
+                    alteration,
+                } => Ok(PlannedEffect::AlterEquipment {
+                    alteration: self.compile_equipment_alteration(actor, selection, *alteration)?,
+                }),
                 Effect::CorrodeArmor { slot, amount } => Ok(PlannedEffect::CorrodeArmor {
                     slot: slot.clone(),
                     amount: *amount,
@@ -1362,6 +1382,9 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Theft {
                 theft: crate::theft::PlannedTheft,
             },
+            AlterEquipment {
+                alteration: crate::PlannedEquipmentAlteration,
+            },
             CorrodeArmor {
                 slot: crate::EquipmentSlot,
                 #[serde(deserialize_with = "crate::armor::read_corrosion_amount")]
@@ -1436,6 +1459,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
         }
         let effect = match crate::bounded::named_map(deserializer)? {
             Fields::Theft { theft } => Self::Theft { theft },
+            Fields::AlterEquipment { alteration } => Self::AlterEquipment { alteration },
             Fields::CorrodeArmor { slot, amount } => Self::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::HoldDamage {

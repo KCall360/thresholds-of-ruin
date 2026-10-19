@@ -3,7 +3,7 @@ import json
 import shutil
 import subprocess
 
-from process_harness import ProcessTestCase, ROOT
+from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
 from ruleset_sources import load_rules
 
 
@@ -55,13 +55,13 @@ class RulesetProcesses(ProcessTestCase):
         for source in [
             'import = "../general.toml"\n',
             'import = "interactions-v35"\n',
-            'import = "interactions-v44"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v45"\n[[overrides]]\nop="set"\n'
             'path=["talents","brace_for_impact","id"]\nvalue="renamed"\n',
-            'import = "interactions-v44"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v45"\n[[overrides]]\nop="set"\n'
             'path=["resources","mana","missing"]\nvalue=1\n',
-            'import = "interactions-v44"\n[[overrides]]\nop="remove"\n'
+            'import = "interactions-v45"\n[[overrides]]\nop="remove"\n'
             'path=["abilities","spark_lance_fire"]\n',
-            'import = "interactions-v44"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v45"\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=12\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=13\n',
         ]:
@@ -296,11 +296,16 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                    capture_output=True, text=True, encoding="utf-8", timeout=20)
         self.assertEqual(validated.returncode, 0, validated.stderr)
-        server = self.server("--checkpoint-interval", 1, scenario=package)
+        server = self.server("--checkpoint-interval", 1, scenario=package, wizard=True)
         probe, initial = self.client(observe=True)
         slot = initial["state"]["observation"]["interactions"]["slots"][0]
         self.assertEqual(slot, {"id": "tentacle", "name": "Tentacle",
                                "equipped_phrase": "held by a tentacle", "requires_attack": True})
+        self.assertTrue(all(item["known_equipment"] is None for item in
+                            initial["state"]["observation"]["interactions"]["inventory"]))
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        self.wizard_command(wizard, "identify 1 10")
+        wizard.stop()
         text, _ = self.text_client()
         self.assertIn("ItemStarted", text.command("remove sword"))
         self.assertIn("ItemStarted", text.command("wear sword"))
@@ -317,7 +322,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         text.stop()
         server.stop()
         rules_path.unlink()
-        self.server(scenario=ROOT / "scenarios/two-room", seed=None)
+        self.server(scenario=ROOT / "scenarios/two-room", seed=None, wizard=True)
         _, restored = self.client(observe=True)
         self.assertEqual(restored["state"], snapshot["state"])
 

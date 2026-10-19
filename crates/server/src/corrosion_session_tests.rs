@@ -146,7 +146,7 @@ impl Wire {
             },
         }
     }
-    fn finish(&mut self, id: &str, request: &Request) -> RequestReceipt {
+    fn finish(&mut self, actor: ActorId, id: &str, request: &Request) -> RequestReceipt {
         for _ in 0..24 {
             self.service.run_until_blocked();
             for actor in [OWNER, AQUATOR] {
@@ -155,7 +155,7 @@ impl Wire {
                     .iter()
                     .any(|m| matches!(m, ServerMessage::Error { .. })));
             }
-            let receipt = ack(self.send(AQUATOR, id, request.clone()));
+            let receipt = ack(self.send(actor, id, request.clone()));
             if matches!(
                 receipt,
                 RequestReceipt::Admitted {
@@ -239,11 +239,70 @@ fn encoded_co1_changes_one_item_once_with_retry_disclosure_and_source_free_reope
         ..Default::default()
     };
     let mut wire = Wire::new(Engine::open_with_policy(&save, scenario(), policy.clone()).unwrap());
+    let unknown = wire.snapshot(OWNER);
+    let inventory = &unknown
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory;
+    assert!(inventory.iter().all(|item| item.known_equipment.is_none()));
+    assert!(inventory
+        .iter()
+        .all(|item| item.known_cursed.is_none() && item.known_protected.is_none()));
+    let worn = inventory
+        .iter()
+        .find(|item| item.equipped_slot.is_some())
+        .unwrap();
+    let slot = worn.equipped_slot.unwrap();
+    let worn = worn.item;
+    let spare = inventory
+        .iter()
+        .find(|item| item.equipped_slot.is_none())
+        .unwrap()
+        .item;
+    // Ordinary paid wearing observes each exact armor's numeric state without
+    // granting type-wide or curse/protection knowledge.
+    for (index, action) in [
+        Action::Unequip { item: worn },
+        Action::Equip { item: spare, slot },
+        Action::Unequip { item: spare },
+        Action::Equip { item: worn, slot },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for _ in 0..24 {
+            wire.service.run_until_blocked();
+            if wire.snapshot(OWNER).readiness.admission {
+                break;
+            }
+            let next = wire.service.engine.next_actor().unwrap();
+            wire.serial += 1;
+            let wait = wire.request(next, Action::Wait);
+            let id = format!("observe-clock-{}", wire.serial);
+            ack(wire.send(next, &id, wait));
+        }
+        let request = wire.request(OWNER, action);
+        let id = format!("observe-armor-{index}");
+        ack(wire.send(OWNER, &id, request.clone()));
+        wire.finish(OWNER, &id, &request);
+    }
     let before = wire.snapshot(OWNER);
     let combat = before.state.observation.combat.as_ref().unwrap();
     let hp = combat.hp;
     let physical = combat.own_stats.as_ref().unwrap().defenses.physical;
     assert_eq!(reduction_amounts(&before), vec![2, 2, 2, 2]);
+    assert!(before
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory
+        .iter()
+        .all(|item| item.known_cursed.is_none() && item.known_protected.is_none()));
     assert_eq!(corrosion(&wire.saved()), vec![0, 0]);
     let mut last = None;
     for index in 0..32 {
@@ -266,7 +325,7 @@ fn encoded_co1_changes_one_item_once_with_retry_disclosure_and_source_free_reope
         );
         let id = format!("rust-{index}");
         ack(wire.send(AQUATOR, &id, request.clone()));
-        let receipt = wire.finish(&id, &request);
+        let receipt = wire.finish(AQUATOR, &id, &request);
         if corrosion(&wire.saved()) == vec![0, 1] {
             last = Some((id, request, receipt));
             break;

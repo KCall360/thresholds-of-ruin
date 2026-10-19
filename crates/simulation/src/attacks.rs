@@ -19,6 +19,7 @@ pub struct MeleeAttack {
     wind_up: u64,
     recovery: u64,
     damage: DamageSpec,
+    damage_enchantment: i32,
 }
 
 impl MeleeAttack {
@@ -61,6 +62,7 @@ impl MeleeAttack {
             wind_up,
             recovery,
             damage,
+            damage_enchantment: 0,
         })
     }
 
@@ -80,6 +82,42 @@ impl MeleeAttack {
         &self.damage
     }
 
+    /// Signed instance credit stays separate until all primary damage modifiers
+    /// are combined, so negative fixed damage never clamps prematurely.
+    pub fn damage_enchantment(&self) -> i32 {
+        self.damage_enchantment
+    }
+
+    pub(crate) fn with_enchantment(&self, hit: i32, damage: i32) -> Result<Self, AttackError> {
+        let bonus = self
+            .bonus
+            .checked_add(hit)
+            .ok_or(AttackError::InvalidDefinition)?;
+        let damage_enchantment = self
+            .damage_enchantment
+            .checked_add(damage)
+            .ok_or(AttackError::InvalidDefinition)?;
+        if !(-crate::limits::NUMERIC..=crate::limits::NUMERIC)
+            .contains(&i64::from(damage_enchantment))
+        {
+            return Err(AttackError::InvalidDefinition);
+        }
+        let mut result = Self::new(
+            self.skill,
+            bonus,
+            self.wind_up,
+            self.recovery,
+            self.damage.clone(),
+        )?;
+        result.damage_enchantment = damage_enchantment;
+        // Validate the effective standalone contribution, preserving the signed
+        // operand itself for later ability modifiers.
+        result
+            .damage_with_modifiers(0, 0, 0)
+            .map_err(|_| AttackError::InvalidDefinition)?;
+        Ok(result)
+    }
+
     /// Fixed primary amounts have no dice to extend. Dice-count modifiers apply
     /// only to rolled primaries; signed flat modifiers apply to either kind.
     pub fn damage_with_modifiers(
@@ -88,6 +126,9 @@ impl MeleeAttack {
         flat_bonus: i32,
         impact_bonus: u32,
     ) -> Result<DamageSpec, DamageError> {
+        let flat_bonus = flat_bonus
+            .checked_add(self.damage_enchantment)
+            .ok_or(DamageError::InvalidSpec)?;
         self.damage
             .with_melee_modifiers(extra_dice, flat_bonus, impact_bonus)
     }

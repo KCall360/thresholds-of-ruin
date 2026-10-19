@@ -106,6 +106,9 @@ impl NaturalAttack {
     }
     /// Explicit conversion for existing Rust content builders, never a source reader fallback.
     pub fn from_melee(attack: MeleeAttack) -> Result<Self, AttackError> {
+        if attack.damage_enchantment() != 0 {
+            return Err(AttackError::InvalidDefinition);
+        }
         let primary = attack
             .damage()
             .primary()
@@ -219,8 +222,16 @@ impl SelectedMeleeAttack {
         flat_bonus: i32,
         impact_bonus: u32,
     ) -> Result<DamageSpec, SelectedDamageError> {
-        self.first_primary_damage()?
-            .with_melee_modifiers(extra_dice, flat_bonus, impact_bonus)
-            .map_err(|_| SelectedDamageError::InvalidDefinition)
+        match self {
+            Self::Weapon(attack) => {
+                attack.damage_with_modifiers(extra_dice, flat_bonus, impact_bonus)
+            }
+            Self::Natural(attack) => attack.first_primary_damage()?.with_melee_modifiers(
+                extra_dice,
+                flat_bonus,
+                impact_bonus,
+            ),
+        }
+        .map_err(|_| SelectedDamageError::InvalidDefinition)
     }
 }

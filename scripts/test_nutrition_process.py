@@ -93,11 +93,13 @@ class NutritionProcesses(ProcessTestCase):
     def assert_no_meal_operand(self, value):
         if isinstance(value, dict):
             if "edible" in value:
-                self.assertEqual(set(value), {"item", "slot", "equipped_slot", "known_equipment",
+                self.assertEqual(set(value), {"item", "slot", "equipped_slot", "known_equipment", "known_cursed", "known_protected",
                                              "drinkable", "edible", "readable", "zappable", "charges"})
                 self.assertFalse(value["readable"])
                 self.assertFalse(value["zappable"])
                 self.assertIsNone(value["charges"])
+                self.assertIsNone(value["known_cursed"])
+                self.assertIsNone(value["known_protected"])
             for key, child in value.items():
                 self.assertNotIn(key, ("dice", "rules_rng", "raw_sample", "on_success", "on_failure"))
                 self.assert_no_meal_operand(child)
@@ -245,11 +247,13 @@ class NutritionProcesses(ProcessTestCase):
         for frame in (initial, observed, watched):
             entry = next(row for row in observation(frame)["interactions"]["inventory"] if row["item"] == meal["id"])
             self.assertTrue(entry["edible"])
-            self.assertEqual(set(entry), {"item", "slot", "equipped_slot", "known_equipment",
+            self.assertEqual(set(entry), {"item", "slot", "equipped_slot", "known_equipment", "known_cursed", "known_protected",
                                           "drinkable", "edible", "readable", "zappable", "charges"})
             self.assertFalse(entry["readable"])
             self.assertFalse(entry["zappable"])
             self.assertIsNone(entry["charges"])
+            self.assertIsNone(entry["known_cursed"])
+            self.assertIsNone(entry["known_protected"])
             self.assert_no_meal_operand(frame)
         self.assertFalse(observed["has_control"])
         self.assertEqual(watched["role"], "spectator")

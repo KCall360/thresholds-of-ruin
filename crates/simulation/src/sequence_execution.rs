@@ -282,7 +282,17 @@ impl Game {
                                     discovery: crate::ItemDiscovery::OnUse,
                                     ..
                                 }
-                            ) || outcome.result == crate::abilities::OutcomeStatus::Applied,
+                            ) || (outcome.result == crate::abilities::OutcomeStatus::Applied
+                                && !matches!(
+                                    &resolved.plan,
+                                    crate::abilities::Plan::Read {
+                                        discovery: crate::ItemDiscovery::Never,
+                                        ..
+                                    } | crate::abilities::Plan::Drink {
+                                        discovery: crate::ItemDiscovery::Never,
+                                        ..
+                                    }
+                                )),
                             consumed_identity,
                         )?;
                         self.finish_combat_diagnostic(diagnostic, outcome);

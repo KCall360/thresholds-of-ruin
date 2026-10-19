@@ -40,6 +40,7 @@ fn condition_phases_are_required_closed_and_named_without_legacy_defaults() {
 }
 pub(super) fn attack() -> AttackView {
     AttackView {
+        damage_enchantment: 0,
         skill: content("fixture_skill"),
         bonus: 2,
         wind_up: 60,
@@ -689,4 +690,25 @@ fn detailed_inspection_keeps_the_actual_hit_die_row_limit_at_256() {
             "actual hit-die row count {count}"
         );
     }
+}
+
+#[test]
+fn weapon_damage_enchantment_is_an_explicit_signed_inspection_lane() {
+    let mut view = attack();
+    view.damage_enchantment = -3;
+    let raw = serde_json::to_value(&view).unwrap();
+    assert_eq!(raw["damage_enchantment"], serde_json::json!(-3));
+    assert_eq!(
+        serde_json::from_value::<AttackView>(raw.clone()).unwrap(),
+        view
+    );
+    let mut missing = raw.clone();
+    missing
+        .as_object_mut()
+        .unwrap()
+        .remove("damage_enchantment");
+    assert!(serde_json::from_value::<AttackView>(missing).is_err());
+    let mut unknown = raw;
+    unknown["hidden_curse"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<AttackView>(unknown).is_err());
 }

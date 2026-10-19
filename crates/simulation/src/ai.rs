@@ -1452,6 +1452,132 @@ mod tests {
     }
 
     #[test]
+    fn gear_decisions_do_not_read_hidden_curses_and_stop_after_observed_failure() {
+        let mut game = fixture_with_anatomy(crate::AnatomySpec {
+            slots: vec![crate::EquipmentSlot::new("ring").unwrap()],
+        });
+        let actor = ActorId(2);
+        game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
+        game.set_region_light(RegionId(2), false).unwrap();
+        ring(&mut game, 10, 1, false);
+        ring(&mut game, 11, 2, false);
+        game.equip_authored(actor, crate::ItemId(10), crate::EquipmentSlotId(0))
+            .unwrap();
+        let action = game.choose_ai(actor).unwrap().action;
+        assert_eq!(
+            action,
+            Action::Unequip {
+                item: crate::ItemId(10)
+            }
+        );
+        game.items
+            .edit(crate::ItemId(10), |item| item.condition.cursed = true)
+            .unwrap();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().action,
+            action,
+            "Hidden curse changes cannot alter the decision"
+        );
+        assert!(game
+            .known_equipment_view(actor, crate::ItemId(10))
+            .is_none());
+        assert_eq!(
+            game.actors[&actor].known_equipment.curse(crate::ItemId(10)),
+            None
+        );
+        game.act(ActorId(1), Action::Wait).unwrap();
+        game.act(actor, action).unwrap();
+        while game.preparation(actor).is_some() {
+            let next = game.next_actor().unwrap();
+            game.act(next, Action::Wait).unwrap();
+        }
+        assert_eq!(
+            game.actors[&actor].known_equipment.curse(crate::ItemId(10)),
+            Some(true)
+        );
+        assert_eq!(
+            game.equipment(actor)
+                .unwrap()
+                .get(&crate::EquipmentSlotId(0)),
+            Some(&crate::ItemId(10))
+        );
+        assert!(game
+            .known_equipment_view(actor, crate::ItemId(10))
+            .is_none());
+        assert!(!matches!(
+            game.choose_ai(actor).unwrap().action,
+            Action::Unequip { .. }
+        ));
+    }
+
+    #[test]
+    fn ordinary_gear_estimates_ignore_hidden_bonuses_without_disclosing_numbers() {
+        let slot = crate::EquipmentSlot::new("body_armor").unwrap();
+        let mut game = fixture_with_anatomy(crate::AnatomySpec {
+            slots: vec![slot.clone()],
+        });
+        let actor = ActorId(2);
+        game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
+        game.set_region_light(RegionId(2), false).unwrap();
+        for (id, reduction) in [(10, 1), (11, 2)] {
+            let mut spec = crate::ItemSpec::ordinary(format!("armor-{id}"));
+            spec.class = crate::ItemClass::Armor;
+            spec.equipment = Some(crate::EquipmentSpec {
+                slot: slot.clone(),
+                armor: Some(crate::ArmorSpec {
+                    physical_reduction: reduction,
+                    material: crate::ArmorMaterial::Metal,
+                    rustproof: false,
+                }),
+                attack: None,
+                modifiers: vec![],
+            });
+            game.place_item_stack(id, at(1, 2, 1), Some(actor), 1, spec)
+                .unwrap();
+        }
+        game.equip_authored(actor, crate::ItemId(10), crate::EquipmentSlotId(0))
+            .unwrap();
+        // Authored placement supplies no inspection witness for either instance.
+        assert!(game
+            .known_equipment_view(actor, crate::ItemId(10))
+            .is_none());
+        assert!(game
+            .known_equipment_view(actor, crate::ItemId(11))
+            .is_none());
+        let expected = Action::Unequip {
+            item: crate::ItemId(10),
+        };
+        assert_eq!(game.choose_ai(actor).unwrap().action, expected);
+        let mut hidden = game.clone();
+        hidden
+            .items
+            .edit(crate::ItemId(10), |item| {
+                item.condition.cursed = true;
+                item.condition.armor_enchantment = 10;
+            })
+            .unwrap();
+        hidden
+            .items
+            .edit(crate::ItemId(11), |item| {
+                item.condition.armor_penalty = 2;
+            })
+            .unwrap();
+        assert_eq!(hidden.choose_ai(actor).unwrap().action, expected);
+        assert!(hidden
+            .known_equipment_view(actor, crate::ItemId(10))
+            .is_none());
+        assert!(hidden
+            .known_equipment_view(actor, crate::ItemId(11))
+            .is_none());
+        // Once observed, actual instance facts replace the ordinary estimate.
+        hidden.identify_item(actor, crate::ItemId(11)).unwrap();
+        assert!(!matches!(
+            hidden.choose_ai(actor).unwrap().action,
+            Action::Unequip { .. }
+        ));
+    }
+
+    #[test]
     fn gear_removal_chooses_an_upgrade_and_does_not_reequip_the_dominated_old_item() {
         let mut game = fixture_with_anatomy(crate::AnatomySpec {
             slots: vec![crate::EquipmentSlot::new("ring").unwrap(); 1],

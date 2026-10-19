@@ -2969,7 +2969,10 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
                 .map(|known| {
                     let mut parts = Vec::new();
                     if let Some(attack) = &known.attack {
-                        parts.push(format!("attack {:+}", attack.bonus));
+                        parts.push(format!(
+                            "attack {:+}; damage enchantment {:+}",
+                            attack.bonus, attack.damage_enchantment
+                        ));
                     }
                     for modifier in &known.modifiers {
                         parts.extend(tor_client_common::combat_diagnostics::trace_lines(modifier));
@@ -2977,6 +2980,21 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
                     parts.join(", ")
                 })
                 .filter(|text| !text.is_empty());
+            let mut parts: Vec<String> = stats.into_iter().collect();
+            if let Some(cursed) = affordance.and_then(|value| value.known_cursed) {
+                parts.push(if cursed { "cursed" } else { "uncursed" }.into());
+            }
+            if let Some(protected) = affordance.and_then(|value| value.known_protected) {
+                parts.push(
+                    if protected {
+                        "rust protected"
+                    } else {
+                        "not rust protected"
+                    }
+                    .into(),
+                );
+            }
+            let stats = (!parts.is_empty()).then(|| parts.join(", "));
             let appearance = crate::map::item(&app.palette, item);
             InventoryEntry {
                 letter: app.letters.get(&item.id).copied().unwrap_or('?'),

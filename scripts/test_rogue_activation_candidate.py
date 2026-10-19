@@ -177,7 +177,8 @@ class RogueActivationCandidateTests(unittest.TestCase):
             stages = ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength"]
             input_stages = [*stages, "rogue.room_gold"]
             if shape == "twenty_six":
-                input_stages.extend(["rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices"])
+                input_stages.extend(["rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices",
+                                     "rogue.equipment", "rogue.equipment_scrolls"])
             self.assertEqual(result["input_population_scope"], {
                 "species": sorted([*species, *("rogue." + name for name in omitted)]),
                 "stage_ids": input_stages,
@@ -192,6 +193,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             if shape == "twenty_six":
                 self.assertIn("finite magic-potion, magic-scroll and magic-device stages are omitted",
                               result["limitations"][0])
+                self.assertIn("finite equipment and equipment-scroll stages are omitted", result["limitations"][0])
             for relative, fingerprint in result["source_package_inputs"].items():
                 raw = (supplied / relative).read_bytes()
                 self.assertEqual(fingerprint, hashlib.sha256(raw).hexdigest())
@@ -218,8 +220,9 @@ class RogueActivationCandidateTests(unittest.TestCase):
         self.assertEqual({choice["archetype"] for band in stages[0]["bands"] for choice in band["choices"]},
                          {"rogue." + name for name in PLAYABLE_SPECIES})
 
-    def test_twenty_six_rejects_magic_stock_count_choice_boundary_and_order_drift(self):
-        for identity in ("rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices"):
+    def test_twenty_six_rejects_finite_stock_count_choice_boundary_and_order_drift(self):
+        for identity in ("rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices",
+                         "rogue.equipment", "rogue.equipment_scrolls"):
             def stages(activation):
                 return activation["profiles"]["rogue.low_depth"]["stages"]
             def stage(activation):
@@ -264,13 +267,16 @@ class RogueActivationCandidateTests(unittest.TestCase):
                         population_shape(source)
 
     def test_magic_stock_does_not_expand_historical_twenty_one_or_twenty_four_inputs(self):
-        magic = reviewed_twenty_six_activation()["profiles"]["rogue.low_depth"]["stages"][5:]
-        for source_factory in (twenty_one_source, twenty_four_source):
-            with self.subTest(source=source_factory.__name__):
-                source = source_factory()
-                source["floor_activation"]["profiles"]["rogue.low_depth"]["stages"].extend(copy.deepcopy(magic))
-                with self.assertRaisesRegex(ValueError, "Review changed population profile"):
-                    population_shape(source)
+        stages = reviewed_twenty_six_activation()["profiles"]["rogue.low_depth"]["stages"]
+        # Retain the independent three-magic-stage rejection witness, then also
+        # reject equipment-only and combined extensions of historical inputs.
+        for extra in (stages[5:8], stages[8:], stages[5:]):
+            for source_factory in (twenty_one_source, twenty_four_source):
+                with self.subTest(source=source_factory.__name__, stages=[row["id"] for row in extra]):
+                    source = source_factory()
+                    source["floor_activation"]["profiles"]["rogue.low_depth"]["stages"].extend(copy.deepcopy(extra))
+                    with self.assertRaisesRegex(ValueError, "Review changed population profile"):
+                        population_shape(source)
 
     def test_twenty_six_rejects_a_d_stock_order_schedule_and_tail_drift(self):
         def bands(activation):

@@ -13,8 +13,8 @@ fn client_message_envelopes_keep_a_bounded_inline_footprint() {
 }
 
 #[test]
-fn magic_item_commands_and_disclosures_require_protocol_51() {
-    assert_eq!(PROTOCOL_VERSION, 51);
+fn equipment_magic_commands_and_disclosures_require_protocol_52() {
+    assert_eq!(PROTOCOL_VERSION, 52);
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v51.json"
+            "/tests/fixtures/wire-v52.json"
         ))
         .expect("regenerate current wire samples"),
     )

@@ -68,10 +68,10 @@ pub fn completed_items(before: &Observation, after: &Observation) -> Vec<String>
         return Vec::new();
     };
     if before.tick == after.tick
-        && before
-            .interactions
-            .as_ref()
-            .is_some_and(|old| old.completed == interactions.completed)
+        && before.interactions.as_ref().is_some_and(|old| {
+            old.completed == interactions.completed
+                && old.curse_blocked == interactions.curse_blocked
+        })
     {
         return Vec::new();
     }
@@ -96,6 +96,15 @@ pub fn completed_items(before: &Observation, after: &Observation) -> Vec<String>
                 .map_or_else(|| "item".into(), |candidate| label(&candidate.name, "item"));
             Some(format!("You finish {verb} the {name}."))
         })
+        .chain(interactions.curse_blocked.iter().map(|item| {
+            let name = before
+                .inventory
+                .iter()
+                .chain(&after.inventory)
+                .find(|candidate| candidate.id == *item)
+                .map_or_else(|| "item".into(), |candidate| label(&candidate.name, "item"));
+            format!("You cannot remove the {name}; it is cursed.")
+        }))
         .collect()
 }
 
@@ -538,6 +547,26 @@ mod tests {
     }
 
     #[test]
+    fn paid_curse_failure_is_narrated_without_success_or_hidden_item_name() {
+        let before = observation();
+        let mut after = before.clone();
+        after.tick += 300;
+        after.interactions = Some(tor_protocol::InteractionView {
+            identification: None,
+            completed: vec![],
+            curse_blocked: vec![tor_protocol::ItemTarget::from_digest([19; 32])],
+            slots: vec![],
+            preparation: None,
+            inventory: vec![],
+        });
+        assert_eq!(
+            completed_items(&before, &after),
+            ["You cannot remove the item; it is cursed."]
+        );
+        assert!(completed_items(&after, &after).is_empty());
+    }
+
+    #[test]
     fn item_preparation_names_only_disclosed_items_and_reports_no_effect_early() {
         let mut view = observation();
         let item = tor_protocol::ItemTarget::from_digest([3; 32]);
@@ -562,6 +591,7 @@ mod tests {
         assert_eq!(action(&event, &view), "You begin to drink the item.");
         let before = view.clone();
         view.interactions = Some(tor_protocol::InteractionView {
+            curse_blocked: vec![],
             identification: None,
             completed: vec![tor_protocol::Action::Drink { item }],
             slots: vec![],

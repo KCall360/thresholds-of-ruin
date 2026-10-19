@@ -32,6 +32,87 @@ fn decode(value: Value) -> Result<Arc<Ruleset>, String> {
         serde_json::from_value::<RulesetDocument>(value).map_err(|error| error.to_string())?;
     Ruleset::validate(document).map_err(|error| error.to_string())
 }
+
+fn equipment_alteration(slot: &str, class: &str, alteration: &str) -> Value {
+    json!({"kind":"alter_equipment", "selection":{
+        "kind":"slot", "slot":slot, "class":class, "last":false
+    }, "alteration":alteration})
+}
+
+fn strike_with_equipment_alteration(branch: &str, effect: Value) -> Value {
+    let mut row = strike(0);
+    if branch == "rider" {
+        row["riders"] = json!([{
+            "trigger":"success", "check":null, "effects":[effect], "descriptors":[]
+        }]);
+    } else {
+        row[branch] = json!([effect]);
+    }
+    row
+}
+
+#[test]
+fn equipment_alteration_slots_are_checked_in_authored_abilities_and_natural_riders() {
+    for (class, alteration, compatible, incompatible) in [
+        ("armor", "enchant_armor", "body_armor", "weapon"),
+        ("armor", "protect_armor", "body_armor", "weapon"),
+        ("weapon", "enchant_weapon", "weapon", "body_armor"),
+        ("armor", "remove_curse", "body_armor", "weapon"),
+    ] {
+        for branch in ["on_success", "on_failure", "rider", "additional_rider"] {
+            for (slot, valid) in [(compatible, true), (incompatible, false)] {
+                let effect = equipment_alteration(slot, class, alteration);
+                let mut value = if branch == "additional_rider" {
+                    let mut value = document_with(vec![strike(0)]);
+                    value["abilities"][0]["strikes"] = json!({
+                        "kind":"natural_melee", "additional_riders":[{
+                            "trigger":"success", "check":null, "effects":[effect],
+                            "descriptors":[]
+                        }]
+                    });
+                    value
+                } else {
+                    document_with(vec![strike_with_equipment_alteration(branch, effect)])
+                };
+                value["abilities"][0]["basic_attack"] = json!(false);
+                let result = decode(value);
+                if valid {
+                    assert!(result.is_ok(), "{alteration}/{branch}/{slot}: {result:?}");
+                } else {
+                    assert!(
+                        result.is_err_and(|error| error.contains("equipment_selection")),
+                        "{alteration}/{branch}/{slot} must reject at content validation"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn equipment_alteration_slots_are_checked_in_natural_strikes_and_direct_effects() {
+    let rules = decode(document_with(vec![strike(0)])).unwrap();
+    for (slot, valid) in [("body_armor", true), ("weapon", false)] {
+        let effect = equipment_alteration(slot, "armor", "enchant_armor");
+        let direct: Effect = serde_json::from_value(effect.clone()).unwrap();
+        assert_eq!(rules.validate_effects(&[direct]).is_ok(), valid);
+        for branch in ["on_success", "on_failure", "rider"] {
+            let strike: StrikeDef =
+                serde_json::from_value(strike_with_equipment_alteration(branch, effect.clone()))
+                    .unwrap();
+            let result = rules.validate_strikes(&[strike]);
+            if valid {
+                assert!(result.is_ok(), "{branch}/{slot}: {result:?}");
+            } else {
+                assert!(
+                    matches!(result, Err(RulesetError::Bound { field }) if field == "equipment_selection"),
+                    "{branch}/{slot} must reject at natural-strike validation"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn sequence_rider_condition_is_closed_bounded_and_success_only() {
     let mut row = strike(0);

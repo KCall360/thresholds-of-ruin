@@ -77,7 +77,7 @@ class AiInteractionProcesses(ProcessTestCase):
                 self.assertEqual(names[chosen["item"]], "heavy_blade")
                 break
         self.assertIsNotNone(chosen, "AI must equip the actual upgrade")
-        self.assertEqual(chosen["known_equipment"]["attack"]["skill"]["id"], "heavy_weaponry")
+        self.assertIsNone(chosen["known_equipment"], "base-gear utility estimates must not disclose unobserved instance numbers")
 
     def test_ai_takes_one_ground_healing_unit_and_keeps_the_remaining_stack(self):
         package = self.idle_item_package("ground-healing")

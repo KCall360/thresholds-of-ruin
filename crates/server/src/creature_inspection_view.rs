@@ -18,6 +18,7 @@ pub(crate) fn attack_view(
     p::AttackView {
         skill: skill(value.skill()),
         bonus: value.bonus(),
+        damage_enchantment: value.damage_enchantment(),
         wind_up: value.wind_up() as u32,
         recovery: value.recovery() as u32,
         damage: p::DamageView {
@@ -149,6 +150,16 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
                 ],
             )
         }
+        s::rules::Effect::AlterEquipment {
+            selection,
+            alteration,
+        } => (
+            "alter_equipment",
+            vec![
+                text("selection", format!("{selection:?}")),
+                text("alteration", format!("{alteration:?}")),
+            ],
+        ),
         s::rules::Effect::CorrodeArmor { slot, amount } => (
             "corrode_armor",
             vec![

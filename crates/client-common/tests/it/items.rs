@@ -25,6 +25,7 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
         ]
     })).unwrap();
     view.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
         slots: vec![slot.clone(), slot.clone()],
@@ -34,6 +35,8 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 item: target(1),
                 slot: Some(slot.clone()),
                 equipped_slot: Some(0),
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -45,6 +48,8 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 item: target(2),
                 slot: Some(slot),
                 equipped_slot: None,
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,

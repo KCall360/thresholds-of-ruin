@@ -786,7 +786,7 @@ impl Game {
             }
             PlannedTheftSelection::MagicalUnit => {
                 let eligible =
-                    |id: &ItemId| self.theft_eligible(target, *id) && self.items[id].spec.magical;
+                    |id: &ItemId| self.theft_eligible(target, *id) && self.items[id].magical();
                 let count = self
                     .items
                     .at(ItemLocation::Carried(target))

@@ -52,6 +52,7 @@ struct ItemDefinition {
     #[serde(default)]
     class: ItemClass,
     equipment: Option<EquipmentSpec>,
+    equipment_generation: Option<EquipmentGeneration>,
     consumable: Option<ConsumableSpec>,
     readable: Option<ReadableSpec>,
     device: Option<DeviceSpec>,
@@ -109,6 +110,7 @@ fn normalize_catalog_views(
                     name: item.name,
                     class: item.class,
                     equipment: item.equipment,
+                    equipment_generation: item.equipment_generation,
                     consumable: item.consumable,
                     readable: item.readable,
                     device: item.device,

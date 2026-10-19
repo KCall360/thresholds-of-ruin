@@ -247,8 +247,37 @@ HD by one, bounded by its immutable acquisition roll; exact restoration retains
 that credit and a different-source replacement cannot inherit it. Smaller forms
 can temporarily mask the benefit. See [item contracts](../reference/items.md#reading-identification-and-charged-devices).
 
-Complete curses/enchantment and the remaining catalog specials separately. Throw
-and launch still need their own projectile work. PCs and AI use the same ordinary
+The equipment risk/recovery batch adds instance curses, signed weapon enchantment,
+physical armor penalties, five-category magical armor wards and rust protection.
+Psychic damage is deliberately excluded from the ward. The finite authored gear
+catalog contains five nonlauncher weapons (mace, long sword, dagger, two handed
+sword and spear) and all eight source armor identities. Weapon melee dice follow
+the [pinned weapon source](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/weapons.c);
+common 60/40 wind-up/recovery timing remains provisional TOR tuning. Armor physical
+DR 1/2/2/3/4/5/5/6 preserves source ordering and ties while retaining 2 DR ring mail;
+this conservative additive-protection ladder is not a direct AC conversion.
+
+Explicit bounded birth policies preserve the
+[pinned generation probabilities](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/things.c#L250-L269):
+weapons have 10% cursed −1–3 hit, next 5% +1–3 hit; armor has 20% cursed 1–3
+physical penalty, next 8% 1–3 ward. Remaining outcomes are ordinary. TOR clamps
+physical penalties at base DR without clearing curse. The neutral shared mace
+archetype remains 2d4; an explicit authored +1 hit/+1 damage instance policy keeps
+the starting mace's effective stats unchanged and bypasses birth randomness.
+The starting ring-mail policy likewise bypasses random condition.
+
+Two append-only stages, `rogue.equipment` and `rogue.equipment_scrolls`, bring the
+production profile to ten stages while preserving the original eight stage IDs,
+order and choices. Each makes one finite quantity-one attempt per first entered
+floor from depth 1; gear's thirteen choices and scrolls' six choices have equal
+provisional weights. The scroll pool adds enchant armor, protect armor, enchant
+weapon, remove curse, identify weapon and identify armor. The four equipped-item
+alterations retain no-auto-identification and consume on no eligible gear;
+class-identification uses on-use discovery without direct effects. See
+[equipment birth contracts](../reference/items.md#equipment-birth-and-the-finite-rogue-catalog)
+for bounded policy schemas, immutable definitions, atomic sampling and adaptations.
+Remaining catalog specials stay separate. Throw and launch still need their own
+projectile work. PCs and AI use the same ordinary
 actions with knowledge-limited decisions; the conservative device AI fallback
 requires an identified type and explicitly known positive instance charges.
 

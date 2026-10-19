@@ -73,32 +73,139 @@ equipment still contributes its modifiers. Simultaneous dual attacks are not imp
 
 Ordinary armor uses an explicit equipment capability, for example
 `armor = { physical_reduction = 2, material = "metal", rustproof = false }`.
-Its Physical protection is additive damage reduction for Impact and Keen, rather
-than a Physical-defense bonus. Energy, Spirit and Vital damage and unrelated
-modifiers retain their ordinary rules. `material` is the closed `metal`/`nonmetal`
-choice; string-valued item properties never grant armor or rust protection.
+Its base Physical protection is additive damage reduction for Impact and Keen,
+rather than a Physical-defense bonus. A magical armor ward adds its own reduction
+to an explicit allowlist: Energy, Impact, Keen, Spirit and Vital. Psychic is a
+separate damage category and receives no armor ward. Future categories do not
+join this allowlist automatically. Explicit Psychic reductions and immunity still
+work through the ordinary damage kernel. Damage reduction does not prevent
+separate effects such as confusion, attribute loss or hit-die drain.
 
-An item definition is shared and immutable. Each actual item owns its persisted
-`condition = { corrosion = 0 }`; loss cannot exceed that item's original armor
-contribution. Nonmetal, rustproof and non-armor items cannot carry corrosion.
-The item ID and loss survive transfer, dropping, death, recovery and re-equipping.
-Two items sharing a definition can have different losses. Equip, AI comparison,
-restoration and identified equipment views use the same effective contribution.
-A change folds the existing permanent compiled sheet, without walking HD rows.
+An item definition is shared and immutable. Each actual item owns seven explicit
+condition fields: corrosion, curse, permanent protection, physical armor penalty,
+magical armor ward, signed weapon hit enchantment and signed weapon damage
+enchantment. Physical protection is `max(base - penalty - corrosion, 0)`; the
+nonnegative ward is added separately. Penalty and corrosion are each bounded by
+the original armor contribution; the total effective reduction is checked against
+the numerical limit. No negative magical ward or hidden enchantment debt exists.
+Nonmetal, intrinsically rustproof and non-armor items cannot carry corrosion.
+Runtime protection does allow existing corrosion: it prevents future loss without
+repairing it. Physical penalty and curse are independent; uncursing repairs neither
+penalty nor corrosion. Identified displays distinguish these facts rather than
+pretend they form one signed armor bonus.
+
+The exact item state survives transfer, dropping, death, recovery and re-equipping.
+Two copies of one definition can differ. Equip, restoration and actor-known
+previews use one effective-item fold. A change folds the existing permanent
+compiled sheet without walking hit-die rows. Signed weapon damage stays signed
+until final damage modifiers are combined, so negative values are not prematurely
+clamped before ordinary skill bonuses.
 
 The generic `corrode_armor` effect names an equipment-slot kind and a positive
-bounded amount. It selects the first currently equipped socket of that kind,
-reduces rustable item-owned Physical armor protection by that amount, and floors
-at zero. Empty, nonmetal, rustproof and already exhausted armor are no-ops.
-Corrosion is an isolated effect payload: the exact item witness and actor sheet
-publish in the enclosing action transaction; later strikes see the new protection.
-No hidden inventory identity appears in its public result. CO1 uses one attempt
-per source occurrence after at least one successful natural contact, even when
-that contact deals zero damage.
+bounded amount. It selects the first equipped socket of that kind and reduces
+remaining rustable physical plating to zero. The magical ward remains intact.
+Empty, nonmetal, intrinsically rustproof, protected and physically exhausted armor
+are no-ops. Corrosion is an isolated effect payload: the exact item witness and
+actor sheet publish in the enclosing transaction. Later strikes see the new
+protection. No hidden inventory identity appears in its public result. CO1 uses
+one attempt per source occurrence after a successful natural contact, including
+zero-damage contacts.
 
-Authoring may omit `armor` and defaults `rustproof` to false. Current owned
-records require the explicit nullable armor field, all armor fields and the
-item condition; unknown fields, positional aliases and impossible loss reject.
+Generic `alter_equipment` effects freeze the selected equipped item IDs, sockets
+and condition witnesses at paid preparation. An empty selection remains empty;
+a replacement or independently changed target cannot inherit the old effect.
+Multiple alterations in one payload validate original witnesses once and then
+apply sequentially to the candidate. Weapon enchantment chooses hit or damage
+with equal probability only when an eligible weapon was selected. Armor enchantment
+adds one ward point and removes curse; weapon enchantment adds one point on its
+selected axis and removes curse. Protection prevents later rust without repair or
+uncursing. Remove-curse affects equipped items only, preserving negative weapon
+bonuses and physical armor losses. All changes, randomness, payment and knowledge
+share the enclosing rollback boundary.
+
+These four scrolls consume their unit and action even with no eligible equipment,
+and use explicit `discovery = "never"`: neither success nor a no-op learns the
+scroll type. Paid armor/weapon identification records exact-instance details;
+knowing a type does not reveal every copy's condition. Equipping armor observes
+its numeric contribution, while a paid failed cursed removal learns only that
+item's curse. Failed removal keeps the authored removal timing (three turns
+for body armor under shared rules, one for weapons), an explicit TOR adaptation
+from Rogue's shorter failed armor command. Hidden curse never changes admission
+or visible preparation timing. Facts belong to the observing actor and may become stale; hidden
+changes and transfers do not refresh them. AI cannot repeatedly attempt a removal
+it already knows is cursed or inspect hidden bonuses while comparing equipment.
+
+Authoring may omit `armor` and defaults intrinsic `rustproof` to false. Current
+owned records require explicit nullable armor, all armor and condition fields;
+unknown fields, positional aliases and impossible loss reject. There is no legacy
+condition reader.
+
+### Equipment birth and the finite Rogue catalog
+
+The optional `equipment_generation` capability selects a generic birth policy;
+class, identity and scenario name never implicitly select one. A generated weapon
+can declare `{ kind = "weapon", curse_percent = 10, enchant_percent = 5,
+minimum = 1, maximum = 3 }`; armor uses the corresponding `armor` kind. The two
+percentages describe disjoint intervals of one percentage roll, not independent
+chances. Each percentage is nonnegative and their sum cannot exceed 100. The
+inclusive magnitude range must satisfy `1 <= minimum <= maximum <= 1000000`.
+Validation also checks the equipment class and capability and every possible
+result against the attack/protection limits before sampling.
+
+Creation samples condition once in the existing item-birth transaction. The item,
+allocator and rules RNG publish together; a failed placement leaves them unchanged.
+A checkpoint, replay, transfer or equip does not reroll existing condition or
+modify the shared equipment definition. Omitting the policy initializes ordinary
+zero condition without a random draw. Explicit `kind = "authored"` also bypasses
+the roll, with checked fixed `hit_enchantment` and `damage_enchantment` operands.
+These operands default to zero only in authoring; canonical runtime and stored
+policy records require both fields, and item definitions require an explicit
+nullable policy field.
+
+Rogue's generated weapons have a 10% curse chance with −1 to −3 hit, the next 5%
+have +1 to +3 hit, and the remaining 85% are ordinary. Birth generation does not
+change weapon damage. Armor has a 20% curse chance with a 1–3 physical penalty,
+the next 8% receive a 1–3 magical ward, and the remaining 72% are ordinary.
+These probabilities and ranges follow the pinned
+[Rogue generation branch](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/things.c#L250-L269).
+TOR clamps a generated armor penalty to its base physical reduction; the curse
+remains even when that clamp produces zero. Favorable armor rolls add a nonnegative
+five-category ward, rather than changing Rogue's AC statistic.
+
+The production finite catalog contains these five nonlauncher melee weapons,
+using the [pinned weapon dice](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/weapons.c):
+mace 2d4, long sword 3d4, dagger 1d6, two handed sword 4d4 and spear 2d3.
+All currently use 60 wind-up / 40 recovery ticks. This common timing and the TOR
+skill/damage-category mapping are conservative provisional tuning, not Rogue
+attack-speed claims. Throwing, launchers and ammunition remain separate work.
+
+The eight armor identities are leather armor, ring mail, studded leather armor,
+scale mail, chain mail, splint mail, banded mail and plate mail. Their base physical
+reductions are respectively 1, 2, 2, 3, 4, 5, 5 and 6. This small monotone ladder
+preserves the [source armor ordering and ties](../research/rogue-5.4.4/content.md#armor-8)
+and the existing ring-mail value while limiting the initial spread of additive DR;
+it is provisional TOR balance, not an equivalence between AC and damage reduction.
+Only leather is nonmetal; the other seven are rustable metal absent protection.
+
+Both starting kits use explicit authored policies. The mace's original +1 hit
+and +1 damage now live on that exact instance; its immutable neutral 2d4 definition
+and identity match the generated mace. Effective starter attack values and 60/40
+timing are unchanged, and ring mail retains 2 base physical DR with zero condition.
+Starting equipment consumes no birth randomness. Starting and generated archetypes
+may share an identity while differing in birth policy; their underlying equipment
+behavior must still agree exactly.
+
+Production appends `rogue.equipment` and `rogue.equipment_scrolls` after the eight
+existing population stages, for ten stages total. Each new stage makes one
+quantity-one placement attempt per first entered floor from depth 1, with no
+replenishment or retry after a recorded skip. The gear stage has thirteen equally
+weighted choices; the scroll stage has enchant armor, protect armor, enchant
+weapon, remove curse, identify weapon and identify armor, also equally weighted.
+These finite rates and equal subtype weights are provisional TOR tuning, not
+Rogue's complete item probability table. Prior stage IDs, order and choices remain
+unchanged, retaining their independent generation streams. The four alteration
+scrolls use `discovery = "never"`; the two class-identification scrolls use
+`discovery = "on_use"` and no direct effects.
 
 One unit of a supply stack provides one unit of its named supply. Supply identity
 participates in physical stack equality, cloning and saved item definitions.
@@ -247,8 +354,10 @@ and saved records. Ordinary materialized stacks retain one concrete u64 quantity
 `currency = "gold"` marks ordinary stackable Gold units; the coin appearance class alone
 does not grant currency behavior. Gold uses normal pickup/drop, splitting,
 merging, inventory and death-drop authority, with no purse or second quantity
-ledger. Magical status is authored independently of class, name, modifiers and
-identity knowledge. Rogue's restore-strength potion and Amulet of Yendor are
+ledger. Runtime magical status is true for explicit authored magic or nonzero
+owned curse, protection, armor penalty/ward or weapon enchantment. Corrosion alone
+does not confer magic. Class, name and identity knowledge do not grant it. Rogue's
+restore-strength potion, Amulet of Yendor and authored +1/+1 starter mace are
 magical; its ordinary ring mail is not. These capabilities participate in
 compatible item definitions and remain private authoritative facts rather than
 new item-view fields.

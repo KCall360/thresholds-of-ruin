@@ -110,7 +110,8 @@ fn record(
                 .iter()
                 .filter_map(|effect| {
                     Some(match effect {
-                        s::abilities::ResolvedEffect::Theft { .. } => return None,
+                        s::abilities::ResolvedEffect::Theft { .. }
+                        | s::abilities::ResolvedEffect::AlterEquipment { .. } => return None,
                         s::abilities::ResolvedEffect::CorrodeArmor { amount, .. } => {
                             p::DiagnosticEffect::CorrodeArmor {
                                 target,

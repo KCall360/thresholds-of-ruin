@@ -99,6 +99,11 @@ impl EquipmentSpec {
             }
         })?)?;
         if let Some(attack) = &self.attack {
+            if attack.damage_enchantment() != 0 {
+                return Err(crate::rules::RulesetError::Bound {
+                    field: "equipment_capability".into(),
+                });
+            }
             rules.validate_damage(attack.damage())?;
         }
         Ok(())
@@ -218,6 +223,7 @@ impl From<&crate::rules::EquipmentSlotDef> for EquipmentSlotView {
 pub struct InteractionView {
     pub identification: Option<crate::IdentificationChoiceView>,
     pub completed: Vec<Work>,
+    pub curse_blocked: Vec<ItemId>,
     pub slots: Vec<EquipmentSlotView>,
     pub preparation: Option<PreparationView>,
     pub inventory: Vec<ItemInteractionView>,
@@ -234,6 +240,8 @@ pub struct ItemInteractionView {
     pub slot: Option<EquipmentSlotView>,
     pub equipped_slot: Option<EquipmentSlotId>,
     pub known_equipment: Option<EquipmentSpec>,
+    pub known_cursed: Option<bool>,
+    pub known_protected: Option<bool>,
     pub drinkable: bool,
     pub readable: bool,
     pub zappable: bool,
@@ -1081,9 +1089,35 @@ impl Game {
                     .equipment
                     .clone();
                 equipment.insert(slot, item);
-                ItemChange::Equipment(self.equipment_candidate(actor, equipment)?)
+                let mut outcome = self.equipment_candidate(actor, equipment)?;
+                if let Some(gear) = self.items.get(&item).filter(|item| {
+                    item.spec
+                        .equipment
+                        .as_ref()
+                        .is_some_and(|gear| gear.armor.is_some())
+                }) {
+                    outcome
+                        .state
+                        .known_equipment
+                        .learn_numbers(item, gear.condition)?;
+                }
+                ItemChange::Equipment(outcome)
             }
             Work::Unequip { .. } => {
+                if self
+                    .items
+                    .get(&item)
+                    .is_some_and(|item| item.condition.cursed)
+                {
+                    let mut outcome = self.actor_outcome(actor)?;
+                    outcome.state.known_equipment.learn_curse(item, true)?;
+                    return self.apply_outcome(ItemOutcome {
+                        actor,
+                        work,
+                        intention,
+                        change: ItemChange::CurseBlocked(outcome),
+                    });
+                }
                 let mut equipment = self
                     .actors
                     .get(&actor)

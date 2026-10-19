@@ -477,7 +477,7 @@ fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
     let mut game = game();
     let gear: tor_simulation::EquipmentSpec = serde_json::from_value(serde_json::json!({
         "slot":"weapon", "armor":null, "modifiers":[],
-        "attack":{"skill":"light_weaponry", "bonus":100,"wind_up":90,"recovery":70,
+        "attack":{"skill":"light_weaponry", "bonus":100,"damage_enchantment":0,"wind_up":90,"recovery":70,
             "damage":{"primary":{"category":"energy","descriptor":"fire","sides":6},
                 "components":[
                     {"category":"energy","descriptor":"fire","amount":{"type":"rolled","count":2,"sides":6,"bonus":-1}},
