@@ -738,6 +738,131 @@ fn unknown_references_fail_without_changing_the_build() {
 }
 
 #[test]
+fn fresh_hit_dice_report_unknown_classes_before_binding_health_origins() {
+    let value = build(&[HdSource::Racial]);
+    for ledger in [
+        HdLedger::seeded(vec![class("missing")], 42).unwrap(),
+        HdLedger::new(vec![tor_simulation::progression::HitDie::new(
+            class("missing"),
+            42,
+        )])
+        .unwrap(),
+    ] {
+        assert_eq!(
+            CreatureBuild::new(
+                value.content().clone(),
+                value.species_id().clone(),
+                ledger.clone(),
+                value.binding(),
+                value.advancement().starting_skills,
+            ),
+            Err(BuildError::UnknownClass)
+        );
+        assert_eq!(
+            CreatureBuild::from_recorded(
+                value.content().clone(),
+                value.species_id().clone(),
+                value.initial_attributes(),
+                ledger,
+                value.binding(),
+                value.advancement().clone(),
+                vec![],
+            ),
+            Err(BuildError::UnknownClass)
+        );
+    }
+}
+
+#[test]
+fn recorded_unknown_classes_remain_invalid_bound_provenance() {
+    use tor_simulation::creatures::record::BuildRecord;
+
+    for drained in [false, true] {
+        let mut value = build(&[class("mage"), class("mage")]);
+        if drained {
+            value.remove_latest().unwrap();
+        }
+        let record = BuildRecord::capture(&value);
+        assert_eq!(record.restore(value.content().clone()).unwrap(), value);
+        let mut record = serde_json::to_value(record).unwrap();
+        let row = if drained {
+            &mut record["drained_hd"][0]["hit_die"]
+        } else {
+            &mut record["hd"][0]
+        };
+        row["source"] = serde_json::json!({"kind": "class", "id": "missing"});
+        let record: BuildRecord = serde_json::from_value(record).unwrap();
+        assert_eq!(
+            record.restore(value.content().clone()),
+            Err(BuildError::InvalidDefinition)
+        );
+    }
+}
+
+#[test]
+fn unknown_classes_preserve_append_error_precedence_and_dormant_rows() {
+    let fixture = build(&[HdSource::Racial]);
+    let mut value = CreatureBuild::new(
+        fixture.content().clone(),
+        fixture.species_id().clone(),
+        HdLedger::seeded(vec![HdSource::Racial; 256], 42).unwrap(),
+        fixture.binding(),
+        fixture.advancement().starting_skills,
+    )
+    .unwrap();
+    let full = value.clone();
+    for root in [42, 43] {
+        assert_eq!(
+            value.add_hit_die(class("missing"), root),
+            Err(BuildError::TooManyHitDice)
+        );
+        assert_eq!(value, full);
+    }
+    value.remove_latest().unwrap();
+    let drained = value.clone();
+    assert_eq!(
+        value.add_hit_die(class("missing"), 43),
+        Err(BuildError::InvalidHealthRoot)
+    );
+    assert_eq!(value, drained);
+    assert_eq!(
+        value.add_hit_die(class("missing"), 42),
+        Err(BuildError::UnknownClass)
+    );
+    assert_eq!(value, drained);
+    value.add_hit_die(HdSource::Racial, 42).unwrap();
+    assert_eq!(value, full);
+
+    let mut advancement = fixture.advancement().clone();
+    advancement.restoration = tor_simulation::creatures::RestorationPolicy::Authored(vec![
+        tor_simulation::creatures::PlannedAdvancement {
+            source: HdSource::Racial,
+            choices: fixture.choices()[0].clone(),
+        },
+    ]);
+    let mut value = CreatureBuild::from_recorded(
+        fixture.content().clone(),
+        fixture.species_id().clone(),
+        fixture.initial_attributes(),
+        HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+        fixture.binding(),
+        advancement,
+        vec![],
+    )
+    .unwrap();
+    value.remove_latest().unwrap();
+    let before = value.clone();
+    for root in [42, 43] {
+        assert_eq!(
+            value.add_hit_die(class("missing"), root),
+            Err(BuildError::InvalidOwnership)
+        );
+        assert_eq!(value, before);
+    }
+    value.restore_hit_die(42).unwrap();
+}
+
+#[test]
 fn validated_content_rejects_oversized_species_and_template_catalogs() {
     for templates in [false, true] {
         let mut catalog = ScenarioCatalog::default();

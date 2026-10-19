@@ -216,6 +216,20 @@ impl CreatureBuild {
         Ok(build)
     }
     fn bind_health_origins(&mut self, kind: &crate::content_ids::TypeId) -> Result<(), BuildError> {
+        // Fresh source requests retain their public typed error. Bound rows
+        // instead carry provenance, whose missing references remain malformed.
+        if self
+            .ledger
+            .entries()
+            .iter()
+            .chain(self.ledger.drained().map(|(_, entry)| entry))
+            .any(|entry| {
+                entry.health_origin().is_none()
+                    && matches!(entry.source(), HdSource::Class(id) if self.ruleset().class(&id).is_none())
+            })
+        {
+            return Err(BuildError::UnknownClass);
+        }
         self.ledger
             .bind_health_origins(kind, &self.templates, self.content.rules())
             .map_err(BuildError::from)?;

@@ -1464,6 +1464,7 @@ fn phase5_container_checkpoint_rejects_positional_held_item() {
         &[
             "corpse",
             "condition",
+            "charges",
             "motion",
             "orientation",
             "spec",
@@ -1548,6 +1549,8 @@ fn phase5_container_checkpoint_rejects_positional_item_spec() {
             "currency",
             "equipment",
             "consumable",
+            "readable",
+            "device",
             "edible",
             "supply",
             "class",
