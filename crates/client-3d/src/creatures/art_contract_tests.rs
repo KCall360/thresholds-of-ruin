@@ -99,3 +99,73 @@ fn art_contract_spawned_joints_use_the_same_dimensions_as_body_fitting() {
         "the actual caster recipe must own fitted cloth"
     );
 }
+
+/// Every surface point of `body` within `heights` lies inside `cloth` by at
+/// least `clearance`, all the way round the limb.
+fn assert_covers(
+    body: &crate::sdf::Sculpt,
+    cloth: &crate::sdf::Sculpt,
+    heights: &[f32],
+    clearance: f32,
+    what: &str,
+) {
+    for &y in heights {
+        for k in 0..12 {
+            let a = k as f32 / 12.0 * std::f32::consts::TAU;
+            let out = Vec3::new(a.cos(), 0.0, a.sin());
+            let skin = body.onto(Vec3::new(0.0, y, 0.0) + out * 0.3, -out);
+            assert!(
+                body.distance(skin).abs() < 0.002,
+                "{what}: no surface at {y}"
+            );
+            let inside = cloth.distance(skin);
+            assert!(
+                inside < -clearance,
+                "{what} at height {y}, angle {a:.2}: {inside}"
+            );
+        }
+    }
+}
+
+#[test]
+fn art_contract_sleeves_and_trousers_stand_off_the_limbs_they_cover() {
+    for (build, muscle) in [(0.9, 0.94), (1.0, 1.0), (1.1, 1.08)] {
+        assert_covers(
+            &geometry::upper_arm_form(1.0, build, 1.0, muscle, 1.0),
+            &geometry::upper_sleeve_form(1.0, build, 1.0, muscle),
+            &[-0.06, -0.12, -0.18, -0.24],
+            0.003 * build,
+            "upper sleeve",
+        );
+        assert_covers(
+            &geometry::forearm_form(build, 1.0, muscle),
+            &geometry::forearm_sleeve_form(build, 1.0, muscle),
+            &[-0.03, -0.08, -0.14, -0.2],
+            0.003 * build,
+            "forearm sleeve",
+        );
+        // The elbow gathers: cloth stands further off there than the ease.
+        let arm = geometry::upper_arm_form(1.0, build, 1.0, muscle, 1.0);
+        let sleeve = geometry::upper_sleeve_form(1.0, build, 1.0, muscle);
+        let elbow = arm.onto(Vec3::new(0.0, -0.245, 0.3), Vec3::NEG_Z);
+        assert!(sleeve.distance(elbow) < -(geometry::SLEEVE_EASE * build + 0.003));
+    }
+    for build in 0..3 {
+        let body = HumanoidBody::resolve(&appearance(CreatureModel::Human, build == 1, build));
+        let ease = geometry::TROUSER_EASE * body.build;
+        for (shape, knee) in [(body.thigh, false), (body.shin, true)] {
+            let length = shape.length;
+            assert_covers(
+                &geometry::limb_form(shape),
+                &geometry::cloth_over(geometry::limb_form(shape), ease, &[]),
+                &[-0.15 * length, -0.5 * length, -0.85 * length],
+                0.005 * body.build,
+                if knee {
+                    "trouser shin"
+                } else {
+                    "trouser thigh"
+                },
+            );
+        }
+    }
+}

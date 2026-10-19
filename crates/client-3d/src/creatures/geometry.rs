@@ -1092,7 +1092,7 @@ fn limb(b: &mut Builder, len: f32, r0: f32, r1: f32, belly: f32, forward: f32, c
     sculpted_limb(b, LimbShape::new(len, r0, r1, belly, forward), color);
 }
 
-fn sculpted_limb(b: &mut Builder, shape: LimbShape, color: Vec3) {
+pub(super) fn limb_form(shape: LimbShape) -> crate::sdf::Sculpt {
     use crate::sdf::{Sculpt, Shape::*};
     let LimbShape {
         length: len,
@@ -1106,13 +1106,61 @@ fn sculpted_limb(b: &mut Builder, shape: LimbShape, color: Vec3) {
     if belly.x > 0.0 {
         s.add(Ellipsoid(belly_center, belly), 0.03);
     }
-    let r = r0.max(r1).max(belly.x) + 0.02;
-    s.mesh(
+    s
+}
+
+fn sculpted_limb(b: &mut Builder, shape: LimbShape, color: Vec3) {
+    let r = shape.radius_top.max(shape.radius_bottom).max(shape.belly.x) + 0.02;
+    limb_form(shape).mesh(
         b,
-        Vec3::new(-r, -len - r, -r),
+        Vec3::new(-r, -shape.length - r, -r),
         Vec3::new(r, r, r),
         0.007,
-        &|at, _| color * Sculpt::weave(at),
+        &|at, _| color * crate::sdf::Sculpt::weave(at),
+    );
+}
+
+/// How far cloth stands off the body beneath it, by build.
+pub(super) const SLEEVE_EASE: f32 = 0.007;
+pub(super) const TROUSER_EASE: f32 = 0.008;
+
+/// A cloth layer over a limb: the anatomy grown outward by `ease` so the
+/// muscle hollows fill and it reads as fabric, gathered into soft rolls at
+/// each fraction of its length in `rolls` (the crook of a joint).
+pub(super) fn cloth_over(
+    mut form: crate::sdf::Sculpt,
+    ease: f32,
+    rolls: &[(f32, f32)],
+) -> crate::sdf::Sculpt {
+    use crate::sdf::Shape::Ellipsoid;
+    form.inflate(ease);
+    for &(y, radius) in rolls {
+        form.add(
+            Ellipsoid(
+                Vec3::new(0.0, y, 0.004),
+                Vec3::new(radius, 0.013, radius * 1.04),
+            ),
+            0.012,
+        );
+    }
+    form
+}
+
+/// Trousers over a thigh or a shin, rolled at the knee.
+fn trouser_leg(b: &mut Builder, shape: LimbShape, build: f32, knee: bool, color: Vec3) {
+    let ease = TROUSER_EASE * build;
+    let rolls: &[(f32, f32)] = if knee {
+        &[(-0.035, shape.radius_top + ease + 0.004)]
+    } else {
+        &[(-shape.length + 0.03, shape.radius_bottom + ease + 0.005)]
+    };
+    let r = shape.radius_top.max(shape.radius_bottom).max(shape.belly.x) + 0.03;
+    cloth_over(limb_form(shape), ease, rolls).mesh(
+        b,
+        Vec3::new(-r, -shape.length - r, -r),
+        Vec3::new(r, r, r),
+        0.007,
+        &|at, _| color * crate::sdf::Sculpt::weave(at),
     );
 }
 
@@ -1847,8 +1895,74 @@ fn biped_upper_arm(
     bare: bool,
     color: Vec3,
 ) {
-    use crate::sdf::{Sculpt, Shape::*};
+    use crate::sdf::Sculpt;
     let fullness = if bare { 0.94 } else { 1.0 };
+    let arm = upper_arm_form(side, build, length, muscle, fullness);
+    arm.mesh(
+        b,
+        Vec3::new(-0.13 * build, -0.3 * length - 0.06 * build, -0.09 * build),
+        Vec3::new(0.13 * build, 0.075 * build.max(1.0), 0.095 * build),
+        0.007,
+        &|at, _| color * if bare { 1.0 } else { Sculpt::weave(at) },
+    );
+}
+
+/// A sleeve over the upper arm: eased off the deltoid and biceps, hanging a
+/// little fuller beneath, gathered in the crook of the elbow so the bent
+/// forearm never shows a gap between the two pieces of cloth.
+fn biped_upper_sleeve(
+    b: &mut Builder,
+    side: f32,
+    build: f32,
+    length: f32,
+    muscle: f32,
+    color: Vec3,
+) {
+    use crate::sdf::{Sculpt, Shape::*};
+    let mut sleeve = upper_sleeve_form(side, build, length, muscle);
+    // The underside of the sleeve falls away from the arm.
+    sleeve.add(
+        Ellipsoid(
+            Vec3::new(side * 0.012 * build, -0.13 * length, -0.012 * build),
+            Vec3::new(0.05 * build, 0.08 * length, 0.05 * build),
+        ),
+        0.03 * build,
+    );
+    sleeve.mesh(
+        b,
+        Vec3::new(-0.14 * build, -0.3 * length - 0.07 * build, -0.1 * build),
+        Vec3::new(0.14 * build, 0.085 * build.max(1.0), 0.105 * build),
+        0.007,
+        &|at, _| color * Sculpt::weave(at),
+    );
+}
+
+pub(super) fn upper_sleeve_form(
+    side: f32,
+    build: f32,
+    length: f32,
+    muscle: f32,
+) -> crate::sdf::Sculpt {
+    // Cloth softens the muscle beneath; the elbow gathers in two rolls.
+    let arm = upper_arm_form(side, build, length, 1.0 + (muscle - 1.0) * 0.5, 1.0);
+    cloth_over(
+        arm,
+        SLEEVE_EASE * build,
+        &[
+            (-0.245 * length, 0.056 * build),
+            (-0.28 * length, 0.053 * build),
+        ],
+    )
+}
+
+pub(super) fn upper_arm_form(
+    side: f32,
+    build: f32,
+    length: f32,
+    muscle: f32,
+    fullness: f32,
+) -> crate::sdf::Sculpt {
+    use crate::sdf::{Sculpt, Shape::*};
     let mut arm = Sculpt::default();
     arm.add(
         Capsule(
@@ -1890,18 +2004,38 @@ fn biped_upper_arm(
         ),
         0.02 * build,
     );
-    arm.mesh(
-        b,
-        Vec3::new(-0.13 * build, -0.3 * length - 0.06 * build, -0.09 * build),
-        Vec3::new(0.13 * build, 0.075 * build.max(1.0), 0.095 * build),
-        0.007,
-        &|at, _| color * if bare { 1.0 } else { Sculpt::weave(at) },
-    );
+    arm
 }
 
 /// A forearm has a full extensor mass below the elbow and a slim wrist;
 /// bare arms keep smooth skin instead of inheriting the cloth weave.
 fn biped_forearm(b: &mut Builder, build: f32, length: f32, muscle: f32, bare: bool, color: Vec3) {
+    use crate::sdf::Sculpt;
+    let arm = if bare {
+        forearm_form(build, length, muscle)
+    } else {
+        forearm_sleeve_form(build, length, muscle)
+    };
+    arm.mesh(
+        b,
+        Vec3::new(-0.085 * build, -0.3 * length, -0.085 * build),
+        Vec3::new(0.085 * build, 0.065 * build, 0.085 * build),
+        0.007,
+        &|at, _| color * if bare { 1.0 } else { Sculpt::weave(at) },
+    );
+}
+
+/// A forearm sleeve eases over the extensor mass and bunches just below
+/// the elbow, where it tucks under the upper sleeve's rolls.
+pub(super) fn forearm_sleeve_form(build: f32, length: f32, muscle: f32) -> crate::sdf::Sculpt {
+    cloth_over(
+        forearm_form(build, length, 1.0 + (muscle - 1.0) * 0.5),
+        SLEEVE_EASE * build * 0.85,
+        &[(-0.025 * length, 0.046 * build)],
+    )
+}
+
+pub(super) fn forearm_form(build: f32, length: f32, muscle: f32) -> crate::sdf::Sculpt {
     use crate::sdf::{Sculpt, Shape::*};
     let mut arm = Sculpt::default();
     arm.add(
@@ -1927,13 +2061,7 @@ fn biped_forearm(b: &mut Builder, build: f32, length: f32, muscle: f32, bare: bo
         ),
         0.016 * build,
     );
-    arm.mesh(
-        b,
-        Vec3::new(-0.075 * build, -0.3 * length, -0.075 * build),
-        Vec3::new(0.075 * build, 0.055 * build, 0.075 * build),
-        0.007,
-        &|at, _| color * if bare { 1.0 } else { Sculpt::weave(at) },
-    );
+    arm
 }
 
 /// A neck widens into the collar and narrows beneath the jaw. The lower
@@ -2000,9 +2128,10 @@ fn biped_cuff(
     let path = heights.map(|height| Vec3::Y * -height * length);
     // Follow proximal forearm fullness, then return to the authored wrist and
     // hem. Both recipes keep their final two stations and flare unchanged.
+    // Bracers and cuffs are worn over the eased sleeve beneath them.
     let radii: [Vec2; 5] = std::array::from_fn(|i| {
         let influence = 1.0 - ease((heights[i] - 0.145) / (0.25 - 0.145));
-        radii[i] * build * (1.0 + (muscle - 1.0) * influence)
+        radii[i] * build * (1.0 + (muscle - 1.0) * influence) + Vec2::splat(SLEEVE_EASE * build)
     });
     let smooth = b.smooth;
     b.smooth = false;
@@ -2268,6 +2397,20 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             | Style::Phantom
     );
     let barefoot = matches!(style, Style::Troll | Style::Nymph);
+    // Cloth trousers stand off the leg; skin, stockings and mail stay fitted.
+    let trousered = matches!(
+        style,
+        Style::Hero
+            | Style::Scout
+            | Style::Common
+            | Style::Vampire
+            | Style::Hobgoblin
+            | Style::Zombie
+            | Style::Orc
+            | Style::Leprechaun
+            | Style::Phantom
+            | Style::Wraith
+    );
     let boot = match style {
         Style::Guardian => l.skin * 0.85,
         Style::Yeti => l.skin,
@@ -3415,16 +3558,10 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     ],
                     sleeve,
                 );
+            } else if metal || bare_arms {
+                biped_upper_arm(m, side, b, arm_len, body.profile.muscle, true, sleeve);
             } else {
-                biped_upper_arm(
-                    m,
-                    side,
-                    b,
-                    arm_len,
-                    body.profile.muscle,
-                    metal || bare_arms,
-                    sleeve,
-                );
+                biped_upper_sleeve(m, side, b, arm_len, body.profile.muscle, sleeve);
             }
             if furry {
                 m.blob(Vec3::Y * -0.12, Vec3::new(0.1, 0.16, 0.1), 3, 0.1, sleeve);
@@ -3634,6 +3771,9 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     ],
                     pants,
                 );
+            } else if trousered {
+                // Trousers ease over the thigh, which stays fullest above the middle.
+                trouser_leg(&mut p.matte, body.thigh, b, false, pants);
             } else {
                 // Hip to knee: the thigh is fullest above the middle.
                 sculpted_limb(&mut p.matte, body.thigh, pants);
@@ -3700,6 +3840,9 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     ],
                     pants,
                 );
+            } else if trousered {
+                // Cloth gathers below the knee before the boot.
+                trouser_leg(&mut p.matte, body.shin, b, true, pants);
             } else {
                 // Knee to ankle, the calf full at the back.
                 sculpted_limb(&mut p.matte, body.shin, pants);
