@@ -144,8 +144,28 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
         self.assertFalse(initial["state"]["wizard_game"])
         self.assertEqual(u64(combat(initial_foe)["own_stats"]["hit_dice"]["total"]), 5)
         self.assertEqual(observation(initial_foe)["inventory"], [])
-        self.assertEqual(armor_reductions(initial), [2, 2])
         item = armor_item(initial)["id"]
+        gear = next(row for row in observation(initial)["interactions"]["inventory"]
+                    if row["item"] == item)
+        self.assertIsNone(gear["known_equipment"])
+        self.assertIsNone(gear["known_cursed"])
+        self.assertIsNone(gear["known_protected"])
+        slot = gear["equipped_slot"]
+        # Authored starting equipment is not an exact-instance numeric witness.
+        # Ordinary removal and wearing observes this armor without identifying
+        # its curse/protection state or changing the production kit.
+        for action in ({"type": "unequip", "item": item},
+                       {"type": "equip", "item": item, "slot": slot}):
+            self.advance_until(clients, lambda frames: observation(frames[0])["ready"])
+            self.assertIsNone(self.act(player, action)["error"])
+            self.advance_until(clients, lambda frames: not frames[0]["intentions"])
+        initial, _ = self.advance_until(clients, lambda frames: observation(frames[1])["ready"])
+        self.assertEqual(armor_reductions(initial), [2, 2])
+        gear = next(row for row in observation(initial)["interactions"]["inventory"]
+                    if row["item"] == item)
+        self.assertEqual(gear["equipped_slot"], slot)
+        self.assertIsNone(gear["known_cursed"])
+        self.assertIsNone(gear["known_protected"])
         hp = combat(initial)["hp"]
         physical = combat(initial)["own_stats"]["defenses"]["physical"]
         target = next(actor["id"] for actor in observation(initial_foe)["visible_actors"]

@@ -23,6 +23,224 @@ pub enum EquipmentGeneration {
     },
 }
 
+impl<'de> Deserialize<'de> for EquipmentGeneration {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Authored {
+                hit_enchantment: i32,
+                damage_enchantment: i32,
+            },
+            Weapon {
+                curse_percent: u8,
+                enchant_percent: u8,
+                minimum: u32,
+                maximum: u32,
+            },
+            Armor {
+                curse_percent: u8,
+                enchant_percent: u8,
+                minimum: u32,
+                maximum: u32,
+            },
+        }
+        let value = match Fields::deserialize(d)? {
+            Fields::Authored {
+                hit_enchantment,
+                damage_enchantment,
+            } => Self::Authored {
+                hit_enchantment,
+                damage_enchantment,
+            },
+            Fields::Weapon {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            } => Self::Weapon {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            },
+            Fields::Armor {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            } => Self::Armor {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            },
+        };
+        if !value.valid() {
+            return Err(serde::de::Error::custom(
+                "invalid equipment generation policy",
+            ));
+        }
+        Ok(value)
+    }
+}
+
+impl EquipmentGeneration {
+    pub fn valid(self) -> bool {
+        match self {
+            Self::Authored {
+                hit_enchantment,
+                damage_enchantment,
+            } => [hit_enchantment, damage_enchantment]
+                .into_iter()
+                .all(|amount| {
+                    (-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(amount))
+                }),
+            Self::Weapon {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            }
+            | Self::Armor {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            } => {
+                u16::from(curse_percent) + u16::from(enchant_percent) <= 100
+                    && minimum > 0
+                    && minimum <= maximum
+                    && maximum <= crate::limits::NUMERIC as u32
+            }
+        }
+    }
+
+    /// Validate every possible outcome before accepting a definition. In
+    /// particular a low-probability invalid bonus must not make births flaky.
+    pub fn valid_for(self, class: ItemClass, equipment: Option<&EquipmentSpec>) -> bool {
+        let Some(gear) = equipment else {
+            return false;
+        };
+        if !self.valid() {
+            return false;
+        }
+        match self {
+            Self::Authored {
+                hit_enchantment,
+                damage_enchantment,
+            } => match gear.attack.as_ref() {
+                Some(attack) => attack
+                    .with_enchantment(hit_enchantment, damage_enchantment)
+                    .is_ok(),
+                None => hit_enchantment == 0 && damage_enchantment == 0,
+            },
+            Self::Weapon {
+                curse_percent,
+                enchant_percent,
+                maximum,
+                ..
+            } => {
+                class == ItemClass::Weapon
+                    && gear.attack.as_ref().is_some_and(|attack| {
+                        (curse_percent == 0
+                            || attack.with_enchantment(-(maximum as i32), 0).is_ok())
+                            && (enchant_percent == 0
+                                || attack.with_enchantment(maximum as i32, 0).is_ok())
+                    })
+            }
+            Self::Armor {
+                enchant_percent,
+                maximum,
+                ..
+            } => {
+                class == ItemClass::Armor
+                    && gear.armor.is_some_and(|armor| {
+                        armor.valid()
+                            && (enchant_percent == 0
+                                || ItemCondition {
+                                    armor_enchantment: maximum,
+                                    ..Default::default()
+                                }
+                                .effective_armor(armor)
+                                .is_some())
+                    })
+            }
+        }
+    }
+
+    pub(crate) fn sample(
+        self,
+        class: ItemClass,
+        equipment: Option<&EquipmentSpec>,
+        rng: &mut u64,
+    ) -> Result<ItemCondition, GameError> {
+        if !self.valid_for(class, equipment) {
+            return Err(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition,
+            ));
+        }
+        let (curse_percent, enchant_percent, minimum, maximum) = match self {
+            Self::Authored {
+                hit_enchantment,
+                damage_enchantment,
+            } => {
+                return Ok(ItemCondition {
+                    hit_enchantment,
+                    damage_enchantment,
+                    ..Default::default()
+                })
+            }
+            Self::Weapon {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            }
+            | Self::Armor {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            } => (curse_percent, enchant_percent, minimum, maximum),
+        };
+        let mut candidate = *rng;
+        let roll = crate::quantity::QuantityRange::new(1, 100)?.sample(&mut candidate)?;
+        let cursed = roll <= u64::from(curse_percent);
+        let enchanted = !cursed && roll <= u64::from(curse_percent) + u64::from(enchant_percent);
+        let mut condition = ItemCondition::default();
+        if cursed || enchanted {
+            let amount =
+                crate::quantity::QuantityRange::new(u64::from(minimum), u64::from(maximum))?
+                    .sample(&mut candidate)? as u32;
+            condition.cursed = cursed;
+            match self {
+                Self::Weapon { .. } => {
+                    condition.hit_enchantment = if cursed {
+                        -(amount as i32)
+                    } else {
+                        amount as i32
+                    }
+                }
+                Self::Armor { .. } if cursed => {
+                    // TOR adaptation: negative physical protection floors at zero;
+                    // curse remains independent even for zero-DR armor.
+                    condition.armor_penalty = amount.min(
+                        equipment
+                            .and_then(|gear| gear.armor)
+                            .expect("validated armor")
+                            .physical_reduction,
+                    );
+                }
+                Self::Armor { .. } => condition.armor_enchantment = amount,
+                Self::Authored { .. } => unreachable!("authored policy returned before sampling"),
+            }
+        }
+        *rng = candidate;
+        Ok(condition)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,223 +499,5 @@ mod tests {
             game.items[&first].condition,
             after_birth.items[&first].condition
         );
-    }
-}
-
-impl<'de> Deserialize<'de> for EquipmentGeneration {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-        enum Fields {
-            Authored {
-                hit_enchantment: i32,
-                damage_enchantment: i32,
-            },
-            Weapon {
-                curse_percent: u8,
-                enchant_percent: u8,
-                minimum: u32,
-                maximum: u32,
-            },
-            Armor {
-                curse_percent: u8,
-                enchant_percent: u8,
-                minimum: u32,
-                maximum: u32,
-            },
-        }
-        let value = match Fields::deserialize(d)? {
-            Fields::Authored {
-                hit_enchantment,
-                damage_enchantment,
-            } => Self::Authored {
-                hit_enchantment,
-                damage_enchantment,
-            },
-            Fields::Weapon {
-                curse_percent,
-                enchant_percent,
-                minimum,
-                maximum,
-            } => Self::Weapon {
-                curse_percent,
-                enchant_percent,
-                minimum,
-                maximum,
-            },
-            Fields::Armor {
-                curse_percent,
-                enchant_percent,
-                minimum,
-                maximum,
-            } => Self::Armor {
-                curse_percent,
-                enchant_percent,
-                minimum,
-                maximum,
-            },
-        };
-        if !value.valid() {
-            return Err(serde::de::Error::custom(
-                "invalid equipment generation policy",
-            ));
-        }
-        Ok(value)
-    }
-}
-
-impl EquipmentGeneration {
-    pub fn valid(self) -> bool {
-        match self {
-            Self::Authored {
-                hit_enchantment,
-                damage_enchantment,
-            } => [hit_enchantment, damage_enchantment]
-                .into_iter()
-                .all(|amount| {
-                    (-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(amount))
-                }),
-            Self::Weapon {
-                curse_percent,
-                enchant_percent,
-                minimum,
-                maximum,
-            }
-            | Self::Armor {
-                curse_percent,
-                enchant_percent,
-                minimum,
-                maximum,
-            } => {
-                u16::from(curse_percent) + u16::from(enchant_percent) <= 100
-                    && minimum > 0
-                    && minimum <= maximum
-                    && maximum <= crate::limits::NUMERIC as u32
-            }
-        }
-    }
-
-    /// Validate every possible outcome before accepting a definition. In
-    /// particular a low-probability invalid bonus must not make births flaky.
-    pub fn valid_for(self, class: ItemClass, equipment: Option<&EquipmentSpec>) -> bool {
-        let Some(gear) = equipment else {
-            return false;
-        };
-        if !self.valid() {
-            return false;
-        }
-        match self {
-            Self::Authored {
-                hit_enchantment,
-                damage_enchantment,
-            } => match gear.attack.as_ref() {
-                Some(attack) => attack
-                    .with_enchantment(hit_enchantment, damage_enchantment)
-                    .is_ok(),
-                None => hit_enchantment == 0 && damage_enchantment == 0,
-            },
-            Self::Weapon {
-                curse_percent,
-                enchant_percent,
-                maximum,
-                ..
-            } => {
-                class == ItemClass::Weapon
-                    && gear.attack.as_ref().is_some_and(|attack| {
-                        (curse_percent == 0
-                            || attack.with_enchantment(-(maximum as i32), 0).is_ok())
-                            && (enchant_percent == 0
-                                || attack.with_enchantment(maximum as i32, 0).is_ok())
-                    })
-            }
-            Self::Armor {
-                enchant_percent,
-                maximum,
-                ..
-            } => {
-                class == ItemClass::Armor
-                    && gear.armor.is_some_and(|armor| {
-                        armor.valid()
-                            && (enchant_percent == 0
-                                || ItemCondition {
-                                    armor_enchantment: maximum,
-                                    ..Default::default()
-                                }
-                                .effective_armor(armor)
-                                .is_some())
-                    })
-            }
-        }
-    }
-
-    pub(crate) fn sample(
-        self,
-        class: ItemClass,
-        equipment: Option<&EquipmentSpec>,
-        rng: &mut u64,
-    ) -> Result<ItemCondition, GameError> {
-        if !self.valid_for(class, equipment) {
-            return Err(GameError::Rule(
-                crate::abilities::RuleError::InvalidDefinition,
-            ));
-        }
-        let (curse_percent, enchant_percent, minimum, maximum) = match self {
-            Self::Authored {
-                hit_enchantment,
-                damage_enchantment,
-            } => {
-                return Ok(ItemCondition {
-                    hit_enchantment,
-                    damage_enchantment,
-                    ..Default::default()
-                })
-            }
-            Self::Weapon {
-                curse_percent,
-                enchant_percent,
-                minimum,
-                maximum,
-            }
-            | Self::Armor {
-                curse_percent,
-                enchant_percent,
-                minimum,
-                maximum,
-            } => (curse_percent, enchant_percent, minimum, maximum),
-        };
-        let mut candidate = *rng;
-        let roll = crate::quantity::QuantityRange::new(1, 100)?.sample(&mut candidate)?;
-        let cursed = roll <= u64::from(curse_percent);
-        let enchanted = !cursed && roll <= u64::from(curse_percent) + u64::from(enchant_percent);
-        let mut condition = ItemCondition::default();
-        if cursed || enchanted {
-            let amount =
-                crate::quantity::QuantityRange::new(u64::from(minimum), u64::from(maximum))?
-                    .sample(&mut candidate)? as u32;
-            condition.cursed = cursed;
-            match self {
-                Self::Weapon { .. } => {
-                    condition.hit_enchantment = if cursed {
-                        -(amount as i32)
-                    } else {
-                        amount as i32
-                    }
-                }
-                Self::Armor { .. } if cursed => {
-                    // TOR adaptation: negative physical protection floors at zero;
-                    // curse remains independent even for zero-DR armor.
-                    condition.armor_penalty = amount.min(
-                        equipment
-                            .and_then(|gear| gear.armor)
-                            .expect("validated armor")
-                            .physical_reduction,
-                    );
-                }
-                Self::Armor { .. } => condition.armor_enchantment = amount,
-                Self::Authored { .. } => unreachable!("authored policy returned before sampling"),
-            }
-        }
-        *rng = candidate;
-        Ok(condition)
     }
 }

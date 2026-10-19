@@ -146,7 +146,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         text, _ = self.adventure()
         worn = next(row["item"] for row in interactions(initial)["inventory"] if row["equipped_slot"] == 1)
         spare = next(row["id"] for row in items(initial, "armor") if row["id"] != worn)
-        identify = next(row["id"] for row in items(initial, "scroll") if row["name"] == "indigo page")
+        self.assertTrue(any(row["name"] == "indigo page" for row in items(initial, "scroll")))
         enchant = next(row["id"] for row in items(initial, "scroll") if row["name"] == "silver page")
         def said(command, expected):
             # Paid identification can refresh its prompt independently. Wait for

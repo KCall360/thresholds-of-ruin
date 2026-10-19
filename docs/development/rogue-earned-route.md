@@ -27,6 +27,10 @@ evidence. Shared equipment condition, enchantment, curse and Psychic-category
 rules make this a new experiment input, with no claim of identical outcomes or a requalified pilot. The source
 receipt alone does not establish compiler validation, regenerated certificates
 or route acceptance. Current route CI must still qualify the adapted fixture.
+Certificate regeneration must select gameplay packages under `scenarios/` (and
+the explicit client menagerie), excluding source-only comparator snapshots.
+Validate comparators only in campaign copies: generated `index.json`,
+`validation.json`, and `.compiled` files violate their exact source closure.
 New campaigns have distinct source fingerprints and cannot resume an earlier
 pilot with changed inputs. This is experimental input, not a historical save reader.
 The arm name remains unchanged when the bundled package

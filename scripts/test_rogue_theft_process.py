@@ -4,7 +4,7 @@ The generated floor, finite stock, synthetic durable victim and neutral factions
 are authored fixture context. Production L/N/O species, purchases, AI and shared
 Filch rules are copied unchanged. This is not starter survival or balance data.
 The victim's harmless natural contact provokes normally. Its fixture-owned +32
-basic-melee flat bonus affects the equipped production mace's Impact primary,
+basic-melee flat bonus affects an explicitly mundane fixture mace's Impact primary,
 ending recovery on one successful hit before unrelated flee-chasing. The empty
 unarmed effect branch stays harmless. No runtime edits or seed search.
 
@@ -42,6 +42,7 @@ from status_condition_package import actor_creature, checkpoint, combat, observa
 
 GOLD = "rogue.gold"
 POTION = "rogue.restore_strength"
+MUNDANE_MACE = "fixture.mundane_mace"
 
 
 def theft_package(test, species):
@@ -63,7 +64,7 @@ def theft_package(test, species):
             "kind": "attribute", "attribute": attribute}, "value": value}}
           for attribute, value in (("strength", 20), ("speed", 10))],
         {"scope": "always", "op": {"kind": "add", "stat": {"kind": "health"}, "value": 500}},
-        # Mace minimum 2d4+1+32 = 35 exceeds unchanged L/N <=18 and O=12
+        # Mundane mace minimum 2d4+32 = 34 exceeds unchanged L/N <=18 and O=12
         # Health. A flat modifier cannot create effects in the empty unarmed
         # branch; the ordinary selected-weapon check still must succeed.
         {"scope": "always", "op": {"kind": "add", "stat": {
@@ -73,8 +74,8 @@ def theft_package(test, species):
           for defense in ("physical", "cognitive")]]
     manifest["creatures"] = {"species": {"fixture.theft_witness": victim}}
     character = copy.deepcopy(source["manifest"]["characters"][0])
-    character.update(anchor="dungeon/1/start", known_identities=[GOLD, "rogue.mace", "rogue.ring_mail"],
-                     loadout=[{"archetype": "rogue.mace", "quantity": 1},
+    character.update(anchor="dungeon/1/start", known_identities=[GOLD, MUNDANE_MACE, "rogue.ring_mail"],
+                     loadout=[{"archetype": MUNDANE_MACE, "quantity": 1},
                               {"archetype": "rogue.ring_mail", "quantity": 1},
                               {"archetype": GOLD, "quantity": 9 if species == "orc" else 2}])
     character["creature"].update(species="fixture.theft_witness", name="Authored theft witness",
@@ -103,6 +104,17 @@ def theft_package(test, species):
     (package / "catalog").mkdir(parents=True)
     for module in manifest["modules"]:
         shutil.copy2(PRODUCTION / module, package / module)
+    # The production starter mace now carries magical +1/+1 birth state and is
+    # correctly eligible for theft while unequipped. This mechanism witness
+    # needs mundane recovery gear while its empty natural contact provokes.
+    mundane = copy.deepcopy(source["items"]["rogue.mace"])
+    mundane.update(identity=MUNDANE_MACE, name="mundane witness mace",
+                   equipment_generation={"kind": "authored"})
+    fixture_module = "catalog/theft-fixture.toml"
+    manifest["modules"].append(fixture_module)
+    (package / fixture_module).write_text(toml_source(
+        {"namespace": "fixture", "items": {MUNDANE_MACE: mundane}}),
+        encoding="utf-8", newline="\n")
     shutil.copy2(PRODUCTION / "rules.toml", package / "rules.toml")
     (package / "scenario.toml").write_text(toml_source(manifest), encoding="utf-8", newline="\n")
     result = subprocess.run([test.bin / ("tor-scenario" + test.suffix), "validate", package],
@@ -295,6 +307,9 @@ class RogueTheftProcesses(ProcessTestCase):
                 server = self.server("--checkpoint-interval", 1, scenario=package, seed=42)
                 player, current = self.client()
                 self.assertFalse(current["state"]["wizard_game"])
+                weapon = next(row for row in observation(current)["inventory"]
+                              if row["class"] == "weapon")
+                weapon_id = weapon["id"]
                 receipts = self.private_receipts()
                 self.assertEqual(len(receipts), 1)
                 self.assertEqual(receipts[0]["scope"], "dungeon/1")
@@ -355,7 +370,9 @@ class RogueTheftProcesses(ProcessTestCase):
                     self.assertNotIn(POTION, transferred["actors"][str(actor)]["knowledge"])
                     self.assertNotIn(POTION, transferred["actors"]["1"]["knowledge"])
                     self.assertTrue(inventory(current, "ring mail"), "Mundane unequipped armor is ineligible")
-                    self.assertTrue(inventory(current, "mace"))
+                    self.assertTrue(any(row["id"] == weapon_id
+                                        for row in observation(current)["inventory"]),
+                                    "The exact mundane weapon must remain with its owner")
                 self.assertEqual(quantity(transferred, actor, identity), expected)
                 if species != "orc":
                     self.assert_vanished_at_transfer(player, start, before, species, stolen_name)
@@ -369,8 +386,9 @@ class RogueTheftProcesses(ProcessTestCase):
                 self.assertEqual(current["history"], before_restart["history"])
                 self.assertEqual(checkpoint(self, player), transferred)
                 self.assertEqual(self.private_receipts(), receipts, "Restore must not regenerate finite stock")
-                weapon = inventory(current, "mace")[0]
-                current = self.execute(player, {"type": "equip", "item": weapon["id"], "slot": 0})
+                self.assertTrue(any(row["id"] == weapon_id
+                                    for row in observation(current)["inventory"]))
+                current = self.execute(player, {"type": "equip", "item": weapon_id, "slot": 0})
                 for _ in range(12):
                     if self.target(current, species) is None:
                         break
