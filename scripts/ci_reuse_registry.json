@@ -33,7 +33,7 @@
       "immutable_names": [
         "SPECIES"
       ],
-      "skeleton": "4815d5f5d787304a2166c82fd513e1d7856a76723d15314e2f23b95dc7b032c5"
+      "skeleton": "79e013969ffc6f1e9360bb864df8f7c1076e69d8f1e44f7713a5b71803ca59f7"
     },
     "scripts/test_rogue_chill_process.py": {
       "methods": [
@@ -44,7 +44,7 @@
       ],
       "optional_imports": {},
       "immutable_names": [],
-      "skeleton": "8bed5113bee26cbe57d6c6b2ecd01fe3f7a518c8717dcbdaca7130e2728ce5fd"
+      "skeleton": "c2c19ed071c12078e90ca7e2175e4bb43b4fcd7fa7502c74245406b8b3642520"
     }
   },
   "owner_blobs": {

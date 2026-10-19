@@ -2172,6 +2172,15 @@ impl Game {
         Ok(())
     }
     pub(crate) fn activation_state_valid(&self) -> bool {
+        self.floor_activation
+            .as_ref()
+            .is_none_or(|state| state.plan.valid(self))
+            && self.activation_boundary_valid()
+    }
+
+    /// Validate every boundary-dependent condition. The caller must already
+    /// have validated this immutable plan against this game's Content.
+    pub(crate) fn activation_boundary_valid(&self) -> bool {
         if self
             .scenario_policy
             .selected_character
@@ -2182,8 +2191,7 @@ impl Game {
         let Some(state) = &self.floor_activation else {
             return true;
         };
-        if !state.plan.valid(self)
-            || self.scenario_policy.selected_character != Some(state.plan.protagonist)
+        if self.scenario_policy.selected_character != Some(state.plan.protagonist)
             || state.scopes.len() > MAX_SCOPES
             || state.floors.len() != state.order.len()
             || state.floors.len() > MAX_SCOPES

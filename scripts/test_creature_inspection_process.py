@@ -674,7 +674,8 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 record = next(record for record in records if record["ability"]["id"] == "fixture_focus_fear")
                 self.assertFalse((record["outcome"]["result"] == "applied"))
                 self.assertEqual(damage_total(record), 0)
-                self.assertEqual(record["charge"], {"resource": {"id": "focus", "name": "Focus"}, "start": 1, "resolution": 1})
+                self.assertEqual(record["charge"], {"stamina": None, "mana": None,
+                    "focus": {"resource": {"id": "focus", "name": "Focus"}, "start": 1, "resolution": 1}})
                 self.assertEqual(record["target_before"]["conditions"], [])
                 self.assertEqual(record["target_after"]["conditions"], [])
                 self.assertEqual(u64(record["target_after"]["health"]), u64(record["target_before"]["health"]))
@@ -1175,7 +1176,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         for entry in report["hit_dice"]:
             self.assertEqual(entry["point_pools"], [{"pool": {"id": "advancement", "name": "Advancement"},
                                                    "granted": 1, "spent": 1,
-                                                   "allowed": ["skill_rank", "talent"]}])
+                                                   "allowed": ["skill_rank", "talent", "expertise"]}])
         self.assertEqual(report["dormant_talents"], [])
         self.assertIsInstance(report["hit_dice"][0]["health_seed"], str)
         player, _ = self.client(observe=True)
@@ -1466,8 +1467,8 @@ class CreatureInspectionProcesses(ProcessTestCase):
             self.assertEqual(keen["amount_kind"], "fixed")
             self.assertEqual(keen["raw"], 3)
         paid = next(record for record in records if record["charge"] is not None)
-        self.assertEqual(paid["charge"], {"resource": {"id": "stamina", "name": "Stamina"},
-                                          "start": 1, "resolution": 1})
+        self.assertEqual(paid["charge"], {"mana": None, "focus": None,
+            "stamina": {"resource": {"id": "stamina", "name": "Stamina"}, "start": 1, "resolution": 1}})
         impact = next(trace_fields(step) for step in paid["trace"]["steps"]
                       if step["id"] == "damage.component" and trace_fields(step)["category"] == "impact")
         self.assertEqual(impact["raw"], 3)

@@ -108,6 +108,7 @@ fn checkpoint_population_pool_keeps_tick_and_identity_validation_per_boundary() 
             .unwrap(),
         game
     );
+    assert_eq!(context.population_plan_validation_count(), 1);
     for (field, value) in [
         ("tick", game.tick() - 1),
         ("next_actor_id", 2),
@@ -121,6 +122,7 @@ fn checkpoint_population_pool_keeps_tick_and_identity_validation_per_boundary() 
             Err(PersistError::Population),
             "{field}"
         );
+        assert_eq!(context.population_plan_validation_count(), 1);
     }
 }
 
@@ -210,4 +212,99 @@ fn checkpoint_without_population_omits_population_pool_and_reference() {
     let shared = serde_json::to_value(shared).unwrap();
     assert!(snapshot.get("floor_activation").is_none());
     assert!(shared.get("floor_activations").is_none());
+}
+
+#[test]
+fn checkpoint_population_plan_validation_is_once_per_decoded_pool_entry() {
+    use crate::checkpoint::{RestoreContext, SharedState, Snapshot};
+    let game = checkpoint_population_game();
+    let mut shared = SharedState::default();
+    let snapshots: Vec<_> = (0..8).map(|_| game.checkpoint(&mut shared)).collect();
+    let (snapshots, shared): (Vec<Snapshot>, SharedState) =
+        serde_json::from_value(serde_json::to_value((snapshots, shared)).unwrap()).unwrap();
+    let mut context = RestoreContext::new(&shared, game.content.clone());
+    for snapshot in snapshots {
+        assert_eq!(context.restore(snapshot).unwrap(), game);
+    }
+    assert_eq!(context.population_plan_validation_count(), 1);
+}
+
+#[test]
+fn checkpoint_population_plan_cache_never_trusts_another_pool_or_context() {
+    use crate::checkpoint::{PersistError, RestoreContext, SharedState};
+    let game = checkpoint_population_game();
+    let mut shared = SharedState::default();
+    let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
+    let mut encoded = serde_json::to_value(shared).unwrap();
+    let mut invalid = encoded["floor_activations"][0].clone();
+    // Preserve profile and recipe labels; only the other immutable definition
+    // is invalid. A successful sibling must never authorize this pool entry.
+    invalid["plan"]["profiles"]["baseline"]["stages"][1]["population"]["bands"][0]["choices"][0]
+        ["turn_ticks"] = serde_json::json!(0);
+    encoded["floor_activations"]
+        .as_array_mut()
+        .unwrap()
+        .push(invalid.clone());
+    let shared: SharedState = serde_json::from_value(encoded).unwrap();
+    let mut context = RestoreContext::new(&shared, game.content.clone());
+    assert_eq!(
+        context
+            .restore(serde_json::from_value(snapshot.clone()).unwrap())
+            .unwrap(),
+        game
+    );
+    let mut another = snapshot.clone();
+    another["floor_activation"] = serde_json::json!(1);
+    for _ in 0..2 {
+        assert_eq!(
+            context.restore(serde_json::from_value(another.clone()).unwrap()),
+            Err(PersistError::Population),
+        );
+    }
+    assert_eq!(context.population_plan_validation_count(), 3);
+
+    let mut fresh = RestoreContext::new(&shared, game.content.clone());
+    assert_eq!(
+        fresh
+            .restore(serde_json::from_value(snapshot.clone()).unwrap())
+            .unwrap(),
+        game
+    );
+    assert_eq!(fresh.population_plan_validation_count(), 1);
+
+    // The same numeric pool index in another decoded checkpoint has no trust
+    // relationship with the first context, even when Content is unchanged.
+    let mut encoded = serde_json::to_value(&shared).unwrap();
+    encoded["floor_activations"][0] = invalid;
+    let other_shared: SharedState = serde_json::from_value(encoded).unwrap();
+    let mut other_context = RestoreContext::new(&other_shared, game.content.clone());
+    assert_eq!(
+        other_context.restore(serde_json::from_value(snapshot).unwrap()),
+        Err(PersistError::Population),
+    );
+    assert_eq!(other_context.population_plan_validation_count(), 1);
+}
+
+#[test]
+fn checkpoint_population_cached_plan_still_checks_selected_character() {
+    use crate::checkpoint::{PersistError, RestoreContext, SharedState};
+    let game = checkpoint_population_game();
+    let mut shared = SharedState::default();
+    let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
+    let shared: SharedState =
+        serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
+    let mut context = RestoreContext::new(&shared, game.content.clone());
+    assert_eq!(
+        context
+            .restore(serde_json::from_value(snapshot.clone()).unwrap())
+            .unwrap(),
+        game
+    );
+    let mut invalid = snapshot;
+    invalid["scenario_policy"]["selected_character"] = serde_json::json!(2);
+    assert_eq!(
+        context.restore(serde_json::from_value(invalid).unwrap()),
+        Err(PersistError::Population),
+    );
+    assert_eq!(context.population_plan_validation_count(), 1);
 }

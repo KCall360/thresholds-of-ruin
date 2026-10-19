@@ -8,6 +8,7 @@ import json
 import shutil
 import sqlite3
 import unittest
+from unittest.mock import Mock, patch
 
 from process_harness import ProcessTestCase, non_graphical, resource
 from projectile_package import projectile_package
@@ -72,7 +73,12 @@ class ProjectileProcesses(ProcessTestCase):
         self.address = relay.address
         try:
             if native:
-                return self.window()
+                # --automation consumes stdin instead of native keyboard input.
+                window = self.launch("tor-client-ascii", [
+                    "--connect", self.address, "--report-frames"])
+                frame = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
+                self.assertTrue(frame["window_open"])
+                return window, frame
             return self.adventure() if adventure else self.text_client()
         finally:
             self.address = upstream
@@ -330,6 +336,39 @@ class ProjectileProcesses(ProcessTestCase):
         self.assertEqual(item(launched, "shortbow")["id"], item(initial, "shortbow")["id"])
         self.assertFalse(any(row["item"]["name"] == "arrow" for row in view(launched)["ground_items"]))
         self.assertEqual(len(self.admissions("rogue.launch")), 1)
+
+
+class ProjectileCaptureLaunch(unittest.TestCase):
+    """Launch wiring checks do not start a server or a native window."""
+
+    def test_native_capture_keeps_os_input_and_relayed_frame_reports(self):
+        harness = ProjectileProcesses()
+        harness.address = "127.0.0.1:41001"
+        window = object()
+        initial = {"state": {"observation": {}}, "busy": False, "window_open": True}
+        relay = Mock(address="127.0.0.1:41002")
+
+        def presented(client, predicate):
+            self.assertIs(client, window)
+            self.assertFalse(predicate({**initial, "state": None}))
+            self.assertFalse(predicate({**initial, "busy": True}))
+            self.assertTrue(predicate(initial))
+            return initial
+
+        with patch(f"{__name__}.StreamRelay", return_value=relay) as capture, \
+                patch.object(harness, "launch", return_value=window) as launch, \
+                patch.object(harness, "ascii_frame", side_effect=presented):
+            self.addCleanup(harness.doCleanups)
+            self.assertEqual(harness.capture_client(native=True), (window, initial))
+        launch.assert_called_once_with("tor-client-ascii", [
+            "--connect", relay.address, "--report-frames"])
+        self.assertEqual(harness.address, "127.0.0.1:41001")
+        self.assertEqual(capture.call_args.args, (harness.address,))
+        message = {"type": "projectile_choices"}
+        capture.call_args.kwargs["on_server_message"](message)
+        self.assertEqual(harness.replies, [message])
+        harness.doCleanups()
+        relay.close.assert_called_once_with()
 
 
 if __name__ == "__main__":

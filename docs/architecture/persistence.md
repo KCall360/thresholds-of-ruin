@@ -410,7 +410,11 @@ Games without population omit both the reference and the empty table. The
 current reader expects pooled references.
 
 Restored population states share the decoded immutable stores with copy-on-write
-isolation. Every boundary still validates receipts against its own tick and actor
+isolation. A restore context validates the immutable population plan once per
+referenced decoded pool entry against its fixed content catalog. Only successful
+validation is reused, and no validation cache survives the context or enters the
+save. The same numeric index in another decoded pool establishes no trust.
+Every boundary still validates receipts against its own tick and actor
 and item identity ceilings; shared storage does not cache those checks across
 boundaries. Invalid references and malformed referenced states fail closed.
 Decoding does not require unique or referenced-only pool rows; semantic audits
