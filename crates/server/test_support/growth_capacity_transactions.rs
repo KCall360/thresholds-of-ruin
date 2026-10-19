@@ -31,8 +31,11 @@ pub(crate) fn scenario() -> Scenario {
 fn ability(id: &str, target: u64) -> Action {
     Action::UseAbility {
         id: tor_simulation::content_ids::AbilityId::new(id).unwrap(),
-        invocation: crate::journal::AbilityInvocation::ActorTarget {
-            target: SimActor(target),
+        invocation: crate::journal::AbilityInvocation {
+            aim: crate::journal::AbilityAim::ActorTarget {
+                target: SimActor(target),
+            },
+            weapon: crate::journal::WeaponSelection::Default,
         },
         supplies: Default::default(),
     }

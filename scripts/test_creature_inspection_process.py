@@ -168,7 +168,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                               if actor["name"] == "Sequence sentinel")
                 self._private_report(wizard, "combat capture on")
-                preparing = self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"kind": "actor_target", "target": target}})
+                preparing = self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
                 self.assertIsNone(preparing["error"])
                 self.assertTrue(preparing["state"]["observation"]["combat"]["preparation_active"])
                 self._outgoing_policy_peer_wait(peer, preparing)
@@ -567,7 +567,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.frame(player, completed)
                 report = self._private_report(wizard, "creature inspect 1", "creature_inspection")
                 self.assertEqual([entry["condition"]["id"] for entry in report["conditions"]], [token])
-                started = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
+                started = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
                 self.assertIsNone(started["error"])
                 self.assertTrue(started["state"]["observation"]["combat"]["preparation_active"])
                 identity = started["intentions"][0]["intention"]
@@ -600,7 +600,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                                  preparing["state"]["observation"]["tick"])
                 self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
                 self.frame(player, completed)
-                preparing = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
+                preparing = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
                 self.assertIsNone(preparing["error"])
                 self.assertTrue(preparing["state"]["observation"]["combat"]["preparation_active"])
                 peer_ready = self.request(peer, {"type": "snapshot"})
@@ -657,7 +657,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 query("combat capture on")
                 target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                               if actor["name"] == "practice target")
-                started = self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"kind": "actor_target", "target": target}})
+                started = self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
                 self.assertIsNone(started["error"])
                 self.assertEqual(resource(started, "focus")["balance"],
                                  resource(initial, "focus")["balance"] - 1)
@@ -719,7 +719,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         query("combat capture on")
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
-        started = self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"kind": "actor_target", "target": target}})
+        started = self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         self.assertIsNone(started["error"])
         completed = self.frame(player, lambda frame: frame.get("state") is not None
                                and frame["state"]["observation"]["ready"]
@@ -796,7 +796,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
         for _ in range(2):
-            started = self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"kind": "actor_target", "target": target}})
+            started = self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
             self.assertIsNone(started["error"])
             self.frame(player, lambda frame: frame.get("state") is not None
                        and frame["state"]["observation"]["ready"]
@@ -872,7 +872,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self._private_report(wizard, "combat capture on")
                 target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                               if actor["name"] == "practice target")
-                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})["error"])
+                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})["error"])
                 self.frame(player, lambda frame: frame.get("state") is not None
                            and frame["state"]["observation"]["ready"]
                            and int(frame["state"]["observation"]["tick"]) > 0
@@ -951,7 +951,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 snapshot = self.request(player, {"type": "snapshot"})
                 target = next(actor["id"] for actor in snapshot["state"]["observation"]["visible_actors"]
                               if actor["name"] == "practice target")
-                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"kind": "actor_target", "target": target}})["error"])
+                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})["error"])
                 self.frame(player, lambda frame: frame.get("state") is not None
                            and frame["state"]["observation"]["ready"]
                            and int(frame["state"]["observation"]["tick"]) > 0
@@ -1067,7 +1067,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                     self._private_report(wizard, "combat capture on")
                     target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                                   if actor["name"] == "practice target")
-                    started = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
+                    started = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
                     self.assertIsNone(started["error"])
                     self.frame(player, lambda frame: frame.get("state") is not None
                                and frame["state"]["observation"]["ready"]

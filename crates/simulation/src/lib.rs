@@ -12,8 +12,11 @@ pub mod arena;
 pub mod content_ids;
 mod creature_melee;
 mod creature_time;
+pub mod equipment_capacity;
+pub mod expertise;
 mod lifecycle;
 pub mod linked_hold;
+pub mod weapon_profiles;
 pub use linked_hold::HoldId;
 pub mod escape;
 pub mod limits;
@@ -153,6 +156,10 @@ pub enum Action {
         replacement: player_respec::ReplacementOperation,
         supplies: supplies::SupplySelection,
     },
+    ChooseIntellectExpertise {
+        basis: player_advancement::AdvancementBasis,
+        choice: player_advancement::IntellectExpertiseOperation,
+    },
     Purchase {
         basis: player_advancement::AdvancementBasis,
         purchase: player_advancement::PurchaseOperation,
@@ -231,6 +238,10 @@ impl<'de> serde::Deserialize<'de> for Action {
                 replacement: player_respec::ReplacementOperation,
                 supplies: supplies::SupplySelection,
             },
+            ChooseIntellectExpertise {
+                basis: player_advancement::AdvancementBasis,
+                choice: player_advancement::IntellectExpertiseOperation,
+            },
             Purchase {
                 basis: player_advancement::AdvancementBasis,
                 purchase: player_advancement::PurchaseOperation,
@@ -299,6 +310,9 @@ impl<'de> serde::Deserialize<'de> for Action {
                 replacement,
                 supplies,
             },
+            Fields::ChooseIntellectExpertise { basis, choice } => {
+                Self::ChooseIntellectExpertise { basis, choice }
+            }
             Fields::Purchase { basis, purchase } => Self::Purchase { basis, purchase },
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
@@ -378,6 +392,10 @@ pub enum OutcomeKind {
     RespecStarted {
         basis: player_advancement::AdvancementBasis,
         replacement: player_respec::ReplacementOperation,
+    },
+    IntellectExpertiseChosen {
+        basis: player_advancement::AdvancementBasis,
+        choice: player_advancement::IntellectExpertiseOperation,
     },
     Purchased {
         basis: player_advancement::AdvancementBasis,

@@ -108,7 +108,7 @@ class GrowthFailureProcesses(ProcessTestCase):
         target = next(row["id"] for row in before["state"]["observation"]["visible_actors"]
                       if row["name"] == "practice target")
         action = {"type": "use_ability", "id": "fixture_growth_finisher",
-                  "invocation": {"kind": "actor_target", "target": target}, "supplies": {"kind": "carried"}}
+                  "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}}
         return server, player, before, saved, action
 
     def saved_records(self, player):

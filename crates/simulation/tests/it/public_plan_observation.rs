@@ -130,9 +130,7 @@ fn observe_preparing(
         observer,
         Action::UseAbility {
             id: super::abilities::id("fixture_public_plan_read"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: subject,
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(subject),
             supplies: Default::default(),
         },
         tor_simulation::IntentionOrigin::Human,
@@ -143,9 +141,7 @@ fn observe_preparing(
         subject,
         Action::UseAbility {
             id: super::abilities::id("slow_plan"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: observer,
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(observer),
             supplies: Default::default(),
         },
     )
@@ -291,7 +287,7 @@ fn ability_preparation_captures_a_visible_public_aim_once() {
         actor,
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
     )
@@ -789,7 +785,7 @@ fn public_plan_review_forged_pending_participation_fails_authored_and_natural_re
             actor,
             Action::UseAbility {
                 id: super::abilities::id(ability),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             tor_simulation::IntentionOrigin::Human,

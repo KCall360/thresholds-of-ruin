@@ -131,6 +131,7 @@ fn public_equipment_death_publishes_own_feedback_before_reopen() {
     let mut item = crate::ItemSpec::ordinary("frail ring".into());
     item.class = crate::ItemClass::Ring;
     item.equipment = Some(crate::EquipmentSpec {
+        weapon_profile: None,
         armor: None,
         slot: crate::EquipmentSlot::new("ring").unwrap(),
         attack: None,

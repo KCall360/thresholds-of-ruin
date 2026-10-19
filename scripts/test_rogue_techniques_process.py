@@ -164,7 +164,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
             attempts += 1
             before, start = current, len(player.transcript)
             current = self.act_settled(player, {"type": "use_ability", "id": identity,
-                "invocation": {"kind": "actor_target", "target": target["id"]}})
+                "invocation": {"aim": {"kind": "actor_target", "target": target["id"]}, "weapon": {"kind": "default"}}})
             events = list(resolved_events(disclosed_frames(player, start), before,
                                           identity, target["id"]))
             self.assertTrue(events, f"No disclosed resolved {identity} against {target['name']}")
@@ -206,7 +206,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
                 before, contact_start = current, len(player.transcript)
                 current = self.act_settled(player, action)
                 if action["type"] == "use_ability":
-                    target = action["invocation"]["target"]
+                    target = action["invocation"]["aim"]["target"]
                     events = list(resolved_events(disclosed_frames(player, contact_start),
                                                   before, "basic_melee", target))
                     self.assertTrue(events, "Provocation requires a disclosed resolved strike")
@@ -228,7 +228,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
         self.assertEqual(bandages(before), 3)
         self.assertEqual(int(ability(before, "bind_wounds")["cooldown_remaining"]), 0)
         care = {"type": "use_ability", "id": "bind_wounds",
-                "invocation": {"kind": "actor_target", "target": target},
+                "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}},
                 "supplies": {"kind": "carried"}}
         current = self.act_settled(player, care)
         frames = list(disclosed_frames(player, start))

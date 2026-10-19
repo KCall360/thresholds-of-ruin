@@ -332,7 +332,7 @@ class TextCombatBoundaryProcesses(ProcessTestCase):
             target = next(actor["id"] for actor in observation(initial)["visible_actors"]
                           if actor["name"] == "trainee")
             action = {"type": "use_ability", "id": "fixture_boundary_wound",
-                      "invocation": {"kind": "actor_target", "target": target},
+                      "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}},
                       "supplies": {"kind": "carried"}}
         # Admission queues genuine work behind the owner at tick zero. Do not
         # wait for execution before the Text client submits its first action.

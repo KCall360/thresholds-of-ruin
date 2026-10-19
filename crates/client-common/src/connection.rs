@@ -685,6 +685,7 @@ impl Connection {
                             | ServerMessage::CreatureInspection { .. }
                             | ServerMessage::CreatureStrikePage { .. }
                             | ServerMessage::AdvancementPage { .. }
+                            | ServerMessage::AbilityWeaponPreview { .. }
                             | ServerMessage::CombatDiagnostics { .. }
                     )
                 {

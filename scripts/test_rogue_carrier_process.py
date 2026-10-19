@@ -145,7 +145,7 @@ class RogueCarrierProcesses(ProcessTestCase):
             self.assertEqual(target["id"], target_id)
             start = len(player.transcript)
             current = self.execute(player, {"type": "use_ability", "id": "basic_melee",
-                "invocation": {"kind": "actor_target", "target": target_id}})
+                "invocation": {"aim": {"kind": "actor_target", "target": target_id}, "weapon": {"kind": "default"}}})
         for _ in range(8):
             if self.observed_sequence(player, start, target_id, strikes, ability=ability):
                 break
@@ -162,7 +162,7 @@ class RogueCarrierProcesses(ProcessTestCase):
             if target is None:
                 break
             current = self.execute(player, {"type": "use_ability", "id": "basic_melee",
-                "invocation": {"kind": "actor_target", "target": target["id"]}})
+                "invocation": {"aim": {"kind": "actor_target", "target": target["id"]}, "weapon": {"kind": "default"}}})
         else:
             self.fail("Carrier survived 24 ordinary finishing attacks")
         killed = checkpoint(self, player)

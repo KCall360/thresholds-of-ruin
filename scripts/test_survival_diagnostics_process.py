@@ -131,7 +131,7 @@ class SurvivalDiagnosticsProcesses(ProcessTestCase):
         self.assertEqual(rows[0]["selected_actor"], 1)
         for pool in ("stamina", "focus", "mana"):
             paid = self.act(player, {"type": "use_ability", "id": "fixture_spend_" + pool,
-                                    "invocation": {"kind": "actor_target", "target": initial["state"]["observation"]["self_target"]}})
+                                    "invocation": {"aim": {"kind": "actor_target", "target": initial["state"]["observation"]["self_target"]}, "weapon": {"kind": "default"}}})
             self.assertIsNone(paid["error"])
             self.assertIsNone(self.act(player, {"type": "wait"})["error"])
         rows = self.barrier(player, log)
@@ -147,7 +147,7 @@ class SurvivalDiagnosticsProcesses(ProcessTestCase):
         for _ in range(3):
             self.request(player, {"type": "snapshot"})
         failed = self.act(player, {"type": "use_ability", "id": "fixture_missing",
-                                  "invocation": {"kind": "actor_target", "target": initial["state"]["observation"]["self_target"]}})
+                                  "invocation": {"aim": {"kind": "actor_target", "target": initial["state"]["observation"]["self_target"]}, "weapon": {"kind": "default"}}})
         self.assertIsNotNone(failed["error"])
         after_queries = self.barrier(player, log)
         self.assertEqual([row for row in after_queries if row.get("event") == "survival.commit"], commits)

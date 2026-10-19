@@ -73,6 +73,13 @@ pub(crate) enum Action {
         #[serde(with = "advancement::growth_source")]
         source: tor_simulation::earned_growth::GrowthSource,
     },
+    #[serde(deserialize_with = "advancement::read_intellect_expertise")]
+    ChooseIntellectExpertise {
+        #[serde(with = "advancement::basis")]
+        basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
+        #[serde(with = "advancement::intellect_expertise")]
+        choice: tor_simulation::player_advancement::IntellectExpertiseOperation,
+    },
     #[serde(deserialize_with = "advancement::read_purchase")]
     Purchase {
         #[serde(with = "advancement::basis")]
@@ -387,6 +394,10 @@ impl From<&crate::actions::Action> for Action {
                 basis: basis.clone(),
                 source: source.clone(),
             },
+            Backend::ChooseIntellectExpertise { basis, choice } => Self::ChooseIntellectExpertise {
+                basis: basis.clone(),
+                choice: choice.clone(),
+            },
             Backend::Purchase { basis, purchase } => Self::Purchase {
                 basis: basis.clone(),
                 purchase: purchase.clone(),
@@ -454,6 +465,9 @@ impl From<Action> for crate::actions::Action {
             Action::Escape { hold } => Self::Escape { hold },
             Action::ChooseGrowthSource { basis, source } => {
                 Self::ChooseGrowthSource { basis, source }
+            }
+            Action::ChooseIntellectExpertise { basis, choice } => {
+                Self::ChooseIntellectExpertise { basis, choice }
             }
             Action::Purchase { basis, purchase } => Self::Purchase { basis, purchase },
             Action::Respec {
@@ -651,6 +665,163 @@ pub(crate) mod shared_revisions {
     }
 }
 
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AbilityInvocation {
+    aim: AbilityAim,
+    weapon: WeaponSelection,
+}
+impl<'de> Deserialize<'de> for AbilityInvocation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            aim: AbilityAim,
+            weapon: WeaponSelection,
+        }
+        let Fields { aim, weapon } = named_map(deserializer)?;
+        Ok(Self { aim, weapon })
+    }
+}
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum WeaponSelection {
+    Default,
+    Equipped { item: u64, socket: u16 },
+}
+impl<'de> Deserialize<'de> for WeaponSelection {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Default {},
+            Equipped { item: u64, socket: u16 },
+        }
+        Ok(match named_map(deserializer)? {
+            Fields::Default {} => Self::Default,
+            Fields::Equipped { item, socket } => {
+                if usize::from(socket) >= tor_simulation::limits::EQUIPMENT_SOCKETS
+                    || item == 0
+                    || item == u64::MAX
+                {
+                    return Err(serde::de::Error::custom(
+                        "invalid equipped weapon selection",
+                    ));
+                }
+                Self::Equipped { item, socket }
+            }
+        })
+    }
+}
+impl From<crate::actions::AbilityInvocation> for AbilityInvocation {
+    fn from(value: crate::actions::AbilityInvocation) -> Self {
+        Self {
+            aim: value.aim.into(),
+            weapon: match value.weapon {
+                crate::actions::WeaponSelection::Default => WeaponSelection::Default,
+                crate::actions::WeaponSelection::Equipped { item, socket } => {
+                    WeaponSelection::Equipped { item, socket }
+                }
+            },
+        }
+    }
+}
+impl From<AbilityInvocation> for crate::actions::AbilityInvocation {
+    fn from(value: AbilityInvocation) -> Self {
+        Self {
+            aim: value.aim.into(),
+            weapon: match value.weapon {
+                WeaponSelection::Default => crate::actions::WeaponSelection::Default,
+                WeaponSelection::Equipped { item, socket } => {
+                    crate::actions::WeaponSelection::Equipped { item, socket }
+                }
+            },
+        }
+    }
+}
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum AbilityAim {
+    ActorTarget { target: u64 },
+    ContactTarget { target: u64 },
+    SelfStep { direction: Direction },
+    DirectionalRay { direction: Direction },
+}
+impl<'de> Deserialize<'de> for AbilityAim {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Unit-enum deserialization alone also accepts an externally tagged
+        // object. Selected directions are the documented string token only.
+        fn direction_token<'de, D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Direction, D::Error> {
+            let token = String::deserialize(deserializer)?;
+            <Direction as Deserialize>::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(token),
+            )
+        }
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            ActorTarget {
+                target: u64,
+            },
+            ContactTarget {
+                target: u64,
+            },
+            SelfStep {
+                #[serde(deserialize_with = "direction_token")]
+                direction: Direction,
+            },
+            DirectionalRay {
+                #[serde(deserialize_with = "direction_token")]
+                direction: Direction,
+            },
+        }
+        Ok(match named_map(deserializer)? {
+            Fields::ActorTarget { target } => Self::ActorTarget { target },
+            Fields::ContactTarget { target } => Self::ContactTarget { target },
+            Fields::SelfStep { direction } => Self::SelfStep { direction },
+            Fields::DirectionalRay { direction } => Self::DirectionalRay { direction },
+        })
+    }
+}
+impl From<crate::actions::AbilityAim> for AbilityAim {
+    fn from(value: crate::actions::AbilityAim) -> Self {
+        match value {
+            crate::actions::AbilityAim::ActorTarget { target } => {
+                Self::ActorTarget { target: target.0 }
+            }
+            crate::actions::AbilityAim::ContactTarget { target } => {
+                Self::ContactTarget { target: target.0 }
+            }
+            crate::actions::AbilityAim::SelfStep { direction } => Self::SelfStep {
+                direction: direction.into(),
+            },
+            crate::actions::AbilityAim::DirectionalRay { direction } => Self::DirectionalRay {
+                direction: direction.into(),
+            },
+        }
+    }
+}
+impl From<AbilityAim> for crate::actions::AbilityAim {
+    fn from(value: AbilityAim) -> Self {
+        match value {
+            AbilityAim::ActorTarget { target } => Self::ActorTarget {
+                target: tor_simulation::ActorId(target),
+            },
+            AbilityAim::ContactTarget { target } => Self::ContactTarget {
+                target: tor_simulation::ActorId(target),
+            },
+            AbilityAim::SelfStep { direction } => Self::SelfStep {
+                direction: direction.into(),
+            },
+            AbilityAim::DirectionalRay { direction } => Self::DirectionalRay {
+                direction: direction.into(),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -765,7 +936,7 @@ mod tests {
             "down",
         ] {
             let value = format!(
-                r#"{{"action":{{"type":"use_ability","id":"fixture_ray","invocation":{{"kind":"directional_ray","direction":"{direction}"}},"supplies":{{"kind":"carried"}}}}}}"#
+                r#"{{"action":{{"type":"use_ability","id":"fixture_ray","invocation":{{"aim":{{"kind":"directional_ray","direction":"{direction}"}},"weapon":{{"kind":"default"}}}},"supplies":{{"kind":"carried"}}}}}}"#
             );
             check_stored::<Stored>(&value);
             for extra in [
@@ -783,7 +954,6 @@ mod tests {
     }
     #[test]
     fn saved_invocations_keep_each_direction_and_numeric_actor_independently_of_wire() {
-        use crate::actions::AbilityInvocation;
         let id = tor_simulation::content_ids::AbilityId::new("arbitrary_authored_name").unwrap();
         for (direction, spelling) in [
             (Direction::North, "north"),
@@ -800,7 +970,10 @@ mod tests {
             let value = Stored {
                 action: Action::UseAbility {
                     id: id.clone(),
-                    invocation: AbilityInvocation::SelfStep { direction },
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::SelfStep { direction },
+                        weapon: crate::actions::WeaponSelection::Default,
+                    },
                     supplies: Default::default(),
                 },
             };
@@ -808,7 +981,7 @@ mod tests {
             assert_eq!(
                 encoded,
                 format!(
-                    r#"{{"action":{{"type":"use_ability","id":"arbitrary_authored_name","invocation":{{"kind":"self_step","direction":"{spelling}"}},"supplies":{{"kind":"carried"}}}}}}"#
+                    r#"{{"action":{{"type":"use_ability","id":"arbitrary_authored_name","invocation":{{"aim":{{"kind":"self_step","direction":"{spelling}"}},"weapon":{{"kind":"default"}}}},"supplies":{{"kind":"carried"}}}}}}"#
                 )
             );
             assert_eq!(
@@ -820,15 +993,18 @@ mod tests {
             let value = Stored {
                 action: Action::UseAbility {
                     id: id.clone(),
-                    invocation: AbilityInvocation::ActorTarget {
-                        target: ActorId(target),
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: ActorId(target),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },
             };
             let encoded = serde_json::to_string(&value).unwrap();
             assert!(encoded.contains(&format!(
-                r#""invocation":{{"kind":"actor_target","target":{target}}}"#
+                r#""invocation":{{"aim":{{"kind":"actor_target","target":{target}}},"weapon":{{"kind":"default"}}}}"#
             )));
             assert_eq!(
                 crate::storage::codec::strict::<Stored>(encoded.as_bytes()).unwrap(),
@@ -841,20 +1017,20 @@ mod tests {
     fn saved_invocations_reject_legacy_positional_duplicate_and_cross_variant_operands() {
         for invocation in [
             r#"["self_step","north"]"#,
-            r#"{"kind":"self_step"}"#,
-            r#"{"kind":"self_step","direction":"north_up"}"#,
-            r#"{"kind":"self_step","direction":{"north":null}}"#,
-            r#"{"kind":"self_step","direction":["north"]}"#,
-            r#"{"kind":"self_step","direction":null}"#,
-            r#"{"kind":"self_step","direction":0}"#,
-            r#"{"kind":"self_step","direction":"north","direction":"south"}"#,
-            r#"{"kind":"self_step","kind":"actor_target","direction":"north"}"#,
-            r#"{"kind":"self_step","direction":"north","target":2}"#,
-            r#"{"kind":"actor_target","target":2,"direction":"north"}"#,
-            r#"{"kind":"actor_target","target":"2"}"#,
-            r#"{"kind":"actor_target","target":2,"target":3}"#,
-            r#"{"kind":"actor_target","target":{"type":"self_actor"}}"#,
-            r#"{"kind":"self_step","direction":"north","destination":{"region":1,"position":{"x":1,"y":2,"z":0}}}"#,
+            r#"{"aim":{"kind":"self_step"},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"self_step","direction":"north_up"},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"self_step","direction":{"north":null}},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"self_step","direction":["north"]},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"self_step","direction":null},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"self_step","direction":0},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"self_step","direction":"north","direction":"south"},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"self_step","kind":"actor_target","direction":"north"},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"self_step","direction":"north","target":2},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"actor_target","target":2,"direction":"north"},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"actor_target","target":"2"},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"actor_target","target":2,"target":3},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"actor_target","target":{"type":"self_actor"}},"weapon":{"kind":"default"}}"#,
+            r#"{"aim":{"kind":"self_step","direction":"north","destination":{"region":1,"position":{"x":1,"y":2,"z":0}}},"weapon":{"kind":"default"}}"#,
         ] {
             let encoded = format!(
                 r#"{{"action":{{"type":"use_ability","id":"arbitrary_authored_name","invocation":{invocation},"supplies":{{"kind":"carried"}}}}}}"#
@@ -866,7 +1042,7 @@ mod tests {
         }
         for encoded in [
             r#"{"action":{"type":"use_ability","id":"arbitrary_authored_name","target":2,"supplies":{"kind":"carried"}}}"#,
-            r#"{"action":{"type":"use_ability","id":"arbitrary_authored_name","invocation":{"kind":"self_step","direction":"north"},"invocation":{"kind":"self_step","direction":"south"},"supplies":{"kind":"carried"}}}"#,
+            r#"{"action":{"type":"use_ability","id":"arbitrary_authored_name","invocation":{"aim":{"kind":"self_step","direction":"north"},"weapon":{"kind":"default"}},"invocation":{"aim":{"kind":"self_step","direction":"south"},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}}"#,
         ] {
             assert!(crate::storage::codec::strict::<Stored>(encoded.as_bytes()).is_err());
         }
@@ -896,12 +1072,15 @@ mod tests {
             (
                 Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::actions::AbilityInvocation::ActorTarget {
-                        target: ActorId(u64::MAX),
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: ActorId(u64::MAX),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },
-                r#"{"type":"use_ability","id":"basic_melee","invocation":{"kind":"actor_target","target":18446744073709551615},"supplies":{"kind":"carried"}}"#,
+                r#"{"type":"use_ability","id":"basic_melee","invocation":{"aim":{"kind":"actor_target","target":18446744073709551615},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}"#,
             ),
             (
                 Action::SetDoor {
@@ -971,8 +1150,11 @@ mod tests {
             let value = Stored {
                 action: crate::actions::Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new(name).unwrap(),
-                    invocation: crate::actions::AbilityInvocation::ActorTarget {
-                        target: tor_simulation::ActorId(u64::MAX),
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: tor_simulation::ActorId(u64::MAX),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },
@@ -987,7 +1169,7 @@ mod tests {
     }
     #[test]
     fn phase5_saved_selection_uses_required_bounded_numeric_source_rows() {
-        let original = serde_json::json!({"action":{"type":"use_ability","id":"bind_wounds","invocation":{"kind":"actor_target","target":1},
+        let original = serde_json::json!({"action":{"type":"use_ability","id":"bind_wounds","invocation":{"aim":{"kind":"actor_target","target":1},"weapon":{"kind":"default"}},
             "supplies":{"kind":"explicit","items":[{"cost_ordinal":0,"item":10}]}}});
         let decoded: Stored = serde_json::from_value(original.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), original);
@@ -1057,12 +1239,12 @@ mod tests {
                 "tick": 18446744073709551615,
                 "author": {"type":"user", "user":"owner"}, "audience":"actor",
                 "content": {"type":"intention_admitted", "intention":1,
-                    "action":{"type":"use_ability", "id":"basic_melee", "invocation":{"kind":"actor_target","target":18446744073709551615},"supplies":{"kind":"carried"}}}
+                    "action":{"type":"use_ability", "id":"basic_melee", "invocation":{"aim":{"kind":"actor_target","target":18446744073709551615},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}}
             },
             "receipt": {"user":"owner", "frontend":"test", "request_id":"request",
                 "actor":18446744073709551615, "branch":"branch",
                 "command":{"type":"admit_intention", "expected_revision":18446744073709551615,
-                    "action":{"type":"use_ability", "id":"basic_melee", "invocation":{"kind":"actor_target","target":18446744073709551615},"supplies":{"kind":"carried"}}}}
+                    "action":{"type":"use_ability", "id":"basic_melee", "invocation":{"aim":{"kind":"actor_target","target":18446744073709551615},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}}}
         }"#,
         );
         check_stored::<crate::journal::Command>(
@@ -1146,88 +1328,77 @@ mod tests {
             ));
         }
     }
-}
-#[derive(Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum AbilityInvocation {
-    ActorTarget { target: u64 },
-    ContactTarget { target: u64 },
-    SelfStep { direction: Direction },
-    DirectionalRay { direction: Direction },
-}
-impl<'de> Deserialize<'de> for AbilityInvocation {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        // Unit-enum deserialization alone also accepts an externally tagged
-        // object. Selected directions are the documented string token only.
-        fn direction_token<'de, D: serde::Deserializer<'de>>(
-            deserializer: D,
-        ) -> Result<Direction, D::Error> {
-            let token = String::deserialize(deserializer)?;
-            <Direction as Deserialize>::deserialize(
-                serde::de::value::StringDeserializer::<D::Error>::new(token),
-            )
+    #[test]
+    fn saved_weapon_selection_is_exact_numeric_named_and_independent_of_wire() {
+        use crate::actions as backend;
+        for (item, socket) in [(1, 0), (9_007_199_254_740_993, 63), (u64::MAX - 1, 1)] {
+            let stored = Stored {
+                action: backend::Action::UseAbility {
+                    id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
+                    invocation: backend::AbilityInvocation {
+                        aim: backend::AbilityAim::ContactTarget { target: ActorId(2) },
+                        weapon: backend::WeaponSelection::Equipped { item, socket },
+                    },
+                    supplies: Default::default(),
+                },
+            };
+            let value = serde_json::to_value(&stored).unwrap();
+            assert_eq!(
+                value["action"]["invocation"],
+                serde_json::json!({
+                    "aim":{"kind":"contact_target","target":2},
+                    "weapon":{"kind":"equipped","item":item,"socket":socket}
+                })
+            );
+            assert_eq!(
+                crate::storage::codec::strict::<Stored>(&serde_json::to_vec(&value).unwrap())
+                    .unwrap(),
+                stored
+            );
         }
-        #[derive(Deserialize)]
-        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-        enum Fields {
-            ActorTarget {
-                target: u64,
-            },
-            ContactTarget {
-                target: u64,
-            },
-            SelfStep {
-                #[serde(deserialize_with = "direction_token")]
-                direction: Direction,
-            },
-            DirectionalRay {
-                #[serde(deserialize_with = "direction_token")]
-                direction: Direction,
-            },
+        let aim = r#"{"kind":"actor_target","target":2}"#;
+        for weapon in [
+            r#""default""#,
+            r#"["equipped",7,0]"#,
+            r#"{"kind":"default","item":7}"#,
+            r#"{"kind":"default","socket":0}"#,
+            r#"{"kind":"equipped","item":7}"#,
+            r#"{"kind":"equipped","socket":0}"#,
+            r#"{"kind":"equipped","item":0,"socket":0}"#,
+            r#"{"kind":"equipped","item":18446744073709551615,"socket":0}"#,
+            r#"{"kind":"equipped","item":7,"socket":64}"#,
+            r#"{"kind":"equipped","item":7,"socket":-1}"#,
+            r#"{"kind":"equipped","item":7,"socket":0.0}"#,
+            r#"{"kind":"equipped","item":7,"socket":"0"}"#,
+            r#"{"kind":"equipped","item":"7","socket":0}"#,
+            r#"{"kind":"equipped","item":7,"socket":0,"target":2}"#,
+            r#"{"kind":"equipped","item":7,"item":8,"socket":0}"#,
+            r#"{"kind":"equipped","item":7,"socket":0,"socket":1}"#,
+            r#"{"kind":"equipped","kind":"default","item":7,"socket":0}"#,
+        ] {
+            let encoded = format!(r#"{{"aim":{aim},"weapon":{weapon}}}"#);
+            assert!(
+                crate::storage::codec::strict::<super::AbilityInvocation>(encoded.as_bytes())
+                    .is_err(),
+                "{encoded}"
+            );
         }
-        Ok(match named_map(deserializer)? {
-            Fields::ActorTarget { target } => Self::ActorTarget { target },
-            Fields::ContactTarget { target } => Self::ContactTarget { target },
-            Fields::SelfStep { direction } => Self::SelfStep { direction },
-            Fields::DirectionalRay { direction } => Self::DirectionalRay { direction },
-        })
-    }
-}
-impl From<crate::actions::AbilityInvocation> for AbilityInvocation {
-    fn from(value: crate::actions::AbilityInvocation) -> Self {
-        match value {
-            crate::actions::AbilityInvocation::ActorTarget { target } => {
-                Self::ActorTarget { target: target.0 }
-            }
-            crate::actions::AbilityInvocation::ContactTarget { target } => {
-                Self::ContactTarget { target: target.0 }
-            }
-            crate::actions::AbilityInvocation::SelfStep { direction } => Self::SelfStep {
-                direction: direction.into(),
-            },
-            crate::actions::AbilityInvocation::DirectionalRay { direction } => {
-                Self::DirectionalRay {
-                    direction: direction.into(),
-                }
-            }
-        }
-    }
-}
-impl From<AbilityInvocation> for crate::actions::AbilityInvocation {
-    fn from(value: AbilityInvocation) -> Self {
-        match value {
-            AbilityInvocation::ActorTarget { target } => Self::ActorTarget {
-                target: tor_simulation::ActorId(target),
-            },
-            AbilityInvocation::ContactTarget { target } => Self::ContactTarget {
-                target: tor_simulation::ActorId(target),
-            },
-            AbilityInvocation::SelfStep { direction } => Self::SelfStep {
-                direction: direction.into(),
-            },
-            AbilityInvocation::DirectionalRay { direction } => Self::DirectionalRay {
-                direction: direction.into(),
-            },
+        for encoded in [
+            format!(r#"{{"aim":{aim}}}"#),
+            r#"{"weapon":{"kind":"default"}}"#.into(),
+            format!(r#"{{"aim":{aim},"aim":{aim},"weapon":{{"kind":"default"}}}}"#),
+            format!(
+                r#"{{"aim":{aim},"weapon":{{"kind":"default"}},"weapon":{{"kind":"default"}}}}"#
+            ),
+            format!(r#"{{"aim":{aim},"weapon":{{"kind":"default"}},"kind":"actor_target"}}"#),
+            format!(r#"[{aim},{{"kind":"default"}}]"#),
+            aim.into(),
+        ] {
+            assert!(
+                crate::storage::codec::strict::<super::AbilityInvocation>(encoded.as_bytes())
+                    .is_err(),
+                "{encoded}"
+            );
         }
     }
 }

@@ -345,7 +345,7 @@ class RogueTheftProcesses(ProcessTestCase):
                 before = current
                 start = len(player.transcript)
                 current = self.execute(player, {"type": "use_ability", "id": "basic_melee",
-                    "invocation": {"kind": "actor_target", "target": target["id"]}})
+                    "invocation": {"aim": {"kind": "actor_target", "target": target["id"]}, "weapon": {"kind": "default"}}})
                 for _ in range(12):
                     if self.ability_seen(player, start, target["id"], signature) and (
                             species == "orc" or not inventory(current, stolen_name)):
@@ -394,7 +394,7 @@ class RogueTheftProcesses(ProcessTestCase):
                         break
                     current, target = self.approach(player, current, species)
                     current = self.execute(player, {"type": "use_ability", "id": "basic_melee",
-                        "invocation": {"kind": "actor_target", "target": target["id"]}})
+                        "invocation": {"aim": {"kind": "actor_target", "target": target["id"]}, "weapon": {"kind": "default"}}})
                 else:
                     self.fail("Ordinary equipped recovery did not defeat the thief within twelve attacks")
                 killed = checkpoint(self, player)

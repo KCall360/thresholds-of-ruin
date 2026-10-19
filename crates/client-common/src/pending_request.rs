@@ -57,6 +57,7 @@ impl PendingRequest {
             | ServerMessage::CreatureInspection { request_id, .. }
             | ServerMessage::CreatureStrikePage { request_id, .. }
             | ServerMessage::AdvancementPage { request_id, .. }
+            | ServerMessage::AbilityWeaponPreview { request_id, .. }
             | ServerMessage::MapPage { request_id, .. }
             | ServerMessage::CombatDiagnostics { request_id, .. } => request_id == &self.id,
             ServerMessage::Error {

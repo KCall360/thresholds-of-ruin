@@ -18,6 +18,7 @@ fn equipped(
             .into_iter()
             .enumerate()
             .map(|(index, (item, modifiers))| EquipmentSource {
+                weapon_profile: None,
                 item,
                 socket: tor_simulation::EquipmentSlotId(index as u16),
                 modifiers,
@@ -182,46 +183,70 @@ fn collision_damage_saturates_at_the_shared_injury_bound() {
 }
 
 #[test]
-fn multiple_weapon_sockets_select_the_highest_equipped_slot_once() {
+fn multiple_weapon_sockets_select_only_the_authored_primary() {
     use tor_simulation::{AnatomySpec, EquipmentSlot, EquipmentSlotId, Game, ItemClass, ItemSpec};
-    let mut species = super::creature_fixture::species();
-    species.anatomy = AnatomySpec {
-        slots: vec![
-            EquipmentSlot::new("weapon").unwrap(),
-            EquipmentSlot::new("weapon").unwrap(),
-        ],
-    };
-    let mut game = Game::two_room(
-        42,
-        super::creature_fixture::content_with(species.clone(), vec![]),
-    );
-    let at = tor_world::Location {
-        region: tor_world::RegionId(1),
-        position: tor_world::Position { x: 1, y: 1, z: 0 },
-    };
-    let actor = game
-        .spawn_actor(at, std::num::NonZeroU64::new(100).unwrap())
-        .unwrap();
-    super::creature_fixture::configure(&mut game, actor, "neutral", species);
-    let low = super::creature_fixture::melee(1, 40, DamageType::Keen, 3);
-    let high = super::creature_fixture::melee(2, 80, DamageType::Impact, 7);
-    for (id, slot, attack) in [(11, 1, high.clone()), (12, 0, low)] {
-        let mut item = ItemSpec::ordinary(format!("weapon {id}"));
-        item.class = ItemClass::Weapon;
-        item.equipment = Some(tor_simulation::EquipmentSpec {
-            armor: None,
-            slot: EquipmentSlot::new("weapon").unwrap(),
-            attack: Some(attack),
-            modifiers: vec![],
-        });
-        game.place_item_stack(id, at, Some(actor), 1, item).unwrap();
-        game.equip_authored(actor, ItemId(id), EquipmentSlotId(slot))
+    for has_primary in [true, false] {
+        let mut species = super::creature_fixture::species();
+        species.anatomy = AnatomySpec {
+            capacities: tor_simulation::equipment_capacity::EquipmentCapacities::new(
+                std::collections::BTreeMap::from([(
+                    tor_simulation::content_ids::EquipmentCapacityId::new("grip").unwrap(),
+                    2,
+                )]),
+            )
+            .unwrap(),
+            primary_attack_socket:
+                tor_simulation::equipment_capacity::PrimaryAttackSocket::Socket {
+                    slot: tor_simulation::EquipmentSlotId(0),
+                },
+            slots: vec![
+                EquipmentSlot::new("weapon").unwrap(),
+                EquipmentSlot::new("weapon").unwrap(),
+            ],
+        };
+        if !has_primary {
+            species.anatomy.primary_attack_socket =
+                tor_simulation::equipment_capacity::PrimaryAttackSocket::None;
+        }
+        let mut game = Game::two_room(
+            42,
+            super::creature_fixture::content_with(species.clone(), vec![]),
+        );
+        let at = tor_world::Location {
+            region: tor_world::RegionId(1),
+            position: tor_world::Position { x: 1, y: 1, z: 0 },
+        };
+        let actor = game
+            .spawn_actor(at, std::num::NonZeroU64::new(100).unwrap())
             .unwrap();
+        super::creature_fixture::configure(&mut game, actor, "neutral", species);
+        let natural = game.selected_melee_attack(actor).unwrap().clone();
+        let low = super::creature_fixture::melee(1, 40, DamageType::Keen, 3);
+        let high = super::creature_fixture::melee(2, 80, DamageType::Impact, 7);
+        for (id, slot, attack) in [(11, 1, high.clone()), (12, 0, low.clone())] {
+            let mut item = ItemSpec::ordinary(format!("weapon {id}"));
+            item.class = ItemClass::Weapon;
+            item.equipment = Some(tor_simulation::EquipmentSpec {
+                weapon_profile: None,
+                armor: None,
+                slot: EquipmentSlot::new("weapon").unwrap(),
+                attack: Some(attack),
+                modifiers: vec![],
+            });
+            game.place_item_stack(id, at, Some(actor), 1, item).unwrap();
+            game.equip_authored(actor, ItemId(id), EquipmentSlotId(slot))
+                .unwrap();
+            if slot == 1 {
+                assert_eq!(game.selected_melee_attack(actor), Some(&natural));
+            }
+        }
+        let expected = if has_primary {
+            tor_simulation::attacks::SelectedMeleeAttack::Weapon(low)
+        } else {
+            natural
+        };
+        assert_eq!(game.selected_melee_attack(actor), Some(&expected));
     }
-    assert_eq!(
-        game.selected_melee_attack(actor),
-        Some(&tor_simulation::attacks::SelectedMeleeAttack::Weapon(high))
-    );
 }
 
 #[test]
@@ -238,6 +263,8 @@ fn ordinary_equipment_does_not_require_a_combat_creature() {
     game.configure_anatomy(
         actor,
         AnatomySpec {
+            capacities: Default::default(),
+            primary_attack_socket: tor_simulation::equipment_capacity::PrimaryAttackSocket::None,
             slots: vec![EquipmentSlot::new("body_armor").unwrap()],
         },
     )
@@ -245,6 +272,7 @@ fn ordinary_equipment_does_not_require_a_combat_creature() {
     let mut armor = ItemSpec::ordinary("mail".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(tor_simulation::EquipmentSpec {
+        weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {
             physical_reduction: 3,
             material: tor_simulation::ArmorMaterial::Metal,
@@ -292,6 +320,7 @@ fn selected_attack_cache_tracks_weapon_operands_rebuild_removal_and_restore() {
     )
     .unwrap();
     let equipment = vec![EquipmentSource {
+        weapon_profile: None,
         item: ItemId(100),
         socket: EquipmentSlotId(0),
         modifiers: vec![],
@@ -354,6 +383,7 @@ fn duplicate_equipment_sockets_are_rejected_without_changing_cached_provenance()
     let equipment = [ItemId(4), ItemId(5)]
         .into_iter()
         .map(|item| EquipmentSource {
+            weapon_profile: None,
             item,
             socket: EquipmentSlotId(0),
             modifiers: vec![],
@@ -371,6 +401,7 @@ fn out_of_range_equipment_sockets_cannot_enter_cached_attack_provenance() {
     let before = creature.clone();
     for socket in [64, u16::MAX] {
         let equipment = vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(100),
             socket: EquipmentSlotId(socket),
             modifiers: vec![],

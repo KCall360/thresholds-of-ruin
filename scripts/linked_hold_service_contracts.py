@@ -104,7 +104,7 @@ class LinkedHoldServiceContracts(unittest.TestCase):
             current = self.snapshot(actor)
             target = next(row["id"] for row in current["state"]["observation"]["visible_actors"] if row["name"] == NAMES[0])
             self.request(actor, self.command(current, {"type": "use_ability", "id": LINK,
-                "invocation": {"kind": "actor_target", "target": target}, "supplies": {"kind": "carried"}}))
+                "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}}))
         current = self.step_until(lambda value: len(value["state"]["observation"]["linked_holds"]) == 2
             and value["readiness"]["admission"] and value["state"]["observation"]["ready"])
         offers = current["state"]["observation"]["linked_holds"]

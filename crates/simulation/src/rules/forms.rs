@@ -1,6 +1,6 @@
 //! Fixed immutable starter forms, not a spell-discovery or casting subsystem.
 use super::{Modifier, Requirement, TalentDef};
-use crate::content_ids::{AbilityId, FormId, TalentId};
+use crate::content_ids::{AbilityId, ExpertiseId, FormId, TalentId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -50,6 +50,12 @@ impl<'de> Deserialize<'de> for TalentDef {
                 deserialize_with = "super::strikes::bounded_vec::<_, _, { crate::limits::FORMS_PER_TALENT }>"
             )]
             form_choices: Vec<FormId>,
+            // Authoring shorthand only; independent save records require it.
+            #[serde(
+                default,
+                deserialize_with = "super::strikes::bounded_vec::<_, _, { crate::limits::MODIFIERS_PER_SOURCE }>"
+            )]
+            expertise_grants: Vec<ExpertiseId>,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
@@ -59,6 +65,7 @@ impl<'de> Deserialize<'de> for TalentDef {
             requirement: fields.requirement,
             modifiers: fields.modifiers,
             form_choices: fields.form_choices,
+            expertise_grants: fields.expertise_grants,
         })
     }
 }

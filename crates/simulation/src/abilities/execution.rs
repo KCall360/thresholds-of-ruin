@@ -10,9 +10,12 @@ struct BatchExecutionFacts<'a> {
 
 impl Game {
     pub(crate) fn plan_actor_available(&self, plan: &Plan) -> bool {
-        self.actors
-            .get(&plan.actor())
-            .is_some_and(|actor| actor.alive())
+        plan.as_ability()
+            .is_none_or(|ability| self.frozen_weapon_available(ability.actor, &ability.weapon))
+            && self
+                .actors
+                .get(&plan.actor())
+                .is_some_and(|actor| actor.alive())
             && self.creature(plan.actor()).map_or_else(
                 || {
                     matches!(plan, Plan::Equip { .. } | Plan::Unequip { .. })
@@ -135,8 +138,8 @@ impl Game {
             // An unavailable/dead/detached target has no mutation or RNG draw.
             let mut origin = self.capture_event_origin(outcome.actor, outcome.target);
             if matches!(
-                ability.invocation,
-                super::AbilityInvocation::ContactTarget { .. }
+                ability.invocation.aim,
+                super::AbilityAim::ContactTarget { .. }
             ) {
                 origin.cap_contact_target();
             }
@@ -298,7 +301,7 @@ impl Game {
             self.reuse_event_origin(actor, target, facts.disclosure_origin.as_ref());
         if matches!(plan,
             ResolutionPlan::Ability(ability) | ResolutionPlan::Strike { ability, .. } | ResolutionPlan::Rider { ability, .. }
-                if matches!(ability.invocation, super::AbilityInvocation::ContactTarget { .. }))
+                if matches!(ability.invocation.aim, super::AbilityAim::ContactTarget { .. }))
         {
             disclosure_origin.cap_contact_target();
         }

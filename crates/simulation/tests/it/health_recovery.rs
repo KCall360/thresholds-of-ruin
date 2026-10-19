@@ -141,6 +141,7 @@ fn species_and_equipment_recovery_modifiers_use_the_shared_fold_and_round_up() {
     creature.advance_active(500);
     creature
         .set_equipment(vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(1),
             socket: EquipmentSlotId(0),
             attack: None,
@@ -862,9 +863,7 @@ fn lethal_quiet_reset_cannot_restore_a_source_token_consumed_by_target_death() {
         target,
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: source,
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(source),
             supplies: Default::default(),
         },
         IntentionOrigin::Human,

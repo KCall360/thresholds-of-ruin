@@ -120,6 +120,9 @@ CLIENT = [
             "stream": {"stream": "sample-attachment", "epoch": "1"}, "readiness_revision": "3"},
             "branch": "branch-1", "command": command} for command in [
             *SAMPLE_ADVANCEMENT_COMMANDS,
+            {"type": "preview_ability_weapon", "expected_revision": "3", "ability": "basic_melee",
+             "invocation": {"aim": {"kind": "actor_target", "target": "a_" + "02" * 32}, "weapon": {"kind": "default"}},
+             "supplies": {"kind": "carried"}},
             {"type": "rename_place", "expected_revision": "3", "key": "place-key", "name": "Lantern Hall"},
             {"type": "resume_intention", "expected_revision": "3", "intention": "admission-1"},
             {"type": "cancel_intention", "expected_revision": "3", "intention": "admission-1", "step": None},
@@ -137,15 +140,15 @@ CLIENT = [
                 {"type": "identify", "choice": "choice-sample", "item": "i_" + "04" * 32},
                 {"type": "identify", "choice": "choice-sample", "item": None},
                 {"type": "eat", "item": "i_" + "04" * 32},
-                *({"type": "use_ability", "id": ability, "invocation": {"kind": "actor_target", "target": "a_" + "02" * 32},
+                *({"type": "use_ability", "id": ability, "invocation": {"aim": {"kind": "actor_target", "target": "a_" + "02" * 32}, "weapon": {"kind": "default"}},
                    "supplies": {"kind": "carried"}}
                   for ability in ("basic_melee", "rattling_blow", "spark_lance_fire", "falter")),
-                {"type": "use_ability", "id": "guarded_step", "invocation": {"kind": "self_step", "direction": "north_east"},
+                {"type": "use_ability", "id": "guarded_step", "invocation": {"aim": {"kind": "self_step", "direction": "north_east"}, "weapon": {"kind": "default"}},
                  "supplies": {"kind": "carried"}},
                 {"type": "use_ability", "id": "fixture_directional_ray",
-                 "invocation": {"kind": "directional_ray", "direction": "east"},
+                 "invocation": {"aim": {"kind": "directional_ray", "direction": "east"}, "weapon": {"kind": "default"}},
                  "supplies": {"kind": "carried"}},
-                {"type": "use_ability", "id": "bind_wounds", "invocation": {"kind": "actor_target", "target": "a_" + "02" * 32},
+                {"type": "use_ability", "id": "bind_wounds", "invocation": {"aim": {"kind": "actor_target", "target": "a_" + "02" * 32}, "weapon": {"kind": "default"}},
                  "supplies": {"kind": "explicit", "items": [
                      {"cost_ordinal": 0, "item": "i_" + "04" * 32}]}},
                 {"type": "set_door", "door": "d_" + "07" * 32, "open": True},
@@ -444,7 +447,17 @@ class Recorder(ProcessTestCase):
         defender, _ = self.client(actor=2)
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "Sequence sentinel")
-        admitted = self.act(attacker, {"type": "use_ability", "id": "triple_strike", "invocation": {"kind": "actor_target", "target": target}})
+        current = self.request(attacker, {"type": "snapshot"})
+        preview = self.request(attacker, {"type": "command", "context": current["input_context"],
+            "branch": current["branch"], "command": {"type": "preview_ability_weapon",
+                "expected_revision": current["state"]["revision"], "ability": "triple_strike",
+                "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}},
+                "supplies": {"kind": "carried"}}})
+        self.assertIsNone(preview["error"])
+        messages = [json.loads(line).get("message") for line in attacker.transcript if line.startswith("{")]
+        server_samples["ability_weapon_preview"] = next(message for message in reversed(messages)
+            if message and message["type"] == "ability_weapon_preview")
+        admitted = self.act(attacker, {"type": "use_ability", "id": "triple_strike", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         self.assertIsNone(admitted["error"])
         self.assertIsNone(self.act(defender, {"type": "wait"})["error"])
         self.frame(attacker, lambda frame: frame.get("state") is not None
@@ -472,7 +485,7 @@ class Recorder(ProcessTestCase):
         bandage = next(row["item"]["id"] for row in observation["ground_items"]
                        if (row["item"]["known_supply"] or {}).get("id") == "bandage")
         accepted = self.act(carer, {"type": "use_ability", "id": "bind_wounds",
-            "invocation": {"kind": "actor_target", "target": observation["self_target"]}, "supplies": {"kind": "explicit", "items": [
+            "invocation": {"aim": {"kind": "actor_target", "target": observation["self_target"]}, "weapon": {"kind": "default"}}, "supplies": {"kind": "explicit", "items": [
                 {"cost_ordinal": 0, "item": bandage}]}})
         self.assertIsNone(accepted["error"])
         prepared = self.request(carer, {"type": "snapshot"})

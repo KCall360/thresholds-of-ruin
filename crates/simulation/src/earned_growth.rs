@@ -374,6 +374,9 @@ pub(crate) fn assess(
                 PurchaseSelection::SkillRank(_) => {
                     trained = trained.checked_add(1).ok_or(BuildError::Arithmetic)?
                 }
+                // Effective expertise benefits are counted once below, even
+                // when the same ID has several independent owned grant sources.
+                PurchaseSelection::Expertise(_) => {}
                 PurchaseSelection::Talent(id)
                 | PurchaseSelection::TalentForm { talent: id, .. } => {
                     identities.insert(ThreatSource::Talent { id: id.clone() });
@@ -381,6 +384,13 @@ pub(crate) fn assess(
             }
         }
     }
+    identities.extend(
+        permanent
+            .expertises
+            .active_ids()
+            .cloned()
+            .map(|id| ThreatSource::Expertise { id }),
+    );
     let sources: Vec<_> = identities
         .into_iter()
         .map(|source| ThreatContribution {
@@ -1218,6 +1228,7 @@ mod source_tests {
         let peak = state.earned_progress().peak_threat();
         state
             .set_equipment(vec![crate::creatures::EquipmentSource {
+                weapon_profile: None,
                 item: crate::ItemId(1),
                 socket: crate::EquipmentSlotId(0),
                 attack: None,

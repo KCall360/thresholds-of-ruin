@@ -78,6 +78,15 @@ pub(crate) fn talent(value: &str, rules: &s::rules::Ruleset) -> Result<TalentId,
     Ok(id)
 }
 
+pub(crate) fn expertise(value: &str, rules: &s::rules::Ruleset) -> Result<ExpertiseId, Failure> {
+    let id =
+        ExpertiseId::new(value).map_err(|_| invalid(format!("Invalid expertise ID {value:?}")))?;
+    if rules.expertise(&id).is_none() {
+        return Err(invalid(format!("Unknown expertise {value:?}")));
+    }
+    Ok(id)
+}
+
 // Generic mechanism DTOs deliberately contain authored text, not interned IDs
 // or persisted actor records. Their vocabulary is independent of game content.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -581,6 +590,7 @@ pub struct Purchase {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PurchaseSelection {
+    Expertise { expertise: String },
     SkillRank { skill: Skill },
     Talent { talent: Talent },
     TalentForm { talent: Talent, form: String },
@@ -598,6 +608,9 @@ pub(crate) fn compile_choices(
                     pool: PointPoolId::new(&purchase.pool)
                         .map_err(|_| invalid("Invalid point pool ID"))?,
                     selection: match &purchase.selection {
+                        PurchaseSelection::Expertise { expertise: value } => {
+                            s::creatures::PurchaseSelection::Expertise(expertise(value, rules)?)
+                        }
                         PurchaseSelection::SkillRank { skill: value } => {
                             s::creatures::PurchaseSelection::SkillRank(skill(value)?)
                         }
@@ -1354,5 +1367,38 @@ mod locomotion_authoring_tests {
         assert!(toml::from_str::<Modifier>("scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'erratic', enabled = true, chance = { numerator = 1, denominator = 2 } } }").is_err());
         let bad: Modifier = toml::from_str("scope = 'always'\nop = { kind = 'locomotion', value = { kind = 'erratic', chance = { numerator = 2, denominator = 1 } } }").unwrap();
         assert!(bad.compile().is_err());
+    }
+}
+
+#[cfg(test)]
+mod expertise_purchase_tests {
+    use super::*;
+    #[test]
+    fn authored_expertise_purchase_resolves_exact_known_catalog_id() {
+        let mut document: s::rules::RulesetDocument =
+            toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap();
+        document.expertises.push(s::expertise::ExpertiseDef {
+            id: ExpertiseId::new("fixture.knife").unwrap(),
+            name: "Knife".into(),
+            category: s::expertise::ExpertiseCategory::Equipment,
+        });
+        let rules = s::rules::Ruleset::validate(document).unwrap();
+        let row = |id: &str| Purchase {
+            pool: "advancement".into(),
+            selection: PurchaseSelection::Expertise {
+                expertise: id.into(),
+            },
+        };
+        let choices = compile_choices(&[row("fixture.knife")], None, &rules).unwrap();
+        assert!(
+            matches!(&choices.purchases[0].selection, s::creatures::PurchaseSelection::Expertise(id) if id.as_str() == "fixture.knife")
+        );
+        for id in ["fixture.missing", "INVALID"] {
+            assert!(compile_choices(&[row(id)], None, &rules).is_err());
+        }
+        assert!(serde_json::from_str::<PurchaseSelection>(
+            r#"{"kind":"expertise","expertise":"fixture.knife","free":true}"#
+        )
+        .is_err());
     }
 }

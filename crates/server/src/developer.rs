@@ -77,6 +77,13 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
                     .map_err(|_| usage)?,
             },
         },
+        ["creature", "expertise", actor, ordinal, expertise] => WizardOperation::AdvanceCreature {
+            actor: ActorId(actor.parse().map_err(|_| usage)?),
+            advancement: CreatureAdvancement::SelectExpertise {
+                owner: owner(ordinal)?,
+                expertise: catalog_value(expertise, usage)?,
+            },
+        },
         ["creature", "talent", actor, ordinal, talent] => WizardOperation::AdvanceCreature {
             actor: ActorId(actor.parse().map_err(|_| usage)?),
             advancement: CreatureAdvancement::SelectTalent {
@@ -106,6 +113,10 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
                             skill: crate::creature_authoring::skill(value)
                                 .map(|_| (*value).to_owned())
                                 .map_err(|_| usage)?,
+                        },
+                        "expertise" => PurchaseReplacement::Expertise {
+                            pool: catalog_value(pool, usage)?,
+                            expertise: catalog_value(value, usage)?,
                         },
                         "talent" => PurchaseReplacement::Talent {
                             pool: catalog_value(pool, usage)?,
@@ -398,6 +409,8 @@ mod advancement_tests {
             "creature add-hd 1 mage",
             "creature add-hd 1 bard",
             "creature talent 1 4 unknown",
+            "creature expertise 1 4 fixture.knife",
+            "creature replace 1 2 1 advancement expertise fixture.knife",
             "creature train 1 4 athletics",
             "creature attribute 1 4 strength",
             "creature talent 1 4 hardiness",
@@ -418,6 +431,8 @@ mod advancement_tests {
             "creature train 1 4 unknown",
             "creature attribute 1 4 unknown",
             "creature talent 1 4 bad!",
+            "creature expertise 1 4 bad!",
+            "creature expertise 1 0 fixture.knife",
             "creature train 1 athletics",
             "creature attribute 1 strength",
             "creature talent 1 hardiness",

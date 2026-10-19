@@ -80,6 +80,8 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
     };
     let mut species = super::creature_fixture::species();
     species.anatomy = AnatomySpec {
+        capacities: Default::default(),
+        primary_attack_socket: tor_simulation::equipment_capacity::PrimaryAttackSocket::None,
         slots: vec![EquipmentSlot::new("body_armor").unwrap()],
     };
     let mut game = Game::two_room(
@@ -102,6 +104,7 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
         let mut item = ItemSpec::ordinary(format!("mail {id}"));
         item.class = ItemClass::Armor;
         item.equipment = Some(tor_simulation::EquipmentSpec {
+            weapon_profile: None,
             armor: Some(tor_simulation::ArmorSpec {
                 physical_reduction: defense as u32,
                 material: tor_simulation::ArmorMaterial::Metal,
@@ -302,9 +305,7 @@ fn a_many_target_decision_uses_one_remembered_topology_search() {
             ai,
             Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                    target: human
-                },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(human),
                 supplies: Default::default(),
             }
         ))

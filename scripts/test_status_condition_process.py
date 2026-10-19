@@ -15,7 +15,7 @@ from status_condition_package import (
 
 def ability(frame, identity, target=None):
     return {"type": "use_ability", "id": identity,
-            "invocation": {"kind": "actor_target", "target": target or observation(frame)["self_target"]},
+            "invocation": {"aim": {"kind": "actor_target", "target": target or observation(frame)["self_target"]}, "weapon": {"kind": "default"}},
             "supplies": {"kind": "carried"}}
 
 

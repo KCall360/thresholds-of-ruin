@@ -1,7 +1,7 @@
 //! Compile and validate owned action-specific plans; never resolve effects here.
 use super::{FrozenStrike, ResolutionPlan, TokenClaim};
 use crate::content_ids::{AbilityId, ConditionId};
-use crate::costs::ResourceCost;
+use crate::costs::CostBundle;
 use crate::damage::{DamageComponent, DamageSpec};
 use crate::dice::DicePool;
 use crate::resources::Resource;
@@ -280,6 +280,7 @@ pub struct AbilityPlan {
     pub ambush: Option<super::CheckSite>,
     pub actor: ActorId,
     pub invocation: super::AbilityInvocation,
+    pub weapon: super::FrozenWeaponSelection,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub step: Option<super::StepCommitment>,
     pub target: ActorId,
@@ -290,7 +291,7 @@ pub struct AbilityPlan {
     pub ability: AbilityId,
     pub preparation: u64,
     pub recovery: u64,
-    pub cost: Option<ResourceCost>,
+    pub cost: Option<CostBundle>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub cooldown: Option<std::num::NonZeroU64>,
     #[serde(deserialize_with = "crate::rules::read_supply_costs")]
@@ -311,6 +312,7 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
             ambush: Option<super::CheckSite>,
             actor: ActorId,
             invocation: super::AbilityInvocation,
+            weapon: super::FrozenWeaponSelection,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             step: Option<super::StepCommitment>,
             target: ActorId,
@@ -321,7 +323,7 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
             ability: AbilityId,
             preparation: u64,
             recovery: u64,
-            cost: Option<ResourceCost>,
+            cost: Option<CostBundle>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             cooldown: Option<std::num::NonZeroU64>,
             #[serde(deserialize_with = "crate::rules::read_supply_costs")]
@@ -338,6 +340,7 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
             ambush: fields.ambush,
             actor: fields.actor,
             invocation: fields.invocation,
+            weapon: fields.weapon,
             step: fields.step,
             target: fields.target,
             initial_hold: fields.initial_hold,
@@ -411,9 +414,7 @@ impl Plan {
             },
             Self::Ray(plan) => Work::UseAbility {
                 id: plan.ability.clone(),
-                invocation: super::AbilityInvocation::DirectionalRay {
-                    direction: plan.direction,
-                },
+                invocation: super::AbilityInvocation::directional_ray(plan.direction),
                 supplies: plan.supplies.clone(),
             },
             Self::Ability(plan) => Work::UseAbility {
@@ -457,7 +458,7 @@ impl Plan {
             | Self::Eat { .. } => 0,
         }
     }
-    pub fn cost(&self) -> Option<ResourceCost> {
+    pub fn cost(&self) -> Option<CostBundle> {
         match self {
             Self::Ability(plan) => plan.cost,
             Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.cost,
@@ -1009,19 +1010,16 @@ impl Game {
             })
             .cloned()
     }
-    pub fn ability_cost(&self, ability: &AbilityId) -> Result<Option<ResourceCost>, GameError> {
-        Ok(self
-            .content
+    pub fn ability_cost(&self, ability: &AbilityId) -> Result<Option<CostBundle>, GameError> {
+        self.content
             .rules
             .ability(ability)
             .ok_or(GameError::Rule(RuleError::UnknownAbility))?
             .cost
             .as_ref()
-            .map(|cost| ResourceCost {
-                resource: cost.resource,
-                start: cost.start,
-                resolution: cost.resolution,
-            }))
+            .map(CostBundle::try_from)
+            .transpose()
+            .map_err(|_| invalid())
     }
     pub(super) fn target_in_reach_snapshot(
         &self,
@@ -1105,9 +1103,9 @@ impl Game {
     ) -> Result<Plan, GameError> {
         let reference = self.actor_disclosure(actor, target)?.reference();
         let invocation = if reference == Some(crate::perception::ActorReferenceKind::Contact) {
-            super::AbilityInvocation::ContactTarget { target }
+            super::AbilityInvocation::contact_target(target)
         } else {
-            super::AbilityInvocation::ActorTarget { target }
+            super::AbilityInvocation::actor_target(target)
         };
         self.compile_strike_plan(
             actor,
@@ -1127,7 +1125,7 @@ impl Game {
         self.compile_strike_plan(
             actor,
             ability,
-            super::AbilityInvocation::ActorTarget { target },
+            super::AbilityInvocation::actor_target(target),
             sight,
             crate::supplies::SupplySelection::Carried,
         )
@@ -1162,7 +1160,7 @@ impl Game {
         effects: &[Effect],
         modifiers: &crate::creatures::AbilityValues,
     ) -> Result<Vec<PlannedEffect>, GameError> {
-        self.compile_effects_from_source(actor, effects, modifiers, false)
+        self.compile_effects_from_source(actor, effects, modifiers, false, None)
     }
     pub(crate) fn compile_effects_from_source(
         &self,
@@ -1170,6 +1168,7 @@ impl Game {
         effects: &[Effect],
         modifiers: &crate::creatures::AbilityValues,
         natural_source: bool,
+        selected: Option<&crate::creatures::SelectedAttack>,
     ) -> Result<Vec<PlannedEffect>, GameError> {
         if effects.len() > crate::limits::EFFECTS_PER_BRANCH {
             return Err(invalid());
@@ -1236,8 +1235,9 @@ impl Game {
                             .map_err(|_| invalid())?
                             .with_melee_modifiers(modifiers.dice, modifiers.flat, *impact_bonus)
                             .map_err(|_| invalid())?,
-                        DamageExpr::SelectedWeapon { impact_bonus } => self
-                            .selected_melee_attack(actor)
+                        DamageExpr::SelectedWeapon { impact_bonus } => selected
+                            .map(|selected| &selected.attack)
+                            .or_else(|| self.selected_melee_attack(actor))
                             .ok_or_else(invalid)?
                             .damage_with_modifiers(modifiers.dice, modifiers.flat, *impact_bonus)
                             .map_err(|_| invalid())?,

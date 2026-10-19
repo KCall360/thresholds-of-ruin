@@ -485,6 +485,7 @@ fn tr3_flag_gain_or_loss_does_not_rewrite_prepared_optional_relocation() {
                         op: ModifierOp::Flag { flag: flag.clone() },
                     }],
                     form_choices: vec![],
+                    expertise_grants: vec![],
                 });
             },
             |game| {

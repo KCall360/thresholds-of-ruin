@@ -9,7 +9,7 @@ fn selected_ability_invocations_are_named_closed_and_current_only() {
         json!({"kind":"self_step","direction":"north_east"}),
     ] {
         let value = json!({"type":"use_ability","id":"content_owned_name",
-            "invocation":invocation,"supplies":{"kind":"carried"}});
+            "invocation":{"aim":invocation,"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}});
         let action: tor_protocol::Action =
             serde_json::from_slice(&serde_json::to_vec(&value).unwrap()).unwrap();
         assert_eq!(serde_json::to_value(action).unwrap(), value);
@@ -24,7 +24,7 @@ fn selected_ability_invocations_are_named_closed_and_current_only() {
         json!({"kind":"actor_target","target":target,"direction":"north"}),
     ] {
         let value = json!({"type":"use_ability","id":"content_owned_name",
-            "invocation":invocation,"supplies":{"kind":"carried"}});
+            "invocation":{"aim":invocation,"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}});
         assert!(serde_json::from_slice::<tor_protocol::Action>(
             &serde_json::to_vec(&value).unwrap()
         )
@@ -36,9 +36,9 @@ fn selected_ability_invocations_are_named_closed_and_current_only() {
             .is_err()
     );
     for raw in [
-        r#"{"type":"use_ability","id":"probe","invocation":{"kind":"self_step","direction":"north","direction":"south"},"supplies":{"kind":"carried"}}"#,
-        r#"{"type":"use_ability","id":"probe","invocation":["self_step",{"direction":"north"}],"supplies":{"kind":"carried"}}"#,
-        r#"{"type":"use_ability","id":"probe","invocation":{"kind":"self_step","kind":"actor_target","direction":"north"},"supplies":{"kind":"carried"}}"#,
+        r#"{"type":"use_ability","id":"probe","invocation":{"aim":{"kind":"self_step","direction":"north","direction":"south"},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}"#,
+        r#"{"type":"use_ability","id":"probe","invocation":{"aim":["self_step",{"direction":"north"}],"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}"#,
+        r#"{"type":"use_ability","id":"probe","invocation":{"aim":{"kind":"self_step","kind":"actor_target","direction":"north"},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}"#,
     ] {
         assert!(serde_json::from_slice::<tor_protocol::Action>(raw.as_bytes()).is_err());
     }
@@ -65,7 +65,7 @@ fn selected_step_direction_is_a_string_token_not_an_externally_tagged_enum_objec
         serde_json::json!(0),
     ] {
         let action = serde_json::json!({"type":"use_ability","id":"probe",
-            "invocation":{"kind":"self_step","direction":direction},
+            "invocation":{"aim":{"kind":"self_step","direction":direction},"weapon":{"kind":"default"}},
             "supplies":{"kind":"carried"}});
         assert!(
             serde_json::from_slice::<tor_protocol::Action>(&serde_json::to_vec(&action).unwrap())
@@ -89,7 +89,8 @@ fn selected_step_invocations_round_trip_all_ten_direction_tokens() {
         "up",
         "down",
     ] {
-        let value = json!({"kind":"self_step","direction":direction});
+        let value =
+            json!({"aim":{"kind":"self_step","direction":direction},"weapon":{"kind":"default"}});
         let invocation: tor_protocol::AbilityInvocation =
             serde_json::from_slice(&serde_json::to_vec(&value).unwrap()).unwrap();
         assert_eq!(serde_json::to_value(invocation).unwrap(), value);
@@ -110,7 +111,7 @@ fn directional_ray_is_targetless_closed_and_accepts_exactly_ten_direction_tokens
         "up",
         "down",
     ] {
-        let value = json!({"kind":"directional_ray","direction":direction});
+        let value = json!({"aim":{"kind":"directional_ray","direction":direction},"weapon":{"kind":"default"}});
         let invocation: tor_protocol::AbilityInvocation =
             serde_json::from_slice(&serde_json::to_vec(&value).unwrap()).unwrap();
         assert_eq!(serde_json::to_value(invocation).unwrap(), value);
@@ -130,7 +131,7 @@ fn directional_ray_is_targetless_closed_and_accepts_exactly_ten_direction_tokens
         json!({"kind":"directional_ray","direction":"north","path":[]}),
     ] {
         let value = json!({"type":"use_ability","id":"content_owned_name",
-            "invocation":invocation,"supplies":{"kind":"carried"}});
+            "invocation":{"aim":invocation,"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}});
         assert!(
             serde_json::from_slice::<tor_protocol::Action>(&serde_json::to_vec(&value).unwrap())
                 .is_err(),
@@ -141,6 +142,82 @@ fn directional_ray_is_targetless_closed_and_accepts_exactly_ten_direction_tokens
         r#"{"kind":"directional_ray","direction":"north","direction":"south"}"#,
         r#"{"kind":"directional_ray","kind":"self_step","direction":"north"}"#,
     ] {
+        let raw = format!(r#"{{"aim":{raw},"weapon":{{"kind":"default"}}}}"#);
         assert!(serde_json::from_slice::<tor_protocol::AbilityInvocation>(raw.as_bytes()).is_err());
+    }
+}
+
+#[test]
+fn invocation_requires_independent_named_aim_and_weapon_operands() {
+    let aim = json!({"kind":"self_step", "direction":"north"});
+    let weapon = json!({"kind":"default"});
+    for invalid in [
+        json!({"aim":aim}),
+        json!({"weapon":weapon}),
+        json!({}),
+        json!([aim, weapon]),
+        json!({"aim":aim,"weapon":weapon,"target":null}),
+        json!({"aim":aim,"weapon":null}),
+        json!({"aim":null,"weapon":weapon}),
+        json!({"kind":"self_step","direction":"north"}),
+    ] {
+        assert!(
+            serde_json::from_value::<tor_protocol::AbilityInvocation>(invalid.clone()).is_err(),
+            "{invalid}"
+        );
+    }
+    for raw in [
+        r#"{"aim":{"kind":"self_step","direction":"north"},"aim":{"kind":"self_step","direction":"south"},"weapon":{"kind":"default"}}"#,
+        r#"{"aim":{"kind":"self_step","direction":"north"},"weapon":{"kind":"default"},"weapon":{"kind":"default"}}"#,
+    ] {
+        assert!(serde_json::from_str::<tor_protocol::AbilityInvocation>(raw).is_err());
+    }
+}
+
+#[test]
+fn exact_equipped_weapon_selection_round_trips_and_rejects_ambiguous_operands() {
+    let item = tor_protocol::ItemTarget::from_digest([11; 32]);
+    let aim =
+        json!({"kind":"actor_target","target":tor_protocol::ActorTarget::from_digest([7;32])});
+    for socket in [0, 63] {
+        let value = json!({"aim":aim,"weapon":{"kind":"equipped","item":item,"socket":socket}});
+        let invocation: tor_protocol::AbilityInvocation =
+            serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(invocation).unwrap(), value);
+    }
+    for weapon in [
+        json!("default"),
+        json!(["default"]),
+        json!({"kind":"default","item":item}),
+        json!({"kind":"default","socket":0}),
+        json!({"kind":"equipped"}),
+        json!({"kind":"equipped","item":item}),
+        json!({"kind":"equipped","socket":0}),
+        json!({"kind":"equipped","item":item,"socket":0,"target":null}),
+        json!({"kind":"equipped","item":1,"socket":0}),
+        json!({"kind":"equipped","item":tor_protocol::ActorTarget::from_digest([11;32]),"socket":0}),
+        json!({"kind":"equipped","item":item,"socket":-1}),
+        json!({"kind":"equipped","item":item,"socket":64}),
+        json!({"kind":"equipped","item":item,"socket":65535}),
+        json!({"kind":"equipped","item":item,"socket":65536}),
+        json!({"kind":"equipped","item":item,"socket":0.0}),
+        json!({"kind":"equipped","item":item,"socket":"0"}),
+    ] {
+        let value = json!({"aim":aim,"weapon":weapon});
+        assert!(
+            serde_json::from_value::<tor_protocol::AbilityInvocation>(value.clone()).is_err(),
+            "{value}"
+        );
+    }
+    for weapon in [
+        format!(r#"{{"kind":"equipped","item":"{item}","item":"{item}","socket":0}}"#),
+        format!(r#"{{"kind":"equipped","item":"{item}","socket":0,"socket":1}}"#),
+        format!(r#"{{"kind":"equipped","kind":"default","item":"{item}","socket":0}}"#),
+    ] {
+        let raw = format!(r#"{{"aim":{aim},"weapon":{weapon}}}"#);
+        assert!(
+            serde_json::from_str::<tor_protocol::AbilityInvocation>(&raw).is_err(),
+            "{raw}"
+        );
     }
 }

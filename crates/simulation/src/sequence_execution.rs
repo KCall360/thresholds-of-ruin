@@ -96,11 +96,13 @@ impl Game {
                 };
                 if self.survival_diagnostics.is_some() {
                     if let Some(cost) = paid {
-                        crate::survival_diagnostics::checked_add(
-                            completion.survival.paid_resolution.get_mut(cost.resource),
-                            u64::from(cost.resolution),
-                            &mut completion.survival.incomplete,
-                        );
+                        for cost in cost.entries() {
+                            crate::survival_diagnostics::checked_add(
+                                completion.survival.paid_resolution.get_mut(cost.resource),
+                                u64::from(cost.resolution),
+                                &mut completion.survival.incomplete,
+                            );
+                        }
                     }
                 }
                 // Capture identification before an exact last unit disappears. Effects

@@ -113,7 +113,7 @@ fn fixture_with(
 fn attack(target: ActorId) -> Action {
     Action::UseAbility {
         id: AbilityId::new("basic_melee").unwrap(),
-        invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+        invocation: crate::abilities::AbilityInvocation::actor_target(target),
         supplies: Default::default(),
     }
 }

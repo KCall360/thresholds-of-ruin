@@ -200,7 +200,7 @@ class TheftServiceContracts(unittest.TestCase):
     def use(self, actor, ability, name):
         target = next(row["id"] for row in observation(self.snapshot(actor))["visible_actors"] if row["name"] == name)
         return self.act(actor, {"type": "use_ability", "id": ability,
-            "invocation": {"kind": "actor_target", "target": target}, "supplies": {"kind": "carried"}})
+            "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}})
 
     def recover(self, item_class):
         for _ in range(16):

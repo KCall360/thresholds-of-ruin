@@ -456,6 +456,7 @@ fn gaining_and_losing_descriptor_immunity_ends_effect_once_without_erasing_prote
     subject.apply_condition(&id, ActorId(7), 200).unwrap();
     subject.advance_active(50);
     let equipment = EquipmentSource {
+        weapon_profile: None,
         item: tor_simulation::ItemId(1),
         socket: tor_simulation::EquipmentSlotId(0),
         modifiers: vec![Modifier {

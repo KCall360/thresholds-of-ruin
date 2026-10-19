@@ -14,8 +14,11 @@ const SUBJECT: ActorId = ActorId(2);
 fn action(id: &str, target: ActorId) -> Action {
     Action::UseAbility {
         id: tor_simulation::content_ids::AbilityId::new(id).unwrap(),
-        invocation: tor_server::journal::AbilityInvocation::ActorTarget {
-            target: tor_simulation::ActorId(target.0),
+        invocation: tor_server::journal::AbilityInvocation {
+            aim: tor_server::journal::AbilityAim::ActorTarget {
+                target: tor_simulation::ActorId(target.0),
+            },
+            weapon: tor_server::journal::WeaponSelection::Default,
         },
         supplies: Default::default(),
     }

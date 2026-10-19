@@ -41,6 +41,7 @@ fn request_kind(request: &Request) -> &'static str {
         Request::Palette => "palette",
         Request::Map { .. } => "map",
         Request::Command { command, .. } => match command {
+            Command::PreviewAbilityWeapon { .. } => "command.preview_ability_weapon",
             Command::Advancement { .. } => "command.advancement",
             Command::InspectStrikeSource { .. } => "command.inspect_strike_source",
             Command::ResumeIntention { .. } => "command.resume_intention",
@@ -52,6 +53,7 @@ fn request_kind(request: &Request) -> &'static str {
             Command::Act { action, .. } => match action {
                 Action::Escape { .. } => "act.escape",
                 Action::ChooseGrowthSource { .. } => "act.choose_growth_source",
+                Action::ChooseIntellectExpertise { .. } => "act.choose_intellect_expertise",
                 Action::Purchase { .. } => "act.purchase",
                 Action::Respec { .. } => "act.respec",
                 Action::UseAbility { .. } => "act.use_ability",
@@ -74,6 +76,7 @@ fn request_kind(request: &Request) -> &'static str {
 }
 
 const CLIENT_KINDS: &[&str] = &[
+    "command.preview_ability_weapon",
     "act.escape",
     "hello",
     "continue",
@@ -151,6 +154,7 @@ server_sample_kinds! {
     CreatureInspection => ("creature_inspection", None),
     CreatureStrikePage => ("creature_strike_page", None),
     AdvancementPage => ("advancement_page", None),
+    AbilityWeaponPreview => ("ability_weapon_preview", None),
     MapPage => ("map_page", None),
     CombatDiagnostics => ("combat_diagnostics", None),
     Error => ("error", None),
@@ -185,6 +189,7 @@ fn server_kind(message: &ServerMessage) -> ServerSampleKind {
         ServerMessage::CreatureCatalog { .. } => Kind::CreatureCatalog,
         ServerMessage::CreatureInspection { .. } => Kind::CreatureInspection,
         ServerMessage::CreatureStrikePage { .. } => Kind::CreatureStrikePage,
+        ServerMessage::AbilityWeaponPreview { .. } => Kind::AbilityWeaponPreview,
         ServerMessage::AdvancementPage { .. } => Kind::AdvancementPage,
         ServerMessage::MapPage { .. } => Kind::MapPage,
         ServerMessage::CombatDiagnostics { .. } => Kind::CombatDiagnostics,
@@ -462,7 +467,7 @@ fn recorded_ability_commands_require_explicit_invocations_and_supplies() {
         .iter()
         .find(|message| {
             let action = &message["request"]["command"]["action"];
-            action["type"] == "use_ability" && action["invocation"]["kind"] == "actor_target"
+            action["type"] == "use_ability" && action["invocation"]["aim"]["kind"] == "actor_target"
         })
         .unwrap();
     round_trip::<ClientMessage>(message);
@@ -481,7 +486,7 @@ fn recorded_ability_commands_require_explicit_invocations_and_supplies() {
     for keep_invocation in [false, true] {
         let mut implicit = message.clone();
         let action = &mut implicit["request"]["command"]["action"];
-        action["target"] = action["invocation"]["target"].clone();
+        action["target"] = action["invocation"]["aim"]["target"].clone();
         if !keep_invocation {
             action.as_object_mut().unwrap().remove("invocation");
         }
@@ -503,7 +508,7 @@ fn playable_rogue_samples_pin_form_choices_and_both_explicit_invocations() {
         .collect();
     for kind in ["actor_target", "self_step"] {
         assert!(actions.iter().any(|action| {
-            action["type"] == "use_ability" && action["invocation"]["kind"] == kind
+            action["type"] == "use_ability" && action["invocation"]["aim"]["kind"] == kind
         }));
     }
     for action in actions

@@ -2,13 +2,13 @@ use tor_protocol::*;
 
 fn ability() -> serde_json::Value {
     serde_json::json!({"id":"mend","name":"Mend","cost":null,
-        "reach":{"kind":"self_only"},"target_kind":"self_only","basic_attack":false,
+        "reach":{"kind":"self_only"},"target_kind":"self_only","basic_attack":false,"weapon_selection":false,
         "cooldown_remaining":"25","supply_costs":[{"supply":"bandage","name":"Bandage",
             "quantity":"1","access":"carried_or_ground_touch"}]})
 }
 fn action(items: Vec<serde_json::Value>) -> serde_json::Value {
     serde_json::json!({"type":"use_ability","id":"mend",
-        "invocation":{"kind":"actor_target","target":ActorTarget::from_digest([1;32])},"supplies":{"kind":"explicit","items":items}})
+        "invocation":{"aim":{"kind":"actor_target","target":ActorTarget::from_digest([1;32])},"weapon":{"kind":"default"}},"supplies":{"kind":"explicit","items":items}})
 }
 fn item(index: u8) -> serde_json::Value {
     serde_json::json!({"cost_ordinal":0,"item":ItemTarget::from_digest([index;32])})
@@ -80,6 +80,7 @@ fn phase5_container_ability_requires_a_named_object() {
         "reach",
         "target_kind",
         "basic_attack",
+        "weapon_selection",
         "cooldown_remaining",
         "supply_costs",
     ]

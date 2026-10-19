@@ -171,7 +171,7 @@ class RogueVampireProcesses(ProcessTestCase):
                       if row["name"] == name)
         start = len(player.transcript)
         result = self.execute(player, peer, {"type": "use_ability", "id": identity,
-                              "invocation": {"kind": "actor_target", "target": target["id"]}}, current=frame)
+                              "invocation": {"aim": {"kind": "actor_target", "target": target["id"]}, "weapon": {"kind": "default"}}}, current=frame)
         if record_cost:
             self.assert_paid_work(player, start, frame, result, known)
         return result
@@ -408,7 +408,7 @@ class RogueVampireProcesses(ProcessTestCase):
                 paid = stamina["available"] >= cost["start"] + cost["resolution"]
                 paid_actions += int(paid)
                 action = {"type": "use_ability", "id": "rattling_blow" if paid else "basic_melee",
-                          "invocation": {"kind": "actor_target", "target": target["id"]}}
+                          "invocation": {"aim": {"kind": "actor_target", "target": target["id"]}, "weapon": {"kind": "default"}}}
             previous_tick = int(observation(current)["tick"])
             previous, transcript_start = current, len(player.transcript)
             current = settle_rogue_action(self, player, self.act(player, action))

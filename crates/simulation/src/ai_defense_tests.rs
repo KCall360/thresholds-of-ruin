@@ -23,7 +23,7 @@ fn at(region: u64, x: i32, y: i32) -> Location {
 fn action(name: &str) -> Action {
     Action::UseAbility {
         id: id(name),
-        invocation: crate::abilities::AbilityInvocation::ActorTarget { target: OWNER },
+        invocation: crate::abilities::AbilityInvocation::actor_target(OWNER),
         supplies: Default::default(),
     }
 }
@@ -324,11 +324,12 @@ fn self_defense_unfunded_supplies_and_authored_resource_threshold_refuse_fresh_w
                 .unwrap()
                 .start_preparation_cost(
                     crate::IntentionId(900),
-                    crate::costs::ResourceCost {
+                    crate::costs::CostBundle::single(crate::costs::ResourceCost {
                         resource: crate::resources::Resource::Focus,
                         start: 1,
                         resolution: 0,
-                    },
+                    })
+                    .unwrap(),
                 )
                 .unwrap();
         }
@@ -510,7 +511,10 @@ fn self_defense_healing_and_disclosed_self_step_retreat_keep_priority() {
             assert!(matches!(
                 game.choose_ai(OWNER).unwrap().action,
                 Action::UseAbility {
-                    invocation: crate::abilities::AbilityInvocation::SelfStep { .. },
+                    invocation: crate::abilities::AbilityInvocation {
+                        aim: crate::abilities::AbilityAim::SelfStep { .. },
+                        ..
+                    },
                     ..
                 }
             ));
@@ -606,7 +610,7 @@ fn paid_prefix_retains_priority(erratic: bool) {
     game.act(FOE, Action::Wait).unwrap();
     let attack = Action::UseAbility {
         id: id("probe_sequence"),
-        invocation: crate::abilities::AbilityInvocation::ActorTarget { target: FOE },
+        invocation: crate::abilities::AbilityInvocation::actor_target(FOE),
         supplies: Default::default(),
     };
     let origin = game
@@ -628,11 +632,12 @@ fn paid_prefix_retains_priority(erratic: bool) {
     let (&hold, &cost) = after_start.reservations().iter().next().unwrap();
     assert_eq!(
         cost,
-        crate::costs::ResourceCost {
+        crate::costs::CostBundle::single(crate::costs::ResourceCost {
             resource: crate::resources::Resource::Stamina,
             start: 1,
             resolution: 1,
-        }
+        })
+        .unwrap()
     );
     // Preparation earns ordinary recovery. Compare the complete paid ledger
     // against its independent clock/cost kernel, not a net-balance subtraction

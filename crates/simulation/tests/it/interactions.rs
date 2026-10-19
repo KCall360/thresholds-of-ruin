@@ -26,6 +26,8 @@ fn fixture(combat: bool) -> (Game, ActorId, ActorId) {
     fixture_with_anatomy(
         combat,
         AnatomySpec {
+            capacities: Default::default(),
+            primary_attack_socket: tor_simulation::equipment_capacity::PrimaryAttackSocket::None,
             slots: vec![
                 EquipmentSlot::new("body_armor").unwrap(),
                 EquipmentSlot::new("ring").unwrap(),
@@ -104,6 +106,7 @@ fn armor(game: &mut Game, actor: ActorId) {
     let mut spec = ItemSpec::ordinary("mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(EquipmentSpec {
+        weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {
             physical_reduction: 3,
             material: tor_simulation::ArmorMaterial::Metal,
@@ -243,6 +246,7 @@ fn duplicate_ring_slots_are_distinct_and_a_slot_must_match_the_item() {
     let mut spec = ItemSpec::ordinary("ring".into());
     spec.class = ItemClass::Ring;
     spec.equipment = Some(EquipmentSpec {
+        weapon_profile: None,
         armor: None,
         slot: EquipmentSlot::new("ring").unwrap(),
         attack: None,
@@ -459,6 +463,7 @@ fn concealed_equipment_discloses_its_slot_but_stats_require_actor_knowledge() {
     spec.concealed = true;
     spec.appearance = "silver ring".into();
     spec.equipment = Some(EquipmentSpec {
+        weapon_profile: None,
         armor: None,
         slot: EquipmentSlot::new("ring").unwrap(),
         attack: None,
@@ -546,6 +551,17 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     let (mut game, actor, _) = fixture_with_anatomy(
         true,
         AnatomySpec {
+            capacities: tor_simulation::equipment_capacity::EquipmentCapacities::new(
+                std::collections::BTreeMap::from([(
+                    tor_simulation::content_ids::EquipmentCapacityId::new("grip").unwrap(),
+                    2,
+                )]),
+            )
+            .unwrap(),
+            primary_attack_socket:
+                tor_simulation::equipment_capacity::PrimaryAttackSocket::Socket {
+                    slot: tor_simulation::EquipmentSlotId(0),
+                },
             slots: vec![
                 EquipmentSlot::new("weapon").unwrap(),
                 EquipmentSlot::new("body_armor").unwrap(),
@@ -566,6 +582,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     )
     .unwrap();
     weapon.equipment = Some(EquipmentSpec {
+        weapon_profile: None,
         armor: None,
         slot: EquipmentSlot::new("weapon").unwrap(),
         attack: Some(attack.clone()),
@@ -584,6 +601,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     let mut armor = ItemSpec::ordinary("armor".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
+        weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {
             physical_reduction: 3,
             material: tor_simulation::ArmorMaterial::Metal,
@@ -769,6 +787,9 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
         let (mut game, actor, _) = fixture_with_rules(
             true,
             AnatomySpec {
+                capacities: Default::default(),
+                primary_attack_socket:
+                    tor_simulation::equipment_capacity::PrimaryAttackSocket::None,
                 slots: vec![slot.clone()],
             },
             rules.clone(),
@@ -780,6 +801,7 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
             ItemClass::Armor
         };
         item.equipment = Some(EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot,
             attack: None,
@@ -854,6 +876,7 @@ fn custom_slot_capability_timing_and_checkpoint_use_rules_data() {
             equipped_phrase: "held by a tentacle".into(),
             compatible_classes: vec![ItemClass::Tool],
             requires_attack: true,
+            capacity: tor_simulation::equipment_capacity::EquipmentCapacityUse::None,
             equip_turns: 2,
             unequip_turns: 4,
         });
@@ -861,6 +884,8 @@ fn custom_slot_capability_timing_and_checkpoint_use_rules_data() {
     let (mut game, actor, _) = fixture_with_rules(
         true,
         AnatomySpec {
+            capacities: Default::default(),
+            primary_attack_socket: tor_simulation::equipment_capacity::PrimaryAttackSocket::None,
             slots: vec![slot.clone(), slot.clone()],
         },
         rules,
@@ -868,6 +893,7 @@ fn custom_slot_capability_timing_and_checkpoint_use_rules_data() {
     let mut item = ItemSpec::ordinary("grasped tool".into());
     item.class = ItemClass::Tool;
     item.equipment = Some(EquipmentSpec {
+        weapon_profile: None,
         armor: None,
         slot: slot.clone(),
         attack: Some(super::creature_fixture::melee(7, 60, DamageType::Impact, 9)),
@@ -917,6 +943,8 @@ fn custom_slot_capability_timing_and_checkpoint_use_rules_data() {
 fn unknown_anatomy_slot_rejects_configuration_and_checkpoint_restore() {
     let (mut game, actor, _) = fixture(false);
     let bad = AnatomySpec {
+        capacities: Default::default(),
+        primary_attack_socket: tor_simulation::equipment_capacity::PrimaryAttackSocket::None,
         slots: vec![EquipmentSlot::new("unknown_slot").unwrap()],
     };
     assert!(game.configure_anatomy(actor, bad).is_err());
@@ -927,4 +955,71 @@ fn unknown_anatomy_slot_rejects_configuration_and_checkpoint_restore() {
         serde_json::json!(["unknown_slot"]);
     let corrupt = serde_json::from_value(value).unwrap();
     assert!(Game::restore_checkpoint(snapshot, &corrupt, game.content().clone()).is_err());
+}
+
+#[test]
+fn shared_grip_capacity_limits_authored_and_paid_equips_without_combat() {
+    for capacity in [1, 3] {
+        let mut anatomy = AnatomySpec::from_rules(&super::creature_fixture::ruleset());
+        anatomy.slots.push(EquipmentSlot::new("weapon").unwrap());
+        anatomy.capacities = tor_simulation::equipment_capacity::EquipmentCapacities::new(
+            std::collections::BTreeMap::from([(
+                tor_simulation::content_ids::EquipmentCapacityId::new("grip").unwrap(),
+                capacity,
+            )]),
+        )
+        .unwrap();
+        let (mut game, actor, _) = fixture_with_anatomy(false, anatomy);
+        for (index, socket) in [0, 10, 1, 11].into_iter().enumerate() {
+            let shield = socket == 1;
+            let mut item = ItemSpec::ordinary(format!("capacity gear {index}"));
+            item.class = if shield {
+                ItemClass::Armor
+            } else {
+                ItemClass::Weapon
+            };
+            item.equipment = Some(EquipmentSpec {
+                weapon_profile: None,
+                slot: EquipmentSlot::new(if shield { "shield" } else { "weapon" }).unwrap(),
+                armor: None,
+                attack: (!shield)
+                    .then(|| super::creature_fixture::melee(1, 40, DamageType::Keen, 3)),
+                modifiers: vec![],
+            });
+            let id = ItemId(100 + index as u64);
+            game.place_item_stack(id.0, at(1), Some(actor), 1, item)
+                .unwrap();
+            if index < usize::from(capacity) {
+                game.equip_authored(actor, id, EquipmentSlotId(socket))
+                    .unwrap();
+            } else {
+                let before = game.equipment(actor).unwrap().clone();
+                assert!(game
+                    .equip_authored(actor, id, EquipmentSlotId(socket))
+                    .is_err());
+                assert!(game
+                    .act(
+                        actor,
+                        Action::Equip {
+                            item: id,
+                            slot: EquipmentSlotId(socket)
+                        }
+                    )
+                    .is_err());
+                assert_eq!(game.equipment(actor), Some(&before));
+                assert!(game.preparation(actor).is_none());
+            }
+        }
+        let mut shared = SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_ok());
+        if capacity == 3 {
+            let snapshot = game.checkpoint(&mut shared);
+            let mut invalid = serde_json::to_value(&shared).unwrap();
+            invalid["actors"][0][actor.0.to_string()]["anatomy"]["capacities"]["grip"] =
+                serde_json::json!(1);
+            let corrupt = serde_json::from_value(invalid).unwrap();
+            assert!(Game::restore_checkpoint(snapshot, &corrupt, game.content().clone()).is_err());
+        }
+    }
 }

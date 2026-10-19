@@ -22,6 +22,12 @@ pub enum Event {
     History(HistoryPage),
     CreatureInspection(Box<CreatureInspectionView>),
     CreatureCatalog(Box<CreatureCatalogPage>),
+    WeaponPreviewSent(String),
+    AbilityWeaponPreview {
+        context: ReplyContext,
+        request_id: String,
+        preview: Box<AbilityWeaponPreview>,
+    },
     StrikeQuerySent(String),
     AdvancementQuerySent(String),
     AdvancementPage {
@@ -240,13 +246,24 @@ async fn transact(
             ..
         }
     );
+    let weapon_preview = matches!(
+        &request,
+        Request::Command {
+            command: tor_protocol::Command::PreviewAbilityWeapon { .. },
+            ..
+        }
+    );
     let id = connection.request(request).await?;
+    if weapon_preview {
+        publish(tx, Event::WeaponPreviewSent(id.clone()))?;
+    }
     if advancement_query {
         publish(tx, Event::AdvancementQuerySent(id.clone()))?;
     }
     if strike_query {
         publish(tx, Event::StrikeQuerySent(id.clone()))?;
     }
+    let mut refresh_preview = weapon_preview;
     let mut pending = tor_client_common::PendingRequest::new(id);
     timeout(Duration::from_secs(10), async {
         loop {
@@ -254,7 +271,17 @@ async fn transact(
             let completion = pending.observe(connection, &message);
             let complete = completion.is_some();
             let unknown = matches!(completion, Some(tor_client_common::RequestCompletion::Unknown));
+            let stale_preview = refresh_preview && complete && matches!(&message, ServerMessage::Error {
+                code: ErrorCode::StaleRevision | ErrorCode::StaleContext | ErrorCode::WrongBranch, ..
+            });
             present(message, tx)?;
+            if stale_preview {
+                refresh_preview = false;
+                let id = connection.request(Request::Snapshot).await?;
+                pending = tor_client_common::PendingRequest::new(id);
+                publish(tx, Event::Status("Observation changed; refreshing before you choose the exact action again.".into()))?;
+                continue;
+            }
             if unknown {
                 publish(tx, Event::Status("State resynchronized; the previous request may have completed. Inspect history before retrying.".into()))?;
             }
@@ -268,6 +295,18 @@ async fn transact(
 
 fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> {
     match message {
+        ServerMessage::AbilityWeaponPreview {
+            context,
+            request_id,
+            preview,
+        } => publish(
+            tx,
+            Event::AbilityWeaponPreview {
+                context,
+                request_id,
+                preview,
+            },
+        ),
         ServerMessage::AdvancementPage {
             context,
             request_id,

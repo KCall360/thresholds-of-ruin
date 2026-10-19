@@ -17,11 +17,26 @@ pub fn choices(view: &Observation) -> Vec<AbilityView> {
         .collect()
 }
 pub fn basic_action(view: &Observation, target: ActorTarget) -> Result<Action, String> {
+    basic_action_with_weapon(view, target, tor_protocol::WeaponSelection::Default)
+}
+pub fn basic_action_with_weapon(
+    view: &Observation,
+    target: ActorTarget,
+    weapon: tor_protocol::WeaponSelection,
+) -> Result<Action, String> {
     let ability = available(view)
         .iter()
         .find(|a| a.basic_attack)
         .ok_or("You don't have a basic attack.")?;
-    action(view, &ability.id, target)
+    invocation_action(
+        view,
+        &ability.id,
+        AbilityInvocation {
+            aim: tor_protocol::AbilityAim::ActorTarget { target },
+            weapon,
+        },
+        SupplySelection::Carried,
+    )
 }
 pub fn action(view: &Observation, id: &str, target: ActorTarget) -> Result<Action, String> {
     action_with_supplies(view, id, target, SupplySelection::Carried)
@@ -35,7 +50,10 @@ pub fn action_with_supplies(
     invocation_action(
         view,
         id,
-        AbilityInvocation::ActorTarget { target },
+        tor_protocol::AbilityInvocation {
+            aim: tor_protocol::AbilityAim::ActorTarget { target },
+            weapon: tor_protocol::WeaponSelection::Default,
+        },
         supplies,
     )
 }
@@ -49,22 +67,28 @@ pub fn invocation_action(
         .iter()
         .find(|ability| ability.id == id)
         .ok_or_else(|| format!("You don't have {id}."))?;
-    match invocation {
-        AbilityInvocation::ActorTarget { target } if !target_eligible(view, ability, target) => {
+    match invocation.aim {
+        tor_protocol::AbilityAim::ActorTarget { target }
+            if !target_eligible(view, ability, target) =>
+        {
             return Err("That creature is not a valid visible target.".into());
         }
-        AbilityInvocation::SelfStep { .. }
+        tor_protocol::AbilityAim::SelfStep { .. }
             if ability.target_kind != AbilityTargetKind::SelfStep =>
         {
             return Err("That ability does not select a step.".into());
         }
-        AbilityInvocation::DirectionalRay { .. }
+        tor_protocol::AbilityAim::DirectionalRay { .. }
             if ability.target_kind != AbilityTargetKind::DirectionalRay =>
         {
             return Err("That ability does not select a ray direction.".into());
         }
         _ => {}
     }
+    if invocation.weapon != tor_protocol::WeaponSelection::Default && !ability.weapon_selection {
+        return Err("That ability does not select a weapon.".into());
+    }
+    crate::weapons::validate(view, invocation.weapon)?;
     if !supplies.valid() {
         return Err("Choose valid exact supplies.".into());
     }
@@ -259,6 +283,9 @@ pub fn selection_from_text_for_costs(
 }
 pub fn ability_label(ability: &AbilityView) -> String {
     let mut parts = Vec::new();
+    if ability.weapon_selection {
+        parts.push("weapon choice".into());
+    }
     if ability.cooldown_remaining > 0 {
         parts.push(format!(
             "cooldown: {} active ticks",
@@ -375,8 +402,11 @@ mod tests {
                 action(&view, &selected.id, view.visible_actors[0].id),
                 Ok(Action::UseAbility {
                     id: "shimmer_wave".into(),
-                    invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                        target: view.visible_actors[0].id
+                    invocation: tor_protocol::AbilityInvocation {
+                        aim: tor_protocol::AbilityAim::ActorTarget {
+                            target: view.visible_actors[0].id
+                        },
+                        weapon: tor_protocol::WeaponSelection::Default
                     },
                     supplies: Default::default(),
                 })
@@ -705,7 +735,10 @@ mod supply_tests {
             tor_protocol::Direction::Up,
             tor_protocol::Direction::Down,
         ] {
-            let invocation = AbilityInvocation::SelfStep { direction };
+            let invocation = tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::SelfStep { direction },
+                weapon: tor_protocol::WeaponSelection::Default,
+            };
             assert_eq!(
                 invocation_action(&view, &ability.id, invocation, SupplySelection::Carried)
                     .unwrap(),
@@ -720,8 +753,11 @@ mod supply_tests {
         assert!(invocation_action(
             &view,
             "missing",
-            AbilityInvocation::SelfStep {
-                direction: tor_protocol::Direction::North
+            tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::SelfStep {
+                    direction: tor_protocol::Direction::North
+                },
+                weapon: tor_protocol::WeaponSelection::Default
             },
             SupplySelection::Carried
         )
@@ -747,8 +783,11 @@ mod supply_tests {
         assert!(invocation_action(
             &supplied,
             &id,
-            AbilityInvocation::SelfStep {
-                direction: tor_protocol::Direction::West
+            tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::SelfStep {
+                    direction: tor_protocol::Direction::West
+                },
+                weapon: tor_protocol::WeaponSelection::Default
             },
             selection
         )
@@ -781,7 +820,10 @@ mod supply_tests {
             tor_protocol::Direction::Up,
             tor_protocol::Direction::Down,
         ] {
-            let invocation = AbilityInvocation::DirectionalRay { direction };
+            let invocation = tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::DirectionalRay { direction },
+                weapon: tor_protocol::WeaponSelection::Default,
+            };
             assert_eq!(
                 invocation_action(&view, &ability.id, invocation, SupplySelection::Carried)
                     .unwrap(),
@@ -796,8 +838,11 @@ mod supply_tests {
         assert!(invocation_action(
             &view,
             "missing",
-            AbilityInvocation::DirectionalRay {
-                direction: tor_protocol::Direction::North
+            tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::DirectionalRay {
+                    direction: tor_protocol::Direction::North
+                },
+                weapon: tor_protocol::WeaponSelection::Default
             },
             SupplySelection::Carried
         )
@@ -805,8 +850,11 @@ mod supply_tests {
         assert!(invocation_action(
             &view,
             &ability.id,
-            AbilityInvocation::SelfStep {
-                direction: tor_protocol::Direction::North
+            tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::SelfStep {
+                    direction: tor_protocol::Direction::North
+                },
+                weapon: tor_protocol::WeaponSelection::Default
             },
             SupplySelection::Carried
         )
@@ -827,8 +875,11 @@ mod supply_tests {
             assert!(invocation_action(
                 &other,
                 &ability.id,
-                AbilityInvocation::DirectionalRay {
-                    direction: tor_protocol::Direction::North
+                tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::DirectionalRay {
+                        direction: tor_protocol::Direction::North
+                    },
+                    weapon: tor_protocol::WeaponSelection::Default
                 },
                 SupplySelection::Carried
             )
@@ -841,8 +892,11 @@ mod supply_tests {
         assert!(invocation_action(
             &view,
             &ability.id,
-            AbilityInvocation::DirectionalRay {
-                direction: tor_protocol::Direction::North
+            tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::DirectionalRay {
+                    direction: tor_protocol::Direction::North
+                },
+                weapon: tor_protocol::WeaponSelection::Default
             },
             SupplySelection::Carried
         )
@@ -868,8 +922,11 @@ mod supply_tests {
         assert!(invocation_action(
             &supplied,
             &id,
-            AbilityInvocation::DirectionalRay {
-                direction: tor_protocol::Direction::West
+            tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::DirectionalRay {
+                    direction: tor_protocol::Direction::West
+                },
+                weapon: tor_protocol::WeaponSelection::Default
             },
             selection
         )

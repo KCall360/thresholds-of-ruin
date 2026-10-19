@@ -158,8 +158,9 @@ fn authored_dungeon_completes_retrieval_and_escape() {
                         ActorId(1),
                         &tor_protocol::Action::UseAbility {
                             id: "basic_melee".into(),
-                            invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                                target: a.id,
+                            invocation: tor_protocol::AbilityInvocation {
+                                aim: tor_protocol::AbilityAim::ActorTarget { target: a.id },
+                                weapon: tor_protocol::WeaponSelection::Default,
                             },
                             supplies: Default::default(),
                         },
@@ -204,8 +205,11 @@ fn victory_death_and_pending_attacks_survive_durable_restart() {
             ActorId(1),
             Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: tor_server::journal::AbilityInvocation::ActorTarget {
-                    target: tor_simulation::ActorId(2),
+                invocation: tor_server::journal::AbilityInvocation {
+                    aim: tor_server::journal::AbilityAim::ActorTarget {
+                        target: tor_simulation::ActorId(2),
+                    },
+                    weapon: tor_server::journal::WeaponSelection::Default,
                 },
                 supplies: Default::default(),
             },
@@ -355,8 +359,11 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
         ActorId(1),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
-                target: tor_simulation::ActorId(2),
+            invocation: tor_server::journal::AbilityInvocation {
+                aim: tor_server::journal::AbilityAim::ActorTarget {
+                    target: tor_simulation::ActorId(2),
+                },
+                weapon: tor_server::journal::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },
@@ -409,8 +416,11 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
         ActorId(1),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
-                target: tor_simulation::ActorId(2),
+            invocation: tor_server::journal::AbilityInvocation {
+                aim: tor_server::journal::AbilityAim::ActorTarget {
+                    target: tor_simulation::ActorId(2),
+                },
+                weapon: tor_server::journal::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },
@@ -451,8 +461,11 @@ fn active_ai_memory_survives_forced_checkpoint_and_restart() {
         ActorId(1),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
-                target: tor_simulation::ActorId(2),
+            invocation: tor_server::journal::AbilityInvocation {
+                aim: tor_server::journal::AbilityAim::ActorTarget {
+                    target: tor_simulation::ActorId(2),
+                },
+                weapon: tor_server::journal::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },
@@ -483,8 +496,11 @@ fn stationary_attack_does_not_rebuild_unchanged_navigation() {
                 expected_revision: engine.revision(ActorId(1)).unwrap(),
                 action: Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: tor_server::journal::AbilityInvocation::ActorTarget {
-                        target: tor_simulation::ActorId(2),
+                    invocation: tor_server::journal::AbilityInvocation {
+                        aim: tor_server::journal::AbilityAim::ActorTarget {
+                            target: tor_simulation::ActorId(2),
+                        },
+                        weapon: tor_server::journal::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },

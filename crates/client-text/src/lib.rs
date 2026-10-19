@@ -7,7 +7,7 @@ pub mod engine;
 pub mod narrative;
 pub mod parser;
 
-pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor>, <disclosed ability name> <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, expertises, intellect-expertises, intellect-expertise, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor> [with <equipped weapon>], <disclosed ability name> <actor> [with <equipped weapon>] [using <supplies>], places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nExplicit weapon choices preview exact cost, time to next strike and recovery, then require yes/no. Default choices act immediately.\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -188,7 +188,7 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
                         .map(|item| format!("{} (#{})", safe(&item.name), item.id))
                         .collect::<Vec<_>>()
                         .join(", ")
-                ))
+                ));
             }
         };
         let action = match direction {
@@ -230,6 +230,10 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         tor_client_common::abilities::match_command(&state.observation, line)?
     {
         let (noun, supplies) = tor_client_common::abilities::split_supply_clause(noun)?;
+        let (noun, weapon) = tor_client_common::weapons::split_clause(noun)?;
+        let weapon = weapon.map_or(Ok(WeaponSelection::Default), |text| {
+            tor_client_common::weapons::selection_from_text(&state.observation, text)
+        })?;
         let supplies = supplies.map_or(Ok(SupplySelection::Carried), |text| {
             tor_client_common::abilities::selection_from_text(&state.observation, ability, text)
         })?;
@@ -243,9 +247,15 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 &state.observation,
                 &ability.id,
                 if ability.target_kind == AbilityTargetKind::DirectionalRay {
-                    AbilityInvocation::DirectionalRay { direction }
+                    tor_protocol::AbilityInvocation {
+                        aim: tor_protocol::AbilityAim::DirectionalRay { direction },
+                        weapon,
+                    }
                 } else {
-                    AbilityInvocation::SelfStep { direction }
+                    tor_protocol::AbilityInvocation {
+                        aim: tor_protocol::AbilityAim::SelfStep { direction },
+                        weapon,
+                    }
                 },
                 supplies,
             )?);
@@ -280,10 +290,13 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 _ => return Err("Which actor? Use the ability name followed by #id.".into()),
             }
         };
-        return action(tor_client_common::abilities::action_with_supplies(
+        return action(tor_client_common::abilities::invocation_action(
             &state.observation,
             &ability.id,
-            target,
+            AbilityInvocation {
+                aim: AbilityAim::ActorTarget { target },
+                weapon,
+            },
             supplies,
         )?);
     }
@@ -326,6 +339,10 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
             }
         }
         ("attack" | "hit" | "fight", noun) => {
+            let (noun, weapon) = tor_client_common::weapons::split_clause(noun)?;
+            let weapon = weapon.map_or(Ok(WeaponSelection::Default), |text| {
+                tor_client_common::weapons::selection_from_text(&state.observation, text)
+            })?;
             let mut actors: Vec<_> = state
                 .observation
                 .visible_actors
@@ -342,9 +359,10 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
             actors.sort_by_key(|a| a.id);
             actors.dedup_by_key(|a| a.id);
             match actors.as_slice() {
-                [actor] => action(tor_client_common::abilities::basic_action(
+                [actor] => action(tor_client_common::abilities::basic_action_with_weapon(
                     &state.observation,
                     actor.id,
+                    weapon,
                 )?),
                 [] => Err("No matching actor is visible.".into()),
                 _ => Err(format!("Which actor? Use {verb} #id.")),

@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tor_world::Location;
 
+#[cfg(test)]
+#[path = "item_stack_tests.rs"]
+mod stack_tests;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemClass {
@@ -44,6 +48,31 @@ pub(crate) struct PreparedTransfer {
 impl PreparedTransfer {
     pub(crate) fn result(&self) -> ItemId {
         self.result
+    }
+}
+
+/// Value identity for homogeneous stacks. Location, motion and reservations are
+/// transfer constraints rather than interchangeable per-unit state.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ItemStackKey {
+    spec: tor_world::Shared<ItemSpec>,
+    condition: crate::armor::ItemCondition,
+    charges: Option<u16>,
+}
+
+impl Item {
+    pub(crate) fn stack_key(&self) -> Option<ItemStackKey> {
+        // Corpse appearance is exact provenance, never an interchangeable unit.
+        (self.spec.stackable && self.corpse.is_none()).then(|| ItemStackKey {
+            spec: self.spec.clone(),
+            condition: self.condition,
+            charges: self.charges,
+        })
+    }
+
+    pub(crate) fn stacks_with(&self, other: &Self) -> bool {
+        self.stack_key()
+            .is_some_and(|key| other.stack_key() == Some(key))
     }
 }
 
@@ -302,7 +331,7 @@ impl Game {
                     .then(|| {
                         game.items.at(at).find(|id| {
                             crate::diagnostics::stack_candidate();
-                            game.items[id].spec == item.spec
+                            game.items[id].stacks_with(item)
                         })
                     })
                     .flatten()
@@ -365,7 +394,7 @@ impl Game {
                     id != source
                         && item.spec.stackable
                         && existing.location == destination
-                        && existing.spec == item.spec
+                        && existing.stacks_with(item)
                 })
                 .ok_or(GameError::ItemUnavailable)?;
             existing
@@ -562,7 +591,7 @@ impl Game {
                 .map(|id| (id, &self.items[&id]))
                 .find(|(_, i)| {
                     crate::diagnostics::stack_candidate();
-                    i.spec == source.spec
+                    i.stacks_with(source)
                         && (taking
                             || (i.motion.same_kinematics(&self.actors[&actor].motion)
                                 && i.orientation == self.actors[&actor].orientation)
@@ -626,6 +655,9 @@ impl Game {
             self.items
                 .get(&result)
                 .map(|destination| {
+                    if destination.location != location || !item.stacks_with(destination) {
+                        return Err(GameError::ItemUnavailable);
+                    }
                     destination
                         .quantity
                         .checked_add(quantity)
@@ -908,6 +940,7 @@ mod tests {
                 4 => entry.spec.identity.clear(),
                 5 => {
                     entry.spec.equipment = Some(crate::EquipmentSpec {
+                        weapon_profile: None,
                         armor: None,
                         slot: crate::content_ids::EquipmentSlot::new("shield").unwrap(),
                         attack: None,
@@ -1071,8 +1104,7 @@ mod tests {
         let mut value = serde_json::to_value(ItemSpec::ordinary("bandage shield".into())).unwrap();
         value["class"] = serde_json::json!("armor");
         value["supply"] = serde_json::json!("bandage");
-        value["equipment"] =
-            serde_json::json!({"slot":"shield", "armor":null, "attack":null, "modifiers":[]});
+        value["equipment"] = serde_json::json!({"slot":"shield", "armor":null, "attack":null, "weapon_profile":null, "modifiers":[]});
         let spec: ItemSpec = serde_json::from_value(value).unwrap();
         assert!(!spec.valid());
         assert!(spec.validate_rules(rules.rules()).is_err());

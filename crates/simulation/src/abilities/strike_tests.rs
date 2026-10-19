@@ -162,10 +162,11 @@ fn frozen_strike(ordinal: u16, offset: u64) -> Value {
 fn frozen_plan(strikes: Vec<Value>) -> Value {
     json!({
         "ambush": null,
+        "weapon": {"kind":"unselected"},
         "actor": 1,
         "initial_hold": null,
         "hold_damage_increment": 0,
-        "invocation": {"kind": "actor_target", "target": 2},
+        "invocation": {"aim":{"kind": "actor_target", "target": 2},"weapon":{"kind":"default"}},
         "step": null,
         "target": 2,
         "ability": "basic_melee",
@@ -366,7 +367,7 @@ pub(super) fn sequence_game_on_world_configured(
             ActorId(1),
             Action::UseAbility {
                 id,
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -3672,9 +3673,7 @@ fn ordered_strikes_self_step_retreat_never_replaces_paid_prefix() {
         .ability_plan_with_supplies(
             ActorId(1),
             &crate::content_ids::AbilityId::new("prefix_step_probe").unwrap(),
-            crate::abilities::AbilityInvocation::SelfStep {
-                direction: direction.try_into().unwrap()
-            },
+            crate::abilities::AbilityInvocation::self_step(direction.try_into().unwrap()),
             Default::default()
         )
         .is_ok());
@@ -3855,6 +3854,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
                 id: talent_id.clone(),
                 name: "Nonmagical sequence training".into(),
                 form_choices: vec![],
+                expertise_grants: vec![],
                 prerequisites: vec![],
                 requirement: Requirement::Flag {
                     flag: FlagId::new("magical").unwrap(),
@@ -3904,7 +3904,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
             ActorId(1),
             Action::UseAbility {
                 id: ability_id.clone(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,

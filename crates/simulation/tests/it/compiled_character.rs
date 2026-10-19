@@ -176,6 +176,7 @@ fn warm_dynamic_sources_never_resample_owned_health_at_any_hd() {
             .unwrap();
         creature
             .set_equipment(vec![EquipmentSource {
+                weapon_profile: None,
                 item: ItemId(19),
                 socket: EquipmentSlotId(0),
                 modifiers: vec![Modifier {
@@ -356,11 +357,12 @@ fn warm_runtime_and_rejected_equipment_preserve_holds_and_exact_records() {
     creature
         .start_cost(
             IntentionId(1),
-            ResourceCost {
+            tor_simulation::costs::CostBundle::single(ResourceCost {
                 resource: Resource::Stamina,
                 start: 1,
                 resolution: 1,
-            },
+            })
+            .unwrap(),
         )
         .unwrap();
     creature.advance_active(1);
@@ -369,6 +371,7 @@ fn warm_runtime_and_rejected_equipment_preserve_holds_and_exact_records() {
     let retained = creature.clone();
     assert!(creature
         .set_equipment(vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(19),
             socket: EquipmentSlotId(0),
             attack: None,
@@ -456,6 +459,7 @@ fn warm_armed_folds_keep_independent_natural_operands_without_visiting_hit_dice(
         let before = work_counts();
         creature
             .set_equipment(vec![EquipmentSource {
+                weapon_profile: None,
                 item: ItemId(19),
                 socket: EquipmentSlotId(0),
                 modifiers: vec![Modifier {

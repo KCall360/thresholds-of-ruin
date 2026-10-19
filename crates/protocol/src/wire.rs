@@ -10,7 +10,7 @@ pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
 // `Option` fields normally accept omission. Current-only envelopes require an
 // explicit null instead, so old payloads cannot silently acquire new semantics.
-fn required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+pub(crate) fn required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Deserialize<'de>,
@@ -229,6 +229,10 @@ pub enum Action {
     Escape {
         hold: HoldTarget,
     },
+    ChooseIntellectExpertise {
+        basis: Box<crate::AdvancementBasis>,
+        choice: crate::IntellectExpertiseOperation,
+    },
     ChooseGrowthSource {
         basis: Box<crate::AdvancementBasis>,
         source: crate::GrowthSource,
@@ -298,6 +302,10 @@ impl<'de> Deserialize<'de> for Action {
             Escape {
                 hold: HoldTarget,
             },
+            ChooseIntellectExpertise {
+                basis: Box<crate::AdvancementBasis>,
+                choice: crate::IntellectExpertiseOperation,
+            },
             ChooseGrowthSource {
                 basis: Box<crate::AdvancementBasis>,
                 source: crate::GrowthSource,
@@ -363,6 +371,9 @@ impl<'de> Deserialize<'de> for Action {
         }
         Ok(match crate::bounded::named_map(d)? {
             Fields::Escape { hold } => Self::Escape { hold },
+            Fields::ChooseIntellectExpertise { basis, choice } => {
+                Self::ChooseIntellectExpertise { basis, choice }
+            }
             Fields::ChooseGrowthSource { basis, source } => {
                 Self::ChooseGrowthSource { basis, source }
             }
@@ -1038,6 +1049,14 @@ pub enum Anchor {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    #[serde(deserialize_with = "crate::weapon_preview::read_command")]
+    PreviewAbilityWeapon {
+        #[serde(with = "crate::integers::unsigned")]
+        expected_revision: u64,
+        ability: String,
+        invocation: crate::AbilityInvocation,
+        supplies: crate::SupplySelection,
+    },
     #[serde(deserialize_with = "crate::advancement::read_query_command")]
     Advancement {
         #[serde(with = "crate::integers::unsigned")]
@@ -1416,6 +1435,12 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    #[serde(deserialize_with = "crate::weapon_preview::read_reply")]
+    AbilityWeaponPreview {
+        context: ReplyContext,
+        request_id: String,
+        preview: Box<crate::AbilityWeaponPreview>,
+    },
     #[serde(deserialize_with = "crate::map_pages::read_page_reply")]
     MapPage {
         context: ReplyContext,
@@ -1500,7 +1525,8 @@ pub enum ServerMessage {
 impl ServerMessage {
     pub fn reply_context(&self) -> Option<&ReplyContext> {
         match self {
-            Self::MapPage { context, .. }
+            Self::AbilityWeaponPreview { context, .. }
+            | Self::MapPage { context, .. }
             | Self::CreatureCatalog { context, .. }
             | Self::AdvancementPage { context, .. }
             | Self::Ack { context, .. }
@@ -1603,20 +1629,87 @@ pub enum ItemClass {
     Coin,
     Gem,
 }
-/// Selected public operand; the backend resolves movement and ray collision.
+/// Explicit ability operands. Aim and weapon selection have separate authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AbilityInvocation {
+    pub aim: AbilityAim,
+    pub weapon: WeaponSelection,
+}
+impl AbilityInvocation {
+    pub fn actor_target(target: ActorTarget) -> Self {
+        Self {
+            aim: AbilityAim::ActorTarget { target },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub fn self_step(direction: Direction) -> Self {
+        Self {
+            aim: AbilityAim::SelfStep { direction },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub fn directional_ray(direction: Direction) -> Self {
+        Self {
+            aim: AbilityAim::DirectionalRay { direction },
+            weapon: WeaponSelection::Default,
+        }
+    }
+}
+impl From<ActorTarget> for AbilityInvocation {
+    fn from(target: ActorTarget) -> Self {
+        Self::actor_target(target)
+    }
+}
+impl<'de> Deserialize<'de> for AbilityInvocation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            aim: AbilityAim,
+            weapon: WeaponSelection,
+        }
+        let Fields { aim, weapon } = crate::bounded::named_map(deserializer)?;
+        Ok(Self { aim, weapon })
+    }
+}
+/// Exact equipped identity and socket, resolved only in the owner's disclosure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum AbilityInvocation {
+pub enum WeaponSelection {
+    Default,
+    Equipped { item: ItemTarget, socket: u16 },
+}
+impl<'de> Deserialize<'de> for WeaponSelection {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Default {},
+            Equipped { item: ItemTarget, socket: u16 },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Default {} => Self::Default,
+            Fields::Equipped { item, socket } => {
+                if usize::from(socket) >= MAX_EQUIPMENT_SLOTS {
+                    return Err(serde::de::Error::custom(
+                        "invalid equipped weapon selection",
+                    ));
+                }
+                Self::Equipped { item, socket }
+            }
+        })
+    }
+}
+/// Selected public aim; the backend resolves movement and ray collision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AbilityAim {
     ActorTarget { target: ActorTarget },
     SelfStep { direction: Direction },
     DirectionalRay { direction: Direction },
 }
-impl From<ActorTarget> for AbilityInvocation {
-    fn from(target: ActorTarget) -> Self {
-        Self::ActorTarget { target }
-    }
-}
-impl<'de> Deserialize<'de> for AbilityInvocation {
+impl<'de> Deserialize<'de> for AbilityAim {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         // Unit-enum deserialization alone also accepts an externally tagged
         // object. Selected directions are the documented string token only.

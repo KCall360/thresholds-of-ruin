@@ -486,9 +486,9 @@ fn stationary_gate_also_covers_self_step_and_fresh_ai_retreat() {
     let (mut game, actor) = fixture(&[LocomotionValue::Stationary { enabled: true }]);
     let action = Action::UseAbility {
         id: crate::content_ids::AbilityId::new("guarded_step").unwrap(),
-        invocation: crate::abilities::AbilityInvocation::SelfStep {
-            direction: crate::abilities::StepDirection::East,
-        },
+        invocation: crate::abilities::AbilityInvocation::self_step(
+            crate::abilities::StepDirection::East,
+        ),
         supplies: Default::default(),
     };
     assert!(game.condition_blocks_action(actor, &action));

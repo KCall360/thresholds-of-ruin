@@ -146,6 +146,7 @@ fn owner_host_all_preview_sections_are_read_only_and_exact_while_busy() {
         p::AdvancementPreviewSection::Balances,
         p::AdvancementPreviewSection::Skills,
         p::AdvancementPreviewSection::Talents,
+        p::AdvancementPreviewSection::Expertises,
         p::AdvancementPreviewSection::RemovedConditions,
     ] {
         let q = p::AdvancementQuery::Preview {
@@ -158,7 +159,7 @@ fn owner_host_all_preview_sections_are_read_only_and_exact_while_busy() {
         assert_eq!(page.query, q);
         totals.push(page.total);
     }
-    assert_eq!(totals, [1, 1, 1, 2, 20, 0, 0]);
+    assert_eq!(totals, [1, 1, 1, 2, 20, 0, 0, 0]);
     assert_eq!(
         engine.game, original,
         "includes RNG, holds, actor-active clocks and knowledge"
@@ -1523,8 +1524,11 @@ fn earned_fatal_growth_survives_receipts_checkpoint_replay_and_rewind_branches()
             &engine,
             Action::UseAbility {
                 id: s::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: crate::journal::AbilityInvocation::ActorTarget {
-                    target: s::ActorId(2),
+                invocation: crate::journal::AbilityInvocation {
+                    aim: crate::journal::AbilityAim::ActorTarget {
+                        target: s::ActorId(2),
+                    },
+                    weapon: crate::journal::WeaponSelection::Default,
                 },
                 supplies: SupplySelection::Carried,
             },
@@ -1578,8 +1582,11 @@ fn earned_fatal_growth_survives_receipts_checkpoint_replay_and_rewind_branches()
             &engine,
             Action::UseAbility {
                 id: s::content_ids::AbilityId::new("basic_melee").unwrap(),
-                invocation: crate::journal::AbilityInvocation::ActorTarget {
-                    target: s::ActorId(2),
+                invocation: crate::journal::AbilityInvocation {
+                    aim: crate::journal::AbilityAim::ActorTarget {
+                        target: s::ActorId(2),
+                    },
+                    weapon: crate::journal::WeaponSelection::Default,
                 },
                 supplies: SupplySelection::Carried,
             },
@@ -1595,6 +1602,203 @@ fn earned_fatal_growth_survives_receipts_checkpoint_replay_and_rewind_branches()
                 .unwrap()
                 .game,
             engine.game
+        );
+    }
+}
+
+#[test]
+fn owner_expertise_catalog_preview_paid_commit_and_reopen_preserve_exact_source() {
+    for checkpoint_interval in [1, 4096] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("expertise.db");
+        let fixture = crate::advancement_test_support::expertise_scenario();
+        let policy = SavePolicy {
+            checkpoint_interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+        let before = engine.game.clone();
+        let selection = p::PurchaseChoice::Expertise {
+            expertise: "fixture.knife".into(),
+        };
+        let wire_basis = adapter::wire_basis(&basis(&engine));
+        let catalog = query(
+            &engine,
+            p::AdvancementQuery::Catalog {
+                basis: wire_basis.clone(),
+                catalog: p::AdvancementKind::Expertise,
+                offset: 0,
+            },
+        );
+        assert_eq!(catalog.total, 1);
+        assert!(
+            matches!(&catalog.entries[0], p::AdvancementEntry::Catalog { value } if value.selection == selection && value.name == "Knife")
+        );
+        let purchase = p::PurchaseOperation {
+            owner: 0,
+            pool: "advancement".into(),
+            selection,
+        };
+        let preview = query(
+            &engine,
+            p::AdvancementQuery::Preview {
+                basis: wire_basis,
+                proposal: p::AdvancementProposal::Purchase {
+                    purchase: purchase.clone(),
+                },
+                section: p::AdvancementPreviewSection::Expertises,
+                offset: 0,
+            },
+        );
+        assert_eq!(preview.total, 1);
+        let p::AdvancementEntry::Expertise { value } = &preview.entries[0] else {
+            panic!("expertise preview")
+        };
+        assert_eq!(value.status, p::AdvancementStatus::Active);
+        assert_eq!(value.source_count, 1);
+        assert_eq!(engine.game, before, "preview is descriptive only");
+        let action = Action::Purchase {
+            basis: Box::new(basis(&engine)),
+            purchase: adapter::purchase(&purchase).unwrap(),
+        };
+        let command = admission(&engine, action.clone());
+        submit(&mut engine, OWNER, "expertise", command.clone());
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine =
+            Engine::open_with_policy(&path, Scenario::two_room(999), policy.clone()).unwrap();
+        let started = engine.execute_next_intention().unwrap().unwrap();
+        assert!(
+            matches!(&started.entry.content, JournalContent::IntentionStarted { action: saved, .. } if saved == &action)
+        );
+        let id = s::content_ids::ExpertiseId::new("fixture.knife").unwrap();
+        let creature = engine.game.creature(s::ActorId(1)).unwrap();
+        let derived = creature.derived();
+        assert!(derived.expertises.active(&id));
+        let rows = crate::creature_view::expertise_rows(
+            &derived.expertises,
+            engine
+                .game
+                .creature(s::ActorId(1))
+                .unwrap()
+                .build()
+                .ruleset(),
+        );
+        assert_eq!(&rows[0], value);
+        let completed = engine.game.clone();
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, Scenario::two_room(999), policy).unwrap();
+        assert_eq!(engine.game, completed);
+        assert!(submit(&mut engine, OWNER, "expertise", command).duplicate);
+        assert_eq!(engine.game, completed);
+    }
+}
+
+#[test]
+fn intellect_entitlement_preview_commit_stale_basis_and_source_free_reopen() {
+    for checkpoint_interval in [1, 4096] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("intellect-expertise.db");
+        let policy = SavePolicy {
+            checkpoint_interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(
+            &path,
+            crate::advancement_test_support::expertise_scenario_with_intellect(1),
+            policy.clone(),
+        )
+        .unwrap();
+        let before = engine.game.clone();
+        let points = engine
+            .game
+            .creature(s::ActorId(1))
+            .unwrap()
+            .build()
+            .unspent_points();
+        let old_basis = basis(&engine);
+        let choice = p::IntellectExpertiseOperation {
+            threshold: 1,
+            expertise: "fixture.knife".into(),
+        };
+        let rows = query(
+            &engine,
+            p::AdvancementQuery::IntellectExpertises {
+                basis: adapter::wire_basis(&old_basis),
+                offset: 0,
+            },
+        );
+        assert_eq!(rows.total, 1);
+        assert!(
+            matches!(&rows.entries[0], p::AdvancementEntry::IntellectExpertise { value } if value.threshold == 1 && value.expertise.is_none() && value.status == p::AdvancementStatus::Active)
+        );
+        let preview = query(
+            &engine,
+            p::AdvancementQuery::Preview {
+                basis: adapter::wire_basis(&old_basis),
+                proposal: p::AdvancementProposal::IntellectExpertise {
+                    choice: choice.clone(),
+                },
+                section: p::AdvancementPreviewSection::Expertises,
+                offset: 0,
+            },
+        );
+        assert_eq!(preview.total, 1);
+        assert_eq!(engine.game, before);
+        let action = Action::ChooseIntellectExpertise {
+            basis: Box::new(old_basis.clone()),
+            choice: adapter::intellect_expertise(&choice).unwrap(),
+        };
+        let command = admission(&engine, action.clone());
+        let accepted = submit(&mut engine, OWNER, "intellect-choice", command.clone());
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine =
+            Engine::open_with_policy(&path, Scenario::two_room(999), policy.clone()).unwrap();
+        let started = engine.execute_next_intention().unwrap().unwrap();
+        assert!(
+            matches!(&started.entry.content, JournalContent::IntentionStarted { action: saved, .. } if saved == &action)
+        );
+        let creature = engine.game.creature(s::ActorId(1)).unwrap();
+        let id = s::content_ids::ExpertiseId::new("fixture.knife").unwrap();
+        assert!(creature.derived().expertises.active(&id));
+        assert_eq!(creature.build().unspent_points(), points);
+        assert!(matches!(
+            engine.game.preview_player_intellect_expertise(
+                s::ActorId(1),
+                &old_basis,
+                &adapter::intellect_expertise(&choice).unwrap()
+            ),
+            Err(s::GameError::Build(
+                s::creatures::BuildError::StaleAdvancementPreview
+            ))
+        ));
+        let completed = engine.game.clone();
+        let duplicate = submit(&mut engine, OWNER, "intellect-choice", command.clone());
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.entry, accepted.entry);
+        assert_eq!(engine.game, completed);
+        assert_eq!(
+            Engine::replay(engine.archive.clone(), None, None)
+                .unwrap()
+                .game,
+            completed
+        );
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, Scenario::two_room(999), policy).unwrap();
+        assert_eq!(engine.game, completed);
+        assert!(submit(&mut engine, OWNER, "intellect-choice", command).duplicate);
+        let rows = query(
+            &engine,
+            p::AdvancementQuery::IntellectExpertises {
+                basis: adapter::wire_basis(&basis(&engine)),
+                offset: 0,
+            },
+        );
+        assert!(
+            matches!(&rows.entries[0], p::AdvancementEntry::IntellectExpertise { value } if value.expertise.as_ref().is_some_and(|value| value.id == "fixture.knife"))
         );
     }
 }

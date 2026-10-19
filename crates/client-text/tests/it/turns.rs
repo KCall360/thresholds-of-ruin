@@ -25,6 +25,8 @@ enum Frame {
     Waiting(Waiting),
     Resync,
     CreatureCatalog(CreatureCatalogPage),
+    WeaponPreview(AbilityWeaponPreview),
+    SnapshotReply,
     Control(bool),
 }
 
@@ -181,6 +183,20 @@ impl Link for Scripted {
         };
         for frame in frames {
             let message = match frame {
+                Frame::SnapshotReply => {
+                    let mut snapshot = self.client.snapshot();
+                    snapshot.context.epoch += 1;
+                    self.context = snapshot.context.clone();
+                    ServerMessage::Snapshot {
+                        request_id: id.clone(),
+                        snapshot: Box::new(snapshot),
+                    }
+                }
+                Frame::WeaponPreview(preview) => ServerMessage::AbilityWeaponPreview {
+                    context: self.reply_context(),
+                    request_id: id.clone(),
+                    preview: Box::new(preview),
+                },
                 Frame::CreatureCatalog(page) => ServerMessage::CreatureCatalog {
                     context: self.reply_context(),
                     request_id: id.clone(),
@@ -640,7 +656,10 @@ async fn ability_goals_submit_once_from_the_current_position_and_tell_preparatio
                     request,
                     &Action::UseAbility {
                         id: ability.into(),
-                        invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
+                        invocation: tor_protocol::AbilityInvocation {
+                            aim: tor_protocol::AbilityAim::ActorTarget { target },
+                            weapon: tor_protocol::WeaponSelection::Default
+                        },
                         supplies: Default::default(),
                     }
                 ),
@@ -2607,7 +2626,11 @@ fn attacked(link: &Scripted) -> Vec<ActorTarget> {
                     Command::Act {
                         action:
                             Action::UseAbility {
-                                invocation: AbilityInvocation::ActorTarget { target },
+                                invocation:
+                                    tor_protocol::AbilityInvocation {
+                                        aim: tor_protocol::AbilityAim::ActorTarget { target },
+                                        weapon: tor_protocol::WeaponSelection::Default,
+                                    },
                                 ..
                             },
                         ..
@@ -2628,7 +2651,11 @@ fn sparring(kill: usize) -> impl FnMut(&Request, &StateView) -> Vec<Frame> {
                 Command::Act {
                     action:
                         Action::UseAbility {
-                            invocation: AbilityInvocation::ActorTarget { target },
+                            invocation:
+                                tor_protocol::AbilityInvocation {
+                                    aim: tor_protocol::AbilityAim::ActorTarget { target },
+                                    weapon: tor_protocol::WeaponSelection::Default,
+                                },
                             ..
                         },
                     ..
@@ -3746,4 +3773,183 @@ async fn ordinary_zap_and_paid_abort_use_current_authority_and_no_hidden_names()
     let refused = play(&mut link, &mut engine, "zap ivory wand east").await;
     assert!(refused.to_lowercase().contains("spectator"), "{refused}");
     assert_eq!(link.sent.len(), 2);
+}
+
+fn weapon_preview_state() -> StateView {
+    let mut state = with_figures(&[(2, "ruin scout", 1)]);
+    let mut weapon = state.observation.ground_items[0].item.clone();
+    weapon.id = super::item_target(81);
+    weapon.name = "secondary sword".into();
+    weapon.class = ItemClass::Weapon;
+    weapon.identified = false;
+    state.observation.inventory.push(weapon.clone());
+    let slot = equipment_slot("weapon", "in hand", true);
+    state.observation.interactions = Some(InteractionView {
+        identification: None,
+        completed: vec![],
+        curse_blocked: vec![],
+        slots: vec![slot.clone(); 11],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item: weapon.id,
+            slot: Some(slot),
+            equipped_slot: Some(10),
+            known_equipment: None,
+            known_cursed: None,
+            known_protected: None,
+            drinkable: false,
+            edible: false,
+            readable: false,
+            zappable: false,
+            charges: None,
+        }],
+    });
+    state
+}
+fn weapon_preview_response(request: &Request) -> Option<AbilityWeaponPreview> {
+    let Request::Command {
+        command:
+            Command::PreviewAbilityWeapon {
+                ability,
+                invocation,
+                supplies,
+                ..
+            },
+        ..
+    } = request
+    else {
+        return None;
+    };
+    Some(AbilityWeaponPreview {
+        ability: ability.clone(),
+        invocation: *invocation,
+        supplies: supplies.clone(),
+        phase: AbilityWeaponPreviewPhase::Fresh,
+        cost: Some(DiagnosticCostBundle {
+            stamina: None,
+            focus: Some(DiagnosticCost {
+                resource: tor_client_common::test_support::content("focus"),
+                start: 0,
+                resolution: 2,
+            }),
+            mana: Some(DiagnosticCost {
+                resource: tor_client_common::test_support::content("mana"),
+                start: 1,
+                resolution: 2,
+            }),
+        }),
+        preparation: 300,
+        recovery: 100,
+    })
+}
+fn ability_actions(link: &Scripted) -> Vec<Action> {
+    link.sent
+        .iter()
+        .filter_map(|request| match request {
+            Request::Command {
+                command:
+                    Command::Act {
+                        action: action @ Action::UseAbility { .. },
+                        ..
+                    },
+                ..
+            } => Some(action.clone()),
+            _ => None,
+        })
+        .collect()
+}
+#[tokio::test]
+async fn explicit_weapon_text_shows_exact_terms_then_yes_sends_one_original_action() {
+    let mut link = Scripted::new(weapon_preview_state(), |request, now| {
+        if let Some(preview) = weapon_preview_response(request) {
+            vec![Frame::WeaponPreview(preview)]
+        } else {
+            vec![Frame::View(now.clone(), None), Frame::Ack]
+        }
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "attack scout with secondary sword").await;
+    assert!(text.contains("Time to next strike: 300 ticks"), "{text}");
+    assert!(text.contains("Focus"));
+    assert!(text.contains("Mana"));
+    assert!(text.contains("yes/no"));
+    assert!(ability_actions(&link).is_empty());
+    let expected = link.sent.iter().find_map(weapon_preview_response).unwrap();
+    play(&mut link, &mut engine, "yes").await;
+    assert_eq!(
+        ability_actions(&link),
+        vec![Action::UseAbility {
+            id: expected.ability,
+            invocation: expected.invocation,
+            supplies: expected.supplies
+        }]
+    );
+}
+#[tokio::test]
+async fn explicit_weapon_text_no_wrong_echo_and_changed_revision_send_no_action() {
+    for failure in 0..3 {
+        let mut link = Scripted::new(weapon_preview_state(), move |request, _| {
+            let mut preview = weapon_preview_response(request).expect("only preview query");
+            if failure == 1 {
+                preview.invocation.weapon = WeaponSelection::Default;
+            }
+            vec![Frame::WeaponPreview(preview)]
+        });
+        let mut engine = Engine::default();
+        let text = play(&mut link, &mut engine, "attack scout with secondary sword").await;
+        if failure == 1 {
+            assert!(text.contains("does not match"), "{text}");
+        } else if failure == 2 {
+            let mut snapshot = link.client.snapshot();
+            std::sync::Arc::make_mut(&mut snapshot.state).revision += 1;
+            link.client = ClientState::from_snapshot(snapshot).unwrap();
+            let text = play(&mut link, &mut engine, "yes").await;
+            assert!(text.contains("changed"), "{text}");
+        } else {
+            play(&mut link, &mut engine, "no").await;
+        }
+        assert!(ability_actions(&link).is_empty());
+        assert_eq!(link.sent.len(), 1);
+    }
+}
+#[tokio::test]
+async fn omitted_weapon_keeps_immediate_default_text_action() {
+    let mut link = Scripted::new(weapon_preview_state(), sparring(99));
+    play(&mut link, &mut Engine::default(), "attack scout").await;
+    assert!(link
+        .sent
+        .iter()
+        .all(|request| weapon_preview_response(request).is_none()));
+    assert!(matches!(
+        ability_actions(&link).as_slice(),
+        [Action::UseAbility {
+            invocation: AbilityInvocation {
+                weapon: WeaponSelection::Default,
+                ..
+            },
+            ..
+        }]
+    ));
+}
+
+#[tokio::test]
+async fn stale_weapon_preview_refreshes_snapshot_without_rebinding_or_action() {
+    let mut link = Scripted::new(weapon_preview_state(), |request, _| match request {
+        Request::Command {
+            command: Command::PreviewAbilityWeapon { .. },
+            ..
+        } => vec![Frame::Reject(ErrorCode::StaleRevision)],
+        Request::Snapshot => vec![Frame::SnapshotReply],
+        _ => panic!("stale preview must not retry gameplay"),
+    });
+    let text = play(
+        &mut link,
+        &mut Engine::default(),
+        "attack scout with secondary sword",
+    )
+    .await;
+    assert!(text.contains("Observation refreshed"), "{text}");
+    assert!(ability_actions(&link).is_empty());
+    assert_eq!(link.sent.len(), 2);
+    assert_eq!(link.sent[1], Request::Snapshot);
 }

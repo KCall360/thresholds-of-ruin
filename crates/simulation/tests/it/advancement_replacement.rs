@@ -49,6 +49,7 @@ fn replacement_graph(minimum: u16) -> CreatureBuild {
     for (id, requirement) in definitions {
         document.talents.push(TalentDef {
             form_choices: vec![],
+            expertise_grants: vec![],
             id: talent(id),
             name: id.into(),
             prerequisites: vec![],
@@ -267,6 +268,7 @@ fn replacing_a_rank_preserves_parent_supported_talents_as_dormant_and_keeps_unre
         .extend([fixture_health(), fixture_health_child()]);
     document.talents.push(TalentDef {
         form_choices: vec![],
+        expertise_grants: vec![],
         id: talent("rank_gated"),
         name: "Rank gated".into(),
         prerequisites: vec![],
@@ -407,6 +409,7 @@ fn replacement_refunds_each_same_hd_purchase_once_without_borrowing_other_pools(
     }
     document.talents.push(TalentDef {
         form_choices: vec![],
+        expertise_grants: vec![],
         id: talent("child"),
         name: "Child".into(),
         prerequisites: vec![],

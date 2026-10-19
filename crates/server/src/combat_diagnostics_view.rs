@@ -8,6 +8,22 @@ pub(crate) enum DiagnosticProjectionError {
     InvalidPage,
     Inconsistent,
 }
+pub(crate) fn cost_bundle(value: s::costs::CostBundle) -> p::DiagnosticCostBundle {
+    let mut entries = s::resources::ByResource::from_fn(|_| None);
+    for cost in value.entries() {
+        *entries.get_mut(cost.resource) = Some(p::DiagnosticCost {
+            resource: resource(cost.resource),
+            start: cost.start,
+            resolution: cost.resolution,
+        });
+    }
+    p::DiagnosticCostBundle {
+        stamina: entries.stamina,
+        focus: entries.focus,
+        mana: entries.mana,
+    }
+}
+
 fn step(value: &d::ResolutionRecord) -> p::CombatTraceStep {
     p::CombatTraceStep {
         id: value.id.clone(),
@@ -93,11 +109,7 @@ fn record(
         started: value.started,
         remaining: value.remaining,
         recovery: value.recovery,
-        charge: value.charge.map(|value| p::DiagnosticCost {
-            resource: resource(value.resource),
-            start: value.start,
-            resolution: value.resolution,
-        }),
+        charge: value.charge.map(cost_bundle),
         actor_before: combatant(&value.actor_before, rules),
         target_before: combatant(&value.target_before, rules),
         actor_after: combatant(&value.actor_after, rules),

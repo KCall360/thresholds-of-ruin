@@ -62,6 +62,7 @@ pub(super) fn stats() -> OwnStats {
             available: 3,
             reserved: 1,
         }],
+        expertises: vec![],
         active_talents: vec![content("fixture_talent")],
         dormant_talents: vec![],
         abilities: vec![AbilityView {
@@ -75,6 +76,7 @@ pub(super) fn stats() -> OwnStats {
             reach: AbilityReach::Sight { range: 7 },
             target_kind: AbilityTargetKind::Actor,
             basic_attack: false,
+            weapon_selection: false,
             cooldown_remaining: 0,
             supply_costs: vec![],
         }],
@@ -262,8 +264,11 @@ fn undiscovered_content_ids_and_names_round_trip_without_client_catalogs() {
     }
     let action = Action::UseAbility {
         id: stats.abilities[0].id.clone(),
-        invocation: tor_protocol::AbilityInvocation::ActorTarget {
-            target: ActorTarget::from_digest([1; 32]),
+        invocation: tor_protocol::AbilityInvocation {
+            aim: tor_protocol::AbilityAim::ActorTarget {
+                target: ActorTarget::from_digest([1; 32]),
+            },
+            weapon: tor_protocol::WeaponSelection::Default,
         },
         supplies: Default::default(),
     };
@@ -458,4 +463,16 @@ fn directional_ray_catalog_discloses_only_bounded_sight_range_and_direction_kind
     }
     value.basic_attack = true;
     assert!(!value.valid());
+}
+
+#[test]
+fn expertise_snapshot_field_is_mandatory_and_eagerly_bounded() {
+    let mut value = serde_json::to_value(stats()).unwrap();
+    value.as_object_mut().unwrap().remove("expertises");
+    assert!(serde_json::from_value::<OwnStats>(value.clone()).is_err());
+    value["expertises"] = serde_json::json!([]);
+    assert!(serde_json::from_value::<OwnStats>(value.clone()).is_ok());
+    let row = serde_json::json!({"expertise":{"id":"spear","name":"Spear"},"status":"dormant","source_count":257});
+    value["expertises"] = serde_json::json!(vec![row; MAX_ADVANCEMENT_EXPERTISE_ROWS + 1]);
+    assert!(serde_json::from_value::<OwnStats>(value).is_err());
 }

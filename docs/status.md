@@ -110,6 +110,8 @@ and magical armor wards covering Energy, Impact, Keen, Spirit and Vital explicit
 Psychic is a separate category excluded from these wards. Rust damages physical
 plating only. Equipment scrolls use frozen targets and the shared paid Read path;
 their success and no-op outcomes do not automatically identify the scroll type.
+Generic stack transfers require matching exact per-unit condition and charge
+state; equipment and devices remain nonstackable.
 
 ## Implemented scope
 

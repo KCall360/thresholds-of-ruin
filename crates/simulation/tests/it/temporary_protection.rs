@@ -59,6 +59,7 @@ fn content(with_wards: bool) -> Arc<Content> {
     for (id, amount) in [("lesser_protection", 1), ("greater_protection", 3)] {
         document.talents.push(TalentDef {
             form_choices: vec![],
+            expertise_grants: vec![],
             id: TalentId::new(id).unwrap(),
             name: id.into(),
             prerequisites: vec![],

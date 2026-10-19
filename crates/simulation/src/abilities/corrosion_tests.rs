@@ -146,6 +146,7 @@ fn fixture_config(
                 let mut spec = ItemSpec::ordinary("mail".into());
                 spec.class = crate::ItemClass::Armor;
                 spec.equipment = Some(EquipmentSpec {
+                    weapon_profile: None,
                     slot: EquipmentSlot::new("body_armor").unwrap(),
                     armor: Some(armor),
                     attack: None,

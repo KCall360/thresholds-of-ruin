@@ -789,6 +789,9 @@ pub(crate) fn inspect(
                                         s::rules::PurchaseKind::SkillRank => {
                                             p::AdvancementKind::SkillRank
                                         }
+                                        s::rules::PurchaseKind::Expertise => {
+                                            p::AdvancementKind::Expertise
+                                        }
                                         s::rules::PurchaseKind::Talent => {
                                             p::AdvancementKind::Talent
                                         }
@@ -810,6 +813,14 @@ pub(crate) fn inspect(
                                     s::creatures::PurchaseSelection::SkillRank(value) => {
                                         p::InspectionPurchaseSelection::SkillRank {
                                             skill: skill(*value),
+                                        }
+                                    }
+                                    s::creatures::PurchaseSelection::Expertise(id) => {
+                                        p::InspectionPurchaseSelection::Expertise {
+                                            expertise: named(
+                                                id,
+                                                rules.expertise(id).map(|def| def.name.as_str()),
+                                            ),
                                         }
                                     }
                                     s::creatures::PurchaseSelection::Talent(id) => {

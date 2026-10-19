@@ -40,7 +40,7 @@ class RogueRosterProcesses(ProcessTestCase):
         target = next(row["id"] for row in view(ready)["visible_actors"] if row["name"] == "Warrior")
         queued = self.command(foe, {"type": "act", "action": {
             "type": "use_ability", "id": "basic_melee",
-            "invocation": {"kind": "actor_target", "target": target},
+            "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}},
             "supplies": {"kind": "carried"}}})
         self.assertIsNone(queued["error"])
         self.assertIsNone(self.act(player, {"type": "wait"})["error"])

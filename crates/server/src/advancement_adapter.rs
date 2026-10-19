@@ -35,6 +35,9 @@ pub(crate) fn choice(value: &p::PurchaseChoice) -> Result<a::PurchaseChoice, cra
                 .find(|candidate| candidate.as_str() == skill)
                 .ok_or_else(invalid)?,
         },
+        p::PurchaseChoice::Expertise { expertise } => a::PurchaseChoice::Expertise {
+            expertise: s::content_ids::ExpertiseId::new(expertise).map_err(|_| invalid())?,
+        },
         p::PurchaseChoice::Talent { talent } => a::PurchaseChoice::Talent {
             talent: s::content_ids::TalentId::new(talent).map_err(|_| invalid())?,
         },
@@ -48,6 +51,9 @@ pub(crate) fn wire_choice(value: &a::PurchaseChoice) -> p::PurchaseChoice {
     match value {
         a::PurchaseChoice::SkillRank { skill } => p::PurchaseChoice::SkillRank {
             skill: skill.as_str().into(),
+        },
+        a::PurchaseChoice::Expertise { expertise } => p::PurchaseChoice::Expertise {
+            expertise: expertise.to_string(),
         },
         a::PurchaseChoice::Talent { talent } => p::PurchaseChoice::Talent {
             talent: talent.to_string(),
@@ -143,6 +149,26 @@ pub(crate) fn wire_future_growth(value: &s::earned_growth::FutureGrowth) -> p::F
             source: wire_growth_source(source),
         },
         s::earned_growth::FutureGrowth::Authored {} => p::FutureGrowth::Authored {},
+    }
+}
+
+pub(crate) fn intellect_expertise(
+    value: &p::IntellectExpertiseOperation,
+) -> Result<a::IntellectExpertiseOperation, crate::Failure> {
+    if value.threshold == 0 || value.threshold > s::limits::DERIVED_ATTRIBUTE {
+        return Err(invalid());
+    }
+    Ok(a::IntellectExpertiseOperation {
+        threshold: value.threshold,
+        expertise: s::content_ids::ExpertiseId::new(&value.expertise).map_err(|_| invalid())?,
+    })
+}
+pub(crate) fn wire_intellect_expertise(
+    value: &a::IntellectExpertiseOperation,
+) -> p::IntellectExpertiseOperation {
+    p::IntellectExpertiseOperation {
+        threshold: value.threshold,
+        expertise: value.expertise.to_string(),
     }
 }
 

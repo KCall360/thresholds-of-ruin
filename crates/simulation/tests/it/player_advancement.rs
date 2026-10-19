@@ -186,9 +186,7 @@ fn phase5_purchase_rejects_active_and_paused_preparations_without_abandoning_the
         let actor = ActorId(1);
         let attack = Action::UseAbility {
             id: game.basic_attack(actor).unwrap(),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: ActorId(2),
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
             supplies: Default::default(),
         };
         let intention = game
@@ -583,6 +581,7 @@ fn phase5_purchase_reuses_permanent_eligibility_rank_cap_and_duplicate_checks() 
     ));
     document.talents.push(TalentDef {
         form_choices: vec![],
+        expertise_grants: vec![],
         id: TalentId::new("later_choice").unwrap(),
         name: "Later choice".into(),
         prerequisites: vec![],
@@ -784,6 +783,7 @@ fn phase5_purchase_reduced_maximum_death_uses_one_lifecycle_boundary() {
     let mut document = fixture::ruleset().document().clone();
     document.talents.push(TalentDef {
         form_choices: vec![],
+        expertise_grants: vec![],
         id: TalentId::new("fragile_choice").unwrap(),
         name: "Fragile choice".into(),
         prerequisites: vec![],
@@ -871,6 +871,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
     ];
     document.talents.push(TalentDef {
         form_choices: vec![],
+        expertise_grants: vec![],
         id: TalentId::new("calm_choice").unwrap(),
         name: "Calm choice".into(),
         prerequisites: vec![],
@@ -899,6 +900,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
     });
     document.talents.push(TalentDef {
         form_choices: vec![],
+        expertise_grants: vec![],
         id: TalentId::new("lethal_choice").unwrap(),
         name: "Lethal choice".into(),
         prerequisites: vec![],
@@ -914,6 +916,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
     spec.concealed = true;
     spec.appearance = "unmarked ring".into();
     spec.equipment = Some(tor_simulation::EquipmentSpec {
+        weapon_profile: None,
         armor: None,
         slot: tor_simulation::EquipmentSlot::new("ring").unwrap(),
         attack: None,
@@ -1225,9 +1228,7 @@ fn phase5_lethal_equipped_purchase_preview_reports_final_canceled_holds_without_
         actor,
         Action::UseAbility {
             id: game.basic_attack(actor).unwrap(),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: ActorId(2),
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
             supplies: Default::default(),
         },
         IntentionOrigin::Human,

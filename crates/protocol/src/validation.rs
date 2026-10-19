@@ -318,6 +318,12 @@ impl crate::OwnStats {
                     && value.balance <= value.maximum
                     && value.available.checked_add(value.reserved) == Some(value.balance)
             })
+            && self.expertises.len() <= crate::MAX_ADVANCEMENT_EXPERTISE_ROWS
+            && unique(self.expertises.iter().map(|row| &row.expertise.id))
+            && self
+                .expertises
+                .iter()
+                .all(crate::AdvancementExpertiseRow::valid)
             && self.active_talents.len() + self.dormant_talents.len() <= crate::MAX_OWNED_TALENTS
             && self
                 .active_talents

@@ -90,6 +90,9 @@ pub fn lines(combat: Option<&CombatView>) -> Vec<String> {
         ));
         rows.extend(talents.iter().map(|value| format!("  {}", value.name)));
     }
+    for expertise in &stats.expertises {
+        rows.extend(expertise_lines(expertise));
+    }
     rows.push("Granted abilities:".into());
     rows.extend(
         stats
@@ -110,6 +113,14 @@ pub(crate) fn health_recovery_line(recovery: &HealthRecoveryView) -> String {
         recovery.period_ticks,
         recovery.reset_percent,
     )
+}
+
+/// Render a compact server-owned summary; detailed provenance stays authoritative on the server.
+pub(crate) fn expertise_lines(row: &AdvancementExpertiseRow) -> Vec<String> {
+    vec![format!(
+        "Expertise {} ({}): {:?}; sources {}",
+        row.expertise.name, row.expertise.id, row.status, row.source_count
+    )]
 }
 
 #[cfg(test)]
@@ -152,6 +163,7 @@ mod tests {
 
     #[test]
     fn inspection_shows_balances_dormant_choices_and_grants_without_claiming_readiness() {
+        let abilities = serde_json::json!([{"cooldown_remaining":"0","supply_costs":[],"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true,"weapon_selection":true}, {"cooldown_remaining":"0","supply_costs":[],"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false,"weapon_selection":false}]);
         let combat: CombatView = serde_json::from_value(serde_json::json!({
             "hp": "7", "max_hp": "12", "public_plan":null,"sequence":null,"preparation_remaining": "50", "preparation_active": true,
             "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
@@ -165,7 +177,7 @@ mod tests {
                 "skills": [{"skill": {"id":"spellcasting","name":"Spellcasting"}, "rank": 2}, {"skill": {"id":"breath","name":"Breath"}, "rank": 2}],
                 "defenses": {"physical": 13, "cognitive": 13, "spiritual": 11},
                 "binding": {"id":"awareness","name":"Awareness"}, "resources": [{"resource": {"id":"mana","name":"Mana"}, "balance": 2, "maximum": 3, "available": 1, "reserved": 1}],
-                "active_talents": [{"id":"hardiness","name":"Hardiness"}], "dormant_talents": [{"id":"fear","name":"Fear"}], "abilities": [{"cooldown_remaining":"0","supply_costs":[],"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true}, {"cooldown_remaining":"0","supply_costs":[],"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false}]
+                "expertises": [], "active_talents": [{"id":"hardiness","name":"Hardiness"}], "dormant_talents": [{"id":"fear","name":"Fear"}], "abilities": abilities
             }
         })).unwrap();
         let text = lines(Some(&combat)).join("\n");
@@ -182,7 +194,7 @@ mod tests {
             "Mana: 2/3 (1 available, 1 reserved)",
             "Active talents:\n  Hardiness",
             "Dormant talents:\n  Fear",
-            "Granted abilities:\n  Basic Melee\n  Magic Bolt",
+            "Granted abilities:\n  Basic Melee (weapon choice)\n  Magic Bolt",
         ] {
             assert!(text.contains(expected), "missing {expected}");
         }
@@ -201,9 +213,18 @@ mod tests {
 pub fn nutrition_line(nutrition: NutritionView) -> Option<String> {
     match nutrition {
         NutritionView::Exempt => None,
-        NutritionView::Required { reserve, maximum, hunger, unit_ticks, elapsed, starve_at } => Some(format!(
+        NutritionView::Required {
+            reserve,
+            maximum,
+            hunger,
+            unit_ticks,
+            elapsed,
+            starve_at,
+        } => Some(format!(
             "Nutrition: {reserve}/{maximum} ({}); next unit in {} active ticks; starvation at {starve_at}",
-            hunger_label(hunger), unit_ticks - elapsed)),
+            hunger_label(hunger),
+            unit_ticks - elapsed
+        )),
     }
 }
 pub fn hunger_label(hunger: Hunger) -> &'static str {

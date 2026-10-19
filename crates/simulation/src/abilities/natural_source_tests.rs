@@ -108,6 +108,7 @@ fn natural_melee_source_ignores_equipped_weapon_operands_and_timing() {
     let mut weapon = crate::ItemSpec::ordinary("source selection probe".into());
     weapon.class = crate::ItemClass::Weapon;
     weapon.equipment = Some(crate::EquipmentSpec {
+        weapon_profile: None,
         armor: None,
         slot: crate::EquipmentSlot::new("weapon").unwrap(),
         attack: Some(crate::test_creatures::melee(
@@ -345,6 +346,7 @@ fn natural_melee_source_invalid_equipment_grant_rejects_atomically() {
     let mut creature = crate::creatures::CreatureState::new(build).unwrap();
     let before = creature.clone();
     let invalid = crate::creatures::EquipmentSource {
+        weapon_profile: None,
         item: crate::ItemId(1),
         socket: crate::EquipmentSlotId(0),
         attack: None,
@@ -408,6 +410,7 @@ fn natural_melee_selected_weapon_checks_keep_user_and_target_sources_separate() 
         let mut weapon = crate::ItemSpec::ordinary("opposed source probe".into());
         weapon.class = crate::ItemClass::Weapon;
         weapon.equipment = Some(crate::EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("weapon").unwrap(),
             attack: Some(crate::test_creatures::melee(

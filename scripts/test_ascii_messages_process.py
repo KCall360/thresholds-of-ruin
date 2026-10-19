@@ -76,7 +76,7 @@ class AsciiMessageProcesses(ProcessTestCase):
             # The native direction key chooses Attack for an adjacent creature;
             # headless actions spell out that same ordinary server operation.
             action = ({"type": "use_ability", "id": "basic_melee",
-                       "invocation": {"kind": "actor_target", "target": target["id"]}}
+                       "invocation": {"aim": {"kind": "actor_target", "target": target["id"]}, "weapon": {"kind": "default"}}}
                       if max(abs(x), abs(y)) == 1 else {"type": "move", "direction": direction})
             start = len(player.transcript)
             current = self.act(player, action)

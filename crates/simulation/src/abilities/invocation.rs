@@ -12,15 +12,118 @@ pub enum InvocationKind {
     DirectionalRay,
 }
 
+/// Aim authority and equipped-weapon selection are independent operands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct AbilityInvocation {
+    pub aim: AbilityAim,
+    pub weapon: WeaponSelection,
+}
+impl<'de> Deserialize<'de> for AbilityInvocation {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            aim: AbilityAim,
+            weapon: WeaponSelection,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            aim: fields.aim,
+            weapon: fields.weapon,
+        })
+    }
+}
+impl AbilityInvocation {
+    pub fn actor_target(target: ActorId) -> Self {
+        Self {
+            aim: AbilityAim::ActorTarget { target },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub fn contact_target(target: ActorId) -> Self {
+        Self {
+            aim: AbilityAim::ContactTarget { target },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub fn self_step(direction: StepDirection) -> Self {
+        Self {
+            aim: AbilityAim::SelfStep { direction },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub fn directional_ray(direction: StepDirection) -> Self {
+        Self {
+            aim: AbilityAim::DirectionalRay { direction },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub fn target(self, actor: ActorId) -> ActorId {
+        self.aim.target(actor)
+    }
+    pub fn reference(self) -> crate::perception::ActorReferenceKind {
+        self.aim.reference()
+    }
+    pub fn kind(self) -> InvocationKind {
+        self.aim.kind()
+    }
+    pub fn step(self) -> Option<StepDirection> {
+        self.aim.step()
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WeaponSelection {
+    #[default]
+    Default,
+    Equipped {
+        item: crate::ItemId,
+        socket: crate::EquipmentSlotId,
+    },
+}
+impl WeaponSelection {
+    pub(crate) fn valid(self) -> bool {
+        match self {
+            Self::Default => true,
+            Self::Equipped { item, socket } => {
+                item.0 != 0
+                    && item.0 != u64::MAX
+                    && usize::from(socket.0) < crate::limits::EQUIPMENT_SOCKETS
+            }
+        }
+    }
+}
+impl<'de> Deserialize<'de> for WeaponSelection {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Default {},
+            Equipped {
+                item: crate::ItemId,
+                socket: crate::EquipmentSlotId,
+            },
+        }
+        let result = match crate::bounded::named_map(d)? {
+            Fields::Default {} => Self::Default,
+            Fields::Equipped { item, socket } => Self::Equipped { item, socket },
+        };
+        if !result.valid() {
+            return Err(serde::de::Error::custom("invalid weapon selector"));
+        }
+        Ok(result)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum AbilityInvocation {
+pub enum AbilityAim {
     ActorTarget { target: ActorId },
     ContactTarget { target: ActorId },
     SelfStep { direction: StepDirection },
     DirectionalRay { direction: StepDirection },
 }
-impl<'de> Deserialize<'de> for AbilityInvocation {
+impl<'de> Deserialize<'de> for AbilityAim {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -38,7 +141,7 @@ impl<'de> Deserialize<'de> for AbilityInvocation {
         })
     }
 }
-impl AbilityInvocation {
+impl AbilityAim {
     pub fn target(self, actor: ActorId) -> ActorId {
         match self {
             Self::ActorTarget { target } | Self::ContactTarget { target } => target,
@@ -265,9 +368,11 @@ mod tests {
             let raw = serde_json::to_string(token).unwrap();
             let direction: StepDirection = serde_json::from_str(&raw).unwrap();
             assert_eq!(serde_json::to_string(&direction).unwrap(), raw);
-            let invocation = format!(r#"{{"kind":"self_step","direction":{raw}}}"#);
+            let invocation = format!(
+                r#"{{"aim":{{"kind":"self_step","direction":{raw}}},"weapon":{{"kind":"default"}}}}"#
+            );
             let decoded: AbilityInvocation = serde_json::from_str(&invocation).unwrap();
-            assert_eq!(decoded, AbilityInvocation::SelfStep { direction });
+            assert_eq!(decoded, AbilityInvocation::self_step(direction));
             assert_eq!(serde_json::to_string(&decoded).unwrap(), invocation);
         }
         for raw in [
@@ -279,7 +384,9 @@ mod tests {
             r#""North""#,
         ] {
             assert!(serde_json::from_str::<StepDirection>(raw).is_err(), "{raw}");
-            let invocation = format!(r#"{{"kind":"self_step","direction":{raw}}}"#);
+            let invocation = format!(
+                r#"{{"aim":{{"kind":"self_step","direction":{raw}}},"weapon":{{"kind":"default"}}}}"#
+            );
             assert!(
                 serde_json::from_str::<AbilityInvocation>(&invocation).is_err(),
                 "{invocation}"

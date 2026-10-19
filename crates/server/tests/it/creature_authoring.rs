@@ -590,6 +590,7 @@ fn authored_multi_point_builds_accept_256_talents_and_reject_257_or_258_before_s
     document.talents = (0..258)
         .map(|index| TalentDef {
             form_choices: Vec::new(),
+            expertise_grants: Vec::new(),
             id: TalentId::new(format!("limit_{index:03}")).unwrap(),
             name: format!("Limit {index}"),
             prerequisites: vec![],

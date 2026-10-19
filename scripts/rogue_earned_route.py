@@ -141,7 +141,7 @@ def _available(view, identity):
 
 def _use(known, target, *, carried=False):
     result = {"type": "use_ability", "id": known["id"],
-              "invocation": {"kind": "actor_target", "target": target}}
+              "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}}
     if carried or known["supply_costs"]:
         result["supplies"] = {"kind": "carried"}
     return result

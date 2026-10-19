@@ -428,6 +428,7 @@ mod form_tests {
             },
             modifiers: vec![],
             form_choices: vec![form.id.clone()],
+            expertise_grants: vec![],
         };
         let change = |op: &str, path: &[&str], value: toml::Value| {
             toml::Value::Table(toml::map::Map::from_iter([

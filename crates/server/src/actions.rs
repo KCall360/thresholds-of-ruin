@@ -10,6 +10,10 @@ pub enum Action {
         basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
         source: tor_simulation::earned_growth::GrowthSource,
     },
+    ChooseIntellectExpertise {
+        basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
+        choice: tor_simulation::player_advancement::IntellectExpertiseOperation,
+    },
     Purchase {
         basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
         purchase: tor_simulation::player_advancement::PurchaseOperation,
@@ -93,6 +97,7 @@ impl Action {
     ) -> Option<&tor_simulation::player_advancement::AdvancementBasis> {
         match self {
             Self::ChooseGrowthSource { basis, .. }
+            | Self::ChooseIntellectExpertise { basis, .. }
             | Self::Purchase { basis, .. }
             | Self::Respec { basis, .. } => Some(basis),
             _ => None,
@@ -128,6 +133,56 @@ pub enum Direction {
     Down,
 }
 
+/// Backend selected operands are independent from transport and save DTOs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AbilityInvocation {
+    pub aim: AbilityAim,
+    pub weapon: WeaponSelection,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AbilityAim {
+    ActorTarget { target: tor_simulation::ActorId },
+    ContactTarget { target: tor_simulation::ActorId },
+    SelfStep { direction: Direction },
+    DirectionalRay { direction: Direction },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WeaponSelection {
+    Default,
+    Equipped { item: u64, socket: u16 },
+}
+impl AbilityInvocation {
+    pub fn actor_target(target: tor_simulation::ActorId) -> Self {
+        Self {
+            aim: AbilityAim::ActorTarget { target },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub fn contact_target(target: tor_simulation::ActorId) -> Self {
+        Self {
+            aim: AbilityAim::ContactTarget { target },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub fn self_step(direction: Direction) -> Self {
+        Self {
+            aim: AbilityAim::SelfStep { direction },
+            weapon: WeaponSelection::Default,
+        }
+    }
+    pub fn directional_ray(direction: Direction) -> Self {
+        Self {
+            aim: AbilityAim::DirectionalRay { direction },
+            weapon: WeaponSelection::Default,
+        }
+    }
+}
+impl From<tor_simulation::ActorId> for AbilityInvocation {
+    fn from(target: tor_simulation::ActorId) -> Self {
+        Self::actor_target(target)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,6 +190,74 @@ mod tests {
     use tor_protocol as wire;
     use tor_simulation as sim;
     use tor_world as world;
+
+    #[test]
+    fn equipped_weapon_and_every_aim_round_trip_independent_adapters() {
+        let scope = crate::wire_adapter::TargetScope::new(uuid::Uuid::nil(), sim::ActorId(1));
+        for aim in [
+            AbilityAim::ActorTarget {
+                target: sim::ActorId(2),
+            },
+            AbilityAim::ContactTarget {
+                target: sim::ActorId(3),
+            },
+            AbilityAim::SelfStep {
+                direction: Direction::Up,
+            },
+            AbilityAim::DirectionalRay {
+                direction: Direction::SouthWest,
+            },
+        ] {
+            let action = Action::UseAbility {
+                id: sim::content_ids::AbilityId::new("fixture_selection").unwrap(),
+                invocation: AbilityInvocation {
+                    aim,
+                    weapon: WeaponSelection::Equipped {
+                        item: 9_007_199_254_740_993,
+                        socket: 63,
+                    },
+                },
+                supplies: Default::default(),
+            };
+            let native = adapt::action(&action);
+            assert_eq!(adapt::recorded_action(native), Some(action.clone()));
+            let encoded = crate::wire_adapter::encode_action(&action, &scope);
+            assert!(matches!(&encoded, wire::Action::UseAbility {
+                invocation: wire::AbilityInvocation {
+                    weapon: wire::WeaponSelection::Equipped { item, socket: 63 }, ..
+                }, ..
+            } if *item == scope.item(sim::ItemId(9_007_199_254_740_993))));
+            let wire::Action::UseAbility { invocation, .. } = encoded else {
+                unreachable!()
+            };
+            match aim {
+                AbilityAim::ActorTarget { target } => assert_eq!(
+                    invocation.aim,
+                    wire::AbilityAim::ActorTarget {
+                        target: scope.actor(target)
+                    }
+                ),
+                AbilityAim::ContactTarget { target } => assert_eq!(
+                    invocation.aim,
+                    wire::AbilityAim::ActorTarget {
+                        target: scope.contact(target)
+                    }
+                ),
+                AbilityAim::SelfStep { .. } => assert_eq!(
+                    invocation.aim,
+                    wire::AbilityAim::SelfStep {
+                        direction: wire::Direction::Up
+                    }
+                ),
+                AbilityAim::DirectionalRay { .. } => assert_eq!(
+                    invocation.aim,
+                    wire::AbilityAim::DirectionalRay {
+                        direction: wire::Direction::SouthWest
+                    }
+                ),
+            }
+        }
+    }
 
     #[test]
     fn ability_target_resolution_rejects_foreign_and_undisclosed_tokens_equally() {
@@ -147,7 +270,10 @@ mod tests {
                     observer,
                     &wire::Action::UseAbility {
                         id: ability.into(),
-                        invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
+                        invocation: tor_protocol::AbilityInvocation {
+                            aim: tor_protocol::AbilityAim::ActorTarget { target },
+                            weapon: tor_protocol::WeaponSelection::Default,
+                        },
                         supplies: Default::default(),
                     },
                 )
@@ -156,8 +282,11 @@ mod tests {
                 decoded,
                 Action::UseAbility {
                     id: sim::content_ids::AbilityId::new(ability).unwrap(),
-                    invocation: crate::actions::AbilityInvocation::ActorTarget {
-                        target: sim::ActorId(1)
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: sim::ActorId(1)
+                        },
+                        weapon: crate::actions::WeaponSelection::Default
                     },
                     supplies: Default::default(),
                 }
@@ -169,7 +298,10 @@ mod tests {
                     observer,
                     &wire::Action::UseAbility {
                         id: ability.into(),
-                        invocation: tor_protocol::AbilityInvocation::ActorTarget { target: hidden },
+                        invocation: tor_protocol::AbilityInvocation {
+                            aim: tor_protocol::AbilityAim::ActorTarget { target: hidden },
+                            weapon: tor_protocol::WeaponSelection::Default,
+                        },
                         supplies: Default::default(),
                     },
                 )
@@ -179,8 +311,9 @@ mod tests {
                     observer,
                     &wire::Action::UseAbility {
                         id: ability.into(),
-                        invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                            target: foreign,
+                        invocation: tor_protocol::AbilityInvocation {
+                            aim: tor_protocol::AbilityAim::ActorTarget { target: foreign },
+                            weapon: tor_protocol::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },
@@ -198,8 +331,11 @@ mod tests {
         let scope = engine.target_scope(observer);
         let action = |item| wire::Action::UseAbility {
             id: "bind_wounds".into(),
-            invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                target: scope.actor(sim::ActorId(1)),
+            invocation: tor_protocol::AbilityInvocation {
+                aim: tor_protocol::AbilityAim::ActorTarget {
+                    target: scope.actor(sim::ActorId(1)),
+                },
+                weapon: tor_protocol::WeaponSelection::Default,
             },
             supplies: wire::SupplySelection::Explicit {
                 items: vec![wire::SelectedSupply {
@@ -215,8 +351,11 @@ mod tests {
             decoded,
             Action::UseAbility {
                 id: sim::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                invocation: crate::actions::AbilityInvocation::ActorTarget {
-                    target: sim::ActorId(1)
+                invocation: crate::actions::AbilityInvocation {
+                    aim: crate::actions::AbilityAim::ActorTarget {
+                        target: sim::ActorId(1)
+                    },
+                    weapon: crate::actions::WeaponSelection::Default
                 },
                 supplies: SupplySelection::Explicit {
                     items: vec![SelectedSupply {
@@ -246,8 +385,11 @@ mod tests {
         let scope = engine.target_scope(observer);
         let action = Action::UseAbility {
             id: sim::content_ids::AbilityId::new("bind_wounds").unwrap(),
-            invocation: crate::actions::AbilityInvocation::ActorTarget {
-                target: sim::ActorId(1),
+            invocation: crate::actions::AbilityInvocation {
+                aim: crate::actions::AbilityAim::ActorTarget {
+                    target: sim::ActorId(1),
+                },
+                weapon: crate::actions::WeaponSelection::Default,
             },
             supplies: SupplySelection::Explicit {
                 items: vec![
@@ -353,13 +495,19 @@ mod tests {
             let id = sim::content_ids::AbilityId::new("unowned_content_ray").unwrap();
             let ray = Action::UseAbility {
                 id: id.clone(),
-                invocation: AbilityInvocation::DirectionalRay { direction: backend },
+                invocation: crate::actions::AbilityInvocation {
+                    aim: crate::actions::AbilityAim::DirectionalRay { direction: backend },
+                    weapon: crate::actions::WeaponSelection::Default,
+                },
                 supplies: Default::default(),
             };
             let native_ray = sim::Action::UseAbility {
                 id,
-                invocation: sim::abilities::AbilityInvocation::DirectionalRay {
-                    direction: native.try_into().unwrap(),
+                invocation: sim::abilities::AbilityInvocation {
+                    aim: sim::abilities::AbilityAim::DirectionalRay {
+                        direction: native.try_into().unwrap(),
+                    },
+                    weapon: sim::abilities::WeaponSelection::Default,
                 },
                 supplies: Default::default(),
             };
@@ -367,7 +515,7 @@ mod tests {
             assert_eq!(adapt::recorded_action(native_ray), Some(ray.clone()));
             let encoded = engine.encode_action(actor, &ray);
             assert!(matches!(encoded, wire::Action::UseAbility {
-                invocation: wire::AbilityInvocation::DirectionalRay { direction }, ..
+                invocation: wire::AbilityInvocation { aim: wire::AbilityAim::DirectionalRay { direction }, weapon: wire::WeaponSelection::Default }, ..
             } if direction == wire));
             // Decoding never requires or resolves a creature in the selected ray.
             assert_eq!(engine.decode_action(actor, &encoded).unwrap(), ray.clone());
@@ -424,15 +572,21 @@ mod tests {
             (
                 Action::UseAbility {
                     id: sim::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: crate::actions::AbilityInvocation::ActorTarget {
-                        target: sim::ActorId(u64::MAX),
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: sim::ActorId(u64::MAX),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },
                 sim::Action::UseAbility {
                     id: sim::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                        target: sim::ActorId(u64::MAX),
+                    invocation: tor_simulation::abilities::AbilityInvocation {
+                        aim: tor_simulation::abilities::AbilityAim::ActorTarget {
+                            target: sim::ActorId(u64::MAX),
+                        },
+                        weapon: tor_simulation::abilities::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },
@@ -486,15 +640,21 @@ mod tests {
             cases.push((
                 Action::UseAbility {
                     id: id.clone(),
-                    invocation: crate::actions::AbilityInvocation::ActorTarget {
-                        target: sim::ActorId(u64::MAX),
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: sim::ActorId(u64::MAX),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },
                 sim::Action::UseAbility {
                     id,
-                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                        target: sim::ActorId(u64::MAX),
+                    invocation: tor_simulation::abilities::AbilityInvocation {
+                        aim: tor_simulation::abilities::AbilityAim::ActorTarget {
+                            target: sim::ActorId(u64::MAX),
+                        },
+                        weapon: tor_simulation::abilities::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },
@@ -513,20 +673,6 @@ mod tests {
         }
     }
 }
-/// Backend selected operands are independent from transport and save DTOs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AbilityInvocation {
-    ActorTarget { target: tor_simulation::ActorId },
-    ContactTarget { target: tor_simulation::ActorId },
-    SelfStep { direction: Direction },
-    DirectionalRay { direction: Direction },
-}
-impl From<tor_simulation::ActorId> for AbilityInvocation {
-    fn from(target: tor_simulation::ActorId) -> Self {
-        Self::ActorTarget { target }
-    }
-}
-
 #[cfg(test)]
 mod magic_item_adapter_tests {
     use super::*;

@@ -462,7 +462,9 @@ impl Game {
         }
         if matches!(
             &action,
-            Action::Purchase { .. } | Action::ChooseGrowthSource { .. }
+            Action::Purchase { .. }
+                | Action::ChooseGrowthSource { .. }
+                | Action::ChooseIntellectExpertise { .. }
         ) && !self.player_advancement_ready(id)
         {
             return Err(GameError::ActorBusy);
@@ -500,6 +502,13 @@ impl Game {
                 (
                     OutcomeKind::GrowthSourceChosen { basis, source },
                     self.content.rules.document().growth.recovery,
+                )
+            }
+            Action::ChooseIntellectExpertise { basis, choice } => {
+                self.preview_player_intellect_expertise(id, &basis, &choice)?;
+                (
+                    OutcomeKind::IntellectExpertiseChosen { basis, choice },
+                    self.content.rules.document().advancement.purchase_recovery,
                 )
             }
             Action::Purchase { basis, purchase } => {
@@ -748,6 +757,10 @@ impl Game {
         if let OutcomeKind::IdentificationResolved { choice, item } = kind {
             return self.resolve_identification(id, choice, item);
         }
+        if let OutcomeKind::IntellectExpertiseChosen { basis, choice } = &kind {
+            let (_, outcome) = self.prepare_player_intellect_expertise(id, basis, choice)?;
+            return self.publish_actor_outcome(outcome);
+        }
         if let OutcomeKind::Purchased { basis, purchase } = &kind {
             // Recheck the frozen proposal inside the current action transaction.
             // No saved full-state preview can overwrite earned runtime changes.
@@ -779,6 +792,9 @@ impl Game {
         match kind {
             OutcomeKind::GrowthSourceChosen { .. } => {
                 unreachable!("growth source uses one actor publication")
+            }
+            OutcomeKind::IntellectExpertiseChosen { .. } => {
+                unreachable!("Intellect expertise uses one actor publication")
             }
             OutcomeKind::Purchased { .. } => unreachable!("purchase uses one actor publication"),
             OutcomeKind::IdentificationResolved { .. } => {

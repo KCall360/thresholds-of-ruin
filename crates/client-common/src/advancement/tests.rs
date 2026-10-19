@@ -931,3 +931,156 @@ fn wide_scalar_programmatic_invalid_owners_have_safe_labels() {
     };
     assert!(proposal_label(&purchase).contains("invalid"));
 }
+
+#[test]
+fn expertise_grammar_preserves_server_authority_and_source_labels() {
+    assert_eq!(
+        parse("expertises").unwrap(),
+        AdvancementInput::Catalog(AdvancementKind::Expertise)
+    );
+    assert_eq!(
+        parse("details expertises").unwrap(),
+        AdvancementInput::Details(AdvancementPreviewSection::Expertises)
+    );
+    let AdvancementInput::Preview(AdvancementProposal::Purchase { purchase }) =
+        parse("purchase 2 general expertise unknown_id").unwrap()
+    else {
+        panic!("purchase preview")
+    };
+    assert_eq!(purchase.owner, 1);
+    assert_eq!(
+        purchase.selection,
+        PurchaseChoice::Expertise {
+            expertise: "unknown_id".into()
+        }
+    );
+    assert!(parse("purchase 2 general expertise unknown_id form other").is_err());
+    let row = AdvancementExpertiseRow {
+        expertise: content("spear"),
+        status: AdvancementStatus::Active,
+        source_count: 2,
+    };
+    let lines = crate::stats::expertise_lines(&row);
+    assert_eq!(lines, ["Expertise spear (spear): Active; sources 2"]);
+}
+
+#[test]
+fn intellect_expertise_controls_preview_and_commit_exact_entitlement() {
+    assert_eq!(
+        parse("intellect-expertises").unwrap(),
+        AdvancementInput::IntellectExpertises
+    );
+    for threshold in [1, 1000] {
+        let choice = IntellectExpertiseOperation {
+            threshold,
+            expertise: "spear".into(),
+        };
+        let proposal = AdvancementProposal::IntellectExpertise {
+            choice: choice.clone(),
+        };
+        assert_eq!(
+            parse(&format!("intellect-expertise {threshold} spear")).unwrap(),
+            AdvancementInput::Preview(proposal.clone())
+        );
+        let mut pages = opened();
+        let mut preview = preview_page();
+        let AdvancementQuery::Preview {
+            proposal: requested,
+            ..
+        } = &mut preview.query
+        else {
+            panic!("preview")
+        };
+        *requested = proposal.clone();
+        let AdvancementEntry::Summary { value } = &mut preview.entries[0] else {
+            panic!("summary")
+        };
+        value.proposal = proposal;
+        install(&mut pages, preview, "intellect-preview").unwrap();
+        assert_eq!(
+            pages
+                .confirm(
+                    &context(),
+                    &crate::test_support::observation(),
+                    SupplySelection::Carried
+                )
+                .unwrap(),
+            Command::Act {
+                expected_revision: 6,
+                action: Action::ChooseIntellectExpertise {
+                    basis: Box::new(basis()),
+                    choice
+                }
+            }
+        );
+        let mut stale = context();
+        stale.revision += 1;
+        assert!(pages
+            .confirm(
+                &stale,
+                &crate::test_support::observation(),
+                SupplySelection::Carried
+            )
+            .is_err());
+    }
+    for text in [
+        "intellect-expertise 0 spear",
+        "intellect-expertise 1001 spear",
+        "intellect-expertise -1 spear",
+        "intellect-expertise 1 bad/id",
+        "intellect-expertise 1 spear extra",
+    ] {
+        assert!(parse(text).is_err(), "{text}");
+    }
+}
+
+#[test]
+fn intellect_threshold_pages_preserve_navigation_and_disclosed_dormant_choices() {
+    let query = AdvancementQuery::IntellectExpertises {
+        basis: basis(),
+        offset: 0,
+    };
+    assert_eq!(query_basis(&query), Some(&basis()));
+    assert_eq!(offset(&with_offset(&query, 999).unwrap()), 999);
+    assert!(same_section(&query, &with_offset(&query, 999).unwrap()));
+    let mut pages = opened();
+    let page = AdvancementPage {
+        basis: basis(),
+        revision: 6,
+        query,
+        total: 1000,
+        next: Some(1),
+        entries: vec![AdvancementEntry::IntellectExpertise {
+            value: AdvancementIntellectExpertiseRow {
+                threshold: 1,
+                status: AdvancementStatus::Active,
+                expertise: None,
+            },
+        }],
+    };
+    install(&mut pages, page.clone(), "intellect-first").unwrap();
+    assert!(matches!(
+        pages.next(&context()).unwrap(),
+        Command::Advancement {
+            query: AdvancementQuery::IntellectExpertises { offset: 1, .. },
+            ..
+        }
+    ));
+    let mut rows = vec![];
+    render_entry(&page.entries[0], &mut rows);
+    assert!(rows[0].contains("available"));
+    rows.clear();
+    render_entry(
+        &AdvancementEntry::IntellectExpertise {
+            value: AdvancementIntellectExpertiseRow {
+                threshold: 1000,
+                status: AdvancementStatus::Dormant,
+                expertise: Some(content("spear")),
+            },
+        },
+        &mut rows,
+    );
+    assert!(rows[0].contains("Dormant"));
+    assert!(rows[0].contains("spear"));
+    assert!(rows[0].contains("cannot reselect"));
+}

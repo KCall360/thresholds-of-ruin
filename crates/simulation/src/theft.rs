@@ -731,7 +731,7 @@ impl Game {
             PlannedTheftSelection::Currency { currency, amount } => {
                 let requested = amount.sample(rng)?;
                 let mut remaining = requested;
-                // Lazy, candidate-local full-spec merge index. A no-op theft
+                // Lazy, candidate-local homogeneous-stack merge index. A no-op theft
                 // never scans the recipient, and multiple fragments do so once.
                 let mut destinations: Option<BTreeMap<_, _>> = None;
                 // The indexed owner bucket is deterministic. Never sum a purse:
@@ -754,7 +754,9 @@ impl Game {
                         .free_quantity(None)
                         .ok_or(GameError::ItemUnavailable)?
                         .min(remaining);
-                    let spec = self.items[&id].spec.clone();
+                    let key = self.items[&id]
+                        .stack_key()
+                        .ok_or(GameError::ItemUnavailable)?;
                     let destinations = destinations.get_or_insert_with(|| {
                         let mut index = BTreeMap::new();
                         // Indexed IDs are ordered. Keep the lowest-ID exact
@@ -762,20 +764,22 @@ impl Game {
                         // retain definitions without copying them.
                         for id in self.items.at(ItemLocation::Carried(source)) {
                             crate::diagnostics::stack_candidate();
-                            let spec = &self.items[&id].spec;
-                            if spec.currency == Some(*currency) {
-                                index.entry(spec.clone()).or_insert(id);
+                            let item = &self.items[&id];
+                            if item.spec.currency == Some(*currency) {
+                                if let Some(key) = item.stack_key() {
+                                    index.entry(key).or_insert(id);
+                                }
                             }
                         }
                         index
                     });
                     crate::diagnostics::stack_candidate();
-                    let merge = destinations.get(&spec).copied();
+                    let merge = destinations.get(&key).copied();
                     let transfer =
                         self.prepare_owned_transfer_into(id, target, source, quantity, merge)?;
                     let result = transfer.result();
                     self.apply_owned_transfer(transfer)?;
-                    destinations.entry(spec).or_insert(result);
+                    destinations.entry(key).or_insert(result);
                     remaining -= quantity;
                 }
                 Ok((remaining < requested).then_some(TransferReceipt {

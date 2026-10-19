@@ -116,6 +116,7 @@ fn effective_interaction_later_equipment_and_condition_modifiers_reject_atomical
         let before = creature.clone();
         assert!(creature
             .set_equipment(vec![EquipmentSource {
+                weapon_profile: None,
                 item: ItemId(1),
                 socket: EquipmentSlotId(0),
                 attack: None,
@@ -164,6 +165,7 @@ fn effective_interaction_frozen_plan_rejects_positive_harm_without_current_equip
     let mut weapon = crate::ItemSpec::ordinary("later weapon".into());
     weapon.class = crate::ItemClass::Weapon;
     weapon.equipment = Some(crate::EquipmentSpec {
+        weapon_profile: None,
         armor: None,
         slot: crate::EquipmentSlot::new("weapon").unwrap(),
         attack: Some(crate::test_creatures::melee(
@@ -311,6 +313,7 @@ fn effective_interaction_extra_dice_follow_rolled_and_fixed_scopes() {
         let mut creature = CreatureState::new(build(natural, amount, 0).unwrap()).unwrap();
         let before = creature.clone();
         let result = creature.set_equipment(vec![EquipmentSource {
+            weapon_profile: None,
             item: ItemId(1),
             socket: EquipmentSlotId(0),
             attack: None,
@@ -409,6 +412,7 @@ fn combined_source_creature(natural: bool) -> CreatureState {
 }
 fn combined_source_gear() -> Vec<EquipmentSource> {
     vec![EquipmentSource {
+        weapon_profile: None,
         item: ItemId(1),
         socket: EquipmentSlotId(0),
         attack: None,
@@ -522,6 +526,7 @@ fn effective_interaction_harmless_numeric_pool_conflict_keeps_soft_reconciliatio
             .unwrap();
         let outcome = creature
             .set_equipment(vec![EquipmentSource {
+                weapon_profile: None,
                 item: ItemId(1),
                 socket: EquipmentSlotId(0),
                 attack: None,

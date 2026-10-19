@@ -28,6 +28,7 @@ fn root() -> TalentDef {
         },
         modifiers: vec![],
         form_choices: vec![form("starter.fire")],
+        expertise_grants: vec![],
     }
 }
 fn document() -> RulesetDocument {

@@ -114,8 +114,11 @@ fn assert_wait_refresh(suppressed: bool) {
                 expected_revision: engine.revision(actor).unwrap(),
                 action: crate::journal::Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("fixture_hover").unwrap(),
-                    invocation: crate::journal::AbilityInvocation::ActorTarget {
-                        target: tor_simulation::ActorId(1),
+                    invocation: crate::journal::AbilityInvocation {
+                        aim: crate::journal::AbilityAim::ActorTarget {
+                            target: tor_simulation::ActorId(1),
+                        },
+                        weapon: crate::journal::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },

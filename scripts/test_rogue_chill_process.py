@@ -35,13 +35,13 @@ class RogueChillProcesses(ProcessTestCase):
             ice, ice_initial = self.client(actor=3)
             self.assertFalse(initial["state"]["wizard_game"])
             started = self.act(player, {"type": "use_ability", "id": "bind_wounds",
-                "invocation": {"kind": "actor_target", "target": view(initial)["self_target"]},
+                "invocation": {"aim": {"kind": "actor_target", "target": view(initial)["self_target"]}, "weapon": {"kind": "default"}},
                 "supplies": {"kind": "carried"}})
             self.assertIsNone(started["error"])
             original = checkpoint(self, player)
             target = next(row["id"] for row in view(ice_initial)["visible_actors"] if row["name"] == "Mage")
             cast = self.act(ice, {"type": "use_ability", "id": CHILL,
-                "invocation": {"kind": "actor_target", "target": target}})
+                "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
             self.assertIsNone(cast["error"])
             for _ in range(12):
                 current = self.request(player, {"type": "snapshot"})

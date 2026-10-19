@@ -122,6 +122,7 @@ pub struct AbilityView {
     pub reach: AbilityReach,
     pub target_kind: AbilityTargetKind,
     pub basic_attack: bool,
+    pub weapon_selection: bool,
     #[serde(with = "crate::integers::unsigned")]
     pub cooldown_remaining: u64,
     #[serde(deserialize_with = "crate::supplies::read_supply_costs")]
@@ -138,6 +139,7 @@ impl<'de> Deserialize<'de> for AbilityView {
             reach: AbilityReach,
             target_kind: AbilityTargetKind,
             basic_attack: bool,
+            weapon_selection: bool,
             #[serde(with = "crate::integers::unsigned")]
             cooldown_remaining: u64,
             #[serde(deserialize_with = "crate::supplies::read_supply_costs")]
@@ -151,6 +153,7 @@ impl<'de> Deserialize<'de> for AbilityView {
             reach: f.reach,
             target_kind: f.target_kind,
             basic_attack: f.basic_attack,
+            weapon_selection: f.weapon_selection,
             cooldown_remaining: f.cooldown_remaining,
             supply_costs: f.supply_costs,
         })
@@ -327,6 +330,7 @@ pub struct OwnStats {
     pub nutrition: NutritionView,
     pub restorable_losses: RestorableLossesView,
     pub conditions: Vec<PersonalCondition>,
+    pub expertises: Vec<crate::AdvancementExpertiseRow>,
     pub active_talents: Vec<ContentRef>,
     pub dormant_talents: Vec<ContentRef>,
     pub abilities: Vec<AbilityView>,
@@ -349,6 +353,8 @@ impl<'de> Deserialize<'de> for OwnStats {
             restorable_losses: RestorableLossesView,
             #[serde(deserialize_with = "crate::bounded::bounded::<_, _, 128>")]
             conditions: Vec<PersonalCondition>,
+            #[serde(deserialize_with = "crate::bounded::bounded::<_, _, 256>")]
+            expertises: Vec<crate::AdvancementExpertiseRow>,
             active_talents: Vec<ContentRef>,
             dormant_talents: Vec<ContentRef>,
             abilities: Vec<AbilityView>,
@@ -367,6 +373,7 @@ impl<'de> Deserialize<'de> for OwnStats {
             nutrition: fields.nutrition,
             restorable_losses: fields.restorable_losses,
             conditions: fields.conditions,
+            expertises: fields.expertises,
             active_talents: fields.active_talents,
             dormant_talents: fields.dormant_talents,
             abilities: fields.abilities,

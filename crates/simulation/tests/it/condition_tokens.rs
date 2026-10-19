@@ -13,7 +13,7 @@ fn id(name: &str) -> ConditionId {
 fn attack(target: ActorId) -> Action {
     Action::UseAbility {
         id: AbilityId::new("basic_melee").unwrap(),
-        invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+        invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
         supplies: Default::default(),
     }
 }

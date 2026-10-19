@@ -246,7 +246,7 @@ macro_rules! scalar {
         }
     )+};
 }
-scalar!(String, u32);
+scalar!(String, u16, u32);
 
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::Scenario", deny_unknown_fields)]
@@ -814,7 +814,167 @@ struct AiProfile {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::AnatomySpec", deny_unknown_fields)]
 struct AnatomySpec {
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::EQUIPMENT_SOCKETS }>"
+    )]
     slots: Vec<String>,
+    #[serde(deserialize_with = "stored_anatomy_capacities")]
+    capacities: BTreeMap<String, u16>,
+    #[serde(with = "mapped")]
+    primary_attack_socket: source::PrimaryAttackSocket,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::PrimaryAttackSocket",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum SourcePrimaryAttackSocket {
+    None {},
+    Socket { slot: u16 },
+}
+fn stored_anatomy_capacities<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeMap<String, u16>, D::Error> {
+    let values = bounded_stored_map::<_, u16, { tor_simulation::limits::EQUIPMENT_SOCKETS }>(d)?;
+    if values
+        .values()
+        .any(|units| usize::from(*units) > tor_simulation::limits::EQUIPMENT_SOCKETS)
+    {
+        return Err(serde::de::Error::custom(
+            "invalid stored equipment capacities",
+        ));
+    }
+    Ok(values)
+}
+impl Stored for tor_simulation::equipment_capacity::EquipmentCapacities {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        for (id, units) in self.entries() {
+            map.serialize_entry(id.as_str(), &units)?;
+        }
+        map.end()
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let values = stored_anatomy_capacities(d)?
+            .into_iter()
+            .map(|(id, units)| {
+                tor_simulation::content_ids::EquipmentCapacityId::new(id)
+                    .map(|id| (id, units))
+                    .map_err(|_| serde::de::Error::custom("invalid stored equipment capacity ID"))
+            })
+            .collect::<Result<BTreeMap<_, _>, D::Error>>()?;
+        Self::new(values)
+            .ok_or_else(|| serde::de::Error::custom("invalid stored equipment capacities"))
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_simulation::AnatomySpec", deny_unknown_fields)]
+struct RulesAnatomySpec {
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::EQUIPMENT_SOCKETS }>"
+    )]
+    slots: Vec<tor_simulation::EquipmentSlot>,
+    #[serde(with = "mapped")]
+    capacities: tor_simulation::equipment_capacity::EquipmentCapacities,
+    #[serde(with = "mapped")]
+    primary_attack_socket: tor_simulation::equipment_capacity::PrimaryAttackSocket,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_simulation::rules::Constants", deny_unknown_fields)]
+struct RulesConstants {
+    base_defense: i32,
+    attribute_cap: u16,
+    derived_attribute_cap: u16,
+    attribute_opportunity_interval: u16,
+    racial_point_grants: Vec<tor_simulation::rules::PointGrant>,
+    duration_scale_numerator: u16,
+    duration_scale_offset: u16,
+    default_abilities: Vec<tor_simulation::content_ids::AbilityId>,
+    item_timing: tor_simulation::rules::ItemTiming,
+    #[serde(with = "mapped")]
+    default_anatomy: tor_simulation::AnatomySpec,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::EquipmentSlotDef",
+    deny_unknown_fields
+)]
+struct RulesEquipmentSlotDef {
+    id: tor_simulation::EquipmentSlot,
+    name: String,
+    equipped_phrase: String,
+    compatible_classes: Vec<tor_simulation::ItemClass>,
+    requires_attack: bool,
+    #[serde(with = "mapped")]
+    capacity: tor_simulation::equipment_capacity::EquipmentCapacityUse,
+    equip_turns: u64,
+    unequip_turns: u64,
+}
+impl Stored for tor_simulation::equipment_capacity::PrimaryAttackSocket {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let value = match self {
+            Self::None => source::PrimaryAttackSocket::None {},
+            Self::Socket { slot } => source::PrimaryAttackSocket::Socket { slot: slot.0 },
+        };
+        SourcePrimaryAttackSocket::serialize(&value, serializer)
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = <source::PrimaryAttackSocket as Stored>::decode(d)?;
+        Ok(match value {
+            source::PrimaryAttackSocket::None {} => Self::None,
+            source::PrimaryAttackSocket::Socket { slot }
+                if usize::from(slot) < tor_simulation::limits::EQUIPMENT_SOCKETS =>
+            {
+                Self::Socket {
+                    slot: tor_simulation::EquipmentSlotId(slot),
+                }
+            }
+            _ => return Err(serde::de::Error::custom("invalid stored primary socket")),
+        })
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum StoredCapacityUse {
+    None {},
+    Shared { resource: String, units: u16 },
+}
+impl Stored for tor_simulation::equipment_capacity::EquipmentCapacityUse {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::None => StoredCapacityUse::None {},
+            Self::Shared { resource, units } => StoredCapacityUse::Shared {
+                resource: resource.as_str().into(),
+                units: *units,
+            },
+        }
+        .serialize(serializer)
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match super::named_map(d)? {
+            StoredCapacityUse::None {} => Self::None,
+            StoredCapacityUse::Shared { resource, units }
+                if (1..=tor_simulation::limits::EQUIPMENT_SOCKETS)
+                    .contains(&usize::from(units)) =>
+            {
+                Self::Shared {
+                    resource: tor_simulation::content_ids::EquipmentCapacityId::new(resource)
+                        .map_err(|_| {
+                            serde::de::Error::custom("invalid stored equipment capacity ID")
+                        })?,
+                    units,
+                }
+            }
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "invalid stored equipment capacity use",
+                ))
+            }
+        })
+    }
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::ArmorMaterial", rename_all = "snake_case")]
@@ -832,8 +992,94 @@ struct ArmorSpec {
     rustproof: bool,
 }
 #[derive(Serialize, Deserialize)]
+#[serde(remote = "source::WeaponRangeBands", deny_unknown_fields)]
+struct WeaponRangeBands {
+    short_feet: u32,
+    long_feet: u32,
+}
+impl Stored for source::WeaponRangeBands {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        WeaponRangeBands::serialize(self, serializer)
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        // Decode through the independent save record, then validate physical units.
+        struct Named;
+        impl<'de> serde::de::Visitor<'de> for Named {
+            type Value = source::WeaponRangeBands;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("named weapon range bands")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                fields: A,
+            ) -> Result<Self::Value, A::Error> {
+                WeaponRangeBands::deserialize(serde::de::value::MapAccessDeserializer::new(fields))
+            }
+        }
+        let value = d.deserialize_map(Named)?;
+        tor_simulation::weapon_profiles::RangeBands::from(value)
+            .validate()
+            .map_err(serde::de::Error::custom)?;
+        Ok(value)
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::WeaponTrait",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum WeaponTrait {
+    TwoHanded {},
+    Offhand {},
+    Quickdraw {},
+    Thrown {
+        #[serde(with = "mapped")]
+        range: source::WeaponRangeBands,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::WeaponTraitKind", rename_all = "snake_case")]
+enum WeaponTraitKind {
+    TwoHanded,
+    Offhand,
+    Quickdraw,
+    Thrown,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::WeaponTraitChanges", deny_unknown_fields)]
+struct WeaponTraitChanges {
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, 4>"
+    )]
+    add: Vec<source::WeaponTrait>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, 4>"
+    )]
+    remove: Vec<source::WeaponTraitKind>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::WeaponProfileSpec", deny_unknown_fields)]
+struct WeaponProfileSpec {
+    expertise: String,
+    #[serde(with = "mapped")]
+    ranged: Option<source::WeaponRangeBands>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, 4>"
+    )]
+    base_traits: Vec<source::WeaponTrait>,
+    #[serde(with = "mapped")]
+    expert_traits: source::WeaponTraitChanges,
+}
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "source::EquipmentSpec", deny_unknown_fields)]
 struct EquipmentSpec {
+    #[serde(with = "mapped")]
+    weapon_profile: Option<source::WeaponProfileSpec>,
     slot: String,
     #[serde(with = "mapped")]
     armor: Option<source::ArmorSpec>,
@@ -1744,6 +1990,7 @@ struct Purchase {
     deny_unknown_fields
 )]
 enum PurchaseSelection {
+    Expertise { expertise: String },
     SkillRank { skill: String },
     Talent { talent: String },
     TalentForm { talent: String, form: String },
@@ -2377,6 +2624,7 @@ enum ConditionEviction {
 #[serde(remote = "tor_simulation::rules::RulesetDocument", deny_unknown_fields)]
 struct RulesDocument {
     id: tor_simulation::content_ids::RulesetId,
+    #[serde(with = "mapped")]
     constants: tor_simulation::rules::Constants,
     point_pools: Vec<tor_simulation::rules::PointPoolDef>,
     #[serde(
@@ -2400,6 +2648,11 @@ struct RulesDocument {
         deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
     )]
     talents: Vec<tor_simulation::rules::TalentDef>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
+    )]
+    expertises: Vec<tor_simulation::expertise::ExpertiseDef>,
     creature_types: Vec<tor_simulation::rules::TypeDef>,
     subtypes: Vec<tor_simulation::rules::SubtypeDef>,
     classes: Vec<tor_simulation::rules::ClassDef>,
@@ -2418,6 +2671,7 @@ struct RulesDocument {
     nutrition_condition_trigger: tor_simulation::nutrition::NutritionConditionTrigger,
     #[serde(with = "mapped")]
     advancement: tor_simulation::rules::AdvancementPolicy,
+    #[serde(with = "mapped")]
     equipment_slots: Vec<tor_simulation::rules::EquipmentSlotDef>,
     #[serde(with = "mapped")]
     growth: tor_simulation::rules::GrowthPolicy,
@@ -2457,6 +2711,9 @@ enum FutureGrowth {
     deny_unknown_fields
 )]
 enum ThreatSource {
+    Expertise {
+        id: tor_simulation::content_ids::ExpertiseId,
+    },
     Species {
         id: tor_simulation::content_ids::SpeciesId,
     },
@@ -2533,6 +2790,7 @@ struct ThreatPolicy {
     class: u32,
     template: u32,
     talent: u32,
+    expertise: u32,
     #[serde(
         serialize_with = "mapped::serialize",
         deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
@@ -2555,6 +2813,7 @@ impl ThreatPolicy {
             class: u32,
             template: u32,
             talent: u32,
+            expertise: u32,
             #[serde(
                 serialize_with = "mapped::serialize",
                 deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
@@ -2572,6 +2831,7 @@ impl ThreatPolicy {
             class: value.class,
             template: value.template,
             talent: value.talent,
+            expertise: value.expertise,
             overrides: value.overrides,
         })
     }
@@ -2632,6 +2892,29 @@ impl FormDefinition {
         })
     }
 }
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::expertise::ExpertiseCategory",
+    rename_all = "snake_case"
+)]
+enum ExpertiseCategory {
+    Cultural,
+    Equipment,
+    Utility,
+    Specialist,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::expertise::ExpertiseDef",
+    deny_unknown_fields
+)]
+struct ExpertiseDefinition {
+    id: tor_simulation::content_ids::ExpertiseId,
+    #[serde(deserialize_with = "form_display_name")]
+    name: String,
+    #[serde(with = "mapped")]
+    category: tor_simulation::expertise::ExpertiseCategory,
+}
 #[derive(Serialize)]
 #[serde(remote = "tor_simulation::rules::TalentDef")]
 struct TalentDefinition {
@@ -2641,6 +2924,7 @@ struct TalentDefinition {
     requirement: tor_simulation::rules::Requirement,
     modifiers: Vec<tor_simulation::rules::Modifier>,
     form_choices: Vec<tor_simulation::content_ids::FormId>,
+    expertise_grants: Vec<tor_simulation::content_ids::ExpertiseId>,
 }
 impl TalentDefinition {
     fn deserialize<'de, D: serde::Deserializer<'de>>(
@@ -2665,6 +2949,10 @@ impl TalentDefinition {
                 deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::FORMS_PER_TALENT }>"
             )]
             form_choices: Vec<tor_simulation::content_ids::FormId>,
+            #[serde(
+                deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::MODIFIERS_PER_SOURCE }>"
+            )]
+            expertise_grants: Vec<tor_simulation::content_ids::ExpertiseId>,
         }
         let f: Fields = super::named_map(d)?;
         Ok(tor_simulation::rules::TalentDef {
@@ -2674,6 +2962,7 @@ impl TalentDefinition {
             requirement: f.requirement,
             modifiers: f.modifiers,
             form_choices: f.form_choices,
+            expertise_grants: f.expertise_grants,
         })
     }
 }
@@ -3076,6 +3365,47 @@ mod supply_id {
     }
 }
 
+impl Stored for source::AnatomySpec {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        AnatomySpec::serialize(self, serializer)
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(transparent)]
+        struct Named(#[serde(with = "AnatomySpec")] source::AnatomySpec);
+        let value: Named = super::named_map(d)?;
+        if matches!(value.0.primary_attack_socket, source::PrimaryAttackSocket::Socket { slot } if usize::from(slot) >= value.0.slots.len())
+        {
+            return Err(serde::de::Error::custom(
+                "stored primary socket outside anatomy",
+            ));
+        }
+        Ok(value.0)
+    }
+}
+impl Stored for tor_simulation::AnatomySpec {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        RulesAnatomySpec::serialize(self, serializer)
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(transparent)]
+        struct Named(#[serde(with = "RulesAnatomySpec")] tor_simulation::AnatomySpec);
+        let value: Named = super::named_map(d)?;
+        if value
+            .0
+            .primary_attack_socket
+            .socket()
+            .is_some_and(|slot| usize::from(slot.0) >= value.0.slots.len())
+        {
+            return Err(serde::de::Error::custom(
+                "stored primary socket outside anatomy",
+            ));
+        }
+        Ok(value.0)
+    }
+}
+
 macro_rules! remote {
     ($($schema:ident => $value:ty),+ $(,)?) => {$(
         impl Stored for $value {
@@ -3178,6 +3508,13 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    WeaponTrait => source::WeaponTrait,
+    WeaponTraitChanges => source::WeaponTraitChanges,
+    WeaponProfileSpec => source::WeaponProfileSpec,
+    SourcePrimaryAttackSocket => source::PrimaryAttackSocket,
+    RulesConstants => tor_simulation::rules::Constants,
+    RulesEquipmentSlotDef => tor_simulation::rules::EquipmentSlotDef,
+    ExpertiseDefinition => tor_simulation::expertise::ExpertiseDef,
     EquippedSelection => source::EquippedSelection,
     ConsumableSpec => source::ConsumableSpec,
     ReadableSpec => source::ReadableSpec,
@@ -3252,6 +3589,8 @@ macro_rules! string_remote {
     )+};
 }
 string_remote!(
+    WeaponTraitKind => source::WeaponTraitKind,
+    ExpertiseCategory => tor_simulation::expertise::ExpertiseCategory,
     HealingOverflow => source::HealingOverflow,
     ItemDiscovery => source::ItemDiscovery,
     EquipmentAlteration => source::EquipmentAlteration,
@@ -3311,7 +3650,6 @@ remote!(
     ItemClass => crate::scenario_package::ItemClass,
     Character => source::Character,
     Objective => source::Objective,
-    AnatomySpec => source::AnatomySpec,
     DiceExpr => source::DiceExpr,
     AmountExpr => source::AmountExpr,
     DamageComponentExpr => source::DamageComponentExpr,
@@ -7149,11 +7487,11 @@ mod armor_record_tests {
     fn stored_armor_has_independent_named_required_current_shapes() {
         let good = json!({"slot":"body_armor", "armor":{
             "physical_reduction":2,"material":"metal","rustproof":false},
-            "attack":null,"modifiers":[]});
+            "attack":null,"modifiers":[],"weapon_profile":null});
         let value: Owned<source::EquipmentSpec> = serde_json::from_value(good.clone()).unwrap();
         assert_eq!(serde_json::to_value(Borrowed(&value.0)).unwrap(), good);
         let mut bad = vec![json!(["body_armor", null, null, []])];
-        for field in ["armor", "attack", "modifiers"] {
+        for field in ["armor", "attack", "modifiers", "weapon_profile"] {
             let mut omitted = good.clone();
             omitted.as_object_mut().unwrap().remove(field);
             bad.push(omitted);
@@ -7429,5 +7767,272 @@ mod equipment_generation_stored_tests {
             &serde_json::to_vec(&unknown).unwrap(),
         )
         .is_err());
+    }
+}
+
+#[cfg(test)]
+mod expertise_boundary_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn saved_expertise_catalog_and_grants_have_independent_complete_named_schema() {
+        use tor_simulation::{
+            content_ids::ExpertiseId,
+            expertise::{ExpertiseCategory, ExpertiseDef},
+            rules::RulesetDocument,
+        };
+        let mut document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let id = ExpertiseId::new("fixture.knife").unwrap();
+        document.expertises.push(ExpertiseDef {
+            id: id.clone(),
+            name: "Knife".into(),
+            category: ExpertiseCategory::Equipment,
+        });
+        document.talents[0].expertise_grants.push(id);
+        let good = serde_json::to_value(Borrowed(&document)).unwrap();
+        let restored: Owned<RulesetDocument> = serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(restored.0, document);
+        for pointer in [
+            "/expertises",
+            "/talents/0/expertise_grants",
+            "/growth/threat/expertise",
+        ] {
+            let mut bad = good.clone();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            bad.pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert!(
+                serde_json::from_value::<Owned<RulesetDocument>>(bad).is_err(),
+                "missing {pointer}"
+            );
+        }
+        for row in [
+            json!(["fixture.knife", "Knife", "equipment"]),
+            json!({"id":"fixture.knife","name":"Knife"}),
+            json!({"id":"fixture.knife","name":"Knife","category":"equipment","active":true}),
+            json!({"id":"fixture.knife","name":"Knife","category":{"equipment":null}}),
+        ] {
+            let mut bad = good.clone();
+            bad["expertises"][0] = row;
+            assert!(serde_json::from_value::<Owned<RulesetDocument>>(bad).is_err());
+        }
+        let mut bad = good.clone();
+        bad["talents"][0]["expertise_grants"] = json!(vec![
+            "fixture.knife";
+            tor_simulation::limits::MODIFIERS_PER_SOURCE
+                + 1
+        ]);
+        assert!(serde_json::from_value::<Owned<RulesetDocument>>(bad).is_err());
+        let mut bad = good;
+        bad["expertises"] = json!(vec![
+            json!({"id":"fixture.knife","name":"Knife","category":"equipment"});
+            tor_simulation::limits::CATALOG_ENTRIES + 1
+        ]);
+        assert!(serde_json::from_value::<Owned<RulesetDocument>>(bad).is_err());
+    }
+}
+
+#[cfg(test)]
+mod anatomy_storage_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn stored_anatomy_requires_named_complete_bounded_explicit_fields() {
+        let good = json!({"slots": ["weapon"], "capacities": {"grip": 2}, "primary_attack_socket": {"kind": "socket", "slot": 0}});
+        let source: Owned<source::AnatomySpec> = serde_json::from_value(good.clone()).unwrap();
+        let runtime: Owned<tor_simulation::AnatomySpec> =
+            serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(serde_json::to_value(source).unwrap(), good);
+        assert_eq!(serde_json::to_value(runtime).unwrap(), good);
+        for field in ["slots", "capacities", "primary_attack_socket"] {
+            let mut bad = good.clone();
+            bad.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<Owned<source::AnatomySpec>>(bad.clone()).is_err());
+            assert!(serde_json::from_value::<Owned<tor_simulation::AnatomySpec>>(bad).is_err());
+        }
+        for bad in [
+            json!([["weapon"], {"grip": 2}, {"kind": "socket", "slot": 0}]),
+            json!({"slots": [], "capacities": {}, "primary_attack_socket": {"kind": "socket", "slot": 0}}),
+            json!({"slots": [], "capacities": {"grip": 65}, "primary_attack_socket": {"kind": "none"}}),
+            json!({"slots": [], "capacities": {}, "primary_attack_socket": null}),
+            json!({"slots": [], "capacities": {}, "primary_attack_socket": {"kind": "none", "slot": 0}}),
+            json!({"slots": [], "capacities": {}, "primary_attack_socket": {"kind": "none"}, "extra": 0}),
+        ] {
+            assert!(serde_json::from_value::<Owned<source::AnatomySpec>>(bad.clone()).is_err());
+            assert!(serde_json::from_value::<Owned<tor_simulation::AnatomySpec>>(bad).is_err());
+        }
+        for (field, oversized) in [
+            (
+                "slots",
+                json!(vec![
+                    "weapon";
+                    tor_simulation::limits::EQUIPMENT_SOCKETS + 1
+                ]),
+            ),
+            (
+                "capacities",
+                serde_json::to_value(
+                    (0..=tor_simulation::limits::EQUIPMENT_SOCKETS)
+                        .map(|i| (format!("pool_{i}"), 1))
+                        .collect::<BTreeMap<_, _>>(),
+                )
+                .unwrap(),
+            ),
+        ] {
+            let mut bad = good.clone();
+            bad[field] = oversized;
+            assert!(serde_json::from_value::<Owned<source::AnatomySpec>>(bad.clone()).is_err());
+            assert!(serde_json::from_value::<Owned<tor_simulation::AnatomySpec>>(bad).is_err());
+        }
+        let duplicate = r#"{"slots":[],"capacities":{"grip":1,"grip":2},"primary_attack_socket":{"kind":"none"}}"#;
+        assert!(serde_json::from_str::<Owned<source::AnatomySpec>>(duplicate).is_err());
+        assert!(serde_json::from_str::<Owned<tor_simulation::AnatomySpec>>(duplicate).is_err());
+        let none = json!({"slots": [], "capacities": {"grip": 0}, "primary_attack_socket": {"kind": "none"}});
+        assert!(serde_json::from_value::<Owned<source::AnatomySpec>>(none.clone()).is_ok());
+        assert!(serde_json::from_value::<Owned<tor_simulation::AnatomySpec>>(none).is_ok());
+    }
+
+    #[test]
+    fn stored_rules_own_required_equipment_resource_schema() {
+        let rules: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let good = serde_json::to_value(Borrowed(&rules)).unwrap();
+        assert!(
+            serde_json::from_value::<Owned<tor_simulation::rules::RulesetDocument>>(good.clone())
+                .is_ok()
+        );
+        for field in ["capacities", "primary_attack_socket"] {
+            let mut bad = good.clone();
+            bad["constants"]["default_anatomy"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                serde_json::from_value::<Owned<tor_simulation::rules::RulesetDocument>>(bad)
+                    .is_err()
+            );
+        }
+        let mut missing = good.clone();
+        missing["equipment_slots"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("capacity");
+        assert!(
+            serde_json::from_value::<Owned<tor_simulation::rules::RulesetDocument>>(missing)
+                .is_err()
+        );
+        for capacity in [
+            json!({"kind":"none", "units":1}),
+            json!({"kind":"shared", "resource":"grip", "units":0}),
+            json!({"kind":"shared", "resource":"grip", "units":65}),
+            json!({"kind":"shared", "resource":"grip"}),
+            json!({"kind":"shared", "resource":"bad id", "units":1}),
+            json!(null),
+        ] {
+            let mut bad = good.clone();
+            bad["equipment_slots"][0]["capacity"] = capacity;
+            assert!(
+                serde_json::from_value::<Owned<tor_simulation::rules::RulesetDocument>>(bad)
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod weapon_profile_record_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn saved_weapon_profiles_are_independent_named_bounded_and_explicitly_nullable() {
+        let good = json!({"slot":"weapon","armor":null,"attack":null,"modifiers":[],
+            "weapon_profile":{"expertise":"fixture.knife","ranged":null,
+                "base_traits":[{"kind":"two_handed"},{"kind":"thrown","range":{"short_feet":20,"long_feet":60}}],
+                "expert_traits":{"add":[{"kind":"quickdraw"},{"kind":"offhand"}],"remove":["two_handed"]}}});
+        let restored: Owned<source::EquipmentSpec> = serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+        let mut bad = vec![];
+        for pointer in [
+            "/weapon_profile",
+            "/weapon_profile/ranged",
+            "/weapon_profile/expertise",
+            "/weapon_profile/base_traits",
+            "/weapon_profile/expert_traits",
+            "/weapon_profile/expert_traits/add",
+            "/weapon_profile/expert_traits/remove",
+        ] {
+            let mut value = good.clone();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            value
+                .pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            bad.push(value);
+        }
+        for (pointer, replacements) in [
+            (
+                "/weapon_profile",
+                vec![json!(["fixture.knife",null,[],{"add":[],"remove":[]}])],
+            ),
+            (
+                "/weapon_profile/ranged",
+                vec![
+                    json!([20, 60]),
+                    json!({"short_feet":20}),
+                    json!({"short_feet":20,"long_feet":60,"extra":0}),
+                    json!({"short_feet":0,"long_feet":60}),
+                    json!({"short_feet":21,"long_feet":60}),
+                    json!({"short_feet":60,"long_feet":20}),
+                    json!({"short_feet":20,"long_feet":1_000_005}),
+                ],
+            ),
+            (
+                "/weapon_profile/base_traits",
+                vec![
+                    json!([{"kind":"finesse"}]),
+                    json!([{"kind":"offhand","extra":0}]),
+                    json!([{"kind":"thrown"}]),
+                    json!(["offhand"]),
+                    json!(vec![json!({"kind":"offhand"}); 5]),
+                ],
+            ),
+            (
+                "/weapon_profile/expert_traits",
+                vec![json!([[], []]), json!({"add":[],"remove":[],"extra":0})],
+            ),
+            (
+                "/weapon_profile/expert_traits/add",
+                vec![json!(vec![json!({"kind":"quickdraw"}); 5])],
+            ),
+            (
+                "/weapon_profile/expert_traits/remove",
+                vec![
+                    json!(["finesse"]),
+                    json!([{"offhand":null}]),
+                    json!(vec!["offhand"; 5]),
+                ],
+            ),
+        ] {
+            for replacement in replacements {
+                let mut value = good.clone();
+                *value.pointer_mut(pointer).unwrap() = replacement;
+                bad.push(value);
+            }
+        }
+        for value in bad {
+            assert!(
+                serde_json::from_value::<Owned<source::EquipmentSpec>>(value.clone()).is_err(),
+                "accepted {value}"
+            );
+        }
     }
 }

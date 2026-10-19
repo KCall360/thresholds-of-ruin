@@ -38,8 +38,9 @@ pub use authoring::{
     AiProfile, AmountExpr, AnatomySpec, ArmorMaterial, ArmorSpec, BodySpec, ChargeRange,
     ConsumableSpec, CurrencyKind, DamageComponentExpr, DamageExpr, DamageType, DeviceSpec,
     DiceExpr, Effect, EquipmentAlteration, EquipmentGeneration, EquipmentSlot, EquipmentSpec,
-    EquippedSelection, HealingOverflow, HoldPolicy, ItemClass, ItemDiscovery, PushDirection,
-    ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection,
+    EquippedSelection, HealingOverflow, HoldPolicy, ItemClass, ItemDiscovery, PrimaryAttackSocket,
+    PushDirection, ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection,
+    WeaponProfileSpec, WeaponRangeBands, WeaponTrait, WeaponTraitChanges, WeaponTraitKind,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};

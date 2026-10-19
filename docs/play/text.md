@@ -100,6 +100,25 @@ accepted as spaces; `stats` lists your grants. Examples above do not grant missi
 forms. Techniques validate reach and resources when executed and do not approach
 for you.
 
+For an ability marked “weapon choice” in stats, append `with <equipped weapon>`
+to choose a currently equipped attack item by full name or opaque `#item` handle.
+For example, `attack goblin with silver sword` retains that exact item and
+observed socket. If a granted ability also requires supplies, the `with` clause
+comes before its `using <supplies>` clause.
+Omitting it preserves the default primary weapon or natural attack. Selection
+adds no extra attack and does not equip a carried item. A stale, missing or
+unequipped choice is refused, never silently replaced. An explicit weapon attack
+acts from your current position, like a named ability; it does not approach.
+After the target and supplies are chosen, the server previews that exact action's
+resource costs, time to the next strike, and separate recovery. Both text modes
+ask for `yes` before sending it; `no` or a new command cancels. Fresh costs are
+paid/reserved at preparation start. A resumed action labels its already-paid
+start and reserved resolution; a paid sequence prefix labels its settled costs
+and no new resource charge. The preview neither reserves resources nor promises
+affordability. Changed authority or observation requires a fresh choice and
+preview; a stale server reply refreshes the observation without retrying the
+action. Omitting `with` keeps the ordinary immediate default action.
+
 Finite-supply abilities use carried inventory automatically unless you add
 `using <item>`. For example, `bind wounds me using clean bandage` selects that
 exact known, touch-reachable ground or carried stack. Use full item names or

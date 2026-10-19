@@ -33,7 +33,7 @@ fn ability_invocations_decode_current_named_selection_only() {
         json!({"kind": "self_step", "direction": "east"}),
     ] {
         let valid = json!({"type": "use_ability", "value": {
-            "id": "guarded_step", "invocation": invocation,
+            "id": "guarded_step", "invocation": {"aim":invocation,"weapon":{"kind":"default"}},
             "supplies": {"kind": "carried"}
         }});
         let action: crate::Action = serde_json::from_slice(&serde_json::to_vec(&valid).unwrap())
@@ -48,7 +48,7 @@ fn ability_invocations_decode_current_named_selection_only() {
         json!(["self_step", "east"]),
     ] {
         let invalid = json!({"type": "use_ability", "value": {
-            "id": "guarded_step", "invocation": invocation,
+            "id": "guarded_step", "invocation": {"aim":invocation,"weapon":{"kind":"default"}},
             "supplies": {"kind": "carried"}
         }});
         assert!(
@@ -169,7 +169,7 @@ pub(super) fn guarded_step_game_with(
 
 fn guarded_step_action(direction: &str) -> crate::Action {
     serde_json::from_value(json!({"type":"use_ability","value":{
-        "id":"guarded_step_probe","invocation":{"kind":"self_step","direction":direction},
+        "id":"guarded_step_probe","invocation":{"aim":{"kind":"self_step","direction":direction},"weapon":{"kind":"default"}},
         "supplies":{"kind":"carried"}
     }}))
     .expect("typed selected step")
@@ -225,7 +225,15 @@ fn guarded_step_moves_only_at_preparation_completion_and_pays_one_move() {
             .balance(crate::resources::Resource::Stamina),
         before - 1
     );
-    assert_eq!(paid.reservation(identity).unwrap().resolution, 1);
+    assert_eq!(
+        paid.reservation(identity)
+            .unwrap()
+            .entries()
+            .find(|cost| cost.resource == crate::resources::Resource::Stamina)
+            .unwrap()
+            .resolution,
+        1
+    );
     assert_eq!(game.tick(), 0);
     assert_eq!(game.actors[&actor].location, cell(2, 2, 0));
     assert_eq!(
@@ -328,7 +336,16 @@ fn newly_occupied_step_retains_braced_and_all_committed_timing_and_cost() {
             .balance(crate::resources::Resource::Stamina),
         19
     );
-    assert_eq!(expected.reservation(identity).unwrap().resolution, 1);
+    assert_eq!(
+        expected
+            .reservation(identity)
+            .unwrap()
+            .entries()
+            .find(|cost| cost.resource == crate::resources::Resource::Stamina)
+            .unwrap()
+            .resolution,
+        1
+    );
     expected.advance_active(100);
     expected.finish(identity).unwrap();
     expected.advance_active(42);
@@ -576,7 +593,7 @@ fn push_game(
 
 fn push_action() -> crate::Action {
     serde_json::from_value(json!({"type":"use_ability","value":{
-        "id":"push_probe","invocation":{"kind":"actor_target","target":2},
+        "id":"push_probe","invocation":{"aim":{"kind":"actor_target","target":2},"weapon":{"kind":"default"}},
         "supplies":{"kind":"carried"}
     }}))
     .unwrap()
@@ -655,6 +672,9 @@ fn two_cell_delvers_push_from_shortest_contact_under_every_cube_rotation() {
                 .unwrap()
                 .costs()
                 .reservation(identity)
+                .unwrap()
+                .entries()
+                .find(|cost| cost.resource == crate::resources::Resource::Stamina)
                 .unwrap()
                 .resolution,
             2
@@ -1162,9 +1182,7 @@ fn ordinary_primary_control_retains_damage_and_weapon_timing() {
         crate::ActorId(1),
         crate::Action::UseAbility {
             id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-            invocation: crate::abilities::AbilityInvocation::ActorTarget {
-                target: crate::ActorId(2),
-            },
+            invocation: crate::abilities::AbilityInvocation::actor_target(crate::ActorId(2)),
             supplies: Default::default(),
         },
     )
@@ -1389,9 +1407,7 @@ fn unowned_self_step_rejects_before_geometry_without_licensing_the_private_abili
     }
     let action = Action::UseAbility {
         id: crate::content_ids::AbilityId::new("guarded_step_probe").unwrap(),
-        invocation: AbilityInvocation::SelfStep {
-            direction: StepDirection::North,
-        },
+        invocation: AbilityInvocation::self_step(StepDirection::North),
         supplies: Default::default(),
     };
     for blocked in [false, true] {

@@ -42,7 +42,7 @@ class FallCreditProcesses(ProcessTestCase):
                               if row["name"] == "practice target")
                 started = self.act(owner, {
                     "type": "use_ability", "id": "push_probe",
-                    "invocation": {"kind": "actor_target", "target": target},
+                    "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}},
                 })
                 self.assertIsNone(started["error"])
                 for _ in range(20):

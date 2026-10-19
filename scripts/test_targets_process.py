@@ -59,7 +59,7 @@ class TargetProcesses(ProcessTestCase):
         self.assertEqual(own["self_appearance"]["seed"], subject["appearance_seed"])
         target = next(actor for actor in own["visible_actors"] if actor["name"] == "practice target")
         killed = self.act(player, {"type": "use_ability", "id": "fixture_mana_bolt",
-                                  "invocation": {"kind": "actor_target", "target": target["id"]}})
+                                  "invocation": {"aim": {"kind": "actor_target", "target": target["id"]}, "weapon": {"kind": "default"}}})
         self.assertIsNone(killed["error"])
         if not any(ground["item"]["class"] == "corpse" for ground in killed["state"]["observation"]["ground_items"]):
             killed = self.frame(player, lambda frame: any(ground["item"]["class"] == "corpse"
@@ -124,11 +124,11 @@ class TargetProcesses(ProcessTestCase):
                       if actor["name"] == "ruin guard")
         self.assertRegex(target, r"^a_[0-9a-f]{64}$")
         self.assertNotEqual(target, observation["self_target"])
-        started = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
+        started = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         self.assertIsNone(started["error"])
         action = next(entry["content"] for entry in started["history"]
                       if entry["content"].get("action", {}).get("type") == "use_ability")
-        self.assertEqual(action["action"]["invocation"]["target"], target)
+        self.assertEqual(action["action"]["invocation"]["aim"]["target"], target)
         self.assertEqual(action["event"]["target"], target)
 
     def test_disclosed_door_handle_drives_a_change_and_keeps_its_identity(self):

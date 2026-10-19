@@ -58,7 +58,7 @@ fn documentation_validator_rejects_valid_json_with_invalid_wire_contracts() {
             }, "branch": "example-branch",
             "command": {"type": "act", "expected_revision": "0", "action": {"supplies":{"kind":"carried"},
                 "type": "use_ability", "id": "basic_melee",
-                "invocation": {"kind":"actor_target", "target": tor_protocol::ActorTarget::from_digest([0; 32])}
+                "invocation": {"aim":{"kind":"actor_target", "target": tor_protocol::ActorTarget::from_digest([0; 32])},"weapon":{"kind":"default"}}
             }}
         }
     });
@@ -67,7 +67,8 @@ fn documentation_validator_rejects_valid_json_with_invalid_wire_contracts() {
     let mut numeric_revision = valid.clone();
     numeric_revision["request"]["command"]["expected_revision"] = serde_json::json!(0);
     let mut numeric_target = valid.clone();
-    numeric_target["request"]["command"]["action"]["invocation"]["target"] = serde_json::json!(1);
+    numeric_target["request"]["command"]["action"]["invocation"]["aim"]["target"] =
+        serde_json::json!(1);
     let mut missing_context = valid.clone();
     missing_context["request"]
         .as_object_mut()

@@ -128,6 +128,24 @@ Automatic server launch and packaged builds are not available; see [status](../s
 | Enter on the end screen | Close the victory or death summary |
 | Escape | Cancel or close what's open, otherwise quit |
 
+When the selected ability permits a weapon choice, Tab in the attack, ability
+or direction picker opens WEAPON. The first row preserves the default primary
+weapon (or natural attack); other rows are your currently observed equipped
+attack items and exact sockets. Up/Down selects, Enter returns to the original
+picker, and Esc keeps your previous choice. Choosing a weapon creates no extra
+attack. A changed observation clears the draft; a moved or missing item is
+refused rather than replaced. Choose again before confirming. The same exact
+choice is retained if the action also asks for supplies.
+After choosing the target and any supplies, an explicit equipped choice opens
+EXACT WEAPON ACTION PREVIEW. Review the server's cost bundle, time to the next
+strike, and separate recovery, then press Enter to send that one exact action or
+Esc to cancel. Enter cannot send it while the reply is pending. Resuming labels
+start already paid and resolution reserved; a paid sequence prefix labels
+settled costs with no new resource charge. Time to the next strike is not the
+completion time for the whole sequence. Previewing reserves nothing and does
+not promise affordability. A stale response refreshes the observation and
+requires choosing again. The default row retains the ordinary immediate path.
+
 For an ability that requires finite supplies, confirming its target opens the
 SUPPLIES screen. The first choice uses carried inventory automatically. Up/Down
 focuses an exact known carried or touch-reachable ground stack; Space toggles

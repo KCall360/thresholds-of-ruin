@@ -1,5 +1,7 @@
 //! Bounded, provisional numerical policy for ordinary earned progression.
-use crate::content_ids::{ClassId, SpeciesId, SubtypeId, TalentId, TemplateId, TypeId};
+use crate::content_ids::{
+    ClassId, ExpertiseId, SpeciesId, SubtypeId, TalentId, TemplateId, TypeId,
+};
 use serde::{Deserialize, Serialize};
 
 /// Permanent source identities only. Equipment, conditions and actor identities
@@ -13,6 +15,7 @@ pub enum ThreatSource {
     Class { id: ClassId },
     Template { id: TemplateId },
     Talent { id: TalentId },
+    Expertise { id: ExpertiseId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +37,7 @@ pub struct ThreatPolicy {
     pub class: u32,
     pub template: u32,
     pub talent: u32,
+    pub expertise: u32,
     #[serde(
         deserialize_with = "super::strikes::bounded_vec::<_, _, { crate::limits::CATALOG_ENTRIES }>"
     )]
@@ -68,6 +72,7 @@ impl ThreatPolicy {
                 ThreatSource::Class { .. } => self.class,
                 ThreatSource::Template { .. } => self.template,
                 ThreatSource::Talent { .. } => self.talent,
+                ThreatSource::Expertise { .. } => self.expertise,
             })
     }
 }
@@ -157,6 +162,7 @@ impl GrowthPolicy {
                     t.class,
                     t.template,
                     t.talent,
+                    t.expertise,
                 ]
                 .iter()
                 .all(|value| *value <= maximum)

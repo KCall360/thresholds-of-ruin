@@ -111,8 +111,11 @@ fn start_sequence(engine: &mut Engine) -> (CommandResult, Command) {
         expected_revision: engine.revision(ActorId(1)).unwrap(),
         action: Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("triple_strike").unwrap(),
-            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
-                target: tor_simulation::ActorId(2),
+            invocation: tor_server::journal::AbilityInvocation {
+                aim: tor_server::journal::AbilityAim::ActorTarget {
+                    target: tor_simulation::ActorId(2),
+                },
+                weapon: tor_server::journal::WeaponSelection::Default,
             },
             supplies: Default::default(),
         },

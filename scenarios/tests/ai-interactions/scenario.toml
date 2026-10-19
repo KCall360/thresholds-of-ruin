@@ -57,7 +57,7 @@ confounding = true
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }
 kind = "humanoid"
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
-anatomy = { slots = ["body_armor", "ring", "ring", "head_armor"] }
+anatomy = { slots = ["body_armor", "ring", "ring", "head_armor"], capacities = {}, primary_attack_socket = { kind = "none" } }
 melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 80, recovery = 20, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 1 } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 22 } }]
 

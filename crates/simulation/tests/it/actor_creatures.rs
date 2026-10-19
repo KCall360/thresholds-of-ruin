@@ -62,7 +62,7 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
             actor,
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
         )
@@ -103,9 +103,7 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
                 actor,
                 Action::UseAbility {
                     id: AbilityId::new("basic_melee").unwrap(),
-                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                        target,
-                    },
+                    invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
             )
@@ -127,7 +125,7 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
             actor,
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
         )
@@ -232,9 +230,7 @@ fn game_checkpoint_rebuilds_creature_caches_and_preserves_next_attack_outcome() 
             ActorId(1),
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                    target: ActorId(2),
-                },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
         )
@@ -318,9 +314,7 @@ fn queued_natural_melee_matches_the_shared_seeded_check_and_damage_kernel() {
         ActorId(1),
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: ActorId(2),
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
             supplies: Default::default(),
         },
     )
@@ -404,6 +398,7 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
     let mut weapon = tor_simulation::ItemSpec::ordinary("test weapon".into());
     weapon.class = tor_simulation::ItemClass::Weapon;
     weapon.equipment = Some(tor_simulation::EquipmentSpec {
+        weapon_profile: None,
         armor: None,
         slot: tor_simulation::EquipmentSlot::new("weapon").unwrap(),
         attack: Some(
@@ -439,9 +434,7 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
         ActorId(1),
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: ActorId(2),
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
             supplies: Default::default(),
         },
     )
@@ -476,7 +469,7 @@ fn anatomy_configuration_cannot_desynchronize_a_creature_build() {
 fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
     let mut game = game();
     let gear: tor_simulation::EquipmentSpec = serde_json::from_value(serde_json::json!({
-        "slot":"weapon", "armor":null, "modifiers":[],
+        "slot":"weapon", "armor":null, "weapon_profile":null, "modifiers":[],
         "attack":{"skill":"light_weaponry", "bonus":100,"damage_enchantment":0,"wind_up":90,"recovery":70,
             "damage":{"primary":{"category":"energy","descriptor":"fire","sides":6},
                 "components":[
@@ -510,9 +503,7 @@ fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
         ActorId(1),
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: ActorId(2),
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
             supplies: Default::default(),
         },
     )
@@ -572,9 +563,7 @@ fn checkpoint_owns_rule_random_stream_and_event_log_outside_run_policy() {
             ActorId(1),
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                    target: ActorId(2),
-                },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
         )

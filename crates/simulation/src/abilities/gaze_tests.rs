@@ -122,7 +122,7 @@ fn fixture() -> Game {
 fn gaze() -> Action {
     Action::UseAbility {
         id: AbilityId::new("fixture_gaze").unwrap(),
-        invocation: AbilityInvocation::ActorTarget { target: ActorId(2) },
+        invocation: AbilityInvocation::actor_target(ActorId(2)),
         supplies: Default::default(),
     }
 }
@@ -391,9 +391,7 @@ fn confusion_does_not_redirect_or_recompile_a_paid_movement_ability() {
     let actor = ActorId(1);
     let action = Action::UseAbility {
         id: AbilityId::new("guarded_step_probe").unwrap(),
-        invocation: AbilityInvocation::SelfStep {
-            direction: StepDirection::North,
-        },
+        invocation: AbilityInvocation::self_step(StepDirection::North),
         supplies: Default::default(),
     };
     game.admit_intention(actor, action, IntentionOrigin::Human)

@@ -277,7 +277,40 @@ class-identification uses on-use discovery without direct effects. See
 [equipment birth contracts](../reference/items.md#equipment-birth-and-the-finite-rogue-catalog)
 for bounded policy schemas, immutable definitions, atomic sampling and adaptations.
 Remaining catalog specials stay separate. Throw and launch still need their own
-projectile work. PCs and AI use the same ordinary
+projectile work. The selected next slice adopts weapon expertise and short/long
+ranges from the [Plotweaver Open Alpha v0.3](https://drive.google.com/file/d/11v0ujMTuXNdwkHEPAcPZqY29I3ZdmlJn/view)
+and [Stormlight Starter Rules](https://www.cosmererpg.com/s/SL015_Stormlight_StarterRules_Digital.pdf),
+while retaining TOR's existing attack checks and damage rules. Durable thrown
+weapons are recoverable after hits. The dagger's ranged profile requires knife
+expertise; source ranges are 20/60 feet. Full weapon-trait behavior, ordinary
+client actions and recovery remain implementation work, not shipped capabilities.
+
+Expertise acquisition is a third ordinary HD point purchase competing with skill
+ranks and talents. Permanent talents may also grant expertise. The shared
+foundation tracks independent owned sources, deduplicates active expertise, and
+keeps dormant talent grants distinct from refunded or removed purchases. Paid HD
+expertise follows the existing drain/restoration choice policy; this does not
+invent permanently retained paid choices. Intellect-derived choices retain one
+choice per earned permanent-Intellect threshold: a loss makes higher thresholds
+dormant, restoration fills the same choices, and a genuinely new maximum earns
+new thresholds once. Recombining old sources above the previous maximum is new
+capacity; there is no lifetime source-consumption counter. Creation includes its
+immutable birth composition. Later acquisition receipts retain deduplicated exact
+HD choice versions and canonical source witnesses; snapshots check source
+consistency while replay establishes historical chronology. Timed modifiers,
+equipment and restorable attribute damage neither grant nor disable these choices.
+Privileged baseline rewrites are rejected once choices or later acquisition
+receipts exist; before learning, the unchosen baseline is reconciled explicitly.
+The source-only ordinary bonus-choice path uses a distinct threshold/expertise
+operation with existing admission, preview, stale-basis checks and replay. Compact
+paginated threshold rows preserve dormant choices; Text and ASCII can browse,
+preview and confirm the entitlement without spending an HD point. Owning tests
+cover source-free reopening and idempotence but remain unrun at this checkpoint.
+Full qualification and weapon behavior remain pending before this can be described
+as a playable expertise system. Growth assessment
+uses an explicit zero expertise baseline with authored combat-benefit overrides;
+pure-grant talent contributions must not price the same unlock twice. These
+assessment values remain TOR tuning, not imported tabletop rules. PCs and AI use the same ordinary
 actions with knowledge-limited decisions; the conservative device AI fallback
 requires an identified type and explicitly known positive instance charges.
 

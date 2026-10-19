@@ -33,7 +33,7 @@ def care(frame, item=None):
     if item is None:
         item = next(row["item"]["id"] for row in observation(frame)["ground_items"]
                     if (row["item"]["known_supply"] or {}).get("id") == "bandage")
-    return {"type": "use_ability", "id": "bind_wounds", "invocation": {"kind": "actor_target", "target": observation(frame)["self_target"]},
+    return {"type": "use_ability", "id": "bind_wounds", "invocation": {"aim": {"kind": "actor_target", "target": observation(frame)["self_target"]}, "weapon": {"kind": "default"}},
             "supplies": {"kind": "explicit", "items": [{"cost_ordinal": 0, "item": item}]}}
 
 

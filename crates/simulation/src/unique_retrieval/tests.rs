@@ -949,7 +949,7 @@ fn cancelling_preparation_with_terminal_up_uses_the_same_atomic_ownership_check(
                         .unwrap()
                         .id
                         .clone(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 crate::IntentionOrigin::Human,
@@ -1134,7 +1134,7 @@ fn host_teleport_preserves_an_entry_from_cancel_released_preload_continuation() 
             ActorId(2),
             Action::UseAbility {
                 id: ability_id,
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(3) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(3)),
                 supplies: Default::default(),
             },
             crate::IntentionOrigin::Human,
@@ -1322,7 +1322,7 @@ fn accepted_terminal_up_stops_scheduled_attack_recovery_and_hunger_work() {
         enemy,
         Action::UseAbility {
             id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-            invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
+            invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(1)),
             supplies: Default::default(),
         },
     )

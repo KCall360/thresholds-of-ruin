@@ -187,8 +187,11 @@ fn prepared_ability_snapshots_validate_and_round_trip_deltas() {
             preparation: Some(PreparationView {
                 action: Action::UseAbility {
                     id: ability.into(),
-                    invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                        target: ActorTarget::from_digest(synthetic_digest(2)),
+                    invocation: tor_protocol::AbilityInvocation {
+                        aim: tor_protocol::AbilityAim::ActorTarget {
+                            target: ActorTarget::from_digest(synthetic_digest(2)),
+                        },
+                        weapon: tor_protocol::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },
@@ -225,8 +228,11 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
         preparation: Some(PreparationView {
             action: Action::UseAbility {
                 id: "basic_melee".into(),
-                invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                    target: ActorTarget::from_digest(synthetic_digest(2)),
+                invocation: tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::ActorTarget {
+                        target: ActorTarget::from_digest(synthetic_digest(2)),
+                    },
+                    weapon: tor_protocol::WeaponSelection::Default,
                 },
                 supplies: Default::default(),
             },
@@ -1378,8 +1384,11 @@ fn phase5_preparation_supply_shape_is_validated_for_direct_values() {
         preparation: Some(PreparationView {
             action: Action::UseAbility {
                 id: "mend".into(),
-                invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                    target: state.observation.self_target,
+                invocation: tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::ActorTarget {
+                        target: state.observation.self_target,
+                    },
+                    weapon: tor_protocol::WeaponSelection::Default,
                 },
                 supplies: SupplySelection::Carried,
             },

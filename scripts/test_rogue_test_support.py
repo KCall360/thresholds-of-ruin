@@ -168,7 +168,7 @@ class RogueCareChoices(unittest.TestCase):
         foe = {"id": "bird", **actor(1, 0, 1)}
         view = {"self_target": "self", "visible_actors": [{"id": "self", **actor(0, 0, 1)}, foe]}
         attack = {"type": "use_ability", "id": "basic_melee",
-                  "invocation": {"kind": "actor_target", "target": "bird"}}
+                  "invocation": {"aim": {"kind": "actor_target", "target": "bird"}, "weapon": {"kind": "default"}}}
         self.assertEqual(care_combat_action([foe], injured=False, observation=view), attack)
         self.assertEqual(care_combat_action([foe], injured=False, contacted={"bird"}, observation=view),
                          {"type": "wait"})
@@ -187,7 +187,7 @@ class RogueCareChoices(unittest.TestCase):
         foe = {"id": "visible-snake", **actor(1, 0)}
         self.assertEqual(care_combat_action([foe], injured=False), {
             "type": "use_ability", "id": "basic_melee",
-            "invocation": {"kind": "actor_target", "target": foe["id"]}})
+            "invocation": {"aim": {"kind": "actor_target", "target": foe["id"]}, "weapon": {"kind": "default"}}})
         self.assertEqual(self.action([foe], injured=False, contacted={foe["id"]}),
                          {"type": "wait"})
 
@@ -202,7 +202,7 @@ class RogueCareChoices(unittest.TestCase):
         foe = {"id": "new-snake", **actor(1, 0)}
         self.assertEqual(self.action([foe], injured=False, contacted={"gone-emu"}), {
             "type": "use_ability", "id": "basic_melee",
-            "invocation": {"kind": "actor_target", "target": foe["id"]}})
+            "invocation": {"aim": {"kind": "actor_target", "target": foe["id"]}, "weapon": {"kind": "default"}}})
 
     def test_waits_for_an_existing_contact_before_provoking_another_foe(self):
         foes = [{"id": "new-snake", **actor(-1, 0)},
@@ -215,7 +215,7 @@ class RogueCareChoices(unittest.TestCase):
                 {"id": "cardinal", **actor(0, 1)}]
         self.assertEqual(self.action(foes, injured=True), {
             "type": "use_ability", "id": "basic_melee",
-            "invocation": {"kind": "actor_target", "target": "cardinal"}})
+            "invocation": {"aim": {"kind": "actor_target", "target": "cardinal"}, "weapon": {"kind": "default"}}})
 
     def test_contact_choice_uses_public_geometry_not_view_or_opaque_id_order(self):
         for west_id, east_id in (("z-opaque", "a-opaque"), ("a-new", "z-new")):
@@ -225,7 +225,7 @@ class RogueCareChoices(unittest.TestCase):
                 for injured in (False, True):
                     with self.subTest(west=west_id, injured=injured, foes=foes):
                         action = self.action(foes, injured=injured)
-                        self.assertEqual(action["invocation"]["target"], west_id)
+                        self.assertEqual(action["invocation"]["aim"]["target"], west_id)
 
     def test_no_visible_foe_keeps_exploration_available(self):
         for injured in (False, True):

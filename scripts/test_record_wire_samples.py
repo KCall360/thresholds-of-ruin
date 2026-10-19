@@ -64,6 +64,18 @@ def recording_case(failure=None):
 
 
 class CompleteRecordingContracts(unittest.TestCase):
+    def test_preview_request_fixture_echoes_a_complete_public_action(self):
+        commands = [entry["request"]["command"] for entry in record_wire_samples.CLIENT
+                    if entry["type"] == "request" and entry["request"]["type"] == "command"]
+        previews = [command for command in commands if command["type"] == "preview_ability_weapon"]
+        self.assertEqual(len(previews), 1)
+        self.assertEqual(previews[0], {
+            "type": "preview_ability_weapon", "expected_revision": "3", "ability": "basic_melee",
+            "invocation": {"aim": {"kind": "actor_target", "target": "a_" + "02" * 32},
+                           "weapon": {"kind": "default"}},
+            "supplies": {"kind": "carried"},
+        })
+
     def test_exact_artifact_is_returned_only_after_all_lifecycle_hooks_finish(self):
         case, trace = recording_case()
         artifact = record_wire_samples.run_recording_case(case, "artifact")

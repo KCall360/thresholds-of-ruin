@@ -60,6 +60,7 @@ pub enum ParsedCommand {
         id: String,
         selection: AbilitySelection,
         supplies: Option<String>,
+        weapon: Option<String>,
     },
     Intransitive {
         verb: Verb,

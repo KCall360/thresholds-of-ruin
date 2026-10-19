@@ -712,3 +712,41 @@ fn weapon_damage_enchantment_is_an_explicit_signed_inspection_lane() {
     unknown["hidden_curse"] = serde_json::json!(true);
     assert!(serde_json::from_value::<AttackView>(unknown).is_err());
 }
+
+#[test]
+fn expertise_inspection_checks_paid_purchase_against_compact_summary() {
+    let mut view = report();
+    let reference = |id: &str| {
+        let value = content(id);
+        AdvancementContentRef {
+            id: value.id,
+            name: value.name,
+        }
+    };
+    view.hit_dice[0].point_pools[0].granted += 1;
+    view.hit_dice[0].point_pools[0].spent += 1;
+    view.hit_dice[0].point_pools[0]
+        .allowed
+        .push(AdvancementKind::Expertise);
+    view.hit_dice[0].purchases.push(InspectionPurchase {
+        pool: content("advancement"),
+        selection: InspectionPurchaseSelection::Expertise {
+            expertise: content("spear"),
+        },
+    });
+    view.stats.expertises.push(AdvancementExpertiseRow {
+        expertise: reference("spear"),
+        status: AdvancementStatus::Active,
+        source_count: 2,
+    });
+    assert!(view.validate().is_ok());
+    let mut bad = view.clone();
+    bad.stats.expertises.clear();
+    assert!(bad.validate().is_err());
+    let mut bad = view.clone();
+    bad.stats.expertises[0].status = AdvancementStatus::Dormant;
+    assert!(bad.validate().is_err());
+    let mut bad = view;
+    bad.stats.expertises.push(bad.stats.expertises[0].clone());
+    assert!(bad.validate().is_err());
+}

@@ -91,8 +91,11 @@ fn scenario(hd: usize, bandages: u64, partner: Option<bool>, injury: u32) -> Sce
 fn care(actor: ActorId) -> Action {
     Action::UseAbility {
         id: tor_simulation::content_ids::AbilityId::new("bind_wounds").unwrap(),
-        invocation: tor_server::journal::AbilityInvocation::ActorTarget {
-            target: tor_simulation::ActorId(actor.0),
+        invocation: tor_server::journal::AbilityInvocation {
+            aim: tor_server::journal::AbilityAim::ActorTarget {
+                target: tor_simulation::ActorId(actor.0),
+            },
+            weapon: tor_server::journal::WeaponSelection::Default,
         },
         supplies: SupplySelection::Explicit {
             items: vec![SelectedSupply {
@@ -609,8 +612,11 @@ fn ordinary_ai_loses_held_last_bandage_then_heals_when_human_cancels() {
         ActorId(3),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("fixture_injury").unwrap(),
-            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
-                target: tor_simulation::ActorId(2),
+            invocation: tor_server::journal::AbilityInvocation {
+                aim: tor_server::journal::AbilityAim::ActorTarget {
+                    target: tor_simulation::ActorId(2),
+                },
+                weapon: tor_server::journal::WeaponSelection::Default,
             },
             supplies: SupplySelection::Carried,
         },

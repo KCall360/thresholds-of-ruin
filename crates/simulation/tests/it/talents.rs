@@ -109,6 +109,7 @@ fn local_talent(name: &str, requirement: Requirement, prerequisites: Vec<TalentI
         prerequisites,
         modifiers: vec![],
         form_choices: vec![],
+        expertise_grants: vec![],
     }
 }
 #[test]

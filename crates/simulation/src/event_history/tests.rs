@@ -266,8 +266,7 @@ fn rider_refreshes_after_primary_reveal_without_upgrading_primary_or_contact_pla
             descriptors: vec![],
         }];
         if contact {
-            ability.invocation =
-                crate::abilities::AbilityInvocation::ContactTarget { target: ActorId(2) };
+            ability.invocation = crate::abilities::AbilityInvocation::contact_target(ActorId(2));
         }
         template(&mut game, ActorId(2), Some("event_guised"));
         assert!(game.actors[&ActorId(2)].guise.appearance().is_some());

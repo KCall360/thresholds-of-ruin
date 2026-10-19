@@ -136,6 +136,7 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
                     .map(|kind| match kind {
                         AdvancementKind::SkillRank => "skill ranks",
                         AdvancementKind::Talent => "talents",
+                        AdvancementKind::Expertise => "expertises",
                     })
                     .collect::<Vec<_>>()
                     .join(" or ")
@@ -147,6 +148,9 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
                     format!("skill rank {}", skill.name)
                 }
                 InspectionPurchaseSelection::Talent { talent } => format!("talent {}", talent.name),
+                InspectionPurchaseSelection::Expertise { expertise } => {
+                    format!("expertise {}", expertise.name)
+                }
                 InspectionPurchaseSelection::TalentForm { talent, form } => {
                     format!("talent {} / form {} ({})", talent.name, form.name, form.id)
                 }
@@ -174,6 +178,9 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
     rows.push(format!("Mana binding: {}", report.stats.binding.name));
     for skill in &report.stats.skills {
         rows.push(format!("Skill {}: {}", skill.skill.name, skill.rank));
+    }
+    for expertise in &report.stats.expertises {
+        rows.extend(crate::stats::expertise_lines(expertise));
     }
     for talent in &report.stats.active_talents {
         rows.push(format!("Active talent: {}", talent.name));
@@ -267,8 +274,10 @@ pub fn page_lines(page: &CreatureStrikePage) -> Result<Vec<String>, InvalidStrik
             additional_riders,
             ..
         } => {
-            format!("Natural source: {} ({}); ability: {} ({}); {additional_riders} ability-added riders per strike",
-                species.name, species.id, ability.name, ability.id)
+            format!(
+                "Natural source: {} ({}); ability: {} ({}); {additional_riders} ability-added riders per strike",
+                species.name, species.id, ability.name, ability.id
+            )
         }
         StrikeSourceAttribution::Weapon { source, socket } => {
             format!("Weapon: {} ({}, socket {socket})", source.name, source.id)
@@ -597,6 +606,7 @@ pub(crate) mod tests {
                     reset_percent: 100,
                 },
                 resources: vec![],
+                expertises: vec![],
                 active_talents: vec![],
                 dormant_talents: vec![],
                 abilities: vec![],

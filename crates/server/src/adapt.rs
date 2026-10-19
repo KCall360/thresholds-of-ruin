@@ -109,6 +109,12 @@ pub fn action(action: &a::Action) -> s::Action {
             basis: (**basis).clone(),
             source: source.clone(),
         },
+        a::Action::ChooseIntellectExpertise { basis, choice } => {
+            s::Action::ChooseIntellectExpertise {
+                basis: basis.as_ref().clone(),
+                choice: choice.clone(),
+            }
+        }
         a::Action::Purchase { basis, purchase } => s::Action::Purchase {
             basis: basis.as_ref().clone(),
             purchase: purchase.clone(),
@@ -128,15 +134,15 @@ pub fn action(action: &a::Action) -> s::Action {
             supplies,
         } => s::Action::UseAbility {
             id: id.clone(),
-            invocation: match invocation {
-                a::AbilityInvocation::ActorTarget { target } => {
-                    s::abilities::AbilityInvocation::ActorTarget { target: *target }
-                }
-                a::AbilityInvocation::ContactTarget { target } => {
-                    s::abilities::AbilityInvocation::ContactTarget { target: *target }
-                }
-                a::AbilityInvocation::SelfStep { direction } => {
-                    s::abilities::AbilityInvocation::SelfStep {
+            invocation: s::abilities::AbilityInvocation {
+                aim: match &invocation.aim {
+                    a::AbilityAim::ActorTarget { target } => {
+                        s::abilities::AbilityAim::ActorTarget { target: *target }
+                    }
+                    a::AbilityAim::ContactTarget { target } => {
+                        s::abilities::AbilityAim::ContactTarget { target: *target }
+                    }
+                    a::AbilityAim::SelfStep { direction } => s::abilities::AbilityAim::SelfStep {
                         direction: match direction {
                             a::Direction::North => s::abilities::StepDirection::North,
                             a::Direction::East => s::abilities::StepDirection::East,
@@ -149,24 +155,33 @@ pub fn action(action: &a::Action) -> s::Action {
                             a::Direction::Up => s::abilities::StepDirection::Up,
                             a::Direction::Down => s::abilities::StepDirection::Down,
                         },
+                    },
+                    a::AbilityAim::DirectionalRay { direction } => {
+                        s::abilities::AbilityAim::DirectionalRay {
+                            direction: match direction {
+                                a::Direction::North => s::abilities::StepDirection::North,
+                                a::Direction::East => s::abilities::StepDirection::East,
+                                a::Direction::South => s::abilities::StepDirection::South,
+                                a::Direction::West => s::abilities::StepDirection::West,
+                                a::Direction::NorthEast => s::abilities::StepDirection::NorthEast,
+                                a::Direction::SouthEast => s::abilities::StepDirection::SouthEast,
+                                a::Direction::SouthWest => s::abilities::StepDirection::SouthWest,
+                                a::Direction::NorthWest => s::abilities::StepDirection::NorthWest,
+                                a::Direction::Up => s::abilities::StepDirection::Up,
+                                a::Direction::Down => s::abilities::StepDirection::Down,
+                            },
+                        }
                     }
-                }
-                a::AbilityInvocation::DirectionalRay { direction } => {
-                    s::abilities::AbilityInvocation::DirectionalRay {
-                        direction: match direction {
-                            a::Direction::North => s::abilities::StepDirection::North,
-                            a::Direction::East => s::abilities::StepDirection::East,
-                            a::Direction::South => s::abilities::StepDirection::South,
-                            a::Direction::West => s::abilities::StepDirection::West,
-                            a::Direction::NorthEast => s::abilities::StepDirection::NorthEast,
-                            a::Direction::SouthEast => s::abilities::StepDirection::SouthEast,
-                            a::Direction::SouthWest => s::abilities::StepDirection::SouthWest,
-                            a::Direction::NorthWest => s::abilities::StepDirection::NorthWest,
-                            a::Direction::Up => s::abilities::StepDirection::Up,
-                            a::Direction::Down => s::abilities::StepDirection::Down,
-                        },
+                },
+                weapon: match invocation.weapon {
+                    a::WeaponSelection::Default => s::abilities::WeaponSelection::Default,
+                    a::WeaponSelection::Equipped { item, socket } => {
+                        s::abilities::WeaponSelection::Equipped {
+                            item: s::ItemId(item),
+                            socket: s::EquipmentSlotId(socket),
+                        }
                     }
-                }
+                },
             },
             supplies: simulation_supplies(supplies),
         },
@@ -227,7 +242,9 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
             replacement: replacement.clone(),
             supplies: simulation_supplies(supplies),
         },
-        a::Action::ChooseGrowthSource { .. } | a::Action::Purchase { .. } => return None,
+        a::Action::ChooseGrowthSource { .. }
+        | a::Action::ChooseIntellectExpertise { .. }
+        | a::Action::Purchase { .. } => return None,
         a::Action::UseAbility { .. } => {
             let s::Action::UseAbility {
                 id,
@@ -280,6 +297,12 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
             basis: Box::new(basis),
             source,
         },
+        s::Action::ChooseIntellectExpertise { basis, choice } => {
+            a::Action::ChooseIntellectExpertise {
+                basis: Box::new(basis),
+                choice,
+            }
+        }
         s::Action::Purchase { basis, purchase } => a::Action::Purchase {
             basis: Box::new(basis),
             purchase,
@@ -321,15 +344,15 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
             supplies,
         } => a::Action::UseAbility {
             id,
-            invocation: match invocation {
-                s::abilities::AbilityInvocation::ActorTarget { target } => {
-                    a::AbilityInvocation::ActorTarget { target }
-                }
-                s::abilities::AbilityInvocation::ContactTarget { target } => {
-                    a::AbilityInvocation::ContactTarget { target }
-                }
-                s::abilities::AbilityInvocation::SelfStep { direction } => {
-                    a::AbilityInvocation::SelfStep {
+            invocation: a::AbilityInvocation {
+                aim: match invocation.aim {
+                    s::abilities::AbilityAim::ActorTarget { target } => {
+                        a::AbilityAim::ActorTarget { target }
+                    }
+                    s::abilities::AbilityAim::ContactTarget { target } => {
+                        a::AbilityAim::ContactTarget { target }
+                    }
+                    s::abilities::AbilityAim::SelfStep { direction } => a::AbilityAim::SelfStep {
                         direction: match direction {
                             s::abilities::StepDirection::North => a::Direction::North,
                             s::abilities::StepDirection::East => a::Direction::East,
@@ -342,24 +365,33 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
                             s::abilities::StepDirection::Up => a::Direction::Up,
                             s::abilities::StepDirection::Down => a::Direction::Down,
                         },
+                    },
+                    s::abilities::AbilityAim::DirectionalRay { direction } => {
+                        a::AbilityAim::DirectionalRay {
+                            direction: match direction {
+                                s::abilities::StepDirection::North => a::Direction::North,
+                                s::abilities::StepDirection::East => a::Direction::East,
+                                s::abilities::StepDirection::South => a::Direction::South,
+                                s::abilities::StepDirection::West => a::Direction::West,
+                                s::abilities::StepDirection::NorthEast => a::Direction::NorthEast,
+                                s::abilities::StepDirection::SouthEast => a::Direction::SouthEast,
+                                s::abilities::StepDirection::SouthWest => a::Direction::SouthWest,
+                                s::abilities::StepDirection::NorthWest => a::Direction::NorthWest,
+                                s::abilities::StepDirection::Up => a::Direction::Up,
+                                s::abilities::StepDirection::Down => a::Direction::Down,
+                            },
+                        }
                     }
-                }
-                s::abilities::AbilityInvocation::DirectionalRay { direction } => {
-                    a::AbilityInvocation::DirectionalRay {
-                        direction: match direction {
-                            s::abilities::StepDirection::North => a::Direction::North,
-                            s::abilities::StepDirection::East => a::Direction::East,
-                            s::abilities::StepDirection::South => a::Direction::South,
-                            s::abilities::StepDirection::West => a::Direction::West,
-                            s::abilities::StepDirection::NorthEast => a::Direction::NorthEast,
-                            s::abilities::StepDirection::SouthEast => a::Direction::SouthEast,
-                            s::abilities::StepDirection::SouthWest => a::Direction::SouthWest,
-                            s::abilities::StepDirection::NorthWest => a::Direction::NorthWest,
-                            s::abilities::StepDirection::Up => a::Direction::Up,
-                            s::abilities::StepDirection::Down => a::Direction::Down,
-                        },
+                },
+                weapon: match invocation.weapon {
+                    s::abilities::WeaponSelection::Default => a::WeaponSelection::Default,
+                    s::abilities::WeaponSelection::Equipped { item, socket } => {
+                        a::WeaponSelection::Equipped {
+                            item: item.0,
+                            socket: socket.0,
+                        }
                     }
-                }
+                },
             },
             supplies: recorded_supplies(supplies),
         },
@@ -405,6 +437,9 @@ pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
         }
         s::OutcomeKind::EscapeStarted { hold } => crate::journal::Event::EscapeStarted { hold },
         s::OutcomeKind::GrowthSourceChosen { .. } => crate::journal::Event::GrowthSourceChosen,
+        s::OutcomeKind::IntellectExpertiseChosen { .. } => {
+            crate::journal::Event::IntellectExpertiseChosen
+        }
         s::OutcomeKind::Purchased { .. } => crate::journal::Event::Purchased,
         s::OutcomeKind::RespecStarted { .. } => crate::journal::Event::RespecStarted,
         s::OutcomeKind::AbilityStarted {
@@ -896,8 +931,11 @@ mod ability_journal_tests {
         let id = tor_simulation::content_ids::AbilityId::new("fixture_ability").unwrap();
         let action = crate::actions::Action::UseAbility {
             id: id.clone(),
-            invocation: crate::actions::AbilityInvocation::ActorTarget {
-                target: tor_simulation::ActorId(2),
+            invocation: crate::actions::AbilityInvocation {
+                aim: crate::actions::AbilityAim::ActorTarget {
+                    target: tor_simulation::ActorId(2),
+                },
+                weapon: crate::actions::WeaponSelection::Default,
             },
             supplies: Default::default(),
         };
@@ -905,8 +943,11 @@ mod ability_journal_tests {
             super::work(&action),
             Some(tor_simulation::Work::UseAbility {
                 id: id.clone(),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                    target: tor_simulation::ActorId(2)
+                invocation: tor_simulation::abilities::AbilityInvocation {
+                    aim: tor_simulation::abilities::AbilityAim::ActorTarget {
+                        target: tor_simulation::ActorId(2)
+                    },
+                    weapon: tor_simulation::abilities::WeaponSelection::Default
                 },
                 supplies: Default::default(),
             })

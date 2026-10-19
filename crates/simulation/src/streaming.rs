@@ -2160,7 +2160,7 @@ mod tests {
             owner,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: owner },
+                invocation: crate::abilities::AbilityInvocation::actor_target(owner),
                 supplies: SupplySelection::Explicit {
                     items: vec![SelectedSupply {
                         cost_ordinal: 0,
@@ -2221,7 +2221,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(actor),
                     supplies: crate::supplies::SupplySelection::Carried,
                 },
                 crate::IntentionOrigin::Human,
@@ -2312,7 +2312,7 @@ mod tests {
             owner,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: owner },
+                invocation: crate::abilities::AbilityInvocation::actor_target(owner),
                 supplies: crate::supplies::SupplySelection::Explicit {
                     items: vec![crate::supplies::SelectedSupply {
                         cost_ordinal: 0,

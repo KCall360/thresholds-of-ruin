@@ -40,6 +40,7 @@ ids!(
     AbilityTagId,
     FormId,
     TalentId,
+    ExpertiseId,
     TypeId,
     SubtypeId,
     ClassId,
@@ -50,6 +51,7 @@ ids!(
     SpeciesId,
     TemplateId,
     EquipmentSlot,
+    EquipmentCapacityId,
     PointPoolId,
     SupplyId
 );

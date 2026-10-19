@@ -56,7 +56,7 @@ class LinkedHoldProcesses(ProcessTestCase):
             # act() would wait for execution while that external turn is held.
             admitted = self.command(peers[actor], {"type": "act", "action": {
                 "type": "use_ability", "id": LINK,
-                "invocation": {"kind": "actor_target", "target": target},
+                "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}},
                 "supplies": {"kind": "carried"}}})
             self.assertIsNone(admitted["error"])
         frame = self.advance(peers[1], peers, lambda value: len(holds(value)) == 2 and settled(value))

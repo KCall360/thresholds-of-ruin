@@ -236,7 +236,7 @@ fn frozen_wind_up_resumes_where_it_stopped() {
         attacker,
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
     )
@@ -281,9 +281,7 @@ fn queued_native_attack_survives_frozen_and_detached_checkpoint_boundaries() {
                 attacker,
                 Action::UseAbility {
                     id: super::abilities::id("basic_melee"),
-                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                        target,
-                    },
+                    invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                     supplies: Default::default(),
                 },
                 tor_simulation::IntentionOrigin::Human,
@@ -345,6 +343,9 @@ fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
         game.configure_anatomy(
             worker,
             AnatomySpec {
+                capacities: Default::default(),
+                primary_attack_socket:
+                    tor_simulation::equipment_capacity::PrimaryAttackSocket::None,
                 slots: vec![
                     tor_simulation::EquipmentSlot::new("body_armor").unwrap(),
                     tor_simulation::EquipmentSlot::new("ring").unwrap(),
@@ -369,6 +370,7 @@ fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
             let mut spec = ItemSpec::ordinary(format!("gear {item}"));
             spec.class = class;
             spec.equipment = Some(EquipmentSpec {
+                weapon_profile: None,
                 armor: None,
                 slot,
                 attack: None,
@@ -453,7 +455,7 @@ fn paused_native_portal_attack_keeps_required_regions_active_without_losing_prog
             attacker,
             Action::UseAbility {
                 id: super::abilities::id("basic_melee"),
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
                 supplies: Default::default(),
             },
             tor_simulation::IntentionOrigin::Human,
@@ -596,7 +598,7 @@ fn a_frozen_attack_keeps_its_target_loaded() {
         attacker,
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         },
     )

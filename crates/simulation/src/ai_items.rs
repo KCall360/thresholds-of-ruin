@@ -212,7 +212,7 @@ impl Game {
             let Ok(plan) = self.ability_plan_in_scene(actor, id, actor, sight) else {
                 continue;
             };
-            if !crate::ai::safe_healing_plan(&plan) {
+            if !self.ai_plan_resources_available(&plan) || !crate::ai::safe_healing_plan(&plan) {
                 continue;
             }
             // Keep one complete recipe; component-wise minima across alternatives
@@ -339,7 +339,12 @@ impl Game {
         }
         let sources = equipment
             .iter()
-            .map(|(socket, id)| candidate.items.get(id)?.equipment_source(*id, *socket))
+            .map(|(socket, id)| {
+                candidate
+                    .items
+                    .get(id)?
+                    .equipment_source(*id, *socket, &candidate.content.rules)
+            })
             .collect::<Option<Vec<_>>>()?;
         let context = candidate.equipment_recovery_context(actor, &sources).ok()?;
         let mut owner = candidate.actors.get_mut(&actor)?;
@@ -841,7 +846,7 @@ mod tests {
             retaliation.action,
             Action::UseAbility {
                 id: basic,
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: other },
+                invocation: crate::abilities::AbilityInvocation::actor_target(other),
                 supplies: Default::default(),
             }
         );
@@ -898,6 +903,7 @@ mod tests {
         );
         let primary = component.key();
         EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: EquipmentSlot::new("weapon").unwrap(),
             attack: Some(
@@ -980,6 +986,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    weapon_profile: None,
                     armor: None,
                     slot: EquipmentSlot::new("head_armor").unwrap(),
                     attack: None,
@@ -1006,6 +1013,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    weapon_profile: None,
                     armor: None,
                     slot: EquipmentSlot::new("head_armor").unwrap(),
                     attack: None,
@@ -1043,6 +1051,7 @@ mod tests {
                     at,
                     20,
                     EquipmentSpec {
+                        weapon_profile: None,
                         armor: None,
                         slot: EquipmentSlot::new("body_armor").unwrap(),
                         attack: None,
@@ -1064,6 +1073,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    weapon_profile: None,
                     armor: None,
                     slot: EquipmentSlot::new("head_armor").unwrap(),
                     attack: None,

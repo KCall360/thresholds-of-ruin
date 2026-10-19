@@ -381,7 +381,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         initial_mana = resource(initial, "mana")["balance"]
         # The adept's eye is one cell above the sentinel's single-cell body:
         # five horizontal cells are six sight-range cells, outside Falter's five.
-        rejected = self.act(player, {"type": "use_ability", "id": "falter", "invocation": {"kind": "actor_target", "target": target}})
+        rejected = self.act(player, {"type": "use_ability", "id": "falter", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         self.assertEqual(rejected["error"], "InvalidAction: Intention is unavailable")
         self.assertEqual(rejected["state"], initial["state"])
         self.assertEqual(resource(rejected, "mana")["balance"], initial_mana)
@@ -401,7 +401,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
             actor["position"]["x"], actor["position"]["y"], actor["position"]["z"], actor["name"],
         ))["id"]
         self.assertEqual(resource(approached, "mana")["balance"], initial_mana)
-        started = self.act(player, {"type": "use_ability", "id": "falter", "invocation": {"kind": "actor_target", "target": target}})
+        started = self.act(player, {"type": "use_ability", "id": "falter", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         self.assertIsNone(started["error"])
         self.assertTrue(started["state"]["observation"]["combat"]["preparation_active"])
         self.assertEqual(resource(started, "mana")["balance"], initial_mana - 1)
@@ -595,7 +595,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         player, initial = self.client()
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
-        started = self.act(player, {"type": "use_ability", "id": ability, "invocation": {"kind": "actor_target", "target": target}})
+        started = self.act(player, {"type": "use_ability", "id": ability, "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         self.assertIsNone(started["error"])
         self.assertTrue(started["state"]["observation"]["combat"]["preparation_active"])
         self.assertEqual(resource(started, pool)["balance"], resource(initial, pool)["balance"] - 1)

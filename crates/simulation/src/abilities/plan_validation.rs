@@ -84,40 +84,42 @@ impl AbilityPlan {
         let Some(definition) = rules.ability(&self.ability) else {
             return false;
         };
-        let cost = definition
+        let Ok(cost) = definition
             .cost
             .as_ref()
-            .map(|cost| crate::costs::ResourceCost {
-                resource: cost.resource,
-                start: cost.start,
-                resolution: cost.resolution,
-            });
-        if self.ambush.is_some_and(|site| {
-            site != (super::CheckSite {
-                strike: 0,
-                check: super::CheckPhase::Primary {
-                    side: super::CheckSide::Initiating,
-                },
-            }) || !definition.basic_attack
-                || definition.interaction != crate::rules::Interaction::HostileToTarget
-                || !matches!(self.reach, Reach::Melee)
-                || self
-                    .strikes
-                    .first()
-                    .and_then(|strike| strike.check.as_ref())
-                    .is_none_or(|check| check.actor != crate::rules::CheckActor::User)
-        }) || matches!(self.invocation, AbilityInvocation::ContactTarget { .. })
-            && (!definition.basic_attack
-                || definition.interaction != crate::rules::Interaction::HostileToTarget
-                || !matches!(self.reach, Reach::Melee))
+            .map(crate::costs::CostBundle::try_from)
+            .transpose()
+        else {
+            return false;
+        };
+        let Ok(cost) = self.weapon.cost(rules, cost) else {
+            return false;
+        };
+        if !self.weapon.valid_for(self, rules)
+            || self.ambush.is_some_and(|site| {
+                site != (super::CheckSite {
+                    strike: 0,
+                    check: super::CheckPhase::Primary {
+                        side: super::CheckSide::Initiating,
+                    },
+                }) || !definition.basic_attack
+                    || definition.interaction != crate::rules::Interaction::HostileToTarget
+                    || !matches!(self.reach, Reach::Melee)
+                    || self
+                        .strikes
+                        .first()
+                        .and_then(|strike| strike.check.as_ref())
+                        .is_none_or(|check| check.actor != crate::rules::CheckActor::User)
+            })
+            || matches!(self.invocation.aim, AbilityAim::ContactTarget { .. })
+                && (!definition.basic_attack
+                    || definition.interaction != crate::rules::Interaction::HostileToTarget
+                    || !matches!(self.reach, Reach::Melee))
             || self.invocation.kind() != definition.invocation
             || self.invocation.target(self.actor) != self.target
-            || match (self.invocation, self.step) {
-                (
-                    AbilityInvocation::ActorTarget { .. } | AbilityInvocation::ContactTarget { .. },
-                    None,
-                ) => false,
-                (AbilityInvocation::SelfStep { direction }, Some(step)) => {
+            || match (self.invocation.aim, self.step) {
+                (AbilityAim::ActorTarget { .. } | AbilityAim::ContactTarget { .. }, None) => false,
+                (AbilityAim::SelfStep { direction }, Some(step)) => {
                     direction != step.direction || !step.valid()
                 }
                 _ => true,
@@ -369,7 +371,8 @@ impl Game {
         let Some(ability) = plan.as_ability() else {
             return true;
         };
-        if !self.theft_contexts_valid(ability) {
+        if !self.frozen_weapon_source_valid(&ability.weapon) || !self.theft_contexts_valid(ability)
+        {
             return false;
         }
         if ability

@@ -1,7 +1,7 @@
 //! Owned advancement, independent of transient effects and control ownership.
 use super::{BuildError, CreatureBuild};
 use crate::attributes::{Attribute, Skill};
-use crate::content_ids::{FormId, PointPoolId, TalentId};
+use crate::content_ids::{ExpertiseId, FormId, PointPoolId, TalentId};
 use crate::progression::HdSource;
 use crate::rules::PurchaseKind;
 use std::collections::BTreeMap;
@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PurchaseSelection {
     SkillRank(Skill),
+    Expertise(ExpertiseId),
     Talent(TalentId),
     TalentForm { talent: TalentId, form: FormId },
 }
@@ -16,24 +17,37 @@ impl PurchaseSelection {
     pub fn kind(&self) -> PurchaseKind {
         match self {
             Self::SkillRank(_) => PurchaseKind::SkillRank,
+            Self::Expertise(_) => PurchaseKind::Expertise,
             Self::Talent(_) | Self::TalentForm { .. } => PurchaseKind::Talent,
         }
     }
     pub fn talent(&self) -> Option<&TalentId> {
         match self {
-            Self::SkillRank(_) => None,
+            Self::SkillRank(_) | Self::Expertise(_) => None,
             Self::Talent(talent) | Self::TalentForm { talent, .. } => Some(talent),
+        }
+    }
+    pub fn expertise(&self) -> Option<&ExpertiseId> {
+        match self {
+            Self::Expertise(expertise) => Some(expertise),
+            Self::SkillRank(_) | Self::Talent(_) | Self::TalentForm { .. } => None,
         }
     }
     pub fn form(&self) -> Option<&FormId> {
         match self {
             Self::TalentForm { form, .. } => Some(form),
-            Self::SkillRank(_) | Self::Talent(_) => None,
+            Self::SkillRank(_) | Self::Expertise(_) | Self::Talent(_) => None,
         }
     }
     /// Validate the owned operand even when its talent is currently dormant.
     /// Eligibility is separate; a valid choice never changes as gates change.
     pub(crate) fn validate(&self, rules: &crate::rules::Ruleset) -> Result<(), BuildError> {
+        if let Some(expertise) = self.expertise() {
+            return rules
+                .expertise(expertise)
+                .map(|_| ())
+                .ok_or(BuildError::UnknownExpertise);
+        }
         let Some(talent) = self.talent() else {
             return Ok(());
         };
@@ -68,7 +82,9 @@ impl HdChoices {
             .iter()
             .filter_map(|purchase| match purchase.selection {
                 PurchaseSelection::SkillRank(skill) => Some(skill),
-                PurchaseSelection::Talent(_) | PurchaseSelection::TalentForm { .. } => None,
+                PurchaseSelection::Expertise(_)
+                | PurchaseSelection::Talent(_)
+                | PurchaseSelection::TalentForm { .. } => None,
             })
     }
 }
@@ -212,8 +228,14 @@ impl CreatureBuild {
         pool: PointPoolId,
         selection: PurchaseSelection,
     ) -> Result<AdvancementPreview, BuildError> {
+        selection.validate(self.ruleset())?;
+        if let Some(expertise) = selection.expertise() {
+            if self.derive()?.expertises.owns(expertise) {
+                return Err(BuildError::DuplicateExpertise);
+            }
+        }
         let owner = owner.to_usize().map_err(BuildError::from)?;
-        let (candidate, derived) = self.preview_edit(|build| {
+        let (candidate, derived) = self.preview_intellect_advancement(|build| {
             if let Some(id) = selection.talent() {
                 if build.ruleset().talent(id).is_none() {
                     return Err(BuildError::UnknownTalent);
@@ -255,6 +277,12 @@ impl CreatureBuild {
         owner: crate::HdIndex,
         selection: PurchaseSelection,
     ) -> Result<(), BuildError> {
+        selection.validate(self.ruleset())?;
+        if let Some(expertise) = selection.expertise() {
+            if self.derive()?.expertises.owns(expertise) {
+                return Err(BuildError::DuplicateExpertise);
+            }
+        }
         if let Some(id) = selection.talent() {
             if self.ruleset().talent(id).is_none() {
                 return Err(BuildError::UnknownTalent);
@@ -285,6 +313,24 @@ impl CreatureBuild {
     pub fn train(&mut self, owner: crate::HdIndex, skill: Skill) -> Result<(), BuildError> {
         self.purchase_from_available_pool(owner, PurchaseSelection::SkillRank(skill))
     }
+    pub fn select_expertise(
+        &mut self,
+        owner: crate::HdIndex,
+        expertise: ExpertiseId,
+    ) -> Result<(), BuildError> {
+        self.purchase_from_available_pool(owner, PurchaseSelection::Expertise(expertise))
+    }
+    pub fn available_expertises(&self) -> Result<Vec<ExpertiseId>, BuildError> {
+        let owned = self.derive()?.expertises;
+        Ok(self
+            .ruleset()
+            .document()
+            .expertises
+            .iter()
+            .filter(|definition| !owned.owns(&definition.id))
+            .map(|definition| definition.id.clone())
+            .collect())
+    }
     pub fn select_talent(
         &mut self,
         owner: crate::HdIndex,
@@ -308,6 +354,8 @@ impl CreatureBuild {
                 BuildError::AttributeCap
                 | BuildError::RankCap
                 | BuildError::DuplicateTalent
+                | BuildError::DuplicateExpertise
+                | BuildError::TooManyOwnedExpertises
                 | BuildError::TooManyOwnedTalents,
             ) if restores_authored => Ok(GrowthBuildOutcome::Obstructed),
             // Preserve current authored numeric/override obstructions. Ledger
@@ -340,7 +388,8 @@ impl CreatureBuild {
         // permanent template changed. Ownership is restored, never eligibility.
         let kind = super::derive::kind_for_templates(&candidate, &candidate.templates)?;
         candidate.bind_health_origins(&kind)?;
-        candidate.derive()?;
+        let derived = candidate.derive()?;
+        candidate.retain_intellect_acquisition(self, &derived)?;
         *self = candidate;
         Ok(())
     }

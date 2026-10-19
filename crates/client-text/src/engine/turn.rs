@@ -99,6 +99,104 @@ impl Link for Connection {
     }
 }
 
+/// Query one complete selected action without executing it. Invalidated replies
+/// cannot grant confirmation, and the query is never retried as gameplay.
+pub async fn preview_weapon(
+    link: &mut impl Link,
+    chronicler: &mut Chronicler,
+    record: &mut Record,
+    action: Action,
+) -> Result<Option<tor_client_common::weapon_preview::WeaponPreview>, Error> {
+    let mut preview =
+        match tor_client_common::weapon_preview::WeaponPreview::new(link.client(), action) {
+            Ok(value) => value,
+            Err(reason) => {
+                record.say(reason);
+                return Ok(None);
+            }
+        };
+    let request = link.client().command_request(preview.command());
+    if !link.role().permits(&request) {
+        record.say("Spectator access is read-only.");
+        return Ok(None);
+    }
+    let id = link.send(request).await?;
+    preview.bind_request(&id)?;
+    let deadline = tokio::time::Instant::now() + ANSWER;
+    let mut reader = Reader {
+        chronicler,
+        beats: Vec::new(),
+        pages: Vec::new(),
+        resynced: false,
+        waiting: None,
+    };
+    let result = loop {
+        if tokio::time::Instant::now() >= deadline {
+            record.say("Weapon preview timed out. Choose again; no action was sent.");
+            break None;
+        }
+        let before = link.client().state().clone();
+        let Some(message) = link
+            .next(deadline.saturating_duration_since(tokio::time::Instant::now()))
+            .await?
+        else {
+            record.say("Weapon preview timed out. Choose again; no action was sent.");
+            break None;
+        };
+        reader.record(&before, link, &message);
+        if !link.is_synchronized() || !preview.current(link.client()) {
+            record.say("Things changed while previewing. Choose again; no action was sent.");
+            break None;
+        }
+        match message {
+            ServerMessage::AbilityWeaponPreview {
+                context,
+                request_id,
+                preview: value,
+            } if request_id == id => {
+                match preview.accept(link.client(), &context, &request_id, &value) {
+                    Ok(()) => {
+                        record.say(preview.lines().join("\n"));
+                        break Some(preview);
+                    }
+                    Err(reason) => {
+                        record.say(reason);
+                        break None;
+                    }
+                }
+            }
+            ServerMessage::Error {
+                request_id: Some(request_id),
+                message,
+                code,
+                ..
+            } if request_id == id => {
+                record.say(crate::safe(&message));
+                if matches!(
+                    code,
+                    ErrorCode::StaleRevision | ErrorCode::StaleContext | ErrorCode::WrongBranch
+                ) {
+                    settle(link, &mut reader, Request::Snapshot, Until::Answered).await?;
+                    record.say("Observation refreshed. Choose the exact action again.");
+                }
+                break None;
+            }
+            _ => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            record.say("Weapon preview timed out. Choose again; no action was sent.");
+            break None;
+        }
+    };
+    if !reader.beats.is_empty() {
+        record.entries.push(Entry::Beats(reader.beats));
+    }
+    if !reader.pages.is_empty() {
+        record.say(reader.pages.join("\n"));
+    }
+    Ok(result)
+}
+
 /// What a request waits for before it counts as finished.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Until {
@@ -564,13 +662,23 @@ fn object(goal: &Goal, scene: &Scene) -> String {
         Goal::Door { door, .. } => named(Key::Door(*door)),
         Goal::Attack { target }
         | Goal::UseAbility {
-            invocation: AbilityInvocation::ActorTarget { target },
+            invocation:
+                tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::ActorTarget { target },
+                    ..
+                },
             ..
         } => named(Key::Actor(*target)),
         Goal::UseAbility {
             invocation:
-                AbilityInvocation::SelfStep { direction }
-                | AbilityInvocation::DirectionalRay { direction },
+                tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::SelfStep { direction },
+                    ..
+                }
+                | tor_protocol::AbilityInvocation {
+                    aim: tor_protocol::AbilityAim::DirectionalRay { direction },
+                    ..
+                },
             ..
         } => Some(direction_name(*direction).to_owned()),
         Goal::Approach { target } => named(*target),

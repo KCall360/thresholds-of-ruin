@@ -306,6 +306,7 @@ fn public_restoration_accepts_only_structurally_valid_equipment_sources() {
     let original = CreatureState::new(build()).unwrap();
     for item in [ItemId(0), ItemId(u64::MAX)] {
         let equipment = vec![EquipmentSource {
+            weapon_profile: None,
             item,
             socket: EquipmentSlotId(0),
             modifiers: vec![],

@@ -1275,6 +1275,7 @@ mod tests {
         let mut modifier = crate::ItemSpec::ordinary("armor".into());
         modifier.class = crate::ItemClass::Armor;
         modifier.equipment = Some(crate::EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
@@ -1297,6 +1298,7 @@ mod tests {
         let mut attack = crate::ItemSpec::ordinary("weapon".into());
         attack.class = crate::ItemClass::Weapon;
         attack.equipment = Some(crate::EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("weapon").unwrap(),
             modifiers: vec![],
@@ -1316,6 +1318,7 @@ mod tests {
         let mut slot = crate::ItemSpec::ordinary("unknown slot armor".into());
         slot.class = crate::ItemClass::Armor;
         slot.equipment = Some(crate::EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("missing_slot").unwrap(),
             attack: None,

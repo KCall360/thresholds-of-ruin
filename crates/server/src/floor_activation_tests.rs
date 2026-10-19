@@ -1435,8 +1435,11 @@ fn cancelling_preparation_with_a_stair_step_commits_entry_as_a_gameplay_boundary
                 expected_revision: engine.revision(ActorId(1)).unwrap(),
                 action: Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("activation_windup").unwrap(),
-                    invocation: crate::actions::AbilityInvocation::ActorTarget {
-                        target: SimActor(1),
+                    invocation: crate::actions::AbilityInvocation {
+                        aim: crate::actions::AbilityAim::ActorTarget {
+                            target: SimActor(1),
+                        },
+                        weapon: crate::actions::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 },

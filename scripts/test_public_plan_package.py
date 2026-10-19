@@ -41,7 +41,7 @@ class PublicPlanHandoff(unittest.TestCase):
             if not self.consumed_handoff:
                 return {"error": "StaleRevision: Refresh the observation before acting"}
             self.assertEqual(action, {"type": "use_ability", "id": "slow_plan",
-                "invocation": {"kind": "actor_target", "target": "current-observer"}})
+                "invocation": {"aim": {"kind": "actor_target", "target": "current-observer"}, "weapon": {"kind": "default"}}})
             return {"error": self.subject_error}
         self.assertIs(client, self.player)
         return {"error": None}

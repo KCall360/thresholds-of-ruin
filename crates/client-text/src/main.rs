@@ -81,6 +81,7 @@ async fn run() -> Result<(), Error> {
             }
         }
     });
+    let mut weapon_confirmation: Option<tor_client_common::weapon_preview::WeaponPreview> = None;
     loop {
         tokio::select! {
             biased;
@@ -99,6 +100,23 @@ async fn run() -> Result<(), Error> {
                             println!("Resynchronizing; input was not sent.");
                             ready()?;
                             continue;
+                        }
+                        if let Some(preview) = weapon_confirmation.take() {
+                            match line.trim().to_ascii_lowercase().as_str() {
+                                "yes" | "y" => {
+                                    match preview.confirm(&connection.state) {
+                                        Ok(action) => {
+                                            let command = Command::Act { expected_revision: connection.state.state().revision, action };
+                                            let request = connection.state.command_request(command);
+                                            transact(&mut connection, request).await?;
+                                        }
+                                        Err(error) => println!("{}", safe(&error)),
+                                    }
+                                    ready()?; continue;
+                                }
+                                "no" | "n" => { println!("All right."); ready()?; continue; }
+                                _ => {}
+                            }
                         }
                         // `parse` stamps expected_revision from the state now in hand.
                         match parse(&line, connection.state.state()) {
@@ -148,6 +166,16 @@ async fn run() -> Result<(), Error> {
                                     println!("Wizard authority is required.");
                                 } else if matches!(command, Command::Act { .. }) && !connection.state.has_control() {
                                     println!("You are observing. Use control to request control.");
+                                } else if let Command::Act { action, .. } = &command {
+                                    if tor_client_common::weapon_preview::explicit_action(action) {
+                                        let mut record = tor_client_text::engine::narrate::Record::default();
+                                        weapon_confirmation = tor_client_text::engine::turn::preview_weapon(&mut connection, &mut tor_client_text::engine::chronicle::Chronicler::default(), &mut record, action.clone()).await?;
+                                        println!("{}", tor_client_text::engine::narrate::compose(&record));
+                                        if weapon_confirmation.is_some() { println!("Use this exact weapon action? (yes/no)"); }
+                                    } else {
+                                        let request = connection.state.command_request(command);
+                                        transact(&mut connection, request).await?;
+                                    }
                                 } else {
                                     let request = connection.state.command_request(command);
                                     transact(&mut connection, request).await?;
@@ -289,6 +317,7 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
                 println!("{line}");
             }
         }
+        ServerMessage::AbilityWeaponPreview { .. } => {} // Only the matching preview gate presents terms.
         ServerMessage::Palette { .. }
         | ServerMessage::Waiting { .. }
         | ServerMessage::MapPage { .. } => {}

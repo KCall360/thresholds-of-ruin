@@ -47,7 +47,11 @@ fn autonomous_retreat_selects_a_typed_self_step_and_keeps_ordinary_turn_identity
     let (actor, action) = game.next_ai_action().unwrap();
     assert_eq!(actor, crate::ActorId(2));
     let crate::Action::UseAbility {
-        invocation: crate::abilities::AbilityInvocation::SelfStep { direction },
+        invocation:
+            crate::abilities::AbilityInvocation {
+                aim: crate::abilities::AbilityAim::SelfStep { direction },
+                ..
+            },
         ..
     } = &action
     else {
@@ -156,7 +160,7 @@ fn self_step_retreat_is_identical_across_undisclosed_world_twins_and_read_only()
     assert_eq!(a.next_ai_action(), b.next_ai_action());
     assert!(
         matches!(a.next_ai_action(),Some((id,crate::Action::UseAbility {
-        invocation:crate::abilities::AbilityInvocation::SelfStep {..},..})) if id==actor)
+        invocation:crate::abilities::AbilityInvocation { aim: crate::abilities::AbilityAim::SelfStep { .. }, .. },..})) if id==actor)
     );
     assert_eq!(a, a_before);
     assert_eq!(b, b_before);
@@ -170,7 +174,10 @@ fn canceled_self_steps_consume_start_cost_and_fall_back_to_an_ordinary_retreat()
         assert!(matches!(
             execution.action,
             Some(crate::Action::UseAbility {
-                invocation: crate::abilities::AbilityInvocation::SelfStep { .. },
+                invocation: crate::abilities::AbilityInvocation {
+                    aim: crate::abilities::AbilityAim::SelfStep { .. },
+                    ..
+                },
                 ..
             })
         ));
@@ -247,6 +254,9 @@ fn autonomous_late_block_retains_paid_self_step_and_braced_without_retargeting()
             .unwrap()
             .costs()
             .reservation(identity)
+            .unwrap()
+            .entries()
+            .find(|cost| cost.resource == crate::resources::Resource::Stamina)
             .unwrap()
             .resolution,
         1

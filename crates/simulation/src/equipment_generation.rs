@@ -247,6 +247,7 @@ mod tests {
 
     fn armor() -> EquipmentSpec {
         EquipmentSpec {
+            weapon_profile: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             armor: Some(crate::ArmorSpec {
                 physical_reduction: 2,
@@ -367,6 +368,7 @@ mod tests {
         );
         let primary = component.key();
         EquipmentSpec {
+            weapon_profile: None,
             slot: crate::EquipmentSlot::new("weapon").unwrap(),
             armor: None,
             attack: Some(

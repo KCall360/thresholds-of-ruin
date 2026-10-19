@@ -17,10 +17,9 @@ use tor_simulation::{
 fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
     AbilityPlan {
         ambush: None,
+        weapon: tor_simulation::abilities::FrozenWeaponSelection::Unselected,
         actor: ActorId(1),
-        invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-            target: ActorId(2),
-        },
+        invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
         step: None,
         target: ActorId(2),
         public_aim: tor_simulation::public_plan::PublicAim::Unavailable,

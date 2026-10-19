@@ -356,7 +356,7 @@ fn rejected(messages: Vec<ServerMessage>, code: ErrorCode) {
 fn attack(id: &str, target: ActorTarget) -> Action {
     Action::UseAbility {
         id: id.into(),
-        invocation: AbilityInvocation::ActorTarget { target },
+        invocation: tor_protocol::AbilityInvocation::actor_target(target),
         supplies: SupplySelection::Carried,
     }
 }

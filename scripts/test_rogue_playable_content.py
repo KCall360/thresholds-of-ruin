@@ -113,7 +113,8 @@ class RoguePlayableContent(unittest.TestCase):
                 self.assertEqual(build["hit_dice"], [{"source": "racial", "purchases": []}])
                 definition = species[identity]
                 self.assertEqual(definition["kind"], "animal")
-                self.assertEqual(definition["anatomy"], {"slots": []})
+                self.assertEqual(definition["anatomy"], {
+                    "slots": [], "capacities": {}, "primary_attack_socket": {"kind": "none"}})
                 strikes = definition["melee"]["strikes"]
                 self.assertEqual(len(strikes), 1)
                 damage = strikes[0]["on_success"][0]["damage"]

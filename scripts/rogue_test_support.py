@@ -189,7 +189,7 @@ def care_combat_action(foes, *, injured, contacted=(), observation=None):
     if not injured and any(foe["id"] in contacted for foe in adjacent):
         return {"type": "wait"}
     return {"type": "use_ability", "id": "basic_melee",
-            "invocation": {"kind": "actor_target", "target": adjacent[0]["id"]}}
+            "invocation": {"aim": {"kind": "actor_target", "target": adjacent[0]["id"]}, "weapon": {"kind": "default"}}}
 
 
 def ground_sight_candidate(actor, distance):

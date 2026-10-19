@@ -507,6 +507,9 @@ impl Game {
         }) {
             return Some(plan);
         }
+        if !self.ai_plan_resources_available(&plan) {
+            return None;
+        }
         if self.physical_item_allocation(&plan).is_ok() {
             return Some(plan);
         }
@@ -990,7 +993,7 @@ mod tests {
             actor,
             crate::Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
+                invocation: crate::abilities::AbilityInvocation::actor_target(actor),
                 supplies: SupplySelection::Carried,
             },
             crate::IntentionOrigin::Human,
@@ -1039,7 +1042,7 @@ mod tests {
             actor,
             crate::Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
+                invocation: crate::abilities::AbilityInvocation::actor_target(actor),
                 supplies: SupplySelection::Carried,
             },
             crate::IntentionOrigin::Human,

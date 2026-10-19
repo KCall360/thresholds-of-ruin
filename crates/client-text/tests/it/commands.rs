@@ -399,7 +399,7 @@ fn directional_ray_commands_select_direction_without_a_visible_creature() {
     ] {
         assert!(
             matches!(parse(&format!("arbitrary ray {token}"), &state).unwrap(), Input::Command(Command::Act {
-            action: Action::UseAbility { invocation: AbilityInvocation::DirectionalRay { direction: selected }, supplies: SupplySelection::Carried, .. }, ..
+            action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::DirectionalRay { direction: selected }, weapon: tor_protocol::WeaponSelection::Default }, supplies: SupplySelection::Carried, .. }, ..
         }) if selected == direction)
         );
     }
@@ -556,4 +556,49 @@ fn identification_commands_bind_current_choice_and_exact_category() {
         .unwrap()
         .identification = None;
     assert!(parse("identify cancel", &view).is_err());
+}
+
+#[test]
+fn expertise_commands_delegate_to_shared_ordinary_advancement() {
+    use tor_client_common::advancement::AdvancementInput;
+    assert_eq!(
+        parse("advancement expertises", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Catalog(AdvancementKind::Expertise))
+    );
+    assert_eq!(
+        parse("advancement details expertises", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Details(
+            AdvancementPreviewSection::Expertises
+        ))
+    );
+    assert!(matches!(
+        parse("advancement purchase 1 general expertise spear", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Preview(AdvancementProposal::Purchase {
+            purchase: PurchaseOperation {
+                selection: PurchaseChoice::Expertise { .. },
+                ..
+            }
+        }))
+    ));
+}
+
+#[test]
+fn intellect_expertise_commands_use_distinct_ordinary_entitlements() {
+    use tor_client_common::advancement::AdvancementInput;
+    assert_eq!(
+        parse("advancement intellect-expertises", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::IntellectExpertises)
+    );
+    assert_eq!(
+        parse("advancement intellect-expertise 3 spear", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Preview(
+            AdvancementProposal::IntellectExpertise {
+                choice: IntellectExpertiseOperation {
+                    threshold: 3,
+                    expertise: "spear".into()
+                }
+            }
+        ))
+    );
+    assert!(parse("advancement intellect-expertise 0 spear", &state()).is_err());
 }

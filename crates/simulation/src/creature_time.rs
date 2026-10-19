@@ -397,9 +397,7 @@ mod tests {
                     ActorId(1),
                     crate::Action::UseAbility {
                         id: bolt.clone(),
-                        invocation: crate::abilities::AbilityInvocation::ActorTarget {
-                            target: ActorId(2),
-                        },
+                        invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                         supplies: Default::default(),
                     },
                     crate::IntentionOrigin::Human,
@@ -857,9 +855,7 @@ mod tests {
                 ActorId(1),
                 crate::Action::UseAbility {
                     id: attack,
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget {
-                        target: ActorId(2),
-                    },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(2)),
                     supplies: Default::default(),
                 },
                 crate::IntentionOrigin::Human,

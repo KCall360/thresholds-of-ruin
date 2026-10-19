@@ -115,7 +115,7 @@ fn fixture_custom(
 }
 fn own_action(actor: ActorId) -> Action {
     serde_json::from_value(json!({"type":"use_ability", "value":{
-        "id":"test_care", "invocation":{"kind":"actor_target","target":actor}, "supplies":{"kind":"carried"}
+        "id":"test_care", "invocation":{"aim":{"kind":"actor_target","target":actor},"weapon":{"kind":"default"}}, "supplies":{"kind":"carried"}
     }}))
     .expect("typed supply selection")
 }
@@ -212,7 +212,7 @@ fn bandages(game: &mut Game, id: u64, owner: Option<ActorId>, quantity: u64, x: 
 }
 fn explicit_action(actor: ActorId, item: u64) -> Action {
     serde_json::from_value(json!({"type":"use_ability", "value":{
-        "id":"test_care", "invocation":{"kind":"actor_target","target":actor},
+        "id":"test_care", "invocation":{"aim":{"kind":"actor_target","target":actor},"weapon":{"kind":"default"}},
         "supplies":{"kind":"explicit", "items":[{"cost_ordinal":0,"item":item}]}
     }}))
     .unwrap()
@@ -459,7 +459,7 @@ fn ordinary_ai_chooses_affordable_generic_self_heal_with_exact_visible_supply() 
     assert_eq!(action["value"]["id"], json!("test_care"));
     assert_eq!(
         action["value"]["invocation"],
-        json!({"kind":"actor_target","target":actor})
+        json!({"aim":{"kind":"actor_target","target":actor},"weapon":{"kind":"default"}})
     );
     assert_eq!(
         action["value"]["supplies"],
@@ -836,7 +836,7 @@ fn two_cost_fixture(offsets: &[u64]) -> (Game, ActorId, ActorId) {
 }
 fn two_cost_action(actor: ActorId, second_item: u64) -> Action {
     serde_json::from_value(json!({"type":"use_ability", "value":{
-        "id":"test_care", "invocation":{"kind":"actor_target","target":actor}, "supplies":{"kind":"explicit", "items":[
+        "id":"test_care", "invocation":{"aim":{"kind":"actor_target","target":actor},"weapon":{"kind":"default"}}, "supplies":{"kind":"explicit", "items":[
             {"cost_ordinal":0,"item":10}, {"cost_ordinal":1,"item":second_item}
         ]}
     }}))

@@ -1090,7 +1090,11 @@ mod tests {
     #[test]
     fn creature_preparation_rejects_external_anatomy_and_unknown_factions() {
         let mut manifest = creature_manifest();
-        manifest.characters[0].anatomy = Some(super::super::AnatomySpec { slots: vec![] });
+        manifest.characters[0].anatomy = Some(super::super::AnatomySpec {
+            slots: vec![],
+            capacities: Default::default(),
+            primary_attack_socket: super::super::PrimaryAttackSocket::None {},
+        });
         assert!(super::PreparedDefinitions::new(&manifest, 1).is_err());
         manifest.characters[0].anatomy = None;
         manifest.factions.insert("other".into(), Default::default());
@@ -1105,7 +1109,7 @@ mod tests {
         let prepared = super::PreparedDefinitions::new(&manifest, 1).unwrap();
         assert!(prepared.characters[0].creature.recipe.is_some());
 
-        let actor: super::Actor = serde_json::from_value(serde_json::json!({"id": 2, "at": [2, 1, 0], "creature": manifest.characters[0].creature, "anatomy": {"slots": []}})).unwrap();
+        let actor: super::Actor = serde_json::from_value(serde_json::json!({"id": 2, "at": [2, 1, 0], "creature": manifest.characters[0].creature, "anatomy": {"slots": [], "capacities": {}, "primary_attack_socket": {"kind": "none"}}})).unwrap();
         assert!(prepared.actor(&actor).is_err());
     }
     use super::*;

@@ -103,6 +103,12 @@ pub fn match_disclosed_sentence(
     };
     if let Some((ability, noun)) = matched {
         let (noun, supplies) = tor_client_common::abilities::split_supply_clause(&noun)?;
+        let (noun, weapon) = tor_client_common::weapons::split_clause(noun)?;
+        let suffix = format!(
+            "{}{}",
+            weapon.map_or(String::new(), |weapon| format!(" with {weapon}")),
+            supplies.map_or(String::new(), |supplies| format!(" using {supplies}"))
+        );
         if matches!(
             ability.target_kind,
             tor_protocol::AbilityTargetKind::SelfStep
@@ -112,7 +118,7 @@ pub fn match_disclosed_sentence(
                 return Ok(ParsedCommand::Orphan {
                     prompt: format!("Which way do you want to use {}?", ability.name),
                     before: ability.name.to_lowercase(),
-                    after: String::new(),
+                    after: suffix.clone(),
                 });
             }
             let direction = lexicon::parse_direction(&noun.to_ascii_lowercase())
@@ -126,6 +132,7 @@ pub fn match_disclosed_sentence(
                     grammar::AbilitySelection::SelfStep { direction }
                 },
                 supplies: supplies.map(str::to_owned),
+                weapon: weapon.map(str::to_owned),
             });
         }
         let self_target = matches!(
@@ -136,7 +143,7 @@ pub fn match_disclosed_sentence(
             return Ok(ParsedCommand::Orphan {
                 prompt: format!("Who do you want to use {} on?", ability.name),
                 before: ability.name.to_lowercase(),
-                after: String::new(),
+                after: suffix.clone(),
             });
         }
         let noun = if noun.is_empty() { "me" } else { noun };
@@ -146,6 +153,7 @@ pub fn match_disclosed_sentence(
                 direct: parse_noun_phrase(&tokenize(noun))?,
             },
             supplies: supplies.map(str::to_owned),
+            weapon: weapon.map(str::to_owned),
         });
     }
     let words = name_words(raw).join(" ");

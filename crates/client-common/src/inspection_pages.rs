@@ -688,7 +688,7 @@ mod ordered_strikes_detail_state_tests {
     fn natural_melee_navigation_pins_species_rider_boundaries_across_pages() {
         let mut value = serde_json::to_value(crate::inspection::tests::report()).unwrap();
         value["stats"]["abilities"] = serde_json::json!([{"id":"natural_technique","name":"Natural technique",
-            "cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":false,
+            "cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":false,"weapon_selection":false,
             "cooldown_remaining":"0","supply_costs":[]}]);
         value["ability_strikes"] = serde_json::json!([{"ability":"natural_technique",
             "source":{"kind":"natural_melee","strike_count":1,"additional_riders":0}}]);

@@ -36,6 +36,8 @@ pub use recovery::*;
 mod targets;
 pub use targets::{ActorTarget, AppearanceSeed, DoorTarget, HoldTarget, InvalidTarget, ItemTarget};
 mod validation;
+mod weapon_preview;
+pub use weapon_preview::*;
 mod wire;
 pub use codec::*;
 pub use delta::*;

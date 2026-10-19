@@ -281,9 +281,7 @@ fn condition_expiry_keeps_the_check_operands_owned_by_preparation() {
             ActorId(1),
             Action::UseAbility {
                 id: ability,
-                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                    target: ActorId(2),
-                },
+                invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
                 supplies: Default::default(),
             },
         )
@@ -345,9 +343,7 @@ fn intermediate_expiry_does_not_stop_the_loop_while_all_actors_prepare_attacks()
         ActorId(1),
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: ActorId(2),
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(2)),
             supplies: Default::default(),
         },
     )
@@ -356,9 +352,7 @@ fn intermediate_expiry_does_not_stop_the_loop_while_all_actors_prepare_attacks()
         ActorId(2),
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
-            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
-                target: ActorId(1),
-            },
+            invocation: tor_simulation::abilities::AbilityInvocation::actor_target(ActorId(1)),
             supplies: Default::default(),
         },
     )

@@ -316,7 +316,7 @@ class CatalogServiceContracts(unittest.TestCase):
             if row["name"] == "Sequence sentinel")
         target_before = int(snapshot(defender)["state"]["observation"]["combat"]["hp"])
         messages = send_command(attacker, current, {"type": "act", "action": {"type": "use_ability",
-            "id": "triple_strike", "invocation": {"kind": "actor_target", "target": target},
+            "id": "triple_strike", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}},
             "supplies": {"kind": "carried"}}}, "sequence-admission")
         receipts = [row["receipt"] for row in messages if row["type"] == "ack"]
         self.assertEqual(len(receipts), 1)

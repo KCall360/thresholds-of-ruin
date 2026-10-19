@@ -676,6 +676,7 @@ fn new_talent_data_flows_through_the_same_fold_and_attribution() {
     let id = talent("fixture_vitality");
     document.talents.push(TalentDef {
         form_choices: vec![],
+        expertise_grants: vec![],
         id: id.clone(),
         name: "Fixture Vitality".into(),
         prerequisites: vec![],

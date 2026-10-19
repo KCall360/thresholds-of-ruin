@@ -53,8 +53,8 @@ class NutritionProcesses(ProcessTestCase):
         for index, pool in enumerate(("stamina", "focus", "mana"), 1):
             maximum = resource(frame, pool)["maximum"]
             paid = self.act(player, {"type": "use_ability", "id": "fixture_spend_" + pool,
-                                    "invocation": {"kind": "actor_target",
-                                                   "target": observation(frame)["self_target"]}})
+                                    "invocation": {"aim": {"kind": "actor_target",
+                                                   "target": observation(frame)["self_target"]}, "weapon": {"kind": "default"}}})
             self.assertIsNone(paid["error"])
             self.assertEqual(resource(paid, pool)["balance"], maximum - 1)
             frame = self.act(player, {"type": "wait"})
@@ -68,8 +68,8 @@ class NutritionProcesses(ProcessTestCase):
             for _ in range(3):
                 self.assertEqual(self.request(player, {"type": "snapshot"})["state"], frame["state"])
             failed = self.act(player, {"type": "use_ability", "id": "fixture_missing",
-                                      "invocation": {"kind": "actor_target",
-                                                     "target": observation(frame)["self_target"]}})
+                                      "invocation": {"aim": {"kind": "actor_target",
+                                                     "target": observation(frame)["self_target"]}, "weapon": {"kind": "default"}}})
             self.assertIsNotNone(failed["error"])
             self.assertEqual(self.checkpoint(player), saved)
             if index == 1:

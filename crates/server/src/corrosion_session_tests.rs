@@ -319,7 +319,7 @@ fn encoded_co1_changes_one_item_once_with_retry_disclosure_and_source_free_reope
             AQUATOR,
             Action::UseAbility {
                 id: "rogue.corrode".into(),
-                invocation: AbilityInvocation::ActorTarget { target },
+                invocation: tor_protocol::AbilityInvocation::actor_target(target),
                 supplies: SupplySelection::Carried,
             },
         );

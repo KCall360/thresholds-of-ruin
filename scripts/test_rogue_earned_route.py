@@ -120,11 +120,11 @@ class EarnedRouteControllerTests(unittest.TestCase):
     def test_actor_ties_use_public_coordinates_before_names_and_ignore_opaque_ids(self):
         _, selected = self.choose(state(foes=[foe("actor:z", -1, 0, name="weak"),
                                                  foe("actor:a", 1, 0, name="immune")]))
-        self.assertEqual(selected.action["invocation"]["target"], "actor:z")
+        self.assertEqual(selected.action["invocation"]["aim"]["target"], "actor:z")
 
     def test_nearest_actor_precedes_public_coordinate_ties(self):
         _, selected = self.choose(state(foes=[foe("actor:a", 8, 0), foe("actor:z", 1, 0)]))
-        self.assertEqual(selected.action["invocation"]["target"], "actor:z")
+        self.assertEqual(selected.action["invocation"]["aim"]["target"], "actor:z")
 
     def test_rattling_blow_uses_full_available_start_and_resolution_cost(self):
         known = ability("rattling_blow", cost={"resource": {"id": "stamina"}, "start": 2, "resolution": 3})
@@ -310,7 +310,7 @@ class EarnedRouteControllerTests(unittest.TestCase):
         current = state(hp=50, inventory=[item("item:b", "bandage", 3)], abilities=[ability("bind_wounds")])
         controller, decision = self.choose(current)
         self.assertEqual(decision.action, {"type": "use_ability", "id": "bind_wounds",
-            "invocation": {"kind": "actor_target", "target": "actor:self"}, "supplies": {"kind": "carried"}})
+            "invocation": {"aim": {"kind": "actor_target", "target": "actor:self"}, "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}})
         controller.consume_command()
         controller.observe(current, overview())
         self.assertEqual(controller.choose(current).action, {"type": "wait"})
@@ -516,7 +516,7 @@ class EarnedRouteControllerTests(unittest.TestCase):
                 if reverse:
                     actors.reverse()
                 _, decision = self.choose(state(foes=actors))
-                self.assertEqual(decision.action["invocation"]["target"], left)
+                self.assertEqual(decision.action["invocation"]["aim"]["target"], left)
 
     def test_fresh_opaque_identity_cannot_change_ground_supply_choice(self):
         for left, right in [("item:a", "item:z"), ("item:z", "item:a")]:
@@ -540,7 +540,7 @@ class EarnedRouteControllerTests(unittest.TestCase):
 
     def test_duplicate_actor_occurrences_keep_nearest_public_witness(self):
         _, decision = self.choose(state(foes=[foe("actor:a", 1, 0), foe("actor:a", 8, 0), foe("actor:b", -2, 0)]))
-        self.assertEqual(decision.action["invocation"]["target"], "actor:a")
+        self.assertEqual(decision.action["invocation"]["aim"]["target"], "actor:a")
 
     def test_entry_and_growth_witness_use_ordinary_observation_tick(self):
         current = state()

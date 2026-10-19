@@ -2,8 +2,14 @@
 mod compile;
 mod execution;
 mod invocation;
+mod weapon_selection;
+pub use weapon_selection::{
+    AbilityWeaponPreview, AbilityWeaponPreviewPhase, CapturedWeaponProfile, FrozenWeaponSelection,
+};
 mod participation;
-pub use invocation::{AbilityInvocation, InvocationKind, PushDirection, StepDirection};
+pub use invocation::{
+    AbilityAim, AbilityInvocation, InvocationKind, PushDirection, StepDirection, WeaponSelection,
+};
 mod plan;
 mod plan_validation;
 mod ray;
@@ -94,3 +100,6 @@ mod magic_item_tests;
 
 #[cfg(test)]
 mod equipment_magic_tests;
+
+#[cfg(test)]
+mod weapon_selection_tests;

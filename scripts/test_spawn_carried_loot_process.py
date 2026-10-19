@@ -71,7 +71,7 @@ class SpawnCarriedLootProcesses(ProcessTestCase):
                 frame = self.execute(player, {"type": "move", "direction": direction})
             else:
                 frame = self.execute(player, {"type": "use_ability", "id": "basic_melee",
-                    "invocation": {"kind": "actor_target", "target": foe["id"]}, "supplies": {"kind": "carried"}})
+                    "invocation": {"aim": {"kind": "actor_target", "target": foe["id"]}, "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}})
             self.assertIsNone(frame["error"])
         self.fail("Ordinary melee did not defeat the passive carrier within the bounded fixture")
 

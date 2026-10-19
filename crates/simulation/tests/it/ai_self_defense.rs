@@ -125,7 +125,7 @@ fn defensive_ai_admission_replays_the_same_paid_plan_then_stops_reapplying() {
     game.act(human, Action::Wait).unwrap();
     let expected = Action::UseAbility {
         id: ability,
-        invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target: mob },
+        invocation: tor_simulation::abilities::AbilityInvocation::actor_target(mob),
         supplies: Default::default(),
     };
     assert_eq!(game.next_ai_action(), Some((mob, expected.clone())));
@@ -178,7 +178,14 @@ fn defensive_ai_admission_replays_the_same_paid_plan_then_stops_reapplying() {
         // spending from a final balance that may already be full again.
         assert_eq!(costs.resources().balance(Resource::Stamina), balance - 1);
         assert_eq!(costs.reservations().len(), 1);
-        assert_eq!(costs.reservations()[&original].resolution, 1);
+        assert_eq!(
+            costs.reservations()[&original]
+                .entries()
+                .find(|cost| cost.resource == Resource::Stamina)
+                .unwrap()
+                .resolution,
+            1
+        );
         let mut expected_costs = costs;
         expected_costs.advance_active(frozen.preparation());
         expected_costs.finish(original).unwrap();

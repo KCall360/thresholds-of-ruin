@@ -49,6 +49,7 @@ fn build() -> CreatureBuild {
         },
         modifiers: vec![],
         form_choices: vec![form("first_form"), form("second_form")],
+        expertise_grants: vec![],
     });
     let species = fixture::species();
     let id = species.id.clone();
@@ -409,6 +410,7 @@ fn lifecycle_changing_a_form_preserves_root_dependents_but_refunding_the_root_re
         requirement: Requirement::OwnedTalent { talent: talent() },
         modifiers: vec![],
         form_choices: vec![],
+        expertise_grants: vec![],
     });
     let content = Content::new(
         Ruleset::validate(document).unwrap(),

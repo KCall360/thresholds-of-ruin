@@ -308,3 +308,74 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod compact_expertise_tests {
+    use super::*;
+    #[test]
+    fn maximally_sourced_expertise_summary_fits_page_without_provenance_truncation() {
+        let context = p::ReplyContext {
+            input: p::InputContext {
+                stream: p::StreamContext {
+                    stream: p::StreamId("owner".into()),
+                    epoch: 0,
+                },
+                readiness_revision: 0,
+            },
+            actor: p::ActorId(1),
+            branch: p::BranchId("main".into()),
+            cursor: p::StreamCursor {
+                sequence: 0,
+                tick: 0,
+            },
+            revision: 0,
+        };
+        let basis = p::AdvancementBasis {
+            actor: context.actor,
+            branch: context.branch.clone(),
+            stream: context.input.stream.stream.clone(),
+            reset: 0,
+            build_epoch: 1,
+        };
+        let query = p::AdvancementQuery::Preview {
+            basis: basis.clone(),
+            proposal: p::AdvancementProposal::Purchase {
+                purchase: p::PurchaseOperation {
+                    owner: 0,
+                    pool: "advancement".into(),
+                    selection: p::PurchaseChoice::Expertise {
+                        expertise: "fixture.knife".into(),
+                    },
+                },
+            },
+            section: p::AdvancementPreviewSection::Expertises,
+            offset: 0,
+        };
+        let value = p::AdvancementExpertiseRow {
+            expertise: p::AdvancementContentRef {
+                id: "x".repeat(60),
+                name: "\\\"".repeat(128),
+            },
+            status: p::AdvancementStatus::Active,
+            source_count: 257,
+        };
+        let page = pack(
+            basis,
+            0,
+            query,
+            1,
+            [Ok(p::AdvancementEntry::Expertise {
+                value: value.clone(),
+            })],
+            &PageBudget {
+                context: &context,
+                request_id: "owner",
+                limit: p::MAX_ADVANCEMENT_PAGE_BYTES,
+            },
+        )
+        .unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.next, None);
+        assert_eq!(page.entries, vec![p::AdvancementEntry::Expertise { value }]);
+    }
+}

@@ -99,7 +99,7 @@ class EffectiveInteractionProcesses(ProcessTestCase):
         self.server("--checkpoint-interval", 1, scenario=package)
         player, initial = self.client()
         charged = self.act(player, {"type": "use_ability", "id": "fixture_charge",
-            "invocation": {"kind": "actor_target", "target": initial["state"]["observation"]["self_target"]}})
+            "invocation": {"aim": {"kind": "actor_target", "target": initial["state"]["observation"]["self_target"]}, "weapon": {"kind": "default"}}})
         self.assertIsNone(charged["error"])
         saved = checkpoint(self, player)
         self.assertTrue(any(row["condition"] == "fear" for row in actor_creature(saved)["conditions"]))

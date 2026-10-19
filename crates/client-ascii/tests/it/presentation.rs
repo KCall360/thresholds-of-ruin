@@ -19,7 +19,7 @@ fn creature_snapshot() -> Snapshot {
             "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting", "breath"].into_iter().map(|skill| serde_json::json!({"skill": tor_client_common::test_support::content(skill), "rank": 0})).collect::<Vec<_>>()),
             "defenses": {"physical": 13, "cognitive": 15, "spiritual": 11},
             "binding": {"id":"intellect","name":"Intellect"}, "resources": (["stamina", "focus", "mana"].into_iter().map(|resource| serde_json::json!({"resource": tor_client_common::test_support::content(resource), "balance": 2, "maximum": 3, "available": 1, "reserved": 1})).collect::<Vec<_>>()),
-            "active_talents": [], "dormant_talents": [], "abilities": [{"cooldown_remaining":"0","supply_costs":[],"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true}, {"cooldown_remaining":"0","supply_costs":[],"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false}]
+            "expertises": [], "active_talents": [], "dormant_talents": [], "abilities": [{"cooldown_remaining":"0","supply_costs":[],"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true,"weapon_selection":true}, {"cooldown_remaining":"0","supply_costs":[],"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false,"weapon_selection":false}]
         }
     })).unwrap());
     snapshot
@@ -129,7 +129,7 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
         assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
         assert!(
             matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command {
-            command: Command::Act { expected_revision: 3, action: Action::UseAbility { id: selected, invocation: tor_protocol::AbilityInvocation::ActorTarget { target: selected_target }, ..} }, ..
+            command: Command::Act { expected_revision: 3, action: Action::UseAbility { id: selected, invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target: selected_target }, weapon: tor_protocol::WeaponSelection::Default }, ..} }, ..
         }) if selected == ability.id && selected_target == target)
         );
         assert_eq!(
@@ -246,7 +246,10 @@ fn ability_preparation_history_names_the_technique() {
             content: HistoryContent::Action {
                 action: Action::UseAbility {
                     id: ability.id.clone(),
-                    invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
+                    invocation: tor_protocol::AbilityInvocation {
+                        aim: tor_protocol::AbilityAim::ActorTarget { target },
+                        weapon: tor_protocol::WeaponSelection::Default,
+                    },
                     supplies: Default::default(),
                 },
                 event: Event::AbilityStarted {
@@ -1600,8 +1603,11 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             if attacks {
                 Action::UseAbility {
                     id: "basic_melee".into(),
-                    invocation: tor_protocol::AbilityInvocation::ActorTarget {
-                        target: super::actor_target(2),
+                    invocation: tor_protocol::AbilityInvocation {
+                        aim: tor_protocol::AbilityAim::ActorTarget {
+                            target: super::actor_target(2),
+                        },
+                        weapon: tor_protocol::WeaponSelection::Default,
                     },
                     supplies: Default::default(),
                 }
@@ -2195,7 +2201,7 @@ fn phase5_supportive_menu_lists_self_and_allies_but_never_neutrals() {
         [own, ally]
     );
     assert!(
-        matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command { command: Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, .. }, .. }, .. }) if target == own)
+        matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command { command: Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target }, weapon: tor_protocol::WeaponSelection::Default }, .. }, .. }, .. }) if target == own)
     );
 }
 

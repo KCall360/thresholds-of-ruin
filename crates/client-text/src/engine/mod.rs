@@ -49,6 +49,10 @@ enum Asked {
     Missing { before: String, after: String },
     /// Yes or no; yes does this.
     Confirm(Interpretation),
+    WeaponConfirm {
+        then: Interpretation,
+        preview: tor_client_common::weapon_preview::WeaponPreview,
+    },
 }
 
 /// A question waiting for its answer, and the rest of the chain it
@@ -79,6 +83,7 @@ struct Tally {
 pub struct Engine {
     pub referents: Referents,
     pending: Option<Pending>,
+    confirmed_weapon: Option<tor_client_common::weapon_preview::WeaponPreview>,
     last_line: Option<String>,
     chronicler: Chronicler,
     verbosity: Verbosity,
@@ -628,6 +633,30 @@ impl Engine {
                     line = format!("{line} {after}");
                     rest = pending.rest;
                 }
+                Asked::WeaponConfirm { then, preview } => match yes_or_no(&line) {
+                    Some(true) if current && preview.current(link.client()) => {
+                        self.confirmed_weapon = Some(preview);
+                        chain.push_back(Ok(then));
+                        chain.extend(pending.rest.into_iter().map(Err));
+                    }
+                    Some(true) => {
+                        record.say("Things have changed since the preview. Choose again.");
+                        return Ok(Outcome::Passage(narrate::compose(&record)));
+                    }
+                    Some(false) => {
+                        record.say("All right.");
+                        return Ok(Outcome::Passage(narrate::compose(&record)));
+                    }
+                    None if current && !is_command => {
+                        record.say("Please answer yes or no, or type a new command.");
+                        self.pending = Some(Pending {
+                            asked: Asked::WeaponConfirm { then, preview },
+                            ..pending
+                        });
+                        return Ok(Outcome::Passage(narrate::compose(&record)));
+                    }
+                    None => {}
+                },
                 Asked::Confirm(then) => {
                     match yes_or_no(&line) {
                         Some(true) if current => {
@@ -870,11 +899,61 @@ impl Engine {
             Interpretation::Quit => Flow::Quit,
             Interpretation::Goals(goals) => {
                 if let Err(why) = turn::may_act(link) {
+                    self.confirmed_weapon = None;
                     record.say(why);
                     return Ok(Flow::Stop);
                 }
                 let count = goals.len();
-                for (i, goal) in goals.into_iter().enumerate() {
+                let mut remaining = goals.into_iter().enumerate();
+                while let Some((i, goal)) = remaining.next() {
+                    if let verbs::Goal::UseAbility {
+                        ability,
+                        invocation,
+                        supplies,
+                    } = &goal
+                    {
+                        let action = Action::UseAbility {
+                            id: ability.clone(),
+                            invocation: *invocation,
+                            supplies: supplies.clone(),
+                        };
+                        if tor_client_common::weapon_preview::explicit_action(&action) {
+                            if let Some(preview) = self.confirmed_weapon.take() {
+                                if !preview.matches_action(&action)
+                                    || preview.confirm(link.client()).is_err()
+                                {
+                                    record.say(
+                                        "The selected action changed after preview. Choose again.",
+                                    );
+                                    return Ok(Flow::Stop);
+                                }
+                            } else {
+                                let Some(preview) = turn::preview_weapon(
+                                    link,
+                                    &mut self.chronicler,
+                                    record,
+                                    action,
+                                )
+                                .await?
+                                else {
+                                    return Ok(Flow::Stop);
+                                };
+                                let goals = std::iter::once(goal)
+                                    .chain(remaining.map(|(_, goal)| goal))
+                                    .collect();
+                                return Ok(self.ask(
+                                    link,
+                                    record,
+                                    "Use this exact weapon action? (yes/no)",
+                                    Asked::WeaponConfirm {
+                                        then: Interpretation::Goals(goals),
+                                        preview,
+                                    },
+                                    chain,
+                                ));
+                            }
+                        }
+                    }
                     let fighting = matches!(
                         goal,
                         verbs::Goal::Attack { .. } | verbs::Goal::UseAbility { .. }

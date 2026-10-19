@@ -53,6 +53,7 @@ struct DisclosedReadiness {
 
 /// Payloads prepared by a request and published after its ordered effects.
 enum RequestReply {
+    AbilityWeaponPreview(Box<tor_protocol::AbilityWeaponPreview>),
     Receipt(RequestReceipt),
     History(HistoryPage),
     Palette(PaletteUpdate),
@@ -66,6 +67,11 @@ enum RequestReply {
 impl RequestReply {
     fn message(self, request_id: String, context: ReplyContext) -> ServerMessage {
         match self {
+            Self::AbilityWeaponPreview(preview) => ServerMessage::AbilityWeaponPreview {
+                context,
+                request_id,
+                preview,
+            },
             Self::Receipt(receipt) => ServerMessage::Ack {
                 context,
                 request_id,
@@ -659,6 +665,7 @@ impl Service {
                 if let crate::wire_adapter::DecodedCommand::Gameplay { action, .. } = &command {
                     let basis = match action {
                         Action::ChooseGrowthSource { basis, .. }
+                        | Action::ChooseIntellectExpertise { basis, .. }
                         | Action::Purchase { basis, .. }
                         | Action::Respec { basis, .. } => Some(basis.as_ref()),
                         _ => None,
@@ -669,6 +676,45 @@ impl Service {
                         })?;
                         self.engine.check_advancement_basis(&reply, basis)?;
                     }
+                }
+                if let crate::wire_adapter::DecodedCommand::AbilityWeaponPreview {
+                    expected_revision,
+                    ability,
+                    invocation,
+                    supplies,
+                } = &command
+                {
+                    let preview = self.engine.ability_weapon_preview(
+                        actor,
+                        &branch,
+                        *expected_revision,
+                        ability,
+                        *invocation,
+                        supplies,
+                    )?;
+                    let context = self.reply_context(id).ok_or_else(|| {
+                        Failure::new(ErrorCode::StaleContext, "Input context changed")
+                    })?;
+                    let message = ServerMessage::AbilityWeaponPreview {
+                        context,
+                        request_id: request_id.into(),
+                        preview: Box::new(preview.clone()),
+                    };
+                    if tor_protocol::encoded_length(
+                        &message,
+                        self.outbound.capabilities().max_response_bytes as usize,
+                    )
+                    .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Invalid preview"))?
+                    .is_none()
+                    {
+                        return Err(Failure::new(
+                            ErrorCode::ResourceLimit,
+                            "Preview exceeds response limit",
+                        ));
+                    }
+                    return Ok(ProcessedRequest::Reply(RequestReply::AbilityWeaponPreview(
+                        Box::new(preview),
+                    )));
                 }
                 if let crate::wire_adapter::DecodedCommand::Advancement {
                     expected_revision,
@@ -4432,3 +4478,7 @@ mod ray_tests;
 #[cfg(test)]
 #[path = "magic_item_session_tests.rs"]
 mod magic_item_tests;
+
+#[cfg(test)]
+#[path = "weapon_selection_session_tests.rs"]
+mod weapon_selection_tests;

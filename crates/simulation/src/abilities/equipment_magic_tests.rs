@@ -14,6 +14,7 @@ fn armor(game: &mut Game, id: u64, equipped: bool) -> ItemId {
     let mut spec = ItemSpec::ordinary("mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(EquipmentSpec {
+        weapon_profile: None,
         slot: EquipmentSlot::new("body_armor").unwrap(),
         armor: Some(ArmorSpec {
             physical_reduction: 2,
@@ -238,7 +239,11 @@ fn paid_read_overflow_rolls_back_prior_weapon_draw_equipment_and_payment() {
     let sources = game.actors[&ActorId(1)]
         .equipment
         .iter()
-        .map(|(socket, id)| game.items[id].equipment_source(*id, *socket).unwrap())
+        .map(|(socket, id)| {
+            game.items[id]
+                .equipment_source(*id, *socket, &game.content.rules)
+                .unwrap()
+        })
         .collect::<Vec<_>>();
     let context = game
         .equipment_recovery_context(ActorId(1), &sources)
@@ -305,7 +310,11 @@ fn paid_read_overflow_rolls_back_prior_weapon_draw_equipment_and_payment() {
     let sources = game.actors[&ActorId(1)]
         .equipment
         .iter()
-        .map(|(socket, id)| game.items[id].equipment_source(*id, *socket).unwrap())
+        .map(|(socket, id)| {
+            game.items[id]
+                .equipment_source(*id, *socket, &game.content.rules)
+                .unwrap()
+        })
         .collect::<Vec<_>>();
     let context = game
         .equipment_recovery_context(ActorId(1), &sources)
@@ -363,6 +372,7 @@ fn weapon(game: &mut Game, id: u64) -> ItemId {
     let mut spec = ItemSpec::ordinary("test blade".into());
     spec.class = ItemClass::Weapon;
     spec.equipment = Some(EquipmentSpec {
+        weapon_profile: None,
         slot: EquipmentSlot::new("weapon").unwrap(),
         armor: None,
         attack: Some(

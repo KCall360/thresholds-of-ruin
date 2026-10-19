@@ -91,7 +91,7 @@ pub(crate) fn read_corrosion_amount<'de, D: serde::Deserializer<'de>>(
 }
 
 /// Exact owned condition, persisted with the item rather than its definition.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ItemCondition {
     pub corrosion: u32,
@@ -301,6 +301,7 @@ impl Item {
         &self,
         id: ItemId,
         socket: EquipmentSlotId,
+        rules: &crate::rules::Ruleset,
     ) -> Option<crate::creatures::EquipmentSource> {
         if !self.condition_valid() {
             return None;
@@ -309,6 +310,12 @@ impl Item {
         Some(crate::creatures::EquipmentSource {
             item: id,
             socket,
+            weapon_profile: equipment
+                .weapon_profile
+                .as_ref()
+                .map(|profile| profile.validate(rules))
+                .transpose()
+                .ok()?,
             modifiers: equipment.modifiers,
             attack: equipment.attack,
         })
@@ -382,7 +389,7 @@ impl crate::Game {
                         .get(id)
                         .ok_or(crate::GameError::ItemUnavailable)?
                 };
-                item.equipment_source(*id, *socket)
+                item.equipment_source(*id, *socket, &self.content.rules)
                     .ok_or(crate::GameError::ItemUnavailable)
             })
             .collect::<Result<Vec<_>, crate::GameError>>()?;
@@ -416,6 +423,7 @@ mod tests {
         let mut spec = ItemSpec::ordinary("mail".into());
         spec.class = crate::ItemClass::Armor;
         spec.equipment = Some(EquipmentSpec {
+            weapon_profile: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             armor: Some(armor),
             attack: None,
@@ -508,7 +516,11 @@ mod tests {
         assert!(weapon.condition_valid());
         let view = weapon.equipment_view().unwrap();
         let source = weapon
-            .equipment_source(ItemId(1), EquipmentSlotId(0))
+            .equipment_source(
+                ItemId(1),
+                EquipmentSlotId(0),
+                &crate::test_creatures::ruleset(),
+            )
             .unwrap();
         assert_eq!(view.attack, source.attack);
         assert_eq!(view.attack, Some(adjusted));
@@ -665,7 +677,11 @@ mod tests {
         for loss in 0..=2 {
             worn.condition.corrosion = loss;
             let source = worn
-                .equipment_source(ItemId(1), EquipmentSlotId(0))
+                .equipment_source(
+                    ItemId(1),
+                    EquipmentSlotId(0),
+                    &crate::test_creatures::ruleset(),
+                )
                 .unwrap();
             let reductions = source
                 .modifiers
@@ -689,7 +705,11 @@ mod tests {
         worn.condition.corrosion = 3;
         assert!(!worn.condition_valid());
         assert!(worn
-            .equipment_source(ItemId(1), EquipmentSlotId(0))
+            .equipment_source(
+                ItemId(1),
+                EquipmentSlotId(0),
+                &crate::test_creatures::ruleset()
+            )
             .is_none());
     }
     #[test]

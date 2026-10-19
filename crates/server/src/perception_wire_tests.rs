@@ -104,7 +104,7 @@ fn take(item: p::ItemTarget, quantity: Option<u64>) -> p::Action {
 fn attack(target: p::ActorTarget) -> p::Action {
     request(json!({
         "type": "use_ability", "id": "basic_melee",
-        "invocation": {"kind": "actor_target", "target": target},
+        "invocation": {"aim":{"kind": "actor_target", "target": target},"weapon":{"kind":"default"}},
         "supplies": {"kind": "carried"}
     }))
 }
@@ -206,8 +206,11 @@ fn apparent_tokens_never_become_inventory_supply_or_actor_authority() {
         attack(scope.contact(SUBJECT)),
         p::Action::UseAbility {
             id: "basic_melee".into(),
-            invocation: p::AbilityInvocation::ActorTarget {
-                target: scope.actor(view.actor),
+            invocation: p::AbilityInvocation {
+                aim: p::AbilityAim::ActorTarget {
+                    target: scope.actor(view.actor),
+                },
+                weapon: p::WeaponSelection::Default,
             },
             supplies: p::SupplySelection::Explicit {
                 items: vec![p::SelectedSupply {
@@ -292,7 +295,7 @@ fn contact_action_and_preparation_never_upgrade_when_current_disclosure_changes(
     let wire = attack(scope.contact(SUBJECT));
     let action = decode_action(&wire, &scope, &view).unwrap();
     assert!(matches!(&action, a::Action::UseAbility {
-        invocation: a::AbilityInvocation::ContactTarget { target }, ..
+        invocation: a::AbilityInvocation { aim: a::AbilityAim::ContactTarget { target }, weapon: a::WeaponSelection::Default }, ..
     } if *target == SUBJECT));
     assert!(decode_action(&attack(scope.actor(SUBJECT)), &scope, &view).is_err());
     let work = crate::adapt::work(&action).unwrap();
@@ -478,7 +481,10 @@ fn old_creature_token_retry_remains_exact_when_new_actions_require_contact() {
     assert!(matches!(
         decode_action(&current_wire, &scope, &view).unwrap(),
         a::Action::UseAbility {
-            invocation: a::AbilityInvocation::ContactTarget { .. },
+            invocation: a::AbilityInvocation {
+                aim: a::AbilityAim::ContactTarget { .. },
+                weapon: a::WeaponSelection::Default
+            },
             ..
         }
     ));
@@ -690,4 +696,142 @@ fn magic_choices_resolve_exact_owner_tokens_category_and_carried_incarnation() {
         &scope
     )
     .is_none());
+}
+
+#[test]
+fn equipped_weapon_selection_keeps_item_scope_socket_and_contact_authority_independent() {
+    let (mut view, _, scope) = fixture();
+    let item = s::ItemId(9_007_199_254_740_995);
+    let socket = s::EquipmentSlotId(0);
+    view.inventory.push(s::ItemView {
+        corpse: None,
+        class: s::ItemClass::Weapon,
+        description: "An observed equipped item.".into(),
+        id: item,
+        name: "equipped item".into(),
+        quantity: 1,
+        appearance: "equipped_item".into(),
+        identified: false,
+        known_supply: None,
+        known_currency: None,
+        asset: None,
+    });
+    view.interactions = Some(s::InteractionView {
+        identification: None,
+        completed: Vec::new(),
+        curse_blocked: Vec::new(),
+        slots: vec![s::EquipmentSlotView {
+            id: s::content_ids::EquipmentSlot::new("hand").unwrap(),
+            name: "Hand".into(),
+            equipped_phrase: "in hand".into(),
+            requires_attack: true,
+        }],
+        preparation: None,
+        inventory: vec![s::ItemInteractionView {
+            item,
+            slot: None,
+            equipped_slot: Some(socket),
+            known_equipment: None,
+            known_cursed: None,
+            known_protected: None,
+            drinkable: false,
+            readable: false,
+            zappable: false,
+            charges: None,
+            edible: false,
+        }],
+    });
+    contact(&mut view, ActorDisclosure::AnonymousContact);
+    let action = |target, item, socket| {
+        request(json!({
+            "type":"use_ability", "id":"basic_melee",
+            "invocation":{"aim":{"kind":"actor_target","target":target},
+                "weapon":{"kind":"equipped","item":item,"socket":socket}},
+            "supplies":{"kind":"carried"}
+        }))
+    };
+    let wire = action(scope.contact(SUBJECT), scope.item(item), socket.0);
+    let backend = decode_action(&wire, &scope, &view).unwrap();
+    assert!(matches!(&backend, a::Action::UseAbility {
+        invocation: a::AbilityInvocation {
+            aim: a::AbilityAim::ContactTarget { target: SUBJECT },
+            weapon: a::WeaponSelection::Equipped { item: selected, socket: 0 },
+        }, ..
+    } if *selected == item.0));
+    assert_eq!(encode_action(&backend, &scope), wire);
+    assert_eq!(
+        crate::adapt::recorded_action(crate::adapt::action(&backend)),
+        Some(backend.clone())
+    );
+
+    let foreign = TargetScope::new(uuid::Uuid::from_u128(7), s::ActorId(view.actor.0 + 1));
+    let errors = [
+        action(scope.contact(SUBJECT), foreign.item(item), 0),
+        action(scope.contact(SUBJECT), scope.item(s::ItemId(item.0 + 1)), 0),
+        action(scope.contact(SUBJECT), scope.apparent_object(SUBJECT), 0),
+        action(scope.contact(SUBJECT), scope.item(item), 1),
+        action(scope.actor(SUBJECT), scope.item(item), 0),
+    ]
+    .map(|invalid| decode_action(&invalid, &scope, &view).unwrap_err());
+    for error in &errors {
+        assert_eq!(
+            error, &errors[0],
+            "unavailable operands reveal no private identity"
+        );
+    }
+    assert!(decode_action(&wire, &foreign, &view).is_err());
+    let mut unequipped = view.clone();
+    unequipped.interactions.as_mut().unwrap().inventory[0].equipped_slot = None;
+    assert_eq!(
+        decode_action(&wire, &scope, &unequipped).unwrap_err(),
+        errors[0]
+    );
+    let mut no_inventory = view.clone();
+    no_inventory.inventory.clear();
+    assert_eq!(
+        decode_action(&wire, &scope, &no_inventory).unwrap_err(),
+        errors[0]
+    );
+    let mut no_interactions = view.clone();
+    no_interactions.interactions = None;
+    assert_eq!(
+        decode_action(&wire, &scope, &no_interactions).unwrap_err(),
+        errors[0]
+    );
+    contact(&mut view, ActorDisclosure::Creature);
+    assert!(
+        decode_action(&wire, &scope, &view).is_err(),
+        "contact freshness is separate from item authority"
+    );
+    assert!(decode_action(
+        &action(scope.actor(SUBJECT), scope.item(item), 0),
+        &scope,
+        &view
+    )
+    .is_ok());
+
+    let command = Command::AdmitIntention {
+        expected_revision: 7,
+        action: backend,
+    };
+    let decoded = decode_command(&p::Command::Act {
+        expected_revision: 7,
+        action: wire.clone(),
+    })
+    .unwrap();
+    assert!(
+        decoded.matches(&command, &scope),
+        "durable receipt comparison does not resolve live equipment"
+    );
+    let mut changed = wire;
+    let p::Action::UseAbility { invocation, .. } = &mut changed else {
+        unreachable!()
+    };
+    invocation.weapon = p::WeaponSelection::Default;
+    assert!(!decode_command(&p::Command::Act {
+        expected_revision: 7,
+        action: changed
+    })
+    .unwrap()
+    .matches(&command, &scope));
 }

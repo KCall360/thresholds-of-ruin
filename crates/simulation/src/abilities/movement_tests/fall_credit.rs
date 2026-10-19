@@ -904,11 +904,14 @@ fn exhausted_fall_identity_rejects_the_whole_ordinary_resolution_boundary() {
     );
     assert_eq!(
         expected_costs.reservation(intention),
-        Some(crate::costs::ResourceCost {
-            resource: crate::resources::Resource::Stamina,
-            start: 1,
-            resolution: 2,
-        })
+        Some(
+            crate::costs::CostBundle::single(crate::costs::ResourceCost {
+                resource: crate::resources::Resource::Stamina,
+                start: 1,
+                resolution: 2,
+            })
+            .unwrap()
+        )
     );
     game.act(TARGET, Action::Wait).unwrap();
     assert_eq!(game.tick(), 100);
@@ -1060,7 +1063,7 @@ fn frozen_falls_do_not_expand_the_active_victims_causal_owner_working_set() {
         let Action::UseAbility { invocation, .. } = &mut action else {
             unreachable!()
         };
-        *invocation = crate::abilities::AbilityInvocation::ActorTarget { target: victim };
+        *invocation = crate::abilities::AbilityInvocation::actor_target(victim);
         game.admit_intention(owner, action, crate::IntentionOrigin::Human)
             .unwrap();
         game.execute_next_intention().unwrap().outcome.unwrap();

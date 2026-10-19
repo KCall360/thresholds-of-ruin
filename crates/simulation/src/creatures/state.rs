@@ -8,7 +8,7 @@ use super::{
 use crate::conditions::{ConditionError, ConditionState, ConditionUpdate};
 use crate::content_ids::{AbilityId, ConditionId};
 use crate::cooldowns::{CooldownError, Cooldowns};
-use crate::costs::{CostError, CostLedger, ResourceCost, StartCost};
+use crate::costs::{CostBundle, CostError, CostLedger, StartCost};
 use crate::health::{Health, HealthError};
 use crate::health_recovery::{HealthRecovery, RecoveryContext, RecoveryNutrition};
 use crate::resources::{Resource, ResourceError, Resources};
@@ -86,6 +86,7 @@ pub struct EquipmentSource {
     pub socket: crate::EquipmentSlotId,
     pub modifiers: Vec<Modifier>,
     pub attack: Option<crate::attacks::MeleeAttack>,
+    pub weapon_profile: Option<crate::weapon_profiles::ValidatedWeaponProfile>,
 }
 
 pub(super) fn equipment_sources(
@@ -1385,7 +1386,7 @@ impl CreatureState {
     pub fn start_cost(
         &mut self,
         intention: IntentionId,
-        cost: ResourceCost,
+        cost: CostBundle,
     ) -> Result<StartCost, CostError> {
         if self.health.dead() {
             return Err(CostError::Invalid);
@@ -1398,17 +1399,17 @@ impl CreatureState {
     pub fn validate_cost(
         &self,
         intention: IntentionId,
-        cost: ResourceCost,
+        cost: CostBundle,
     ) -> Result<StartCost, CostError> {
         if self.health.dead() {
             return Err(CostError::Invalid);
         }
         self.costs.validate_start(intention, cost)
     }
-    pub fn finish_cost(&mut self, intention: IntentionId) -> Result<ResourceCost, CostError> {
+    pub fn finish_cost(&mut self, intention: IntentionId) -> Result<CostBundle, CostError> {
         self.costs.finish(intention)
     }
-    pub fn cancel_cost(&mut self, intention: IntentionId) -> Option<ResourceCost> {
+    pub fn cancel_cost(&mut self, intention: IntentionId) -> Option<CostBundle> {
         self.costs.cancel(intention)
     }
     pub fn apply_condition(
@@ -1833,6 +1834,7 @@ mod compiled_tests {
         for set in [false, true] {
             creature
                 .set_equipment(vec![EquipmentSource {
+                    weapon_profile: None,
                     item: crate::ItemId(7),
                     socket: crate::EquipmentSlotId(0),
                     attack: Some(crate::test_creatures::melee(

@@ -32,8 +32,10 @@ rounded upward, independent of quantity. Zero, excessive, overflowing, unavailab
 and unauthorized requests do not partially mutate state or spend simulation time.
 
 Only explicitly stackable items merge. Archetype, true identity, name, appearance,
-concealment and authored instance properties must match. Character knowledge is
-not a physical stack property. If several destination stacks match, the lowest
+concealment, authored instance properties, exact condition and charge state must
+match. Corpse provenance is never interchangeable stack state. Equipment and
+devices remain nonstackable. Character knowledge is not a physical stack property;
+transfers do not copy or refresh exact-instance equipment knowledge. If several destination stacks match, the lowest
 ID survives. A whole transfer retains its ID when it does not merge. Partial
 transfers retain the source ID and allocate a new monotonic ID only when there is
 no destination stack. Retired IDs are not reused. History records source ID, result ID and

@@ -3191,6 +3191,7 @@ impl Engine {
             Action::Move { .. }
             | Action::Escape { .. }
             | Action::ChooseGrowthSource { .. }
+            | Action::ChooseIntellectExpertise { .. }
             | Action::Purchase { .. }
             | Action::Respec { .. }
             | Action::UseAbility { .. }
@@ -4177,6 +4178,14 @@ impl Candidate {
                             owner_index(*owner)?,
                             crate::creature_authoring::attribute(attribute)?,
                         ),
+                    CreatureAdvancement::SelectExpertise { owner, expertise } => build
+                        .select_expertise(
+                            owner_index(*owner)?,
+                            crate::creature_authoring::expertise(
+                                expertise,
+                                build.content().rules(),
+                            )?,
+                        ),
                     CreatureAdvancement::SelectTalent { owner, talent } => build.select_talent(
                         owner_index(*owner)?,
                         crate::creature_authoring::talent(talent, build.content().rules())?,
@@ -4200,6 +4209,15 @@ impl Candidate {
                                 pool: point_pool(pool)?,
                                 selection: PurchaseSelection::SkillRank(
                                     crate::creature_authoring::skill(skill)?,
+                                ),
+                            }),
+                            R::Expertise { pool, expertise } => Some(AdvancementPurchase {
+                                pool: point_pool(pool)?,
+                                selection: PurchaseSelection::Expertise(
+                                    crate::creature_authoring::expertise(
+                                        expertise,
+                                        build.content().rules(),
+                                    )?,
                                 ),
                             }),
                             R::Talent { pool, talent } => Some(AdvancementPurchase {
@@ -4859,8 +4877,11 @@ mod frozen_plan_profile_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        invocation: crate::actions::AbilityInvocation::ActorTarget {
-                            target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation {
+                            aim: crate::actions::AbilityAim::ActorTarget {
+                                target: SimActor(2),
+                            },
+                            weapon: crate::actions::WeaponSelection::Default,
                         },
                         supplies: Default::default(),
                     },

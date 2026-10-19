@@ -40,6 +40,7 @@ fn skill(value: s::attributes::Skill) -> p::AdvancementContentRef {
 fn kind(value: s::rules::PurchaseKind) -> p::AdvancementKind {
     match value {
         s::rules::PurchaseKind::SkillRank => p::AdvancementKind::SkillRank,
+        s::rules::PurchaseKind::Expertise => p::AdvancementKind::Expertise,
         s::rules::PurchaseKind::Talent => p::AdvancementKind::Talent,
     }
 }
@@ -47,6 +48,9 @@ fn selection(value: &PurchaseSelection) -> p::PurchaseChoice {
     match value {
         PurchaseSelection::SkillRank(value) => p::PurchaseChoice::SkillRank {
             skill: value.as_str().into(),
+        },
+        PurchaseSelection::Expertise(value) => p::PurchaseChoice::Expertise {
+            expertise: value.to_string(),
         },
         PurchaseSelection::Talent(value) => p::PurchaseChoice::Talent {
             talent: value.to_string(),
@@ -73,6 +77,15 @@ fn purchase_row(
 ) -> Result<p::AdvancementLedgerRow, Failure> {
     let (name, status) = match &value.selection {
         PurchaseSelection::SkillRank(value) => (skill(*value).name, p::AdvancementStatus::Active),
+        PurchaseSelection::Expertise(value) => (
+            build
+                .ruleset()
+                .expertise(value)
+                .ok_or_else(invalid)?
+                .name
+                .clone(),
+            p::AdvancementStatus::Active,
+        ),
         PurchaseSelection::Talent(value) | PurchaseSelection::TalentForm { talent: value, .. } => {
             let definition = build.ruleset().talent(value).ok_or_else(invalid)?;
             (
@@ -208,6 +221,37 @@ impl Engine {
                     budget,
                 )
             }
+            p::AdvancementQuery::IntellectExpertises { .. } => {
+                let capacity = creature.derived().intellect_expertise_capacity();
+                let total = build.intellect_expertise_choices().count();
+                let rows =
+                    build
+                        .intellect_expertise_choices()
+                        .skip(offset)
+                        .map(|(threshold, choice)| {
+                            let expertise = choice
+                                .map(|id| {
+                                    build
+                                        .ruleset()
+                                        .expertise(id)
+                                        .map(|definition| named(id, Some(&definition.name)))
+                                        .ok_or_else(invalid)
+                                })
+                                .transpose()?;
+                            Ok(p::AdvancementEntry::IntellectExpertise {
+                                value: p::AdvancementIntellectExpertiseRow {
+                                    threshold,
+                                    status: if threshold <= capacity {
+                                        p::AdvancementStatus::Active
+                                    } else {
+                                        p::AdvancementStatus::Dormant
+                                    },
+                                    expertise,
+                                },
+                            })
+                        });
+                pack(basis, revision, query.clone(), total, rows, budget)
+            }
             p::AdvancementQuery::Ledger { .. } => {
                 let total = build
                     .choices()
@@ -268,6 +312,27 @@ impl Engine {
                         }),
                     budget,
                 ),
+                p::AdvancementKind::Expertise => {
+                    let source = &build.ruleset().document().expertises;
+                    pack(
+                        basis,
+                        revision,
+                        query.clone(),
+                        source.len(),
+                        source.iter().skip(offset).map(|value| {
+                            Ok(p::AdvancementEntry::Catalog {
+                                value: p::AdvancementCatalogRow {
+                                    selection: p::PurchaseChoice::Expertise {
+                                        expertise: value.id.to_string(),
+                                    },
+                                    name: value.name.clone(),
+                                    form_choices: Vec::new(),
+                                },
+                            })
+                        }),
+                        budget,
+                    )
+                }
                 p::AdvancementKind::Talent => {
                     let source = &build.ruleset().document().talents;
                     pack(
@@ -310,6 +375,17 @@ impl Engine {
                             )
                             .map_err(|_| unavailable())?,
                     )),
+                    p::AdvancementProposal::IntellectExpertise { choice } => {
+                        Preview::IntellectExpertise(Box::new(
+                            self.game
+                                .preview_player_intellect_expertise(
+                                    s::ActorId(actor.0),
+                                    &domain_basis,
+                                    &adapter::intellect_expertise(choice)?,
+                                )
+                                .map_err(|_| unavailable())?,
+                        ))
+                    }
                     p::AdvancementProposal::Purchase { purchase } => Preview::Purchase(Box::new(
                         self.game
                             .preview_player_purchase(
@@ -443,6 +519,7 @@ impl Engine {
 }
 
 enum Preview {
+    IntellectExpertise(Box<s::player_advancement::PlayerIntellectExpertisePreview>),
     Growth(Box<s::player_advancement::PlayerGrowthPreview>),
     Purchase(Box<s::player_advancement::PlayerPurchasePreview>),
     Replacement(Box<s::player_respec::PlayerReplacementPreview>),
@@ -450,6 +527,7 @@ enum Preview {
 impl Preview {
     fn build(&self) -> &CreatureBuild {
         match self {
+            Self::IntellectExpertise(value) => value.build(),
             Self::Growth(value) => value.build(),
             Self::Purchase(value) => value.build(),
             Self::Replacement(value) => value.permanent().build(),
@@ -457,6 +535,7 @@ impl Preview {
     }
     fn derived(&self) -> &DerivedCreature {
         match self {
+            Self::IntellectExpertise(value) => value.derived(),
             Self::Growth(value) => value.derived(),
             Self::Purchase(value) => value.derived(),
             Self::Replacement(value) => value.permanent().derived(),
@@ -464,6 +543,7 @@ impl Preview {
     }
     fn runtime(&self) -> &s::player_advancement::AdvancementConsequences {
         match self {
+            Self::IntellectExpertise(value) => value.runtime(),
             Self::Growth(value) => value.runtime(),
             Self::Purchase(value) => value.runtime(),
             Self::Replacement(value) => value.runtime(),
@@ -471,13 +551,13 @@ impl Preview {
     }
     fn removed(&self) -> &[s::creatures::RemovedPurchase] {
         match self {
-            Self::Growth(_) | Self::Purchase(_) => &[],
+            Self::IntellectExpertise(_) | Self::Growth(_) | Self::Purchase(_) => &[],
             Self::Replacement(value) => value.permanent().removed(),
         }
     }
     fn refunds(&self) -> &[s::creatures::PointRefund] {
         match self {
-            Self::Growth(_) | Self::Purchase(_) => &[],
+            Self::IntellectExpertise(_) | Self::Growth(_) | Self::Purchase(_) => &[],
             Self::Replacement(value) => value.permanent().refunds(),
         }
     }
@@ -574,6 +654,20 @@ impl Preview {
                     }),
                 budget,
             ),
+            p::AdvancementPreviewSection::Expertises => {
+                let rows =
+                    crate::creature_view::expertise_rows(&derived.expertises, build.ruleset());
+                pack(
+                    basis,
+                    revision,
+                    query.clone(),
+                    rows.len(),
+                    rows.into_iter()
+                        .skip(offset)
+                        .map(|value| Ok(p::AdvancementEntry::Expertise { value })),
+                    budget,
+                )
+            }
             p::AdvancementPreviewSection::Talents => {
                 let total = derived.active_talents.len() + derived.dormant_talents.len();
                 let rows = build

@@ -188,6 +188,39 @@ pub(crate) fn safe_healing_plan(plan: &crate::abilities::Plan) -> bool {
     harmless && positive
 }
 
+/// Every frozen resource operand participates in a fresh AI affordability gate.
+pub(crate) fn resource_budget_satisfies(
+    ledger: &crate::costs::CostLedger,
+    bundle: crate::costs::CostBundle,
+    minimum_percent: u8,
+) -> bool {
+    bundle.entries().all(|cost| {
+        let available = ledger.available(cost.resource);
+        cost.start
+            .checked_add(cost.resolution)
+            .is_some_and(|total| available >= total)
+            && u64::from(available) * 100
+                >= u64::from(ledger.resources().maximum(cost.resource)) * u64::from(minimum_percent)
+    })
+}
+
+impl Game {
+    pub(crate) fn ai_plan_resources_available(&self, plan: &crate::abilities::Plan) -> bool {
+        let Some(cost) = plan.cost() else {
+            return true;
+        };
+        let ability = plan
+            .as_ability()
+            .map(|value| &value.ability)
+            .or_else(|| plan.as_ray().map(|value| &value.ability));
+        let minimum = ability
+            .and_then(|id| self.content.rules().ability(id))
+            .map_or(0, |definition| definition.ai.minimum_resource_percent);
+        self.creature(plan.actor())
+            .is_some_and(|creature| resource_budget_satisfies(creature.costs(), cost, minimum))
+    }
+}
+
 impl Game {
     pub fn configure_ai(&mut self, actor: ActorId, profile: AiProfile) -> Result<(), GameError> {
         if !profile.valid() {
@@ -599,11 +632,11 @@ impl Game {
                 if let Some(definition) = rules.ability(id).filter(|definition| {
                     definition.ai.hostile && (!basic_only || definition.basic_attack)
                 }) {
-                    let selected = match invocation {
-                        crate::abilities::AbilityInvocation::ActorTarget {
+                    let selected = match &invocation.aim {
+                        crate::abilities::AbilityAim::ActorTarget {
                             target: prepared_target,
                         } => *prepared_target == target,
-                        crate::abilities::AbilityInvocation::DirectionalRay { direction } => {
+                        crate::abilities::AbilityAim::DirectionalRay { direction } => {
                             let crate::rules::Reach::Sight { range } = definition.reach else {
                                 return None;
                             };
@@ -671,9 +704,9 @@ impl Game {
                     ) else {
                         continue;
                     };
-                    crate::abilities::AbilityInvocation::DirectionalRay { direction }
+                    crate::abilities::AbilityInvocation::directional_ray(direction)
                 } else {
-                    crate::abilities::AbilityInvocation::ActorTarget { target }
+                    crate::abilities::AbilityInvocation::actor_target(target)
                 };
             let Ok(plan) = self.ability_invocation_plan_in_scene(actor, id, invocation, sight)
             else {
@@ -840,9 +873,7 @@ impl Game {
         use crate::rules::RangePreference;
         let creature = self.creature(actor)?;
         let rules = creature.build().ruleset();
-        let invocation = AbilityInvocation::SelfStep {
-            direction: direction.try_into().ok()?,
-        };
+        let invocation = AbilityInvocation::self_step(direction.try_into().ok()?);
         let in_melee = view.visible_actors.iter().any(|other| {
             self.perceived_hostile(actor, other.id, other.disclosure)
                 && self.attack_available_in_scene(actor, other.id, sight)
@@ -1106,7 +1137,7 @@ mod tests {
     fn basic(target: ActorId) -> Action {
         Action::UseAbility {
             id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-            invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+            invocation: crate::abilities::AbilityInvocation::actor_target(target),
             supplies: Default::default(),
         }
     }
@@ -1144,7 +1175,7 @@ mod tests {
             game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("fixture_focus_fear").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(1)),
                 supplies: Default::default(),
             }
         );
@@ -1159,7 +1190,7 @@ mod tests {
             game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("fixture_paid_melee").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(1)),
                 supplies: Default::default(),
             }
         );
@@ -1180,7 +1211,7 @@ mod tests {
             game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("fixture_mana_ray").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(1)),
                 supplies: Default::default(),
             }
         );
@@ -1267,6 +1298,7 @@ mod tests {
         spec.concealed = concealed;
         spec.appearance = "silver ring".into();
         spec.equipment = Some(crate::EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("ring").unwrap(),
             attack: None,
@@ -1425,6 +1457,8 @@ mod tests {
     #[test]
     fn equipment_uses_duplicate_anatomy_sockets_and_only_the_ais_known_stats() {
         let mut game = fixture_with_anatomy(crate::AnatomySpec {
+            capacities: Default::default(),
+            primary_attack_socket: crate::equipment_capacity::PrimaryAttackSocket::None,
             slots: vec![crate::EquipmentSlot::new("ring").unwrap(); 2],
         });
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
@@ -1454,6 +1488,8 @@ mod tests {
     #[test]
     fn gear_decisions_do_not_read_hidden_curses_and_stop_after_observed_failure() {
         let mut game = fixture_with_anatomy(crate::AnatomySpec {
+            capacities: Default::default(),
+            primary_attack_socket: crate::equipment_capacity::PrimaryAttackSocket::None,
             slots: vec![crate::EquipmentSlot::new("ring").unwrap()],
         });
         let actor = ActorId(2);
@@ -1514,6 +1550,8 @@ mod tests {
     fn ordinary_gear_estimates_ignore_hidden_bonuses_without_disclosing_numbers() {
         let slot = crate::EquipmentSlot::new("body_armor").unwrap();
         let mut game = fixture_with_anatomy(crate::AnatomySpec {
+            capacities: Default::default(),
+            primary_attack_socket: crate::equipment_capacity::PrimaryAttackSocket::None,
             slots: vec![slot.clone()],
         });
         let actor = ActorId(2);
@@ -1523,6 +1561,7 @@ mod tests {
             let mut spec = crate::ItemSpec::ordinary(format!("armor-{id}"));
             spec.class = crate::ItemClass::Armor;
             spec.equipment = Some(crate::EquipmentSpec {
+                weapon_profile: None,
                 slot: slot.clone(),
                 armor: Some(crate::ArmorSpec {
                     physical_reduction: reduction,
@@ -1580,6 +1619,8 @@ mod tests {
     #[test]
     fn gear_removal_chooses_an_upgrade_and_does_not_reequip_the_dominated_old_item() {
         let mut game = fixture_with_anatomy(crate::AnatomySpec {
+            capacities: Default::default(),
+            primary_attack_socket: crate::equipment_capacity::PrimaryAttackSocket::None,
             slots: vec![crate::EquipmentSlot::new("ring").unwrap(); 1],
         });
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
@@ -1618,6 +1659,8 @@ mod tests {
     #[test]
     fn gear_work_does_not_replace_unknown_equipment_or_start_beside_a_visible_hostile() {
         let mut game = fixture_with_anatomy(crate::AnatomySpec {
+            capacities: Default::default(),
+            primary_attack_socket: crate::equipment_capacity::PrimaryAttackSocket::None,
             slots: vec![crate::EquipmentSlot::new("ring").unwrap(); 1],
         });
         ring(&mut game, 10, 1, true);
@@ -1778,9 +1821,7 @@ mod tests {
                 action,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("custom_arc").unwrap(),
-                    invocation: crate::abilities::AbilityInvocation::ActorTarget {
-                        target: ActorId(1)
-                    },
+                    invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(1)),
                     supplies: Default::default(),
                 }
             );
@@ -1806,7 +1847,7 @@ mod tests {
             execution.action,
             Some(Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("custom_arc").unwrap(),
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(1)),
                 supplies: Default::default(),
             })
         );
@@ -1929,7 +1970,7 @@ mod tests {
             decision.action,
             Action::UseAbility {
                 id: observation,
-                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
+                invocation: crate::abilities::AbilityInvocation::actor_target(ActorId(1)),
                 supplies: Default::default()
             }
         );
@@ -2042,6 +2083,7 @@ mod tests {
         let mut item = crate::ItemSpec::ordinary("private armor".into());
         item.class = crate::ItemClass::Armor;
         item.equipment = Some(crate::EquipmentSpec {
+            weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
@@ -2074,7 +2116,7 @@ mod tests {
         assert_eq!(idle_choice.action, private_choice.action);
         assert_eq!(idle_choice.plan, private_choice.plan);
         assert!(
-            matches!(idle_choice.action, Action::UseAbility { ref id, invocation: crate::abilities::AbilityInvocation::ActorTarget { target }, .. } if id.as_str() == "read_the_rhythm" && target == hero)
+            matches!(idle_choice.action, Action::UseAbility { ref id, invocation: crate::abilities::AbilityInvocation { aim: crate::abilities::AbilityAim::ActorTarget { target }, .. }, .. } if id.as_str() == "read_the_rhythm" && target == hero)
         );
     }
     #[test]

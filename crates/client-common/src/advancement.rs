@@ -4,13 +4,14 @@ use std::collections::VecDeque;
 use tor_protocol::*;
 
 const STALE: &str = "Advancement preview is stale. Open advancement and explicitly preview again.";
-pub const HELP: &str = "overview | ledger | balances | skills | talents | next | previous\nsource racial | source class <class ID>\npurchase <HD> <pool ID> <skill|talent> <ID> [form <form ID>]\nremove <HD> <purchase number> | replace <HD> <purchase number> <pool ID> <skill|talent> <ID> [form <form ID>]\ndetails <summary|removed|refunds|balances|skills|talents|conditions>\nsupplies | confirm [using carried|<name or #item>] | resume | cancel\nHD and purchase numbers start at 1. Choices preview first; only confirm commits.";
+pub const HELP: &str = "overview | ledger | balances | skills | talents | expertises | intellect-expertises | next | previous\nsource racial | source class <class ID>\nintellect-expertise <threshold> <expertise ID>\npurchase <HD> <pool ID> <skill|talent|expertise> <ID> [form <form ID>]\nremove <HD> <purchase number> | replace <HD> <purchase number> <pool ID> <skill|talent|expertise> <ID> [form <form ID>]\ndetails <summary|removed|refunds|balances|skills|talents|expertises|conditions>\nsupplies | confirm [using carried|<name or #item>] | resume | cancel\nHD and purchase numbers start at 1. Choices preview first; only confirm commits.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AdvancementInput {
     Overview,
     Ledger,
     Balances,
+    IntellectExpertises,
     Catalog(AdvancementKind),
     Preview(AdvancementProposal),
     Details(AdvancementPreviewSection),
@@ -56,7 +57,10 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
         match kind {
             "skill" => Ok(PurchaseChoice::SkillRank { skill: id.into() }),
             "talent" => Ok(PurchaseChoice::Talent { talent: id.into() }),
-            _ => Err("Choose skill or talent.".into()),
+            "expertise" => Ok(PurchaseChoice::Expertise {
+                expertise: id.into(),
+            }),
+            _ => Err("Choose skill, talent or expertise.".into()),
         }
     };
     let form_choice = |talent: &str, form: &str| -> Result<PurchaseChoice, String> {
@@ -74,6 +78,21 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
         ["balances"] => AdvancementInput::Balances,
         ["skills"] => AdvancementInput::Catalog(AdvancementKind::SkillRank),
         ["talents"] => AdvancementInput::Catalog(AdvancementKind::Talent),
+        ["intellect-expertises"] => AdvancementInput::IntellectExpertises,
+        ["intellect-expertise", threshold, expertise] if valid_content_id(expertise) => {
+            let threshold = threshold
+                .parse::<u16>()
+                .ok()
+                .filter(|n| (1..=1000).contains(n))
+                .ok_or("Intellect thresholds must be 1 through 1000.")?;
+            AdvancementInput::Preview(AdvancementProposal::IntellectExpertise {
+                choice: IntellectExpertiseOperation {
+                    threshold,
+                    expertise: (*expertise).into(),
+                },
+            })
+        }
+        ["expertises"] => AdvancementInput::Catalog(AdvancementKind::Expertise),
         ["next"] => AdvancementInput::Next,
         ["previous"] => AdvancementInput::Previous,
         ["supplies"] => AdvancementInput::Supplies,
@@ -151,6 +170,7 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
             "balances" => AdvancementPreviewSection::Balances,
             "skills" => AdvancementPreviewSection::Skills,
             "talents" => AdvancementPreviewSection::Talents,
+            "expertises" => AdvancementPreviewSection::Expertises,
             "conditions" => AdvancementPreviewSection::RemovedConditions,
             _ => return Err(HELP.into()),
         }),
@@ -508,6 +528,9 @@ impl AdvancementPages {
                 self.fresh(&context)?;
                 let basis = self.basis()?.clone();
                 let query = match input {
+                    AdvancementInput::IntellectExpertises => {
+                        AdvancementQuery::IntellectExpertises { basis, offset: 0 }
+                    }
                     AdvancementInput::Ledger => AdvancementQuery::Ledger { basis, offset: 0 },
                     AdvancementInput::Balances => AdvancementQuery::Balances { basis, offset: 0 },
                     AdvancementInput::Catalog(catalog) => AdvancementQuery::Catalog {
@@ -559,6 +582,15 @@ impl AdvancementPages {
             return Err("Finish or cancel existing work and wait out recovery first; use resume for paused respec.".into());
         }
         let action = match &confirmation.proposal {
+            AdvancementProposal::IntellectExpertise { choice } => {
+                if supplies != SupplySelection::Carried {
+                    return Err("An Intellect expertise choice does not select a ration.".into());
+                }
+                Action::ChooseIntellectExpertise {
+                    basis: Box::new(confirmation.basis.clone()),
+                    choice: choice.clone(),
+                }
+            }
             AdvancementProposal::GrowthSource { source } => {
                 if supplies != SupplySelection::Carried {
                     return Err("Choosing future growth does not select a ration.".into());
@@ -697,6 +729,7 @@ fn query_basis(query: &AdvancementQuery) -> Option<&AdvancementBasis> {
     match query {
         AdvancementQuery::Overview {} => None,
         AdvancementQuery::Ledger { basis, .. }
+        | AdvancementQuery::IntellectExpertises { basis, .. }
         | AdvancementQuery::Balances { basis, .. }
         | AdvancementQuery::Catalog { basis, .. }
         | AdvancementQuery::Preview { basis, .. } => Some(basis),
@@ -706,6 +739,7 @@ fn offset(query: &AdvancementQuery) -> u16 {
     match query {
         AdvancementQuery::Overview {} => 0,
         AdvancementQuery::Ledger { offset, .. }
+        | AdvancementQuery::IntellectExpertises { offset, .. }
         | AdvancementQuery::Balances { offset, .. }
         | AdvancementQuery::Catalog { offset, .. }
         | AdvancementQuery::Preview { offset, .. } => *offset,
@@ -720,6 +754,7 @@ fn with_offset(query: &AdvancementQuery, value: u16) -> Result<AdvancementQuery,
             ..
         } => return Err("This section has one page.".into()),
         AdvancementQuery::Ledger { offset, .. }
+        | AdvancementQuery::IntellectExpertises { offset, .. }
         | AdvancementQuery::Balances { offset, .. }
         | AdvancementQuery::Catalog { offset, .. }
         | AdvancementQuery::Preview { offset, .. } => *offset = value,
@@ -732,6 +767,9 @@ fn same_section(left: &AdvancementQuery, right: &AdvancementQuery) -> bool {
 fn query_label(query: &AdvancementQuery) -> String {
     match query {
         AdvancementQuery::Overview {} => "Overview".into(),
+        AdvancementQuery::IntellectExpertises { .. } => {
+            "Intellect expertise thresholds (browse expertises for candidate IDs)".into()
+        }
         AdvancementQuery::Ledger { .. } => "Purchase ledger".into(),
         AdvancementQuery::Balances { .. } => "Point balances".into(),
         AdvancementQuery::Catalog { catalog, .. } => {
@@ -744,6 +782,7 @@ fn choice_label(choice: &PurchaseChoice) -> String {
     match choice {
         PurchaseChoice::SkillRank { skill } => format!("skill {skill}"),
         PurchaseChoice::Talent { talent } => format!("talent {talent}"),
+        PurchaseChoice::Expertise { expertise } => format!("expertise {expertise}"),
         PurchaseChoice::TalentForm { talent, form } => format!("talent {talent} form {form}"),
     }
 }
@@ -768,6 +807,10 @@ fn hd_ordinal_label(owner: u64) -> String {
 
 pub fn proposal_label(proposal: &AdvancementProposal) -> String {
     match proposal {
+        AdvancementProposal::IntellectExpertise { choice } => format!(
+            "Intellect threshold {}: expertise {}",
+            choice.threshold, choice.expertise
+        ),
         AdvancementProposal::GrowthSource { source } => {
             format!("Future growth: {}", growth_source_label(source))
         }
@@ -805,7 +848,7 @@ fn render_entry(entry: &AdvancementEntry, rows: &mut Vec<String>) {
             rows.push(format!("{}Timing: purchase recovery {}; respec preparation {}, recovery {}; received-loss quiet interval {} active ticks", if value.timings.provisional { "Provisional " } else { "" }, value.timings.purchase_recovery, value.timings.respec_prepare, value.timings.respec_recovery, value.timings.received_loss_interval));
             rows.push(format!("Respec needs {} {} ({}): {:?}. Availability is checked by the server.", value.ration.quantity, value.ration.supply.name, value.ration.supply.id, value.ration.access));
             if let Some(progress) = &value.respec { rows.push(format!("Respec {}: {} of {} active ticks remaining. {}. Use resume for paused work or cancel to release an unspent ration.", if progress.active { "active" } else { "paused" }, progress.remaining_ticks, progress.total_ticks, proposal_label(&AdvancementProposal::Replacement { replacement: progress.replacement.clone() }))); }
-            rows.push("Browse ledger, balances and catalogs; preview an exact purchase, replacement or future growth source before confirming.".into());
+            rows.push("Browse ledger, balances, intellect-expertises and catalogs; preview an exact purchase, replacement or future growth source before confirming.".into());
         }
         AdvancementEntry::Purchase { value } | AdvancementEntry::Removed { value } => rows.push(format!("HD {} / purchase {} / {} ({}) / {} [{}] / {:?}", value.source.owner.checked_add(1).expect("validated HD ordinal"), u32::from(value.source.index) + 1, value.pool.name, value.pool.id, value.name, choice_label(&value.selection), value.status)),
         AdvancementEntry::Balance { value } => rows.push(format!("HD {} / {} ({}) / granted {}, spent {}, unspent {} / {:?}", value.owner.checked_add(1).expect("validated HD ordinal"), value.pool.name, value.pool.id, value.granted, value.spent, value.unspent, value.allowed)),
@@ -822,10 +865,18 @@ fn render_entry(entry: &AdvancementEntry, rows: &mut Vec<String>) {
             rows.push(format!("Health recovery: period {}, elapsed {}, stopped {}", value.health_recovery.period_ticks, value.health_recovery.elapsed_ticks, value.health_recovery.stopped));
             for resource in [&value.resources.stamina, &value.resources.focus, &value.resources.mana] { rows.push(format!("{} ({}): {}/{}", resource.resource.name, resource.resource.id, resource.balance, resource.maximum)); }
             rows.push(format!("Canceled resource holds: {}. Values include resulting clamping and death consequences.", value.canceled_resource_holds));
-            rows.push("Review details removed/refunds/balances/skills/talents/conditions; next and previous traverse every row. Confirm commits this exact proposal.".into());
+            rows.push("Review details removed/refunds/balances/skills/talents/expertises/conditions; next and previous traverse every row. Confirm commits this exact proposal.".into());
         }
         AdvancementEntry::Refund { value } => rows.push(format!("HD {} / {} ({}): {} gross points returned; resulting balances show replacement spending", value.owner.checked_add(1).expect("validated HD ordinal"), value.pool.name, value.pool.id, value.points)),
         AdvancementEntry::Skill { value } => rows.push(format!("{} ({}): permanent rank {}", value.skill.name, value.skill.id, value.rank)),
+        AdvancementEntry::IntellectExpertise { value } => {
+            let selection = value.expertise.as_ref().map_or_else(
+                || if value.status == AdvancementStatus::Active { "available; browse expertises, then intellect-expertise <threshold> <ID>".into() } else { "unavailable".into() },
+                |expertise| format!("{} ({}); retained choice, cannot reselect", expertise.name, expertise.id),
+            );
+            rows.push(format!("Intellect threshold {}: {:?}; {}", value.threshold, value.status, selection));
+        },
+        AdvancementEntry::Expertise { value } => rows.extend(crate::stats::expertise_lines(value)),
         AdvancementEntry::Talent { value } => rows.push(format!("{} ({}): {:?}", value.talent.name, value.talent.id, value.status)),
         AdvancementEntry::RemovedCondition { value } => rows.push(format!("Lost condition {} ({}): {} applications, {} stacks", value.condition.name, value.condition.id, value.applications, value.stacks)),
     }

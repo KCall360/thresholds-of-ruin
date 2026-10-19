@@ -76,6 +76,9 @@ impl CreatureBuild {
         if replacement.as_ref() == Some(&original) {
             return Err(BuildError::NoAdvancementChange);
         }
+        if let Some(purchase) = &replacement {
+            purchase.selection.validate(self.ruleset())?;
+        }
         let previously_owned: BTreeSet<_> = self
             .choices()
             .iter()
@@ -85,7 +88,7 @@ impl CreatureBuild {
             location: target,
             purchase: original.clone(),
         }];
-        let (candidate, derived) = self.preview_edit(|build| {
+        let (candidate, derived) = self.preview_intellect_advancement(|build| {
             let purchases = &mut build.advancement.choices[owner].purchases;
             if let Some(purchase) = replacement.clone() {
                 purchases[target.index] = purchase;
@@ -155,6 +158,22 @@ impl CreatureBuild {
             }
             Ok(())
         })?;
+        // The replaced talent and its dependent grants are already gone. Test
+        // the resulting ownership, not a grant that this same edit retires.
+        if let Some(expertise) = replacement
+            .as_ref()
+            .and_then(|purchase| purchase.selection.expertise())
+        {
+            if original.selection.expertise() != Some(expertise)
+                && derived
+                    .expertises
+                    .grants()
+                    .get(expertise)
+                    .is_some_and(|origins| origins.len() > 1)
+            {
+                return Err(BuildError::DuplicateExpertise);
+            }
+        }
         removed.sort_by_key(|entry| entry.location);
         let mut refunds = BTreeMap::<(crate::HdIndex, PointPoolId), u16>::new();
         for entry in &removed {
