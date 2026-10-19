@@ -123,9 +123,11 @@ Progress: limbs now have the first reusable cloth rule. A sculpt can be
 inflated, so a sleeve or trouser leg is the anatomy beneath it grown by an
 ease (filling the muscle hollows), with soft rolls gathered at the elbow and
 below the knee; cuffs and bracers sit over that ease. Every clothed person
-uses it, including the Rogue folk, and contract tests require the cloth to
-clear the limb all round for every build. Torso regions, free hems and plate
-articulation remain to be done.
+uses it, and contract tests require the cloth to clear the limb all round for
+every build. Draped skirts, tunic hems and coat tails now hang free: their
+folds deepen toward the edge and the hem drops where each fold swings out,
+while short edges such as cowls stay neat. Torso regions, the caster robe's
+hem and plate articulation remain to be done.
 
 ### 3. Separate composition concerns without a new content format
 
