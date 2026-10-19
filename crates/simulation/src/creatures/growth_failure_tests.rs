@@ -105,9 +105,16 @@ fn refund(build: &mut CreatureBuild, index: usize) {
     build.commit_replacement(preview).unwrap();
 }
 
+#[derive(Clone, Copy)]
+enum BirthLearningExpectation {
+    Unchanged,
+    RebasedByInitialAttributes,
+}
+
 fn obstruction_banks_and_retries(
     original: CreatureBuild,
     error: BuildError,
+    birth_learning: BirthLearningExpectation,
     obstruct: impl Fn(&mut CreatureBuild),
     clear: impl Fn(&mut CreatureBuild),
 ) {
@@ -201,8 +208,19 @@ fn obstruction_banks_and_retries(
         clear(&mut cleared);
         assert_eq!(cleared.ledger(), blocked.ledger());
         assert_eq!(cleared.choices(), &original.choices()[..retained]);
+        let mut expected = original.clone();
+        if matches!(
+            birth_learning,
+            BirthLearningExpectation::RebasedByInitialAttributes
+        ) {
+            // The privileged initial-attribute rewrite rebases unchosen birth
+            // learning to the retained three-HD build. Restoring Strength must
+            // retain that exact receipt, not mint a new Intellect entitlement.
+            assert_ne!(cleared.intellect_learning, original.intellect_learning);
+            expected.intellect_learning = cleared.intellect_learning.clone();
+        }
         state.rebuild(cleared).unwrap();
-        assert_eq!(state.build(), &original);
+        assert_eq!(state.build(), &expected);
         assert_eq!(state.build().ledger().entries()[retained], removed_die);
         assert_eq!(state.build().choices()[retained], removed_choices);
         assert_eq!(state.derived(), &original_derived);
@@ -212,6 +230,11 @@ fn obstruction_banks_and_retries(
         assert_eq!(state.restorable_hit_dice().get(), 0);
 
         let restored = CreatureRecord::capture(&state);
+        let decoded: CreatureRecord =
+            serde_json::from_slice(&serde_json::to_vec(&restored).unwrap()).unwrap();
+        let roundtrip = decoded.restore(original.content().clone(), vec![]).unwrap();
+        assert_eq!(roundtrip, state);
+        assert_eq!(roundtrip.build(), &expected);
         state.rebuild(state.build().clone()).unwrap();
         state.award_xp(0).unwrap();
         assert_eq!(CreatureRecord::capture(&state), restored);
@@ -237,6 +260,7 @@ fn authored_attribute_cap_banks_xp_until_retained_initial_attributes_allow_resto
     obstruction_banks_and_retries(
         original,
         BuildError::AttributeCap,
+        BirthLearningExpectation::RebasedByInitialAttributes,
         |build| build.set_initial_attributes(strength(5)).unwrap(),
         |build| build.set_initial_attributes(strength(4)).unwrap(),
     );
@@ -267,6 +291,7 @@ fn authored_rank_cap_banks_xp_until_the_conflicting_retained_rank_is_refunded() 
     obstruction_banks_and_retries(
         original,
         BuildError::RankCap,
+        BirthLearningExpectation::Unchanged,
         |build| {
             build
                 .train(crate::HdIndex(0), Skill::HeavyWeaponry)
@@ -296,6 +321,7 @@ fn authored_duplicate_talent_banks_xp_until_the_retained_duplicate_is_refunded()
     obstruction_banks_and_retries(
         original,
         BuildError::DuplicateTalent,
+        BirthLearningExpectation::Unchanged,
         |build| build.select_talent(crate::HdIndex(0), talent(0)).unwrap(),
         |build| refund(build, 0),
     );
@@ -331,6 +357,7 @@ fn authored_talent_ownership_cap_banks_xp_until_a_retained_talent_is_refunded() 
     obstruction_banks_and_retries(
         original,
         BuildError::TooManyOwnedTalents,
+        BirthLearningExpectation::Unchanged,
         |build| build.select_talent(crate::HdIndex(0), talent(256)).unwrap(),
         |build| refund(build, 255),
     );

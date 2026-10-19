@@ -225,6 +225,7 @@ fn rules_document_requires_current_named_fields_and_rejects_positional_fields() 
             "forms",
             "ability_tags",
             "talents",
+            "expertises",
             "creature_types",
             "subtypes",
             "classes",

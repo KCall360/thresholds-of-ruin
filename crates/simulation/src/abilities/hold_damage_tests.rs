@@ -579,6 +579,10 @@ fn hold_damage_descriptor_counts_enforce_frozen_sequence_budget() {
         };
         *value = Some(descriptor.clone());
     }
+    // The fixture changed from authored named-skill rows to the selected natural
+    // source, so its single captured weapon witness must change with the rows.
+    assert!(!frozen.valid(&rules));
+    frozen.weapon = FrozenWeaponSelection::Natural;
     assert!(frozen.valid(&rules));
     frozen.strikes[0].descriptors.push(descriptor);
     assert!(
