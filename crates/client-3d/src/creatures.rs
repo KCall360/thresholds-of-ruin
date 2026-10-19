@@ -271,7 +271,7 @@ impl Look {
                 self.skin *= 1.0 + 0.1 * s;
             }
             Style::Unicorn => {
-                self.cloth = self.cloth.lerp(Vec3::new(0.1, 0.12, 0.26), 0.3 + 0.3 * s);
+                self.cloth = self.cloth.lerp(Vec3::new(0.2, 0.18, 0.34), 0.3 + 0.3 * s);
             }
             Style::Emu => {
                 self.skin *= 1.0 + 0.12 * s;
@@ -329,7 +329,7 @@ impl Look {
             stride: 1.0,
             v: Variant::default(),
         };
-        let teal = Vec3::new(0.16, 0.5, 0.46);
+        let teal = Vec3::new(0.045, 0.6, 0.55);
         if model == CreatureModel::Placeholder {
             return base(Plan::Marker, Style::Common, SKIN, teal, LEATHER);
         }
@@ -375,9 +375,11 @@ impl Look {
                 ..base(
                     Plan::Quadruped,
                     Style::Unicorn,
-                    Vec3::new(0.05, 0.05, 0.08),
-                    Vec3::new(0.16, 0.12, 0.22),
-                    Vec3::new(0.2, 0.2, 0.24),
+                    // Display-space charcoal remains black after the shared
+                    // sRGB decode, with enough blue-violet value to show form.
+                    Vec3::new(0.16, 0.17, 0.235),
+                    Vec3::new(0.3, 0.24, 0.42),
+                    Vec3::new(0.24, 0.25, 0.31),
                 )
             };
         }
@@ -575,9 +577,9 @@ impl Look {
     }
 }
 
-/// Cells are five-foot cubes; a figure designed 1.85 units tall stands
-/// about five foot nine. A body two cells high only reaches into the second.
-pub const BODY_SCALE: f32 = 0.62;
+/// Bold Storybook visual presence relative to dungeon cells. This is an art
+/// scale, not a conversion to real-world feet or authoritative occupied cells.
+pub const BODY_SCALE: f32 = 0.74;
 
 /// The joints a rig may have.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -610,16 +612,26 @@ pub enum J {
     BR,
     BRs,
     Core,
+    FootL,
+    FootR,
+    HoofFL,
+    HoofFR,
+    HoofBL,
+    HoofBR,
 }
-const JOINTS: usize = 27;
+const JOINTS: usize = 33;
 
 #[derive(Component)]
 pub struct Rig {
     pub plan: Plan,
+    /// Resolved anatomy; shared by mesh generation, fitting and support.
+    humanoid: Option<anatomy::HumanoidBody>,
     joints: [Option<Entity>; JOINTS],
     rest: [Vec3; JOINTS],
     /// Serpent segments or floater motes, posed directly.
     segments: Vec<Entity>,
+    /// Continuous caster garment with an owned mesh and shared material.
+    robe: Option<robe::RobeRig>,
     stride: f32,
     hunch: f32,
     style: Style,
@@ -751,12 +763,33 @@ impl Move {
     }
 }
 
+/// Renderer-only support memory. Each leg retains one ankle point and its
+/// landing heading; swing and settling derive their targets from that point.
+#[derive(Clone, Copy)]
+struct WalkFoot {
+    world: Vec3,
+    yaw: f32,
+    phase: f32,
+    lifted: f32,
+    settle_order: u8,
+    settled: bool,
+}
+
+#[derive(Default)]
+struct WalkContacts {
+    rig: Option<Entity>,
+    feet: [Option<WalkFoot>; 4],
+    blend: f32,
+    settle: Option<f32>,
+}
+
 #[derive(Component)]
 pub struct Anim {
     pub yaw: f32,
     pub target_yaw: Option<f32>,
     walk: f32,
     speed: f32,
+    contacts: WalkContacts,
     last: Vec3,
     time: f32,
     seed: f32,
@@ -777,6 +810,7 @@ impl Anim {
             target_yaw: None,
             walk: 0.0,
             speed: 0.0,
+            contacts: WalkContacts::default(),
             last: at,
             time: 0.0,
             seed: rand(seed, 2) * 10.0,
@@ -796,24 +830,31 @@ impl Anim {
     }
 
     pub fn act(&mut self, action: Move) {
+        self.contacts = WalkContacts::default();
         self.action = Some((action, 0.0));
     }
 
     pub fn hit(&mut self, delay: f32) {
+        self.contacts = WalkContacts::default();
         self.hurt = Some(-delay);
     }
 
     pub fn miss(&mut self, delay: f32) {
+        self.contacts = WalkContacts::default();
         self.dodge = Some(-delay);
     }
 }
 
+mod anatomy;
 mod animation;
+#[cfg(test)]
+mod art_contract_tests;
 mod corpse;
 mod effects;
 mod geometry;
 #[cfg(test)]
 mod reaction_tests;
+mod robe;
 
 pub use animation::{animate, Boredom, BORED_AFTER};
 pub use corpse::{snuff, spawn_corpse, Snuffed};

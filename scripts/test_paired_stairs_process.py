@@ -28,9 +28,14 @@ class PairedStairsProcess(ProcessTestCase):
         self.assertEqual(underfoot(blocked)["key"], here["key"])
         self.assertEqual(blocked["tick"], initial["tick"])
 
-        self.wizard_command(wizard, json.dumps({"type": "set_body", "actor": 1,
+        reshaped = self.wizard_command(wizard, json.dumps({"type": "set_body", "actor": 1,
             "cells": [[0, 0, 0]], "eye": [0, 0, 0], "mass": 80}))
+        # Wizard acknowledgement is on another connection. Wait for the player
+        # to apply the replacement body and its new command context.
+        self.frame(player, lambda frame: frame["synchronized"] and frame.get("state") is not None
+                   and frame["state"]["revision"] == reshaped["state"]["revision"])
         arrived = self.act(player, {"type": "move", "direction": "down"})
+        self.assertIsNone(arrived["error"])
         self.assertEqual(underfoot(arrived["state"]["observation"])["key"], landing)
         self.assertEqual(arrived["state"]["observation"]["tick"], "100")
         wall = {"x": 1, "y": 0, "z": 0}

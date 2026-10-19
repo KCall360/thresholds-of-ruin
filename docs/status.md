@@ -448,6 +448,10 @@ checks do not replace complete Windows/Linux debug/release CI before merge.
   ASCII map/look/inventory redraw on palette changes and recover safely.
   Shared creature seeds and captured corpse appearance support the optional,
   independently maintained [3D prototype](../crates/client-3d/README.md).
+  The prototype adds shared body/fitting dimensions, correlated build silhouettes,
+  fitted garment surfaces and family-specific support motion. See the
+  [art continuation plan](plans/3d-art-continuation.md) for visual-review limits
+  and the unfinished garment/equipment authoring boundary.
   Scenario overrides (including Rogue letters), general trait specifications
   and server-stored player choices remain deferred. See the
   [presentation plan](plans/presentation.md).

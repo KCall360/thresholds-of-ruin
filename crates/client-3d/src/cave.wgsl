@@ -1,20 +1,19 @@
 // Cave rock: stratified slate walls with mineral flecks; umber floors with
 // gravel, damp patches and faintly glowing moss. Rock between the camera and
 // the player dissolves in a dithered cutaway.
-#import bevy_pbr::{
-    pbr_fragment::pbr_input_from_standard_material,
-    pbr_functions::alpha_discard,
-}
-
 #ifdef PREPASS_PIPELINE
-#import bevy_pbr::{
-    prepass_io::{VertexOutput, FragmentOutput},
-    pbr_deferred_functions::deferred_output,
-}
+#import bevy_pbr::prepass_io::VertexOutput
+#ifndef CAVE_SHADOW_PASS
+#import bevy_pbr::prepass_io::FragmentOutput
+#ifdef MOTION_VECTOR_PREPASS
+#import bevy_pbr::pbr_prepass_functions::calculate_motion_vector
+#endif
+#endif
 #else
 #import bevy_pbr::{
+    pbr_fragment::pbr_input_from_standard_material,
+    pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     forward_io::{VertexOutput, FragmentOutput},
-    pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
 }
 #endif
 
@@ -69,16 +68,10 @@ fn bayer(frag: vec2<f32>) -> f32 {
     return (m[y * 4u + x] + 0.5) / 16.0;
 }
 
-@fragment
-fn fragment(
-    in: VertexOutput,
-    @builtin(front_facing) is_front: bool,
-) -> FragmentOutput {
-    var pbr_input = pbr_input_from_standard_material(in, is_front);
-    let wp = in.world_position.xyz;
-    let n = normalize(in.world_normal);
-
-#ifndef PREPASS_PIPELINE
+// Keep camera colour and normal/depth coverage identical down to the Bayer
+// pixel. Shadow views reuse this world-space opening; only its dithered
+// transition is sampled on the light's framebuffer instead of the camera's.
+fn discard_cutaway(wp: vec3<f32>, frag_coord: vec2<f32>) {
     // Dissolve rock above the floor that stands between camera and player.
     if (wp.y > cave.player.w + 0.12) {
         let chest = cave.player.xyz;
@@ -93,7 +86,7 @@ fn fragment(
         let stub = cave.player.w + 0.45;
         if (ahead > 0.6 && wp.y > stub) {
             let edge = smoothstep(stub, stub + 0.3, wp.y) * smoothstep(0.6, 1.4, ahead);
-            if (edge > bayer(in.position.xy)) {
+            if (edge > bayer(frag_coord)) {
                 discard;
             }
         }
@@ -101,12 +94,59 @@ fn fragment(
             let perp = length(v - to_cam * t);
             let r = cave.camera.w + max(t, 0.0) * 0.12;
             let cut = smoothstep(r, r * 0.6, perp);
-            if (cut > bayer(in.position.xy)) {
+            if (cut > bayer(frag_coord)) {
                 discard;
             }
         }
     }
+}
+
+#ifdef PREPASS_PIPELINE
+#ifdef CAVE_SHADOW_PASS
+#ifdef UNCLIPPED_DEPTH_ORTHO_EMULATION
+@fragment
+fn fragment(in: VertexOutput) -> @builtin(frag_depth) f32 {
+    discard_cutaway(in.world_position.xyz, in.position.xy);
+    return in.unclipped_depth;
+}
+#else
+@fragment
+fn fragment(in: VertexOutput) {
+    discard_cutaway(in.world_position.xyz, in.position.xy);
+}
 #endif
+#else
+@fragment
+fn fragment(
+    in: VertexOutput,
+    @builtin(front_facing) is_front: bool,
+) -> FragmentOutput {
+    var out: FragmentOutput;
+#ifdef NORMAL_PREPASS
+    // Keep the main-camera prepass pixel-identical to the colour pass.
+    discard_cutaway(in.world_position.xyz, in.position.xy);
+    out.normal = vec4(normalize(in.world_normal) * 0.5 + vec3(0.5), 1.0);
+#endif
+#ifdef MOTION_VECTOR_PREPASS
+    out.motion_vector = calculate_motion_vector(in.world_position, in.previous_world_position);
+#endif
+#ifdef UNCLIPPED_DEPTH_ORTHO_EMULATION
+    out.frag_depth = in.unclipped_depth;
+#endif
+    return out;
+}
+#endif
+#else
+@fragment
+fn fragment(
+    in: VertexOutput,
+    @builtin(front_facing) is_front: bool,
+) -> FragmentOutput {
+    var pbr_input = pbr_input_from_standard_material(in, is_front);
+    let wp = in.world_position.xyz;
+    let n = normalize(in.world_normal);
+
+    discard_cutaway(wp, in.position.xy);
 
     let floor_w = smoothstep(0.55, 0.85, n.y);
     // Walls: broad tone, strata, crevices and bright mineral flecks.
@@ -163,15 +203,12 @@ fn fragment(
     pbr_input.N = normalize(pbr_input.N - tangent_grad * mix(0.05, 0.03, floor_w));
 
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
-#ifdef PREPASS_PIPELINE
-    let out = deferred_output(in, pbr_input);
-#else
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);
     // Dark body awareness and memory remain readable without accepting light
     // from the artistic fill or an adjacent decorative point light.
     out.color = mix(vec4(vec3(0.018, 0.022, 0.035) * shade, 1.0), out.color, lit);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
-#endif
     return out;
 }
+#endif
