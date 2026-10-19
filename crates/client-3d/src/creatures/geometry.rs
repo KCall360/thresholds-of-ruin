@@ -1216,6 +1216,74 @@ pub(super) fn drape_point(
     )
 }
 
+/// One articulated plate: a band from `top` down to `bottom` (heights along a
+/// limb), with its radius at each edge.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Lame {
+    pub top: f32,
+    pub bottom: f32,
+    pub radius_top: f32,
+    pub radius_bottom: f32,
+}
+
+/// Overlapping lames down a limb: each band's upper edge tucks inside the
+/// lower edge of the one above, so the plates can slide as the limb bends
+/// without opening a gap. Radii taper from `radius_top` to `radius_bottom`.
+pub(super) fn lames(
+    top: f32,
+    count: usize,
+    length: f32,
+    radius_top: f32,
+    radius_bottom: f32,
+) -> Vec<Lame> {
+    let overlap = length * 0.3;
+    let radius = |y: f32| {
+        let t = ((top - y) / (length * count as f32)).clamp(0.0, 1.0);
+        radius_top + (radius_bottom - radius_top) * t
+    };
+    (0..count)
+        .map(|k| {
+            let upper = top - k as f32 * (length - overlap);
+            let lower = upper - length;
+            // Each band flares slightly at its lower edge and starts a little
+            // inside the band above it.
+            let tuck = if k == 0 { 0.0 } else { 0.004 };
+            Lame {
+                top: upper,
+                bottom: lower,
+                radius_top: radius(upper) - tuck,
+                radius_bottom: radius(lower) + 0.003,
+            }
+        })
+        .collect()
+}
+
+/// Draw overlapping lames as shallow metal bands with darker lower edges.
+fn plate_lames(
+    b: &mut Builder,
+    top: f32,
+    count: usize,
+    length: f32,
+    radius_top: f32,
+    radius_bottom: f32,
+) {
+    for (k, lame) in lames(top, count, length, radius_top, radius_bottom)
+        .into_iter()
+        .enumerate()
+    {
+        let shade = 1.0 - 0.04 * k as f32;
+        b.tube(
+            &[Vec3::Y * lame.top, Vec3::Y * lame.bottom],
+            &[
+                Vec2::new(lame.radius_top, lame.radius_top * 0.96),
+                Vec2::new(lame.radius_bottom, lame.radius_bottom * 0.96),
+            ],
+            16,
+            &|_, _, along| STEEL * shade * if along > 0.85 { 0.82 } else { 1.0 },
+        );
+    }
+}
+
 /// The skirt of each kind's tunic, robe or coat: its colour and length.
 fn tunic_skirt(l: &Look, tunic: Vec3) -> (Vec3, f32) {
     match l.style {
@@ -3619,6 +3687,15 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             }
             if metal {
                 biped_pauldron(p, side, b);
+                // Rerebrace lames below the pauldron, each tucked under the last.
+                plate_lames(
+                    &mut p.metal,
+                    -0.08 * arm_len,
+                    3,
+                    0.055 * arm_len,
+                    0.064 * b,
+                    0.058 * b,
+                );
             }
         });
         let lower = kit.joint(fore, upper, body.elbow(), &format!("fore{tag}"), |p| {
@@ -3812,6 +3889,10 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     ],
                     pants,
                 );
+            } else if style == Style::Sentinel {
+                // Cuisses over the mail: overlapping lames down to the knee cop.
+                sculpted_limb(&mut p.matte, body.thigh, pants);
+                plate_lames(&mut p.metal, -0.04, 4, 0.085, 0.104 * b, 0.075 * b);
             } else if trousered {
                 // Trousers ease over the thigh, which stays fullest above the middle.
                 trouser_leg(&mut p.matte, body.thigh, b, false, pants);

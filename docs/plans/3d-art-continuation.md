@@ -131,7 +131,10 @@ stay neat. Cloaks, capes, tunic skirts, coat tails and rags now hang on
 their own drape pivots: a cloak flares back as its wearer travels and trails
 through turns, skirts sway with the stride, and cloth at rest barely stirs.
 This is a lagged swing, not cloth simulation, so contact with legs is not
-checked. Torso regions and plate articulation remain to be done.
+checked. Sentinel plate now articulates: overlapping lames form the
+rerebrace under each pauldron and the cuisses over the thigh, each band tucked
+inside the one above so bending cannot open a gap. Supported/eased/free torso
+regions remain to be done.
 
 ### 3. Separate composition concerns without a new content format
 
