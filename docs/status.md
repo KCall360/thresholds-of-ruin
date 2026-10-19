@@ -496,7 +496,10 @@ checks do not replace complete Windows/Linux debug/release CI before merge.
   Shared creature seeds and captured corpse appearance support the optional,
   independently maintained [3D prototype](../crates/client-3d/README.md).
   The prototype adds shared body/fitting dimensions, correlated build silhouettes,
-  fitted garment surfaces and family-specific support motion. See the
+  fitted garment surfaces and family-specific support motion. Every Rogue
+  monster has its own recipe and motions, drawn from the maintainer's concept
+  sheets (see the [Rogue creature models plan](plans/rogue-creature-models.md)).
+  See the
   [art continuation plan](plans/3d-art-continuation.md) for visual-review limits
   and the unfinished garment/equipment authoring boundary.
   Scenario overrides (including Rogue letters), general trait specifications

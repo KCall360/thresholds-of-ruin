@@ -1,6 +1,8 @@
 use super::anatomy::{FOOT_SCALE, HIP_SCALE};
-use super::geometry::{snake_segment_radius, BIRD_ANKLE, EQUINE_ANKLE, SNAKE};
+use super::geometry::{snake_segment_radius, BIRD_ANKLE, SNAKE};
 use super::*;
+
+mod rogue;
 
 // ---------------------------------------------------------------------------
 // Posing.
@@ -84,10 +86,12 @@ pub fn animate(
         };
         let target_speed = (step / dt.max(1e-4) / (4.0 * rig.scale.max(0.2))).clamp(0.0, 1.0);
         anim.speed += (target_speed - anim.speed) * (1.0 - (-dt * 10.0).exp());
+        // Fliers never touch the floor; a rooted plant never steps.
         let supported = matches!(
             rig.plan,
             Plan::Biped | Plan::Bird | Plan::Quadruped | Plan::Centaur
-        ) && !placed
+        ) && !rig.style.flies()
+            && !placed
             && delta.y.abs() <= 0.001
             && !anim.quiet
             && anim.action.is_none()
@@ -181,10 +185,12 @@ fn pose(rig: &Rig, a: &mut Anim, fun: f32, dt: f32, supported: bool, moving: boo
     let calm = (1.0 - ease(s * 4.0).max(a.contacts.blend))
         * f32::from(u8::from(m.is_none() && a.dead.is_none()));
     if calm > 0.0 && !a.quiet {
-        idle(&mut p, rig, a.time + a.seed * 3.7, a.seed, calm);
+        if !rogue::idle(&mut p, rig, a.time + a.seed * 3.7, a.seed, calm) {
+            idle(&mut p, rig, a.time + a.seed * 3.7, a.seed, calm);
+        }
         if fun > 0.0 {
             let (w, gag, progress) = antic(a);
-            if w > 0.0 {
+            if w > 0.0 && !rogue::antics(&mut p, rig, a.time, gag, progress, w * calm * fun) {
                 antics(&mut p, rig, a.time, gag, progress, w * calm * fun);
             }
         }
@@ -192,8 +198,10 @@ fn pose(rig: &Rig, a: &mut Anim, fun: f32, dt: f32, supported: bool, moving: boo
     let world_walk = supported && (moving || a.contacts.rig.is_some());
     match rig.plan {
         Plan::Biped => biped_pose(&mut p, rig, s, w, breath, m, t),
+        Plan::Bird if rig.style.flies() => rogue::flier_pose(&mut p, rig, a, s, breath, m, t),
         Plan::Bird => bird_pose(&mut p, s, w, breath, m, t, !world_walk),
         Plan::Quadruped | Plan::Centaur => quad_pose(&mut p, rig, s, w, breath, m, t, !world_walk),
+        Plan::Rooted => rogue::rooted_pose(&mut p, a, breath, m, t),
         Plan::Serpent | Plan::Floater | Plan::Marker => {}
     }
     if world_walk {
@@ -240,6 +248,14 @@ fn biped_gait(style: Style) -> BipedGait {
         Style::Caster => (1.0, 0.57, 0.08, 0.075, 0.18, 0.011),
         Style::Sentinel => (1.0, 0.57, 0.09, 0.075, 0.2, 0.011),
         Style::Scout => (1.05, 0.55, 0.11, 0.08, 0.3, 0.013),
+        Style::Orc => (1.12, 0.6, 0.09, 0.09, 0.26, 0.014),
+        Style::Troll => (1.3, 0.64, 0.07, 0.1, 0.15, 0.012),
+        Style::Leprechaun => (0.92, 0.52, 0.12, 0.07, 0.32, 0.018),
+        Style::Nymph => (0.96, 0.53, 0.12, 0.07, 0.3, 0.016),
+        Style::Medusa => (1.1, 0.6, 0.07, 0.07, 0.15, 0.008),
+        // The dead glide, barely lifting their feet.
+        Style::Phantom => (1.2, 0.62, 0.04, 0.05, 0.05, 0.004),
+        Style::Wraith => (1.25, 0.63, 0.04, 0.05, 0.04, 0.004),
         _ => (1.0, 0.55, 0.11, 0.075, 0.28, 0.014),
     };
     BipedGait {
@@ -380,6 +396,7 @@ fn walk_legs(rig: &Rig, a: &Anim) -> [Option<WalkLeg>; 4] {
         }
         Plan::Quadruped | Plan::Centaur => {
             let trot = ease((a.speed - 0.38) / 0.45);
+            let legs = rig.legs;
             for (i, (leg, shin, foot, offset)) in [
                 (J::FL, J::FLs, J::HoofFL, 0.0),
                 (J::FR, J::FRs, J::HoofFR, 0.5),
@@ -401,10 +418,10 @@ fn walk_legs(rig: &Rig, a: &Anim) -> [Option<WalkLeg>; 4] {
                     if rig.style == Style::Unicorn {
                         0.11
                     } else {
-                        0.075
+                        0.075 * legs
                     },
                     if i < 2 { 1.0 } else { -1.0 },
-                    Some(0.081),
+                    Some(rig.ankle_floor),
                 );
             }
         }
@@ -588,7 +605,7 @@ fn grounded_world_walk(p: &mut Pose, rig: &Rig, a: &mut Anim, dt: f32, moving: b
     match rig.plan {
         Plan::Biped => p.off[J::Lift as usize].y -= biped_gait(rig.style).crouch * stride * weight,
         Plan::Bird => p.off[J::Lift as usize].y -= 0.09 * (stride - procedural) * weight,
-        _ => p.off[J::Lift as usize].y -= 0.113 * (stride - procedural) * weight,
+        _ => p.off[J::Lift as usize].y -= 0.113 * rig.legs * (stride - procedural) * weight,
     }
     let mut targets = [Vec3::ZERO; 4];
     let mut headings = [a.yaw; 4];
@@ -936,6 +953,7 @@ fn grounded_action(p: &mut Pose, rig: &Rig, a: &Anim, m: Move, t: f32) {
         Move::Heavy => (0, 0.18),
         Move::Hook => (0, 0.14),
         Move::Touch(_) => (0, 0.25),
+        Move::Bite(_) => (0, 0.2),
         Move::Combo(other) => (usize::from(other), 0.14),
         _ => (0, 0.0),
     };
@@ -1188,7 +1206,7 @@ fn antics(p: &mut Pose, rig: &Rig, time: f32, gag: u32, progress: f32, k: f32) {
                 p.r(J::Lift, Quat::from_rotation_y(spins(progress, 3.0)));
             }
         }
-        Plan::Marker => {}
+        Plan::Marker | Plan::Rooted => {}
         Plan::Floater => match gag {
             0 => {
                 // Loop the loop.
@@ -1399,7 +1417,7 @@ fn idle(p: &mut Pose, rig: &Rig, time: f32, seed: f32, k: f32) {
             p.r(J::FL, fwd(0.5 * stamp));
             p.r(J::FLs, fwd(-0.9 * stamp));
         }
-        Plan::Serpent | Plan::Floater | Plan::Marker => {}
+        Plan::Serpent | Plan::Floater | Plan::Rooted | Plan::Marker => {}
     }
 }
 
@@ -1799,6 +1817,7 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
             p.r(J::Torso, bow((if upright { 0.12 } else { 0.3 }) * kneel));
             p.r(J::Head, bow((if upright { 0.24 } else { 0.45 }) * kneel));
         }
+        Move::Breath(_) | Move::Gaze | Move::Bite(_) => rogue::biped_move(p, m, t),
     }
 }
 
@@ -1979,7 +1998,7 @@ fn quad_pose(
     let rise = (cycle * 2.0).cos() * (0.008 + 0.01 * trot) * walk;
     // Idle geometry puts every sole on the floor. The lower travelling
     // pelvis leaves room for the knee to flex through a planted full stride.
-    p.o(J::Lift, Vec3::Y * (-0.113 * support + rise));
+    p.o(J::Lift, Vec3::Y * (-0.113 * rig.legs * support + rise));
     p.r(J::Body, bow(pitch) * Quat::from_rotation_z(roll));
     p.r(
         J::Neck,
@@ -2006,7 +2025,9 @@ fn quad_pose(
     }
     let mut rear = 0.0;
     let mut stamp = 0.0;
-    if let Some(m) = m {
+    if rig.style.rogue_beast() {
+        rogue::beast_pose(p, rig, breath, m, t, walk);
+    } else if let Some(m) = m {
         let hit = m.impact();
         let gather = envelope(t, 0.0, hit * 0.55, hit - 0.1, hit);
         let strike = envelope(t, hit - 0.07, hit, hit + 0.06, 1.0);
@@ -2070,7 +2091,7 @@ fn quad_pose(
         let clearance = if rig.style == Style::Unicorn {
             0.11
         } else {
-            0.075
+            0.075 * rig.legs
         };
         let (z, lift) = beast_step(cycle / TAU + offset, stance, span, clearance);
         let hip = rig.rest[thigh as usize];
@@ -2092,8 +2113,8 @@ fn quad_pose(
             Vec3::new(
                 hip.x + side * 0.012 * rear,
                 // The swept horn wall sits below the shallow inner sole.
-                0.081 + lift * walk + raised,
-                hip.z + EQUINE_ANKLE.z + z * walk + lead,
+                rig.ankle_floor + lift * walk + raised * rig.legs,
+                hip.z + rig.rest[hoof as usize].z + z * walk + lead,
             ),
             if front { 1.0 } else { -1.0 },
             support,
@@ -2193,9 +2214,13 @@ fn death_pose(p: &mut Pose, rig: &Rig, d: f32, seed: f32) {
             );
         }
         Plan::Quadruped => {
+            // Fallen on its side: the body lies at its own girth above the
+            // floor, close beside the spot where it stood.
+            let height = rig.rest[J::Body as usize].y;
             p.rot[J::Lift as usize] = Quat::from_rotation_z(side * FRAC_PI_2 * d);
-            p.off[J::Lift as usize] = Vec3::new(side * 0.72 * d, 0.2 * d, 0.0);
+            p.off[J::Lift as usize] = Vec3::new(side * height * 0.715 * d, rig.girth * d, 0.0);
             limp_legs(p, side, d);
+            rogue::death(p, rig, d, side);
             // Neck stretched out along the ground, head resting on it.
             p.r(
                 J::Neck,
@@ -2207,6 +2232,8 @@ fn death_pose(p: &mut Pose, rig: &Rig, d: f32, seed: f32) {
                 fwd(0.6 * d) * Quat::from_rotation_z(-side * 0.6 * d),
             );
         }
+        Plan::Bird if rig.style.flies() => rogue::death(p, rig, d, side),
+        Plan::Rooted => rogue::death(p, rig, d, side),
         Plan::Bird => {
             p.rot[J::Lift as usize] = Quat::from_rotation_z(side * 1.5 * d);
             p.off[J::Lift as usize] = Vec3::new(side * 0.62 * d, 0.2 * d, 0.0);
@@ -2289,6 +2316,35 @@ fn settled_ice_height(rotation: Quat) -> f32 {
     -bottom * 0.65 + 0.006
 }
 
+/// A flat spiral laid from the tail outward, its last few bands lifting the
+/// head in an S over the coil. The rattle rises from the centre.
+fn rattle_coil(n: usize) -> [Vec3; SNAKE] {
+    let mut points = [Vec3::ZERO; SNAKE];
+    let mut theta = 0.0f32;
+    for j in 0..n {
+        let i = n - 1 - j;
+        let radius = 0.07 + 0.075 * theta / TAU;
+        points[i] = Vec3::new(theta.cos() * radius, 0.0, theta.sin() * radius);
+        theta += 0.068 / radius;
+    }
+    for (i, point) in points.iter_mut().enumerate().take(n) {
+        let head = (1.0 - i as f32 / 5.0).max(0.0);
+        let rattle = (i as f32 + 4.0 - n as f32).max(0.0);
+        point.y = snake_ground_height(i, 0.0) + 0.3 * ease(head) + 0.05 * rattle;
+    }
+    if n > 1 {
+        // Face the head forward and draw the coil back beneath it.
+        let forward = (points[0] - points[1]).with_y(0.0).normalize_or(Vec3::Z);
+        let turn = Quat::from_rotation_arc(forward, Vec3::Z);
+        let head = turn * points[0].with_y(0.0);
+        for point in points.iter_mut().take(n) {
+            let y = point.y;
+            *point = (turn * point.with_y(0.0) - head + Vec3::Z * 0.42).with_y(y);
+        }
+    }
+    points
+}
+
 /// Snakes and floaters place their pieces along paths rather than joints.
 fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transform, Without<Rig>>) {
     let (m, t) = a
@@ -2306,6 +2362,9 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
     let strike = m
         .filter(|m| m.offensive())
         .map_or(0.0, |_| envelope(t, hit - 0.07, hit, hit + 0.06, 1.0));
+    if rogue::place(rig, a, fun, joints) {
+        return;
+    }
     match rig.plan {
         Plan::Serpent => {
             let n = rig.segments.len().min(SNAKE);
@@ -2323,6 +2382,11 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
             );
             let mut settled = Vec3::new(0.0, snake_ground_height(0, 2.6), 0.6);
             let mut points = [Vec3::ZERO; SNAKE];
+            // A rattlesnake rests coiled, head raised over its rattle.
+            let rattler = rig.style == Style::Rattlesnake;
+            let still = (1.0 - ease(a.speed * 4.0)) * f32::from(u8::from(m.is_none()));
+            let coiled = if rattler { still * 0.92 } else { 0.0 };
+            let coil = rattle_coil(n);
             let mut previous_y = live.y;
             for (i, point) in points.iter_mut().enumerate().take(n) {
                 let f = i as f32;
@@ -2346,7 +2410,7 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
                         -fall_yaw.cos() * fall_span,
                     );
                 }
-                let mut at = live.lerp(settled, d);
+                let mut at = live.lerp(coil[i], coiled).lerp(settled, d);
                 if spring > 0.0 {
                     // The optional long-idle gag winds into a continuous helix,
                     // with approximately the same spacing as the resting body.
@@ -2372,10 +2436,18 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
                 } else {
                     tangent.normalize_or(Vec3::Z)
                 };
+                // The rattle buzzes as a warning, at rest and when it strikes.
+                let shake = if rattler && i + 3 >= n {
+                    let buzz = ((calm * 0.6 + gather) * alive).min(1.0);
+                    Quat::from_rotation_y((a.time * 42.0 + i as f32).sin() * 0.35 * buzz)
+                } else {
+                    Quat::IDENTITY
+                };
                 if let Ok(mut transform) = joints.get_mut(*e) {
                     transform.translation = points[i];
                     transform.rotation = Quat::from_rotation_arc(Vec3::Z, direction)
-                        * Quat::from_rotation_z(d * 2.6);
+                        * Quat::from_rotation_z(d * 2.6)
+                        * shake;
                 }
             }
             if let Some(tongue) = rig.joint(J::Snout) {

@@ -52,7 +52,8 @@ and stops it on exit. Other options:
 - `--scenario DIR`, `--save FILE`, `--save-root DIR`, `--seed N`, `--server-bin EXE`
 - `--connect 127.0.0.1:PORT [--actor 1] [--observe]` joins a running server
   (token from `TOR_SERVER_TOKEN`)
-- `--bestiary` shows every creature walking, then performing all sixteen moves
+- `--bestiary` shows every creature, one row at a time (people, beasts, the
+  Rogue folk and the Rogue beasts), walking, then performing all nineteen moves
   on a schedule, then a close-up of each at rest and in its signature move
   (with `--capture DIR`, named screenshots of each moment); `--portraits`
   skips straight to the close-ups; `--idles` shows everyone standing at rest;
@@ -71,18 +72,20 @@ and stops it on exit. Other options:
   are blank
 - `--capture-every SECS` also works in the offline bestiary for time-stamped
   motion frames; `--quit-after SECS` bounds its timeline after warm-up
-- `--travel-study` runs two 35-second offline groups through slow curves, a
+- `--travel-study` runs the four 40-second offline groups through slow curves, a
   3.2-cell/s shuttle, sharp turns, abrupt stops/restarts, and action, hurt, dodge
   and death interruptions. Everyone shares an offset within 0.9 cells of home.
   Try `--travel-study --capture DIR --capture-warmup 12 --capture-every 0.1`,
   then repeat with `--azimuth 90` to inspect feet and profiles. The study clock
   slows during render stalls to preserve the animation's time step; capture
-  timestamps and `--quit-after` use that clock. It exits after 70 study seconds
+  timestamps and `--quit-after` use that clock. It exits after 160 study seconds
   and pending captures finish. This mode cannot combine with gallery, lineups,
   idles/antics or portraits/photos.
 - `--lineups` (with `--capture DIR`) shows five individuals of each creature
   side by side, women and men alternating among people, with close-ups of
-  the first two individuals.
+  the first two individuals. `--family NAME[,NAME...]` limits the line-ups to
+  the named creatures, as the bestiary labels them (for example
+  `--lineups --family "dragon,venus flytrap"`).
   Lineup capture deadlines use real time and wait for each GPU readback.
   Slow frames stop at each camera and family boundary so no view is skipped;
   creature animation retains its capped timestep.
@@ -279,11 +282,27 @@ Objects:
   Guardian and Yeti retain their separate mass recipes. These fitting rules are
   foundations for equipment composition; interchangeable worn armor and general
   data-driven creature authoring remain future integration work.
+- The Rogue bestiary: every monster in `scenarios/rogue-exploration` has a
+  recipe of its own, drawn from the maintainer's concept sheets in
+  [`docs/art/rogue-concepts`](../../docs/art/rogue-concepts/README.md). The orc,
+  troll, leprechaun, nymph, medusa, phantom and wraith are dressed on the
+  shared humanoid body, as women and men; the medusa's hair is a crown of
+  weaving serpents and the phantom is drawn translucent as its normal look.
+  The bat and kestrel are always drawn on the wing, beating membrane or
+  feathered wings, and never plant feet. The griffin, dragon, jabberwock,
+  aquator and xeroc keep the four-legged support rig on their own short, heavy
+  legs and feet, with jaws, folded wings that mantle, tails and the aquator's
+  segmented tendrils. The Venus flytrap is rooted, swaying on a two-jointed
+  stem with a snapping trap, and the rattlesnake rests coiled, its rattle
+  buzzing. A disguised xeroc remains the item the server discloses.
 - Idles: at rest everyone breathes, shifts weight and looks about, with a
   fidget of their own every few seconds: the hero checks the blade, casters
   study a raised palm, sentinels settle the shield, the scout flips the dagger,
   the hobgoblin taps its club, the zombie sways, the yeti beats its chest, the
-  emu pecks, horses graze and stamp, the snake rears to taste the air.
+  emu pecks, horses graze and stamp, the snake rears to taste the air. The
+  orc cracks its knuckles, the troll scratches its scalp, the leprechaun flips
+  a coin, the nymph opens a welcoming hand, the medusa flexes her claws, the
+  wraith reaches, the dragon snorts, the griffin preens and the xeroc gapes.
 - Animation: walk cycles paced to the distance moved use separate support and
   swing paths. A zombie drags a leg, a guardian or yeti lumbers, the emu stabilizes
   its head, horses change from a four-beat walk to diagonal trot, the snake
@@ -293,7 +312,11 @@ Objects:
   follow-through, a heavy overhead smash with a shockwave (Rattling Blow), a
   cast that launches a bolt in the spell's element (Spark Lance), a hex of
   drifting violet motes (Falter), and a guard or ward with rising rings (Brace
-  for Impact, Shell). Targets flinch when hit and sidestep a miss, timed to
+  for Impact, Shell). Rogue signature abilities have their own motions: the
+  dragon's breath pours from its open jaw, the medusa's confusing gaze kindles
+  her eyes as her serpents rear, the aquator sweeps its tendrils to corrode,
+  the wraith drains, a xeroc lunges from ambush and the rattlesnake's bite
+  carries venom. Targets flinch when hit and sidestep a miss, timed to
   the blow landing; beasts rear and stamp or peck, the centaur thrusts.
 - Faces and torsos are sculpted (`src/sdf.rs`): signed-distance shapes for cranium, jaw,
   cheekbones, brow, nose, lips, chin and ears blend into one surface, with
@@ -324,7 +347,12 @@ Objects:
   or polish the shield, the scout juggles the dagger or tiptoes, the guardian
   does the robot, the zombie's head falls off (it catches it), the vampire
   pirouettes, the emu and the quagga race in circles, horses rear and buck,
-  the snake coils into a bouncing spring, wisps loop the loop.
+  the snake coils into a bouncing spring, wisps loop the loop. The leprechaun
+  jigs or spins nearly out of sight, the nymph dances, the medusa sways like a
+  snake charmer, the dead rise and drift or loom, fliers loop and roll, the
+  dragon and griffin rear beating their wings, the jabberwock jabbers, the
+  aquator hops, the xeroc spins on its shell and the flytrap dances or snaps
+  at flies only it can see.
 - Death: a creature seen to die collapses onto its back, limbs limp, head
   lolled (beasts on their side, legs slack); its glow fades to embers and any
   light it carried goes out. Its body stays as its corpse,

@@ -2,6 +2,8 @@ use super::anatomy::{storybook_part, BootShape, HumanoidBody, LimbShape};
 use super::animation::ease;
 use super::*;
 
+mod rogue;
+
 #[cfg(test)]
 mod art_contract_tests {
     use super::*;
@@ -54,6 +56,8 @@ struct Kit<'a, 'w, 's> {
     meshes: &'a mut Assets<Mesh>,
     rig: Rig,
     key: String,
+    /// Every part is drawn translucent (a phantom).
+    ghost: bool,
 }
 
 impl Kit<'_, '_, '_> {
@@ -83,6 +87,7 @@ impl Kit<'_, '_, '_> {
 
     fn part(&mut self, part: &str, build: impl FnOnce(&mut Parts)) -> Model {
         let soft = true;
+        let ghost = self.ghost;
         self.library
             .get(format!("creature/{}/{part}", self.key), self.meshes, || {
                 let mut p = Parts::default();
@@ -90,6 +95,9 @@ impl Kit<'_, '_, '_> {
                     p.soften();
                 }
                 build(&mut p);
+                if ghost {
+                    p.ghostify();
+                }
                 p
             })
     }
@@ -138,8 +146,12 @@ pub fn spawn(
             style: look.style,
             scale: look.scale,
             robe: None,
+            ankle_floor: 0.081,
+            legs: 1.0,
+            girth: 0.2,
         },
         key: look.key.clone(),
+        ghost: look.style.ghostly(),
     };
     let lift = kit
         .commands
@@ -152,8 +164,11 @@ pub fn spawn(
     kit.rig.joints[J::Lift as usize] = Some(lift);
     match look.plan {
         Plan::Biped => biped(&mut kit, lift, look),
+        Plan::Bird if look.style.flies() => rogue::flier(&mut kit, lift, look),
         Plan::Bird => bird(&mut kit, lift, look),
+        Plan::Quadruped if look.style.rogue_beast() => rogue::beast(&mut kit, lift, look),
         Plan::Quadruped => quadruped(&mut kit, lift, look, false),
+        Plan::Rooted => rogue::flytrap(&mut kit, lift, look),
         Plan::Centaur => quadruped(&mut kit, lift, look, true),
         Plan::Serpent => serpent(&mut kit, lift, look),
         Plan::Floater => floater(&mut kit, lift, look),
@@ -227,6 +242,28 @@ fn hair_color(l: &Look) -> Vec3 {
             HAIRS[0],
         ][t],
         Style::Zombie => HAIRS[t] * 0.75 + Vec3::splat(0.05),
+        Style::Orc | Style::Troll => {
+            [HAIRS[0], HAIRS[1], DARK * 3.0, HAIRS[0], HAIRS[1], HAIRS[1]][t]
+        }
+        // Every leprechaun is a redhead, from copper to deep auburn.
+        Style::Leprechaun => [
+            Vec3::new(0.78, 0.32, 0.1),
+            Vec3::new(0.7, 0.26, 0.08),
+            Vec3::new(0.86, 0.4, 0.14),
+            Vec3::new(0.6, 0.22, 0.08),
+            Vec3::new(0.82, 0.36, 0.12),
+            Vec3::new(0.66, 0.28, 0.12),
+        ][t],
+        Style::Nymph => [HAIRS[4], HAIRS[2], HAIRS[1], HAIRS[4], HAIRS[3], HAIRS[2]][t],
+        // The dead go white: silver, ash and bone.
+        Style::Phantom | Style::Wraith => [
+            Vec3::new(0.86, 0.86, 0.9),
+            Vec3::new(0.78, 0.8, 0.86),
+            Vec3::new(0.9, 0.88, 0.84),
+            Vec3::new(0.72, 0.74, 0.8),
+            Vec3::new(0.84, 0.84, 0.86),
+            Vec3::new(0.8, 0.78, 0.82),
+        ][t],
         _ => HAIRS[t],
     }
 }
@@ -292,8 +329,11 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
     // the face with its wings, lips with a fitted mouth line, a chin, ears.
     use crate::sdf::{Sculpt, Shape::*};
     let n = if fem { 0.85 } else { 1.0 };
-    let gaunt = matches!(l.style, Style::Zombie | Style::Vampire);
-    let brute = l.style == Style::Hobgoblin;
+    let gaunt = matches!(
+        l.style,
+        Style::Zombie | Style::Vampire | Style::Phantom | Style::Wraith
+    );
+    let brute = matches!(l.style, Style::Hobgoblin | Style::Orc | Style::Troll);
     let mut jaw = if fem {
         Vec3::new(0.069, 0.066, 0.075)
     } else {
@@ -435,8 +475,11 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
         Style::Hero | Style::Scout | Style::Caster | Style::Common | Style::Centaur => {
             (0.006, -0.004, 0.0)
         }
-        Style::Hobgoblin | Style::Sentinel => (-0.004, 0.009, 0.0),
-        Style::Vampire => (0.0, 0.005, 0.006),
+        // Fey grin; the medusa smirks like the vampire.
+        Style::Leprechaun | Style::Nymph => (0.009, -0.004, 0.0),
+        Style::Hobgoblin | Style::Sentinel | Style::Orc | Style::Troll => (-0.004, 0.009, 0.0),
+        Style::Vampire | Style::Medusa => (0.0, 0.005, 0.006),
+        Style::Phantom | Style::Wraith => (-0.003, 0.004, 0.0),
         Style::Zombie => (-0.006, -0.006, 0.0),
         _ => (0.0, 0.0, 0.0),
     };
@@ -593,8 +636,8 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
     }
     // Arched brows, heavier on men, drawn down at the centre in a scowl.
     let brow_scowl = match l.style {
-        Style::Hobgoblin | Style::Sentinel => 0.009,
-        Style::Vampire => 0.005,
+        Style::Hobgoblin | Style::Sentinel | Style::Orc | Style::Troll => 0.009,
+        Style::Vampire | Style::Medusa | Style::Wraith => 0.005,
         Style::Zombie => -0.004,
         _ => -0.002,
     };
@@ -847,6 +890,14 @@ fn hair(p: &mut Parts, l: &Look) {
         Style::Vampire => [0, 2, 0, 2, 4][v.hair as usize],
         Style::Zombie if !v.woman => 2,
         Style::Zombie => 0,
+        // As drawn on their sheets: tousled or swept fey heads, a long
+        // braid on her; the dead wear theirs long and loose.
+        Style::Leprechaun if !v.woman => [2, 0, 2, 2, 0][v.hair as usize],
+        Style::Leprechaun => 3,
+        Style::Nymph if !v.woman => 2,
+        Style::Nymph => 0,
+        Style::Phantom if !v.woman => [4, 3, 4, 4, 3][v.hair as usize],
+        Style::Phantom => 0,
         _ => v.hair,
     };
     let seed = u64::from(v.hair_tone) * 31 + u64::from(style) + u64::from(v.skin) * 7;
@@ -2177,8 +2228,9 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     let furry = style == Style::Yeti;
     // The colour of each layer.
     let tunic = match style {
-        Style::Guardian | Style::Yeti => l.cloth,
-        Style::Sentinel => l.cloth,
+        Style::Orc | Style::Troll => LEATHER * 0.9,
+        // A purple waistcoat under the open green coat.
+        Style::Leprechaun => Vec3::new(0.34, 0.16, 0.36),
         _ => l.cloth,
     };
     let trousers = [
@@ -2196,14 +2248,37 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         Style::Zombie => Vec3::new(0.3, 0.26, 0.2),
         Style::Vampire => DARK * 2.0,
         Style::Scout => Vec3::new(0.22, 0.2, 0.15),
+        Style::Orc => Vec3::new(0.3, 0.2, 0.13),
+        Style::Troll | Style::Nymph => l.skin,
+        Style::Leprechaun => Vec3::new(0.2, 0.17, 0.15),
+        Style::Medusa => Vec3::new(0.16, 0.1, 0.1),
+        Style::Phantom => Vec3::new(0.2, 0.18, 0.24),
+        Style::Wraith => DARK * 2.6,
         _ => l.cloth * 0.55 + LEATHER * 0.45,
     };
+    // Bare-limbed kinds show skin where others wear sleeves and leggings.
+    let bare_arms = matches!(
+        style,
+        Style::Hobgoblin
+            | Style::Zombie
+            | Style::Orc
+            | Style::Troll
+            | Style::Nymph
+            | Style::Medusa
+            | Style::Phantom
+    );
+    let barefoot = matches!(style, Style::Troll | Style::Nymph);
     let boot = match style {
         Style::Guardian => l.skin * 0.85,
         Style::Yeti => l.skin,
         Style::Sentinel => STEEL,
         Style::Zombie => l.skin * 0.8,
         Style::Vampire => DARK,
+        Style::Troll => l.skin * 0.88,
+        Style::Nymph => l.skin,
+        Style::Leprechaun => LEATHER * 0.9,
+        Style::Medusa => Vec3::new(0.4, 0.24, 0.14),
+        Style::Wraith => Vec3::new(0.2, 0.16, 0.14),
         _ => LEATHER * 0.75,
     };
     let sleeve = match style {
@@ -2212,6 +2287,8 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         Style::Sentinel => STEEL,
         Style::Zombie => l.skin,
         Style::Vampire => Vec3::new(0.22, 0.12, 0.17),
+        _ if bare_arms => l.skin,
+        Style::Leprechaun => l.cloth,
         _ => tunic,
     };
     let hand_color = match style {
@@ -2249,6 +2326,13 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             Style::Caster => (l.cloth, 0.84, false),
             Style::Zombie => (tunic * 0.8, 0.2, false),
             Style::Vampire => (DARK, 0.3, false),
+            Style::Orc => (LEATHER * 0.8, 0.18, false),
+            Style::Troll => (l.cloth, 0.26, false),
+            Style::Leprechaun => (l.cloth, 0.4, false),
+            Style::Nymph => (l.cloth, 0.2, false),
+            Style::Medusa => (l.cloth, 0.62, false),
+            Style::Phantom => (l.cloth * 0.9, 0.5, false),
+            Style::Wraith => (l.cloth, 0.66, false),
             Style::Hero | Style::Scout if fem => (tunic * 0.98, 0.19, false),
             _ => (tunic * 0.98, 0.22, false),
         };
@@ -2278,14 +2362,17 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 bottom,
                 skirt_len,
                 if skirt_len > 0.5 { 12 } else { 8 },
-                if matches!(style, Style::Hero | Style::Scout) {
-                    0.055
-                } else {
-                    0.0
+                match style {
+                    Style::Hero | Style::Scout => 0.055,
+                    // Coat tails and a robe-skirt part at the front.
+                    Style::Leprechaun => 0.07,
+                    Style::Medusa => 0.05,
+                    _ => 0.0,
                 },
                 skirt_color,
                 u64::from(l.v.shade),
-                (style == Style::Caster).then_some(l.trim),
+                matches!(style, Style::Caster | Style::Medusa | Style::Leprechaun)
+                    .then_some(l.trim),
             );
         }
         if style == Style::Zombie {
@@ -2484,9 +2571,12 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         // same supports with material-specific room and chest construction.
         use crate::sdf::{Sculpt, Shape::*};
         let (sh, w) = (shoulders * b, waist * b);
-        let trim_neck = !matches!(style, Style::Sentinel | Style::Hobgoblin | Style::Zombie);
+        let trim_neck = !matches!(
+            style,
+            Style::Sentinel | Style::Hobgoblin | Style::Zombie | Style::Orc | Style::Troll
+        );
         let body_shape = torso_shape(body, None, trim_neck);
-        let bare_shoulders = matches!(style, Style::Hobgoblin | Style::Zombie);
+        let bare_shoulders = bare_arms;
         body_shape.mesh(
             &mut p.matte,
             Vec3::new(-0.38, -0.06, -0.21) * b.max(1.0),
@@ -2519,10 +2609,13 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             Style::Scout => Some((LEATHER * 0.85, 0.465, true)),
             Style::Hobgoblin => Some((LEATHER * 0.9, 0.43, true)),
             Style::Vampire => Some((Vec3::new(0.32, 0.05, 0.07), 0.47, false)),
+            Style::Orc => Some((LEATHER * 0.95, 0.44, true)),
+            Style::Leprechaun => Some((l.cloth, 0.47, false)),
+            Style::Wraith => Some((l.cloth * 1.15, 0.48, false)),
             _ => None,
         };
         let shell = outer.map(|(color, top, sleeveless)| {
-            let material = if style == Style::Vampire {
+            let material = if matches!(style, Style::Vampire | Style::Leprechaun | Style::Wraith) {
                 TorsoMaterial::Cloth
             } else {
                 TorsoMaterial::Leather
@@ -2535,7 +2628,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 for side in [-1.0f32, 1.0] {
                     shell.carve(Beyond(Vec3::X * side, 0.185 * sh), 0.008);
                 }
-                if matches!(style, Style::Hero | Style::Scout) {
+                if matches!(style, Style::Hero | Style::Scout | Style::Orc) {
                     // A shaped neckline leaves the fitted upper sides high
                     // while the centre opens over the under-tunic.
                     shell.carve(
@@ -2546,6 +2639,16 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                         0.006,
                     );
                 }
+            }
+            if style == Style::Leprechaun {
+                // The coat hangs open over the waistcoat.
+                shell.carve(
+                    Ellipsoid(
+                        Vec3::new(0.0, 0.2, 0.2 * b),
+                        Vec3::new(0.075 * sh, 0.3, 0.12 * b),
+                    ),
+                    0.008,
+                );
             }
             let c = color;
             shell.mesh(
@@ -2580,6 +2683,9 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             Style::Hero => Some((tunic * 0.75, false)),
             Style::Caster => Some((l.cloth * 0.85, false)),
             Style::Scout => Some((Vec3::new(0.3, 0.42, 0.22), true)),
+            // The orc's red scarf, the phantom's torn shawl.
+            Style::Orc => Some((l.trim, true)),
+            Style::Phantom => Some((l.cloth * 0.85, true)),
             _ => None,
         };
         if let Some((color, tail)) = cowl {
@@ -2795,7 +2901,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     }
                 }
             }
-            _ => {}
+            _ => rogue::torso_details(p, &l, body, garment, &body_shape),
         }
     });
     kit.joint(J::Head, torso, body.head, "head", |p| {
@@ -2958,18 +3064,26 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                         * Affine3A::from_scale(Vec3::splat(size))
                         * Affine3A::from_translation(Vec3::Y * -0.08),
                 );
-                human_face(p, &l, style != Style::Hobgoblin);
+                human_face(p, &l, !matches!(style, Style::Hobgoblin | Style::Troll));
                 let hood_down = matches!(style, Style::Caster | Style::Scout) && l.v.pattern >= 2;
-                let hooded =
-                    matches!(style, Style::Caster | Style::Scout | Style::Sentinel) && !hood_down;
-                if !hooded && style != Style::Hobgoblin {
+                let hooded = matches!(
+                    style,
+                    Style::Caster | Style::Scout | Style::Sentinel | Style::Wraith
+                ) && !hood_down;
+                if !hooded
+                    && !matches!(
+                        style,
+                        Style::Hobgoblin | Style::Orc | Style::Troll | Style::Medusa
+                    )
+                {
                     hair(p, &l);
                 }
-                if l.v.beard
+                if (l.v.beard
                     && matches!(
                         style,
                         Style::Hero | Style::Caster | Style::Scout | Style::Common | Style::Zombie
-                    )
+                    ))
+                    || (style == Style::Leprechaun && !fem)
                 {
                     beard(p, hair_color(&l));
                 }
@@ -3086,11 +3200,11 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                             );
                         }
                     }
-                    Style::Caster | Style::Scout => {
-                        let hood = if style == Style::Caster {
-                            l.cloth
-                        } else {
-                            Vec3::new(0.3, 0.42, 0.22)
+                    Style::Caster | Style::Scout | Style::Wraith => {
+                        let hood = match style {
+                            Style::Caster => l.cloth,
+                            Style::Wraith => l.cloth * 0.85,
+                            _ => Vec3::new(0.3, 0.42, 0.22),
                         };
                         // A deep hood: the shell rounds over the head, a thick
                         // rolled rim frames the face, and the cloth drapes down
@@ -3142,8 +3256,8 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                                 },
                             );
                         }
-                        if fem {
-                            // Locks of hair escape the hood to frame her face.
+                        if fem || style == Style::Wraith {
+                            // Locks of hair escape the hood to frame the face.
                             let c = hair_color(&l);
                             for side in [-1.0f32, 1.0] {
                                 lock(
@@ -3259,7 +3373,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                             0.0,
                         );
                     }
-                    _ => {}
+                    _ => rogue::head_details(p, &l),
                 }
             }
         }
@@ -3308,7 +3422,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     b,
                     arm_len,
                     body.profile.muscle,
-                    metal || matches!(style, Style::Hobgoblin | Style::Zombie),
+                    metal || bare_arms,
                     sleeve,
                 );
             }
@@ -3390,19 +3504,15 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     sleeve,
                 );
             } else {
-                biped_forearm(
-                    m,
-                    b,
-                    arm_len,
-                    body.profile.muscle,
-                    matches!(style, Style::Hobgoblin | Style::Zombie),
-                    sleeve,
-                );
+                biped_forearm(m, b, arm_len, body.profile.muscle, bare_arms, sleeve);
             }
             let cuff = match style {
                 Style::Hero | Style::Scout | Style::Hobgoblin => Some(LEATHER),
+                Style::Orc | Style::Troll | Style::Nymph | Style::Phantom => Some(LEATHER * 0.85),
+                Style::Leprechaun => Some(CREAM),
+                Style::Medusa => Some(l.trim),
                 Style::Sentinel => Some(STEEL * 0.85),
-                Style::Caster | Style::Vampire => Some(l.trim),
+                Style::Caster | Style::Vampire | Style::Wraith => Some(l.trim),
                 _ => None,
             };
             if style == Style::Caster {
@@ -3456,15 +3566,19 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             kit.attach(grip, Transform::IDENTITY, &format!("hand{tag}"), |p| {
                 // Equipment presentation attaches props to HandR. The free
                 // left hand can express the role without opening a held grip.
-                if side > 0.0 && matches!(style, Style::Zombie | Style::Vampire | Style::Caster) {
-                    open_hand(
-                        p,
-                        Vec3::Y * (0.01 * arm_len),
-                        side,
-                        b,
-                        hand_color,
-                        matches!(style, Style::Zombie | Style::Vampire),
-                    );
+                let clawed = matches!(
+                    style,
+                    Style::Zombie
+                        | Style::Vampire
+                        | Style::Troll
+                        | Style::Medusa
+                        | Style::Phantom
+                        | Style::Wraith
+                );
+                let open =
+                    clawed || matches!(style, Style::Caster | Style::Leprechaun | Style::Nymph);
+                if side > 0.0 && open {
+                    open_hand(p, Vec3::Y * (0.01 * arm_len), side, b, hand_color, clawed);
                 } else {
                     fist(p, Vec3::Y * (0.01 * arm_len), side, b, hand_color);
                 }
@@ -3600,7 +3714,13 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 boot,
                 0.0,
             );
-            if !matches!(style, Style::Zombie | Style::Yeti) {
+            if barefoot {
+                // Wrappings bind the ankle and calf of a bare leg.
+                for y in [-0.3f32, -0.36] {
+                    p.satin
+                        .torus(Vec3::Y * y, Vec3::Y, 0.062 * b, 0.01, 12, 3, LEATHER * 0.8);
+                }
+            } else if !matches!(style, Style::Zombie | Style::Yeti) {
                 let (radius, thickness) = (boot_shape.cuff_radius, boot_shape.cuff_thickness);
                 p.satin.torus(
                     Vec3::Y * boot_top,
@@ -3612,7 +3732,10 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     boot * 1.15,
                 );
             }
-            if matches!(style, Style::Hero | Style::Scout | Style::Hobgoblin) {
+            if matches!(
+                style,
+                Style::Hero | Style::Scout | Style::Hobgoblin | Style::Orc | Style::Leprechaun
+            ) {
                 for y in [-0.3f32, -0.37] {
                     p.satin
                         .torus(Vec3::Y * y, Vec3::Y, 0.068 * b, 0.009, 12, 3, boot * 0.6);
@@ -3649,7 +3772,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     if i == 2 { boot * 0.55 } else { boot },
                 );
             }
-            if furry {
+            if furry || style == Style::Troll {
                 for k in 0..3 {
                     let x = (k as f32 - 1.0) * 0.035;
                     p.matte.prism(
@@ -3665,6 +3788,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             }
         });
     }
+    rogue::biped_extras(kit, &l, body, torso, hips);
     // Capes and cloaks hang from the shoulders.
     if matches!(style, Style::Hero | Style::Vampire) {
         let (cloak, lining) = if style == Style::Vampire {
@@ -4883,6 +5007,7 @@ fn quadruped(kit: &mut Kit, lift: Entity, look: &Look, centaur: bool) {
 /// wedge-shaped head with a jaw, and a tongue that flickers.
 fn serpent(kit: &mut Kit, lift: Entity, look: &Look) {
     let l = look.clone();
+    let rattler = l.style == Style::Rattlesnake;
     for i in 0..SNAKE {
         let r = snake_segment_radius(i);
         let model = kit.part(&format!("seg{i}"), |p| {
@@ -4890,7 +5015,12 @@ fn serpent(kit: &mut Kit, lift: Entity, look: &Look) {
                 // A low wedge grows continuously out of the neck. Brow and
                 // jaw are part of the skull; the eyes sit inside its outline.
                 use crate::sdf::{Sculpt, Shape::*};
-                p.set_transform(Affine3A::from_scale(Vec3::splat(1.25)));
+                // A pit viper's head is a broad triangle behind its eyes.
+                p.set_transform(Affine3A::from_scale(if rattler {
+                    Vec3::new(1.5, 1.25, 1.3)
+                } else {
+                    Vec3::splat(1.25)
+                }));
                 let mut head = Sculpt::default();
                 head.add(
                     Ellipsoid(Vec3::new(0.0, 0.0, 0.015), Vec3::new(0.078, 0.048, 0.105)),
@@ -4952,6 +5082,44 @@ fn serpent(kit: &mut Kit, lift: Entity, look: &Look) {
                     Vec3::new(0.86, 0.57, 0.1),
                     l.skin,
                     None,
+                );
+            } else if rattler && i >= SNAKE - 3 {
+                // The rattle: stacked hollow segments, each a ridged ring.
+                let k = (i - (SNAKE - 3)) as f32;
+                let tone = Vec3::new(0.86, 0.74, 0.5) * (1.0 - 0.06 * k);
+                for ring in 0..3 {
+                    let z = (ring as f32 - 1.0) * 0.022;
+                    p.satin.blob(
+                        Vec3::new(0.0, 0.0, z),
+                        Vec3::new(0.034 - k * 0.004, 0.026 - k * 0.003, 0.016),
+                        ring,
+                        0.0,
+                        tone * (0.9 + 0.05 * ring as f32),
+                    );
+                }
+            } else if rattler {
+                // Dark diamonds outlined in cream down the olive back.
+                let half_length = (r * 1.9).max(0.052);
+                p.satin.blob_painted(
+                    Vec3::ZERO,
+                    Vec3::new(r, r * 0.75, half_length),
+                    i as u64,
+                    0.0,
+                    &|normal, at| {
+                        let phase = (i % 2) as f32 * half_length;
+                        let diamond = at.x.abs() / (r * 0.85)
+                            + ((at.z + phase).rem_euclid(half_length * 2.0) - half_length).abs()
+                                / (half_length * 0.9);
+                        if normal.y < -0.25 {
+                            l.trim
+                        } else if normal.y > -0.1 && diamond < 0.75 {
+                            Vec3::new(0.24, 0.17, 0.1)
+                        } else if normal.y > -0.1 && diamond < 0.95 {
+                            l.cloth
+                        } else {
+                            l.skin
+                        }
+                    },
                 );
             } else {
                 // A painted belly and flush dorsal diamonds share the same

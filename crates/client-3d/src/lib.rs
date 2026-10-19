@@ -138,6 +138,13 @@ pub fn run() -> Result<(), Error> {
                 bestiary = true;
                 diagnostics.lineups = true;
             }
+            "--family" => {
+                diagnostics.families = value()?
+                    .split(',')
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+                    .collect();
+            }
             "--fallen-lineups" => {
                 bestiary = true;
                 diagnostics.lineups = true;
@@ -349,6 +356,8 @@ pub(crate) struct Diagnostics {
     lineups: bool,
     /// Use the same generated lineup individuals in their settled death poses.
     fallen_lineups: bool,
+    /// Limit line-ups to these creatures, by their bestiary names.
+    families: Vec<String>,
     /// Offline travel, fast gait transitions, and interrupted contact recovery.
     travel_study: bool,
     shots: u32,
