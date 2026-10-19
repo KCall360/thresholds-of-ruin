@@ -156,6 +156,39 @@ pub fn animate(
             super::robe::place(robe, rest, &pose.rot, &pose.off, &mut meshes);
         }
         place_segments(&rig, &anim, fun, &mut joints);
+        swing_drapes(&rig, &anim, &mut joints);
+    }
+}
+
+/// Hanging cloth follows its wearer with a little lag: a cloak flares back
+/// as they travel and trails through a turn; skirts and rags sway with the
+/// stride, longer cloth less far. At rest it barely stirs; the dead's lies still.
+fn swing_drapes(rig: &Rig, a: &Anim, joints: &mut Query<&mut Transform, Without<Rig>>) {
+    if rig.drapes.is_empty() {
+        return;
+    }
+    let alive = if a.dead.is_none() { 1.0 } else { 0.0 };
+    let walk = ease(a.speed * 4.0) * alive;
+    let turning = a.target_yaw.map_or(0.0, |goal| {
+        ((goal - a.yaw + PI).rem_euclid(TAU) - PI).clamp(-1.0, 1.0)
+    }) * alive;
+    let stir = (a.time * 1.3 + a.seed).sin() * alive;
+    let stride = a.walk.sin();
+    for &(e, kind) in &rig.drapes {
+        let rotation = match kind {
+            Drape::Cloak => {
+                Quat::from_rotation_x(0.3 * walk + 0.05 * stride.abs() * walk + 0.012 * stir)
+                    * Quat::from_rotation_z(0.3 * turning + 0.04 * stride * walk)
+            }
+            Drape::Skirt(length) => {
+                let give = 1.0 / (1.0 + 2.5 * length);
+                Quat::from_rotation_z((0.09 * stride * walk + 0.2 * turning) * give)
+                    * Quat::from_rotation_x((0.1 * walk + 0.008 * stir) * give)
+            }
+        };
+        if let Ok(mut transform) = joints.get_mut(e) {
+            transform.rotation = rotation;
+        }
     }
 }
 

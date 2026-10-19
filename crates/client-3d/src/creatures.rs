@@ -962,6 +962,19 @@ pub struct Rig {
     legs: f32,
     /// Half the body's width, the height it lies at when fallen on its side.
     girth: f32,
+    /// Hanging cloth that swings on its own as the wearer moves.
+    drapes: Vec<(Entity, Drape)>,
+}
+
+/// How a piece of hanging cloth swings.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Drape {
+    /// A cloak or cape from the shoulders: it flares back as its wearer
+    /// travels and trails through turns.
+    Cloak,
+    /// A skirt, kilt, coat tails or rags from the hips, of this length: it
+    /// sways with the stride, longer cloth more slowly and less far.
+    Skirt(f32),
 }
 
 impl Rig {

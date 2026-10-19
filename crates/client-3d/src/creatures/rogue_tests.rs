@@ -309,3 +309,38 @@ fn rogue_signature_abilities_have_their_own_motions() {
         assert!(motion.duration() > 0.0 && (0.0..1.0).contains(&motion.impact()));
     }
 }
+
+#[test]
+fn cloaks_flare_and_skirts_sway_as_their_wearers_travel() {
+    let drape_angles = |moving: bool| {
+        let speed = if moving { 0.03 } else { 0.0 };
+        let (app, root) = animate_along(CreatureModel::Human, 60, |f| Vec3::Z * f as f32 * speed);
+        let rig = app.world().get::<Rig>(root).unwrap();
+        let mut cloak = None;
+        let mut skirt = None;
+        for &(e, kind) in &rig.drapes {
+            let angle = app
+                .world()
+                .get::<Transform>(e)
+                .unwrap()
+                .rotation
+                .angle_between(Quat::IDENTITY);
+            match kind {
+                Drape::Cloak => cloak = Some(angle),
+                Drape::Skirt(_) => skirt = Some(angle),
+            }
+        }
+        (
+            cloak.expect("the warrior wears a cloak"),
+            skirt.expect("and a tunic skirt"),
+        )
+    };
+    let (cloak, skirt) = drape_angles(true);
+    assert!(cloak > 0.15, "a travelling cloak flares back: {cloak}");
+    assert!(skirt > 0.01, "a travelling skirt sways: {skirt}");
+    let (cloak, skirt) = drape_angles(false);
+    assert!(
+        cloak < 0.05 && skirt < 0.03,
+        "cloth at rest barely stirs: {cloak} {skirt}"
+    );
+}

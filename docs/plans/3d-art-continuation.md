@@ -127,7 +127,11 @@ uses it, the Rogue folk included, and contract tests require the cloth to
 clear the limb all round for every build. Draped skirts, tunic hems, coat
 tails and the caster robe now hang free: their folds deepen toward the edge
 and the hem drops where each fold swings out, while short edges such as cowls
-stay neat. Torso regions and plate articulation remain to be done.
+stay neat. Cloaks, capes, tunic skirts, coat tails and rags now hang on
+their own drape pivots: a cloak flares back as its wearer travels and trails
+through turns, skirts sway with the stride, and cloth at rest barely stirs.
+This is a lagged swing, not cloth simulation, so contact with legs is not
+checked. Torso regions and plate articulation remain to be done.
 
 ### 3. Separate composition concerns without a new content format
 
