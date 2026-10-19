@@ -730,12 +730,53 @@ fn identification_choices_and_owned_charge_facts_are_bounded_named_records() {
         #[serde(deserialize_with = "crate::magic_items::read_known_charges")]
         _facts: tor_world::Shared<crate::magic_items::ChargeKnowledge>,
     }
+    let choice = serde_json::json!({"choice":1,"class":"tool"});
+    assert!(
+        serde_json::from_value::<crate::magic_items::IdentificationChoice>(choice.clone()).is_ok()
+    );
+    assert!(
+        serde_json::from_slice::<crate::magic_items::IdentificationChoice>(
+            &serde_json::to_vec(&choice).unwrap()
+        )
+        .is_ok()
+    );
+    for raw in [
+        r#"{"choice":0,"class":"tool"}"#,
+        r#"{"choice":18446744073709551615,"class":"tool"}"#,
+        r#"{"class":"tool"}"#,
+        r#"{"choice":1}"#,
+        r#"{"choice":1,"class":"tool","extra":0}"#,
+        r#"{"choice":1,"choice":2,"class":"tool"}"#,
+        r#"{"choice":1,"class":"tool","class":"potion"}"#,
+        r#"[1,"tool"]"#,
+    ] {
+        assert!(
+            serde_json::from_str::<crate::magic_items::IdentificationChoice>(raw).is_err(),
+            "{raw}"
+        );
+    }
     let named = serde_json::json!({"_facts":[{"item":10,"charges":3}]});
-    assert!(serde_json::from_value::<Facts>(named).is_ok());
+    assert!(serde_json::from_value::<Facts>(named.clone()).is_ok());
+    assert!(serde_json::from_slice::<Facts>(&serde_json::to_vec(&named).unwrap()).is_ok());
+    let full = serde_json::json!({"_facts":(1..=4096)
+        .map(|id| serde_json::json!({"item":id,"charges":3}))
+        .collect::<Vec<_>>()});
+    assert!(serde_json::from_value::<Facts>(full.clone()).is_ok());
+    assert!(serde_json::from_slice::<Facts>(&serde_json::to_vec(&full).unwrap()).is_ok());
+    for raw in [
+        r#"{"_facts":[{"item":10,"item":11,"charges":3}]}"#,
+        r#"{"_facts":[{"item":10,"charges":3,"charges":4}]}"#,
+    ] {
+        assert!(serde_json::from_str::<Facts>(raw).is_err(), "{raw}");
+    }
     for facts in [
         serde_json::json!([[10, 3]]),
         serde_json::json!([{"item":10,"charges":3},{"item":10,"charges":2}]),
         serde_json::json!([{"item":10}]),
+        serde_json::json!([{"charges":3}]),
+        serde_json::json!([{"item":0,"charges":3}]),
+        serde_json::json!([{"item":u64::MAX,"charges":3}]),
+        serde_json::json!([{"item":11,"charges":3},{"item":10,"charges":3}]),
         serde_json::json!([{"item":10,"charges":3,"identity":"hidden"}]),
         serde_json::Value::Array(
             (1..=4097)
@@ -743,7 +784,9 @@ fn identification_choices_and_owned_charge_facts_are_bounded_named_records() {
                 .collect(),
         ),
     ] {
-        assert!(serde_json::from_value::<Facts>(serde_json::json!({"_facts":facts})).is_err());
+        let malformed = serde_json::json!({"_facts":facts});
+        assert!(serde_json::from_slice::<Facts>(&serde_json::to_vec(&malformed).unwrap()).is_err());
+        assert!(serde_json::from_value::<Facts>(malformed).is_err());
     }
 }
 
@@ -974,4 +1017,196 @@ fn read_self_sleep_while_blind_consumes_exactly_and_restores_without_protection(
         }
         assert_eq!(game, restored);
     }
+}
+
+fn equipment_fact_fixture() -> Game {
+    super::ray_tests::fixture_with(|_, _, species| {
+        species.anatomy = crate::AnatomySpec {
+            slots: vec![crate::EquipmentSlot::new("body_armor").unwrap()],
+        };
+    })
+}
+fn fact_armor(game: &mut Game, id: u64, cursed: bool) -> ItemId {
+    let mut spec = ItemSpec::ordinary("test mail".into());
+    spec.class = ItemClass::Armor;
+    spec.equipment = Some(crate::EquipmentSpec {
+        slot: crate::EquipmentSlot::new("body_armor").unwrap(),
+        armor: Some(crate::ArmorSpec {
+            physical_reduction: 3,
+            material: crate::ArmorMaterial::Metal,
+            rustproof: false,
+        }),
+        attack: None,
+        modifiers: vec![],
+    });
+    let item = game
+        .place_item_stack(id, at(1), Some(ActorId(1)), 1, spec)
+        .unwrap();
+    game.items
+        .edit(item, |item| item.condition.cursed = cursed)
+        .unwrap();
+    item
+}
+
+#[test]
+fn paid_equipment_identification_is_exact_and_hidden_changes_leave_stale_facts_visible() {
+    let mut game = equipment_fact_fixture();
+    let first = fact_armor(&mut game, 10, true);
+    let second = fact_armor(&mut game, 11, false);
+    game.items
+        .edit(first, |item| item.condition.armor_enchantment = 2)
+        .unwrap();
+    assert!(game.known_equipment_view(ActorId(1), first).is_none());
+    let scroll = identify_scroll(&mut game, 12, ItemClass::Armor, 1);
+    let choice = execute(&mut game, Action::Read { item: scroll });
+    execute(
+        &mut game,
+        Action::Identify {
+            choice,
+            item: Some(first),
+        },
+    );
+    let remembered = game.known_equipment_view(ActorId(1), first).unwrap();
+    assert!(game.known_equipment_view(ActorId(1), second).is_none());
+    assert!(game.known_equipment_view(ActorId(2), first).is_none());
+    assert_eq!(
+        game.actors[&ActorId(1)].known_equipment.curse(first),
+        Some(true)
+    );
+    game.items
+        .edit(first, |item| {
+            item.condition.armor_enchantment = 5;
+            item.condition.cursed = false;
+        })
+        .unwrap();
+    assert_eq!(
+        game.known_equipment_view(ActorId(1), first),
+        Some(remembered)
+    );
+    assert_eq!(
+        game.actors[&ActorId(1)].known_equipment.curse(first),
+        Some(true)
+    );
+    assert_eq!(game, roundtrip(&game));
+}
+
+#[test]
+fn cursed_removal_learns_only_at_paid_completion_and_pause_restore_preserves_ignorance() {
+    let mut game = equipment_fact_fixture();
+    let item = fact_armor(&mut game, 10, true);
+    execute(
+        &mut game,
+        Action::Equip {
+            item,
+            slot: crate::EquipmentSlotId(0),
+        },
+    );
+    assert!(game.known_equipment_view(ActorId(1), item).is_some());
+    assert_eq!(game.actors[&ActorId(1)].known_equipment.curse(item), None);
+    assert_eq!(
+        game.actors[&ActorId(1)].known_equipment.protection(item),
+        None
+    );
+    let before = game.tick;
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = before;
+    let mut ordinary = game.clone();
+    ordinary
+        .items
+        .edit(item, |item| item.condition.cursed = false)
+        .unwrap();
+    execute(&mut ordinary, Action::Unequip { item });
+    let intention = execute(&mut game, Action::Unequip { item });
+    assert_eq!(
+        game.preparation(ActorId(1)).unwrap().remaining,
+        ordinary.preparation(ActorId(1)).unwrap().remaining,
+        "Hidden curse must not affect preparation timing"
+    );
+    assert_eq!(game.tick, before);
+    assert_eq!(game.actors[&ActorId(1)].known_equipment.curse(item), None);
+    assert_eq!(
+        game.pause_preparation(ActorId(1)),
+        Some(Work::Unequip { item })
+    );
+    let mut restored = roundtrip(&game);
+    for current in [&mut game, &mut restored] {
+        assert_eq!(
+            current.actors[&ActorId(1)].known_equipment.curse(item),
+            None
+        );
+        let preparation = current.preparation(ActorId(1)).unwrap().clone();
+        let remaining = preparation.remaining;
+        assert_eq!(
+            remaining, 300,
+            "Armor retains authored three-turn removal timing even when cursed"
+        );
+        current
+            .start_work(preparation.plan, preparation.intention)
+            .unwrap();
+        current
+            .with_recovery_transition(true, |game| {
+                game.tick += remaining;
+                game.resolve_preparations()
+            })
+            .unwrap();
+        assert!(current.preparation(ActorId(1)).is_none());
+        assert_eq!(
+            current
+                .equipment(ActorId(1))
+                .unwrap()
+                .get(&crate::EquipmentSlotId(0)),
+            Some(&item)
+        );
+        assert_eq!(
+            current.actors[&ActorId(1)].known_equipment.curse(item),
+            Some(true)
+        );
+        assert_eq!(
+            current.actors[&ActorId(1)].known_equipment.protection(item),
+            None
+        );
+        assert!(current.combat_events().iter().any(|event| matches!(event,
+            crate::combat::CombatEvent::ItemCurseBlocked { actor: ActorId(1), item: blocked, intention: Some(issued) }
+                if *blocked == item && *issued == intention)));
+        assert!(!current.combat_events().iter().any(|event| matches!(
+            event,
+            crate::combat::CombatEvent::ItemCompleted {
+                work: Work::Unequip { .. },
+                ..
+            }
+        )));
+    }
+    assert_eq!(game, restored);
+}
+
+#[test]
+fn equipment_fact_ownership_does_not_follow_transfer_and_hidden_return_does_not_refresh() {
+    let mut game = equipment_fact_fixture();
+    let item = fact_armor(&mut game, 10, true);
+    game.identify_item(ActorId(1), item).unwrap();
+    let remembered = game.known_equipment_view(ActorId(1), item).unwrap();
+    let transfer = game
+        .prepare_owned_transfer(item, ActorId(1), ActorId(2), 1)
+        .unwrap();
+    game.apply_owned_transfer(transfer).unwrap();
+    assert!(game.known_equipment_view(ActorId(2), item).is_none());
+    assert_eq!(game.actors[&ActorId(2)].known_equipment.curse(item), None);
+    game.items
+        .edit(item, |item| {
+            item.condition.cursed = false;
+            item.condition.armor_enchantment = 3;
+        })
+        .unwrap();
+    let transfer = game
+        .prepare_owned_transfer(item, ActorId(2), ActorId(1), 1)
+        .unwrap();
+    game.apply_owned_transfer(transfer).unwrap();
+    assert_eq!(
+        game.known_equipment_view(ActorId(1), item),
+        Some(remembered)
+    );
+    assert_eq!(
+        game.actors[&ActorId(1)].known_equipment.curse(item),
+        Some(true)
+    );
+    assert_eq!(game, roundtrip(&game));
 }

@@ -90,6 +90,7 @@ fn category(value: s::combat::DamageType) -> p::DamageType {
         s::combat::DamageType::Keen => p::DamageType::Keen,
         s::combat::DamageType::Spirit => p::DamageType::Spirit,
         s::combat::DamageType::Vital => p::DamageType::Vital,
+        s::combat::DamageType::Psychic => p::DamageType::Psychic,
     }
 }
 fn attributes(value: s::attributes::Attributes) -> p::AttributeView {

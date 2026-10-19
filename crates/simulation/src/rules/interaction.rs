@@ -147,7 +147,8 @@ impl Ruleset {
                     | PlannedEffect::ApplyConditionForTurns { id, .. } => {
                         self.condition_directly_harms(id)
                     }
-                    PlannedEffect::StepSelfOneCell
+                    PlannedEffect::AlterEquipment { .. }
+                    | PlannedEffect::StepSelfOneCell
                     | PlannedEffect::RestoreHitDie
                     | PlannedEffect::Heal { .. }
                     | PlannedEffect::HealPerHitDie { .. }
@@ -208,7 +209,8 @@ impl Ruleset {
                 self.condition_directly_harms(condition)
             }
             // Future consequences and source-only benefits do not imply intent.
-            Effect::StepSelfOneCell
+            Effect::AlterEquipment { .. }
+            | Effect::StepSelfOneCell
             | Effect::RestoreHitDie
             | Effect::Heal { .. }
             | Effect::HealPerHitDie { .. }

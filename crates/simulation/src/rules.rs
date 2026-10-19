@@ -915,6 +915,10 @@ pub enum Effect {
         selection: crate::theft::TheftSelection,
         relocation: Option<crate::theft::RelocationGate>,
     },
+    AlterEquipment {
+        selection: crate::EquippedSelection,
+        alteration: crate::EquipmentAlteration,
+    },
     CorrodeArmor {
         slot: crate::EquipmentSlot,
         amount: u32,
@@ -986,7 +990,8 @@ pub enum Effect {
 impl Effect {
     pub fn recipient(&self) -> EffectRecipient {
         match self {
-            Self::SearchAdjacentGuises
+            Self::AlterEquipment { .. }
+            | Self::SearchAdjacentGuises
             | Self::ObservePublicPlan
             | Self::ApplyQualifiedConditionToSource { .. } => EffectRecipient::Source,
             _ => EffectRecipient::Target,
@@ -1002,6 +1007,10 @@ impl<'de> Deserialize<'de> for Effect {
                 selection: crate::theft::TheftSelection,
                 #[serde(deserialize_with = "crate::bounded::required_option")]
                 relocation: Option<crate::theft::RelocationGate>,
+            },
+            AlterEquipment {
+                selection: crate::EquippedSelection,
+                alteration: crate::EquipmentAlteration,
             },
             CorrodeArmor {
                 slot: crate::EquipmentSlot,
@@ -1079,6 +1088,13 @@ impl<'de> Deserialize<'de> for Effect {
             } => Self::Theft {
                 selection,
                 relocation,
+            },
+            Fields::AlterEquipment {
+                selection,
+                alteration,
+            } => Self::AlterEquipment {
+                selection,
+                alteration,
             },
             Fields::CorrodeArmor { slot, amount } => Self::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
@@ -1583,6 +1599,11 @@ impl Ruleset {
         let descriptors = catalog!(descriptors);
         let flags = catalog!(flags);
         let equipment_slots = catalog!(equipment_slots);
+        let equipment_slot_definitions = document
+            .equipment_slots
+            .iter()
+            .map(|slot| (slot.id.clone(), slot))
+            .collect();
         let refs = References {
             abilities: &abilities,
             ability_tags: &ability_tags,
@@ -1594,7 +1615,7 @@ impl Ruleset {
             qualified_conditions: &qualified_conditions,
             descriptors: &descriptors,
             flags: &flags,
-            equipment_slots: &equipment_slots,
+            equipment_slots: &equipment_slot_definitions,
         };
         let c = &mut document.constants;
         bound(
@@ -2170,9 +2191,19 @@ struct References<'a> {
     qualified_conditions: &'a BTreeSet<ConditionId>,
     descriptors: &'a BTreeSet<DescriptorId>,
     flags: &'a BTreeSet<FlagId>,
-    equipment_slots: &'a BTreeSet<EquipmentSlot>,
+    equipment_slots: &'a BTreeMap<EquipmentSlot, &'a EquipmentSlotDef>,
 }
 impl References<'_> {
+    fn equipment_slot(&self, id: &EquipmentSlot) -> Result<&EquipmentSlotDef, RulesetError> {
+        self.equipment_slots
+            .get(id)
+            .copied()
+            .ok_or_else(|| RulesetError::UnknownReference {
+                category: "equipment_slot",
+                id: id.to_string(),
+            })
+    }
+
     fn descriptors(
         &self,
         values: &mut [DescriptorId],
@@ -2341,12 +2372,27 @@ impl References<'_> {
                         gate.flag.intern(pool);
                     }
                 }
+                Effect::AlterEquipment {
+                    selection,
+                    alteration,
+                } => {
+                    bound(selection.accepts(*alteration), "equipment_alteration")?;
+                    if let crate::EquippedSelection::Slot { slot, class, .. } = selection {
+                        bound(
+                            self.equipment_slot(slot)?
+                                .compatible_classes
+                                .contains(class),
+                            "equipment_selection",
+                        )?;
+                        slot.intern(pool);
+                    }
+                }
                 Effect::CorrodeArmor { slot, amount } => {
                     bound(
                         (1..=crate::limits::NUMERIC as u32).contains(amount),
                         "corrosion amount",
                     )?;
-                    reference(self.equipment_slots, slot, "equipment_slot")?;
+                    self.equipment_slot(slot)?;
                     slot.intern(pool);
                 }
                 Effect::ApplyLinkedHold { policy } => {
@@ -2705,7 +2751,12 @@ impl Ruleset {
             .map(|d| d.id.clone())
             .collect();
         let flags = self.indexes.flags.keys().cloned().collect();
-        let equipment_slots = self.indexes.equipment_slots.keys().cloned().collect();
+        let equipment_slots = self
+            .document
+            .equipment_slots
+            .iter()
+            .map(|slot| (slot.id.clone(), slot))
+            .collect();
         References {
             abilities: &abilities,
             ability_tags: &ability_tags,
@@ -2850,7 +2901,12 @@ impl Ruleset {
             .map(|d| d.id.clone())
             .collect();
         let flags = self.indexes.flags.keys().cloned().collect();
-        let equipment_slots = self.indexes.equipment_slots.keys().cloned().collect();
+        let equipment_slots = self
+            .document
+            .equipment_slots
+            .iter()
+            .map(|slot| (slot.id.clone(), slot))
+            .collect();
         References {
             abilities: &abilities,
             ability_tags: &ability_tags,
@@ -2888,7 +2944,12 @@ impl Ruleset {
             .map(|d| d.id.clone())
             .collect();
         let flags = self.indexes.flags.keys().cloned().collect();
-        let equipment_slots = self.indexes.equipment_slots.keys().cloned().collect();
+        let equipment_slots = self
+            .document
+            .equipment_slots
+            .iter()
+            .map(|slot| (slot.id.clone(), slot))
+            .collect();
         References {
             abilities: &abilities,
             ability_tags: &ability_tags,
@@ -2948,6 +3009,10 @@ impl Effect {
                 crate::theft::TheftSelection::Currency { amount, .. } => amount.valid(),
                 crate::theft::TheftSelection::MagicalUnit => true,
             },
+            Self::AlterEquipment {
+                selection,
+                alteration,
+            } => selection.accepts(*alteration),
             Self::CorrodeArmor { amount, .. } => {
                 (1..=crate::limits::NUMERIC as u32).contains(amount)
             }
@@ -3348,8 +3413,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v44\"",
-                "id = \"interactions-v44\"\nunknown = true"
+                "id = \"interactions-v45\"",
+                "id = \"interactions-v45\"\nunknown = true"
             ))
             .is_err()
         );

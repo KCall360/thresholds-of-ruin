@@ -477,6 +477,12 @@ fn concealed_equipment_discloses_its_slot_but_stats_require_actor_knowledge() {
     assert!(interaction.inventory[0].known_equipment.is_none());
     assert!(game.observe(witness).unwrap().interactions.is_none());
     game.learn_identity(actor, "enchanted ring").unwrap();
+    assert!(
+        game.observe(actor).unwrap().interactions.unwrap().inventory[0]
+            .known_equipment
+            .is_none()
+    );
+    game.identify_item(actor, ItemId(30)).unwrap();
     let interaction = game.observe(actor).unwrap().interactions.unwrap();
     assert_eq!(
         interaction.inventory[0]

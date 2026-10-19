@@ -227,13 +227,32 @@ impl Game {
         Default::default()
     }
 
-    fn known_gear(&self, actor: ActorId, item: ItemId) -> Option<&EquipmentSpec> {
-        let item = self.items.get(&item)?;
-        let actor = self.actors.get(&actor)?;
-        if item.spec.concealed && !actor.knowledge.contains(&item.spec.identity) {
+    fn known_gear(&self, actor: ActorId, item: ItemId) -> Option<EquipmentSpec> {
+        let mut estimate = self.items.get(&item)?.clone();
+        estimate.condition = self.gear_condition_estimate(actor, item)?;
+        estimate.equipment_view()
+    }
+
+    /// Private planning estimate, never a disclosed numerical item view. An
+    /// identified archetype supplies its ordinary baseline until this actor has
+    /// observed exact instance numbers; hidden mutations never refresh memory.
+    fn gear_condition_estimate(
+        &self,
+        actor: ActorId,
+        item: ItemId,
+    ) -> Option<crate::armor::ItemCondition> {
+        let owner = self.actors.get(&actor)?;
+        let definition = &self.items.get(&item)?.spec;
+        if definition.concealed && !owner.knowledge.contains(&definition.identity) {
             return None;
         }
-        item.spec.equipment.as_ref()
+        definition.equipment.as_ref()?;
+        Some(
+            owner
+                .known_equipment
+                .remembered_condition(item)
+                .unwrap_or_default(),
+        )
     }
 
     pub(crate) fn exposed_to_visible_hostile(
@@ -283,7 +302,10 @@ impl Game {
             }
             let slot = EquipmentSlotId(u16::try_from(index).ok()?);
             let old = owner.equipment.get(&slot).copied();
-            if old.is_some_and(|old| self.known_gear(actor, old).is_none()) {
+            if old.is_some_and(|old| {
+                self.known_gear(actor, old).is_none()
+                    || owner.known_equipment.curse(old) == Some(true)
+            }) {
                 continue;
             }
             if self.gear_upgrade(actor, item, slot) {
@@ -296,9 +318,25 @@ impl Game {
     /// Candidate evaluation uses the production modifier fold. It changes only
     /// a private snapshot; the chosen ordinary action still owns admission.
     fn gear_projection(&self, actor: ActorId, item: ItemId, slot: EquipmentSlotId) -> Option<Game> {
-        let mut candidate = self.clone();
-        let mut equipment = candidate.actors.get(&actor)?.equipment.clone();
+        let mut equipment = self.actors.get(&actor)?.equipment.clone();
         equipment.insert(slot, item);
+        self.known_loadout_projection(actor, equipment)
+    }
+
+    /// Baseline and candidates use the same remembered facts or ordinary
+    /// archetype estimates. Reading live hidden condition would make AI an oracle.
+    fn known_loadout_projection(
+        &self,
+        actor: ActorId,
+        equipment: std::collections::BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Option<Game> {
+        let mut candidate = self.clone();
+        for id in equipment.values() {
+            let condition = self.gear_condition_estimate(actor, *id)?;
+            candidate
+                .items
+                .edit(*id, |item| item.condition = condition)?;
+        }
         let sources = equipment
             .iter()
             .map(|(socket, id)| candidate.items.get(id)?.equipment_source(*id, *socket))
@@ -321,8 +359,14 @@ impl Game {
         let Some(candidate) = self.gear_projection(actor, item, slot) else {
             return false;
         };
-        let (Some(before), Some(after)) = (gear_score(self, actor), gear_score(&candidate, actor))
-        else {
+        let before = self
+            .actors
+            .get(&actor)
+            .and_then(|owner| self.known_loadout_projection(actor, owner.equipment.clone()));
+        let (Some(before), Some(after)) = (
+            before.as_ref().and_then(|game| gear_score(game, actor)),
+            gear_score(&candidate, actor),
+        ) else {
             return false;
         };
         after.dominates(&before)

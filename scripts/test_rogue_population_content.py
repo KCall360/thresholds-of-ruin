@@ -9,7 +9,7 @@ from pathlib import Path
 import tomllib
 import unittest
 
-from rogue_activation_oracle import reviewed_twenty_one_activation, reviewed_twenty_six_activation
+from rogue_activation_oracle import reviewed_twenty_six_activation
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "scenarios/rogue-exploration"
@@ -41,32 +41,18 @@ def choices_at(bands, depth):
 class RoguePopulationContent(unittest.TestCase):
     def test_full_policy_matches_separate_oracle_and_preserves_other_stage_streams(self):
         activation = source("scenario.toml")["floor_activation"]
+        # Independent policy covers all ten stages, including unchanged legacy streams.
         self.assertEqual(activation, reviewed_twenty_six_activation())
         stages = activation["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([row["id"] for row in stages], ["rogue.eight_species_foes",
-            "rogue.bandages", "rogue.rations", "rogue.restore_strength", "rogue.room_gold",
-            "rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices"])
+            "rogue.bandages", "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions", "rogue.magic_scrolls",
+            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls"])
         self.assertEqual(stages[0]["count"], [4, 4])
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         bands = stages[0]["bands"]
         self.assertEqual([band["depth"] for band in bands], [
             *[{"kind": "finite", "minimum": depth, "maximum": depth} for depth in range(1, 32)],
             {"kind": "open", "minimum": 32}])
-
-    def test_finite_magic_stock_appends_after_unchanged_legacy_item_streams(self):
-        activation = source("scenario.toml")["floor_activation"]
-        stages = activation["profiles"]["rogue.low_depth"]["stages"]
-        historical = reviewed_twenty_one_activation()
-        self.assertEqual(stages[1:5], historical["profiles"]["rogue.low_depth"]["stages"][1:])
-        self.assertEqual(activation["carried_item_pools"], historical["carried_item_pools"])
-        self.assertEqual(stages[5:], [
-            {"id": identity, "version": 1, "kind": "items", "count": [1, 1], "quantity": 1,
-             "bands": [{"depth": {"kind": "open", "minimum": 1},
-                        "choices": [{"archetype": "rogue." + name, "weight": 1} for name in names]}]}
-            for identity, names in (
-                ("rogue.magic_potions", ("healing", "confusion", "blindness")),
-                ("rogue.magic_scrolls", ("identify_potion", "identify_scroll", "identify_wand", "sleep")),
-                ("rogue.magic_devices", ("wand_fire", "wand_cold", "wand_lightning")))])
 
     def test_exact_selector_mass_order_and_normalized_weights_at_every_boundary(self):
         bands = stage()["bands"]

@@ -12,6 +12,7 @@ pub enum ItemDiscovery {
     #[default]
     SelfEffect,
     OnUse,
+    Never,
 }
 
 impl<'de> Deserialize<'de> for ItemDiscovery {
@@ -19,6 +20,7 @@ impl<'de> Deserialize<'de> for ItemDiscovery {
         match String::deserialize(d)?.as_str() {
             "self_effect" => Ok(Self::SelfEffect),
             "on_use" => Ok(Self::OnUse),
+            "never" => Ok(Self::Never),
             _ => Err(serde::de::Error::custom("invalid item discovery policy")),
         }
     }
@@ -316,6 +318,14 @@ impl Game {
             {
                 return Err(GameError::ItemUnavailable);
             }
+            if self
+                .items
+                .get(&id)
+                .is_some_and(|i| i.spec.equipment.is_some())
+                && !owner.known_equipment.can_learn(id)
+            {
+                return Err(GameError::ItemUnavailable);
+            }
             if self.items.get(&id).is_some_and(|i| i.charges.is_some())
                 && owner.known_charges.len() == MAX_KNOWN_CHARGES
                 && !owner.known_charges.contains(&id)
@@ -334,10 +344,18 @@ impl Game {
         self.validate_identification(actor, choice, item)?;
         let learned = item.map(|id| {
             let i = &self.items[&id];
-            (id, i.spec.identity.clone(), i.charges)
+            (
+                id,
+                i.spec.identity.clone(),
+                i.charges,
+                i.spec.equipment.is_some().then_some(i.condition),
+            )
         });
         let mut outcome = self.actor_outcome(actor)?;
-        if let Some((id, identity, charges)) = learned {
+        if let Some((id, identity, charges, condition)) = learned {
+            if let Some(condition) = condition {
+                outcome.state.known_equipment.identify(id, condition)?;
+            }
             outcome.state.knowledge.insert(identity);
             if let Some(charges) = charges {
                 outcome.state.known_charges.insert(id, charges);
@@ -348,7 +366,8 @@ impl Game {
     }
     pub(crate) fn magic_knowledge_valid(&self, actor: ActorId) -> bool {
         let a = &self.actors[&actor];
-        a.known_charges.len() <= MAX_KNOWN_CHARGES
+        self.equipment_knowledge_valid(actor)
+            && a.known_charges.len() <= MAX_KNOWN_CHARGES
             && a.known_charges.0.iter().all(|fact| {
                 fact.item.0 > 0
                     && fact.item.0 < self.next_item_id

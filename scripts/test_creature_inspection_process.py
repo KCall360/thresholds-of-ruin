@@ -1381,6 +1381,11 @@ class CreatureInspectionProcesses(ProcessTestCase):
                         for item in frame["state"]["observation"]["interactions"]["inventory"]
                         if item["equipped_slot"] == 0)
 
+        self.assertIsNone(next(item["known_equipment"] for item in
+                              initial["state"]["observation"]["interactions"]["inventory"]
+                              if item["equipped_slot"] == 0))
+        self.wizard_command(wizard, "identify 1 100")
+        initial = self.request(observer, {"type": "snapshot"})
         declared = weapon(initial)
         self.assertEqual((declared["skill"]["id"], declared["bonus"], declared["wind_up"], declared["recovery"]),
                          ("light_weaponry", 100, 90, 70))

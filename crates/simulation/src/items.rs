@@ -56,6 +56,8 @@ pub struct ItemSpec {
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub currency: Option<CurrencyKind>,
     pub equipment: Option<crate::EquipmentSpec>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub equipment_generation: Option<crate::EquipmentGeneration>,
     pub consumable: Option<crate::ConsumableSpec>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub readable: Option<crate::ReadableSpec>,
@@ -88,6 +90,8 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
             #[serde(deserialize_with = "crate::bounded::required_option")]
             currency: Option<CurrencyKind>,
             equipment: Option<crate::EquipmentSpec>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            equipment_generation: Option<crate::EquipmentGeneration>,
             consumable: Option<crate::ConsumableSpec>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             readable: Option<crate::ReadableSpec>,
@@ -113,6 +117,7 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
             magical: fields.magical,
             currency: fields.currency,
             equipment: fields.equipment,
+            equipment_generation: fields.equipment_generation,
             consumable: fields.consumable,
             readable: fields.readable,
             device: fields.device,
@@ -144,6 +149,7 @@ impl Clone for ItemSpec {
             magical: self.magical,
             currency: self.currency,
             equipment: self.equipment.clone(),
+            equipment_generation: self.equipment_generation,
             consumable: self.consumable.clone(),
             readable: self.readable.clone(),
             device: self.device.clone(),
@@ -168,6 +174,7 @@ impl ItemSpec {
             magical: false,
             currency: None,
             equipment: None,
+            equipment_generation: None,
             consumable: None,
             readable: None,
             device: None,
@@ -189,6 +196,14 @@ impl ItemSpec {
         &self,
         rules: &crate::rules::Ruleset,
     ) -> Result<(), crate::rules::RulesetError> {
+        if self
+            .equipment_generation
+            .is_some_and(|policy| !policy.valid_for(self.class, self.equipment.as_ref()))
+        {
+            return Err(crate::rules::RulesetError::Bound {
+                field: "equipment_generation".into(),
+            });
+        }
         if let Some(supply) = &self.supply {
             if self.equipment.is_some() {
                 return Err(crate::rules::RulesetError::Bound {
@@ -226,6 +241,9 @@ impl ItemSpec {
     }
     pub(crate) fn valid(&self) -> bool {
         self.magic_shape_valid()
+            && self
+                .equipment_generation
+                .is_none_or(|policy| policy.valid_for(self.class, self.equipment.as_ref()))
             && self.currency.is_none_or(|_| {
                 self.class == ItemClass::Coin
                     && self.stackable
@@ -408,6 +426,11 @@ impl Game {
         spec.validate_rules(self.content.rules())
             .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidDefinition))?;
         let mut rng = self.rules_rng;
+        let condition = spec
+            .equipment_generation
+            .map(|policy| policy.sample(spec.class, spec.equipment.as_ref(), &mut rng))
+            .transpose()?
+            .unwrap_or_default();
         let charges = spec
             .device
             .as_ref()
@@ -419,6 +442,7 @@ impl Game {
                 entry.spec = tor_world::Shared::new(spec);
                 entry.quantity = quantity;
                 entry.charges = charges;
+                entry.condition = condition;
             })
             .expect("placed item");
         self.rules_rng = rng;
@@ -439,14 +463,15 @@ impl Game {
     }
 
     pub fn identify_item(&mut self, actor: ActorId, item: ItemId) -> Result<(), GameError> {
-        let identity = self
-            .items
-            .get(&item)
-            .ok_or(GameError::ItemUnavailable)?
-            .spec
-            .identity
-            .clone();
-        self.learn_identity(actor, &identity)
+        let entry = self.items.get(&item).ok_or(GameError::ItemUnavailable)?;
+        let identity = entry.spec.identity.clone();
+        let condition = entry.spec.equipment.is_some().then_some(entry.condition);
+        let mut owner = self.actors.get_mut(&actor).ok_or(GameError::UnknownActor)?;
+        if let Some(condition) = condition {
+            owner.known_equipment.identify(item, condition)?;
+        }
+        owner.knowledge.insert(identity);
+        Ok(())
     }
 
     /// Place one existing objective item without allocation or transfer semantics.

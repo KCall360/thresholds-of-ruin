@@ -31,6 +31,8 @@ pub(crate) struct ActorRecord {
     knowledge: Shared<BTreeSet<String>>,
     #[serde(deserialize_with = "crate::magic_items::read_known_charges")]
     known_charges: Shared<crate::magic_items::ChargeKnowledge>,
+    #[serde(deserialize_with = "crate::equipment_knowledge::read_known_equipment")]
+    known_equipment: Shared<crate::equipment_knowledge::EquipmentKnowledge>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     identification: Option<crate::magic_items::IdentificationChoice>,
     #[serde(deserialize_with = "crate::public_plan::read_recognized_abilities")]
@@ -63,6 +65,8 @@ impl<'de> Deserialize<'de> for ActorRecord {
             knowledge: Shared<BTreeSet<String>>,
             #[serde(deserialize_with = "crate::magic_items::read_known_charges")]
             known_charges: Shared<crate::magic_items::ChargeKnowledge>,
+            #[serde(deserialize_with = "crate::equipment_knowledge::read_known_equipment")]
+            known_equipment: Shared<crate::equipment_knowledge::EquipmentKnowledge>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             identification: Option<crate::magic_items::IdentificationChoice>,
             #[serde(deserialize_with = "crate::public_plan::read_recognized_abilities")]
@@ -91,6 +95,7 @@ impl<'de> Deserialize<'de> for ActorRecord {
             visited: fields.visited,
             knowledge: fields.knowledge,
             known_charges: fields.known_charges,
+            known_equipment: fields.known_equipment,
             identification: fields.identification,
             recognized_abilities: fields.recognized_abilities,
             public_plan: fields.public_plan,
@@ -127,6 +132,7 @@ impl ActorRecord {
             visited: actor.visited.clone(),
             knowledge: actor.knowledge.clone(),
             known_charges: actor.known_charges.clone(),
+            known_equipment: actor.known_equipment.clone(),
             identification: actor.identification.clone(),
             recognized_abilities: actor.recognized_abilities.clone(),
             public_plan: actor.public_plan.clone(),
@@ -175,6 +181,7 @@ impl ActorRecord {
             visited: self.visited.clone(),
             knowledge: self.knowledge.clone(),
             known_charges: self.known_charges.clone(),
+            known_equipment: self.known_equipment.clone(),
             identification: self.identification.clone(),
             recognized_abilities: self.recognized_abilities.clone(),
             public_plan: self.public_plan.clone(),
@@ -231,6 +238,9 @@ mod public_plan_record_tests {
             "ready_at",
             "visited",
             "knowledge",
+            "known_charges",
+            "known_equipment",
+            "identification",
             "recognized_abilities",
             "public_plan",
             "asset",
@@ -260,7 +270,13 @@ mod public_plan_record_tests {
             "current actor wrapper must reject positional aliases"
         );
         assert!(serde_json::from_value::<ActorRecord>(positional).is_err());
-        for key in ["recognized_abilities", "public_plan"] {
+        for key in [
+            "known_charges",
+            "known_equipment",
+            "identification",
+            "recognized_abilities",
+            "public_plan",
+        ] {
             let mut missing = value.clone();
             missing.as_object_mut().unwrap().remove(key);
             assert!(

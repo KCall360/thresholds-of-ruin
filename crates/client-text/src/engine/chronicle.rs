@@ -484,6 +484,7 @@ mod tests {
         );
         let slot = tor_client_common::test_support::equipment_slot("hand", "in hand", true);
         state.observation.interactions = Some(InteractionView {
+            curse_blocked: vec![],
             identification: None,
             completed: vec![],
             slots: vec![slot.clone()],
@@ -492,6 +493,8 @@ mod tests {
                 item,
                 slot: Some(slot),
                 equipped_slot: Some(0),
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,

@@ -17,6 +17,7 @@ pub(crate) fn category_id(category: DamageType) -> &'static str {
         DamageType::Keen => "keen",
         DamageType::Spirit => "spirit",
         DamageType::Vital => "vital",
+        DamageType::Psychic => "psychic",
     }
 }
 
@@ -664,5 +665,57 @@ impl<'de> serde::Deserialize<'de> for DamageSpec {
         record
             .restore()
             .map_err(|_| serde::de::Error::custom("invalid damage specification"))
+    }
+}
+
+#[cfg(test)]
+mod psychic_tests {
+    use super::*;
+    #[test]
+    fn psychic_uses_generic_explicit_reduction_and_immunity_without_other_categories() {
+        let component = DamageComponent::fixed(DamageType::Psychic, None, 9);
+        let damage = DamageSpec::new(vec![component.clone()], Some(component.key())).unwrap();
+        let mut protection = Protection::default();
+        for category in [
+            DamageType::Energy,
+            DamageType::Impact,
+            DamageType::Keen,
+            DamageType::Spirit,
+            DamageType::Vital,
+        ] {
+            protection
+                .apply(&ModifierOp::Reduction {
+                    selector: Selector::Category { category },
+                    amount: 100,
+                })
+                .unwrap();
+        }
+        let resolve = |protection: &Protection| {
+            damage
+                .resolve(&mut 17, Edge::default(), protection, &mut ())
+                .total
+        };
+        assert_eq!(resolve(&protection), 9);
+        protection
+            .apply(&ModifierOp::Reduction {
+                selector: Selector::Category {
+                    category: DamageType::Psychic,
+                },
+                amount: 3,
+            })
+            .unwrap();
+        assert_eq!(resolve(&protection), 6);
+        protection
+            .apply(&ModifierOp::Immunity {
+                selector: Selector::Category {
+                    category: DamageType::Psychic,
+                },
+            })
+            .unwrap();
+        assert_eq!(resolve(&protection), 0);
+        let encoded = serde_json::to_value(&damage).unwrap();
+        let restored: DamageSpec = serde_json::from_value(encoded).unwrap();
+        assert_eq!(restored, damage);
+        assert_eq!(category_id(DamageType::Psychic), "psychic");
     }
 }

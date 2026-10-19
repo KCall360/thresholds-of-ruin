@@ -136,8 +136,8 @@ class RoguePerceptionContent(unittest.TestCase):
         activation = manifest["floor_activation"]
         stages = activation["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([row["id"] for row in stages], ["rogue.eight_species_foes", "rogue.bandages",
-                         "rogue.rations", "rogue.restore_strength", "rogue.room_gold",
-                         "rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices"])
+                         "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions", "rogue.magic_scrolls",
+            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls"])
         self.assertEqual(stages[0]["count"], [4, 4])
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         bands = stages[0]["bands"]

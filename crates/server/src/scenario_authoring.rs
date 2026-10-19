@@ -64,6 +64,7 @@ pub enum DamageType {
     Keen,
     Spirit,
     Vital,
+    Psychic,
 }
 
 impl From<DamageType> for tor_simulation::combat::DamageType {
@@ -74,7 +75,69 @@ impl From<DamageType> for tor_simulation::combat::DamageType {
             DamageType::Keen => Self::Keen,
             DamageType::Spirit => Self::Spirit,
             DamageType::Vital => Self::Vital,
+            DamageType::Psychic => Self::Psychic,
         }
+    }
+}
+
+/// Explicit source-owned equipment birth policy; never modifies an archetype.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EquipmentGeneration {
+    Authored {
+        #[serde(default)]
+        hit_enchantment: i32,
+        #[serde(default)]
+        damage_enchantment: i32,
+    },
+    Weapon {
+        curse_percent: u8,
+        enchant_percent: u8,
+        minimum: u32,
+        maximum: u32,
+    },
+    Armor {
+        curse_percent: u8,
+        enchant_percent: u8,
+        minimum: u32,
+        maximum: u32,
+    },
+}
+impl EquipmentGeneration {
+    pub(crate) fn compile(self) -> Result<tor_simulation::EquipmentGeneration, crate::Failure> {
+        let value = match self {
+            Self::Authored {
+                hit_enchantment,
+                damage_enchantment,
+            } => tor_simulation::EquipmentGeneration::Authored {
+                hit_enchantment,
+                damage_enchantment,
+            },
+            Self::Weapon {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            } => tor_simulation::EquipmentGeneration::Weapon {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            },
+            Self::Armor {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            } => tor_simulation::EquipmentGeneration::Armor {
+                curse_percent,
+                enchant_percent,
+                minimum,
+                maximum,
+            },
+        };
+        super::require(value.valid(), "Invalid equipment generation policy")?;
+        Ok(value)
     }
 }
 
@@ -235,6 +298,35 @@ pub struct RelocationGate {
     pub policy: RelocationPolicy,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EquipmentAlteration {
+    EnchantArmor,
+    EnchantWeapon,
+    ProtectArmor,
+    RemoveCurse,
+}
+impl From<EquipmentAlteration> for tor_simulation::EquipmentAlteration {
+    fn from(value: EquipmentAlteration) -> Self {
+        match value {
+            EquipmentAlteration::EnchantArmor => Self::EnchantArmor,
+            EquipmentAlteration::EnchantWeapon => Self::EnchantWeapon,
+            EquipmentAlteration::ProtectArmor => Self::ProtectArmor,
+            EquipmentAlteration::RemoveCurse => Self::RemoveCurse,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EquippedSelection {
+    Slot {
+        slot: String,
+        class: ItemClass,
+        last: bool,
+    },
+    All {},
+}
+
 /// Healing overflow is explicitly authored and never inferred from potion identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -249,6 +341,10 @@ pub enum Effect {
     Theft {
         selection: TheftSelection,
         relocation: Option<RelocationGate>,
+    },
+    AlterEquipment {
+        selection: EquippedSelection,
+        alteration: EquipmentAlteration,
     },
     CorrodeArmor {
         slot: String,
@@ -359,12 +455,14 @@ pub enum ItemDiscovery {
     #[default]
     SelfEffect,
     OnUse,
+    Never,
 }
 impl From<ItemDiscovery> for tor_simulation::ItemDiscovery {
     fn from(value: ItemDiscovery) -> Self {
         match value {
             ItemDiscovery::SelfEffect => Self::SelfEffect,
             ItemDiscovery::OnUse => Self::OnUse,
+            ItemDiscovery::Never => Self::Never,
         }
     }
 }
@@ -649,6 +747,10 @@ impl<'de> Deserialize<'de> for Effect {
                 selection: TheftSelection,
                 relocation: Option<RelocationGate>,
             },
+            AlterEquipment {
+                selection: EquippedSelection,
+                alteration: EquipmentAlteration,
+            },
             CorrodeArmor {
                 slot: String,
                 amount: u32,
@@ -736,6 +838,13 @@ impl<'de> Deserialize<'de> for Effect {
             } => Self::Theft {
                 selection,
                 relocation,
+            },
+            Fields::AlterEquipment {
+                selection,
+                alteration,
+            } => Self::AlterEquipment {
+                selection,
+                alteration,
             },
             Fields::CorrodeArmor { slot, amount } => Self::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
@@ -1252,4 +1361,36 @@ mod tests {
 #[serde(rename_all = "snake_case")]
 pub enum PushDirection {
     AwayFromSource,
+}
+
+#[cfg(test)]
+mod equipment_generation_tests {
+    use super::EquipmentGeneration;
+
+    #[test]
+    fn authored_birth_defaults_are_source_only_and_generated_bounds_are_checked() {
+        let policy: EquipmentGeneration =
+            serde_json::from_value(serde_json::json!({"kind":"authored"})).unwrap();
+        assert_eq!(
+            policy.compile().unwrap(),
+            tor_simulation::EquipmentGeneration::Authored {
+                hit_enchantment: 0,
+                damage_enchantment: 0
+            }
+        );
+        for value in [
+            serde_json::json!({"kind":"weapon","curse_percent":99,"enchant_percent":2,"minimum":1,"maximum":3}),
+            serde_json::json!({"kind":"armor","curse_percent":20,"enchant_percent":8,"minimum":0,"maximum":3}),
+            serde_json::json!({"kind":"armor","curse_percent":20,"enchant_percent":8,"minimum":4,"maximum":3}),
+            serde_json::json!({"kind":"armor","curse_percent":20,"enchant_percent":8,"minimum":1,"maximum":1000001}),
+            serde_json::json!({"kind":"authored","hit_enchantment":1000001}),
+        ] {
+            let policy: EquipmentGeneration = serde_json::from_value(value).unwrap();
+            assert!(policy.compile().is_err());
+        }
+        assert!(serde_json::from_value::<EquipmentGeneration>(
+            serde_json::json!({"kind":"authored","curse_percent":1})
+        )
+        .is_err());
+    }
 }

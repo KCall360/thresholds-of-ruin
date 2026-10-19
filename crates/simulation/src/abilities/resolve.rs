@@ -264,6 +264,9 @@ pub enum ResolvedEffect {
         quantity: u64,
         relocation: Option<super::Placement>,
     },
+    AlterEquipment {
+        alteration: crate::ResolvedEquipmentAlteration,
+    },
     CorrodeArmor {
         slot: crate::EquipmentSlot,
         amount: u32,
@@ -333,7 +336,8 @@ pub enum ResolvedEffect {
 impl ResolvedEffect {
     pub(crate) fn recipient(&self) -> EffectRecipient {
         match self {
-            Self::SearchAdjacentGuises
+            Self::AlterEquipment { .. }
+            | Self::SearchAdjacentGuises
             | Self::ObservePublicPlan { .. }
             | Self::ApplyQualifiedConditionToSource { .. } => EffectRecipient::Source,
             _ => EffectRecipient::Target,
@@ -343,6 +347,7 @@ impl ResolvedEffect {
     /// reach this point only after the shared kernel observed a state change.
     pub(crate) fn changed(&self) -> bool {
         match self {
+            Self::AlterEquipment { alteration } => !alteration.plan.targets.is_empty(),
             Self::Theft { quantity, .. } => *quantity > 0,
             Self::Translate { result, .. } => result.changed(),
             Self::CorrodeArmor { amount, .. }
@@ -380,7 +385,8 @@ impl ResolvedEffect {
             Self::Theft { .. } => return Ok(None),
             Self::SearchAdjacentGuises
             | Self::ApplyLinkedHold { .. }
-            | Self::CorrodeArmor { .. } => self.clone(),
+            | Self::CorrodeArmor { .. }
+            | Self::AlterEquipment { .. } => self.clone(),
             Self::Translate { mode, result } => {
                 if let super::MovementResult::Moved { from, to } = result {
                     let Some(placement) = state.placement.as_deref_mut() else {
@@ -971,6 +977,14 @@ pub(super) fn resolve_batch<'a>(
                     .map_or(super::MovementResult::Blocked, |input| input.result);
                 ResolvedEffect::Translate { mode, result }
             }
+            PlannedEffect::AlterEquipment { alteration } => ResolvedEffect::AlterEquipment {
+                alteration: crate::ResolvedEquipmentAlteration {
+                    plan: alteration.clone(),
+                    hit: alteration.alteration == crate::EquipmentAlteration::EnchantWeapon
+                        && !alteration.targets.is_empty()
+                        && crate::dice::random_word(rng) & 1 == 0,
+                },
+            },
             PlannedEffect::CorrodeArmor { slot, amount } => ResolvedEffect::CorrodeArmor {
                 slot: slot.clone(),
                 amount: *amount,
@@ -1186,6 +1200,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 #[serde(deserialize_with = "crate::bounded::required_option")]
                 relocation: Option<super::Placement>,
             },
+            AlterEquipment {
+                alteration: crate::ResolvedEquipmentAlteration,
+            },
             CorrodeArmor {
                 slot: crate::EquipmentSlot,
                 #[serde(deserialize_with = "crate::armor::read_corrosion_amount")]
@@ -1261,6 +1278,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 quantity,
                 relocation,
             },
+            Fields::AlterEquipment { alteration } => Self::AlterEquipment { alteration },
             Fields::CorrodeArmor { slot, amount } => Self::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::Translate { mode, result } => Self::Translate { mode, result },

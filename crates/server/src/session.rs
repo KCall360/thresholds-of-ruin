@@ -27,8 +27,12 @@ fn restrict_item_disclosure(state: &mut StateView, role: AccessRole) {
     if role == AccessRole::Spectator {
         if let Some(interaction) = &mut state.observation.interactions {
             interaction.identification = None;
+            interaction.curse_blocked.clear();
             for item in &mut interaction.inventory {
                 item.charges = None;
+                item.known_equipment = None;
+                item.known_cursed = None;
+                item.known_protected = None;
             }
         }
     }
@@ -3338,6 +3342,7 @@ mod tests {
             "id":item,"class":"wand","quantity":"1","appearance":"ivory wand","identified":true,"name":"Known wand","known_supply":null
         })).unwrap());
         state.observation.interactions = Some(InteractionView {
+            curse_blocked: vec![],
             completed: vec![],
             slots: vec![],
             preparation: Some(PreparationView {
@@ -3357,6 +3362,8 @@ mod tests {
                 item,
                 slot: None,
                 equipped_slot: None,
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,

@@ -4,7 +4,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 51;
+pub const PROTOCOL_VERSION: u32 = 52;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -659,6 +659,7 @@ pub enum DamageType {
     Keen,
     Spirit,
     Vital,
+    Psychic,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -673,6 +674,10 @@ pub struct ItemInteractionView {
     pub slot: Option<EquipmentSlot>,
     pub equipped_slot: Option<u16>,
     pub known_equipment: Option<EquipmentView>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub known_cursed: Option<bool>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub known_protected: Option<bool>,
     pub drinkable: bool,
     pub edible: bool,
     pub readable: bool,
@@ -748,6 +753,7 @@ pub struct InteractionView {
     pub identification: Option<IdentificationChoiceView>,
     /// This observer's completed item actions, including consumed final units.
     pub completed: Vec<Action>,
+    pub curse_blocked: Vec<ItemTarget>,
     pub slots: Vec<EquipmentSlot>,
     pub preparation: Option<PreparationView>,
     pub inventory: Vec<ItemInteractionView>,

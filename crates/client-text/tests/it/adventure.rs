@@ -222,6 +222,7 @@ fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() 
     carrying(&mut s);
     let ring = super::item_target(12);
     s.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
         slots: vec![
@@ -233,6 +234,8 @@ fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() 
             item: ring,
             slot: Some(equipment_slot("ring", "on a finger", false)),
             equipped_slot: None,
+            known_cursed: None,
+            known_protected: None,
             known_equipment: None,
             drinkable: false,
             edible: false,

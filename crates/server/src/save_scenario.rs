@@ -731,6 +731,8 @@ struct Archetype {
     #[serde(with = "mapped")]
     equipment: Option<source::EquipmentSpec>,
     #[serde(with = "mapped")]
+    equipment_generation: Option<source::EquipmentGeneration>,
+    #[serde(with = "mapped")]
     consumable: Option<source::ConsumableSpec>,
     #[serde(with = "mapped")]
     readable: Option<source::ReadableSpec>,
@@ -940,6 +942,12 @@ enum Effect {
         #[serde(with = "mapped")]
         relocation: Option<source::RelocationGate>,
     },
+    AlterEquipment {
+        #[serde(with = "mapped")]
+        selection: source::EquippedSelection,
+        #[serde(with = "mapped")]
+        alteration: source::EquipmentAlteration,
+    },
     CorrodeArmor {
         slot: String,
         amount: u32,
@@ -1141,10 +1149,36 @@ struct ConsumableSpec {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(remote = "source::EquipmentAlteration", rename_all = "snake_case")]
+enum EquipmentAlteration {
+    EnchantArmor,
+    EnchantWeapon,
+    ProtectArmor,
+    RemoveCurse,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::EquippedSelection",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum EquippedSelection {
+    Slot {
+        slot: String,
+        #[serde(with = "ItemClass")]
+        class: source::ItemClass,
+        last: bool,
+    },
+    All {},
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "source::ItemDiscovery", rename_all = "snake_case")]
 enum ItemDiscovery {
     SelfEffect,
     OnUse,
+    Never,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::ReadableSpec", deny_unknown_fields)]
@@ -1156,6 +1190,32 @@ struct ReadableSpec {
     #[serde(with = "mapped")]
     discovery: source::ItemDiscovery,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::EquipmentGeneration",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum EquipmentGeneration {
+    Authored {
+        hit_enchantment: i32,
+        damage_enchantment: i32,
+    },
+    Weapon {
+        curse_percent: u8,
+        enchant_percent: u8,
+        minimum: u32,
+        maximum: u32,
+    },
+    Armor {
+        curse_percent: u8,
+        enchant_percent: u8,
+        minimum: u32,
+        maximum: u32,
+    },
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::ChargeRange", deny_unknown_fields)]
 struct ChargeRange {
@@ -1733,6 +1793,7 @@ enum DamageType {
     Keen,
     Spirit,
     Vital,
+    Psychic,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -3117,10 +3178,12 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    EquippedSelection => source::EquippedSelection,
     ConsumableSpec => source::ConsumableSpec,
     ReadableSpec => source::ReadableSpec,
     DeviceSpec => source::DeviceSpec,
     ChargeRange => source::ChargeRange,
+    EquipmentGeneration => source::EquipmentGeneration,
     Purchase => crate::creature_authoring::Purchase,
     EquipmentSpec => source::EquipmentSpec,
     ArmorSpec => source::ArmorSpec,
@@ -3191,6 +3254,7 @@ macro_rules! string_remote {
 string_remote!(
     HealingOverflow => source::HealingOverflow,
     ItemDiscovery => source::ItemDiscovery,
+    EquipmentAlteration => source::EquipmentAlteration,
     ArmorMaterial => source::ArmorMaterial,
     BehaviorDisposition => crate::creature_authoring::Disposition,
     BehaviorIdle => crate::creature_authoring::IdleBehavior,
@@ -3340,7 +3404,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 17;
+const RULES_INPUT_FORMAT: u32 = 18;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -3440,7 +3504,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 19;
+const CONTENT_PACKAGE_FORMAT: u32 = 20;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -3672,7 +3736,7 @@ mod tests {
     }
 
     #[test]
-    fn magic_item_formats_match_independent_payload_boundaries() {
+    fn equipment_magic_formats_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -3683,16 +3747,16 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (49, 22, "interactions-v44", 17, 5, 19, "tor-arena-run-v5")
+            (50, 23, "interactions-v45", 18, 5, 20, "tor-arena-run-v5")
         );
     }
 
     #[test]
-    fn magic_item_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 51);
-        assert_eq!(super::RULES_INPUT_FORMAT, 17);
+    fn equipment_magic_formats_preserve_physical_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 52);
+        assert_eq!(super::RULES_INPUT_FORMAT, 18);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
-        // Magic-item capabilities, charges and choice state advance their owning
+        // Equipment condition, knowledge, birth and frozen alterations advance their owning
         // semantic payloads without changing compiled region inputs or physical
         // framing.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
@@ -4887,6 +4951,7 @@ mod tests {
             (source::DamageType::Keen, "keen"),
             (source::DamageType::Spirit, "spirit"),
             (source::DamageType::Vital, "vital"),
+            (source::DamageType::Psychic, "psychic"),
         ] {
             let bytes = serde_json::to_vec(&Borrowed(&value)).unwrap();
             assert_eq!(bytes, format!("\"{name}\"").as_bytes());
@@ -5391,6 +5456,12 @@ impl Effect {
                 #[serde(with = "mapped")]
                 relocation: Option<source::RelocationGate>,
             },
+            AlterEquipment {
+                #[serde(with = "mapped")]
+                selection: source::EquippedSelection,
+                #[serde(with = "mapped")]
+                alteration: source::EquipmentAlteration,
+            },
             CorrodeArmor {
                 slot: String,
                 #[serde(deserialize_with = "stored_corrosion_amount")]
@@ -5481,6 +5552,13 @@ impl Effect {
             } => source::Effect::Theft {
                 selection,
                 relocation,
+            },
+            Fields::AlterEquipment {
+                selection,
+                alteration,
+            } => source::Effect::AlterEquipment {
+                selection,
+                alteration,
             },
             Fields::CorrodeArmor { slot, amount } => source::Effect::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => source::Effect::ApplyLinkedHold { policy },
@@ -7213,5 +7291,143 @@ mod consumable_effect_stored_tests {
                 .is_err()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod equipment_selection_stored_tests {
+    use super::*;
+
+    #[test]
+    fn saved_equipment_selections_round_trip_as_strict_named_records() {
+        for raw in [
+            r#"{"kind":"slot","slot":"body_armor","class":"armor","last":false}"#,
+            r#"{"kind":"slot","slot":"hands","class":"weapon","last":true}"#,
+            r#"{"kind":"all"}"#,
+        ] {
+            let source: source::EquippedSelection = serde_json::from_str(raw).unwrap();
+            let saved = serde_json::to_vec(&Borrowed(&source)).unwrap();
+            assert_eq!(
+                crate::storage::codec::strict::<Owned<source::EquippedSelection>>(&saved)
+                    .unwrap()
+                    .0,
+                source
+            );
+            let effect = source::Effect::AlterEquipment {
+                selection: source,
+                alteration: source::EquipmentAlteration::RemoveCurse,
+            };
+            let saved = serde_json::to_vec(&Borrowed(&effect)).unwrap();
+            assert_eq!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(&saved)
+                    .unwrap()
+                    .0,
+                effect
+            );
+        }
+        for raw in [
+            r#""all""#,
+            r#"["all"]"#,
+            r#"["slot","body_armor","armor",false]"#,
+            r#"{"kind":"all","extra":1}"#,
+            r#"{"kind":"slot","slot":"body_armor","class":"armor"}"#,
+            r#"{"kind":"slot","slot":"body_armor","class":"armor","last":false,"last":true}"#,
+        ] {
+            assert!(
+                crate::storage::codec::strict::<Owned<source::EquippedSelection>>(raw.as_bytes())
+                    .is_err(),
+                "{raw}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod equipment_generation_stored_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn saved_equipment_generation_requires_explicit_operands_despite_source_defaults() {
+        let defaulted: source::EquipmentGeneration =
+            serde_json::from_value(json!({"kind":"authored"})).unwrap();
+        assert_eq!(
+            serde_json::to_value(Borrowed(&defaulted)).unwrap(),
+            json!({"kind":"authored","hit_enchantment":0,"damage_enchantment":0})
+        );
+        for value in [
+            json!({"kind":"authored","hit_enchantment":0,"damage_enchantment":0}),
+            json!({"kind":"authored","hit_enchantment":-2,"damage_enchantment":3}),
+            json!({"kind":"weapon","curse_percent":10,"enchant_percent":5,"minimum":1,"maximum":3}),
+            json!({"kind":"armor","curse_percent":20,"enchant_percent":8,"minimum":1,"maximum":3}),
+        ] {
+            let source: source::EquipmentGeneration =
+                serde_json::from_value(value.clone()).unwrap();
+            let saved = serde_json::to_vec(&Borrowed(&source)).unwrap();
+            let restored =
+                crate::storage::codec::strict::<Owned<source::EquipmentGeneration>>(&saved)
+                    .unwrap()
+                    .0;
+            assert_eq!(restored, source);
+            assert_eq!(serde_json::to_value(Borrowed(&restored)).unwrap(), value);
+            for field in value.as_object().unwrap().keys() {
+                let mut missing = value.clone();
+                missing.as_object_mut().unwrap().remove(field);
+                let raw = serde_json::to_vec(&missing).unwrap();
+                assert!(
+                    serde_json::from_slice::<Owned<source::EquipmentGeneration>>(&raw).is_err(),
+                    "missing {field}: {missing}"
+                );
+                assert!(
+                    crate::storage::codec::strict::<Owned<source::EquipmentGeneration>>(&raw)
+                        .is_err()
+                );
+            }
+        }
+        for raw in [
+            r#""authored""#,
+            r#"["authored",0,0]"#,
+            r#"{"kind":"authored","hit_enchantment":0,"damage_enchantment":0,"extra":1}"#,
+            r#"{"kind":"authored","hit_enchantment":0,"hit_enchantment":1,"damage_enchantment":0}"#,
+        ] {
+            assert!(
+                crate::storage::codec::strict::<Owned<source::EquipmentGeneration>>(raw.as_bytes())
+                    .is_err(),
+                "{raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn saved_archetype_requires_equipment_generation_even_when_null() {
+        // Source omission is intentional convenience; the independent saved
+        // shape must carry the current explicit nullable authority field.
+        let source: source::Archetype = serde_json::from_value(json!({"name":"ordinary"})).unwrap();
+        assert!(source.equipment_generation.is_none());
+        let saved = serde_json::to_value(Borrowed(&source)).unwrap();
+        assert_eq!(
+            saved.get("equipment_generation"),
+            Some(&serde_json::Value::Null)
+        );
+        let restored = crate::storage::codec::strict::<Owned<source::Archetype>>(
+            &serde_json::to_vec(&saved).unwrap(),
+        )
+        .unwrap()
+        .0;
+        assert_eq!(serde_json::to_value(Borrowed(&restored)).unwrap(), saved);
+        let mut missing = saved.clone();
+        missing
+            .as_object_mut()
+            .unwrap()
+            .remove("equipment_generation");
+        let raw = serde_json::to_vec(&missing).unwrap();
+        assert!(serde_json::from_slice::<Owned<source::Archetype>>(&raw).is_err());
+        assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(&raw).is_err());
+        let mut unknown = saved;
+        unknown["equipment_generation"] = json!({"kind":"future"});
+        assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(
+            &serde_json::to_vec(&unknown).unwrap(),
+        )
+        .is_err());
     }
 }

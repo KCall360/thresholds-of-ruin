@@ -347,7 +347,9 @@ impl Game {
                                 .equipment
                                 .iter()
                                 .find_map(|(slot, item)| (*item == item_id).then_some(*slot)),
-                            known_equipment: identified.then(|| item.equipment_view()).flatten(),
+                            known_equipment: self.known_equipment_view(id, item_id),
+                            known_cursed: actor.known_equipment.curse(item_id),
+                            known_protected: actor.known_equipment.protection(item_id),
                             drinkable: item.spec.consumable.is_some(),
                             readable: item.spec.readable.is_some(),
                             zappable: item.spec.device.is_some(),
@@ -391,6 +393,19 @@ impl Game {
                 _ => None,
             })
             .collect();
+        let curse_blocked: Vec<_> = self
+            .event_log
+            .iter()
+            .enumerate()
+            .filter_map(|(index, event)| match event {
+                crate::combat::CombatEvent::ItemCurseBlocked { actor, item, .. }
+                    if *actor == id && self.owns_event_receipt(id, index) =>
+                {
+                    Some(*item)
+                }
+                _ => None,
+            })
+            .collect();
         let slots = actor
             .anatomy
             .slots
@@ -411,10 +426,12 @@ impl Game {
                 || actor.pending.is_some()
                 || actor.identification.is_some()
                 || !item_interactions.is_empty()
-                || !completed.is_empty())
+                || !completed.is_empty()
+                || !curse_blocked.is_empty())
             .then(|| crate::interactions::InteractionView {
                 identification: self.identification_view(id),
                 completed,
+                curse_blocked,
                 slots,
                 preparation: actor.pending.as_ref().map(|progress| {
                     crate::interactions::PreparationView {
