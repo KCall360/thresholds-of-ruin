@@ -169,3 +169,32 @@ fn art_contract_sleeves_and_trousers_stand_off_the_limbs_they_cover() {
         }
     }
 }
+
+#[test]
+fn art_contract_long_hems_hang_free_while_short_edges_stay_neat() {
+    let (top, bottom) = (Vec2::new(0.18, 0.135), Vec2::new(0.22, 0.16));
+    let hem_range = |length: f32| {
+        let heights: Vec<f32> = (0..64)
+            .map(|k| {
+                let a = k as f32 / 64.0 * std::f32::consts::TAU;
+                let p = geometry::drape_point(top, bottom, length, 8, 0.0, 0.2, 1.0, a, false);
+                assert!(p.is_finite());
+                p.y
+            })
+            .collect();
+        let low = heights.iter().copied().fold(f32::INFINITY, f32::min);
+        let high = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        high - low
+    };
+    assert!(
+        hem_range(0.4) > 0.01,
+        "a long skirt's hem must not be a level ring"
+    );
+    assert!(hem_range(0.045) < 0.003, "a cowl keeps its neat edge");
+    // The waist stays where the garment is fitted.
+    for k in 0..16 {
+        let a = k as f32 / 16.0 * std::f32::consts::TAU;
+        let waist = geometry::drape_point(top, bottom, 0.4, 8, 0.0, 0.2, 0.0, a, false);
+        assert!((waist.y - 0.04).abs() < 1e-5);
+    }
+}

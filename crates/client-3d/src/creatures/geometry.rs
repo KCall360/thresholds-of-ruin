@@ -1164,6 +1164,39 @@ fn trouser_leg(b: &mut Builder, shape: LimbShape, build: f32, knee: bool, color:
     );
 }
 
+/// One point of a draped garment at `t` down its length and angle `a`.
+/// A free hem hangs loose: its folds deepen toward the edge, and the cloth
+/// drops lower where each fold swings out, so the hem is never a level ring.
+/// Short pieces such as cowls keep their neat edge.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn drape_point(
+    top: Vec2,
+    bottom: Vec2,
+    length: f32,
+    folds: u32,
+    split: f32,
+    phase: f32,
+    t: f32,
+    a: f32,
+    inner: bool,
+) -> Vec3 {
+    let r = top.lerp(bottom, ease(t));
+    let free = (length / 0.3).clamp(0.0, 1.0);
+    let wave = (a * folds as f32 + phase).cos();
+    let fold = wave * (0.007 * t.powf(1.2) + 0.01 * free * t.powi(3));
+    let drop = 0.013 * free * (0.5 + 0.5 * wave) * ease((t - 0.6) / 0.4);
+    let thickness = if inner { 0.007 } else { 0.0 };
+    let hem_split =
+        split * a.cos().max(0.0).powi(if split < 0.0 { 2 } else { 14 }) * ease((t - 0.55) / 0.45);
+    let opening = split.max(0.0) * a.cos().max(0.0).powi(12) * ease((t - 0.3) / 0.7);
+    let side = if a < PI { 1.0 } else { -1.0 };
+    Vec3::new(
+        a.sin() * (r.x + fold - thickness) + side * opening,
+        0.04 - (length + 0.04) * t + hem_split - drop,
+        a.cos() * (r.y + fold - thickness),
+    )
+}
+
 /// A hollow garment with vertical folds, an elliptical silhouette and a
 /// narrow turned hem. Its length is the hem position, not a capsule's centre.
 #[allow(clippy::too_many_arguments)]
@@ -1182,19 +1215,7 @@ fn draped_cloth(
     let rows = 12;
     let phase = rand(seed + 73, 0) * 0.4;
     let point = |t: f32, a: f32, inner: bool| {
-        let r = top.lerp(bottom, ease(t));
-        let fold = (a * folds as f32 + phase).cos() * 0.007 * t.powf(1.2);
-        let thickness = if inner { 0.007 } else { 0.0 };
-        let hem_split = split
-            * a.cos().max(0.0).powi(if split < 0.0 { 2 } else { 14 })
-            * ease((t - 0.55) / 0.45);
-        let opening = split.max(0.0) * a.cos().max(0.0).powi(12) * ease((t - 0.3) / 0.7);
-        let side = if a < PI { 1.0 } else { -1.0 };
-        Vec3::new(
-            a.sin() * (r.x + fold - thickness) + side * opening,
-            0.04 - (length + 0.04) * t + hem_split,
-            a.cos() * (r.y + fold - thickness),
-        )
+        drape_point(top, bottom, length, folds, split, phase, t, a, inner)
     };
     for row in 0..rows {
         let t0 = row as f32 / rows as f32;
