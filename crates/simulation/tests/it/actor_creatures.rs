@@ -357,6 +357,15 @@ fn creature_actor_records_reject_mixed_fields_missing_state_and_stale_anatomy() 
     .is_err());
     let mut forged = value;
     forged[1]["actors"][0]["1"]["anatomy"]["slots"] = serde_json::json!([]);
+    // An out-of-range primary socket is rejected at the anatomy decoder.
+    assert!(serde_json::from_value::<(
+        tor_simulation::checkpoint::Snapshot,
+        tor_simulation::checkpoint::SharedState,
+    )>(forged.clone())
+    .is_err());
+    // A structurally valid but stale anatomy still fails source-aware restore.
+    forged[1]["actors"][0]["1"]["anatomy"] =
+        serde_json::to_value(tor_simulation::AnatomySpec::default()).unwrap();
     let (snapshot, shared) = serde_json::from_value(forged).unwrap();
     assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err());
 }

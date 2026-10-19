@@ -2968,3 +2968,291 @@ fn remembered_ammunition_bonuses_require_identity_and_exact_numeric_memory() {
         "numeric memory requires projectile capability"
     );
 }
+
+fn detached_source_records(game: &mut Game) -> crate::MemoryRecords {
+    let mut records = crate::MemoryRecords::default();
+    game.transition_regions(&crate::RegionTransition::default(), &mut records)
+        .unwrap();
+    assert!(!game.has_actor(ActorId(1)));
+    records
+}
+
+fn edit_detached_source_plan(
+    game: &Game,
+    original: &mut crate::MemoryRecords,
+    edit: impl Fn(&mut Plan),
+) -> crate::MemoryRecords {
+    use crate::streaming::RecordStore;
+    let mut records = crate::MemoryRecords::default();
+    for (_, id) in game.detached_records() {
+        let record = original.get(id).unwrap();
+        let mut value = serde_json::to_value(crate::RegionRecordData::capture(&record)).unwrap();
+        if value["actors"].get("1").is_some() {
+            let encoded = &mut value["actors"]["1"]["pending"]["plan"];
+            let mut plan: Plan = serde_json::from_value(encoded.clone()).unwrap();
+            edit(&mut plan);
+            assert!(
+                plan.valid(game.content.rules()),
+                "isolate source validation"
+            );
+            *encoded = serde_json::to_value(plan).unwrap();
+        }
+        let restored = serde_json::from_value::<crate::RegionRecordData>(value)
+            .unwrap()
+            .restore(game.content().clone())
+            .unwrap();
+        records.put(id, tor_world::Shared::new(restored));
+    }
+    records
+}
+
+fn all_source_fixture_regions() -> crate::RegionTransition {
+    let regions = [tor_world::RegionId(1), tor_world::RegionId(2)]
+        .into_iter()
+        .collect();
+    crate::RegionTransition {
+        active: regions,
+        loaded: [tor_world::RegionId(1), tor_world::RegionId(2)]
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn assert_detached_source_rejected(game: &Game, records: &mut crate::MemoryRecords) {
+    assert!(!game.detached_records_valid(records));
+    let mut candidate = game.clone();
+    assert_eq!(
+        candidate.transition_regions(&all_source_fixture_regions(), records),
+        Err(crate::TransitionError::InvalidRecord(tor_world::RegionId(
+            1
+        )))
+    );
+    assert_eq!(candidate, *game, "malformed arrival must remain atomic");
+}
+
+#[test]
+fn detached_equip_sources_bind_retained_anatomy_owner_and_surviving_profiles() {
+    for configured in [false, true] {
+        let mut game = fixture(|_| {});
+        equip(&mut game, 0, false);
+        let item = equip(&mut game, 10, false);
+        stow_fixture_weapon(&mut game, item);
+        if configured {
+            game.actors.get_mut(&ActorId(1)).unwrap().combat = None;
+        }
+        let plan = game
+            .plan_work(
+                ActorId(1),
+                crate::Work::Equip {
+                    item,
+                    slot: EquipmentSlotId(10),
+                },
+            )
+            .unwrap();
+        start_plan(&mut game, &plan);
+        let pending = game.preparation(ActorId(1)).unwrap().clone();
+        let mut original = detached_source_records(&mut game);
+        let mut records = edit_detached_source_plan(&game, &mut original, |_| {});
+        assert!(game.detached_records_valid(&mut records));
+        for target in [false, true] {
+            let mut damaged = edit_detached_source_plan(&game, &mut original, |plan| {
+                let Plan::Equip { allocation, .. } = plan else {
+                    panic!("Equip")
+                };
+                let profile = if target {
+                    &mut allocation.target
+                } else {
+                    &mut allocation.occupants[0].profile
+                };
+                let CapturedWeaponProfile::Profile { spec, .. } = profile else {
+                    panic!("profile")
+                };
+                spec.expert_traits.add.clear();
+            });
+            assert_detached_source_rejected(&game, &mut damaged);
+        }
+        let mut alias = edit_detached_source_plan(&game, &mut original, |plan| {
+            let Plan::Equip { actor, .. } = plan else {
+                panic!("Equip")
+            };
+            *actor = ActorId(2);
+        });
+        assert_detached_source_rejected(&game, &mut alias);
+        if configured {
+            let mut damaged = edit_detached_source_plan(&game, &mut original, |plan| {
+                let Plan::Equip { allocation, .. } = plan else {
+                    panic!("Equip")
+                };
+                let crate::equipment_capture::EquipAnatomySource::Configured { anatomy } =
+                    &mut allocation.anatomy
+                else {
+                    panic!("configured anatomy")
+                };
+                anatomy.primary_attack_socket =
+                    crate::equipment_capacity::PrimaryAttackSocket::None;
+            });
+            assert_detached_source_rejected(&game, &mut damaged);
+        }
+        game.transition_regions(&all_source_fixture_regions(), &mut records)
+            .unwrap();
+        assert_eq!(game.preparation(ActorId(1)), Some(&pending));
+        finish_fixture_preparation(&mut game);
+        assert_eq!(
+            game.equipment(ActorId(1))
+                .unwrap()
+                .get(&EquipmentSlotId(10)),
+            Some(&item)
+        );
+    }
+}
+
+#[test]
+fn merged_equip_source_context_never_falls_back_and_retains_deleted_item_semantics() {
+    let mut game = fixture(|_| {});
+    let item = equip(&mut game, 0, false);
+    stow_fixture_weapon(&mut game, item);
+    game.actors.get_mut(&ActorId(1)).unwrap().combat = None;
+    let plan = game
+        .plan_work(
+            ActorId(1),
+            crate::Work::Equip {
+                item,
+                slot: EquipmentSlotId(0),
+            },
+        )
+        .unwrap();
+    let actors = game.actors.iter().map(|(id, actor)| (*id, actor)).collect();
+    let mut items: std::collections::BTreeMap<_, _> =
+        game.items.iter().map(|(id, item)| (*id, item)).collect();
+    let absent_actors = Default::default();
+    assert!(!game.plan_source_valid_with_context(
+        &plan,
+        PlanSourceContext::Records {
+            actors: &absent_actors,
+            items: &items
+        },
+    ));
+    let mut historical = plan.clone();
+    let Plan::Equip { allocation, .. } = &mut historical else {
+        panic!("Equip")
+    };
+    let CapturedWeaponProfile::Profile { spec, .. } = &mut allocation.target else {
+        panic!("profile")
+    };
+    spec.expert_traits.add.clear();
+    assert!(!game.plan_source_valid(&historical));
+    items.remove(&item);
+    assert!(game.plan_source_valid_with_context(
+        &historical,
+        PlanSourceContext::Records {
+            actors: &actors,
+            items: &items
+        },
+    ));
+    let mut forged = plan;
+    let Plan::Equip { item, .. } = &mut forged else {
+        panic!("Equip")
+    };
+    *item = ItemId(game.next_item_id);
+    assert!(!game.plan_source_valid_with_context(
+        &forged,
+        PlanSourceContext::Records {
+            actors: &actors,
+            items: &items
+        },
+    ));
+}
+
+#[test]
+fn detached_projectile_sources_retain_generation_and_exact_weapon_witnesses() {
+    for (qualified, carried) in [(false, false), (true, false), (false, true), (true, true)] {
+        let (mut game, mut captured) =
+            projectile_throw_fixture(qualified.then(projectile_qualification));
+        if carried {
+            let item = captured.source.item().unwrap();
+            stow_fixture_weapon(&mut game, item);
+            captured = game
+                .capture_projectile_plan(
+                    ActorId(1),
+                    &captured.ability,
+                    captured.direction,
+                    ProjectileDeliverySelection::Throw {
+                        source: ThrownSourceSelection::Carried {
+                            item,
+                            socket: EquipmentSlotId(0),
+                        },
+                    },
+                )
+                .unwrap();
+        }
+        let plan = Plan::Projectile(tor_world::Shared::new(captured));
+        start_plan(&mut game, &plan);
+        let pending = game.preparation(ActorId(1)).unwrap().clone();
+        let next_generation = game
+            .creature(ActorId(1))
+            .unwrap()
+            .conditions()
+            .next_generation();
+        let mut original = detached_source_records(&mut game);
+        let mut records = edit_detached_source_plan(&game, &mut original, |_| {});
+        assert!(game.detached_records_valid(&mut records));
+        let mut future = edit_detached_source_plan(&game, &mut original, |plan| {
+            let Plan::Projectile(plan) = plan else {
+                panic!("Projectile")
+            };
+            if qualified {
+                plan.conditional_tokens[0].generation = next_generation;
+            } else {
+                plan.tokens[0].reservation.generation = next_generation;
+            }
+        });
+        assert_detached_source_rejected(&game, &mut future);
+        let mut profile = edit_detached_source_plan(&game, &mut original, |plan| {
+            let Plan::Projectile(plan) = plan else {
+                panic!("Projectile")
+            };
+            let profile = match &mut plan.source {
+                ProjectileSource::ThrowEquipped {
+                    weapon: FrozenWeaponSelection::Equipped { profile, .. },
+                } => profile,
+                ProjectileSource::ThrowCarried { allocation, .. } => &mut allocation.target,
+                _ => panic!("throw"),
+            };
+            let CapturedWeaponProfile::Profile { spec, .. } = profile else {
+                panic!("profile")
+            };
+            spec.expert_traits.add.clear();
+        });
+        assert_detached_source_rejected(&game, &mut profile);
+        game.transition_regions(&all_source_fixture_regions(), &mut records)
+            .unwrap();
+        assert_eq!(game.preparation(ActorId(1)), Some(&pending));
+    }
+}
+
+#[test]
+fn detached_launcher_source_rejects_a_forged_surviving_ammunition_payload() {
+    let (mut game, ability, selection, _, _) = projectile_launch_fixture();
+    let plan = game
+        .ability_plan_with_supplies(
+            ActorId(1),
+            &ability,
+            AbilityInvocation::directional_projectile(StepDirection::East, selection),
+            Default::default(),
+        )
+        .unwrap();
+    start_plan(&mut game, &plan);
+    let mut original = detached_source_records(&mut game);
+    let mut records = edit_detached_source_plan(&game, &mut original, |_| {});
+    assert!(game.detached_records_valid(&mut records));
+    let mut damaged = edit_detached_source_plan(&game, &mut original, |plan| {
+        let Plan::Projectile(plan) = plan else {
+            panic!("Projectile")
+        };
+        let ProjectileSource::Launch { payload, .. } = &mut plan.source else {
+            panic!("Launch")
+        };
+        payload.recovery = crate::projectile_profiles::HitRecovery::Recoverable;
+    });
+    assert_detached_source_rejected(&game, &mut damaged);
+}

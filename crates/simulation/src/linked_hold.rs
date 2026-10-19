@@ -661,12 +661,18 @@ impl Game {
     }
     /// Audit cross-record identity/mirror/capability state without requiring
     /// detached geometry. Contact is checked when its dependency closure arrives.
-    pub(crate) fn all_hold_records_valid(&self, actors: &BTreeMap<ActorId, &Actor>) -> bool {
+    pub(crate) fn all_hold_records_valid(
+        &self,
+        actors: &BTreeMap<ActorId, &Actor>,
+        items: &BTreeMap<crate::ItemId, &crate::Item>,
+    ) -> bool {
+        let sources = crate::abilities::PlanSourceContext::Records { actors, items };
         let mut ids = BTreeSet::new();
         actors.iter().all(|(id, actor)| {
             self.hold_actor_shape_valid(*id, actor)
                 && actor.pending.as_ref().is_none_or(|pending| {
-                    self.plan_source_valid(&pending.plan)
+                    pending.plan.actor() == *id
+                        && self.plan_source_valid_with_context(&pending.plan, sources)
                         && pending
                             .progress
                             .hold_binding()

@@ -1,6 +1,6 @@
 //! Frozen draw allocation. Expertise changes may alter current demand, but a
 //! paid draw never acquires permission to displace another item in its pool.
-use crate::abilities::CapturedWeaponProfile;
+use crate::abilities::{CapturedWeaponProfile, PlanSourceContext};
 use crate::content_ids::{EquipmentCapacityId, SpeciesId};
 use crate::equipment_capacity::EquipmentCapacityUse;
 use crate::{ActorId, AnatomySpec, EquipmentSlotId, Game, GameError, ItemId, ItemLocation};
@@ -97,8 +97,9 @@ pub(crate) fn captured_profile_matches_surviving_item(
     item: ItemId,
     slot: &crate::content_ids::EquipmentSlot,
     profile: &CapturedWeaponProfile,
+    sources: PlanSourceContext<'_>,
 ) -> bool {
-    game.items.get(&item).is_none_or(|item| {
+    sources.item(game, item).is_none_or(|item| {
         item.spec.equipment.as_ref().is_some_and(|gear| {
             &gear.slot == slot
                 && match (profile, &gear.weapon_profile) {
@@ -156,12 +157,20 @@ impl FrozenEquipAllocation {
             }
     }
     pub(crate) fn anatomy<'a>(&'a self, game: &'a Game, actor: ActorId) -> Option<&'a AnatomySpec> {
+        self.anatomy_with_context(game, actor, PlanSourceContext::Loaded)
+    }
+    pub(crate) fn anatomy_with_context<'a>(
+        &'a self,
+        game: &'a Game,
+        actor: ActorId,
+        sources: PlanSourceContext<'a>,
+    ) -> Option<&'a AnatomySpec> {
         match &self.anatomy {
             EquipAnatomySource::Species { species } => {
                 Some(&game.content.catalog().species.get(species)?.anatomy)
             }
             EquipAnatomySource::Configured { anatomy } => {
-                let owner = game.actors.get(&actor)?;
+                let owner = sources.actor(game, actor)?;
                 (owner.combat.is_none() && *owner.anatomy == *anatomy).then_some(anatomy)
             }
         }
@@ -174,10 +183,20 @@ impl FrozenEquipAllocation {
         item: ItemId,
         socket: EquipmentSlotId,
     ) -> bool {
+        self.source_valid_with_context(game, actor, item, socket, PlanSourceContext::Loaded)
+    }
+    pub(crate) fn source_valid_with_context(
+        &self,
+        game: &Game,
+        actor: ActorId,
+        item: ItemId,
+        socket: EquipmentSlotId,
+        sources: PlanSourceContext<'_>,
+    ) -> bool {
         if !self.valid_shape(game.content.rules(), item, socket) || item.0 >= game.next_item_id {
             return false;
         }
-        let Some(anatomy) = self.anatomy(game, actor) else {
+        let Some(anatomy) = self.anatomy_with_context(game, actor, sources) else {
             return false;
         };
         let Some(slot) = anatomy
@@ -191,7 +210,7 @@ impl FrozenEquipAllocation {
         else {
             return false;
         };
-        if !captured_profile_matches_surviving_item(game, item, &slot.id, &self.target) {
+        if !captured_profile_matches_surviving_item(game, item, &slot.id, &self.target, sources) {
             return false;
         }
         if !matches!(self.target, CapturedWeaponProfile::Ordinary) && !slot.requires_attack {
@@ -222,6 +241,7 @@ impl FrozenEquipAllocation {
                         row.item,
                         &other.id,
                         &row.profile,
+                        sources,
                     ) {
                         return false;
                     }

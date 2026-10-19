@@ -383,6 +383,15 @@ the narrower per-weapon authored bonus bound. The existing shared final check
 and total damage budgets remain 1,000,000; extreme compositions beyond those
 budgets reject atomically without saturation or disclosing numeric operands.
 
+Population compilation and validation reuse successful, exactly equal actor
+recipes within one immutable content-bound invocation, retaining at most 64
+recipes. Labels alone never authorize reuse, failures are not cached, and all
+band, weight, turn, carried-policy and character/seed/depth witnesses remain
+checked. Regression owners count repeated-recipe validation work and reject
+changed inputs across fresh contexts. The original candidate-validation deadline
+remains unchanged; deterministic work reduction does not replace final-binary
+timing or the required platform CI checks.
+
 These foundations have focused local metadata and owning-test coverage.
 Server-authored revision-scoped source/ammunition menus now drive Text and ASCII
 direction selection and exact cost/timing preview before explicit confirmation.

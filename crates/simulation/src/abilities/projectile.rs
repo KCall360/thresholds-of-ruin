@@ -535,11 +535,16 @@ impl crate::Game {
 }
 
 impl ProjectileSource {
-    fn source_valid(&self, game: &crate::Game, actor: ActorId) -> bool {
+    fn source_valid(
+        &self,
+        game: &crate::Game,
+        actor: ActorId,
+        sources: super::PlanSourceContext<'_>,
+    ) -> bool {
         match self {
             Self::ThrowEquipped { weapon } => {
                 matches!(weapon, FrozenWeaponSelection::Equipped { .. })
-                    && game.frozen_weapon_source_valid(weapon)
+                    && game.frozen_weapon_source_valid_with_context(weapon, sources)
             }
             Self::ThrowCarried {
                 item,
@@ -547,14 +552,16 @@ impl ProjectileSource {
                 secondary,
                 allocation,
             } => {
-                allocation.source_valid(game, actor, *item, *socket)
-                    && allocation.anatomy(game, actor).is_some_and(|anatomy| {
-                        *secondary
-                            == (anatomy.primary_attack_socket
-                                != crate::equipment_capacity::PrimaryAttackSocket::Socket {
-                                    slot: *socket,
-                                })
-                    })
+                allocation.source_valid_with_context(game, actor, *item, *socket, sources)
+                    && allocation
+                        .anatomy_with_context(game, actor, sources)
+                        .is_some_and(|anatomy| {
+                            *secondary
+                                == (anatomy.primary_attack_socket
+                                    != crate::equipment_capacity::PrimaryAttackSocket::Socket {
+                                        slot: *socket,
+                                    })
+                        })
             }
             Self::Launch {
                 weapon,
@@ -562,18 +569,17 @@ impl ProjectileSource {
                 payload,
             } => {
                 matches!(weapon, FrozenWeaponSelection::Equipped { .. })
-                    && game.frozen_weapon_source_valid(weapon)
+                    && game.frozen_weapon_source_valid_with_context(weapon, sources)
                     && ammunition.0 > 0
                     && ammunition.0 < game.next_item_id
-                    && game
-                        .items
-                        .get(ammunition)
+                    && sources
+                        .item(game, *ammunition)
                         .is_none_or(|item| item.spec.projectile.as_ref() == Some(payload))
             }
         }
     }
     pub(crate) fn available(&self, game: &crate::Game, actor: ActorId) -> bool {
-        if !self.source_valid(game, actor) {
+        if !self.source_valid(game, actor, super::PlanSourceContext::Loaded) {
             return false;
         }
         match self {
@@ -742,10 +748,17 @@ impl crate::Game {
 
 impl crate::Game {
     pub(crate) fn projectile_plan_source_valid(&self, plan: &ProjectilePlan) -> bool {
-        let Some(actor) = self.creature(plan.actor) else {
+        self.projectile_plan_source_valid_with_context(plan, super::PlanSourceContext::Loaded)
+    }
+    pub(crate) fn projectile_plan_source_valid_with_context(
+        &self,
+        plan: &ProjectilePlan,
+        sources: super::PlanSourceContext<'_>,
+    ) -> bool {
+        let Some(next_generation) = sources.condition_generation(self, plan.actor) else {
             return false;
         };
-        plan.source.source_valid(self, plan.actor)
+        plan.source.source_valid(self, plan.actor, sources)
             && self.world.knows(plan.origin.location)
             && plan
                 .launch_footprint
@@ -760,7 +773,7 @@ impl crate::Game {
                 .map(|claim| &claim.reservation)
                 .chain(&plan.conditional_tokens)
                 .all(|token| {
-                    token.generation < actor.conditions().next_generation()
+                    token.generation < next_generation
                         && token.source.0 < self.next_actor_id
                         && token
                             .qualification

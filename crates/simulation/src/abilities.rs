@@ -24,6 +24,7 @@ pub use invocation::{
 };
 mod plan;
 mod plan_validation;
+pub(crate) use plan_validation::PlanSourceContext;
 mod ray;
 mod resolve;
 pub use ray::{RayIncomingOwner, RayIncomingSource, RayPlan};
