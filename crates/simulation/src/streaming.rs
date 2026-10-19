@@ -1988,14 +1988,20 @@ impl Game {
         }
         let mut actors: BTreeMap<_, _> =
             self.actors.iter().map(|(id, actor)| (*id, actor)).collect();
+        let mut items: BTreeMap<_, _> = self.items.iter().map(|(id, item)| (*id, item)).collect();
         for record in &retained {
             for (id, actor) in &record.actors {
                 if actors.insert(*id, actor).is_some() {
                     return false;
                 }
             }
+            for (id, item) in &record.items {
+                if items.insert(*id, item).is_some() {
+                    return false;
+                }
+            }
         }
-        self.all_hold_records_valid(&actors) && {
+        self.all_hold_records_valid(&actors, &items) && {
             // Unbuilt regions' identities are declared, not recorded.
             let mut directory = (*l.directory).clone();
             for region in l.unbuilt.iter() {

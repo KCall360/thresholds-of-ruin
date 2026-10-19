@@ -424,16 +424,11 @@ fn recorded_choices_restore_dormancy_and_validate_ownership() {
         .select_talent(tor_simulation::HdIndex(1), talent("fixture_thinking_child"))
         .unwrap();
     value.set_templates(vec![template("zombified")]).unwrap();
-    let restored = CreatureBuild::from_recorded(
-        value.content().clone(),
-        value.species_id().clone(),
-        value.initial_attributes(),
-        value.ledger().clone(),
-        value.binding(),
-        value.advancement().clone(),
-        value.template_ids().to_vec(),
-    )
-    .unwrap();
+    // Persistence retains original birth learning across later polymorph and
+    // purchases; fresh from_recorded construction intentionally starts a birth.
+    let restored = tor_simulation::creatures::record::BuildRecord::capture(&value)
+        .restore(value.content().clone())
+        .unwrap();
     assert_eq!(restored, value);
     assert_eq!(
         restored.derive().unwrap().dormant_talents,

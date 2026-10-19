@@ -721,7 +721,7 @@ fn label(s: &str) -> bool {
 fn valid_bands<T>(
     bands: &[DepthBand<T>],
     header: fn(&T) -> (&str, u32),
-    valid: impl Fn(&T) -> bool,
+    mut valid: impl FnMut(&T) -> bool,
 ) -> bool {
     !bands.is_empty()
         && bands.len() <= MAX_DEPTH_BANDS
@@ -775,6 +775,66 @@ impl PreparedActorChoice {
     }
 }
 
+/// One validation invocation, bound to its immutable content. Labels only pick a
+/// candidate; exact recipe equality authorizes reuse. Limit retained successes to
+/// one band's capacity, independently of the total authored choice count.
+struct PopulationRecipeValidation<'a> {
+    game: &'a Game,
+    successful: BTreeMap<String, PreparedActorChoice>,
+    #[cfg(test)]
+    actor_checks: usize,
+    #[cfg(test)]
+    birth_checks: usize,
+}
+impl<'a> PopulationRecipeValidation<'a> {
+    fn new(game: &'a Game) -> Self {
+        Self {
+            game,
+            successful: BTreeMap::new(),
+            #[cfg(test)]
+            actor_checks: 0,
+            #[cfg(test)]
+            birth_checks: 0,
+        }
+    }
+    fn valid(&mut self, choice: &PreparedActorChoice) -> bool {
+        if self
+            .successful
+            .get(&choice.content)
+            .is_some_and(|previous| previous.same_spawn_recipe(choice))
+        {
+            return true;
+        }
+        #[cfg(test)]
+        {
+            self.actor_checks += 1;
+        }
+        if !choice.actor.valid(self.game) {
+            return false;
+        }
+        #[cfg(test)]
+        {
+            self.birth_checks += 1;
+        }
+        if choice
+            .actor
+            .validate_birth_advancement(
+                self.game.content.clone(),
+                choice.depth_growth,
+                &choice.advancement,
+            )
+            .is_err()
+        {
+            return false;
+        }
+        if self.successful.len() < MAX_CHOICES || self.successful.contains_key(&choice.content) {
+            self.successful
+                .insert(choice.content.clone(), choice.clone());
+        }
+        true
+    }
+}
+
 impl PopulationPlan {
     /// Resolve one authored recipe, never an arbitrary first depth band.
     pub fn named_actor(
@@ -808,6 +868,10 @@ impl PopulationPlan {
         Ok((profile, stage, choice))
     }
     fn valid(&self, game: &Game) -> bool {
+        self.valid_with_recipes(&mut PopulationRecipeValidation::new(game))
+    }
+    fn valid_with_recipes(&self, recipes: &mut PopulationRecipeValidation<'_>) -> bool {
+        let game = recipes.game;
         self.protagonist.0 != 0
             && self.carried_item_pools.len() <= MAX_CARRIED_ITEM_POOLS
             && self
@@ -853,17 +917,10 @@ impl PopulationPlan {
                                     |c| (&c.content, c.weight),
                                     |c| {
                                         c.turn_ticks > 0
-                                            && c.actor.valid(game)
                                             && c.carried_loot.as_ref().is_none_or(|policy| {
                                                 policy.valid(&self.carried_item_pools)
                                             })
-                                            && c.actor
-                                                .validate_birth_advancement(
-                                                    game.content.clone(),
-                                                    c.depth_growth,
-                                                    &c.advancement,
-                                                )
-                                                .is_ok()
+                                            && recipes.valid(c)
                                     },
                                 ),
                             }
@@ -2282,6 +2339,7 @@ mod tests {
     include!("floor_activation_transaction_tests.rs");
     include!("floor_activation_checkpoint_tests.rs");
     include!("population_depth_tests.rs");
+    include!("population_recipe_validation_tests.rs");
     include!("spawn_carried_loot_tests.rs");
     include!("gold_population_tests.rs");
 

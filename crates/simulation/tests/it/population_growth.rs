@@ -289,8 +289,46 @@ fn bulk_racial_birth_matches_ordinary_ordinals_with_bounded_helper_compilation()
         for _ in 0..additional {
             ordinary.add_hit_die(HdSource::Racial, u64::MAX).unwrap();
         }
-        assert_eq!(bulk, ordinary);
         assert_eq!(bulk.derive().unwrap(), ordinary.derive().unwrap());
+        let mut records = [bulk.clone(), ordinary.clone()].map(|build| {
+            let record = tor_simulation::creatures::record::BuildRecord::capture(&build);
+            let value = serde_json::to_value(&record).unwrap();
+            let decoded: tor_simulation::creatures::record::BuildRecord =
+                serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(decoded.restore(build.content().clone()).unwrap(), build);
+            value
+        });
+        // Birth with all HD and subsequent growth have the same owned state,
+        // but retain different first-earned birth witnesses when HD were added.
+        if additional == 0 {
+            assert_eq!(
+                records[0]["intellect_learning"],
+                records[1]["intellect_learning"]
+            );
+        } else {
+            assert_ne!(
+                records[0]["intellect_learning"],
+                records[1]["intellect_learning"]
+            );
+        }
+        for record in &mut records {
+            record.as_object_mut().unwrap().remove("intellect_learning");
+        }
+        assert_eq!(records[0], records[1]);
+        let mut ordinary_birth = CreatureBuild::from_recorded(
+            ordinary.content().clone(),
+            ordinary.species_id().clone(),
+            ordinary.initial_attributes(),
+            ordinary.ledger().clone(),
+            ordinary.binding(),
+            ordinary.advancement().clone(),
+            ordinary.template_ids().to_vec(),
+        )
+        .unwrap();
+        ordinary_birth
+            .set_future_growth(ordinary.future_growth().clone())
+            .unwrap();
+        assert_eq!(bulk, ordinary_birth);
     }
 }
 

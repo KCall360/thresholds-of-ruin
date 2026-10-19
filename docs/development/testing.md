@@ -89,7 +89,11 @@ well as newly added tests. Include existing owners of affected restore fold
 counts, retained build provenance, frozen plan witnesses and complete schema
 field inventories even when their test files were not initially edited. Record
 the selected test IDs and the contracts they cover; a new feature's tests alone
-do not cover those older cross-cutting invariants.
+do not cover those older cross-cutting invariants. Check the CI target order too:
+fail-fast can hide later owning targets. For broad build, restore or schema
+changes, run the directly affected integration target as a whole when its
+runtime is small, instead of repeatedly filtering out older invariants. This
+does not require a full workspace matrix locally.
 
 Choose owners by the production boundary, not the test language. Python-authored
 Service contracts exercise the production Service and encoder. The current host

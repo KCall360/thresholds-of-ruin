@@ -81,7 +81,24 @@ fn denial_and_protection_share_elapsed_time_without_stopping_other_actor_clocks(
         assert_eq!(subject.costs(), control.costs());
         assert_eq!(subject.cooldowns(), control.cooldowns());
     }
-    assert_eq!(subject, control);
+    // Expiry removes the condition, not its non-reusable instance generation.
+    assert!(subject.conditions().is_empty());
+    assert!(control.conditions().is_empty());
+    let mut subject_record = record(&subject);
+    let mut control_record = record(&control);
+    assert_eq!(subject_record["next_condition_generation"], 1);
+    assert_eq!(control_record["next_condition_generation"], 0);
+    subject_record
+        .as_object_mut()
+        .unwrap()
+        .remove("next_condition_generation");
+    control_record
+        .as_object_mut()
+        .unwrap()
+        .remove("next_condition_generation");
+    assert_eq!(subject_record, control_record);
+    assert_eq!(restored(&subject), subject);
+    assert_eq!(restored(&control), control);
 }
 
 fn record(creature: &CreatureState) -> Value {

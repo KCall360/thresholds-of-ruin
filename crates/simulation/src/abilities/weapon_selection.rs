@@ -431,7 +431,11 @@ impl Game {
             },
         })
     }
-    pub(crate) fn frozen_weapon_source_valid(&self, selection: &FrozenWeaponSelection) -> bool {
+    pub(crate) fn frozen_weapon_source_valid_with_context(
+        &self,
+        selection: &FrozenWeaponSelection,
+        sources: super::PlanSourceContext<'_>,
+    ) -> bool {
         let FrozenWeaponSelection::Equipped {
             species,
             item,
@@ -484,7 +488,7 @@ impl Game {
         };
         item.0 < self.next_item_id
             && crate::equipment_capture::captured_profile_matches_surviving_item(
-                self, *item, &slot.id, profile,
+                self, *item, &slot.id, profile, sources,
             )
             && slot.requires_attack
             && fits
