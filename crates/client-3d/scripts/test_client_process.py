@@ -7,6 +7,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 import unittest
 
@@ -49,6 +50,80 @@ class AbilityTrace:
 
 class Native3DProcesses(ProcessTestCase):
     graphical = True
+
+    def test_art_lineup_presents_generated_bodies_and_accepts_native_close(self):
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        captures = self.directory / "art-lineup"
+        captures.mkdir(parents=True)
+        window = self.launch("tor-client-3d", [
+            "--lineups", "--capture", captures, "--capture-warmup", "2",
+        ], executable=executable)
+        deadline = time.monotonic() + 90
+        image = captures / "00-line-Warrior.png"
+        def complete_png():
+            if not image.exists() or image.stat().st_size < 12:
+                return False
+            with image.open("rb") as stream:
+                stream.seek(-12, 2)
+                return stream.read() == b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        while not complete_png() and time.monotonic() < deadline:
+            self.assertIsNone(window.child.poll(), "client exited before presenting its generated lineup")
+            time.sleep(0.05)
+        self.assertTrue(complete_png(), "complete GPU screenshot of the five generated bodies is required")
+        data = image.read_bytes()
+        self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertGreater(len(data), 4096)
+        width, height = struct.unpack(">II", data[16:24])
+        self.assertGreaterEqual(width, 640)
+        self.assertGreaterEqual(height, 480)
+        handle = self._native_window(window, expected_title="Thresholds of Ruin — bestiary")
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+            self.assertTrue(user32.PostMessageW(handle, 0x0010, 0, 0))  # WM_CLOSE
+        else:
+            # Send the normal close request directly: CI's Xvfb has no window
+            # manager, and xdotool windowclose forcibly destroys the surface.
+            import ctypes
+            import ctypes.util
+            class Data(ctypes.Union):
+                _fields_ = [("longs", ctypes.c_long * 5)]
+            class ClientMessage(ctypes.Structure):
+                _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong),
+                            ("send_event", ctypes.c_int), ("display", ctypes.c_void_p),
+                            ("window", ctypes.c_ulong), ("message_type", ctypes.c_ulong),
+                            ("format", ctypes.c_int), ("data", Data)]
+            class Event(ctypes.Union):
+                _fields_ = [("client", ClientMessage), ("padding", ctypes.c_long * 24)]
+            library = ctypes.util.find_library("X11")
+            self.assertIsNotNone(library, "native close requires X11")
+            x11 = ctypes.CDLL(library)
+            x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            x11.XOpenDisplay.restype = ctypes.c_void_p
+            x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+            x11.XInternAtom.restype = ctypes.c_ulong
+            x11.XSendEvent.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int,
+                                      ctypes.c_long, ctypes.POINTER(Event)]
+            x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+            display = x11.XOpenDisplay(None)
+            self.assertTrue(display, "native close requires an X11 display")
+            try:
+                event = Event()
+                event.client.type = 33  # ClientMessage
+                event.client.display = display
+                event.client.window = int(handle, 0)
+                event.client.message_type = x11.XInternAtom(display, b"WM_PROTOCOLS", 0)
+                event.client.format = 32
+                event.client.data.longs[0] = x11.XInternAtom(display, b"WM_DELETE_WINDOW", 0)
+                self.assertTrue(x11.XSendEvent(display, int(handle, 0), 0, 0, ctypes.byref(event)))
+            finally:
+                x11.XCloseDisplay(display)
+        self.assertEqual(window.child.wait(timeout=30), 0)
+        errors = [line for line in window.stdout_path.read_text(encoding="utf-8").splitlines()
+                  if "ERROR" in line and any(term in line.lower() for term in ("shader", "pipeline", "wgpu"))]
+        self.assertFalse(errors, "\n".join(errors)[-2500:])
 
     def own_private_backend_cleanup(self, pid):
         """Retain an OS process handle so failed tests cannot leak a backend
@@ -199,7 +274,7 @@ class Native3DProcesses(ProcessTestCase):
             server.stop(save=False)
         self.assertGreater(luminance[True], luminance[False] * 1.25, luminance)
 
-    def _native_window(self, client):
+    def _native_window(self, client, *, expected_title="Thresholds of Ruin — 3D prototype"):
         if os.name == "nt":
             import ctypes
             from ctypes import wintypes
@@ -219,7 +294,7 @@ class Native3DProcesses(ProcessTestCase):
                     user32.GetWindowTextW(hwnd, title, len(title))
                     # Winit may also own a visible IME helper; input belongs to
                     # the unique game window, identified by both PID and title.
-                    if title.value == "Thresholds of Ruin — 3D prototype":
+                    if title.value == expected_title:
                         handles.append(hwnd)
                 return True
             user32.EnumWindows(find, 0)

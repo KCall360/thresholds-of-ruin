@@ -116,9 +116,8 @@ impl Sculpt {
         for (h, w) in [(0.008f32, 1.0f32), (0.018, 0.6), (0.035, 0.35)] {
             occ += (h - self.distance(p + n * h)).max(0.0) / h * w;
         }
-        // A little darker facing down, as under a warm key light from above.
-        let below = (-n.y).max(0.0) * 0.12;
-        (1.0 - occ * 0.32 - below).clamp(0.55, 1.0)
+        // Runtime lighting supplies directional shade; bake only local creases.
+        (1.0 - occ * 0.32).clamp(0.55, 1.0)
     }
 
     fn normal(&self, p: Vec3) -> Vec3 {
@@ -149,6 +148,7 @@ impl Sculpt {
         step: f32,
         paint: &dyn Fn(Vec3, Vec3) -> Vec3,
     ) {
+        let profile_started = crate::props::profile_builds().then(std::time::Instant::now);
         let size = ((max - min) / step).ceil().as_uvec3() + UVec3::ONE;
         let (nx, ny, nz) = (size.x as usize, size.y as usize, size.z as usize);
         let at =
@@ -162,11 +162,25 @@ impl Sculpt {
                 }
             }
         }
+        let field_done = profile_started.map(|time| time.elapsed());
         // One vertex per cell the surface passes through, at the mean of its
         // edge crossings.
         let cells = (nx - 1, ny - 1, nz - 1);
         let cell = |i: usize, j: usize, k: usize| (k * cells.1 + j) * cells.0 + i;
-        let mut vertex: Vec<Option<Vec3>> = vec![None; cells.0 * cells.1 * cells.2];
+        // Empty cells carry only an index. Positions and their exact painted
+        // attributes live once in a dense surface list, shared by every face.
+        // A surface-net vertex normally belongs to several triangles; repeating
+        // six normal samples and three occlusion samples for each corner
+        // repeats identical distance work during first-use construction.
+        #[derive(Clone, Copy)]
+        struct SurfaceVertex {
+            position: Vec3,
+            normal: Vec3,
+            pigment: Vec3,
+            shade: f32,
+        }
+        let mut grid_vertex = vec![usize::MAX; cells.0 * cells.1 * cells.2];
+        let mut vertex: Vec<SurfaceVertex> = Vec::new();
         const CORNERS: [(usize, usize, usize); 8] = [
             (0, 0, 0),
             (1, 0, 0),
@@ -209,28 +223,42 @@ impl Sculpt {
                             n += 1.0;
                         }
                     }
-                    vertex[cell(i, j, k)] = Some(sum / n);
+                    let position = sum / n;
+                    let normal = self.normal(position);
+                    let pigment = paint(position, normal);
+                    let shade = self.occlusion(position, normal);
+                    grid_vertex[cell(i, j, k)] = vertex.len();
+                    vertex.push(SurfaceVertex {
+                        position,
+                        normal,
+                        pigment,
+                        shade,
+                    });
                 }
             }
         }
+        // Includes crossing extraction, normals, pigment and sculpt occlusion.
+        let surface_done = profile_started.map(|time| time.elapsed());
         // A quad across every grid edge that crosses the surface, joining the
         // four cells around it.
         let mut quad = |cs: [(usize, usize, usize); 4], flip: bool| {
-            let vs: Option<Vec<Vec3>> = cs.iter().map(|&(i, j, k)| vertex[cell(i, j, k)]).collect();
-            let Some(mut vs) = vs else {
+            let indices = cs.map(|(i, j, k)| grid_vertex[cell(i, j, k)]);
+            if indices.contains(&usize::MAX) {
                 return;
-            };
+            }
+            let mut vs = indices.map(|index| vertex[index]);
             if flip {
                 vs.reverse();
             }
             for tri in [[vs[0], vs[1], vs[2]], [vs[0], vs[2], vs[3]]] {
-                let normals = tri.map(|p| self.normal(p));
-                // Soft occlusion baked into the colour: creases, sockets and
-                // the undersides of forms darken gently, as a painted model's do.
-                let colors = std::array::from_fn(|q| {
-                    paint(tri[q], normals[q]) * self.occlusion(tri[q], normals[q])
-                });
-                b.tri_smooth(tri, normals, colors);
+                // Preserve the existing triangle order and winding. Pigment
+                // remains sRGB and occlusion remains linear until upload.
+                b.tri_smooth_shaded(
+                    tri.map(|v| v.position),
+                    tri.map(|v| v.normal),
+                    tri.map(|v| v.pigment),
+                    tri.map(|v| v.shade),
+                );
             }
         };
         for k in 1..cells.2 {
@@ -272,6 +300,21 @@ impl Sculpt {
                     }
                 }
             }
+        }
+        if let (Some(started), Some(field_done), Some(surface_done)) =
+            (profile_started, field_done, surface_done)
+        {
+            let elapsed = started.elapsed();
+            eprintln!(
+                "3d_sdf_mesh grid={nx}x{ny}x{nz} samples={} steps={} surface_vertices={} step={step:.5} field_ms={:.3} surface_ms={:.3} emission_ms={:.3} total_ms={:.3}",
+                field.len(),
+                self.steps.len(),
+                vertex.len(),
+                field_done.as_secs_f64() * 1000.0,
+                (surface_done - field_done).as_secs_f64() * 1000.0,
+                (elapsed - surface_done).as_secs_f64() * 1000.0,
+                elapsed.as_secs_f64() * 1000.0,
+            );
         }
     }
 }

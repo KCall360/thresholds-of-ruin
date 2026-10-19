@@ -1,5 +1,6 @@
 //! Reconcile disclosed views into render entities.
 use super::*;
+use std::time::Instant;
 #[cfg(test)]
 mod tests;
 
@@ -40,6 +41,7 @@ pub(super) fn receive(
                 game.fatal = true;
             }
             NetEvent::View(view) => {
+                let profile_started = props::profile_builds().then(Instant::now);
                 align(&mut commands, &mut game, &view);
                 if game.snap_camera {
                     for effect in &effects {
@@ -83,6 +85,7 @@ pub(super) fn receive(
                             .collect::<Vec<_>>()
                     );
                 }
+                let cells_started = profile_started.map(|_| Instant::now());
                 build_cells(
                     &mut commands,
                     &mut game,
@@ -91,6 +94,7 @@ pub(super) fn receive(
                     &mut meshes,
                     &view,
                 );
+                let cells_ms = cells_started.map(|time| time.elapsed().as_secs_f64() * 1000.0);
                 let fresh = game.last_revision != Some(view.revision);
                 game.last_revision = Some(view.revision);
                 if fresh {
@@ -108,6 +112,7 @@ pub(super) fn receive(
                         _ => None,
                     })
                     .collect();
+                let actors_started = profile_started.map(|_| Instant::now());
                 build_actors(
                     &mut commands,
                     &mut game,
@@ -118,8 +123,21 @@ pub(super) fn receive(
                     &mut bodies,
                     &died,
                 );
+                let actors_ms = actors_started.map(|time| time.elapsed().as_secs_f64() * 1000.0);
+                let items_started = profile_started.map(|_| Instant::now());
                 build_items(&mut commands, &mut game, &mut library, &mut meshes, &view);
                 update_held(&mut commands, &mut game, &mut library, &mut meshes, &view);
+                if let (Some(started), Some(cells), Some(actors), Some(items)) =
+                    (profile_started, cells_ms, actors_ms, items_started)
+                {
+                    eprintln!(
+                        "3d_scene_build view={} actors={} cells_ms={cells:.3} actors_ms={actors:.3} items_ms={:.3} total_ms={:.3}",
+                        game.view_serial + 1,
+                        view.actors.len(),
+                        items.elapsed().as_secs_f64() * 1000.0,
+                        started.elapsed().as_secs_f64() * 1000.0,
+                    );
+                }
                 game.view = Some(*view);
                 game.view_serial += 1;
             }
@@ -225,7 +243,7 @@ fn build_cells(
             );
         }
         // Ceilings over the character's head would hide it from above.
-        if !game.cutaway && dz >= 2 {
+        if dz >= 2 {
             continue;
         }
         let at = ivec(cell.position) + game.offset;
@@ -882,31 +900,52 @@ fn build_items(
     prune_corpses(commands, game, &seen_corpses);
 }
 
-/// The cast's lighting, after the art direction: a broad warm key from the
-/// upper left, a cool blue-violet fill from the right, and a soft back light
-/// that rims silhouettes against the dark.
+/// Bright, readable figures and usable objects take priority over darkness.
+/// A warm key sculpts forms; generous cool fill opens their shadow faces while
+/// the backdrop palette, set design and local light contrast carry the mood.
 pub(crate) fn studio_lights(commands: &mut Commands) {
-    for (color, lux, from) in [
+    for (color, lux, from, shadows) in [
         (
-            Color::srgb(1.0, 0.86, 0.68),
-            1300.0,
+            Color::srgb(1.0, 0.94, 0.86),
+            2600.0,
             Vec3::new(-6.0, 10.0, 6.0),
+            true,
         ),
-        (Color::srgb(0.55, 0.6, 1.0), 650.0, Vec3::new(9.0, 4.0, 2.0)),
         (
-            Color::srgb(0.85, 0.78, 1.0),
-            550.0,
+            Color::srgb(0.72, 0.84, 1.0),
+            1050.0,
+            Vec3::new(9.0, 4.0, 2.0),
+            false,
+        ),
+        (
+            Color::srgb(0.7, 0.82, 1.0),
+            700.0,
             Vec3::new(1.0, 5.0, -9.0),
+            false,
         ),
     ] {
-        commands.spawn((
+        let mut light = commands.spawn((
             DirectionalLight {
                 color,
                 illuminance: lux,
+                shadows_enabled: shadows,
                 ..default()
             },
             Transform::from_translation(from).looking_at(Vec3::ZERO, Vec3::Y),
         ));
+        if shadows {
+            // Spend shadow resolution on the playable room and cast, rather
+            // than the engine's 150-unit outdoor default range.
+            light.insert(
+                bevy::pbr::CascadeShadowConfigBuilder {
+                    num_cascades: 3,
+                    first_cascade_far_bound: 12.0,
+                    maximum_distance: 48.0,
+                    ..default()
+                }
+                .build(),
+            );
+        }
     }
 }
 
