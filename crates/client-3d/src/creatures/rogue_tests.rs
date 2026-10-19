@@ -344,3 +344,34 @@ fn cloaks_flare_and_skirts_sway_as_their_wearers_travel() {
         "cloth at rest barely stirs: {cloak} {skirt}"
     );
 }
+
+#[test]
+fn leather_jerkins_hang_free_below_the_belt_and_stay_shorter_than_the_tunic() {
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Scout,
+        CreatureModel::Hobgoblin,
+        CreatureModel::Orc,
+    ] {
+        let look = Look::of(model, 4);
+        let (_, rig, _, _) = spawn_one(&look);
+        let skirts: Vec<f32> = rig
+            .drapes
+            .iter()
+            .filter_map(|(_, kind)| match kind {
+                Drape::Skirt(length) => Some(*length),
+                Drape::Cloak => None,
+            })
+            .collect();
+        let peplum = geometry::jerkin_peplum(look.style).expect("a jerkin with a free hem");
+        assert!(
+            skirts.contains(&peplum),
+            "{model:?} hangs its peplum as a drape"
+        );
+        assert!(
+            skirts.iter().any(|&tunic| tunic > peplum),
+            "{model:?}: the tunic skirt shows below the jerkin's hem"
+        );
+    }
+    assert!(geometry::jerkin_peplum(Look::of(CreatureModel::Mage, 4).style).is_none());
+}
