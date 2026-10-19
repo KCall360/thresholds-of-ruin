@@ -1088,6 +1088,25 @@ impl Service {
             .unwrap_or_else(|| Arc::new(state))
     }
 
+    /// Project a role only when it has private item details to remove. Equal
+    /// projections retain the same allocation and per-connection stream bases.
+    fn item_observation(&self, state: Arc<StateView>, role: AccessRole) -> Arc<StateView> {
+        if role != AccessRole::Spectator {
+            return state;
+        }
+        let private = state.observation.interactions.as_ref().is_some_and(|view| {
+            view.identification.is_some()
+                || view.inventory.iter().any(|item| item.charges.is_some())
+        });
+        if private {
+            let mut projected = state.as_ref().clone();
+            restrict_item_disclosure(&mut projected, role);
+            self.share_observation(projected)
+        } else {
+            state
+        }
+    }
+
     fn action_update(
         &mut self,
         revisions: &BTreeMap<ActorId, u64>,
@@ -1102,27 +1121,47 @@ impl Service {
         // Disclosed state belongs to an actor at this boundary, not to a
         // connection. Keep stream bases and sequencing per client, but resolve
         // perception only once for everyone watching the same actor.
-        let states: BTreeMap<_, _> = recipients
-            .iter()
-            .map(|(_, actor)| *actor)
-            .collect::<BTreeSet<_>>()
+        let mut observed_roles = BTreeMap::new();
+        for (recipient, actor) in &recipients {
+            let spectator = self.clients[recipient].role == AccessRole::Spectator;
+            let any_spectator = observed_roles.entry(*actor).or_insert(false);
+            *any_spectator |= spectator;
+        }
+        let states: BTreeMap<_, _> = observed_roles
             .into_iter()
-            .map(|actor| {
+            .map(|(actor, needs_spectator)| {
                 (
                     actor,
-                    self.engine
-                        .state(actor)
-                        .ok()
-                        .map(|state| self.share_observation(state)),
+                    self.engine.state(actor).ok().map(|state| {
+                        let owner = self.share_observation(state);
+                        // One redacted projection per actor broadcast, not
+                        // one clone for every spectator connection.
+                        let spectator = if needs_spectator {
+                            self.item_observation(Arc::clone(&owner), AccessRole::Spectator)
+                        } else {
+                            Arc::clone(&owner)
+                        };
+                        (owner, spectator)
+                    }),
                 )
             })
             .collect();
         for (recipient, observer) in recipients {
             // Region streaming can unload an actor nobody keeps in play (an
             // AI actor a spectator watches); its clients must reattach.
-            let Some(state) = states[&observer].as_ref() else {
+            let Some((owner, spectator)) = states[&observer].as_ref() else {
                 self.detach_unloaded(recipient);
                 continue;
+            };
+            // An earlier delivery can disconnect this captured recipient through
+            // a nested control update when its output queue is full.
+            let Some(client) = self.clients.get(&recipient) else {
+                continue;
+            };
+            let state = if client.role == AccessRole::Spectator {
+                spectator
+            } else {
+                owner
             };
             if revisions.get(&observer) != Some(&state.revision) {
                 self.update(
@@ -1917,9 +1956,7 @@ impl Service {
     fn update(&mut self, id: u64, mut body: UpdateBody) {
         if let Some(client) = self.clients.get(&id) {
             if let UpdateBody::Observation { state, .. } = &mut body {
-                if client.role == AccessRole::Spectator {
-                    restrict_item_disclosure(Arc::make_mut(state), client.role);
-                }
+                *state = self.item_observation(Arc::clone(state), client.role);
             }
         }
         let branch = self.engine.branch().clone();
@@ -3330,7 +3367,13 @@ mod tests {
         });
         state.revision += 1;
         let shared = Arc::new(state.clone());
-        for role in [AccessRole::Player, AccessRole::Spectator] {
+        let mut retained_projections = BTreeMap::new();
+        for role in [
+            AccessRole::Player,
+            AccessRole::Spectator,
+            AccessRole::Spectator,
+            AccessRole::Player,
+        ] {
             let account = Account {
                 role,
                 user: format!("{role:?}"),
@@ -3358,12 +3401,22 @@ mod tests {
                 text.contains("private-paid-choice"),
                 role == AccessRole::Player
             );
-            let disclosed = &service.clients[&connection.id]
-                .last_observation
-                .as_ref()
-                .unwrap()
-                .state
-                .observation;
+            let retained = Arc::clone(
+                &service.clients[&connection.id]
+                    .last_observation
+                    .as_ref()
+                    .unwrap()
+                    .state,
+            );
+            let owner = role == AccessRole::Player;
+            assert_eq!(Arc::ptr_eq(&retained, &shared), owner);
+            if let Some(previous) = retained_projections.insert(owner, Arc::clone(&retained)) {
+                assert!(
+                    Arc::ptr_eq(&previous, &retained),
+                    "equal role projections must share storage"
+                );
+            }
+            let disclosed = &retained.observation;
             let interaction = disclosed.interactions.as_ref().unwrap();
             assert_eq!(
                 interaction.identification.is_some(),
@@ -3769,6 +3822,68 @@ mod tests {
             service.engine.state(ActorId(1)).unwrap().observation.tick,
             0
         );
+    }
+
+    #[test]
+    fn action_broadcast_survives_cascaded_backpressure_disconnects() {
+        let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+        let account = Account {
+            role: AccessRole::Player,
+            user: "owner".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let mut clients = Vec::new();
+        for index in 0..3 {
+            let mut client = service
+                .connect(&account, format!("reader-{index}"))
+                .unwrap();
+            while client.messages.try_recv().is_ok() {}
+            service.handle(
+                client.id,
+                "attach".into(),
+                Request::Attach { actor: ActorId(1) },
+            );
+            while client.messages.try_recv().is_ok() {}
+            clients.push(client);
+        }
+        service.handle(clients[0].id, "control".into(), Request::AcquireControl);
+        for client in &mut clients {
+            while client.messages.try_recv().is_ok() {}
+        }
+        for client in &clients[..2] {
+            for _ in 0..QUEUE {
+                service.send(client.id, ServerMessage::Waiting { on: Waiting::You });
+            }
+            assert!(service.clients.contains_key(&client.id));
+        }
+        let revisions = BTreeMap::from([(ActorId(1), 0)]);
+        let result = service
+            .engine
+            .command(
+                "test",
+                "test",
+                ActorId(1),
+                "wait",
+                &service.engine.branch().clone(),
+                crate::journal::Command::Act {
+                    expected_revision: 0,
+                    action: crate::journal::Action::Wait,
+                },
+            )
+            .unwrap();
+        service.action_result_update(&revisions, &result).unwrap();
+        for client in &clients[..2] {
+            assert!(client.close.borrow().is_some());
+            assert!(!service.clients.contains_key(&client.id));
+        }
+        assert!(!service.controllers.contains_key(&ActorId(1)));
+        let survivor = &mut clients[2];
+        assert!(service.clients.contains_key(&survivor.id));
+        let messages: Vec<_> = std::iter::from_fn(|| survivor.messages.try_recv().ok()).collect();
+        assert!(messages.iter().any(|message| matches!(message,
+            ServerMessage::Update { update } if matches!(update.body,
+                UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }))));
     }
 
     #[test]

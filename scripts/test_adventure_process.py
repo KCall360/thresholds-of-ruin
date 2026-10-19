@@ -1,6 +1,7 @@
 """The ordinary adventure interface through real server and text processes."""
 import shutil
 import subprocess
+import threading
 import tomllib
 import unittest
 
@@ -203,7 +204,30 @@ class AdventureProcesses(ProcessTestCase):
     def test_clarification_is_free_and_wizard_rewind_clears_pending_pickup(self):
         self.server(wizard=True, scenario="text-adventure-clarification")
         wizard = self.wizard()
-        player, _ = self.adventure()
+        held = threading.Event()
+        release = threading.Event()
+        pending = []
+
+        def hold_pending_travel(message):
+            if message["type"] != "update" or pending:
+                return
+            update = message["update"]
+            if update["body"]["type"] == "travel" and update["body"]["status"]["phase"] == "active":
+                pending.append(update)
+                held.set()
+                if not release.wait(15):
+                    raise AssertionError("Test did not release the pending travel envelope")
+
+        upstream = self.address
+        relay = StreamRelay(upstream, on_server_message=hold_pending_travel)
+        self.addCleanup(relay.close)
+        self.addCleanup(release.set)
+        self.address = relay.address
+        try:
+            player, _ = self.adventure()
+        finally:
+            self.address = upstream
+        old_branch = self.request(wizard, {"type": "snapshot"})["branch"]
         self.flush_save()
         before = self.save.read_bytes()
         question = self.say(player, "take thing")
@@ -212,13 +236,29 @@ class AdventureProcesses(ProcessTestCase):
         self.assertEqual(before, self.save.read_bytes())
         self.assertIn("You pick up the copper token", self.say(player, "1"))
         self.send(player, "take tablet")
-        # Travel advances the attached actor while the wizard rewinds; the
-        # headless client resubmits a stale command at the disclosed revision.
-        self.wizard_command(wizard, "rewind initial")
+        try:
+            # Stdin submission alone does not establish pending old-branch work.
+            # Hold its first admitted travel envelope before Text can reach the
+            # destination and submit the compound pickup.
+            self.assertTrue(held.wait(15), "Text never established pending travel")
+            self.assertEqual(pending[0]["branch"], old_branch)
+            self.assertEqual(pending[0]["body"]["status"]["completed_steps"], "0")
+            rewound = self.wizard_command(wizard, "rewind initial")
+            self.assertNotEqual(rewound["branch"], old_branch)
+            self.assertEqual(rewound["state"]["observation"]["tick"], "0")
+        finally:
+            release.set()
+        # The existing client must consume the replacement scene and forget its
+        # pending pickup before another read-only command or fresh attachment.
+        player.until(lambda line: line == "*** WIZARD GAME — permanently marked ***")
+        player.until(lambda line: line == "> ")
+        self.assertIn("empty-handed", self.say(player, "inventory"))
         observer, state = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(state["branch"], rewound["branch"])
         self.assertEqual(state["state"]["observation"]["tick"], '0')
         self.assertIsNone(state["travel"])
         self.assertEqual(state["state"]["observation"]["inventory"], [])
+        self.assertEqual(relay.errors, [])
         # Fresh attachment cannot inherit an old client's compound intent.
         player.stop()
         resumed, _ = self.adventure()

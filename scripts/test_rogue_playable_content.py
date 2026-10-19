@@ -48,9 +48,14 @@ class RoguePlayableContent(unittest.TestCase):
             {"archetype": "rogue.clean_bandage", "quantity": 3},
             {"archetype": "rogue.ration", "quantity": 1},
         ]
+        known = ["rogue.mace", "rogue.ring_mail", "rogue.clean_bandage", "rogue.ration", "rogue.amulet_of_yendor"]
+        self.assertEqual(set(items), set(known) | {"rogue.restore_strength", "rogue.gold",
+            "rogue.healing", "rogue.confusion", "rogue.blindness", "rogue.identify_potion",
+            "rogue.identify_scroll", "rogue.identify_wand", "rogue.sleep",
+            "rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning"})
         for character in manifest["characters"]:
             self.assertEqual(character["loadout"], expected)
-            self.assertEqual(set(character["known_identities"]), set(items) - {"rogue.restore_strength", "rogue.gold"})
+            self.assertEqual(character["known_identities"], known)
         self.assertEqual(items["rogue.mace"]["equipment"]["slot"], "weapon")
         self.assertEqual(items["rogue.ring_mail"]["equipment"]["slot"], "body_armor")
         for item, supply in [("rogue.clean_bandage", "bandage"), ("rogue.ration", "ration")]:
@@ -74,8 +79,9 @@ class RoguePlayableContent(unittest.TestCase):
         stages = profile["stages"]
         self.assertEqual([row["id"] for row in stages],
                          ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations",
-                          "rogue.restore_strength", "rogue.room_gold"])
-        for stage, count in zip(stages[:4], (4, 1, 1, 1), strict=True):
+                          "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions",
+                          "rogue.magic_scrolls", "rogue.magic_devices"])
+        for stage, count in zip([*stages[:4], *stages[5:]], (4, 1, 1, 1, 1, 1, 1), strict=True):
             self.assertEqual(stage["version"], 1)
             self.assertEqual(stage["count"], [count, count])
         actor = stages[0]

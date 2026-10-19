@@ -140,6 +140,7 @@ def reviewed_twenty_six_activation():
 
     All 26 source choices are now present, so no probability mass is discarded.
     The depth-31 Dragon outcome is still direct; the uniform tail starts at 32.
+    Current finite magic stock appends after the five unchanged legacy stages.
     """
     activation = reviewed_twenty_four_activation()
     stage = activation["profiles"]["rogue.low_depth"]["stages"][0]
@@ -175,4 +176,15 @@ def reviewed_twenty_six_activation():
                   {"kind": "finite", "minimum": depth, "maximum": depth})
         bands.append({"depth": bounds, "choices": choices})
     stage["bands"] = bands
+    # Independently reviewed provisional TOR stock, not Rogue's probability
+    # table. Keep these last so the existing deterministic streams stay owned.
+    activation["profiles"]["rogue.low_depth"]["stages"].extend(
+        {"id": identity, "version": 1, "kind": "items", "count": [1, 1],
+         "bands": [{"depth": {"kind": "open", "minimum": 1},
+                    "choices": [{"archetype": "rogue." + name, "weight": 1}
+                                for name in names]}], "quantity": 1}
+        for identity, names in (
+            ("rogue.magic_potions", ("healing", "confusion", "blindness")),
+            ("rogue.magic_scrolls", ("identify_potion", "identify_scroll", "identify_wand", "sleep")),
+            ("rogue.magic_devices", ("wand_fire", "wand_cold", "wand_lightning"))))
     return activation

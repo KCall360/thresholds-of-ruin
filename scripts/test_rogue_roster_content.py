@@ -363,7 +363,8 @@ class RogueRosterContent(unittest.TestCase):
         self.assertEqual(profile["version"], 1)
         stages = profile["stages"]
         self.assertEqual([row["id"] for row in stages],
-                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength", "rogue.room_gold"])
+                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength",
+                          "rogue.room_gold", "rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices"])
         self.assertEqual([row["count"] for row in stages[:4]], [[4, 4], [1, 1], [1, 1], [1, 1]])
         actor = stages[0]
         self.assertEqual(actor["kind"], "actors")
@@ -461,7 +462,10 @@ class RogueRosterContent(unittest.TestCase):
                     "maximum_base": 51, "per_depth": 10}
         self.assertEqual(activation["carried_item_pools"]["rogue.leprechaun_gold"], {
             "version": 1, "choices": [{"archetype": "rogue.gold", "weight": 1, "quantity": quantity}]})
-        self.assertEqual(activation["profiles"]["rogue.low_depth"]["stages"][-1], {
+        gold_stages = [stage for stage in activation["profiles"]["rogue.low_depth"]["stages"]
+                       if stage["id"] == "rogue.room_gold"]
+        self.assertEqual(len(gold_stages), 1)
+        self.assertEqual(gold_stages[0], {
             "id": "rogue.room_gold", "version": 1, "kind": "room_items",
             "chance": {"numerator": 1, "denominator": 2}, "quantity": quantity,
             "bands": [{"depth": {"kind": "open", "minimum": 1},

@@ -100,6 +100,8 @@ class RogueActivationCandidateTests(unittest.TestCase):
     def assert_reviewed_input_rejects_changes(self, source_factory):
         def stages(activation):
             return activation["profiles"]["rogue.low_depth"]["stages"]
+        def room_gold(activation):
+            return next(stage for stage in stages(activation) if stage["id"] == "rogue.room_gold")
         def leprechaun(activation):
             return next(choice for band in stages(activation)[0]["bands"] for choice in band["choices"]
                         if choice["archetype"] == "rogue.leprechaun")
@@ -118,13 +120,13 @@ class RogueActivationCandidateTests(unittest.TestCase):
             "gold_quantity": lambda a: a["carried_item_pools"]["rogue.leprechaun_gold"]["choices"][0]["quantity"].update(per_depth=11),
             "unknown_pool": lambda a: a["carried_item_pools"].update(unreviewed={"version": 1, "choices": []}),
             "missing_gold_pool": lambda a: a["carried_item_pools"].pop("rogue.leprechaun_gold"),
-            "room_chance": lambda a: stages(a)[-1]["chance"].update(numerator=2),
-            "room_quantity": lambda a: stages(a)[-1]["quantity"].update(maximum_base=52),
-            "room_kind": lambda a: stages(a)[-1].update(kind="items"),
-            "missing_room_stage": lambda a: stages(a).pop(),
+            "room_chance": lambda a: room_gold(a)["chance"].update(numerator=2),
+            "room_quantity": lambda a: room_gold(a)["quantity"].update(maximum_base=52),
+            "room_kind": lambda a: room_gold(a).update(kind="items"),
+            "missing_room_stage": lambda a: stages(a).remove(room_gold(a)),
             "extra_stage": lambda a: stages(a).append(copy.deepcopy(stages(a)[-1])),
             "stage_order": lambda a: stages(a).reverse(),
-            "unknown_field": lambda a: stages(a)[-1].update(unreviewed=True),
+            "unknown_field": lambda a: room_gold(a).update(unreviewed=True),
         }
         for name, mutate in mutations.items():
             with self.subTest(mutation=name):
@@ -173,9 +175,12 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertEqual(result["source_provenance"], provenance)
             species = sorted("rogue." + name for name in PLAYABLE_SPECIES)
             stages = ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength"]
+            input_stages = [*stages, "rogue.room_gold"]
+            if shape == "twenty_six":
+                input_stages.extend(["rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices"])
             self.assertEqual(result["input_population_scope"], {
                 "species": sorted([*species, *("rogue." + name for name in omitted)]),
-                "stage_ids": [*stages, "rogue.room_gold"],
+                "stage_ids": input_stages,
                 "carried_item_pools": ["rogue.leprechaun_gold", "rogue.vampire_supplies"]})
             self.assertEqual(result["output_population_scope"], {
                 "species": species, "stage_ids": stages, "carried_item_pools": ["rogue.vampire_supplies"]})
@@ -184,6 +189,9 @@ class RogueActivationCandidateTests(unittest.TestCase):
             for exclusion in ("not current " + label + "-species production",
                               "Leprechaun birth-Gold pool", "room-Gold stage", *(name.title() for name in omitted)):
                 self.assertIn(exclusion, " ".join(result["limitations"]))
+            if shape == "twenty_six":
+                self.assertIn("finite magic-potion, magic-scroll and magic-device stages are omitted",
+                              result["limitations"][0])
             for relative, fingerprint in result["source_package_inputs"].items():
                 raw = (supplied / relative).read_bytes()
                 self.assertEqual(fingerprint, hashlib.sha256(raw).hexdigest())
@@ -209,6 +217,60 @@ class RogueActivationCandidateTests(unittest.TestCase):
         self.assertEqual(len(stages), 4)
         self.assertEqual({choice["archetype"] for band in stages[0]["bands"] for choice in band["choices"]},
                          {"rogue." + name for name in PLAYABLE_SPECIES})
+
+    def test_twenty_six_rejects_magic_stock_count_choice_boundary_and_order_drift(self):
+        for identity in ("rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices"):
+            def stages(activation):
+                return activation["profiles"]["rogue.low_depth"]["stages"]
+            def stage(activation):
+                return next(row for row in stages(activation) if row["id"] == identity)
+            def band(activation):
+                return stage(activation)["bands"][0]
+            def move_before_room_gold(activation):
+                selected = stage(activation)
+                stages(activation).remove(selected)
+                stages(activation).insert(4, selected)
+            mutations = {
+                "missing_stage": lambda a: stages(a).remove(stage(a)),
+                "duplicate_stage": lambda a: stages(a).append(copy.deepcopy(stage(a))),
+                "legacy_stream_order": move_before_room_gold,
+                "identity": lambda a: stage(a).update(id="rogue.unreviewed_magic"),
+                "version": lambda a: stage(a).update(version=2),
+                "boolean_version": lambda a: stage(a).update(version=True),
+                "kind": lambda a: stage(a).update(kind="room_items"),
+                "missing_count": lambda a: stage(a).pop("count"),
+                "variable_count": lambda a: stage(a).update(count=[0, 1]),
+                "extra_attempt": lambda a: stage(a).update(count=[2, 2]),
+                "boolean_count": lambda a: stage(a).update(count=[True, True]),
+                "quantity": lambda a: stage(a).update(quantity=2),
+                "boolean_quantity": lambda a: stage(a).update(quantity=True),
+                "chance": lambda a: stage(a).update(chance={"numerator": 1, "denominator": 2}),
+                "unknown_field": lambda a: stage(a).update(unreviewed=True),
+                "late_start": lambda a: band(a)["depth"].update(minimum=2),
+                "finite_cutoff": lambda a: band(a).update(depth={"kind": "finite", "minimum": 1, "maximum": 26}),
+                "extra_band": lambda a: stage(a)["bands"].append(copy.deepcopy(band(a))),
+                "missing_choice": lambda a: band(a)["choices"].pop(),
+                "extra_choice": lambda a: band(a)["choices"].append(copy.deepcopy(band(a)["choices"][0])),
+                "choice_order": lambda a: band(a)["choices"].reverse(),
+                "archetype": lambda a: band(a)["choices"][0].update(archetype="rogue.restore_strength"),
+                "weight": lambda a: band(a)["choices"][0].update(weight=2),
+                "boolean_weight": lambda a: band(a)["choices"][0].update(weight=True),
+            }
+            for name, mutate in mutations.items():
+                with self.subTest(stage=identity, mutation=name):
+                    source = encounter_sources()["manifest"]
+                    mutate(source["floor_activation"])
+                    with self.assertRaisesRegex(ValueError, "Review changed population profile"):
+                        population_shape(source)
+
+    def test_magic_stock_does_not_expand_historical_twenty_one_or_twenty_four_inputs(self):
+        magic = reviewed_twenty_six_activation()["profiles"]["rogue.low_depth"]["stages"][5:]
+        for source_factory in (twenty_one_source, twenty_four_source):
+            with self.subTest(source=source_factory.__name__):
+                source = source_factory()
+                source["floor_activation"]["profiles"]["rogue.low_depth"]["stages"].extend(copy.deepcopy(magic))
+                with self.assertRaisesRegex(ValueError, "Review changed population profile"):
+                    population_shape(source)
 
     def test_twenty_six_rejects_a_d_stock_order_schedule_and_tail_drift(self):
         def bands(activation):
@@ -244,12 +306,23 @@ class RogueActivationCandidateTests(unittest.TestCase):
     def test_reviewed_oracles_are_independent_fresh_values_with_distinct_rosters(self):
         before = reviewed_twenty_one_activation()
         current = reviewed_twenty_four_activation()
+        historical = copy.deepcopy(current)
         self.assertNotEqual(before, current)
         current["profiles"]["rogue.low_depth"]["stages"][0]["bands"][-1]["choices"][-1]["carried_loot"]["chance"]["numerator"] = 99
         current["carried_item_pools"]["rogue.vampire_supplies"]["choices"][0]["weight"] = 99
         self.assertEqual(reviewed_twenty_one_activation(), before)
         self.assertEqual(reviewed_twenty_four_activation(), twenty_four_source()["floor_activation"])
         self.assertEqual(reviewed_twenty_six_activation(), encounter_sources()["manifest"]["floor_activation"])
+        expanded = reviewed_twenty_six_activation()
+        expanded["profiles"]["rogue.low_depth"]["stages"][-1]["bands"][0]["choices"][0]["weight"] = 99
+        expanded["profiles"]["rogue.low_depth"]["stages"][1]["quantity"] = 99
+        self.assertEqual(reviewed_twenty_one_activation(), before)
+        self.assertEqual(reviewed_twenty_four_activation(), historical)
+        self.assertEqual(reviewed_twenty_six_activation(), encounter_sources()["manifest"]["floor_activation"])
+        for activation in (before, historical):
+            self.assertEqual([row["id"] for row in activation["profiles"]["rogue.low_depth"]["stages"]],
+                             ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations",
+                              "rogue.restore_strength", "rogue.room_gold"])
         bands = before["profiles"]["rogue.low_depth"]["stages"][0]["bands"]
         self.assert_pinned_source_mass(bands, roster_size=21)
 

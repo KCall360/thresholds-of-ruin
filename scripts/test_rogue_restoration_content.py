@@ -111,11 +111,11 @@ class RogueRestorationContent(unittest.TestCase):
         self.assertEqual(item, {"name": "potion of restore strength", "identity": POTION,
             "class": "potion", "asset": "item.potion", "stackable": True, "magical": True,
             "appearance_pool": "rogue.potions",
-            "consumable": {"effects": [{"kind": "restore_attribute", "attribute": "strength",
+            "consumable": {"discovery": "self_effect", "effects": [{"kind": "restore_attribute", "attribute": "strength",
                 "amount": {"kind": "fixed", "amount": int(bound)}}]}})
         self.assertEqual(catalog["appearance_pools"]["rogue.potions"], {
             "asset": "item.potion",
-            "appearances": ["amber potion", "smoky potion", "violet potion"]})
+            "appearances": ["amber potion", "smoky potion", "violet potion", "azure potion"]})
         for character in source("scenario.toml")["characters"]:
             self.assertNotIn(POTION, character["known_identities"])
             self.assertNotIn(POTION, [row["archetype"] for row in character["loadout"]])
@@ -123,7 +123,8 @@ class RogueRestorationContent(unittest.TestCase):
     def test_rattlesnake_depth_edges_zero_carry_and_appended_finite_potion_stage(self):
         stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([row["id"] for row in stages], ["rogue.eight_species_foes", "rogue.bandages",
-            "rogue.rations", "rogue.restore_strength", "rogue.room_gold"])
+            "rogue.rations", "rogue.restore_strength", "rogue.room_gold",
+            "rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices"])
         self.assertEqual(stages[3], {"id": "rogue.restore_strength", "version": 1, "kind": "items",
             "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},
                 "choices": [{"archetype": POTION, "weight": 1}]}]})
