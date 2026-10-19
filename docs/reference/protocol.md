@@ -1376,8 +1376,10 @@ after the identifying scroll has been consumed. `identify` submits that `choice`
 and an explicit nullable `item` (null means decline without refund). Tokens are
 observer-scoped and cannot be substituted across actors, branches or stale reply
 contexts. The ordinary controller, receipt and retry contracts apply. Selection
-and charge facts are removed from spectator full snapshots and delta baselines;
-this is server authority, not a client display convention. Headless exposes the
+and charge facts, learned equipment numbers, curse/protection knowledge, and
+curse-blocked item choices are removed from spectator full snapshots, live action
+updates and delta baselines, including when they are the only private facts.
+This is server authority, not a client display convention. Headless exposes the
 same actions as `act` JSON, including the explicit null for decline.
 
 Private `combat_diagnostics` replies carry the requesting observer's reply context,

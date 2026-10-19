@@ -28,7 +28,8 @@ frozen theft/relocation plans, item-owned armor corrosion, frozen directional-ra
 plans and bounded future birth-advancement schedules, nullable readable/device
 capabilities, exact instance charges and observed-charge facts, one paid owner-only
 identification continuation, bounded per-instance equipment birth/condition state,
-actor-owned equipment facts, frozen equipped-item alterations, signed weapon
+actor-owned equipment facts (redacted from spectator snapshots and live updates),
+frozen equipped-item alterations, signed weapon
 damage enchantment and explicit Psychic damage, and owned-HD Health improvements with immutable
 acquisition witnesses and bounded dormant drain records. Prior payload identities
 remain rejection-only. RegionInput and physical framing remain unchanged.
