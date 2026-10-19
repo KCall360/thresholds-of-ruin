@@ -83,6 +83,7 @@ fn equipped_state(requires_attack: bool) -> StateView {
         known_supply: None,
     }];
     state.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: vec![],
         slots: vec![slot.clone()],
@@ -91,6 +92,8 @@ fn equipped_state(requires_attack: bool) -> StateView {
             item,
             slot: Some(slot),
             equipped_slot: Some(0),
+            known_cursed: None,
+            known_protected: None,
             known_equipment: Some(EquipmentView {
                 attack: requires_attack.then(super::creature_inspection::attack),
                 modifiers: vec![],
@@ -176,6 +179,7 @@ fn prepared_ability_snapshots_validate_and_round_trip_deltas() {
         let mut next = base.clone();
         next.revision = 2;
         next.observation.interactions = Some(InteractionView {
+            curse_blocked: vec![],
             identification: None,
             completed: vec![],
             slots: vec![],
@@ -212,6 +216,7 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
     let mut next = base.clone();
     next.revision = 2;
     next.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: vec![Action::Drink {
             item: ItemTarget::from_digest(synthetic_digest(3)),
@@ -1365,6 +1370,7 @@ fn health_recovery_progress_validates_against_full_and_dead_combat_and_deltas() 
 fn phase5_preparation_supply_shape_is_validated_for_direct_values() {
     let mut state = room(5, 5, 1);
     state.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: vec![],
         slots: vec![],
@@ -1432,6 +1438,7 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
         known_supply: None,
     });
     next.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: Some(IdentificationChoiceView {
             choice: IntentionId("opaque-paid-choice".into()),
             class: ItemClass::Wand,
@@ -1446,6 +1453,8 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
             item,
             slot: None,
             equipped_slot: None,
+            known_cursed: None,
+            known_protected: None,
             known_equipment: None,
             drinkable: false,
             edible: false,

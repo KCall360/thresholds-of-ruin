@@ -636,6 +636,11 @@ pub fn observation(
                         .map(|item| targets.item(item))
                         .collect(),
                 }),
+            curse_blocked: interaction
+                .curse_blocked
+                .into_iter()
+                .map(|item| targets.item(item))
+                .collect(),
             completed: interaction
                 .completed
                 .into_iter()
@@ -667,6 +672,8 @@ pub fn observation(
                     item: targets.item(item.item),
                     slot: item.slot.map(equipment_slot),
                     equipped_slot: item.equipped_slot.map(|slot| slot.0),
+                    known_cursed: item.known_cursed,
+                    known_protected: item.known_protected,
                     known_equipment: item.known_equipment.and_then(|equipment| {
                         rules.as_deref().map(|rules| p::EquipmentView {
                             attack: equipment.attack.as_ref().map(|attack| {

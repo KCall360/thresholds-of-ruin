@@ -30,6 +30,7 @@ fn snapshot(identify: bool) -> Snapshot {
     })
     .collect();
     view.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: identify.then(|| IdentificationChoiceView {
             choice: IntentionId("paid-choice".into()),
             class: ItemClass::Wand,
@@ -45,6 +46,8 @@ fn snapshot(identify: bool) -> Snapshot {
                 item: item.id,
                 slot: None,
                 equipped_slot: None,
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,

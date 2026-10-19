@@ -6,6 +6,9 @@ paid-choice UI recovery, spectator presentation and one retained device plan.
 import shutil
 import subprocess
 import unittest
+import tomllib
+
+from arena_matrix import toml_source
 
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, non_graphical
 from status_condition_package import checkpoint
@@ -107,6 +110,89 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(charges(zapped, first["id"]), 2)
         self.assertEqual(len(items(zapped, "wand")), 2)
         self.assertFalse(zapped["state"]["wizard_game"])
+
+    @non_graphical
+    def test_text_cursed_armor_enchantment_and_source_free_reopen(self):
+        package = self.package()
+        path = package / "scenario.toml"
+        manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+        manifest["archetypes"].update({
+            "mail": {"name": "ring mail", "identity": "fixture.mail", "class": "armor",
+                     "equipment": {"slot": "body_armor", "armor": {"physical_reduction": 2, "material": "metal", "rustproof": False}, "modifiers": []},
+                     "equipment_generation": {"kind": "armor", "curse_percent": 100, "enchant_percent": 0, "minimum": 1, "maximum": 1}},
+            "armor_identify": {"name": "scroll of identify armor", "identity": "fixture.identify_armor", "class": "scroll", "stackable": True,
+                               "appearance_pool": "armor_pages", "readable": {"identify": "armor", "discovery": "on_use"}},
+            "armor_enchant": {"name": "scroll of enchant armor", "identity": "fixture.enchant_armor", "class": "scroll", "stackable": True,
+                              "appearance_pool": "enchant_pages", "readable": {"discovery": "never", "effects": [
+                                  {"kind": "alter_equipment", "selection": {"kind": "slot", "slot": "body_armor", "class": "armor", "last": False}, "alteration": "enchant_armor"}]}},
+        })
+        manifest["appearance_pools"].update({"armor_pages": {"appearances": ["indigo page"]}, "enchant_pages": {"appearances": ["silver page"]}})
+        manifest["characters"][0].update({"known_identities": ["fixture.mail"], "loadout": [
+            {"archetype": "mail", "quantity": 1, "equipped_slot": 1},
+            {"archetype": "mail", "quantity": 1},
+            {"archetype": "armor_identify", "quantity": 1},
+            {"archetype": "armor_enchant", "quantity": 2},
+        ]})
+        path.write_text(toml_source(manifest), encoding="utf-8")
+        region_path = package / "regions/1.toml"
+        region = tomllib.loads(region_path.read_text(encoding="utf-8"))
+        region["items"] = []
+        region_path.write_text(toml_source(region), encoding="utf-8")
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validated.returncode, 0, validated.stdout + validated.stderr)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        probe, initial = self.client(observe=True)
+        text, _ = self.adventure()
+        worn = next(row["item"] for row in interactions(initial)["inventory"] if row["equipped_slot"] == 1)
+        spare = next(row["id"] for row in items(initial, "armor") if row["id"] != worn)
+        identify = next(row["id"] for row in items(initial, "scroll") if row["name"] == "indigo page")
+        enchant = next(row["id"] for row in items(initial, "scroll") if row["name"] == "silver page")
+        def said(command, expected):
+            # Paid identification can refresh its prompt independently. Wait for
+            # this command's narration before using another client's snapshot.
+            self.send(text, command)
+            output = text.until(lambda line: expected in line.lower())
+            output += text.until(lambda line: line == "> ")
+            return output
+        def row(frame, item):
+            return next(r for r in interactions(frame)["inventory"] if r["item"] == item)
+        self.assertIsNone(row(initial, worn)["known_cursed"])
+        failed_text = said("remove first ring mail", "it is cursed")
+        self.assertIn("curs", failed_text.lower())
+        failed = self.snapshot(probe)
+        self.assertEqual(row(failed, worn)["equipped_slot"], 1)
+        self.assertTrue(row(failed, worn)["known_cursed"])
+        self.assertIsNone(row(failed, worn)["known_equipment"])
+        said("read indigo page", "choose an item to identify")
+        said("identify #" + worn, "you identify the ring mail")
+        identified = self.snapshot(probe)
+        self.assertIsNotNone(row(identified, worn)["known_equipment"])
+        self.assertIsNone(row(identified, spare)["known_equipment"])
+        said("read silver page", "finish reading the silver page")
+        enchanted = self.snapshot(probe)
+        self.assertFalse(row(enchanted, worn)["known_cursed"])
+        self.assertNotEqual(row(identified, worn)["known_equipment"], row(enchanted, worn)["known_equipment"])
+        remaining = next(i for i in items(enchanted, "scroll") if i["id"] == enchant)
+        self.assertEqual(remaining["quantity"], "1")
+        self.assertFalse(remaining["identified"])
+        said("remove first ring mail", "finish removing the ring mail")
+        removed = self.snapshot(probe)
+        self.assertIsNone(row(removed, worn)["equipped_slot"])
+        self.assertIsNone(self.request(probe, {"type": "save"})["error"])
+        text.stop()
+        probe.stop()
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        probe, restored = self.client(observe=True)
+        self.assertEqual(interactions(restored)["inventory"], interactions(removed)["inventory"])
+        spectator, hidden = self.client(SPECTATOR_TOKEN, observe=True)
+        for item in interactions(hidden)["inventory"]:
+            self.assertIsNone(item["known_cursed"])
+            self.assertIsNone(item["known_protected"])
+            self.assertIsNone(item["known_equipment"])
+        self.assertFalse(restored["state"]["wizard_game"])
 
     def test_native_paid_choice_reopens_and_direction_cancel_keeps_exact_charges(self):
         package = self.package()

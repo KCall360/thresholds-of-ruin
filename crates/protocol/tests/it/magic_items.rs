@@ -37,7 +37,7 @@ fn magic_commands_round_trip_only_current_named_opaque_operands() {
     assert!(serde_json::from_str::<Action>(&raw).is_err());
 }
 fn affordance() -> Value {
-    json!({"item":item(),"slot":null,"equipped_slot":null,"known_equipment":null,"drinkable":false,"edible":false,"readable":false,"zappable":true,"charges":null})
+    json!({"item":item(),"slot":null,"equipped_slot":null,"known_equipment":null,"known_cursed":null,"known_protected":null,"drinkable":false,"edible":false,"readable":false,"zappable":true,"charges":null})
 }
 #[test]
 fn magic_affordances_require_explicit_flags_and_instance_count_and_reject_private_fields() {
@@ -47,7 +47,13 @@ fn magic_affordances_require_explicit_flags_and_instance_count_and_reject_privat
         let decoded: ItemInteractionView = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), value);
     }
-    for field in ["readable", "zappable", "charges"] {
+    for field in [
+        "readable",
+        "zappable",
+        "charges",
+        "known_cursed",
+        "known_protected",
+    ] {
         let mut value = affordance();
         value.as_object_mut().unwrap().remove(field);
         assert!(serde_json::from_value::<ItemInteractionView>(value).is_err());

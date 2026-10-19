@@ -290,6 +290,12 @@ pub enum CombatEvent {
         intention: Option<crate::IntentionId>,
         reason: SequenceEnd,
     },
+    #[serde(deserialize_with = "deserialize_curse_blocked")]
+    ItemCurseBlocked {
+        actor: ActorId,
+        item: crate::ItemId,
+        intention: Option<crate::IntentionId>,
+    },
     ItemCompleted {
         actor: ActorId,
         work: crate::Work,
@@ -303,6 +309,24 @@ pub enum CombatEvent {
     Died {
         actor: ActorId,
     },
+}
+
+fn deserialize_curse_blocked<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<(ActorId, crate::ItemId, Option<crate::IntentionId>), D::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fields {
+        actor: ActorId,
+        item: crate::ItemId,
+        #[serde(deserialize_with = "deserialize_intention_context")]
+        intention: Option<crate::IntentionId>,
+    }
+    let f: Fields = crate::bounded::named_map(d)?;
+    if f.item.0 == 0 || f.item.0 == u64::MAX {
+        return Err(serde::de::Error::custom("invalid blocked equipment"));
+    }
+    Ok((f.actor, f.item, f.intention))
 }
 
 // A derived externally tagged struct variant accepts positional JSON bytes.
@@ -744,6 +768,7 @@ pub enum DamageType {
     Keen,
     Spirit,
     Vital,
+    Psychic,
 }
 
 /// Collision injury saturates at the same bound as Health and DamageSpec.

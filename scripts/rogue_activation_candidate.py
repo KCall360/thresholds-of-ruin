@@ -274,7 +274,8 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
             "eighteen-species diagnostic output is not current twenty-six-species production; "
             "Leprechaun, Nymph, Orc, Medusa, Phantom, Xeroc, Aquator, Dragon, "
             "the Leprechaun birth-Gold pool, room-Gold stage and "
-            "finite magic-potion, magic-scroll and magic-device stages are omitted")
+            "finite magic-potion, magic-scroll and magic-device stages are omitted; "
+            "finite equipment and equipment-scroll stages are omitted")
     write_json(output / "partial.json", inventory)
     try:
         for group, values in (("package", snapshot), ("tools", tools), ("compiler", compiler_inputs)):

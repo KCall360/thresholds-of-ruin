@@ -43,6 +43,7 @@ fn check_fields(check: &s::rules::CheckDef) -> usize {
 fn effect_fields(effect: &s::rules::Effect) -> usize {
     match effect {
         s::rules::Effect::Theft { .. } | s::rules::Effect::HealPerHitDie { .. } => 3,
+        s::rules::Effect::AlterEquipment { .. } => 2,
         s::rules::Effect::CorrodeArmor { .. } => 2,
         s::rules::Effect::ApplyLinkedHold { .. } => 4,
         s::rules::Effect::HoldDamage { .. } => 2,

@@ -293,6 +293,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
                 CombatEvent::SequenceEnded { .. }
                 | CombatEvent::EscapeResolved { .. }
                 | CombatEvent::RespecCompleted { .. }
+                | CombatEvent::ItemCurseBlocked { .. }
                 | CombatEvent::ItemCompleted { .. }
                 | CombatEvent::Interrupted { .. }
                 | CombatEvent::Died { .. } => {}

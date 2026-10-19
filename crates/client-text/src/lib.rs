@@ -714,12 +714,14 @@ pub fn inventory(state: &StateView) -> String {
             .inventory
             .iter()
             .map(|i| format!(
-                "{} x {} (#{}){}",
+                "{} x {} (#{}){}{}",
                 i.quantity,
                 safe(&i.name),
                 i.id,
                 tor_client_common::items::charges(&state.observation, i.id)
-                    .map_or_else(String::new, |charges| format!(" [{charges} charges]"))
+                    .map_or_else(String::new, |charges| format!(" [{charges} charges]")),
+                tor_client_common::items::equipment_details(&state.observation, i.id)
+                    .map_or_else(String::new, |details| format!(" [known: {details}]"))
             ))
             .collect::<Vec<_>>()
             .join(", ")

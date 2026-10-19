@@ -325,6 +325,7 @@ fn contact_action_and_preparation_never_upgrade_when_current_disclosure_changes(
             view.visible_actors.clear();
         }
         view.interactions = Some(s::InteractionView {
+            curse_blocked: vec![],
             identification: None,
             completed: vec![],
             slots: vec![],
@@ -591,6 +592,7 @@ fn magic_choices_resolve_exact_owner_tokens_category_and_carried_incarnation() {
         asset: None,
     }];
     view.interactions = Some(s::InteractionView {
+        curse_blocked: vec![],
         completed: vec![],
         slots: vec![],
         preparation: None,

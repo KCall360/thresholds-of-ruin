@@ -271,6 +271,7 @@ fn carried_rings() -> Snapshot {
     second.id = super::item_target(1);
     view.inventory = vec![first, second];
     view.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
         slots: vec![
@@ -285,6 +286,8 @@ fn carried_rings() -> Snapshot {
                 item: item.id,
                 slot: Some(equipment_slot("ring", "on a finger", false)),
                 equipped_slot: None,
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -1698,6 +1701,7 @@ fn inspection_report() -> CreatureInspectionView {
             socket: Some(0),
             attack: SelectedMeleeView::Weapon {
                 attack: AttackView {
+                    damage_enchantment: 0,
                     bonus: 100,
                     ..attack
                 },
@@ -2219,6 +2223,7 @@ fn eat_picker_and_hunger_status_use_only_disclosed_nutrition() {
     item.class = ItemClass::Food;
     view.inventory = vec![item.clone()];
     view.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         slots: vec![],
         preparation: None,
@@ -2227,6 +2232,8 @@ fn eat_picker_and_hunger_status_use_only_disclosed_nutrition() {
             item: item.id,
             slot: None,
             equipped_slot: None,
+            known_cursed: None,
+            known_protected: None,
             known_equipment: None,
             drinkable: false,
             edible: true,

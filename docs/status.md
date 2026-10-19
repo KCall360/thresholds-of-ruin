@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **51**, save format **49**, scenario format **22**, ruleset
-**`interactions-v44`**, scenario validator **`tor-scenario-34`**. Unsupported
+**Current formats:** protocol **52**, save format **50**, scenario format **23**, ruleset
+**`interactions-v45`**, scenario validator **`tor-scenario-35`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **17**, ContentPackage **19** and
+The independent compiled inputs use RulesInput **18**, ContentPackage **20** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -27,7 +27,9 @@ also retain explicit item magical/currency capability, checked quantity ranges a
 frozen theft/relocation plans, item-owned armor corrosion, frozen directional-ray
 plans and bounded future birth-advancement schedules, nullable readable/device
 capabilities, exact instance charges and observed-charge facts, one paid owner-only
-identification continuation, and owned-HD Health improvements with immutable
+identification continuation, bounded per-instance equipment birth/condition state,
+actor-owned equipment facts, frozen equipped-item alterations, signed weapon
+damage enchantment and explicit Psychic damage, and owned-HD Health improvements with immutable
 acquisition witnesses and bounded dormant drain records. Prior payload identities
 remain rejection-only. RegionInput and physical framing remain unchanged.
 
@@ -101,6 +103,13 @@ current decision can leave a later-ready actor selected before its ready tick.
 Strict checkpoint restore rejects that unsettled schedule. Ordinary accepted
 actions own scheduler settlement; this item slice does not change the injection
 API timing contract or relax restore validation.
+
+The equipment risk/recovery slice adds exact-instance curses and knowledge,
+signed weapon enchantments, physical armor penalties, permanent rust protection,
+and magical armor wards covering Energy, Impact, Keen, Spirit and Vital explicitly.
+Psychic is a separate category excluded from these wards. Rust damages physical
+plating only. Equipment scrolls use frozen targets and the shared paid Read path;
+their success and no-op outcomes do not automatically identify the scroll type.
 
 ## Implemented scope
 

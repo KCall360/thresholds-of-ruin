@@ -363,7 +363,7 @@ class Recorder(ProcessTestCase):
         server_samples["snapshot_part"] = captured[0]
         bounded.stop()
         self.save = self.save.parent / "item-samples.db"
-        item_server = self.server(scenario="interactions")
+        item_server = self.server(scenario="interactions", wizard=True)
         item_client, state = self.client()
         potion = next(item for item in state["state"]["observation"]["inventory"] if item["class"] == "potion")
         result = self.act(item_client, {"type": "drink", "item": potion["id"]})
@@ -372,6 +372,20 @@ class Recorder(ProcessTestCase):
         messages = [json.loads(line).get("message") for line in item_client.transcript if line.startswith("{")]
         server_samples["zz.item_completion"] = next(message for message in reversed(messages)
             if message and message["type"] == "snapshot")
+        # Preserve a real exact-instance weapon disclosure sample. Ordinary
+        # archetype familiarity alone deliberately leaves numerical views absent.
+        self.assertTrue(all(item["known_equipment"] is None for item in
+                            state["state"]["observation"]["interactions"]["inventory"]))
+        item_wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        self.wizard_command(item_wizard, "identify 1 10")
+        known = self.request(item_client, {"type": "snapshot"})
+        self.assertTrue(any(item["known_equipment"] is not None and
+                            item["known_equipment"]["attack"] is not None for item in
+                            known["state"]["observation"]["interactions"]["inventory"]))
+        messages = [json.loads(line).get("message") for line in item_client.transcript if line.startswith("{")]
+        server_samples["zz.known_weapon"] = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot")
+        item_wizard.stop()
         item_client.stop()
         item_server.stop()
         self.save = self.save.parent / "inspection-samples.db"

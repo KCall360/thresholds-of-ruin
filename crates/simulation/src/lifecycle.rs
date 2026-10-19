@@ -202,6 +202,7 @@ pub(crate) struct ItemOutcome {
     pub change: ItemChange,
 }
 pub(crate) enum ItemChange {
+    CurseBlocked(ActorOutcome),
     Equipment(ActorOutcome),
     Consumed { actor: ActorOutcome },
 }
@@ -409,15 +410,25 @@ impl Game {
             ApplicationOutcome::Actor(outcome) => self.commit_actor_outcome(outcome)?,
             ApplicationOutcome::Item(outcome) => {
                 self.push_event(
-                    CombatEvent::ItemCompleted {
-                        actor: outcome.actor,
-                        work: outcome.work,
-                        intention: outcome.intention,
+                    if matches!(&outcome.change, ItemChange::CurseBlocked(_)) {
+                        CombatEvent::ItemCurseBlocked {
+                            actor: outcome.actor,
+                            item: outcome.work.item().ok_or(GameError::ItemUnavailable)?,
+                            intention: outcome.intention,
+                        }
+                    } else {
+                        CombatEvent::ItemCompleted {
+                            actor: outcome.actor,
+                            work: outcome.work,
+                            intention: outcome.intention,
+                        }
                     },
                     None,
                 )?;
                 match outcome.change {
-                    ItemChange::Equipment(actor) => self.commit_actor_outcome(actor)?,
+                    ItemChange::CurseBlocked(actor) | ItemChange::Equipment(actor) => {
+                        self.commit_actor_outcome(actor)?
+                    }
                     ItemChange::Consumed { actor } => self.commit_actor_outcome(actor)?,
                 }
             }
@@ -551,6 +562,7 @@ impl Game {
             crate::abilities::EffectRecipient::Target => outcome.target,
             crate::abilities::EffectRecipient::Source => outcome.actor,
         };
+        self.validate_equipment_alterations(recipient_id, &outcome.effects)?;
         let mut transition = self.settled_actor_outcome(recipient_id)?;
         transition.disclosure_origin = Some(disclosure_origin.clone());
         let mut placement = crate::abilities::Placement {
@@ -576,6 +588,13 @@ impl Game {
             if matches!(effect, ResolvedEffect::Theft { .. }) {
                 outcome.effects[applied_count] = effect.clone();
                 applied_count += 1;
+                continue;
+            }
+            if let ResolvedEffect::AlterEquipment { alteration } = effect {
+                if self.alter_equipment_in_outcome(&mut transition, alteration)? {
+                    outcome.effects[applied_count] = effect.clone();
+                    applied_count += 1;
+                }
                 continue;
             }
             if let ResolvedEffect::CorrodeArmor { slot, amount } = effect {

@@ -95,6 +95,12 @@ pub(crate) fn read_corrosion_amount<'de, D: serde::Deserializer<'de>>(
 #[serde(deny_unknown_fields)]
 pub(crate) struct ItemCondition {
     pub corrosion: u32,
+    pub cursed: bool,
+    pub protected: bool,
+    pub armor_penalty: u32,
+    pub armor_enchantment: u32,
+    pub hit_enchantment: i32,
+    pub damage_enchantment: i32,
 }
 impl<'de> Deserialize<'de> for ItemCondition {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -102,22 +108,156 @@ impl<'de> Deserialize<'de> for ItemCondition {
         #[serde(deny_unknown_fields)]
         struct Fields {
             corrosion: u32,
+            cursed: bool,
+            protected: bool,
+            armor_penalty: u32,
+            armor_enchantment: u32,
+            hit_enchantment: i32,
+            damage_enchantment: i32,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
-        if fields.corrosion > crate::limits::NUMERIC as u32 {
-            return Err(serde::de::Error::custom("invalid item corrosion"));
-        }
-        Ok(Self {
+        let condition = Self {
             corrosion: fields.corrosion,
-        })
+            cursed: fields.cursed,
+            protected: fields.protected,
+            armor_penalty: fields.armor_penalty,
+            armor_enchantment: fields.armor_enchantment,
+            hit_enchantment: fields.hit_enchantment,
+            damage_enchantment: fields.damage_enchantment,
+        };
+        if !condition.valid() {
+            return Err(serde::de::Error::custom("invalid item condition"));
+        }
+        Ok(condition)
+    }
+}
+impl ItemCondition {
+    pub(crate) fn valid(self) -> bool {
+        self.corrosion <= crate::limits::NUMERIC as u32
+            && self.armor_penalty <= crate::limits::NUMERIC as u32
+            && self.armor_enchantment <= crate::limits::NUMERIC as u32
+            && [self.hit_enchantment, self.damage_enchantment]
+                .into_iter()
+                .all(|value| {
+                    (-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(value))
+                })
+    }
+
+    /// Rust and negative physical condition affect only mundane plating.
+    /// Both losses retain their exact history; overlapping losses floor at zero.
+    pub(crate) fn physical_armor(self, armor: ArmorSpec) -> Option<u32> {
+        if !self.valid()
+            || !armor.valid()
+            || self.armor_penalty > armor.physical_reduction
+            || self.corrosion > armor.physical_reduction
+            || (self.corrosion != 0 && !armor.rustable())
+        {
+            return None;
+        }
+        let amount = i64::from(armor.physical_reduction)
+            .checked_sub(i64::from(self.armor_penalty))?
+            .checked_sub(i64::from(self.corrosion))?
+            .max(0);
+        Some(amount as u32)
+    }
+
+    /// Total protection against physical damage includes the five-category ward.
+    pub(crate) fn effective_armor(self, armor: ArmorSpec) -> Option<u32> {
+        let amount = self
+            .physical_armor(armor)?
+            .checked_add(self.armor_enchantment)?;
+        (amount <= crate::limits::NUMERIC as u32).then_some(amount)
+    }
+
+    /// Each enchantment adds one ward point against the five named ward types.
+    /// Psychic damage is excluded.
+    /// Clearing the curse does not repair physical penalty or corrosion.
+    pub(crate) fn enchant_armor(self, armor: ArmorSpec) -> Option<Self> {
+        self.effective_armor(armor)?;
+        let changed = Self {
+            armor_enchantment: self.armor_enchantment.checked_add(1)?,
+            cursed: false,
+            ..self
+        };
+        changed.effective_armor(armor)?;
+        Some(changed)
+    }
+
+    pub(crate) fn enchant_weapon_hit(self) -> Option<Self> {
+        let changed = Self {
+            hit_enchantment: self.hit_enchantment.checked_add(1)?,
+            cursed: false,
+            ..self
+        };
+        (self.valid() && changed.valid()).then_some(changed)
+    }
+
+    pub(crate) fn enchant_weapon_damage(self) -> Option<Self> {
+        let changed = Self {
+            damage_enchantment: self.damage_enchantment.checked_add(1)?,
+            cursed: false,
+            ..self
+        };
+        (self.valid() && changed.valid()).then_some(changed)
+    }
+
+    pub(crate) fn uncurse(self) -> Self {
+        Self {
+            cursed: false,
+            ..self
+        }
+    }
+
+    pub(crate) fn protect(self) -> Self {
+        Self {
+            protected: true,
+            ..self
+        }
+    }
+
+    pub(crate) fn corrode_armor(self, armor: ArmorSpec, requested: u32) -> Option<(Self, u32)> {
+        self.effective_armor(armor)?;
+        let effective = self.physical_armor(armor)?;
+        if requested == 0 || requested > crate::limits::NUMERIC as u32 {
+            return None;
+        }
+        if self.protected || !armor.rustable() {
+            return Some((self, 0));
+        }
+        let amount = requested.min(effective);
+        let changed = Self {
+            corrosion: self.corrosion.checked_add(amount)?,
+            ..self
+        };
+        changed.effective_armor(armor)?;
+        Some((changed, amount))
     }
 }
 impl Item {
     pub(crate) fn condition_valid(&self) -> bool {
-        match self.spec.equipment.as_ref().and_then(|gear| gear.armor) {
-            Some(armor) if armor.rustable() => self.condition.corrosion <= armor.physical_reduction,
-            _ => self.condition.corrosion == 0,
+        if !self.condition.valid() {
+            return false;
         }
+        let gear = self.spec.equipment.as_ref();
+        let armor_valid = match gear.and_then(|gear| gear.armor) {
+            Some(armor) => self.condition.effective_armor(armor).is_some(),
+            None => {
+                self.condition.corrosion == 0
+                    && self.condition.armor_penalty == 0
+                    && self.condition.armor_enchantment == 0
+                    && !self.condition.protected
+            }
+        };
+        let weapon_valid = match gear.and_then(|gear| gear.attack.as_ref()) {
+            Some(attack) => attack
+                .with_enchantment(
+                    self.condition.hit_enchantment,
+                    self.condition.damage_enchantment,
+                )
+                .is_ok(),
+            None => self.condition.hit_enchantment == 0 && self.condition.damage_enchantment == 0,
+        };
+        armor_valid && weapon_valid && (gear.is_some() || !self.condition.cursed)
     }
 
     /// Identified equipment shows its current contribution, not unworn catalog values.
@@ -126,8 +266,32 @@ impl Item {
             return None;
         }
         let mut equipment = self.spec.equipment.clone()?;
-        equipment.modifiers = equipment.modifiers_with_armor(self.condition.corrosion)?;
+        if let Some(armor) = equipment.armor.as_mut() {
+            armor.physical_reduction = self.condition.effective_armor(*armor)?;
+        }
+        equipment.modifiers = equipment.modifiers_with_armor(0)?;
+        if equipment.armor.is_some() && self.condition.armor_enchantment != 0 {
+            for category in [DamageType::Energy, DamageType::Spirit, DamageType::Vital] {
+                equipment.modifiers.push(Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Reduction {
+                        selector: Selector::Category { category },
+                        amount: self.condition.armor_enchantment,
+                    },
+                });
+            }
+        }
         equipment.armor = None;
+        if let Some(attack) = equipment.attack.as_ref() {
+            equipment.attack = Some(
+                attack
+                    .with_enchantment(
+                        self.condition.hit_enchantment,
+                        self.condition.damage_enchantment,
+                    )
+                    .ok()?,
+            );
+        }
         Some(equipment)
     }
 
@@ -194,12 +358,18 @@ impl crate::Game {
         else {
             return Ok(0);
         };
-        let amount = requested.min(armor.physical_reduction - expected.condition.corrosion);
+        let (condition, amount) =
+            expected
+                .condition
+                .corrode_armor(armor, requested)
+                .ok_or(crate::GameError::Rule(
+                    crate::abilities::RuleError::InvalidPlan,
+                ))?;
         if amount == 0 {
             return Ok(0);
         }
         let mut changed = expected.clone();
-        changed.condition.corrosion += amount;
+        changed.condition = condition;
         let sources = outcome
             .state
             .equipment
@@ -225,6 +395,11 @@ impl crate::Game {
         if self.items.get(&item_id) != Some(&expected) {
             return Err(crate::GameError::ItemUnavailable);
         }
+        outcome.state.known_equipment.observe_change(
+            item_id,
+            expected.condition,
+            changed.condition,
+        );
         self.items
             .edit(item_id, |item| item.condition = changed.condition)
             .ok_or(crate::GameError::ItemUnavailable)?;
@@ -273,6 +448,216 @@ mod tests {
             rustproof: false,
         }
     }
+    #[test]
+    fn uncurse_preserves_all_other_condition_operands() {
+        let condition = ItemCondition {
+            corrosion: 4,
+            cursed: true,
+            protected: true,
+            armor_penalty: 2,
+            armor_enchantment: 3,
+            hit_enchantment: -2,
+            damage_enchantment: 1,
+        };
+        assert_eq!(
+            condition.uncurse(),
+            ItemCondition {
+                cursed: false,
+                ..condition
+            }
+        );
+        assert_eq!(condition.uncurse().uncurse(), condition.uncurse());
+    }
+
+    #[test]
+    fn weapon_adjustments_remain_signed_until_final_damage_fold() {
+        let base = crate::attacks::MeleeAttack::fixed(
+            crate::attributes::Skill::LightWeaponry,
+            -2,
+            1,
+            1,
+            DamageType::Keen,
+            None,
+            2,
+        )
+        .unwrap();
+        let adjusted = base.with_enchantment(-3, -5).unwrap();
+        assert_eq!(adjusted.bonus(), -5);
+        assert_eq!(adjusted.damage(), base.damage());
+        let damage = adjusted.damage_with_modifiers(0, 4, 0).unwrap();
+        assert_eq!(
+            damage.components()[0].amount(),
+            crate::damage::DamageAmount::Fixed(1)
+        );
+        let selected = crate::attacks::SelectedMeleeAttack::Weapon(adjusted.clone());
+        assert_eq!(selected.damage_with_modifiers(0, 4, 0).unwrap(), damage);
+        let round_trip: crate::attacks::MeleeAttack =
+            serde_json::from_value(serde_json::to_value(&adjusted).unwrap()).unwrap();
+        assert_eq!(round_trip, adjusted);
+        assert!(crate::attacks::NaturalAttack::from_melee(adjusted.clone()).is_err());
+        let mut raw = serde_json::to_value(&adjusted).unwrap();
+        raw.as_object_mut().unwrap().remove("damage_enchantment");
+        assert!(serde_json::from_value::<crate::attacks::MeleeAttack>(raw).is_err());
+        let mut weapon = item(metal());
+        let mut spec = (*weapon.spec).clone();
+        spec.equipment.as_mut().unwrap().attack = Some(base.clone());
+        weapon.spec = tor_world::Shared::new(spec);
+        let sibling = weapon.clone();
+        weapon.condition.hit_enchantment = -3;
+        weapon.condition.damage_enchantment = -5;
+        assert!(weapon.condition_valid());
+        let view = weapon.equipment_view().unwrap();
+        let source = weapon
+            .equipment_source(ItemId(1), EquipmentSlotId(0))
+            .unwrap();
+        assert_eq!(view.attack, source.attack);
+        assert_eq!(view.attack, Some(adjusted));
+        assert_eq!(weapon.spec, sibling.spec);
+        assert_eq!(sibling.equipment_view().unwrap().attack, Some(base.clone()));
+        let hit = weapon.condition.enchant_weapon_hit().unwrap();
+        assert_eq!(hit.hit_enchantment, -2);
+        assert_eq!(hit.damage_enchantment, -5);
+        let damage = hit.enchant_weapon_damage().unwrap();
+        assert_eq!(damage.hit_enchantment, -2);
+        assert_eq!(damage.damage_enchantment, -4);
+        assert!(base.with_enchantment(i32::MAX, 0).is_err());
+        assert!(base.with_enchantment(0, i32::MIN).is_err());
+    }
+
+    fn reductions(owned: &Item) -> [u32; 6] {
+        let mut result = [0; 6];
+        for modifier in owned.equipment_view().unwrap().modifiers {
+            if let ModifierOp::Reduction {
+                selector: Selector::Category { category },
+                amount,
+            } = modifier.op
+            {
+                let index = match category {
+                    DamageType::Impact => 0,
+                    DamageType::Keen => 1,
+                    DamageType::Energy => 2,
+                    DamageType::Spirit => 3,
+                    DamageType::Vital => 4,
+                    DamageType::Psychic => 5,
+                };
+                result[index] += amount;
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn armor_ward_adds_one_to_five_categories_except_psychic_without_repairing_penalty() {
+        let mut owned = item(metal());
+        owned.condition = ItemCondition {
+            armor_penalty: 2,
+            cursed: true,
+            ..Default::default()
+        };
+        assert_eq!(reductions(&owned), [0, 0, 7, 0, 0, 0]);
+        for level in 1..=3 {
+            owned.condition = owned.condition.enchant_armor(metal()).unwrap();
+            assert_eq!(owned.condition.armor_enchantment, level);
+            assert_eq!(owned.condition.armor_penalty, 2);
+            assert_eq!(owned.condition.corrosion, 0);
+            assert!(!owned.condition.cursed);
+            assert_eq!(
+                reductions(&owned),
+                [level, level, 7 + level, level, level, 0]
+            );
+        }
+        assert!(ItemCondition {
+            armor_penalty: 3,
+            ..Default::default()
+        }
+        .effective_armor(metal())
+        .is_none());
+    }
+
+    #[test]
+    fn corrosion_consumes_only_physical_armor_and_protection_preserves_history() {
+        let condition = ItemCondition {
+            armor_enchantment: 3,
+            cursed: true,
+            ..Default::default()
+        };
+        let (damaged, amount) = condition.corrode_armor(metal(), 5).unwrap();
+        assert_eq!(amount, 2);
+        assert_eq!(damaged.corrosion, 2);
+        assert_eq!(damaged.effective_armor(metal()), Some(3));
+        assert_eq!(damaged.corrode_armor(metal(), 1), Some((damaged, 0)));
+        let mut owned = item(metal());
+        owned.condition = damaged;
+        assert_eq!(reductions(&owned), [3, 3, 10, 3, 3, 0]);
+        let enchanted = damaged.enchant_armor(metal()).unwrap();
+        assert_eq!(enchanted.armor_enchantment, 4);
+        assert_eq!(enchanted.corrosion, 2);
+        assert_eq!(enchanted.effective_armor(metal()), Some(4));
+        let damaged = ItemCondition {
+            corrosion: 1,
+            armor_penalty: 1,
+            ..condition
+        };
+        let plating = ArmorSpec {
+            physical_reduction: 3,
+            ..metal()
+        };
+        let protected = damaged.protect();
+        assert!(protected.cursed);
+        assert_eq!(protected.corrosion, 1);
+        assert_eq!(protected.armor_penalty, 1);
+        assert_eq!(protected.effective_armor(plating), Some(4));
+        assert_eq!(protected.corrode_armor(plating, 3), Some((protected, 0)));
+        assert_eq!(damaged.corrode_armor(plating, 3).unwrap().1, 1);
+        let uncursed = protected.uncurse();
+        assert!(!uncursed.cursed);
+        assert!(uncursed.protected);
+        assert_eq!(uncursed.corrosion, 1);
+        assert_eq!(uncursed.armor_penalty, 1);
+        let mut owned = item(plating);
+        owned.condition = protected;
+        assert!(owned.condition_valid());
+    }
+
+    #[test]
+    fn enchantment_bounds_fail_without_clearing_curse_or_mutating_siblings() {
+        let original = item(metal());
+        let mut changed = original.clone();
+        changed.condition = changed.condition.enchant_armor(metal()).unwrap();
+        assert_eq!(changed.spec, original.spec);
+        assert_eq!(original.condition, ItemCondition::default());
+        assert_ne!(changed.equipment_view(), original.equipment_view());
+        let bound = ItemCondition {
+            armor_enchantment: crate::limits::NUMERIC as u32 - 2,
+            cursed: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            bound.effective_armor(metal()),
+            Some(crate::limits::NUMERIC as u32)
+        );
+        assert!(bound.enchant_armor(metal()).is_none());
+        assert!(bound.cursed);
+        assert!(ItemCondition {
+            hit_enchantment: i32::MAX,
+            ..Default::default()
+        }
+        .enchant_weapon_hit()
+        .is_none());
+        assert!(ItemCondition {
+            damage_enchantment: crate::limits::NUMERIC as i32,
+            ..Default::default()
+        }
+        .enchant_weapon_damage()
+        .is_none());
+        assert!(ItemCondition {
+            corrosion: u32::MAX,
+            ..Default::default()
+        }
+        .effective_armor(metal())
+        .is_none());
+    }
+
     #[test]
     fn item_owned_corrosion_changes_only_its_physical_reduction() {
         let original = item(metal());
@@ -327,6 +712,61 @@ mod tests {
     }
     #[test]
     fn owned_armor_and_condition_records_reject_missing_unknown_and_sequence_shapes() {
+        let raw = serde_json::to_value(ItemCondition::default()).unwrap();
+        assert_eq!(
+            serde_json::from_value::<ItemCondition>(raw.clone()).unwrap(),
+            ItemCondition::default()
+        );
+        for field in [
+            "corrosion",
+            "cursed",
+            "protected",
+            "armor_penalty",
+            "armor_enchantment",
+            "hit_enchantment",
+            "damage_enchantment",
+        ] {
+            let mut missing = raw.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<ItemCondition>(missing).is_err(),
+                "{field}"
+            );
+        }
+        for field in [
+            "corrosion",
+            "armor_penalty",
+            "armor_enchantment",
+            "hit_enchantment",
+            "damage_enchantment",
+        ] {
+            let mut invalid = raw.clone();
+            invalid[field] = serde_json::json!(crate::limits::NUMERIC + 1);
+            assert!(
+                serde_json::from_value::<ItemCondition>(invalid).is_err(),
+                "{field}"
+            );
+        }
+        for field in [
+            "armor_penalty",
+            "armor_enchantment",
+            "hit_enchantment",
+            "damage_enchantment",
+        ] {
+            let mut invalid = raw.clone();
+            invalid[field] = serde_json::json!(-crate::limits::NUMERIC - 1);
+            assert!(
+                serde_json::from_value::<ItemCondition>(invalid).is_err(),
+                "{field}"
+            );
+        }
+        let mut unknown = raw.clone();
+        unknown["extra"] = serde_json::json!(0);
+        assert!(serde_json::from_value::<ItemCondition>(unknown).is_err());
+        assert!(serde_json::from_value::<ItemCondition>(serde_json::json!([
+            0, false, false, 0, 0, 0, 0
+        ]))
+        .is_err());
         for value in [
             serde_json::json!({}),
             serde_json::json!({"corrosion":0,"extra":0}),

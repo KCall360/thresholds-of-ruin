@@ -106,6 +106,7 @@ impl DamageView {
 pub struct AttackView {
     pub skill: ContentRef,
     pub bonus: i32,
+    pub damage_enchantment: i32,
     pub wind_up: u32,
     pub recovery: u32,
     pub damage: DamageView,
@@ -114,6 +115,7 @@ impl AttackView {
     pub(crate) fn valid(&self) -> bool {
         self.skill.valid()
             && (-1000..=1000).contains(&self.bonus)
+            && (-1_000_000..=1_000_000).contains(&self.damage_enchantment)
             && (1..=1_000_000).contains(&self.wind_up)
             && (1..=1_000_000).contains(&self.recovery)
             && self.damage.valid()

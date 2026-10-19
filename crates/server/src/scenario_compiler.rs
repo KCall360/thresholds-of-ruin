@@ -147,6 +147,7 @@ pub(super) struct PreparedArchetype {
     pub recipe: Option<Recipe>,
     pub anatomy: Option<tor_simulation::AnatomySpec>,
     pub equipment: Option<tor_simulation::EquipmentSpec>,
+    pub equipment_generation: Option<tor_simulation::EquipmentGeneration>,
     pub consumable: Option<tor_simulation::ConsumableSpec>,
     pub readable: Option<tor_simulation::ReadableSpec>,
     pub device: Option<tor_simulation::DeviceSpec>,
@@ -188,6 +189,10 @@ impl PreparedArchetype {
                 .equipment
                 .as_ref()
                 .map(|equipment| equipment.compile(catalog.content().rules()))
+                .transpose()?,
+            equipment_generation: author
+                .equipment_generation
+                .map(super::EquipmentGeneration::compile)
                 .transpose()?,
             consumable: author
                 .consumable
@@ -612,6 +617,7 @@ impl PreparedDefinitions {
         properties.extend(author.properties.clone());
         let spec = tor_simulation::ItemSpec {
             equipment: inherited.equipment.clone(),
+            equipment_generation: inherited.equipment_generation,
             consumable: inherited.consumable.clone(),
             readable: inherited.readable.clone(),
             device: inherited.device.clone(),
@@ -1341,6 +1347,7 @@ mod tests {
                 creature: Some(creature),
                 anatomy: None,
                 equipment: None,
+                equipment_generation: None,
                 consumable: None,
                 readable: None,
                 device: None,

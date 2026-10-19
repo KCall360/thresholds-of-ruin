@@ -479,3 +479,181 @@ fn late_store_rejection_rolls_back_magic_charge_and_paid_selection_then_retries(
         assert_eq!(wire.checkpoint(), completed);
     }
 }
+
+fn equipment_scenario() -> crate::Scenario {
+    let mut scenario = scenario(false);
+    let source = scenario.package.as_ref().unwrap();
+    let mut manifest = serde_json::to_value(&source.manifest).unwrap();
+    manifest["id"] = json!("equipment-magic-service");
+    manifest["archetypes"]["mail"] = json!({"name":"ring mail","identity":"fixture.mail","class":"armor","equipment":{"slot":"body_armor","armor":{"physical_reduction":2,"material":"metal","rustproof":false},"modifiers":[]},"equipment_generation":{"kind":"armor","curse_percent":100,"enchant_percent":0,"minimum":1,"maximum":1}});
+    manifest["archetypes"]["armor_identify"] = json!({"name":"scroll of identify armor","identity":"fixture.identify_armor","class":"scroll","stackable":true,"appearance_pool":"armor_pages","readable":{"identify":"armor","discovery":"on_use"}});
+    manifest["archetypes"]["armor_enchant"] = json!({"name":"scroll of enchant armor","identity":"fixture.enchant_armor","class":"scroll","stackable":true,"appearance_pool":"enchant_pages","readable":{"discovery":"never","effects":[{"kind":"alter_equipment","selection":{"kind":"slot","slot":"body_armor","class":"armor","last":false},"alteration":"enchant_armor"}]}});
+    manifest["appearance_pools"]["armor_pages"] = json!({"appearances":["indigo page"]});
+    manifest["appearance_pools"]["enchant_pages"] = json!({"appearances":["silver page"]});
+    manifest["characters"][0]["known_identities"] = json!(["fixture.mail"]);
+    manifest["characters"][0]["loadout"] = json!([
+        {"archetype":"mail","quantity":1,"equipped_slot":1},
+        {"archetype":"mail","quantity":1},
+        {"archetype":"armor_identify","quantity":1},
+        {"archetype":"armor_enchant","quantity":2}
+    ]);
+    let mut regions = source.region_defs().unwrap();
+    let mut region = serde_json::to_value(&regions[0]).unwrap();
+    region["items"] = json!([]);
+    regions[0] = serde_json::from_value(region).unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/magic-items");
+    let rules = std::fs::read_to_string(root.join("rules.toml")).unwrap();
+    let rules = resolve_rules_source(&rules, "rules.toml").unwrap().source;
+    scenario.package = Some(Arc::new(
+        Package::from_parts(serde_json::from_value(manifest).unwrap(), regions, &rules).unwrap(),
+    ));
+    scenario
+}
+
+#[test]
+fn encoded_equipment_curse_identify_enchant_retry_and_reopen_preserve_exact_facts() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("equipment.db");
+    let fixture = equipment_scenario();
+    let mut wire = Wire::new(Engine::open(&path, fixture.clone()).unwrap());
+    let initial = wire.snapshot(OWNER);
+    let interactions = initial.state.observation.interactions.as_ref().unwrap();
+    let worn = interactions
+        .inventory
+        .iter()
+        .find(|r| r.equipped_slot == Some(1))
+        .unwrap()
+        .item;
+    let spare = initial
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|i| i.class == ItemClass::Armor && i.id != worn)
+        .unwrap()
+        .id;
+    let identify = initial
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|i| i.name == "indigo page")
+        .unwrap()
+        .id;
+    let enchant = initial
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|i| i.name == "silver page")
+        .unwrap()
+        .id;
+    assert!(interactions
+        .inventory
+        .iter()
+        .filter(|r| r.item == worn || r.item == spare)
+        .all(|r| r.known_cursed.is_none()));
+    wire.act("try-cursed-removal", Action::Unequip { item: worn });
+    let failed = wire.snapshot(OWNER);
+    let row = failed
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory
+        .iter()
+        .find(|r| r.item == worn)
+        .unwrap();
+    assert_eq!(row.equipped_slot, Some(1));
+    assert_eq!(row.known_cursed, Some(true));
+    wire.act("identify-page", Action::Read { item: identify });
+    let pending = choice(&wire.snapshot(OWNER));
+    wire.act(
+        "identify-worn",
+        Action::Identify {
+            choice: pending.choice,
+            item: Some(worn),
+        },
+    );
+    let identified = wire.snapshot(OWNER);
+    let rows = &identified
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory;
+    assert!(rows
+        .iter()
+        .find(|r| r.item == worn)
+        .unwrap()
+        .known_equipment
+        .is_some());
+    assert!(rows
+        .iter()
+        .find(|r| r.item == spare)
+        .unwrap()
+        .known_equipment
+        .is_none());
+    let request = wire.request(OWNER, Action::Read { item: enchant });
+    ack(wire.send(OWNER, "enchant-once", request.clone()));
+    let resolved = wire.finish(OWNER, "enchant-once", &request);
+    let enchanted = wire.snapshot(OWNER);
+    let row = enchanted
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory
+        .iter()
+        .find(|r| r.item == worn)
+        .unwrap();
+    assert_eq!(row.known_cursed, Some(false));
+    assert_ne!(
+        row.known_equipment,
+        rows.iter()
+            .find(|r| r.item == worn)
+            .unwrap()
+            .known_equipment
+    );
+    assert_eq!(quantity(&enchanted, enchant), 1);
+    assert!(
+        !enchanted
+            .state
+            .observation
+            .inventory
+            .iter()
+            .find(|r| r.id == enchant)
+            .unwrap()
+            .identified
+    );
+    let before = wire.checkpoint();
+    assert_eq!(ack(wire.send(OWNER, "enchant-once", request)), resolved);
+    assert_eq!(wire.checkpoint(), before);
+    wire.act("remove-recovered-armor", Action::Unequip { item: worn });
+    wire.service.engine.flush().unwrap();
+    let expected = wire
+        .snapshot(OWNER)
+        .state
+        .observation
+        .interactions
+        .clone()
+        .unwrap()
+        .inventory;
+    drop(wire);
+    // Reopen is driven by stored package/content; the supplied unrelated seed is unused.
+    let mut reopened = Wire::new(Engine::open(&path, crate::Scenario::two_room(999)).unwrap());
+    assert_eq!(
+        reopened
+            .snapshot(OWNER)
+            .state
+            .observation
+            .interactions
+            .clone()
+            .unwrap()
+            .inventory,
+        expected
+    );
+}

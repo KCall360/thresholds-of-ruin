@@ -545,6 +545,7 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
     let item = ring.id;
     initial.observation.inventory.push(ring);
     initial.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
         slots: vec![
@@ -556,6 +557,8 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
             item,
             slot: Some(equipment_slot("ring", "on a finger", false)),
             equipped_slot: None,
+            known_cursed: None,
+            known_protected: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -3579,6 +3582,7 @@ fn magic_turn_state() -> StateView {
     wand.class = ItemClass::Wand;
     state.observation.inventory = vec![scroll.clone(), wand.clone()];
     state.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         completed: vec![],
         slots: vec![],
         preparation: None,
@@ -3588,6 +3592,8 @@ fn magic_turn_state() -> StateView {
                 item: scroll.id,
                 slot: None,
                 equipped_slot: None,
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -3599,6 +3605,8 @@ fn magic_turn_state() -> StateView {
                 item: wand.id,
                 slot: None,
                 equipped_slot: None,
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,

@@ -10,6 +10,7 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
     item.name = "silver ring".into();
     s.observation.inventory = vec![item.clone()];
     s.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
         slots: vec![
@@ -21,6 +22,8 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
             item: item.id,
             slot: Some(equipment_slot("ring", "on a finger", false)),
             equipped_slot: None,
+            known_cursed: None,
+            known_protected: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -53,6 +56,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
     let slot = equipment_slot("fixture_wing", "fastened to a wing", true);
     state.observation.inventory = vec![first.clone(), second.clone()];
     state.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: vec![],
         slots: vec![slot.clone(); 2],
@@ -62,6 +66,8 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 item: first.id,
                 slot: Some(slot.clone()),
                 equipped_slot: Some(0),
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -73,6 +79,8 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 item: second.id,
                 slot: Some(slot),
                 equipped_slot: None,
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -328,6 +336,7 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
     item.name = "fixture meal".into();
     s.observation.inventory = vec![item.clone()];
     s.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: vec![],
         slots: vec![],
@@ -336,6 +345,8 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
             item: item.id,
             slot: None,
             equipped_slot: None,
+            known_cursed: None,
+            known_protected: None,
             known_equipment: None,
             drinkable: false,
             edible: false,
@@ -411,6 +422,7 @@ fn magic_state() -> StateView {
     wand.identified = false;
     view.observation.inventory = vec![scroll.clone(), wand.clone()];
     view.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
         identification: None,
         completed: vec![],
         slots: vec![],
@@ -420,6 +432,8 @@ fn magic_state() -> StateView {
                 item: scroll.id,
                 slot: None,
                 equipped_slot: None,
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,
@@ -431,6 +445,8 @@ fn magic_state() -> StateView {
                 item: wand.id,
                 slot: None,
                 equipped_slot: None,
+                known_cursed: None,
+                known_protected: None,
                 known_equipment: None,
                 drinkable: false,
                 edible: false,

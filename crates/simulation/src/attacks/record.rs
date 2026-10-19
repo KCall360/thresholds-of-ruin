@@ -4,7 +4,7 @@ use crate::attributes::Skill;
 use crate::damage::record::DamageRecord;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeleeAttackRecord {
     skill: Skill,
@@ -12,6 +12,35 @@ pub struct MeleeAttackRecord {
     wind_up: u64,
     recovery: u64,
     damage: DamageRecord,
+    damage_enchantment: i32,
+}
+
+impl<'de> Deserialize<'de> for MeleeAttackRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            skill: Skill,
+            bonus: i32,
+            wind_up: u64,
+            recovery: u64,
+            damage: DamageRecord,
+            damage_enchantment: i32,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        let record = Self {
+            skill: f.skill,
+            bonus: f.bonus,
+            wind_up: f.wind_up,
+            recovery: f.recovery,
+            damage: f.damage,
+            damage_enchantment: f.damage_enchantment,
+        };
+        record
+            .restore()
+            .map_err(|_| serde::de::Error::custom("invalid melee attack record"))?;
+        Ok(record)
+    }
 }
 
 impl MeleeAttackRecord {
@@ -22,6 +51,7 @@ impl MeleeAttackRecord {
             wind_up: attack.wind_up,
             recovery: attack.recovery,
             damage: DamageRecord::capture(&attack.damage),
+            damage_enchantment: attack.damage_enchantment,
         }
     }
 
@@ -34,7 +64,8 @@ impl MeleeAttackRecord {
             self.damage
                 .restore()
                 .map_err(|_| AttackError::InvalidDefinition)?,
-        )
+        )?
+        .with_enchantment(0, self.damage_enchantment)
     }
 }
 

@@ -65,7 +65,14 @@ pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
 mod armor;
 mod item_store;
 pub use armor::{ArmorMaterial, ArmorSpec};
+mod equipment_generation;
 mod items;
+pub use equipment_generation::EquipmentGeneration;
+mod equipment_magic;
+pub use equipment_magic::{
+    EquipmentAlteration, EquippedSelection, PlannedEquipmentAlteration, ResolvedEquipmentAlteration,
+};
+mod equipment_knowledge;
 mod magic_items;
 pub use items::{CurrencyKind, ItemClass, ItemSpec};
 pub use magic_items::{
@@ -444,6 +451,7 @@ struct Actor {
     visited: BTreeSet<RegionId>,
     knowledge: Shared<BTreeSet<String>>,
     known_charges: Shared<crate::magic_items::ChargeKnowledge>,
+    known_equipment: Shared<crate::equipment_knowledge::EquipmentKnowledge>,
     identification: Option<magic_items::IdentificationChoice>,
     recognized_abilities: Shared<BTreeSet<content_ids::AbilityId>>,
     public_plan: Option<Shared<public_plan::PublicPlanObservation>>,
@@ -769,6 +777,7 @@ impl Game {
                 visited: BTreeSet::from([location.region]),
                 knowledge: Shared::default(),
                 known_charges: Shared::default(),
+                known_equipment: Shared::default(),
                 identification: None,
                 recognized_abilities: Shared::default(),
                 public_plan: None,

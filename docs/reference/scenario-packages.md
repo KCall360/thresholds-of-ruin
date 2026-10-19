@@ -659,7 +659,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v44"
+import = "interactions-v45"
 
 [[overrides]]
 op = "set"

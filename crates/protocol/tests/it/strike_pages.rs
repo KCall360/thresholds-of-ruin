@@ -150,6 +150,7 @@ fn ordered_strikes_detail_weapon_page_budget_includes_all_metadata_and_primary_r
         name: "\\".repeat(256),
     };
     let attack = AttackView {
+        damage_enchantment: 0,
         skill: ContentRef {
             id: "heavy_weaponry".into(),
             name: "\\".repeat(256),

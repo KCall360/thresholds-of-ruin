@@ -339,6 +339,7 @@ struct Weapon {
     #[serde(deserialize_with = "reference")]
     skill: ContentRef,
     bonus: i32,
+    damage_enchantment: i32,
     wind_up: u32,
     recovery: u32,
     damage: WeaponDamage,
@@ -348,6 +349,7 @@ fn weapon<'de, D: serde::Deserializer<'de>>(d: D) -> Result<AttackView, D::Error
     Ok(AttackView {
         skill: v.skill,
         bonus: v.bonus,
+        damage_enchantment: v.damage_enchantment,
         wind_up: v.wind_up,
         recovery: v.recovery,
         damage: crate::DamageView {

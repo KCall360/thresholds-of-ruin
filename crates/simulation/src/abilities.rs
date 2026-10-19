@@ -91,3 +91,6 @@ mod consumable_effect_tests;
 
 #[cfg(test)]
 mod magic_item_tests;
+
+#[cfg(test)]
+mod equipment_magic_tests;

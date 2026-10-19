@@ -169,6 +169,13 @@ class CreatureAbilityProcesses(ProcessTestCase):
             return next(item["known_equipment"]["attack"]
                         for item in view["interactions"]["inventory"] if item["item"] == blade)
 
+        blade = next(item["id"] for item in initial["state"]["observation"]["inventory"]
+                     if item["name"] == "iron greatsword")
+        self.assertIsNone(next(item["known_equipment"] for item in
+                              initial["state"]["observation"]["interactions"]["inventory"]
+                              if item["item"] == blade))
+        self.wizard_command(wizard, "identify 1 101")
+        initial = self.request(player, {"type": "snapshot"})
         declared = weapon(initial)
         self.assertEqual(declared["skill"]["id"], "heavy_weaponry")
         self.assertEqual(declared["damage"]["primary"]["category"], "keen")

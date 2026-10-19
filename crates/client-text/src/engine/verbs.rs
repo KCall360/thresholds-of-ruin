@@ -1743,6 +1743,15 @@ pub fn inventory(scene: &Scene) -> String {
         format!("You are carrying {}.", prose::and_list(&carried))
     };
     for item in &scene.state.observation.inventory {
+        if let Some(details) =
+            tor_client_common::items::equipment_details(&scene.state.observation, item.id)
+        {
+            text.push_str(&format!(
+                " {} (#{}), known: {details}.",
+                safe(&item.name),
+                item.id
+            ));
+        }
         if let Some(charges) = tor_client_common::items::charges(&scene.state.observation, item.id)
         {
             text.push_str(&format!(

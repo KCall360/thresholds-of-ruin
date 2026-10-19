@@ -37,8 +37,9 @@ mod source;
 pub use authoring::{
     AiProfile, AmountExpr, AnatomySpec, ArmorMaterial, ArmorSpec, BodySpec, ChargeRange,
     ConsumableSpec, CurrencyKind, DamageComponentExpr, DamageExpr, DamageType, DeviceSpec,
-    DiceExpr, Effect, EquipmentSlot, EquipmentSpec, HealingOverflow, HoldPolicy, ItemClass,
-    ItemDiscovery, PushDirection, ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection,
+    DiceExpr, Effect, EquipmentAlteration, EquipmentGeneration, EquipmentSlot, EquipmentSpec,
+    EquippedSelection, HealingOverflow, HoldPolicy, ItemClass, ItemDiscovery, PushDirection,
+    ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -49,13 +50,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v44";
-const VALIDATOR: &str = "tor-scenario-34";
+pub const RULESET: &str = "interactions-v45";
+const VALIDATOR: &str = "tor-scenario-35";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 22;
+pub const FORMAT: u32 = 23;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -229,6 +230,7 @@ pub struct Archetype {
     pub creature: Option<crate::creature_authoring::BuildSpec>,
     pub anatomy: Option<AnatomySpec>,
     pub equipment: Option<EquipmentSpec>,
+    pub equipment_generation: Option<EquipmentGeneration>,
     pub consumable: Option<ConsumableSpec>,
     pub readable: Option<ReadableSpec>,
     pub device: Option<DeviceSpec>,
@@ -260,6 +262,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             creature: Option<crate::creature_authoring::BuildSpec>,
             anatomy: Option<AnatomySpec>,
             equipment: Option<EquipmentSpec>,
+            equipment_generation: Option<EquipmentGeneration>,
             consumable: Option<ConsumableSpec>,
             readable: Option<ReadableSpec>,
             device: Option<DeviceSpec>,
@@ -296,6 +299,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             creature: fields.creature,
             anatomy: fields.anatomy,
             equipment: fields.equipment,
+            equipment_generation: fields.equipment_generation,
             consumable: fields.consumable,
             readable: fields.readable,
             device: fields.device,
@@ -328,6 +332,7 @@ impl Clone for Archetype {
             anatomy: self.anatomy.clone(),
             creature: self.creature.clone(),
             equipment: self.equipment.clone(),
+            equipment_generation: self.equipment_generation,
             consumable: self.consumable.clone(),
             readable: self.readable.clone(),
             device: self.device.clone(),
@@ -2983,6 +2988,10 @@ impl Package {
                 }),
                 "Invalid anatomy",
             )?;
+            if let Some(policy) = a.equipment_generation {
+                let equipment = a.equipment.as_ref().map(|gear| gear.compile(&rules)).transpose()?;
+                require(policy.compile()?.valid_for(a.class.into(), equipment.as_ref()), "Invalid equipment generation definition")?;
+            }
             if let Some(equipment) = &a.equipment {
                 let spec = equipment.compile(&rules)?;
                 require(
@@ -4632,8 +4641,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-34");
-        assert_eq!(original.certificate.ruleset, "interactions-v44");
+        assert_eq!(original.certificate.validator, "tor-scenario-35");
+        assert_eq!(original.certificate.ruleset, "interactions-v45");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -6023,7 +6032,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v44"
+        let source = r#"import = "interactions-v45"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]
