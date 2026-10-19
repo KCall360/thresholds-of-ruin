@@ -22,7 +22,7 @@ pub enum Entry {
     Said(String),
     /// A description of the scene, set apart from the narration.
     Description(String),
-    Episode(Episode),
+    Episode(Box<Episode>),
     /// Things that happened outside any goal of the player's.
     Beats(Vec<Beat>),
 }
@@ -196,7 +196,7 @@ pub fn compose(record: &Record) -> String {
             Entry::Episode(e) => {
                 let e = Episode {
                     beats: settled(&e.beats),
-                    ..e.clone()
+                    ..e.as_ref().clone()
                 };
                 episode(&mut teller, &e);
             }
@@ -862,14 +862,14 @@ mod tests {
     }
 
     fn episode(goal: Goal, object: &str, approached: bool, beats: Vec<Beat>, end: End) -> Entry {
-        Entry::Episode(Episode {
+        Entry::Episode(Box::new(Episode {
             goal,
             object: object.into(),
             counted: None,
             approached,
             beats,
             end,
-        })
+        }))
     }
 
     fn told(entries: Vec<Entry>) -> String {

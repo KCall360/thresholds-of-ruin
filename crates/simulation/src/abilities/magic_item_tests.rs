@@ -746,3 +746,232 @@ fn identification_choices_and_owned_charge_facts_are_bounded_named_records() {
         assert!(serde_json::from_value::<Facts>(serde_json::json!({"_facts":facts})).is_err());
     }
 }
+
+#[test]
+fn device_creation_samples_owned_rng_once_and_failed_placement_never_spends_it() {
+    let mut game = fixture();
+    let prototype = device(&mut game, 10, 3);
+    let mut spec = (*game.items[&prototype].spec).clone();
+    spec.identity = "fixture.sampled_device".into();
+    let range = ChargeRange {
+        minimum: 3,
+        maximum: 7,
+    };
+    spec.device.as_mut().unwrap().initial_charges = range;
+    let mut twin = game.clone();
+    let mut expected_rng = game.rules_rng;
+    let expected = range.sample(&mut expected_rng).unwrap();
+    for current in [&mut game, &mut twin] {
+        let item = current
+            .place_item_stack(20, at(1), Some(ActorId(1)), 1, spec.clone())
+            .unwrap();
+        assert_eq!(current.items[&item].charges, Some(expected));
+        assert_eq!(current.items[&item].quantity, 1);
+        assert_eq!(current.rules_rng, expected_rng);
+    }
+    assert_eq!(game, twin);
+    assert_eq!(
+        game,
+        roundtrip(&game),
+        "restore must not draw initial charges again"
+    );
+    let before = game.clone();
+    let invalid = Location {
+        region: RegionId(999),
+        ..at(1)
+    };
+    assert!(game
+        .place_item_stack(21, invalid, None, 1, spec.clone())
+        .is_err());
+    assert_eq!(
+        game, before,
+        "failed placement must not consume RNG or identity"
+    );
+    assert_eq!(
+        game.place_item_stack(21, at(1), Some(ActorId(1)), 2, spec.clone()),
+        Err(GameError::InvalidQuantity)
+    );
+    assert_eq!(game, before);
+    spec.identity = "fixture.empty_device".into();
+    spec.device.as_mut().unwrap().initial_charges = ChargeRange {
+        minimum: 0,
+        maximum: 0,
+    };
+    let item = game
+        .place_item_stack(21, at(1), Some(ActorId(1)), 1, spec)
+        .unwrap();
+    assert_eq!(game.items[&item].charges, Some(0));
+    assert_eq!(
+        game.rules_rng, before.rules_rng,
+        "explicit fixed zero is not rerolled"
+    );
+    assert_eq!(game, roundtrip(&game));
+}
+#[test]
+fn read_self_sleep_while_blind_consumes_exactly_and_restores_without_protection() {
+    use crate::content_ids::ConditionId;
+    use crate::rules::{AmountExpr, Effect};
+
+    // Both authored learning triggers must survive removal of the last unit.
+    for discovery in [ItemDiscovery::SelfEffect, ItemDiscovery::OnUse] {
+        let sleep = ConditionId::new("fixture_ink_rest").unwrap();
+        let blindness = ConditionId::new("fixture_veiled_eyes").unwrap();
+        let mut game = super::ray_tests::fixture_with(|document, _, _| {
+            for definition in [
+                serde_json::json!({
+                    "id":"fixture_ink_rest","family":"fixture_ink_rest",
+                    "lifecycle":"timed","name":"Ink rest","modifiers":[],
+                    "stacking":{"kind":"extend"},"source_scoped":false,
+                    "descriptors":[],"capacity":"reject",
+                    "timing":{"kind":"actor_active","on_expiry":{"kind":"remove"}},
+                    "restrictions":["voluntary_actions"],"preparation":"pause"
+                }),
+                serde_json::json!({
+                    "id":"fixture_veiled_eyes","family":"fixture_veiled_eyes",
+                    "lifecycle":"timed","name":"Veiled eyes",
+                    "modifiers":[{"scope":"always","op":{"kind":"perception",
+                        "value":{"kind":"sight","enabled":false}}}],
+                    "stacking":{"kind":"extend"},"source_scoped":false,
+                    "descriptors":[],"capacity":"reject",
+                    "timing":{"kind":"actor_active","on_expiry":{"kind":"remove"}},
+                    "restrictions":[],"preparation":"preserve"
+                }),
+            ] {
+                document
+                    .conditions
+                    .push(serde_json::from_value(definition).unwrap());
+            }
+        });
+        let mut spec = ItemSpec::ordinary("unread page".into());
+        spec.class = ItemClass::Scroll;
+        spec.identity = "fixture.ink_rest_page".into();
+        spec.name = "ink rest page".into();
+        spec.appearance = "unread page".into();
+        spec.concealed = true;
+        spec.stackable = true;
+        spec.readable = Some(ReadableSpec {
+            effects: vec![Effect::ApplyConditionForTurns {
+                condition: sleep.clone(),
+                duration: AmountExpr::Fixed { amount: 1 },
+            }],
+            identify: None,
+            discovery,
+        });
+        let scroll = game
+            .place_item_stack(10, at(1), Some(ActorId(1)), 1, spec.clone())
+            .unwrap();
+        let spare = game
+            .place_item_stack(11, at(1), Some(ActorId(1)), 2, spec)
+            .unwrap();
+        game.apply_condition(ActorId(1), &blindness, ActorId(1), 5_000)
+            .unwrap();
+        assert!(!game.actors[&ActorId(1)].perception().sight);
+        let preparation = game
+            .plan_work(ActorId(1), Work::Read { item: scroll })
+            .unwrap()
+            .preparation();
+        // Stop at an ordinary ready peer after resolution, before sleep expires.
+        game.actors.get_mut(&ActorId(2)).unwrap().ready_at = preparation;
+        let origin = execute(&mut game, Action::Read { item: scroll });
+        assert_eq!(game.next_actor(), Some(ActorId(2)));
+        assert_eq!(game.tick(), preparation);
+        assert!(!game.items.contains_key(&scroll));
+        assert_eq!(game.items[&spare].quantity, 2);
+        assert!(game.items[&spare].holds.is_empty());
+        assert!(game.preparation(ActorId(1)).is_none());
+        assert!(game.pending_intention(ActorId(1)).is_none());
+        assert!(game.combat_events().iter().any(|event| matches!(
+            event,
+            crate::combat::CombatEvent::ItemCompleted {
+                actor: ActorId(1), work: Work::Read { item }, intention: Some(id),
+            } if *item == scroll && *id == origin
+        )));
+        assert!(game.actors[&ActorId(1)]
+            .knowledge
+            .contains("fixture.ink_rest_page"));
+        assert!(!game.actors[&ActorId(2)]
+            .knowledge
+            .contains("fixture.ink_rest_page"));
+        assert!(game
+            .creature(ActorId(1))
+            .unwrap()
+            .conditions()
+            .instances()
+            .any(|entry| entry.condition == sleep
+                && entry.phase == crate::conditions::ConditionPhase::Active
+                && entry.source == ActorId(1)));
+        assert!(game.condition_blocks_action(ActorId(1), &Action::Wait));
+        let denied = game.clone();
+        assert_eq!(
+            game.admit_intention(
+                ActorId(1),
+                Action::Read { item: spare },
+                IntentionOrigin::Human
+            ),
+            Err(GameError::ActorBusy)
+        );
+        assert_eq!(game, denied);
+        let mut restored = roundtrip(&game);
+        assert_eq!(game, restored);
+
+        for current in [&mut game, &mut restored] {
+            let peer_wait = |current: &mut Game| {
+                assert_eq!(current.next_actor(), Some(ActorId(2)));
+                let id = current
+                    .admit_intention(ActorId(2), Action::Wait, IntentionOrigin::Human)
+                    .unwrap();
+                let done = current.execute_next_intention().unwrap();
+                assert_eq!(done.intention.id, id);
+                done.outcome.unwrap();
+            };
+            let wake_by = current.tick() + current.actors[&ActorId(1)].turn_ticks.get();
+            while current.condition_blocks_action(ActorId(1), &Action::Wait) {
+                assert!(
+                    current.tick() < wake_by,
+                    "denial outlived the authored turn"
+                );
+                peer_wait(current);
+            }
+            assert_eq!(current.next_actor(), Some(ActorId(1)));
+            assert!(!current.condition_blocks_action(ActorId(1), &Action::Wait));
+            assert!(
+                current
+                    .creature(ActorId(1))
+                    .unwrap()
+                    .conditions()
+                    .instances()
+                    .all(|entry| entry.condition != sleep),
+                "expiry leaves no gaze-style protection"
+            );
+            assert!(!current.actors[&ActorId(1)].perception().sight);
+            assert!(current.preparation(ActorId(1)).is_none());
+            // The expired, generically named condition is immediately repeatable.
+            let completes_by = current.tick()
+                + current
+                    .plan_work(ActorId(1), Work::Read { item: spare })
+                    .unwrap()
+                    .preparation();
+            execute(current, Action::Read { item: spare });
+            while current.preparation(ActorId(1)).is_some() {
+                assert!(
+                    current.tick() < completes_by,
+                    "completed source retained its preparation"
+                );
+                peer_wait(current);
+            }
+            assert_eq!(current.items[&spare].quantity, 1);
+            assert!(current.items[&spare].holds.is_empty());
+            assert!(current.preparation(ActorId(1)).is_none());
+            assert!(current.condition_blocks_action(ActorId(1), &Action::Wait));
+            assert!(current
+                .creature(ActorId(1))
+                .unwrap()
+                .conditions()
+                .instances()
+                .any(|entry| entry.condition == sleep
+                    && entry.phase == crate::conditions::ConditionPhase::Active));
+            assert_eq!(*current, roundtrip(current));
+        }
+        assert_eq!(game, restored);
+    }
+}

@@ -906,7 +906,7 @@ pub async fn run_goal(
     }
     episode.beats = std::mem::take(&mut reader.beats);
     let resynced = reader.resynced;
-    record.entries.push(Entry::Episode(episode));
+    record.entries.push(Entry::Episode(Box::new(episode)));
     Ok(done && !resynced)
 }
 

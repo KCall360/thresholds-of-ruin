@@ -242,7 +242,8 @@ pub fn hover(
     let Ok(ray) = camera.viewport_to_world(eye, cursor) else {
         return;
     };
-    let Some(focus) = models.select(ray, view, game.offset, game.cutaway) else {
+    // Match the scene's permanent omission of overhead terrain.
+    let Some(focus) = models.select(ray, view, game.offset, false) else {
         return;
     };
     let Some(local) = focus.position(view) else {

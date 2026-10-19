@@ -1,3 +1,5 @@
+use super::anatomy::{FOOT_SCALE, HIP_SCALE};
+use super::geometry::{snake_segment_radius, BIRD_ANKLE, EQUINE_ANKLE, SNAKE};
 use super::*;
 
 // ---------------------------------------------------------------------------
@@ -57,29 +59,57 @@ impl Pose {
 pub fn animate(
     time: Res<Time>,
     bored: Option<Res<Boredom>>,
-    mut rigs: Query<(&Rig, &mut Anim, &GlobalTransform)>,
+    mut rigs: Query<(&mut Rig, &mut Anim, &Transform)>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut joints: Query<&mut Transform, Without<Rig>>,
 ) {
     let dt = time.delta_secs().min(0.05);
     // Left alone for a minute, everyone starts to amuse themselves.
     let fun = bored.map_or(0.0, |b| ease((b.0 - BORED_AFTER) / 3.0));
-    for (rig, mut anim, global) in &mut rigs {
-        let at = global.translation();
+    for (mut rig, mut anim, root) in &mut rigs {
+        // Actor roots are unparented. Their current Transform already includes
+        // this Update's interpolation; GlobalTransform still describes last frame.
+        let at = root.translation;
         let first = anim.time == 0.0;
-        let moved = (at - anim.last).with_y(0.0);
+        let delta = at - anim.last;
+        let moved = delta.with_y(0.0);
         anim.last = at;
         // The dead lie still, and a body just placed hasn't moved at all.
         // A jump of more than half a cell in one frame is a placement, not a walk.
-        let step = if first || anim.dead.is_some() || moved.length() > 0.5 {
+        let placed = first || moved.length() > 0.5;
+        let step = if placed || anim.dead.is_some() {
             0.0
         } else {
             moved.length()
         };
         let target_speed = (step / dt.max(1e-4) / (4.0 * rig.scale.max(0.2))).clamp(0.0, 1.0);
         anim.speed += (target_speed - anim.speed) * (1.0 - (-dt * 10.0).exp());
-        anim.walk += step * TAU * 0.9 * rig.stride / rig.scale.max(0.2);
+        let supported = matches!(
+            rig.plan,
+            Plan::Biped | Plan::Bird | Plan::Quadruped | Plan::Centaur
+        ) && !placed
+            && delta.y.abs() <= 0.001
+            && !anim.quiet
+            && anim.action.is_none()
+            && anim.hurt.is_none()
+            && anim.dodge.is_none()
+            && anim.dead.is_none();
+        if !supported || anim.contacts.rig != rig.joint(J::Lift) {
+            anim.contacts = WalkContacts::default();
+        }
+        // Shorter slow steps need a correspondingly shorter distance cycle.
+        // The support solve itself is not weakened a second time by speed.
+        let stride = if supported {
+            walk_stride(anim.speed)
+        } else {
+            1.0
+        };
+        anim.walk += step * TAU * 0.9 * rig.stride / (rig.scale.max(0.2) * stride);
         if step > 0.002 && anim.action.is_none() {
             anim.target_yaw = Some(moved.x.atan2(moved.z));
+        }
+        if anim.dead.is_some() {
+            anim.target_yaw = None;
         }
         if let Some(goal) = anim.target_yaw {
             let mut d = (goal - anim.yaw) % TAU;
@@ -100,7 +130,8 @@ pub fn animate(
         if let Some(d) = anim.dead.as_mut() {
             *d = (*d + dt / 1.1).min(1.0);
         }
-        let pose = pose(rig, &anim, fun);
+        let moving = step > dt * 0.04 * rig.scale.max(0.2);
+        let pose = pose(&rig, &mut anim, fun, dt, supported, moving);
         for j in 0..JOINTS {
             if let Some(e) = rig.joints[j] {
                 if let Ok(mut transform) = joints.get_mut(e) {
@@ -116,15 +147,22 @@ pub fn animate(
                 }
             }
         }
-        place_segments(rig, &anim, fun, &mut joints);
+        let Rig { rest, robe, .. } = &mut *rig;
+        if let Some(robe) = robe {
+            super::robe::place(robe, rest, &pose.rot, &pose.off, &mut meshes);
+        }
+        place_segments(&rig, &anim, fun, &mut joints);
     }
 }
 
-fn pose(rig: &Rig, a: &Anim, fun: f32) -> Pose {
+fn pose(rig: &Rig, a: &mut Anim, fun: f32, dt: f32, supported: bool, moving: bool) -> Pose {
     let mut p = Pose::new();
-    let s = a.speed;
-    let w = a.walk;
-    let breath = (a.time * 1.8 + a.seed).sin();
+    // Once a fall starts, ordinary breathing and gait cannot move the body
+    // underneath its death pose. The fall itself is the only moving layer.
+    let alive = if a.dead.is_none() { 1.0 } else { 0.0 };
+    let s = a.speed * alive;
+    let w = a.walk * alive;
+    let breath = (a.time * 1.8 + a.seed).sin() * alive;
     let hurt = a
         .hurt
         .filter(|t| *t >= 0.0)
@@ -133,9 +171,15 @@ fn pose(rig: &Rig, a: &Anim, fun: f32) -> Pose {
         .dodge
         .filter(|t| *t >= 0.0)
         .map_or(0.0, |t| (t / 0.45 * PI).sin());
-    let (m, t) = a.action.map_or((None, 0.0), |(m, t)| (Some(m), t));
+    let (m, t) = a
+        .action
+        .filter(|_| a.dead.is_none())
+        .map_or((None, 0.0), |(m, t)| (Some(m), t));
     // At rest each creature idles in its own way, fading out as it moves or acts.
-    let calm = (1.0 - s).clamp(0.0, 1.0) * f32::from(u8::from(m.is_none() && a.dead.is_none()));
+    // Fidgets belong to rest. Normal travelling speeds already have a full
+    // gait even though speed is normalized against a much faster run.
+    let calm = (1.0 - ease(s * 4.0).max(a.contacts.blend))
+        * f32::from(u8::from(m.is_none() && a.dead.is_none()));
     if calm > 0.0 && !a.quiet {
         idle(&mut p, rig, a.time + a.seed * 3.7, a.seed, calm);
         if fun > 0.0 {
@@ -145,11 +189,21 @@ fn pose(rig: &Rig, a: &Anim, fun: f32) -> Pose {
             }
         }
     }
+    let world_walk = supported && (moving || a.contacts.rig.is_some());
     match rig.plan {
         Plan::Biped => biped_pose(&mut p, rig, s, w, breath, m, t),
-        Plan::Bird => bird_pose(&mut p, s, w, breath, m, t),
-        Plan::Quadruped | Plan::Centaur => quad_pose(&mut p, rig, s, w, breath, m, t),
+        Plan::Bird => bird_pose(&mut p, s, w, breath, m, t, !world_walk),
+        Plan::Quadruped | Plan::Centaur => quad_pose(&mut p, rig, s, w, breath, m, t, !world_walk),
         Plan::Serpent | Plan::Floater | Plan::Marker => {}
+    }
+    if world_walk {
+        grounded_world_walk(&mut p, rig, a, dt, moving);
+    } else if rig.plan == Plan::Biped && a.dead.is_none() {
+        if let Some(m) = m {
+            grounded_action(&mut p, rig, a, m, t);
+        } else if a.hurt.is_none() && a.dodge.is_none() && s > 0.0 {
+            grounded_walk(&mut p, rig, a);
+        }
     }
     // Reactions, shared by every plan.
     p.r(J::Lift, Quat::from_rotation_x(-0.28 * hurt));
@@ -160,9 +214,752 @@ fn pose(rig: &Rig, a: &Anim, fun: f32) -> Pose {
     p.o(J::Lift, Vec3::new(side * 0.28 * dodge, 0.0, -0.05 * dodge));
     p.r(J::Lift, Quat::from_rotation_z(-side * 0.25 * dodge));
     if let Some(d) = a.dead {
-        death_pose(&mut p, rig.plan, ease(d), a.seed);
+        death_pose(&mut p, rig, ease(d), a.seed);
     }
     p
+}
+
+/// Shared contact timing for legs, pelvis and arms. Family differences change
+/// the support duration and pickup, without changing distance-driven foot speed.
+struct BipedGait {
+    cadence: f32,
+    stance: f32,
+    clearance: f32,
+    crouch: f32,
+    arm: f32,
+    bounce: f32,
+}
+
+fn biped_gait(style: Style) -> BipedGait {
+    let (cadence, stance, clearance, crouch, arm, bounce) = match style {
+        Style::Guardian => (1.4, 0.67, 0.06, 0.085, 0.12, 0.008),
+        Style::Yeti => (1.25, 0.65, 0.075, 0.1, 0.18, 0.012),
+        Style::Zombie => (1.5, 0.67, 0.055, 0.11, 0.0, 0.009),
+        Style::Hobgoblin => (1.15, 0.6, 0.095, 0.095, 0.27, 0.014),
+        Style::Vampire => (1.18, 0.63, 0.065, 0.07, 0.18, 0.006),
+        Style::Caster => (1.0, 0.57, 0.08, 0.075, 0.18, 0.011),
+        Style::Sentinel => (1.0, 0.57, 0.09, 0.075, 0.2, 0.011),
+        Style::Scout => (1.05, 0.55, 0.11, 0.08, 0.3, 0.013),
+        _ => (1.0, 0.55, 0.11, 0.075, 0.28, 0.014),
+    };
+    BipedGait {
+        cadence,
+        stance,
+        clearance,
+        crouch,
+        arm,
+        bounce,
+    }
+}
+
+const BIPED_LEGS: [(J, J, J); 2] = [(J::LegL, J::ShinL, J::FootL), (J::LegR, J::ShinR, J::FootR)];
+
+fn biped_rest_contacts(rig: &Rig) -> [Vec3; 2] {
+    BIPED_LEGS.map(|(leg, shin, foot)| {
+        rig.rest[J::Hips as usize]
+            + rig.rest[leg as usize]
+            + rig.rest[shin as usize]
+            + rig.rest[foot as usize]
+    })
+}
+
+fn biped_walk_contacts(rig: &Rig, a: &Anim) -> [Vec3; 2] {
+    let gait = biped_gait(rig.style);
+    let blend = ease(a.speed * 4.0);
+    let mut contacts = biped_rest_contacts(rig);
+    for (i, (leg, _, _)) in BIPED_LEGS.into_iter().enumerate() {
+        let drag = rig.style == Style::Zombie && leg == J::LegR;
+        let stance = gait.stance + if drag { 0.06 } else { 0.0 };
+        let clearance = if drag { 0.018 } else { gait.clearance };
+        let span = stance / (0.9 * rig.stride.max(0.1) * gait.cadence);
+        let phase = a.walk * gait.cadence / TAU + i as f32 * 0.5;
+        let (z, lift) = beast_step(phase, stance, span, clearance);
+        contacts[i] += Vec3::new(0.0, lift, z) * blend;
+    }
+    contacts
+}
+
+/// Ankles follow a distance-driven support/return path. The same small solve
+/// also supports action contacts; there is no separate set of attack leg lengths.
+fn grounded_walk(p: &mut Pose, rig: &Rig, a: &Anim) {
+    let gait = biped_gait(rig.style);
+    let blend = ease(a.speed * 4.0);
+    p.off[J::Lift as usize].y -= gait.crouch * blend;
+    solve_biped_contacts(p, rig, &biped_walk_contacts(rig, a), blend);
+}
+
+fn walk_stride(speed: f32) -> f32 {
+    ease(speed * 4.0).max(0.2)
+}
+
+#[derive(Clone, Copy)]
+struct WalkLeg {
+    body: J,
+    thigh: J,
+    shin: J,
+    foot: J,
+    rest: Vec3,
+    floor: f32,
+    phase: f32,
+    stance: f32,
+    span: f32,
+    clearance: f32,
+    bend: f32,
+}
+
+/// The existing family timing, expressed once for the shared support memory.
+fn walk_legs(rig: &Rig, a: &Anim) -> [Option<WalkLeg>; 4] {
+    let mut legs = [None; 4];
+    let mut add = |i: usize,
+                   body: J,
+                   thigh: J,
+                   shin: J,
+                   foot: J,
+                   phase: f32,
+                   stance: f32,
+                   cadence: f32,
+                   clearance: f32,
+                   bend: f32,
+                   floor: Option<f32>| {
+        if rig.joint(foot).is_some() {
+            let rest = rig.rest[body as usize]
+                + rig.rest[thigh as usize]
+                + rig.rest[shin as usize]
+                + rig.rest[foot as usize];
+            legs[i] = Some(WalkLeg {
+                body,
+                thigh,
+                shin,
+                foot,
+                rest,
+                floor: floor.unwrap_or(rest.y),
+                phase,
+                stance,
+                span: stance / (0.9 * rig.stride.max(0.1) * cadence),
+                clearance,
+                bend,
+            });
+        }
+    };
+    match rig.plan {
+        Plan::Biped => {
+            let gait = biped_gait(rig.style);
+            for (i, (leg, shin, foot)) in BIPED_LEGS.into_iter().enumerate() {
+                let drag = rig.style == Style::Zombie && i == 1;
+                add(
+                    i,
+                    J::Hips,
+                    leg,
+                    shin,
+                    foot,
+                    a.walk * gait.cadence / TAU + i as f32 * 0.5,
+                    gait.stance + if drag { 0.06 } else { 0.0 },
+                    gait.cadence,
+                    if drag { 0.018 } else { gait.clearance },
+                    1.0,
+                    None,
+                );
+            }
+        }
+        Plan::Bird => {
+            for (i, (leg, shin, foot)) in BIPED_LEGS.into_iter().enumerate() {
+                add(
+                    i,
+                    J::Body,
+                    leg,
+                    shin,
+                    foot,
+                    a.walk * 1.6 / TAU + i as f32 * 0.5,
+                    0.6,
+                    1.6,
+                    0.1,
+                    1.0,
+                    Some(0.042),
+                );
+            }
+        }
+        Plan::Quadruped | Plan::Centaur => {
+            let trot = ease((a.speed - 0.38) / 0.45);
+            for (i, (leg, shin, foot, offset)) in [
+                (J::FL, J::FLs, J::HoofFL, 0.0),
+                (J::FR, J::FRs, J::HoofFR, 0.5),
+                (J::BL, J::BLs, J::HoofBL, 0.25 + 0.25 * trot),
+                (J::BR, J::BRs, J::HoofBR, -0.25 + 0.25 * trot),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                add(
+                    i,
+                    J::Body,
+                    leg,
+                    shin,
+                    foot,
+                    a.walk * 1.35 / TAU + offset,
+                    0.69 - 0.12 * trot,
+                    1.35,
+                    if rig.style == Style::Unicorn {
+                        0.11
+                    } else {
+                        0.075
+                    },
+                    if i < 2 { 1.0 } else { -1.0 },
+                    Some(0.081),
+                );
+            }
+        }
+        _ => {}
+    }
+    legs
+}
+
+fn heading_between(from: f32, to: f32, weight: f32) -> f32 {
+    from + ((to - from + PI).rem_euclid(TAU) - PI) * weight
+}
+
+fn walk_hip(p: &Pose, rig: &Rig, leg: WalkLeg) -> Vec3 {
+    p.rot[J::Lift as usize]
+        * (rig.rest[leg.body as usize]
+            + p.off[leg.body as usize]
+            + p.rot[leg.body as usize] * (rig.rest[leg.thigh as usize] + p.off[leg.thigh as usize]))
+        + p.off[J::Lift as usize]
+}
+
+fn posed_ankle(p: &Pose, rig: &Rig, leg: WalkLeg) -> Vec3 {
+    let thigh = p.rot[J::Lift as usize] * p.rot[leg.body as usize] * p.rot[leg.thigh as usize];
+    walk_hip(p, rig, leg)
+        + thigh
+            * (rig.rest[leg.shin as usize]
+                + p.off[leg.shin as usize]
+                + p.rot[leg.shin as usize]
+                    * (rig.rest[leg.foot as usize] + p.off[leg.foot as usize]))
+}
+
+/// Support holds a world point. Swing releases it along a clear arc and
+/// approaches the next landing with the nominal backwards contact velocity.
+fn walking_target(a: &Anim, leg: WalkLeg, foot: WalkFoot, scale: f32) -> (Vec3, f32) {
+    let facing = Quat::from_rotation_y(a.yaw);
+    let from = facing.inverse() * (foot.world - a.last) / scale;
+    let phase = leg.phase.rem_euclid(1.0);
+    if phase < leg.stance {
+        return (from, foot.yaw);
+    }
+    let cycle = leg.phase.floor();
+    let start = foot.lifted.max(cycle + leg.stance).min(leg.phase);
+    let duration = (cycle + 1.0 - start).max(0.001);
+    let t = ((leg.phase - start) / duration).clamp(0.0, 1.0);
+    let stride = walk_stride(a.speed);
+    let to = leg.rest.with_y(leg.floor) + Vec3::Z * (leg.span * stride * 0.5);
+    let mut target = from.lerp(to, ease(t));
+    target.y += leg.clearance * stride * (PI * t).sin().powi(2);
+    target.z -= leg.span * stride * duration / leg.stance * t * t * (1.0 - t) * (1.0 - 2.0 * t);
+    (target, heading_between(foot.yaw, a.yaw, ease(t)))
+}
+
+fn settle_progress(foot: WalkFoot, elapsed: f32, count: usize) -> f32 {
+    let duration = if count == 2 { 0.16 } else { 0.12 };
+    ((elapsed - f32::from(foot.settle_order) * duration) / duration).clamp(0.0, 1.0)
+}
+
+fn settling_target(
+    a: &Anim,
+    leg: WalkLeg,
+    foot: WalkFoot,
+    elapsed: f32,
+    count: usize,
+    scale: f32,
+) -> (Vec3, f32) {
+    let from = Quat::from_rotation_y(-a.yaw) * (foot.world - a.last) / scale;
+    if foot.settled {
+        return (from, foot.yaw);
+    }
+    let t = settle_progress(foot, elapsed, count);
+    let to = leg.rest.with_y(leg.floor);
+    let mut target = from.lerp(to, ease(t));
+    let pickup = (from - to).with_y(0.0).length().min(leg.clearance * 0.6);
+    target.y += pickup * (PI * t).sin().powi(2);
+    (target, heading_between(foot.yaw, a.yaw, ease(t)))
+}
+
+/// Confine a contact before IK, retaining its floor height. Extreme turns may
+/// yield a little instead of crossing legs, stretching, or retaining a far anchor.
+fn reachable_walk_contact(p: &Pose, rig: &Rig, leg: WalkLeg, mut target: Vec3) -> Vec3 {
+    let hip = walk_hip(p, rig, leg);
+    let upper = rig.rest[leg.shin as usize].length();
+    let reach = upper + rig.rest[leg.foot as usize].length() - 0.002;
+    target.x = target
+        .x
+        .clamp(leg.rest.x - upper * 0.32, leg.rest.x + upper * 0.32);
+    let across = (target - hip).with_y(0.0);
+    let radius = (reach * reach - (target.y - hip.y).powi(2)).max(0.0).sqrt();
+    if across.length_squared() > radius * radius {
+        let bounded = hip + across.normalize_or(Vec3::Z) * radius;
+        target.x = bounded.x;
+        target.z = bounded.z;
+    }
+    target
+}
+
+fn grounded_world_walk(p: &mut Pose, rig: &Rig, a: &mut Anim, dt: f32, moving: bool) {
+    let mut legs = walk_legs(rig, a);
+    if a.contacts.settle.is_none() {
+        // Changing the equine walk/trot offset during braking may otherwise
+        // run a hind foot's phase backwards across a touchdown.
+        for (leg, foot) in legs.iter_mut().zip(a.contacts.feet) {
+            if let (Some(leg), Some(foot)) = (leg, foot) {
+                leg.phase = leg.phase.max(foot.phase);
+            }
+        }
+    }
+    let count = legs.iter().flatten().count();
+    if count == 0 {
+        a.contacts = WalkContacts::default();
+        return;
+    }
+    let facing = Quat::from_rotation_y(a.yaw);
+    let scale = rig.scale.max(0.2);
+    let seeded = a.contacts.rig.is_some();
+    if moving && (!seeded || a.contacts.settle.is_some()) {
+        for (i, leg) in legs
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, leg)| leg.map(|leg| (i, leg)))
+        {
+            let (at, yaw) = if let (Some(t), Some(foot)) = (a.contacts.settle, a.contacts.feet[i]) {
+                settling_target(a, leg, foot, t, count, scale)
+            } else {
+                (posed_ankle(p, rig, leg).with_y(leg.floor), a.yaw)
+            };
+            a.contacts.feet[i] = Some(WalkFoot {
+                world: a.last + facing * at * scale,
+                yaw,
+                phase: leg.phase,
+                lifted: leg.phase,
+                settle_order: 0,
+                settled: false,
+            });
+        }
+        a.contacts.rig = rig.joint(J::Lift);
+        a.contacts.settle = None;
+    } else if !moving && a.contacts.settle.is_none() {
+        for (i, leg) in legs
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, leg)| leg.map(|leg| (i, leg)))
+        {
+            if let Some(mut foot) = a.contacts.feet[i] {
+                let (at, yaw) = walking_target(a, leg, foot, scale);
+                foot.world = a.last + facing * at * scale;
+                foot.yaw = yaw;
+                // Land the feet already in swing before moving any support.
+                let airborne = leg.phase.rem_euclid(1.0) >= leg.stance;
+                foot.settle_order = legs
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, other)| {
+                        other.is_some_and(|other| {
+                            let other_airborne = other.phase.rem_euclid(1.0) >= other.stance;
+                            (other_airborne && !airborne) || (other_airborne == airborne && *j < i)
+                        })
+                    })
+                    .count() as u8;
+                foot.settled = false;
+                a.contacts.feet[i] = Some(foot);
+            }
+        }
+        a.contacts.settle = Some(0.0);
+    }
+    if moving {
+        a.contacts.blend = (a.contacts.blend + dt / 0.12).min(1.0);
+    } else if let Some(t) = a.contacts.settle.as_mut() {
+        *t += dt;
+        let end = if count == 2 { 0.32 } else { 0.48 };
+        if *t > end {
+            a.contacts.blend = (a.contacts.blend - dt / 0.14).max(0.0);
+        }
+    }
+    let weight = ease(a.contacts.blend);
+    if weight == 0.0 {
+        a.contacts = WalkContacts::default();
+        return;
+    }
+    let stride = walk_stride(a.speed);
+    let procedural = ease(a.speed * 4.0);
+    match rig.plan {
+        Plan::Biped => p.off[J::Lift as usize].y -= biped_gait(rig.style).crouch * stride * weight,
+        Plan::Bird => p.off[J::Lift as usize].y -= 0.09 * (stride - procedural) * weight,
+        _ => p.off[J::Lift as usize].y -= 0.113 * (stride - procedural) * weight,
+    }
+    let mut targets = [Vec3::ZERO; 4];
+    let mut headings = [a.yaw; 4];
+    for (i, leg) in legs
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, leg)| leg.map(|leg| (i, leg)))
+    {
+        let Some(mut foot) = a.contacts.feet[i] else {
+            continue;
+        };
+        if a.contacts.settle.is_none() {
+            let crossed = leg.phase.floor() != foot.phase.floor();
+            if leg.phase.rem_euclid(1.0) < leg.stance {
+                if crossed || foot.phase.rem_euclid(1.0) >= leg.stance {
+                    let phase = leg.phase.rem_euclid(1.0);
+                    let at = leg.rest.with_y(leg.floor)
+                        + Vec3::Z * (leg.span * stride * (0.5 - phase / leg.stance));
+                    foot.world = a.last + facing * at * scale;
+                    foot.yaw = a.yaw;
+                }
+            } else if crossed || foot.phase.rem_euclid(1.0) < leg.stance {
+                foot.lifted = leg.phase.floor() + leg.stance;
+            }
+        }
+        let (target, yaw) = if let Some(t) = a.contacts.settle {
+            settling_target(a, leg, foot, t, count, scale)
+        } else {
+            walking_target(a, leg, foot, scale)
+        };
+        targets[i] = target;
+        headings[i] = a.yaw + ((yaw - a.yaw + PI).rem_euclid(TAU) - PI).clamp(-0.85, 0.85);
+        if let Some(t) = a.contacts.settle {
+            if !foot.settled && settle_progress(foot, t, count) >= 1.0 {
+                foot.world = a.last + facing * target * scale;
+                foot.yaw = headings[i];
+                foot.settled = true;
+            }
+        }
+        foot.phase = leg.phase;
+        a.contacts.feet[i] = Some(foot);
+    }
+    if rig.plan == Plan::Biped {
+        // Bound a displaced anchor before fitting the pelvis. A tight turn
+        // must not demand a deep squat merely to retain an unreachable point.
+        for i in 0..2 {
+            if let Some(leg) = legs[i] {
+                targets[i] = reachable_walk_contact(p, rig, leg, targets[i]);
+            }
+        }
+        fit_biped_support(p, rig, &[targets[0], targets[1]], weight);
+    }
+    for (i, leg) in legs
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, leg)| leg.map(|leg| (i, leg)))
+    {
+        let target = reachable_walk_contact(p, rig, leg, targets[i]);
+        let planted = a.contacts.settle.is_none() && leg.phase.rem_euclid(1.0) < leg.stance;
+        if planted || a.contacts.feet[i].is_some_and(|foot| foot.settled) {
+            if let Some(foot) = a.contacts.feet[i].as_mut() {
+                foot.world = a.last + facing * target * scale;
+                foot.yaw = headings[i];
+            }
+        }
+        if rig.plan == Plan::Biped {
+            targets[i] = target;
+        } else {
+            beast_limb(
+                p,
+                leg.thigh,
+                leg.shin,
+                leg.foot,
+                rig.rest[leg.body as usize],
+                rig.rest[leg.thigh as usize],
+                rig.rest[leg.shin as usize],
+                rig.rest[leg.foot as usize],
+                target,
+                leg.bend,
+                weight,
+            );
+        }
+    }
+    if rig.plan == Plan::Biped {
+        solve_biped_contacts(p, rig, &[targets[0], targets[1]], weight);
+    }
+    for (i, leg) in legs
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, leg)| leg.map(|leg| (i, leg)))
+    {
+        p.r(
+            leg.foot,
+            Quat::from_rotation_y((headings[i] - a.yaw) * weight),
+        );
+    }
+}
+
+fn solve_biped_contacts(p: &mut Pose, rig: &Rig, contacts: &[Vec3; 2], blend: f32) {
+    for (i, (leg, shin, foot)) in BIPED_LEGS.into_iter().enumerate() {
+        if rig.joint(foot).is_none() {
+            continue;
+        }
+        let rest_hip = rig.rest[J::Hips as usize];
+        let rest_leg = rig.rest[leg as usize];
+        let upper = rig.rest[shin as usize].length();
+        let lower = rig.rest[foot as usize].length();
+        let root = p.rot[J::Lift as usize];
+        let hips = p.rot[J::Hips as usize];
+        let target = hips.inverse()
+            * (root.inverse() * (contacts[i] - p.off[J::Lift as usize])
+                - rest_hip
+                - p.off[J::Hips as usize])
+            - rest_leg
+            - p.off[leg as usize];
+        let distance = target
+            .length()
+            .clamp((upper - lower).abs() + 0.001, upper + lower - 0.001);
+        let direction = target.normalize_or(Vec3::NEG_Y);
+        let along = (upper * upper - lower * lower + distance * distance) / (2.0 * distance);
+        let bend = (upper * upper - along * along).max(0.0).sqrt();
+        let forward = (Vec3::Z - direction * direction.dot(Vec3::Z)).normalize_or(Vec3::X);
+        let knee = direction * along + forward * bend;
+        let thigh = Quat::from_rotation_arc(Vec3::NEG_Y, knee.normalize_or(Vec3::NEG_Y));
+        let calf = Quat::from_rotation_arc(
+            Vec3::NEG_Y,
+            (direction * distance - knee).normalize_or(Vec3::NEG_Y),
+        );
+        // Fade right to zero so both travel and actions can give the individual
+        // idle pose back without snapping a knee at a speed/timer threshold.
+        p.rot[leg as usize] = p.rot[leg as usize].slerp(thigh, blend);
+        p.rot[shin as usize] = p.rot[shin as usize].slerp(thigh.inverse() * calf, blend);
+        let actual = root * hips * p.rot[leg as usize] * p.rot[shin as usize];
+        p.rot[foot as usize] = p.rot[foot as usize].slerp(actual.inverse(), blend);
+    }
+}
+
+/// Keep both requested contacts reachable before solving the legs. A visual
+/// forward drive can otherwise put the rear ankle outside the leg's sphere,
+/// and clamping the IK alone would leave its sole floating above the floor.
+fn fit_biped_support(p: &mut Pose, rig: &Rig, contacts: &[Vec3; 2], weight: f32) {
+    let root = p.rot[J::Lift as usize];
+    let hips = p.rot[J::Hips as usize];
+    let mut drop = 0.0f32;
+    for (i, (leg, shin, foot)) in BIPED_LEGS.into_iter().enumerate() {
+        if rig.joint(foot).is_none() {
+            continue;
+        }
+        let at = root
+            * (rig.rest[J::Hips as usize]
+                + p.off[J::Hips as usize]
+                + hips * (rig.rest[leg as usize] + p.off[leg as usize]))
+            + p.off[J::Lift as usize];
+        let reach = rig.rest[shin as usize].length() + rig.rest[foot as usize].length() - 0.006;
+        let across = (contacts[i] - at).with_y(0.0).length_squared();
+        let height = (reach * reach - across).max(0.0).sqrt();
+        drop = drop.max(at.y - contacts[i].y - height);
+    }
+    p.off[J::Lift as usize].y -= drop * weight;
+    if rig.style == Style::Caster {
+        limit_caster_support(p, rig, contacts);
+    }
+}
+
+/// Retain the caster's conservative floor-length rest-hem support limit.
+/// Account for the whole hip chain, then shorten only an unreachable body
+/// drive. Articulated cloth follows the resulting final pose independently.
+fn limit_caster_support(p: &mut Pose, rig: &Rig, contacts: &[Vec3; 2]) {
+    let root = p.rot[J::Lift as usize];
+    let hips = p.rot[J::Hips as usize];
+    let up = (root * hips).inverse() * Vec3::Y;
+    let body = rig.humanoid.expect("biped support has resolved anatomy");
+    let build = body.build;
+    let hip_width = body.build * body.hips_width;
+    let flare = 0.208 + 0.84 * 0.045;
+    let hem_x = (flare * hip_width + 0.009) * HIP_SCALE.x;
+    let hem_z = (flare * 0.74 * build + 0.009) * HIP_SCALE.z;
+    let origin =
+        root * (rig.rest[J::Hips as usize] + p.off[J::Hips as usize]) + p.off[J::Lift as usize];
+    let hem_y = origin.y - 0.84 * up.y - hem_x * up.x.abs() - hem_z * up.z.abs();
+    let raise = (0.025 - hem_y).max(0.0);
+    if raise == 0.0 {
+        return;
+    }
+    p.off[J::Lift as usize].y += raise;
+    let mut near = f32::NEG_INFINITY;
+    let mut far = f32::INFINITY;
+    for (i, (leg, shin, foot)) in BIPED_LEGS.into_iter().enumerate() {
+        let at = root
+            * (rig.rest[J::Hips as usize]
+                + p.off[J::Hips as usize]
+                + hips * (rig.rest[leg as usize] + p.off[leg as usize]))
+            + p.off[J::Lift as usize];
+        let reach = rig.rest[shin as usize].length() + rig.rest[foot as usize].length() - 0.006;
+        let across = (at.x - contacts[i].x).powi(2) + (at.y - contacts[i].y).powi(2);
+        let span = (reach * reach - across).max(0.0).sqrt();
+        let center = contacts[i].z - (at.z - p.off[J::Lift as usize].z);
+        near = near.max(center - span);
+        far = far.min(center + span);
+    }
+    if near <= far {
+        p.off[J::Lift as usize].z = p.off[J::Lift as usize].z.clamp(near, far);
+    }
+}
+
+/// A lead step has an explicit landing and a separate recovery pickup. Its
+/// planted middle never follows the moving pelvis, and it returns exactly home.
+fn action_step(t: f32, impact: f32) -> (f32, f32) {
+    let land = (impact - 0.08).max(0.14);
+    let recover = (impact + 0.38).clamp(0.78, 0.86);
+    contact_step(t, 0.035, land, recover, 0.985)
+}
+
+fn contact_step(t: f32, start: f32, land: f32, recover: f32, end: f32) -> (f32, f32) {
+    if t < start || t >= end {
+        (0.0, 0.0)
+    } else if t < land {
+        let phase = (t - start) / (land - start);
+        (ease(phase), (PI * phase).sin().powi(2))
+    } else if t < recover {
+        (1.0, 0.0)
+    } else {
+        let phase = (t - recover) / (end - recover);
+        (1.0 - ease(phase), (PI * phase).sin().powi(2))
+    }
+}
+
+/// Downward extent of the existing terminal foot after a toe-down turn.
+/// The ellipse support formula bounds its sampled blobs; the stone foot uses
+/// its box envelope. This includes the mesh-only 1.22 toe/sole depth scale.
+fn biped_foot_depth(rig: &Rig, angle: f32) -> f32 {
+    let (s, c) = angle.sin_cos();
+    if rig.style == Style::Guardian {
+        return 0.075 * c + 0.21 * FOOT_SCALE.z * s;
+    }
+    let body = rig.humanoid.expect("biped support has resolved anatomy");
+    let mut depth = body
+        .feet
+        .into_iter()
+        .fold(f32::NEG_INFINITY, |depth, (center, radii)| {
+            let z = center.z * FOOT_SCALE.z;
+            let rz = radii.z * FOOT_SCALE.z;
+            depth.max(-center.y * c + z * s + Vec2::new(radii.y * c, rz * s).length())
+        });
+    if rig.style == Style::Yeti {
+        depth = depth
+            .max(0.04 * c + 0.17 * FOOT_SCALE.z * s + 0.012 * FOOT_SCALE.z)
+            .max(0.06 * c + 0.22 * FOOT_SCALE.z * s);
+    }
+    depth
+}
+
+/// Plant the front foot before carrying the rear ankle back, then reverse
+/// that order to rise. At full depth the rear knee and tucked toe support the
+/// body; a two-flat-sole solve alone would replace the kneel with a squat.
+fn mend_contacts(p: &mut Pose, rig: &Rig, t: f32, weight: f32) -> ([Vec3; 2], f32) {
+    let mut contacts = biped_rest_contacts(rig);
+    let kneel = envelope(t, 0.0, 0.25, 0.8, 1.0);
+    if rig.style == Style::Caster {
+        // Upright channeling retains the caster's restrained lower-body pose.
+        // The articulated garment then follows the final supported legs.
+        p.off[J::Lift as usize].y =
+            p.off[J::Lift as usize].y * (1.0 - weight) - 0.025 * kneel * weight;
+        return (contacts, 0.0);
+    }
+    let build = rig
+        .humanoid
+        .expect("biped support has resolved anatomy")
+        .build;
+    let knee_height = match rig.style {
+        Style::Guardian => 0.104,
+        Style::Sentinel => (0.076 * build + 0.003).max(0.104),
+        Style::Yeti => 0.08 * build + 0.003,
+        _ => 0.076 * build + 0.003,
+    };
+    let upper = rig.rest[J::ShinR as usize].length();
+    let lower = rig.rest[J::FootR as usize].length();
+    let knee_z = -0.06f32;
+    let tuck = 1.05;
+    let neutral_depth = biped_foot_depth(rig, 0.0);
+    let tucked_y = contacts[1].y + biped_foot_depth(rig, tuck) - neutral_depth + 0.003;
+    let rear_z = knee_z
+        - (lower * lower - (tucked_y - knee_height).powi(2))
+            .max(0.0)
+            .sqrt();
+    let (front, front_lift) = contact_step(t, 0.015, 0.14, 0.9, 0.985);
+    let (rear, rear_lift) = contact_step(t, 0.145, 0.25, 0.8, 0.9);
+    let family = if rig.style == Style::Zombie { 0.8 } else { 1.0 };
+    contacts[0] += Vec3::new(0.0, 0.045 * front_lift, 0.3 * family * front);
+    contacts[1].z += rear_z * rear;
+    let foot_angle = tuck * rear;
+    contacts[1].y +=
+        biped_foot_depth(rig, foot_angle) - neutral_depth + 0.003 * rear + 0.065 * rear_lift;
+
+    // Keep the authored .4-unit descent, adapting its settled depth only for
+    // the knee's actual mass. Remove residual travel roll while it bears weight.
+    p.rot[J::Lift as usize] = p.rot[J::Lift as usize].slerp(Quat::IDENTITY, kneel * weight);
+    let root = p.rot[J::Lift as usize];
+    let hips = p.rot[J::Hips as usize];
+    let rest_hip = rig.rest[J::Hips as usize] + rig.rest[J::LegR as usize];
+    let at = root
+        * (rig.rest[J::Hips as usize]
+            + p.off[J::Hips as usize]
+            + hips * (rig.rest[J::LegR as usize] + p.off[J::LegR as usize]))
+        + p.off[J::Lift as usize];
+    let across = (Vec3::new(contacts[1].x, knee_height, knee_z) - at)
+        .with_y(0.0)
+        .length_squared();
+    let supported_hip = knee_height + (upper * upper - across).max(0.0).sqrt();
+    let wanted = rest_hip.y + (supported_hip - rest_hip.y) * kneel;
+    p.off[J::Lift as usize].y += (wanted - at.y) * weight;
+    (contacts, foot_angle)
+}
+
+fn grounded_action(p: &mut Pose, rig: &Rig, a: &Anim, m: Move, t: f32) {
+    let weight = envelope(t, 0.0, 0.08, 0.92, 1.0);
+    if a.speed > 0.0 {
+        grounded_walk(p, rig, a);
+    }
+    let walking = biped_walk_contacts(rig, a);
+    if matches!(m, Move::Step | Move::Mend) {
+        let (mut planned, foot_angle) = if m == Move::Mend {
+            mend_contacts(p, rig, t, weight)
+        } else {
+            let mut contacts = biped_rest_contacts(rig);
+            let (back, pickup) = contact_step(t, 0.035, 0.35, 0.72, 0.985);
+            let hop = (PI * (t / 0.35).clamp(0.0, 1.0)).sin().max(0.0) * 0.05;
+            contacts[0].y += hop;
+            contacts[1] += Vec3::new(0.0, hop + 0.055 * pickup, -0.38 * back);
+            (contacts, 0.0)
+        };
+        for i in 0..2 {
+            planned[i] = walking[i].lerp(planned[i], weight);
+        }
+        fit_biped_support(p, rig, &planned, weight);
+        solve_biped_contacts(p, rig, &planned, weight);
+        p.r(J::FootR, bow(foot_angle * weight));
+        return;
+    }
+    let (lead, stride): (usize, f32) = match m {
+        Move::Strike => (0, 0.22),
+        Move::Thrust => (0, 0.34),
+        Move::Bash => (0, 0.32),
+        Move::Shove => (0, 0.4),
+        Move::Heavy => (0, 0.18),
+        Move::Hook => (0, 0.14),
+        Move::Touch(_) => (0, 0.25),
+        Move::Combo(other) => (usize::from(other), 0.14),
+        _ => (0, 0.0),
+    };
+    let mut planned = biped_rest_contacts(rig);
+    let (advance, pickup) = action_step(t, m.impact());
+    let (leg, shin, foot) = BIPED_LEGS[lead];
+    let length = rig.rest[shin as usize].length() + rig.rest[foot as usize].length();
+    let family = if rig.style == Style::Zombie { 0.8 } else { 1.0 };
+    let stride = (stride * family).min(length * 0.48);
+    if stride > 0.0 {
+        let clearance = if matches!(rig.style, Style::Guardian | Style::Zombie) {
+            0.035
+        } else {
+            0.055
+        };
+        let side = rig.rest[leg as usize].x.signum();
+        planned[lead] += Vec3::new(side * 0.016 * advance, clearance * pickup, stride * advance);
+    }
+    let contacts = [
+        walking[0].lerp(planned[0], weight),
+        walking[1].lerp(planned[1], weight),
+    ];
+    fit_biped_support(p, rig, &contacts, weight);
+    solve_biped_contacts(p, rig, &contacts, weight);
 }
 
 /// Seconds without the player's touch before the cast starts to play.
@@ -616,17 +1413,49 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
     p.r(J::LegR, fwd(-swing * if zombie { 0.6 } else { 1.0 }));
     p.r(J::ShinL, fwd(-((w + 0.9).sin().max(0.0) * 0.9 * s)));
     p.r(J::ShinR, fwd(-((w + 0.9 + PI).sin().max(0.0) * 0.9 * s)));
-    let bob = (w * 2.0).cos().abs() * 0.04 * s;
-    p.o(J::Lift, Vec3::Y * (bob - 0.02 * s));
+    let gait = biped_gait(rig.style);
+    let blend = ease(s * 4.0);
+    let walking = m.is_none();
+    let cycle = if walking { w * gait.cadence } else { w };
+    // Contact phase zero is left-foot forward. Its opposite shoulder and arm
+    // lead at the same time, rather than lagging the new foot path by a quarter.
+    let arm_swing = if walking {
+        cycle.cos() * gait.arm * blend
+    } else {
+        swing * 0.7
+    };
+    let twist = if walking {
+        cycle.cos() * 0.08 * blend
+    } else {
+        w.sin() * 0.12 * s
+    };
+    let bob = if walking {
+        -(cycle * 2.0).cos() * gait.bounce * blend
+    } else {
+        -(w * 2.0).cos() * 0.016 * s
+    };
+    p.o(J::Lift, Vec3::Y * bob);
     p.r(
         J::Torso,
-        Quat::from_rotation_y(w.sin() * 0.12 * s) * bow(rig.hunch + 0.08 * s + breath * 0.015),
+        Quat::from_rotation_y(twist) * bow(rig.hunch + 0.08 * s + breath * 0.015),
     );
+    if walking {
+        p.r(
+            J::Hips,
+            Quat::from_rotation_y(-cycle.cos() * if lumber { 0.014 } else { 0.025 } * blend),
+        );
+    }
     if lumber {
-        p.r(J::Lift, Quat::from_rotation_z(w.sin() * 0.06 * s));
+        let roll = if walking {
+            -cycle.cos() * 0.03 * blend
+        } else {
+            w.sin() * 0.06 * s
+        };
+        p.r(J::Lift, Quat::from_rotation_z(roll));
     }
     if zombie {
-        // Arms out ahead, swaying; a dragging gait.
+        // The arms stay reaching and the head lolls, while the right foot
+        // drags through its longer, lower-clearance support/return path.
         p.r(
             J::ArmL,
             fwd(1.25 + breath * 0.05) * Quat::from_rotation_z(0.1),
@@ -636,15 +1465,20 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
             fwd(1.15 - breath * 0.05) * Quat::from_rotation_z(-0.1),
         );
         p.r(J::Head, Quat::from_rotation_z(0.25 + breath * 0.05));
-        p.r(J::Lift, Quat::from_rotation_z(w.sin() * 0.1 * s));
+        let roll = if walking {
+            -cycle.cos() * 0.045 * blend
+        } else {
+            w.sin() * 0.1 * s
+        };
+        p.r(J::Lift, Quat::from_rotation_z(roll));
     } else {
         p.r(
             J::ArmL,
-            fwd(-swing * 0.7) * Quat::from_rotation_z(0.1 + breath * 0.01),
+            fwd(-arm_swing) * Quat::from_rotation_z(0.1 + breath * 0.01),
         );
         p.r(
             J::ArmR,
-            fwd(swing * 0.7) * Quat::from_rotation_z(-0.1 - breath * 0.01),
+            fwd(arm_swing) * Quat::from_rotation_z(-0.1 - breath * 0.01),
         );
         p.r(J::ForeL, fwd(0.25 + 0.2 * s));
         p.r(J::ForeR, fwd(0.3 + 0.2 * s));
@@ -920,7 +1754,8 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
         }
         Move::Step => {
             let back = envelope(t, 0.0, 0.35, 0.7, 1.0);
-            let lift = (t / 0.35 * PI).sin().max(0.0);
+            // This is one guarded pickup, not a second sine lobe in recovery.
+            let lift = (PI * (t / 0.35).clamp(0.0, 1.0)).sin().max(0.0);
             p.o(
                 J::Lift,
                 Vec3::new(0.0, 0.05 * lift - 0.08 * back, -0.4 * back),
@@ -937,14 +1772,19 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
             p.r(J::Torso, bow(0.15 * back));
         }
         Move::Mend => {
-            // Down on one knee, hands working a bandage round the arm.
+            // Robed casters bind/channel upright; the remaining cast lowers
+            // onto a supported knee, hands working a bandage round the arm.
             let kneel = envelope(t, 0.0, 0.25, 0.8, 1.0);
             let wrap = (t * 14.0).sin() * kneel;
-            p.o(J::Lift, Vec3::new(0.0, -0.4 * kneel, 0.0));
-            p.r(J::LegL, fwd(1.35 * kneel));
-            p.r(J::ShinL, fwd(-1.45 * kneel));
-            p.r(J::LegR, fwd(-0.15 * kneel));
-            p.r(J::ShinR, fwd(-1.5 * kneel));
+            let upright = rig.style == Style::Caster;
+            let descent = if upright { 0.025 } else { 0.4 };
+            p.o(J::Lift, Vec3::Y * (-descent * kneel));
+            if !upright {
+                p.r(J::LegL, fwd(1.35 * kneel));
+                p.r(J::ShinL, fwd(-1.45 * kneel));
+                p.r(J::LegR, fwd(-0.15 * kneel));
+                p.r(J::ShinR, fwd(-1.5 * kneel));
+            }
             p.r(
                 J::ArmL,
                 fwd(0.9 * kneel) * Quat::from_rotation_z(-0.35 * kneel),
@@ -956,129 +1796,316 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
                     * Quat::from_rotation_z((0.5 + 0.2 * wrap) * kneel),
             );
             p.r(J::ForeR, fwd(1.3 * kneel));
-            p.r(J::Torso, bow(0.3 * kneel));
-            p.r(J::Head, bow(0.45 * kneel));
+            p.r(J::Torso, bow((if upright { 0.12 } else { 0.3 }) * kneel));
+            p.r(J::Head, bow((if upright { 0.24 } else { 0.45 }) * kneel));
         }
     }
 }
 
-fn bird_pose(p: &mut Pose, s: f32, w: f32, breath: f32, m: Option<Move>, t: f32) {
-    let swing = w.sin() * 0.6 * s;
-    p.r(J::LegL, fwd(swing));
-    p.r(J::LegR, fwd(-swing));
-    p.r(J::ShinL, fwd(((w + 1.0).sin().max(0.0)) * 0.9 * s));
-    p.r(J::ShinR, fwd(((w + 1.0 + PI).sin().max(0.0)) * 0.9 * s));
-    p.o(J::Lift, Vec3::Y * ((w * 2.0).cos().abs() * 0.05 * s));
-    p.r(
-        J::Body,
-        Quat::from_rotation_z(w.sin() * 0.06 * s) * bow(0.1 * s + breath * 0.02),
+/// A foot stays in support for most of a step, then clears the ground on
+/// a shorter return arc. Its backwards speed agrees on both sides of contact.
+fn beast_step(phase: f32, stance: f32, span: f32, clearance: f32) -> (f32, f32) {
+    let phase = phase.rem_euclid(1.0);
+    if phase < stance {
+        (span * (0.5 - phase / stance), 0.0)
+    } else {
+        let t = (phase - stance) / (1.0 - stance);
+        let carry = -span * (1.0 - stance) / stance * t * (1.0 - t) * (1.0 - 2.0 * t);
+        (
+            span * (ease(t) - 0.5) + carry,
+            clearance * (PI * t).sin().powi(2),
+        )
+    }
+}
+
+/// Solve an animal ankle against its contact target in the lift frame, then
+/// turn the terminal foot against the actual chain so its sole stays level.
+/// The two bone lengths and ankle-to-sole profile come from the original mesh.
+#[allow(clippy::too_many_arguments)]
+fn beast_limb(
+    p: &mut Pose,
+    thigh: J,
+    shin: J,
+    foot: J,
+    body_rest: Vec3,
+    hip: Vec3,
+    upper: Vec3,
+    lower: Vec3,
+    contact: Vec3,
+    bend_side: f32,
+    weight: f32,
+) {
+    if weight <= 0.0 {
+        return;
+    }
+    let root = p.rot[J::Lift as usize];
+    let body = p.rot[J::Body as usize];
+    let target = body.inverse()
+        * (root.inverse() * (contact - p.off[J::Lift as usize])
+            - body_rest
+            - p.off[J::Body as usize])
+        - hip
+        - p.off[thigh as usize];
+    let upper_len = upper.length();
+    let lower_len = lower.length();
+    let distance = target.length().clamp(
+        (upper_len - lower_len).abs() + 0.001,
+        upper_len + lower_len - 0.001,
     );
-    // The head pumps with each step and twitches when still.
-    let twitch = ((breath * 3.0).sin() * 3.0).round() * 0.06 * (1.0 - s);
+    let direction = target.normalize_or(Vec3::NEG_Y);
+    let along =
+        (upper_len * upper_len - lower_len * lower_len + distance * distance) / (2.0 * distance);
+    let bend = (upper_len * upper_len - along * along).max(0.0).sqrt();
+    let forward = (Vec3::Z - direction * direction.dot(Vec3::Z)).normalize_or(Vec3::X);
+    let knee = direction * along + forward * bend * bend_side;
+    let upper_rot = Quat::from_rotation_arc(upper.normalize(), knee.normalize());
+    let lower_rot = upper_rot.inverse()
+        * Quat::from_rotation_arc(lower.normalize(), (direction * distance - knee).normalize());
+    p.rot[thigh as usize] = p.rot[thigh as usize].slerp(upper_rot, weight);
+    p.rot[shin as usize] = p.rot[shin as usize].slerp(lower_rot, weight);
+    let actual = root * body * p.rot[thigh as usize] * p.rot[shin as usize];
+    p.rot[foot as usize] = p.rot[foot as usize].slerp(actual.inverse(), weight);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn bird_pose(p: &mut Pose, s: f32, w: f32, breath: f32, m: Option<Move>, t: f32, local_legs: bool) {
+    let walk = ease(s * 4.0);
+    // Keep the front contact inside both bone lengths even at maximum
+    // breast pitch. A shorter, quicker step suits a long-legged ground bird.
+    const CADENCE: f32 = 1.6;
+    let cycle = w * CADENCE;
+    let action = m.map_or(0.0, |_| envelope(t, 0.0, 0.12, 0.86, 1.0));
+    let support = walk.max(action);
+    let sway = cycle.sin() * 0.026 * walk;
+    let rise = (cycle * 2.0).cos() * 0.012 * walk;
+    let pitch = 0.045 * walk + breath * 0.012;
+    p.o(
+        J::Lift,
+        Vec3::new(0.025 * cycle.sin() * walk, -0.09 * support + rise, 0.0),
+    );
+    p.r(J::Body, Quat::from_rotation_z(sway) * bow(pitch));
+    // Carry the eye line while the breast and hips transfer weight beneath it.
+    // The quick, purposeful looks in idle() remain the only head twitches.
     p.r(
         J::Neck,
-        bow((w * 2.0).sin() * 0.18 * s + 0.1 * s) * Quat::from_rotation_y(twitch),
+        bow(-pitch * 0.8) * Quat::from_rotation_z(-sway * 0.8),
     );
-    p.r(J::Head, bow(-(w * 2.0).sin() * 0.15 * s));
+    p.o(J::Neck, Vec3::Y * (-rise * 0.7));
+    p.r(J::Head, bow(-pitch * 0.2));
+    let mut kick = 0.0;
     if let Some(m) = m {
-        let wind = envelope(t, 0.0, 0.35, 0.35, 0.38);
-        let peck = envelope(t, 0.38, 0.47, 0.55, 1.0);
-        match m {
-            m if m.offensive() => {
-                p.r(J::Neck, bow(-0.7 * wind + 1.5 * peck));
-                p.r(J::Head, bow(0.3 * wind + 0.4 * peck));
-                p.r(J::Body, bow(-0.2 * wind + 0.35 * peck));
-                p.o(J::Lift, Vec3::new(0.0, 0.0, 0.3 * peck));
-                if matches!(m, Move::Heavy | Move::Shove | Move::Hook) {
-                    p.r(J::LegR, fwd(1.3 * peck));
-                }
+        let hit = m.impact();
+        let gather = envelope(t, 0.0, hit * 0.55, hit - 0.1, hit);
+        let strike = envelope(t, hit - 0.07, hit, hit + 0.06, 1.0);
+        if m.offensive() {
+            if matches!(m, Move::Heavy | Move::Shove | Move::Hook | Move::Bash) {
+                // One foot bears the bird while the other drives out; no
+                // simultaneous hop masquerading as a planted kick.
+                kick = strike;
+                p.o(
+                    J::Lift,
+                    Vec3::new(0.055 * strike, -0.025 * gather, 0.06 * strike),
+                );
+                p.r(J::Body, bow(-0.14 * strike + 0.08 * gather));
+                p.r(J::Neck, bow(0.14 * strike));
+                p.r(J::Head, bow(-0.12 * strike));
+            } else {
+                // Neck retracts first, then the beak leads the breast through.
+                p.r(J::Neck, bow(-0.34 * gather + 0.95 * strike));
+                p.r(J::Head, bow(0.18 * gather - 0.2 * strike));
+                p.r(J::Body, bow(-0.08 * gather + 0.12 * strike));
+                p.o(
+                    J::Lift,
+                    Vec3::new(0.0, -0.025 * gather, -0.06 * gather + 0.16 * strike),
+                );
             }
-            _ => {
-                let k = envelope(t, 0.0, 0.3, 0.7, 1.0);
-                p.r(J::Neck, bow(-0.5 * k));
-                p.r(J::Body, bow(-0.25 * k));
+        } else {
+            p.r(J::Neck, bow(-0.2 * action));
+            p.r(J::Body, bow(-0.07 * action));
+            if m == Move::Step {
+                p.o(J::Lift, Vec3::new(0.0, 0.0, -0.16 * action));
             }
         }
+    }
+    if !local_legs {
+        return;
+    }
+    for (thigh, shin, foot, side, offset) in [
+        (J::LegL, J::ShinL, J::FootL, 1.0, 0.0),
+        (J::LegR, J::ShinR, J::FootR, -1.0, 0.5),
+    ] {
+        let (z, lift) = beast_step(cycle / TAU + offset, 0.6, 0.6 / (0.9 * CADENCE), 0.1);
+        let raised = if side < 0.0 { kick } else { 0.0 };
+        beast_limb(
+            p,
+            thigh,
+            shin,
+            foot,
+            Vec3::Y,
+            Vec3::new(side * 0.11, -0.1, 0.0),
+            Vec3::new(0.0, -0.4, 0.08),
+            BIRD_ANKLE,
+            Vec3::new(
+                side * 0.11,
+                0.042 + lift * walk + 0.28 * raised,
+                0.02 + z * walk + 0.38 * raised,
+            ),
+            1.0,
+            support,
+        );
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn quad_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Move>, t: f32) {
-    let a = w.sin() * 0.45 * s;
-    let b = (w + PI).sin() * 0.45 * s;
-    p.r(J::FL, fwd(a));
-    p.r(J::BR, fwd(a));
-    p.r(J::FR, fwd(b));
-    p.r(J::BL, fwd(b));
-    p.r(J::FLs, fwd(-((w + 0.8).sin().max(0.0)) * 0.8 * s));
-    p.r(J::FRs, fwd(-((w + 0.8 + PI).sin().max(0.0)) * 0.8 * s));
-    p.r(J::BLs, fwd(((w + 0.8 + PI).sin().max(0.0)) * 0.6 * s));
-    p.r(J::BRs, fwd(((w + 0.8).sin().max(0.0)) * 0.6 * s));
-    p.o(J::Lift, Vec3::Y * ((w * 2.0).cos().abs() * 0.04 * s));
-    p.r(J::Body, bow(breath * 0.01));
-    p.r(J::Neck, bow((w * 2.0).sin() * 0.08 * s + breath * 0.03));
-    p.r(J::Snout, bow(breath * 0.04));
-    p.r(
-        J::Tail,
-        Quat::from_rotation_y((w * 1.5).sin() * 0.3 * s + breath * 0.15),
-    );
-    // A centaur's rider swings arms like a walker.
-    p.r(J::ArmL, fwd(-a * 0.6) * Quat::from_rotation_z(0.1));
-    p.r(J::ArmR, fwd(0.4) * Quat::from_rotation_z(-0.1));
-    p.r(J::ForeR, fwd(0.8));
-    let Some(m) = m else {
-        return;
-    };
-    if !m.offensive() {
-        let k = envelope(t, 0.0, 0.25, 0.75, 1.0);
-        p.r(J::Body, bow(-0.15 * k));
-        p.o(
-            J::Lift,
-            Vec3::new(
-                0.0,
-                -0.06 * k,
-                -0.25 * k * f32::from(u8::from(m == Move::Step)),
-            ),
-        );
-        p.r(J::Neck, bow(-0.4 * k));
-        p.r(J::ArmL, fwd(1.0 * k));
-        return;
-    }
-    if rig.plan == Plan::Centaur {
-        let wind = envelope(t, 0.0, 0.38, 0.38, 0.4);
-        let thrust = envelope(t, 0.4, 0.5, 0.6, 1.0);
-        p.r(J::ArmR, fwd(-0.6 * wind + 1.0 * thrust));
-        p.r(J::ForeR, fwd(-0.6 * thrust));
-        p.r(
-            J::Torso,
-            Quat::from_rotation_y(0.4 * wind - 0.3 * thrust) * bow(0.3 * thrust),
-        );
-        p.o(J::Lift, Vec3::new(0.0, 0.0, 0.3 * thrust));
-        return;
-    }
-    let rear = envelope(t, 0.0, 0.38, 0.4, 0.5);
-    let fall = envelope(t, 0.42, 0.52, 0.6, 1.0);
-    let gore = rig.style == Style::Unicorn;
-    // Rear up on the hind legs, striking out, then come down hard.
-    p.r(J::Body, bow(-0.55 * rear + 0.15 * fall));
-    p.o(J::Body, Vec3::new(0.0, 0.25 * rear, -0.12 * rear));
-    for (thigh, shin) in [(J::FL, J::FLs), (J::FR, J::FRs)] {
-        p.r(thigh, fwd(1.0 * rear + (t * 30.0).sin() * 0.25 * rear));
-        p.r(shin, fwd(-1.1 * rear));
-    }
+fn quad_pose(
+    p: &mut Pose,
+    rig: &Rig,
+    s: f32,
+    w: f32,
+    breath: f32,
+    m: Option<Move>,
+    t: f32,
+    local_legs: bool,
+) {
+    let walk = ease(s * 4.0);
+    let trot = ease((s - 0.38) / 0.45);
+    let cycle = w * 1.35;
+    let stance = 0.69 - 0.12 * trot;
+    let span = stance / (0.9 * 1.35 * rig.stride.max(0.1));
+    let action = m.map_or(0.0, |_| envelope(t, 0.0, 0.12, 0.86, 1.0));
+    let support = walk.max(action);
+    let roll = cycle.sin() * 0.022 * walk * (1.0 - 0.6 * trot);
+    let pitch = (cycle * 2.0 - 0.4).sin() * 0.016 * walk + breath * 0.008;
+    let rise = (cycle * 2.0).cos() * (0.008 + 0.01 * trot) * walk;
+    // Idle geometry puts every sole on the floor. The lower travelling
+    // pelvis leaves room for the knee to flex through a planted full stride.
+    p.o(J::Lift, Vec3::Y * (-0.113 * support + rise));
+    p.r(J::Body, bow(pitch) * Quat::from_rotation_z(roll));
     p.r(
         J::Neck,
-        bow(-0.35 * rear + if gore { 1.0 } else { 0.6 } * fall),
+        bow(-pitch * 0.75 + breath * 0.008) * Quat::from_rotation_z(-roll * 0.65),
     );
-    p.r(J::Snout, bow(if gore { 0.5 } else { 0.2 } * fall));
-    p.o(J::Lift, Vec3::new(0.0, 0.0, 0.32 * fall));
+    p.r(J::Snout, bow(-breath * 0.008));
+    // A loose tail follows the gait with a delay, rather than leading the body.
+    p.r(
+        J::Tail,
+        Quat::from_rotation_y((cycle - 0.7).sin() * 0.12 * walk + breath * 0.035),
+    );
+    if rig.plan == Plan::Centaur {
+        p.r(
+            J::Torso,
+            bow(-pitch * 0.85) * Quat::from_rotation_z(-roll * 0.85),
+        );
+        p.r(J::Head, bow(pitch * 0.2));
+        p.r(
+            J::ArmL,
+            fwd(-cycle.sin() * 0.12 * walk) * Quat::from_rotation_z(0.08),
+        );
+        p.r(J::ArmR, fwd(0.35) * Quat::from_rotation_z(-0.08));
+        p.r(J::ForeR, fwd(0.75));
+    }
+    let mut rear = 0.0;
+    let mut stamp = 0.0;
+    if let Some(m) = m {
+        let hit = m.impact();
+        let gather = envelope(t, 0.0, hit * 0.55, hit - 0.1, hit);
+        let strike = envelope(t, hit - 0.07, hit, hit + 0.06, 1.0);
+        if !m.offensive() {
+            p.r(J::Body, bow(-0.035 * action));
+            p.r(J::Neck, bow(-0.14 * action));
+            if m == Move::Step {
+                p.o(J::Lift, Vec3::new(0.0, 0.0, -0.14 * action));
+            }
+            p.r(J::ArmL, fwd(0.65 * action));
+        } else if rig.plan == Plan::Centaur {
+            p.r(J::ArmR, fwd(-0.55 * gather + 0.9 * strike));
+            p.r(J::ForeR, fwd(-0.5 * strike));
+            p.r(
+                J::Torso,
+                Quat::from_rotation_y(0.27 * gather - 0.22 * strike) * bow(0.13 * strike),
+            );
+            p.r(J::ArmL, fwd(0.22 * gather - 0.12 * strike));
+            p.o(
+                J::Lift,
+                Vec3::new(0.0, -0.025 * gather, -0.055 * gather + 0.16 * strike),
+            );
+        } else if matches!(m, Move::Heavy | Move::Bash | Move::Shove) {
+            // Hoof strike: the haunches load before the forequarters rise.
+            // Each front limb follows a deliberate arc, never a sine-wave paw.
+            rear = gather;
+            stamp = strike;
+            p.r(J::Body, bow(-0.38 * rear + 0.07 * stamp));
+            p.o(
+                J::Lift,
+                Vec3::new(0.0, 0.1 * rear - 0.035 * stamp, -0.13 * rear + 0.1 * stamp),
+            );
+            p.r(J::Neck, bow(0.17 * rear - 0.06 * stamp));
+        } else {
+            // A unicorn aims its horn. Equines without a horn reach to bite;
+            // neither needs to rear up for every ordinary attack.
+            let horn = rig.style == Style::Unicorn;
+            p.r(
+                J::Neck,
+                bow(-0.13 * gather + if horn { 0.54 } else { 0.29 } * strike),
+            );
+            p.r(J::Snout, bow(if horn { 0.19 } else { 0.06 } * strike));
+            p.r(J::Body, bow(0.045 * strike));
+            p.o(
+                J::Lift,
+                Vec3::new(0.0, -0.025 * gather, -0.075 * gather + 0.19 * strike),
+            );
+        }
+    }
+    if !local_legs {
+        return;
+    }
+    for (thigh, shin, hoof, offset, front, side) in [
+        (J::FL, J::FLs, J::HoofFL, 0.0, true, 1.0),
+        (J::FR, J::FRs, J::HoofFR, 0.5, true, -1.0),
+        // Touchdowns run LF, RH, RF, LH in the walk; the diagonal pairs
+        // converge continuously as the gait becomes a collected trot.
+        (J::BL, J::BLs, J::HoofBL, 0.25 + 0.25 * trot, false, 1.0),
+        (J::BR, J::BRs, J::HoofBR, -0.25 + 0.25 * trot, false, -1.0),
+    ] {
+        let clearance = if rig.style == Style::Unicorn {
+            0.11
+        } else {
+            0.075
+        };
+        let (z, lift) = beast_step(cycle / TAU + offset, stance, span, clearance);
+        let hip = rig.rest[thigh as usize];
+        let lead = if front {
+            rear * 0.24 + stamp * 0.08
+        } else {
+            0.0
+        };
+        let raised = if front { rear * 0.32 } else { 0.0 };
+        beast_limb(
+            p,
+            thigh,
+            shin,
+            hoof,
+            rig.rest[J::Body as usize],
+            hip,
+            rig.rest[shin as usize],
+            rig.rest[hoof as usize],
+            Vec3::new(
+                hip.x + side * 0.012 * rear,
+                // The swept horn wall sits below the shallow inner sole.
+                0.081 + lift * walk + raised,
+                hip.z + EQUINE_ANKLE.z + z * walk + lead,
+            ),
+            if front { 1.0 } else { -1.0 },
+            support,
+        );
+    }
 }
 
-fn death_pose(p: &mut Pose, plan: Plan, d: f32, seed: f32) {
+fn death_pose(p: &mut Pose, rig: &Rig, d: f32, seed: f32) {
     let side = if seed > 5.0 { 1.0 } else { -1.0 };
     // A little variety from the seed, so no two bodies lie quite alike.
     let v = |k: u32| rand(u64::from(seed.to_bits()), k) - 0.5;
-    match plan {
+    match rig.plan {
         Plan::Biped => {
             // Crumpled onto the back: tipped over along the rig's x axis and
             // rolled face-up, flat to the floor.
@@ -1133,16 +2160,36 @@ fn death_pose(p: &mut Pose, plan: Plan, d: f32, seed: f32) {
             p.rot[J::Lift as usize] = Quat::from_rotation_z(side * FRAC_PI_2 * d);
             p.off[J::Lift as usize] = Vec3::new(side * 0.72 * d, 0.2 * d, 0.0);
             limp_legs(p, side, d);
-            // The rider's half slumps over onto the floor.
-            p.r(
-                J::Torso,
-                Quat::from_rotation_z(side * 0.9 * d) * bow(0.4 * d),
-            );
-            p.r(J::ArmL, Quat::from_rotation_z(1.2 * d));
-            p.r(J::ArmR, Quat::from_rotation_z(-0.3 * d) * fwd(0.6 * d));
+            // The horse is already on its side. Turn the human chest face-up
+            // around its own long axis; an additional sideways torso roll
+            // would drive its shoulders and head beneath the floor.
+            p.r(J::Torso, Quat::from_rotation_y(side * FRAC_PI_2 * d));
+            // The generated forearm's forward belly, smooth-union allowance,
+            // and Storybook mesh scale bound its floor support. Derive the
+            // shoulder-to-elbow drop from each rig's actual upper-arm length.
+            let arm_support = (0.056 * 1.05 + 0.004 + 0.03 * 0.25) * 1.12 + 0.006;
+            for (arm, fore, spread) in [(J::ArmL, J::ForeL, 0.55), (J::ArmR, J::ForeR, -0.55)] {
+                // At the settled quarter-roll, body/torso x and arm z are
+                // vertical. The body's small x-axis slump preserves them.
+                let shoulder_height = 0.2
+                    + side * (rig.rest[J::Body as usize].x + rig.rest[J::Torso as usize].x)
+                    + rig.rest[arm as usize].z;
+                let length = rig.rest[fore as usize].length().max(0.001);
+                let drop = ((shoulder_height - arm_support) / length)
+                    .clamp(-0.9, 0.9)
+                    .asin();
+                let upper = Quat::from_rotation_z(spread) * bow(drop);
+                // Replace the living weapon aim, including its elbow bend.
+                // Counter-rotate the forearm so it rests along the floor.
+                p.rot[arm as usize] = p.rot[arm as usize].slerp(upper, d);
+                p.rot[fore as usize] = p.rot[fore as usize].slerp(bow(-drop), d);
+            }
+            // The spear's attachment turns its shaft across the grip. Relax
+            // the wrist by the same quarter-turn to lay it beside the hand.
+            p.rot[J::HandR as usize] = p.rot[J::HandR as usize].slerp(fwd(FRAC_PI_2), d);
             p.r(
                 J::Head,
-                Quat::from_rotation_y(side * 0.8 * d) * bow(0.4 * d),
+                Quat::from_rotation_y(side * 1.2 * d) * bow(0.4 * d),
             );
         }
         Plan::Quadruped => {
@@ -1207,112 +2254,242 @@ fn limp_legs(p: &mut Pose, side: f32, d: f32) {
     p.r(J::Body, Quat::from_rotation_x(0.05 * d));
 }
 
+/// Clearance under a body band follows the same taper as its geometry.
+/// The separate sculpted skull has a deeper jaw than a body band's ellipse.
+fn snake_ground_height(index: usize, roll: f32) -> f32 {
+    if index == 0 {
+        0.076
+    } else {
+        let radius = snake_segment_radius(index);
+        radius * (roll.sin().powi(2) + (0.75 * roll.cos()).powi(2)).sqrt() + 0.003
+    }
+}
+
+/// Ground the settled crystal core using its generated shard sections. The
+/// circumscribed ring is a conservative bound for each six-sided section;
+/// unlike a sphere bound it stays close to the visibly supporting shard.
+fn settled_ice_height(rotation: Quat) -> f32 {
+    let mut bottom = -0.24f32;
+    for k in 0..9 {
+        let a = k as f32 * TAU / 9.0;
+        let direction = Vec3::new(a.cos(), (k as f32 * 1.3).sin() * 0.8, a.sin()).normalize();
+        let axis = rotation * direction;
+        let tip = 0.3 + rand(k as u64, 3) * 0.15;
+        let width = 0.055 + 0.025 * rand(19, k);
+        let radial_y = (1.0 - axis.y * axis.y).max(0.0).sqrt();
+        for (along, radius) in [
+            (0.06, width * 0.55),
+            (0.06 + (tip - 0.06) * 0.68, width),
+            (0.06 + (tip - 0.06) * 0.9, width * 0.3),
+            (tip, 0.0),
+        ] {
+            bottom = bottom.min(axis.y * along - radius * radial_y);
+        }
+    }
+    -bottom * 0.65 + 0.006
+}
+
 /// Snakes and floaters place their pieces along paths rather than joints.
 fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transform, Without<Rig>>) {
-    let (m, t) = a.action.map_or((None, 0.0), |(m, t)| (Some(m), t));
-    let dead = a.dead.map(ease);
-    let calm =
-        (1.0 - a.speed).clamp(0.0, 1.0) * f32::from(u8::from(m.is_none() && a.dead.is_none()));
+    let (m, t) = a
+        .action
+        .filter(|_| a.dead.is_none())
+        .map_or((None, 0.0), |(m, t)| (Some(m), t));
+    let d = a.dead.map_or(0.0, ease);
+    let alive = 1.0 - d;
+    let calm = (1.0 - ease(a.speed * 4.0))
+        * f32::from(u8::from(m.is_none() && a.dead.is_none() && !a.quiet));
     let (w, gag, _) = antic(a);
     let spring = if gag == 0 { w * fun * calm } else { 0.0 };
+    let hit = m.map_or(0.45, Move::impact);
+    let gather = m.map_or(0.0, |_| envelope(t, 0.0, hit * 0.55, hit - 0.1, hit));
+    let strike = m
+        .filter(|m| m.offensive())
+        .map_or(0.0, |_| envelope(t, hit - 0.07, hit, hit + 0.06, 1.0));
     match rig.plan {
         Plan::Serpent => {
-            let n = rig.segments.len();
-            let amp = 0.05 + 0.1 * a.speed;
-            let wave = a.walk * 2.5 + a.time * 1.5;
-            let coil = envelope(t, 0.0, 0.35, 0.38, 0.45) * f32::from(u8::from(m.is_some()));
-            let lunge = envelope(t, 0.4, 0.5, 0.6, 1.0) * f32::from(u8::from(m.is_some()));
-            let d = dead.unwrap_or(0.0);
-            let mut prev: Option<Vec3> = None;
-            for (i, e) in rig.segments.iter().enumerate() {
+            let n = rig.segments.len().min(SNAKE);
+            if n == 0 {
+                return;
+            }
+            let wave = a.walk * 2.2 + a.seed;
+            let amplitude = 0.18 + 0.4 * ease(a.speed * 3.0);
+            let rear = every(a.time + a.seed * 3.7, 8.0, 3.0, 6.5) * calm;
+            let raised = 0.24 * gather + 0.13 * strike + 0.19 * rear;
+            let mut live = Vec3::new(
+                0.018 * wave.sin() * a.speed,
+                snake_ground_height(0, 0.0) + raised,
+                0.6 - 0.09 * gather + 0.24 * strike,
+            );
+            let mut settled = Vec3::new(0.0, snake_ground_height(0, 2.6), 0.6);
+            let mut points = [Vec3::ZERO; SNAKE];
+            let mut previous_y = live.y;
+            for (i, point) in points.iter_mut().enumerate().take(n) {
                 let f = i as f32;
-                let z = 0.6 - f * 0.068 + 0.35 * lunge - 0.15 * coil;
-                let x = (wave - f * 0.5).sin() * amp * (0.3 + f / n as f32) * (1.0 - d)
-                    + d * (f * 0.4).sin() * 0.12;
-                let front = (1.0 - f / 6.0).max(0.0);
-                let rest = (1.0 - a.speed) * f32::from(u8::from(m.is_none()));
-                let rear = every(a.time + a.seed * 3.7, 8.0, 3.0, 6.5) * rest;
-                let y = 0.07
-                    + front * (0.32 * coil + 0.18 * lunge + 0.22 * rear) * (1.0 - d)
-                    + (a.time * 2.0 + f).sin() * 0.005;
-                let mut at = Vec3::new(x, y, z);
+                if i > 0 {
+                    let front = (1.0 - f / 7.0).max(0.0);
+                    let idle = (a.time * 0.9 + a.seed - f * 0.24).sin() * 0.003 * calm;
+                    let y = snake_ground_height(i, 0.0) + raised * ease(front) + idle;
+                    let dy = (y - previous_y).clamp(-0.06, 0.06);
+                    let yaw = (wave - f * 0.42).sin() * amplitude * (0.75 + 0.25 * f / n as f32);
+                    // Advancing a constant length along the tangent keeps the
+                    // painted bands touching through a turn or raised strike.
+                    let horizontal = (0.068f32.powi(2) - dy * dy).sqrt();
+                    live += Vec3::new(-yaw.sin() * horizontal, dy, -yaw.cos() * horizontal);
+                    previous_y = live.y;
+                    let fall_yaw = (f * 0.38 + a.seed * 0.2).sin() * 0.48;
+                    let fall_dy = snake_ground_height(i, 2.6) - settled.y;
+                    let fall_span = (0.068f32.powi(2) - fall_dy * fall_dy).max(0.0).sqrt();
+                    settled += Vec3::new(
+                        -fall_yaw.sin() * fall_span,
+                        fall_dy,
+                        -fall_yaw.cos() * fall_span,
+                    );
+                }
+                let mut at = live.lerp(settled, d);
                 if spring > 0.0 {
-                    // Coiled up like a spring, head on top, bouncing.
-                    let turn = f * 0.9;
-                    let bounce = (a.time * 7.0).sin().abs() * 0.12;
+                    // The optional long-idle gag winds into a continuous helix,
+                    // with approximately the same spacing as the resting body.
+                    let turn = f * 0.48;
+                    let bounce = (a.time * 7.0).sin().abs() * 0.1;
                     let coil = Vec3::new(
                         turn.cos() * 0.13,
-                        0.45 - f * 0.022 + bounce * (1.0 - f / n as f32),
+                        0.46 - f * 0.02 + bounce * (1.0 - f / n as f32),
                         turn.sin() * 0.13,
                     );
                     at = at.lerp(coil, spring);
                 }
-                let dir = prev.map_or(Vec3::Z, |p: Vec3| (p - at).normalize_or(Vec3::Z));
-                prev = Some(at);
+                *point = at;
+            }
+            for (i, e) in rig.segments.iter().take(n).enumerate() {
+                let before = points[i.saturating_sub(1)];
+                let after = points[(i + 1).min(n - 1)];
+                let tangent = before - after;
+                // The raised neck supports a forward-looking skull rather
+                // than pointing its eyes and fangs up at the ceiling.
+                let direction = if i == 0 {
+                    tangent.with_y(tangent.y * d).normalize_or(Vec3::Z)
+                } else {
+                    tangent.normalize_or(Vec3::Z)
+                };
                 if let Ok(mut transform) = joints.get_mut(*e) {
-                    transform.translation = at;
-                    let face = if i == 0 { Vec3::Z } else { dir };
-                    transform.rotation =
-                        Quat::from_rotation_arc(Vec3::Z, face) * Quat::from_rotation_z(d * 2.6);
+                    transform.translation = points[i];
+                    transform.rotation = Quat::from_rotation_arc(Vec3::Z, direction)
+                        * Quat::from_rotation_z(d * 2.6);
                 }
             }
-            // The tongue flickers out every couple of seconds, and on a strike.
             if let Some(tongue) = rig.joint(J::Snout) {
                 if let Ok(mut transform) = joints.get_mut(tongue) {
-                    let cycle = (a.time * 0.6 + a.seed).fract();
-                    let flick = if cycle < 0.18 {
-                        (cycle / 0.18 * PI * 3.0).sin().abs()
+                    let cycle = (a.time * 0.45 + a.seed).rem_euclid(1.0);
+                    let flick = if cycle < 0.12 {
+                        (cycle / 0.12 * TAU).sin().powi(2)
                     } else {
                         0.0
                     };
-                    let out = (flick + coil).min(1.0) * (1.0 - d);
+                    let out = flick.max(strike * 0.7) * alive;
                     transform.scale = Vec3::new(1.0, 1.0, out.max(0.01));
                 }
             }
         }
         Plan::Floater => {
-            let d = dead.unwrap_or(0.0);
-            let flare = match m {
-                Some(_) => envelope(t, 0.0, 0.4, 0.5, 1.0),
-                None => 0.0,
+            let ice = rig.style == Style::Ice;
+            let phase = a.time + a.seed * 2.7;
+            let hover = if ice {
+                (phase * 1.3).sin() * 0.025
+            } else {
+                (phase * 1.8).sin() * 0.055
             };
-            let dash = match m {
-                Some(m) if m.offensive() => envelope(t, 0.38, 0.48, 0.55, 1.0),
-                _ => 0.0,
-            };
+            let flare = m.map_or(0.0, |_| envelope(t, 0.0, hit * 0.8, hit + 0.04, 1.0));
+            let live_core = Vec3::new(
+                (phase * 0.55).sin() * 0.015 * (1.0 - a.speed),
+                1.1 + hover - 0.035 * gather,
+                -0.04 * a.speed - 0.065 * gather + 0.25 * strike,
+            );
+            let fallen_rotation =
+                Quat::from_rotation_y(a.seed * 0.4) * Quat::from_rotation_z(0.9) * bow(0.2);
+            let fallen = Vec3::new(
+                0.0,
+                if ice {
+                    settled_ice_height(fallen_rotation)
+                } else {
+                    0.055
+                },
+                0.0,
+            );
             if let Some(core) = rig.joint(J::Core) {
                 if let Ok(mut transform) = joints.get_mut(core) {
-                    transform.translation = Vec3::new(
-                        0.0,
-                        1.1 + (a.time * 2.2 + a.seed).sin() * 0.08 - 0.9 * d,
-                        0.45 * dash,
-                    );
-                    transform.scale = Vec3::splat((1.0 + 0.35 * flare) * (1.0 - 0.6 * d));
-                    transform.rotation = Quat::from_rotation_y(a.time * 0.7);
+                    transform.translation = live_core.lerp(fallen, d);
+                    // Ice keeps its mass and a readable face; fire breathes
+                    // upward. Neither spins its eyes away from its target.
+                    let pulse = if ice {
+                        0.0
+                    } else {
+                        (phase * 3.6).sin() * 0.025
+                    };
+                    let charge = 1.0 + if ice { 0.08 } else { 0.16 } * flare;
+                    let live_scale =
+                        Vec3::new(1.0 - pulse * 0.5, 1.0 + pulse, 1.0 - pulse * 0.5) * charge;
+                    transform.scale =
+                        live_scale.lerp(Vec3::splat(if ice { 0.65 } else { 0.06 }), d);
+                    let live_rotation = Quat::from_rotation_y((phase * 0.6).sin() * 0.08)
+                        * bow(0.1 * a.speed - 0.14 * gather + 0.18 * strike)
+                        * Quat::from_rotation_z(
+                            (phase * 0.8).sin() * if ice { 0.035 } else { 0.06 },
+                        );
+                    transform.rotation = live_rotation.slerp(fallen_rotation, d);
                 }
             }
             for (j, side) in [(J::ArmL, 1.0f32), (J::ArmR, -1.0)] {
                 if let Some(e) = rig.joint(j) {
                     if let Ok(mut transform) = joints.get_mut(e) {
-                        transform.rotation =
-                            Quat::from_rotation_y(-side * 0.9 * dash - a.time * 0.7)
-                                * Quat::from_rotation_z(
-                                    side * (0.2 * (a.time * 1.3).sin() + 0.6 * flare),
-                                );
+                        let lag = (phase * 1.3 - 0.55 + side * 0.25).sin() * 0.035;
+                        let live_rotation = Quat::from_rotation_y(-side * 0.22 * strike)
+                            * Quat::from_rotation_z(side * (lag + 0.28 * flare));
+                        // The broken shard fans lie out to either side of
+                        // the core, supported at their broad roots. Cancel
+                        // the core's fall rotation so neither arm is buried.
+                        let ground_rotation =
+                            fallen_rotation.inverse() * Quat::from_rotation_z(side * FRAC_PI_2);
+                        let ground_at = fallen_rotation.inverse()
+                            * Vec3::new(side * 0.42, (0.025 - fallen.y) / 0.65, 0.06);
+                        transform.translation = rig.rest[j as usize].lerp(ground_at, d);
+                        transform.rotation = live_rotation.slerp(ground_rotation, d);
                     }
                 }
             }
+            let count = rig.segments.len().max(1) as f32;
             for (i, e) in rig.segments.iter().enumerate() {
                 let f = i as f32;
-                let angle = a.time * (1.4 + f * 0.17) + f * TAU / 6.0;
-                let r = (0.32 + 0.25 * flare) * (1.0 - d);
+                let angle = phase * if ice { 0.55 } else { 0.9 } + f * TAU / count;
+                let (at, size) = if ice {
+                    let radius = 0.32 + 0.14 * flare;
+                    (
+                        live_core
+                            + Vec3::new(
+                                angle.cos() * radius,
+                                angle.sin() * 0.13,
+                                angle.sin() * radius,
+                            ),
+                        0.8,
+                    )
+                } else {
+                    // Embers rise in a loose column and fade at both ends of
+                    // their life, so recycling has no visible positional pop.
+                    let life = (phase * 0.28 + f / count).rem_euclid(1.0);
+                    let radius = 0.13 + life * 0.16 + flare * 0.1;
+                    (
+                        live_core
+                            + Vec3::new(
+                                angle.cos() * radius,
+                                -0.1 + life * 0.65,
+                                angle.sin() * radius,
+                            ),
+                        (PI * life).sin().powi(2),
+                    )
+                };
                 if let Ok(mut transform) = joints.get_mut(*e) {
-                    transform.translation = Vec3::new(
-                        angle.cos() * r,
-                        1.1 + (a.time * 3.0 + f).sin() * 0.25 - 0.9 * d,
-                        angle.sin() * r + 0.45 * dash,
-                    );
-                    transform.scale = Vec3::splat(1.0 - d);
+                    transform.translation = at.lerp(fallen, d);
+                    transform.scale = Vec3::splat(size * alive);
                 }
             }
         }

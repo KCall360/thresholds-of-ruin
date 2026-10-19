@@ -1756,11 +1756,15 @@ impl Ruleset {
             // pressure. Only the bounded confusion probability is also safe:
             // it cannot invalidate numeric stats, reach, grants or interactions.
             // Other modifier folds still require an ordinary evictable source.
+            // Restrictions without follow-up protection can extend their bounded
+            // duration; protection-bearing entries remain nonrefreshing.
             bound(
                 !d.protected_lifecycle()
                     || (d.lifecycle == ConditionLifecycle::Timed
                         && !d.source_scoped
-                        && d.stacking == Stacking::Keep
+                        && (d.stacking == Stacking::Keep
+                            || (d.stacking == Stacking::Extend
+                                && d.timing.protection().is_none()))
                         && d.modifiers.iter().all(|modifier| {
                             matches!(
                                 modifier,
@@ -3035,6 +3039,70 @@ mod tests {
     }
     fn ruleset() -> Arc<Ruleset> {
         Ruleset::validate(document()).unwrap()
+    }
+    fn repeatable_restriction_document() -> RulesetDocument {
+        let mut document = document();
+        document.conditions.push(ConditionDef {
+            id: ConditionId::new("fixture_repeatable_lock").unwrap(),
+            family: ConditionFamilyId::new("fixture_repeatable_lock").unwrap(),
+            lifecycle: ConditionLifecycle::Timed,
+            name: "Repeatable lock".into(),
+            modifiers: vec![],
+            stacking: Stacking::Extend,
+            source_scoped: false,
+            descriptors: vec![],
+            capacity: Eviction::Reject,
+            timing: ConditionTiming::expiring(),
+            restrictions: vec![ConditionRestriction::VoluntaryActions],
+            preparation: ConditionPreparation::Pause,
+        });
+        document
+    }
+    #[test]
+    fn repeatable_expiring_restrictions_are_valid_rule_definitions() {
+        let result = Ruleset::validate(repeatable_restriction_document());
+        assert!(
+            result.is_ok(),
+            "bounded duration extension must be valid for target-wide restrictions without post-expiry protection: {result:?}"
+        );
+    }
+    #[test]
+    fn repeatable_restrictions_keep_protected_shape_limits() {
+        for invalid in 0..7 {
+            let mut document = repeatable_restriction_document();
+            let definition = document.conditions.last_mut().unwrap();
+            match invalid {
+                0 => definition.source_scoped = true,
+                1 => definition.lifecycle = ConditionLifecycle::NextCheck,
+                2 => {
+                    definition.modifiers.push(Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Add {
+                            stat: Stat::Health,
+                            value: 1,
+                        },
+                    });
+                }
+                3 => {
+                    definition.timing = ConditionTiming::ActorActive {
+                        on_expiry: ConditionExpiry::Protect {
+                            duration: ConditionTicks::new(400).unwrap(),
+                        },
+                    };
+                }
+                4 => definition.stacking = Stacking::Refresh,
+                5 => definition.stacking = Stacking::Longest,
+                6 => definition.stacking = Stacking::Stack { maximum: 2 },
+                _ => unreachable!(),
+            }
+            assert!(
+                matches!(
+                    Ruleset::validate(document),
+                    Err(RulesetError::Bound { field }) if field == "protected_condition_shape"
+                ),
+                "invalid protected shape {invalid}"
+            );
+        }
     }
     #[test]
     fn basic_attack_cannot_target_only_self() {

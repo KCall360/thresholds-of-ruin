@@ -78,8 +78,8 @@ pub fn run(diagnostics: Diagnostics) {
     .add_plugins(MaterialPlugin::<CaveMaterial>::default())
     .insert_resource(ClearColor(FOG))
     .insert_resource(AmbientLight {
-        color: Color::srgb(0.55, 0.6, 0.8),
-        brightness: 260.0,
+        color: Color::srgb(0.5, 0.6, 0.85),
+        brightness: 110.0,
         ..default()
     })
     .insert_resource(diagnostics)
@@ -94,7 +94,8 @@ pub fn run(diagnostics: Diagnostics) {
             capture,
         )
             .chain(),
-    );
+    )
+    .add_systems(Last, crate::props::maintain_cache);
     load_internal_asset!(app, crate::cave::SHADER, "cave.wgsl", Shader::from_wgsl);
     app.run();
 }
@@ -339,7 +340,7 @@ fn setup(
         commands.spawn((
             PointLight {
                 color: Color::srgb(1.0, 0.75, 0.48),
-                intensity: 220_000.0,
+                intensity: 55_000.0,
                 range: 14.0,
                 shadows_enabled: true,
                 ..default()
@@ -369,13 +370,20 @@ const TOUR: [(Vec3, f32); 13] = [
     (Vec3::new(9.5, -0.4, 7.2), 3.6),
 ];
 
-fn tour(time: Res<Time>, mut camera: Query<&mut Transform, With<Camera3d>>) {
+fn tour(
+    time: Res<Time>,
+    diagnostics: Res<Diagnostics>,
+    mut camera: Query<&mut Transform, With<Camera3d>>,
+    mut cave_materials: ResMut<Assets<CaveMaterial>>,
+) {
     let step = ((time.elapsed_secs() - 1.0).max(0.0) / 4.0) as usize % TOUR.len();
     let (focus, distance) = TOUR[step];
     if let Ok(mut transform) = camera.single_mut() {
-        *transform =
-            Transform::from_translation(focus + Vec3::new(0.0, distance * 0.82, distance * 0.58))
-                .looking_at(focus, Vec3::Y);
+        *transform = diagnostics.preview_camera(
+            focus,
+            Vec3::new(0.0, distance * 0.82, distance * 0.58),
+            &mut cave_materials,
+        );
     }
 }
 

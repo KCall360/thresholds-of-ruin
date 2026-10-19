@@ -427,7 +427,7 @@ impl Engine {
         if let Some(prompt) =
             tor_client_common::items::identification_prompt(&link.client().state().observation)
         {
-            text.push_str("\n");
+            text.push('\n');
             text.push_str(&prompt);
         }
         text

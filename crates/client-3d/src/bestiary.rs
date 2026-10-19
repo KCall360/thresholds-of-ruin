@@ -14,10 +14,16 @@ use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     pbr::{DistanceFog, FogFalloff, MaterialPlugin},
     prelude::*,
-    render::view::screenshot::{save_to_disk, Screenshot},
+    render::{
+        primitives::Aabb,
+        view::screenshot::{save_to_disk, Screenshot},
+    },
     window::WindowResolution,
 };
 use std::collections::{HashMap, HashSet};
+
+#[cfg(test)]
+mod tests;
 
 const PEOPLE: [&str; 10] = [
     "Warrior",
@@ -41,7 +47,9 @@ const BEASTS: [&str; 8] = [
     "ember wisp",
     "ice monster",
 ];
-const CYCLE: f32 = 31.0;
+const WALK_TIME: f32 = 6.0;
+const MOVES_AT: f32 = 7.0;
+const CYCLE: f32 = 35.0;
 /// Close-up time for each creature after the group cycles.
 const PORTRAIT: f32 = 2.6;
 /// Seconds each row stands at rest with `--idles`.
@@ -81,13 +89,13 @@ fn schedule() -> Vec<(f32, Cue)> {
     let mut cues: Vec<(f32, Cue)> = MOVES
         .iter()
         .enumerate()
-        .map(|(i, m)| (3.0 + i as f32 * 1.38, Cue::Do(*m)))
+        .map(|(i, m)| (MOVES_AT + i as f32 * 1.38, Cue::Do(*m)))
         .collect();
     cues.extend([
-        (25.2, Cue::Hit),
-        (26.0, Cue::Miss),
-        (26.8, Cue::Die),
-        (30.4, Cue::Revive),
+        (29.2, Cue::Hit),
+        (30.0, Cue::Miss),
+        (30.8, Cue::Die),
+        (34.4, Cue::Revive),
     ]);
     cues
 }
@@ -98,17 +106,127 @@ fn label(m: Move) -> String {
 
 /// Screenshot moments in each group cycle: each move as it lands.
 fn shots() -> Vec<(f32, String)> {
-    let mut shots = vec![(1.6, "walk".to_string())];
+    let mut shots = vec![
+        (0.6, "walk-start".to_string()),
+        (3.0, "walk".to_string()),
+        (5.6, "walk-brake".to_string()),
+        (6.6, "walk-settled".to_string()),
+    ];
     for (i, m) in MOVES.iter().enumerate() {
-        let at = 3.0 + i as f32 * 1.38;
+        let at = MOVES_AT + i as f32 * 1.38;
         shots.push((at + m.impact() * m.duration() + 0.03, label(*m)));
     }
     shots.extend([
-        (25.3, "hurt".to_string()),
-        (26.2, "dodge".to_string()),
-        (29.0, "dead".to_string()),
+        (29.3, "hurt".to_string()),
+        (30.2, "dodge".to_string()),
+        (33.0, "dead".to_string()),
     ]);
     shots
+}
+
+/// A bounded manual study; root travel still drives the ordinary animation.
+fn travel_study_offset(t: f32) -> Vec3 {
+    if t < WALK_TIME {
+        let progress = (t / WALK_TIME).clamp(0.0, 1.0);
+        let a = std::f32::consts::TAU * progress * progress * (3.0 - 2.0 * progress);
+        return Vec3::new(1.0 - a.cos(), 0.0, a.sin()) * 0.45;
+    }
+    if (7.0..13.0).contains(&t) {
+        let u = t - 7.0;
+        // Accelerate for 1.5s, hold 3.2 cells/s for 3s, then brake for 1.5s.
+        // Four complete shuttles end at home; the straight legs expose trot
+        // without the constant extreme yaw of a fast circle on this small stage.
+        let distance = if u < 1.5 {
+            (3.2 / 3.0) * u * u
+        } else if u < 4.5 {
+            2.4 + 3.2 * (u - 1.5)
+        } else {
+            let v = u - 4.5;
+            12.0 + 3.2 * v - (3.2 / 3.0) * v * v
+        };
+        let q = (distance + 0.9).rem_euclid(3.6);
+        return Vec3::Z * if q <= 1.8 { q - 0.9 } else { 2.7 - q };
+    }
+    // Linear legs and repeated positions deliberately keep velocity changes
+    // abrupt. All points stay within .9 cells; interpolation preserves the bound.
+    const WAYPOINTS: &[(f32, Vec2)] = &[
+        (13.0, Vec2::ZERO),
+        (14.0, Vec2::ZERO),
+        (14.5, Vec2::new(0.6, 0.0)),
+        (15.0, Vec2::new(0.6, 0.6)),
+        (15.5, Vec2::new(0.0, 0.6)),
+        (16.0, Vec2::ZERO),
+        (16.6, Vec2::new(0.0, 0.72)),
+        (16.78, Vec2::new(0.0, 0.72)),
+        (16.93, Vec2::new(0.0, 0.9)),
+        (17.68, Vec2::ZERO),
+        (18.0, Vec2::ZERO),
+        (18.6, Vec2::new(0.0, 0.72)),
+        (19.0, Vec2::new(0.0, 0.72)),
+        (19.6, Vec2::ZERO),
+        (22.0, Vec2::ZERO),
+        (22.6, Vec2::new(0.0, 0.72)),
+        (22.8, Vec2::new(0.0, 0.72)),
+        (23.4, Vec2::ZERO),
+        (24.0, Vec2::ZERO),
+        (24.6, Vec2::new(0.0, 0.72)),
+        (24.8, Vec2::new(0.0, 0.72)),
+        (25.4, Vec2::ZERO),
+        (26.0, Vec2::ZERO),
+        (26.6, Vec2::new(0.0, 0.72)),
+        (32.4, Vec2::new(0.0, 0.72)),
+        (33.0, Vec2::ZERO),
+        (CYCLE, Vec2::ZERO),
+    ];
+    for leg in WAYPOINTS.windows(2) {
+        let [(start, from), (end, to)] = leg else {
+            continue;
+        };
+        if t >= *start && t < *end {
+            let at = from.lerp(*to, (t - *start) / (*end - *start));
+            return Vec3::new(at.x, 0.0, at.y);
+        }
+    }
+    Vec3::ZERO
+}
+
+fn travel_study_schedule() -> Vec<(f32, Cue)> {
+    vec![
+        (18.6, Cue::Do(Move::Heavy)),
+        (22.6, Cue::Hit),
+        (24.6, Cue::Miss),
+        (26.6, Cue::Die),
+        (32.0, Cue::Revive),
+    ]
+}
+
+fn travel_study_shots() -> Vec<(f32, String)> {
+    [
+        (3.0, "slow-curve"),
+        (6.6, "slow-settled"),
+        (8.0, "accelerating"),
+        (9.5, "fast-shuttle"),
+        (11.0, "fast-reversal"),
+        (12.5, "braking"),
+        (13.6, "fast-settled"),
+        (15.1, "sharp-corner"),
+        (16.7, "abrupt-stop"),
+        (16.85, "restart"),
+        (17.15, "reverse"),
+        (19.2, "moving-heavy"),
+        (20.5, "action-settled"),
+        (22.7, "hurt"),
+        (23.0, "hurt-restart"),
+        (24.7, "dodge"),
+        (25.0, "dodge-restart"),
+        (27.0, "falling"),
+        (31.0, "dead"),
+        (32.7, "revived-travel"),
+        (34.0, "settled"),
+    ]
+    .into_iter()
+    .map(|(at, name)| (at, format!("travel-{name}")))
+    .collect()
 }
 
 /// Each creature's signature move, for its portrait.
@@ -143,6 +261,8 @@ struct Caption(Vec3, String);
 struct Director {
     last: f32,
     shot: usize,
+    next_capture: f32,
+    study_time: f32,
 }
 
 pub fn run(diagnostics: Diagnostics) {
@@ -158,8 +278,8 @@ pub fn run(diagnostics: Diagnostics) {
     .add_plugins(MaterialPlugin::<CaveMaterial>::default())
     .insert_resource(ClearColor(FOG))
     .insert_resource(AmbientLight {
-        color: Color::srgb(0.55, 0.6, 0.8),
-        brightness: 240.0,
+        color: Color::srgb(0.5, 0.6, 0.85),
+        brightness: 110.0,
         ..default()
     })
     .insert_resource(creatures::Boredom(if diagnostics.bored {
@@ -183,7 +303,8 @@ pub fn run(diagnostics: Diagnostics) {
             captions,
         )
             .chain(),
-    );
+    )
+    .add_systems(Last, crate::props::maintain_cache);
     load_internal_asset!(app, crate::cave::SHADER, "cave.wgsl", Shader::from_wgsl);
     app.run();
 }
@@ -207,6 +328,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut cave_materials: ResMut<Assets<CaveMaterial>>,
 ) {
+    let profile_started = crate::props::profile_builds().then(std::time::Instant::now);
     let mut library = PropLibrary::new(PropMaterials::new(&mut materials));
     let mut solids = HashMap::new();
     let mut open = HashSet::new();
@@ -258,6 +380,8 @@ fn setup(
             commands.spawn((Mesh3d(meshes.add(mesh)), MeshMaterial3d(rock.clone())));
         }
     }
+    let cave_ms = profile_started.map(|time| time.elapsed().as_secs_f64() * 1000.0);
+    let cast_started = profile_started.map(|_| std::time::Instant::now());
     let rows: &[(usize, &[&str])] = if diagnostics.lineups {
         &[]
     } else {
@@ -271,6 +395,11 @@ fn setup(
                 *name == "Warrior",
                 creatures::seed(name),
             );
+            let mut anim = Anim::new(creatures::seed(name), home);
+            // The travel path's initial tangent is +Z. Keep the acceleration
+            // preview free of a random initial turn; live spawn headings differ.
+            anim.yaw = 0.0;
+            anim.target_yaw = Some(0.0);
             let entity = commands
                 .spawn((
                     Pacer {
@@ -279,7 +408,7 @@ fn setup(
                         name,
                         index: row * PEOPLE.len() + i,
                     },
-                    Anim::new(creatures::seed(name), home),
+                    anim,
                     Transform::from_translation(home),
                     Visibility::default(),
                 ))
@@ -323,7 +452,7 @@ fn setup(
             commands.spawn((
                 PointLight {
                     color: Color::srgb(1.0, 0.75, 0.48),
-                    intensity: 160_000.0,
+                    intensity: 45_000.0,
                     range: 12.0,
                     shadows_enabled: z < 2.0,
                     ..default()
@@ -353,6 +482,13 @@ fn setup(
     ));
     crate::studio_lights(&mut commands);
     commands.insert_resource(library);
+    if let (Some(started), Some(cave), Some(cast)) = (profile_started, cave_ms, cast_started) {
+        eprintln!(
+            "3d_bestiary_build cave_ms={cave:.3} cast_ms={:.3} total_ms={:.3}",
+            cast.elapsed().as_secs_f64() * 1000.0,
+            started.elapsed().as_secs_f64() * 1000.0,
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -370,7 +506,43 @@ fn direct(
     if diagnostics.lineups {
         return;
     }
-    let now = clock(&time, &diagnostics);
+    let warmed = (time.elapsed_secs() - diagnostics.capture_warmup).max(0.0);
+    if diagnostics.travel_study && warmed > 0.0 {
+        // Match animate's delta cap: a capture hitch must not become a root
+        // placement that clears contacts instead of exercising the fast gait.
+        director.study_time += time.delta_secs().min(0.05).min(warmed);
+    }
+    let elapsed = if diagnostics.travel_study {
+        director.study_time
+    } else {
+        warmed
+    };
+    let limit = if diagnostics.travel_study {
+        Some(
+            diagnostics
+                .quit_after
+                .unwrap_or(CYCLE * 2.0)
+                .min(CYCLE * 2.0),
+        )
+    } else {
+        diagnostics.quit_after
+    };
+    if let Some(limit) = limit {
+        let finished = if diagnostics.travel_study {
+            elapsed >= limit
+        } else {
+            elapsed > limit
+        };
+        if finished {
+            if pending.is_empty() {
+                exit.write(AppExit::Success);
+            } else if elapsed > limit + 10.0 {
+                exit.write(AppExit::error());
+            }
+            return;
+        }
+    }
+    let now = clock(&time, &diagnostics, &director);
     let last = director.last;
     let crossed = |at: f32| last < at && now >= at;
     let group = (now / CYCLE) as usize;
@@ -394,22 +566,33 @@ fn direct(
     } else if group < 2 {
         let base = group as f32 * CYCLE;
         let t = now - base;
+        let study_offset = diagnostics.travel_study.then(|| travel_study_offset(t));
+        let cues = if diagnostics.travel_study {
+            travel_study_schedule()
+        } else {
+            schedule()
+        };
         for (pacer, mut anim, mut transform, _) in &mut actors {
-            // Walk a small circle, then stand facing the camera for the moves.
-            if t < 2.8 {
-                let a = t * 1.6 + pacer.home.x;
-                transform.translation = pacer.home + Vec3::new(a.cos(), 0.0, a.sin()) * 0.45;
+            // Both paths return home and keep neighbours apart. The study
+            // retains heading through stops to expose actual contact recovery.
+            if let Some(offset) = study_offset {
+                transform.translation = pacer.home + offset;
+            } else if t < WALK_TIME {
+                let progress = (t / WALK_TIME).clamp(0.0, 1.0);
+                let a = std::f32::consts::TAU * progress * progress * (3.0 - 2.0 * progress);
+                transform.translation = pacer.home + Vec3::new(1.0 - a.cos(), 0.0, a.sin()) * 0.45;
             } else {
                 transform.translation = pacer.home;
                 anim.target_yaw = Some(0.0);
             }
-            for (at, cue) in schedule() {
+            for &(at, cue) in &cues {
                 if crossed(base + at) {
                     perform(
                         &mut commands,
                         &mut library,
                         &mut meshes,
                         pacer,
+                        transform.translation,
                         &mut anim,
                         cue,
                     );
@@ -417,7 +600,12 @@ fn direct(
             }
         }
         let tag = if group == 0 { "people" } else { "beasts" };
-        for (at, name) in shots() {
+        let moments = if diagnostics.travel_study {
+            travel_study_shots()
+        } else {
+            shots()
+        };
+        for (at, name) in moments {
             if crossed(base + at) {
                 shots_now.push(format!("{tag}-{name}"));
             }
@@ -466,6 +654,7 @@ fn direct(
                     &mut library,
                     &mut meshes,
                     pacer,
+                    transform.translation,
                     &mut anim,
                     Cue::Do(m),
                 );
@@ -480,6 +669,18 @@ fn direct(
             && pending.is_empty()
         {
             exit.write(AppExit::Success);
+        }
+    }
+    if let Some(interval) = diagnostics.capture_every {
+        shots_now.clear();
+        if interval.is_finite()
+            && interval > 0.0
+            && time.elapsed_secs() >= diagnostics.capture_warmup
+            && now >= director.next_capture
+            && pending.is_empty()
+        {
+            shots_now.push(format!("motion-{now:08.3}"));
+            director.next_capture = now + interval.max(1.0 / 60.0);
         }
     }
     if let Some(dir) = diagnostics.capture.clone() {
@@ -499,19 +700,20 @@ fn perform(
     library: &mut PropLibrary,
     meshes: &mut Assets<Mesh>,
     pacer: &Pacer,
+    origin: Vec3,
     anim: &mut Anim,
     cue: Cue,
 ) {
     match cue {
         Cue::Do(m) => {
             anim.act(m);
-            let target = (pacer.home + Vec3::Z * 1.4, 1.6);
+            let target = (origin + Vec3::Z * 1.4, 1.6);
             creatures::stage(
                 commands,
                 library,
                 meshes,
                 m,
-                (pacer.home, pacer.height),
+                (origin, pacer.height),
                 Some(target),
                 true,
             );
@@ -524,36 +726,63 @@ fn perform(
 }
 
 /// `--lineups`: each creature in turn, five individuals of it side by side,
-/// women and men alternating among people.
+/// women and men alternating among people. `--fallen-lineups` reuses those
+/// individuals in their settled corpse poses.
 #[derive(Resource, Default)]
 struct Lineup {
+    elapsed: f32,
     shown: Option<usize>,
     group: Vec<Entity>,
     shot: usize,
     height: f32,
+    fallen_bounds: Vec<(Vec3, Vec3)>,
 }
 
 /// Seconds each line-up stands before the next.
 const LINEUP: f32 = 4.0;
+const LINEUP_SHOTS: [(f32, &str, usize); 3] =
+    [(1.9, "line", 0), (2.8, "close-a", 1), (3.8, "close-b", 2)];
 
 #[allow(clippy::too_many_arguments)]
 fn lineup(
     mut commands: Commands,
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     diagnostics: Res<Diagnostics>,
     mut state: ResMut<Lineup>,
     mut library: ResMut<PropLibrary>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut camera: Query<&mut Transform, With<Camera3d>>,
+    mut camera: Query<(&mut Transform, &Projection), With<Camera3d>>,
+    children: Query<&Children>,
+    parts: Query<(&GlobalTransform, &Aabb)>,
     pending: Query<(), With<Screenshot>>,
     mut exit: EventWriter<AppExit>,
+    mut cave_materials: ResMut<Assets<CaveMaterial>>,
 ) {
     if !diagnostics.lineups {
         return;
     }
     let names = everyone();
-    let now = time.elapsed_secs();
-    let index = (now / LINEUP) as usize;
+    // Preview deadlines use real time: animation time clamps slow frames to
+    // 250 ms, making a four-second capture take minutes on software DX12.
+    // Stop at each view and family boundary so a long frame cannot skip a
+    // pose, capture a replacement family, or queue several readbacks at once.
+    let next_family = state.shot / LINEUP_SHOTS.len();
+    let changing_family = state.shown.is_some_and(|shown| next_family > shown);
+    let next_moment = if changing_family {
+        0.0
+    } else {
+        LINEUP_SHOTS[state.shot % LINEUP_SHOTS.len()].0
+    };
+    let deadline = diagnostics.capture_warmup + next_family as f32 * LINEUP + next_moment;
+    if pending.is_empty() {
+        state.elapsed = (state.elapsed + time.delta_secs()).min(deadline);
+    }
+    let index = if changing_family && state.elapsed >= deadline {
+        next_family
+    } else {
+        state.shown.unwrap_or(0)
+    };
+    let now = (state.elapsed - diagnostics.capture_warmup).max(0.0);
     if index >= names.len() {
         if pending.is_empty() {
             exit.write(AppExit::Success);
@@ -566,6 +795,7 @@ fn lineup(
             commands.entity(e).despawn();
         }
         state.shown = Some(index);
+        state.fallen_bounds.clear();
         // Pick seeds so people alternate woman, man, woman...
         let base = creatures::seed(name);
         let mut seeds = Vec::new();
@@ -591,6 +821,10 @@ fn lineup(
             anim.yaw = -0.45;
             anim.target_yaw = Some(-0.45);
             anim.quiet = true;
+            if diagnostics.fallen_lineups {
+                anim.dead = Some(1.0);
+                anim.target_yaw = None;
+            }
             let entity = commands
                 .spawn((
                     anim,
@@ -604,33 +838,60 @@ fn lineup(
         }
         state.height = height;
     }
-    // The whole line first, then close on the middle pair.
+    // The whole line first, then close on the first two individuals.
     let t = now - index as f32 * LINEUP;
     let height = state.height;
     let close = t > 2.1;
-    if let Ok(mut transform) = camera.single_mut() {
-        let (focus, d) = if close {
+    if diagnostics.fallen_lineups && t > 0.2 && state.fallen_bounds.len() != state.group.len() {
+        // Global transforms and mesh bounds become available after the first
+        // posed frame. Cache the settled geometry once for this lineup.
+        let bounds: Vec<_> = state
+            .group
+            .iter()
+            .filter_map(|entity| fallen_bounds(*entity, &children, &parts))
+            .collect();
+        if bounds.len() == state.group.len() {
+            state.fallen_bounds = bounds;
+        }
+    }
+    if let Ok((mut transform, projection)) = camera.single_mut() {
+        let (focus, offset) = if diagnostics.fallen_lineups {
+            fallen_lineup_camera(&state, t, projection, &diagnostics)
+        } else if close {
             // Each of the first two in turn, the upper body filling the frame.
             let x = if t > 3.0 { 5.0 } else { 3.4 };
             (
                 Vec3::new(x, -0.5 + height * 0.78, 1.2),
-                (height * 0.75).max(1.1),
+                Vec3::new(0.0, 0.22, 1.0) * (height * 0.75).max(1.1),
             )
         } else {
             (
                 Vec3::new(6.6, -0.5 + height * 0.5, 1.2),
-                (height * 1.9).max(6.4),
+                Vec3::new(0.0, 0.22, 1.0) * (height * 1.9).max(6.4),
             )
         };
-        *transform = Transform::from_translation(focus + Vec3::new(0.0, d * 0.22, d))
-            .looking_at(focus, Vec3::Y);
+        *transform = diagnostics.preview_camera(focus, offset, &mut cave_materials);
     }
-    for (when, tag, step) in [(1.9, "line", 0), (2.8, "close-a", 1), (3.8, "close-b", 2)] {
-        let wanted = index * 3 + step;
-        if t >= when && state.shot <= wanted {
+    for (when, tag, step) in LINEUP_SHOTS {
+        let wanted = index * LINEUP_SHOTS.len() + step;
+        let due = diagnostics.capture_warmup + index as f32 * LINEUP + when;
+        if state.elapsed >= due && state.shot <= wanted {
             state.shot = wanted + 1;
             if let Some(dir) = diagnostics.capture.clone() {
-                let path = dir.join(format!("{:02}-{tag}-{}.png", index, name.replace(' ', "_")));
+                let mode = if diagnostics.fallen_lineups {
+                    "fallen-"
+                } else {
+                    ""
+                };
+                let path = dir.join(format!(
+                    "{:02}-{mode}{tag}-{}.png",
+                    index,
+                    name.replace(' ', "_")
+                ));
+                info!(
+                    "Lineup capture family={name} view={tag} real_secs={:.3}",
+                    time.elapsed_secs()
+                );
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(save_to_disk(path));
@@ -639,9 +900,90 @@ fn lineup(
     }
 }
 
+/// World-space bounds include each joint's actual corpse rotation, the
+/// Storybook mesh proportions, clothing and held props.
+fn fallen_bounds(
+    entity: Entity,
+    children: &Query<&Children>,
+    parts: &Query<(&GlobalTransform, &Aabb)>,
+) -> Option<(Vec3, Vec3)> {
+    let mut low = Vec3::splat(f32::INFINITY);
+    let mut high = Vec3::splat(f32::NEG_INFINITY);
+    for child in children.iter_descendants(entity) {
+        let Ok((transform, bounds)) = parts.get(child) else {
+            continue;
+        };
+        let center = Vec3::from(bounds.center);
+        let half = Vec3::from(bounds.half_extents);
+        for x in [-1.0, 1.0] {
+            for y in [-1.0, 1.0] {
+                for z in [-1.0, 1.0] {
+                    let point = transform
+                        .affine()
+                        .transform_point3(center + half * Vec3::new(x, y, z));
+                    low = low.min(point);
+                    high = high.max(point);
+                }
+            }
+        }
+    }
+    low.is_finite().then_some((low, high))
+}
+
+fn fallen_lineup_camera(
+    state: &Lineup,
+    t: f32,
+    projection: &Projection,
+    diagnostics: &Diagnostics,
+) -> (Vec3, Vec3) {
+    let close = t > 2.1;
+    let bounds = if state.fallen_bounds.len() == state.group.len() {
+        if close {
+            state.fallen_bounds[usize::from(t > 3.0)]
+        } else {
+            state.fallen_bounds.iter().copied().fold(
+                (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+                |(low, high), (a, b)| (low.min(a), high.max(b)),
+            )
+        }
+    } else {
+        // Low framing while transforms are still propagating; captures occur
+        // later, after the settled mesh bounds have replaced this fallback.
+        let x = if close {
+            if t > 3.0 {
+                5.0
+            } else {
+                3.4
+            }
+        } else {
+            6.6
+        };
+        let half = Vec3::new(if close { state.height } else { 4.2 }, 0.5, state.height);
+        let center = Vec3::new(x, -0.25, 1.2);
+        (center - half, center + half)
+    };
+    let focus = (bounds.0 + bounds.1) * 0.5;
+    let half = (bounds.1 - bounds.0) * 0.5;
+    let base_direction = Vec3::new(0.0, 0.7, 1.0).normalize();
+    let direction = Quat::from_rotation_y(diagnostics.azimuth.unwrap_or(0.0)) * base_direction;
+    let right = Vec3::Y.cross(direction).normalize();
+    let up = direction.cross(right);
+    let (tan_y, aspect) = match projection {
+        Projection::Perspective(p) => ((p.fov * 0.5).tan(), p.aspect_ratio),
+        _ => ((std::f32::consts::FRAC_PI_4 * 0.5).tan(), 1.6),
+    };
+    let width_fit = right.abs().dot(half) / (tan_y * aspect).max(0.01);
+    let height_fit = up.abs().dot(half) / tan_y.max(0.01);
+    let distance = direction.abs().dot(half) + width_fit.max(height_fit) * 1.15 + 0.1;
+    (focus, base_direction * distance.max(1.1))
+}
+
 /// Seconds into the show; `--portraits` starts at the close-ups.
-fn clock(time: &Time, diagnostics: &Diagnostics) -> f32 {
-    time.elapsed_secs()
+fn clock(time: &Time, diagnostics: &Diagnostics, director: &Director) -> f32 {
+    if diagnostics.travel_study {
+        return director.study_time;
+    }
+    (time.elapsed_secs() - diagnostics.capture_warmup).max(0.0)
         + if diagnostics.portraits {
             CYCLE * 2.0
         } else {
@@ -652,14 +994,18 @@ fn clock(time: &Time, diagnostics: &Diagnostics) -> f32 {
 fn camera(
     time: Res<Time>,
     diagnostics: Res<Diagnostics>,
+    director: Res<Director>,
     mut camera: Query<&mut Transform, With<Camera3d>>,
+    mut cave_materials: ResMut<Assets<CaveMaterial>>,
 ) {
     if diagnostics.lineups {
         return;
     }
-    let now = clock(&time, &diagnostics);
+    let now = clock(&time, &diagnostics, &director);
     let group = if diagnostics.idles {
         usize::from(now >= IDLE)
+    } else if diagnostics.travel_study {
+        ((now / CYCLE) as usize).min(1)
     } else {
         (now / CYCLE) as usize
     };
@@ -694,20 +1040,22 @@ fn camera(
         )
     };
     if let Ok(mut transform) = camera.single_mut() {
-        *transform = Transform::from_translation(focus + offset).looking_at(focus, Vec3::Y);
+        *transform = diagnostics.preview_camera(focus, offset, &mut cave_materials);
     }
 }
 
 fn captions(
     time: Res<Time>,
     diagnostics: Res<Diagnostics>,
+    director: Res<Director>,
     mut captions: Query<(&Caption, &mut Node, &mut Visibility)>,
     camera: Query<(&Camera, &GlobalTransform)>,
 ) {
     let Ok((camera, eye)) = camera.single() else {
         return;
     };
-    let portraits = clock(&time, &diagnostics) >= CYCLE * 2.0;
+    let portraits =
+        !diagnostics.travel_study && clock(&time, &diagnostics, &director) >= CYCLE * 2.0;
     for (caption, mut node, mut visibility) in &mut captions {
         *visibility = if portraits {
             Visibility::Hidden

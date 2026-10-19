@@ -3377,7 +3377,7 @@ mod tests {
                 interaction.preparation.is_some(),
                 "ordinary preparation remains visible"
             );
-            assert_eq!(interaction.inventory[0].zappable, true);
+            assert!(interaction.inventory[0].zappable);
             // The same restriction owns snapshots as well as delta bases.
             let mut snapshot_state = state.clone();
             restrict_item_disclosure(&mut snapshot_state, role);

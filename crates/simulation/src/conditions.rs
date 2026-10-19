@@ -295,12 +295,13 @@ impl ConditionState {
     }
     /// Called only after metadata reconciliation against validated definitions.
     /// False proves there are no live condition modifiers, including unexpired
-    /// reserved tokens. Otherwise the seed is necessarily ordinary and evictable:
-    /// protected definitions are modifier-free and reserved entries do not fold.
+    /// reserved tokens. Only ordinary, unreserved modifier sources are evictable:
+    /// protected definitions may carry safe confusion modifiers and must survive.
     /// Choosing any older eligible entry preserves ordinary oldest-first policy.
     pub(crate) fn evict_for_reconciliation(&mut self, rules: &Ruleset) -> bool {
         let Some((mut key, mut order)) = self.entries.iter().find_map(|(key, entry)| {
             (entry.phase == ConditionPhase::Active
+                && !entry.protected
                 && entry.reserved_by.is_none()
                 && rules
                     .condition(&entry.condition)
@@ -796,6 +797,56 @@ fn validate(_: &ConditionDef, source: ActorId, duration: u64) -> Result<(), Cond
 mod tests {
     use super::*;
     use crate::rules::DEFAULT_RULESET_TOML;
+
+    #[test]
+    fn reconciliation_never_evicts_protected_confusion_with_repeatable_restrictions() {
+        for stacking in [Stacking::Keep, Stacking::Extend] {
+            let original = crate::test_creatures::ruleset();
+            let ordinary = original
+                .condition(&ConditionId::new("readied").unwrap())
+                .unwrap();
+            let mut protected = ordinary.clone();
+            // Deliberately first in both key and application-age order.
+            protected.id = ConditionId::new("aaa_protected_confusion").unwrap();
+            protected.family =
+                crate::content_ids::ConditionFamilyId::new("aaa_protected_confusion").unwrap();
+            protected.lifecycle = ConditionLifecycle::Timed;
+            protected.stacking = stacking;
+            protected.source_scoped = false;
+            protected.timing = crate::rules::ConditionTiming::expiring();
+            protected.restrictions = vec![ConditionRestriction::VoluntaryActions];
+            protected.preparation = ConditionPreparation::Pause;
+            protected.modifiers = vec![Modifier {
+                scope: crate::rules::Scope::Always,
+                op: crate::rules::ModifierOp::Locomotion {
+                    value: crate::locomotion::LocomotionValue::Confused {
+                        chance: Some(crate::locomotion::MovementChance {
+                            numerator: 1,
+                            denominator: 2,
+                        }),
+                    },
+                },
+            }];
+            let mut document = original.document().clone();
+            document.conditions.push(protected.clone());
+            let rules = Ruleset::validate(document).unwrap();
+            let mut state = ConditionState::default();
+            state.apply(&protected, ActorId(1), 200, false).unwrap();
+            state.apply(ordinary, ActorId(2), 100, false).unwrap();
+            let retained = state.instances().next().unwrap().clone();
+
+            assert!(state.evict_for_reconciliation(&rules));
+            assert_eq!(
+                state.instances().cloned().collect::<Vec<_>>(),
+                vec![retained],
+                "reconciliation must remove the ordinary source, never the older protected confusion"
+            );
+            let before = state.clone();
+            assert!(!state.evict_for_reconciliation(&rules));
+            assert_eq!(state, before);
+            assert!(state.restricts(&rules, ConditionRestriction::VoluntaryActions));
+        }
+    }
 
     #[test]
     fn extend_duration_preserves_one_application_and_expires_without_protection() {

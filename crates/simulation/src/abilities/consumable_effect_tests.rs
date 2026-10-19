@@ -196,7 +196,7 @@ fn hit_die_healing_uses_independent_dice_through_hd256_and_applies_bonus_once() 
             creature.damage(available);
             let mut rng = 91;
             let result = super::resolve(
-                input(&[effect.clone()]),
+                input(std::slice::from_ref(&effect)),
                 &Snapshot::capture(&creature),
                 &mut rng,
                 &mut (),
@@ -215,7 +215,7 @@ fn hit_die_healing_uses_independent_dice_through_hd256_and_applies_bonus_once() 
                     bonus,
                     overflow: crate::rules::HealingOverflow::None
                 }],
-                &[effect.clone()]
+                std::slice::from_ref(&effect)
             ));
             assert!(!super::plan::effects_match_definition(
                 &[Effect::HealPerHitDie {
@@ -392,8 +392,8 @@ fn healing_overflow_policy_is_required_strict_and_source_matched() {
             overflow,
         };
         assert!(super::plan::effects_match_definition(
-            &[source.clone()],
-            &[planned.clone()]
+            std::slice::from_ref(&source),
+            std::slice::from_ref(&planned)
         ));
         for mut value in [
             serde_json::to_value(source).unwrap(),

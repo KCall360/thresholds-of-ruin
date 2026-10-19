@@ -96,6 +96,12 @@ Speed + Agility; activation has no separate check or Mana cost. Healing overflow
 improves a bounded owned HD record rather than adding an unbounded HP modifier.
 See [items](reference/items.md#reading-identification-and-charged-devices).
 
+A separate trusted no-time effect-injection limitation remains open: removing the
+current decision can leave a later-ready actor selected before its ready tick.
+Strict checkpoint restore rejects that unsettled schedule. Ordinary accepted
+actions own scheduler settlement; this item slice does not change the injection
+API timing contract or relax restore validation.
+
 ## Implemented scope
 
 | Area | Current capability | Authoritative detail |
@@ -472,6 +478,10 @@ checks do not replace complete Windows/Linux debug/release CI before merge.
   ASCII map/look/inventory redraw on palette changes and recover safely.
   Shared creature seeds and captured corpse appearance support the optional,
   independently maintained [3D prototype](../crates/client-3d/README.md).
+  The prototype adds shared body/fitting dimensions, correlated build silhouettes,
+  fitted garment surfaces and family-specific support motion. See the
+  [art continuation plan](plans/3d-art-continuation.md) for visual-review limits
+  and the unfinished garment/equipment authoring boundary.
   Scenario overrides (including Rogue letters), general trait specifications
   and server-stored player choices remain deferred. See the
   [presentation plan](plans/presentation.md).

@@ -318,6 +318,67 @@ fn active_to_protection_keeps_its_full_book_slot_and_cannot_be_capacity_evicted(
 }
 
 #[test]
+fn repeatable_expiring_restrictions_keep_their_slot_under_capacity_pressure() {
+    let lock = ConditionId::new("fixture_repeatable_lock").unwrap();
+    let ordinary = ConditionId::new("fixture_ordinary").unwrap();
+    let mut repeated = definition(lock.as_str(), None);
+    repeated["stacking"] = json!({"kind":"extend"});
+    let mut filler = definition(ordinary.as_str(), None);
+    filler["restrictions"] = json!([]);
+    filler["preparation"] = json!("preserve");
+    filler["source_scoped"] = json!(true);
+    filler["capacity"] = json!("oldest");
+    let mut subject = creature(vec![repeated, filler]);
+    subject.apply_condition(&lock, ActorId(7), 200).unwrap();
+    for source in 1..=127 {
+        subject
+            .apply_condition(&ordinary, ActorId(source), 1000)
+            .unwrap();
+    }
+    assert_eq!(subject.conditions().instances().count(), 128);
+    subject.advance_active(50);
+    assert_eq!(
+        subject.apply_condition(&lock, ActorId(8), 100),
+        Ok(ConditionUpdate::Refreshed),
+        "a repeated restriction extends its existing slot even in a full book"
+    );
+    for source in [128, 129] {
+        assert_eq!(
+            subject.apply_condition(&ordinary, ActorId(source), 1000),
+            Ok(ConditionUpdate::Evicted)
+        );
+        assert_eq!(subject.conditions().instances().count(), 128);
+        let entry = subject
+            .conditions()
+            .instances()
+            .find(|entry| entry.condition == lock)
+            .expect("the oldest restriction survives ordinary capacity eviction");
+        assert_eq!(
+            (entry.remaining, entry.stacks, entry.source),
+            (250, 1, ActorId(7))
+        );
+        assert!(subject
+            .condition_restricts(tor_simulation::rules::ConditionRestriction::VoluntaryActions));
+        let reloaded = restored(&subject);
+        assert_eq!(reloaded, subject);
+        subject = reloaded;
+    }
+    subject.advance_active(250);
+    assert!(
+        !subject.condition_restricts(tor_simulation::rules::ConditionRestriction::VoluntaryActions)
+    );
+    assert!(!subject
+        .conditions()
+        .instances()
+        .any(|entry| entry.condition == lock));
+    assert_eq!(
+        subject.apply_condition(&lock, ActorId(9), 100),
+        Ok(ConditionUpdate::Applied),
+        "expiry leaves no follow-up protection"
+    );
+}
+
+#[test]
 fn a_full_protected_book_rejects_new_admission_without_changing_any_entry() {
     let mut definitions: Vec<_> = (0..128)
         .map(|index| definition(&format!("fixture_lock_{index}"), Some(400)))
