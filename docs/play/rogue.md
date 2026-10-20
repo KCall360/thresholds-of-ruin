@@ -177,6 +177,24 @@ A dose spends one unit. Positive actual restoration teaches its identity; drinki
 at zero deficit consumes it without learning. Character-owned knowledge persists
 after the last unit and through save/replay. See [item knowledge](../reference/items.md).
 
+Poison potions instead roll 1–3 restorable Strength loss and identify when drunk.
+See-invisible potions cure blindness and reveal invisible creatures through normal
+illuminated sight for 808–892 actor turns. A second dose extends the remaining
+duration. Effective use does not identify this potion. Both can occur in the
+existing one-unit random potion stock; the complete source potion catalog,
+sustain-strength defense and hallucination cures remain unfinished. Extra healing
+rolls independent d8s per active HD, cures blindness and identifies on use; its
+one/two-point overflow gain is limited by existing owned-HD headroom. See the
+[exact potion mapping](../reference/items.md#reading-identification-and-charged-devices).
+
+Utility wands of invisibility, haste monster and slow monster stop at the first
+creature along the chosen direction, even if it dodges. They do not bounce.
+A successful effect lasts until removed, and another copy does not stack.
+Haste halves action time; slow doubles it. Applying the opposite wand removes
+the old rate and leaves the target at normal speed until a later application.
+These effects do not change the Speed attribute. Utility use does not identify
+the wand. Status screens show these persistent effects as “until removed”.
+
 ## Flight and linked holds
 
 Bat and kestrel each own one animal racial HD, with 1d2 and 1d4 natural damage.

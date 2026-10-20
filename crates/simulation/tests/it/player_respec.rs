@@ -21,6 +21,74 @@ fn at(x: i32) -> Location {
 fn fixture_game() -> Game {
     fixture_custom(|_| {})
 }
+
+#[test]
+fn respec_captures_action_rate_witness_and_keeps_policy_validation_after_expiry() {
+    use tor_simulation::content_ids::ConditionId;
+    for (rate, preparation, recovery) in [("haste", 5, 2), ("slow", 20, 6)] {
+        let mut game = fixture_custom(|document| {
+            document["conditions"].as_array_mut().unwrap().push(json!({
+                "id":"fixture_rate", "family":"fixture_rate", "name":"Action rate",
+                "lifecycle":"timed", "timing":{"kind":"actor_active","on_expiry":{"kind":"remove"}},
+                "restrictions":[], "preparation":"preserve",
+                "modifiers":[{"scope":"always","op":{"kind":"action_duration","value":rate}}],
+                "stacking":{"kind":"keep"},"source_scoped":false,"descriptors":[],"capacity":"reject"
+            }));
+        });
+        let actor = ActorId(1);
+        game.apply_condition(actor, &ConditionId::new("fixture_rate").unwrap(), actor, 2)
+            .unwrap();
+        start(&mut game);
+        let plan = game.preparation(actor).unwrap().plan.clone();
+        assert_eq!(plan.preparation(), preparation);
+        assert_eq!(plan.recovery(), recovery);
+        let encoded = serde_json::to_value(&plan).unwrap();
+        assert_eq!(encoded["action_duration"], json!(rate));
+        for field in ["action_duration", "preparation", "recovery"] {
+            let mut forged = encoded.clone();
+            if field == "action_duration" {
+                forged[field] = json!("normal");
+            } else {
+                forged[field] = json!(encoded[field].as_u64().unwrap() + 1);
+            }
+            let forged: tor_simulation::abilities::Plan = serde_json::from_value(forged).unwrap();
+            assert!(!forged.valid(game.content().rules()), "{rate}/{field}");
+        }
+        for invalid in [
+            json!({(rate):null}),
+            json!([rate]),
+            json!(null),
+            json!(true),
+            json!(1),
+            json!("fast"),
+        ] {
+            let mut forged = encoded.clone();
+            forged["action_duration"] = invalid;
+            assert!(
+                serde_json::from_value::<tor_simulation::abilities::Plan>(forged).is_err(),
+                "{rate} requires an exact scalar action-duration witness"
+            );
+        }
+        let mut missing = encoded;
+        missing.as_object_mut().unwrap().remove("action_duration");
+        assert!(serde_json::from_value::<tor_simulation::abilities::Plan>(missing).is_err());
+        wait_until(&mut game, 2);
+        assert_eq!(
+            game.creature(actor).unwrap().derived().action_duration,
+            tor_simulation::action_duration::ActionDuration::Normal
+        );
+        assert_eq!(game.preparation(actor).unwrap().plan, plan);
+        game = round_trip(&game);
+        assert_eq!(game.preparation(actor).unwrap().plan, plan);
+        wait_until(&mut game, preparation);
+        assert!(game.preparation(actor).is_none());
+        assert_eq!(
+            game.preparation_timing(actor).unwrap().recovery_remaining,
+            recovery
+        );
+        assert_eq!(round_trip(&game), game);
+    }
+}
 #[test]
 fn zero_damage_status_pauses_respec_but_damage_in_either_order_still_discards_it() {
     use tor_simulation::content_ids::ConditionId;
@@ -1858,7 +1926,7 @@ fn public_plan_owner_respec_and_idle_have_identical_paid_records_and_later_snaps
             .find(|instance| instance.condition.as_str() == "readied")
             .unwrap();
         assert_eq!(
-            game.tick() + readied.remaining,
+            game.tick() + readied.remaining.unwrap(),
             400,
             "the 300-active-tick grant expires at the same deadline"
         );

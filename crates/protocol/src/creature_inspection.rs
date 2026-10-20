@@ -164,8 +164,8 @@ pub struct ConditionView {
     pub condition: ContentRef,
     pub phase: ConditionPhase,
     pub source: ActorId,
-    #[serde(with = "crate::integers::unsigned")]
-    pub remaining_ticks: u64,
+    #[serde(with = "crate::integers::optional_unsigned")]
+    pub remaining_ticks: Option<u64>,
 }
 impl<'de> Deserialize<'de> for ConditionView {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -175,8 +175,8 @@ impl<'de> Deserialize<'de> for ConditionView {
             condition: ContentRef,
             phase: ConditionPhase,
             source: ActorId,
-            #[serde(with = "crate::integers::unsigned")]
-            remaining_ticks: u64,
+            #[serde(with = "crate::integers::optional_unsigned")]
+            remaining_ticks: Option<u64>,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
@@ -206,7 +206,11 @@ impl ConditionView {
     pub(crate) fn valid(&self) -> bool {
         self.condition.valid()
             && self.source.0 != 0
-            && (1..=1_000_000).contains(&self.remaining_ticks)
+            && self
+                .remaining_ticks
+                .map_or(self.phase == crate::ConditionPhase::Active, |remaining| {
+                    (1..=1_000_000).contains(&remaining)
+                })
     }
 }
 /// Authoritative selected weapon operands, plus generic cached ability timing/modifier rows.

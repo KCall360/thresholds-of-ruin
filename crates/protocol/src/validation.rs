@@ -152,6 +152,7 @@ impl StateView {
                     }
                     crate::CombatEventView::Condition { condition } => !condition.valid(),
                     crate::CombatEventView::UnseenAbility { .. }
+                    | crate::CombatEventView::AnonymousAbility { .. }
                     | crate::CombatEventView::Interrupted { .. }
                     | crate::CombatEventView::EscapeResolved { .. }
                     | crate::CombatEventView::Died { .. } => false,

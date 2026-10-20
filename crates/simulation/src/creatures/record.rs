@@ -1144,7 +1144,7 @@ mod tests {
                 });
                 assert!(record.restore(content.clone(), immune).is_err());
                 let mut changed = record;
-                changed.conditions.0[0].remaining = 0;
+                changed.conditions.0[0].remaining = Some(0);
                 assert!(changed.restore(content, vec![]).is_err());
             }
         }

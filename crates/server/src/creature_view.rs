@@ -329,7 +329,7 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                     p::AbilityTargetKind::SelfStep
                 } else if def.invocation == s::abilities::InvocationKind::DirectionalProjectile {
                     p::AbilityTargetKind::DirectionalProjectile
-                } else if def.invocation == s::abilities::InvocationKind::DirectionalRay {
+                } else if def.invocation.is_directional_ray() {
                     p::AbilityTargetKind::DirectionalRay
                 } else {
                     match def.reach {

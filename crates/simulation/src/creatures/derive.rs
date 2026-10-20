@@ -149,6 +149,7 @@ pub struct HitDiceSummary {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DerivedCreature {
+    pub action_duration: crate::action_duration::ActionDuration,
     pub perception: crate::perception::PerceptionCapabilities,
     pub locomotion: crate::locomotion::LocomotionCapabilities,
     pub kind: TypeId,
@@ -171,7 +172,7 @@ pub struct DerivedCreature {
     pub health_recovery_reset_percent: u8,
     /// Exact sampled ordinals, shared across effective folds and snapshots.
     pub health_contributions: Shared<Vec<crate::progression::HealthContribution>>,
-    pub(crate) next_health_improvement: Option<crate::progression::HitDieHealthImprovement>,
+    pub(crate) next_health_improvements: Vec<crate::progression::HitDieHealthImprovement>,
     health_sum: u64,
     binding: crate::attributes::ManaBinding,
     base_health_recovery_period: u64,
@@ -1048,7 +1049,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         source: SourceId::Species(species.id.clone()),
         socket: None,
     };
-    let (health_contributions, next_health_improvement) = build
+    let (health_contributions, next_health_improvements) = build
         .ledger()
         .health_provenance_with_improvement(&kind, rules)
         .map_err(BuildError::from)?;
@@ -1057,6 +1058,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
             .ok_or(BuildError::Arithmetic)
     })?;
     let mut derived = DerivedCreature {
+        action_duration: Default::default(),
         locomotion: Default::default(),
         perception: Default::default(),
         kind,
@@ -1074,7 +1076,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         contextual_recovery: false,
         health_recovery_reset_percent: 100,
         health_contributions: Shared::new(health_contributions),
-        next_health_improvement,
+        next_health_improvements,
         health_sum,
         binding: build.binding(),
         base_health_recovery_period: rules
@@ -1381,6 +1383,7 @@ fn collect_stats(
             | ModifierOp::Reduction { .. }
             | ModifierOp::TalentReduction { .. }
             | ModifierOp::GrantAbility { .. }
+            | ModifierOp::ActionDuration { .. }
             | ModifierOp::Locomotion { .. }
             | ModifierOp::Perception { .. } => {}
         }
@@ -1700,6 +1703,8 @@ fn fold(
 
     derived.attributes = attribute_values(derived.attributes, &values, rules)?;
     derived.flags = flags(&derived.sources);
+    derived.action_duration =
+        crate::action_duration::ActionDuration::from_modifiers(derived.sources.values().flatten());
     derived.locomotion = crate::locomotion::LocomotionCapabilities::from_modifiers(
         derived.sources.values().flatten(),
     );
@@ -1764,6 +1769,7 @@ fn fold(
                 ModifierOp::Add { .. }
                 | ModifierOp::Set { .. }
                 | ModifierOp::Flag { .. }
+                | ModifierOp::ActionDuration { .. }
                 | ModifierOp::Locomotion { .. }
                 | ModifierOp::Perception { .. } => {}
             }
@@ -2105,14 +2111,14 @@ pub(crate) fn ability_timing_for_attack(
     let duration = |base: u64, adjustment: i64| -> Result<u64, BuildError> {
         let base = u64::try_from((i128::from(base) + i128::from(adjustment)).max(1))
             .map_err(|_| BuildError::Arithmetic)?;
-        scaled_duration(
+        derived.action_duration.apply_bounded(scaled_duration(
             base,
             definition
                 .timing
                 .scaled_by
                 .map(|attribute| derived.attributes.get(attribute)),
             rules,
-        )
+        )?)
     };
     Ok(AbilityTiming {
         preparation: duration(prepare, modifiers.preparation)?,

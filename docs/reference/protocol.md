@@ -140,6 +140,10 @@ replace semantic snapshot/delta validation.
 Only the current wire shape is accepted. Combat views require nullable `sequence`,
 ability events require nullable `strike`, and cancellation commands require
 nullable `step`; omitting any of these fields is not equivalent to `null`.
+An `anonymous_ability` combat event requires nullable `caster` and `target`
+references and an exact `applied`, `unaffected` or `miss` outcome. It has no ability,
+item, strike or diagnostic operands; extra fields and positional forms reject.
+Its neutral narration does not classify the activity as an attack or infer a source.
 Private inspection uses typed natural/weapon selections and authored strike sources.
 There is no fallback from older attack, inspection or cancellation shapes.
 Actions, finite-supply selections and ability reach/range values require named
@@ -286,7 +290,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":54,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":55,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -935,7 +939,9 @@ saved receipt, journal entry, simulation action, or ordinary observation update.
 The independently defined report carries bounded owned HD records, retained health
 seeds and cached rolls, template operations, source grants, exact Health/resources
 and condition sources. Each disclosed condition has an explicit `phase` of
-`active` or `protection`, its existing authorized source and remaining active ticks.
+`active` or `protection`, its existing authorized source and required nullable
+`remaining_ticks`. Null denotes an active until-removed condition; finite values
+are positive decimal strings. Protection always has a finite remaining duration.
 Protection renders as protection against the named effect, never as an active
 restriction. This field does not broaden the report's authorization or ordinary
 observer disclosure. Missing, unknown, duplicate and positional phase records
@@ -1426,14 +1432,26 @@ apply meals themselves.
 ### Personal condition disclosure
 
 Personal `own_stats` requires `conditions`, an array bounded to 128 records, each
-with named `condition` (`id`, `name`), `phase` (`active` or `protection`) and unsigned
-decimal-string `remaining_ticks` (1–1000000). Source actors, opponent qualifications,
+with named `condition` (`id`, `name`), `phase` (`active` or `protection`) and required
+nullable `remaining_ticks`: a decimal string from 1–1000000 for finite time, or
+JSON null for an active until-removed condition. Missing fields, finite zero,
+string `"null"` and null protection durations reject. Source actors, opponent qualifications,
 reservation owners, stacking internals and private preparation operands are absent.
 Only Timed lifecycle entries appear here. One-use conditions remain governed by
 their existing authorized consumable-token contracts, so a hidden attacker reserving
 a token cannot change this projection. Foreign sightings never gain this field. Saved/current snapshots and reconnects disclose the same live actor facts
 without settling time or sampling RNG. Text and ASCII use the same active/protection
-labels; protection does not mean the actor is still frozen or fainted.
+labels and render a null duration as “until removed”; protection does not mean
+the actor is still frozen or fainted. Clients do not invent deadlines or count
+down persistent conditions.
+
+These lifetime shapes and the expanded timing/effect contracts require the
+coordinated current identities in [status](../status.md). Canonical saved condition
+records also require explicit nullable lifetimes. Saved execution retains frozen
+timing and ray delivery, plus exact bounded resolved healing-improvement claims. Current
+wire/save readers reject older shapes rather than supplying defaults or converting
+finite zero into permanence. Physical save framing and compiled region-input
+identity remain unchanged.
 
 A personally experienced standalone condition can also produce a combat event
 `{ "type": "condition", "condition": { "id": "rogue.faint", "name": "Fainted" } }`.

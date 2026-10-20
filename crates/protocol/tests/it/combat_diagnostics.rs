@@ -399,9 +399,22 @@ fn condition_removal_is_named_closed_and_bound_to_report_target() {
 
 #[test]
 fn healing_improvement_diagnostic_discloses_no_owned_seed_or_selection_claim() {
-    let effect = serde_json::json!({"type":"heal_and_improve_hit_die","target":"2","amount":8});
+    let effect =
+        serde_json::json!({"type":"heal_and_improve_hit_dice","target":"2","amount":8,"credits":2});
     let decoded: DiagnosticEffect = serde_json::from_value(effect.clone()).unwrap();
     assert_eq!(serde_json::to_value(&decoded).unwrap(), effect);
+    let mut missing = effect.clone();
+    missing.as_object_mut().unwrap().remove("credits");
+    assert!(serde_json::from_value::<DiagnosticEffect>(missing).is_err());
+    for credits in [0, 3] {
+        let mut value = report();
+        value.records[0].outcome.effects = vec![DiagnosticEffect::HealAndImproveHitDice {
+            target: ActorId(2),
+            amount: 8,
+            credits,
+        }];
+        assert!(value.validate().is_err());
+    }
     for field in [
         "source",
         "seed",
@@ -420,9 +433,10 @@ fn healing_improvement_diagnostic_discloses_no_owned_seed_or_selection_claim() {
     let mut value = report();
     value.records[0].outcome.effects = vec![decoded];
     assert!(value.validate().is_ok());
-    value.records[0].outcome.effects = vec![DiagnosticEffect::HealAndImproveHitDie {
+    value.records[0].outcome.effects = vec![DiagnosticEffect::HealAndImproveHitDice {
         target: ActorId(0),
         amount: 8,
+        credits: 2,
     }];
     assert!(value.validate().is_err());
 }
@@ -483,4 +497,18 @@ fn fixed_resource_cost_bundle_is_complete_canonical_and_bounded() {
     assert!(
         serde_json::from_value::<DiagnosticCostBundle>(serde_json::to_value(zero).unwrap()).is_ok()
     );
+}
+
+#[test]
+fn persistent_condition_diagnostics_use_required_nullable_duration() {
+    use serde_json::json;
+    let value = json!({"type":"condition","target":"2","condition":{"id":"fixture","name":"Fixture"},"source":"1","duration":null});
+    let effect: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&effect).unwrap(), value);
+    let mut report = report();
+    report.records[0].outcome.effects = vec![effect];
+    report.validate().unwrap();
+    let mut missing = value;
+    missing.as_object_mut().unwrap().remove("duration");
+    assert!(serde_json::from_value::<DiagnosticEffect>(missing).is_err());
 }

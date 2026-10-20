@@ -86,7 +86,7 @@ impl StepCommitment {
         Ok(Self {
             direction,
             context,
-            duration: crate::movement_cost(actor.turn_ticks.get(), direction.into())?,
+            duration: actor.movement_duration(direction.into())?,
         })
     }
 }

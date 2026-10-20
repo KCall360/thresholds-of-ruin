@@ -320,12 +320,18 @@ impl<'a> Compiler<'a> {
         let offset = if definition.offset == 0 {
             0
         } else {
-            crate::creatures::scaled_duration(
-                definition.offset,
-                scaled_by.map(|attribute| creature.derived().attributes.get(attribute)),
-                creature.build().ruleset(),
-            )
-            .map_err(|_| invalid())?
+            creature
+                .derived()
+                .action_duration
+                .apply_bounded(
+                    crate::creatures::scaled_duration(
+                        definition.offset,
+                        scaled_by.map(|attribute| creature.derived().attributes.get(attribute)),
+                        creature.build().ruleset(),
+                    )
+                    .map_err(|_| invalid())?,
+                )
+                .map_err(|_| invalid())?
         };
         Ok(FrozenStrike {
             offset,

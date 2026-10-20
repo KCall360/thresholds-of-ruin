@@ -71,7 +71,7 @@ impl SurvivalFlows {
         let mut flow = Self::default();
         match effect {
             ResolvedEffect::Heal { amount }
-            | ResolvedEffect::HealAndImproveHitDie { amount, .. } => {
+            | ResolvedEffect::HealAndImproveHitDice { amount, .. } => {
                 flow.direct_health = u64::from(*amount)
             }
             ResolvedEffect::Restore { resource, amount } => {

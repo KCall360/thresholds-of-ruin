@@ -90,7 +90,7 @@ fn guarded_step_preserves_portal_orientation_and_checks_every_destination_body_c
                 .find(|condition| condition.condition.as_str() == "braced")
                 .unwrap()
                 .remaining,
-            200
+            Some(200)
         );
         if !blocked {
             assert!(game.actors[&actor].visited.contains(&destination.region));

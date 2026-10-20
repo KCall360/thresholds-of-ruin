@@ -505,6 +505,71 @@ fn anonymous_projection_and_personally_experienced_activity_withhold_identity() 
 }
 
 #[test]
+fn anonymous_ability_projection_preserves_reference_domains_without_source_identity() {
+    for (source_reference, target_reference) in [
+        (
+            Some(ActorReferenceKind::Creature),
+            Some(ActorReferenceKind::Creature),
+        ),
+        (
+            Some(ActorReferenceKind::Contact),
+            Some(ActorReferenceKind::Creature),
+        ),
+        (
+            Some(ActorReferenceKind::Creature),
+            Some(ActorReferenceKind::Contact),
+        ),
+        (None, Some(ActorReferenceKind::Creature)),
+        (Some(ActorReferenceKind::Creature), None),
+    ] {
+        let (mut view, scene, scope) = fixture();
+        let observer = view.actor;
+        view.combat = Some(s::combat::CombatView {
+            own_stats: None,
+            public_plan: None,
+            hp: 10,
+            max_hp: 10,
+            preparation_remaining: None,
+            preparation_active: false,
+            recovery_remaining: 0,
+            sequence: None,
+            actors: vec![],
+            events: vec![s::combat::DisclosedCombatEvent::AnonymousAbility {
+                caster: source_reference.map(|_| SUBJECT),
+                caster_reference: source_reference,
+                target: target_reference.map(|_| observer),
+                target_reference,
+                outcome: s::abilities::OutcomeStatus::Unaffected,
+            }],
+            objective: None,
+            exit: None,
+            victory: false,
+            dead: false,
+            terminal: false,
+        });
+        let wire = projected(view, scene, &scope);
+        let event = &wire["combat"]["events"][0];
+        assert_eq!(
+            event,
+            &json!({
+                "type":"anonymous_ability",
+                "caster":source_reference.map(|kind| scope.actor_reference(SUBJECT, kind)),
+                "target":target_reference.map(|kind| scope.actor_reference(observer, kind)),
+                "outcome":"unaffected"
+            })
+        );
+        let decoded: p::CombatEventView = serde_json::from_value(event.clone()).unwrap();
+        assert_eq!(encoded(&decoded), *event);
+        for hidden in [
+            "ability", "id", "name", "source", "item", "charges", "strike", "effects",
+        ] {
+            assert!(event.get(hidden).is_none());
+        }
+        assert!(!event.to_string().contains(&SUBJECT.0.to_string()));
+    }
+}
+
+#[test]
 fn ordinary_move_history_has_no_contact_or_apparent_target() {
     let (_, _, scope) = fixture();
     let action = a::Action::Move {

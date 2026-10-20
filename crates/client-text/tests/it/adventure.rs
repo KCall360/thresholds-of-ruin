@@ -1849,7 +1849,7 @@ fn personal_stats_distinguish_active_fainting_and_protection_without_hidden_caus
                 name: "Fixture Faint".into(),
             },
             phase: ConditionPhase::Active,
-            remaining_ticks: 200,
+            remaining_ticks: Some(200),
         },
         PersonalCondition {
             condition: ContentRef {
@@ -1857,12 +1857,21 @@ fn personal_stats_distinguish_active_fainting_and_protection_without_hidden_caus
                 name: "Fixture Ice".into(),
             },
             phase: ConditionPhase::Protection,
-            remaining_ticks: 400,
+            remaining_ticks: Some(400),
+        },
+        PersonalCondition {
+            condition: ContentRef {
+                id: "fixture_haste".into(),
+                name: "Fixture Haste".into(),
+            },
+            phase: ConditionPhase::Active,
+            remaining_ticks: None,
         },
     ];
     state.observation.combat = Some(combat);
     let before = state.clone();
     let rows = tor_client_text::stats(&state);
+    assert!(rows.contains("Fixture Haste: until removed"));
     assert!(rows.contains("Fixture Faint: 200 active ticks remaining"));
     assert!(rows.contains("Protection against Fixture Ice: 400 active ticks remaining"));
     assert!(!rows.contains("Protection against Fixture Faint"));

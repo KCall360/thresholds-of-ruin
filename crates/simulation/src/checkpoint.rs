@@ -754,7 +754,7 @@ impl Game {
             crate::combat::CombatEvent::EscapeResolved { actor, hold, intention, .. } => actor.0 == 0
                 || actor.0 >= game.next_actor_id || hold.0 == 0 || hold.0 >= game.next_hold_id
                 || intention.is_some_and(|id| !game.intention_issued(id)),
-            crate::combat::CombatEvent::Resolved { outcome, strike } => !outcome.valid()
+            crate::combat::CombatEvent::Resolved { outcome, strike, .. } => !outcome.valid()
                 || (outcome.target_rider_participated && !strike.is_some_and(|ordinal| usize::from(ordinal) < crate::limits::STRIKES))
                 || outcome.effects.iter().any(|effect| {
                 matches!(effect, crate::abilities::ResolvedEffect::ObservePublicPlan { observation }

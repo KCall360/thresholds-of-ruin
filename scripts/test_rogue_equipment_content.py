@@ -81,9 +81,9 @@ class RogueEquipmentContent(unittest.TestCase):
                          "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions",
                          "rogue.magic_scrolls", "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition"])
         expected = [
-            ["healing", "confusion", "blindness"],
+            ["healing", "confusion", "blindness", "poison", "see_invisible", "extra_healing"],
             ["identify_potion", "identify_scroll", "identify_wand", "sleep"],
-            ["wand_fire", "wand_cold", "wand_lightning"],
+            ["wand_fire", "wand_cold", "wand_lightning", "wand_invisibility", "wand_haste", "wand_slow"],
             ["generated_mace", "long_sword", "dagger", "two_handed_sword", "spear", "leather_armor",
              "generated_ring_mail", "studded_leather", "scale_mail", "chain_mail", "splint_mail", "banded_mail", "plate_mail", "shortbow"],
             ["enchant_armor", "protect_armor", "enchant_weapon", "remove_curse", "identify_weapon", "identify_armor"],

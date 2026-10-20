@@ -131,7 +131,9 @@ impl crate::rules::AbilityDef {
     pub(crate) fn consumes_caster_weapon(&self, included: impl Fn(usize) -> bool) -> bool {
         if matches!(
             self.invocation,
-            super::InvocationKind::DirectionalRay | super::InvocationKind::DirectionalProjectile
+            super::InvocationKind::DirectionalRay
+                | super::InvocationKind::DirectionalContactRay
+                | super::InvocationKind::DirectionalProjectile
         ) || matches!(self.strikes, StrikeSource::NaturalMelee { .. })
         {
             return false;

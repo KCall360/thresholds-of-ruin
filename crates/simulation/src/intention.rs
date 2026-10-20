@@ -878,7 +878,7 @@ impl Game {
                             supplies,
                         }) => {
                             self.content.rules.ability(&id).is_some_and(|definition| {
-                                    if invocation.kind() != definition.invocation
+                                    if !definition.invocation.accepts(invocation.kind())
                                         || !supplies.valid(definition.supply_costs.len())
                                     {
                                         return false;

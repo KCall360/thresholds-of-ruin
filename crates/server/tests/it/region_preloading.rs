@@ -124,6 +124,11 @@ fn seen(engine: &Engine) -> tor_protocol::Observation {
                     caster: attacker,
                     target,
                     ..
+                }
+                | tor_protocol::CombatEventView::AnonymousAbility {
+                    caster: attacker,
+                    target,
+                    ..
                 } => {
                     *attacker = attacker.map(actor);
                     *target = target.map(actor);

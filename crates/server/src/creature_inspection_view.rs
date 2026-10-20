@@ -290,6 +290,16 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
                 text("duration_turns", amount_text(duration)),
             ],
         ),
+        s::rules::Effect::ApplyPersistentCondition {
+            condition: id,
+            cancels,
+        } => {
+            let mut fields = vec![content("condition", condition(id, rules))];
+            if let Some(opposite) = cancels {
+                fields.push(content("cancels", condition(opposite, rules)));
+            }
+            ("apply_persistent_condition", fields)
+        }
         s::rules::Effect::RemoveCondition { condition: id } => (
             "remove_condition",
             vec![content("condition", condition(id, rules))],
@@ -309,6 +319,9 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
                         s::rules::HealingOverflow::None => "none",
                         s::rules::HealingOverflow::ImproveEarliestHitDie => {
                             "improve_earliest_hit_die"
+                        }
+                        s::rules::HealingOverflow::ImproveEarliestHitDiceByExcess => {
+                            "improve_earliest_hit_dice_by_excess"
                         }
                     },
                 ),
@@ -445,6 +458,17 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
         },
     )];
     let id = match &value.op {
+        ModifierOp::ActionDuration { value } => {
+            fields.push(text(
+                "rate",
+                match value {
+                    s::action_duration::ActionDuration::Normal => "normal",
+                    s::action_duration::ActionDuration::Haste => "haste",
+                    s::action_duration::ActionDuration::Slow => "slow",
+                },
+            ));
+            "action_duration"
+        }
         ModifierOp::Perception { value } => {
             use s::perception::PerceptionValue;
             let (name, enabled) = match value {
@@ -981,6 +1005,25 @@ fn write_requirement_ids(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn action_duration_modifier_discloses_typed_rate_without_attribute_changes() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        for rate in ["normal", "haste", "slow"] {
+            let authored: crate::creature_authoring::Modifier = serde_json::from_value(
+                serde_json::json!({"scope":"always","op":{"kind":"action_duration","value":rate}}),
+            )
+            .unwrap();
+            let row = modifier(&authored.compile().unwrap(), &rules);
+            assert_eq!(row.id, "action_duration");
+            assert_eq!(row.fields.len(), 2);
+            assert!(row.fields.iter().any(|field| field.id == "rate"
+                && matches!(
+                    &field.value, p::DiagnosticValue::Text { value } if value == rate
+                )));
+        }
+    }
 
     #[test]
     fn hit_die_effect_inspection_exposes_no_source_seed_or_authored_operands() {

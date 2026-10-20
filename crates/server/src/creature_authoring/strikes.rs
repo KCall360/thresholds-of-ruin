@@ -390,6 +390,9 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                         crate::scenario_package::HealingOverflow::ImproveEarliestHitDie => {
                             s::rules::HealingOverflow::ImproveEarliestHitDie
                         }
+                        crate::scenario_package::HealingOverflow::ImproveEarliestHitDiceByExcess => {
+                            s::rules::HealingOverflow::ImproveEarliestHitDiceByExcess
+                        }
                     },
                 },
                 Effect::ApplyConditionForTurns {
@@ -399,6 +402,10 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                     condition: ConditionId::new(condition)
                         .map_err(|_| invalid("Invalid condition ID"))?,
                     duration: amount(duration),
+                },
+                Effect::ApplyPersistentCondition { condition, cancels } => s::rules::Effect::ApplyPersistentCondition {
+                    condition: ConditionId::new(condition).map_err(|_| invalid("Invalid condition ID"))?,
+                    cancels: cancels.as_ref().map(|id| ConditionId::new(id).map_err(|_| invalid("Invalid condition ID"))).transpose()?,
                 },
                 Effect::RemoveCondition { condition } => s::rules::Effect::RemoveCondition {
                     condition: ConditionId::new(condition)

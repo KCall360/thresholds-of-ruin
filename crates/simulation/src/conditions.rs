@@ -1,11 +1,11 @@
-//! Data-driven, bounded timed conditions. Applications are keyed by condition
+//! Data-driven, bounded conditions with finite or explicitly unbounded lifetimes. Applications are keyed by condition
 //! and, when requested by its definition, their causer.
 use crate::creatures::SourceId;
 use crate::{
     content_ids::{AbilityId, AbilityTagId, ConditionId},
     rules::{
         ConditionDef, ConditionLifecycle, ConditionPreparation, ConditionRestriction,
-        ConditionTicks, Eviction, Modifier, Ruleset, Stacking,
+        ConditionTicks, ConditionTiming, Eviction, Modifier, Ruleset, Stacking,
     },
     ActorId,
 };
@@ -101,7 +101,9 @@ pub struct ConditionInstance {
     pub condition: ConditionId,
     pub phase: ConditionPhase,
     pub source: ActorId,
-    pub remaining: u64,
+    /// None is an unbounded lifetime; Some(0) is only a reserved token tombstone.
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub remaining: Option<u64>,
     pub stacks: u16,
     pub order: u64,
     /// Actor-local lifetime identity; independent of compactable application age.
@@ -119,7 +121,8 @@ impl<'de> serde::Deserialize<'de> for ConditionInstance {
             condition: ConditionId,
             phase: ConditionPhase,
             source: ActorId,
-            remaining: u64,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            remaining: Option<u64>,
             stacks: u16,
             order: u64,
             generation: u64,
@@ -199,6 +202,7 @@ pub struct ConditionState {
 struct ConditionEntry {
     instance: ConditionInstance,
     protection: Option<ConditionTicks>,
+    timing: ConditionTiming,
     protected: bool,
 }
 impl ConditionEntry {
@@ -206,6 +210,7 @@ impl ConditionEntry {
         Self {
             instance,
             protection: definition.timing.protection(),
+            timing: definition.timing,
             protected: definition.protected_lifecycle(),
         }
     }
@@ -240,8 +245,8 @@ fn end_active(entry: &mut ConditionEntry, reason: ConditionEnd) -> bool {
         ConditionEnd::Immunity | ConditionEnd::Removal => 0,
     };
     entry.phase = ConditionPhase::Protection;
-    entry.remaining = duration.get().saturating_sub(elapsed_after);
-    entry.remaining > 0
+    entry.remaining = Some(duration.get().saturating_sub(elapsed_after));
+    entry.remaining.is_some_and(|remaining| remaining > 0)
 }
 impl ConditionState {
     /// Persist this counter even when no instances remain. Generations are never
@@ -260,12 +265,15 @@ impl ConditionState {
     pub(crate) fn remove(&mut self, condition: &ConditionId) -> bool {
         let mut changed = false;
         self.entries.retain(|(id, _), entry| {
-            if id != condition || entry.phase != ConditionPhase::Active || entry.remaining == 0 {
+            if id != condition
+                || entry.phase != ConditionPhase::Active
+                || entry.remaining == Some(0)
+            {
                 return true;
             }
             changed = true;
             if entry.reserved_by.is_some() {
-                entry.remaining = 0;
+                entry.remaining = Some(0);
                 true
             } else {
                 end_active(entry, ConditionEnd::Removal)
@@ -335,34 +343,44 @@ impl ConditionState {
         self.entries.remove(&key);
         true
     }
+    /// Finite time left, if any. Use has_active to test presence, including unbounded effects.
     pub fn remaining(&self, id: &ConditionId, source: ActorId) -> Option<u64> {
         self.entries
             .get(&(id.clone(), source))
-            .map(|entry| entry.remaining)
+            .and_then(|entry| entry.remaining)
             .or_else(|| {
                 self.entries
                     .get(&(id.clone(), ActorId(0)))
-                    .map(|entry| entry.remaining)
+                    .and_then(|entry| entry.remaining)
             })
+    }
+    pub fn has_active(&self, id: &ConditionId) -> bool {
+        self.entries.values().any(|entry| {
+            &entry.condition == id
+                && entry.phase == ConditionPhase::Active
+                && entry.remaining != Some(0)
+        })
     }
     pub fn next_expiry_in(&self) -> Option<u64> {
         self.entries
             .values()
             .filter(|entry| entry.reserved_by.is_none())
-            .map(|entry| entry.remaining)
+            .filter_map(|entry| entry.remaining)
             .min()
     }
     pub(crate) fn last_boundary_in(&self) -> Option<u64> {
         self.entries
             .values()
             .filter(|entry| entry.reserved_by.is_none())
-            .map(|entry| {
-                entry.remaining
-                    + if entry.phase == ConditionPhase::Active {
-                        entry.protection.map_or(0, ConditionTicks::get)
-                    } else {
-                        0
-                    }
+            .filter_map(|entry| {
+                entry.remaining.map(|remaining| {
+                    remaining
+                        + if entry.phase == ConditionPhase::Active {
+                            entry.protection.map_or(0, ConditionTicks::get)
+                        } else {
+                            0
+                        }
+                })
             })
             .max()
     }
@@ -394,7 +412,9 @@ impl ConditionState {
             validate(
                 def,
                 entry.source,
-                entry.remaining.max(u64::from(entry.reserved_by.is_some())),
+                entry
+                    .remaining
+                    .map(|remaining| remaining.max(u64::from(entry.reserved_by.is_some()))),
             )?;
             if entry
                 .reserved_by
@@ -404,11 +424,11 @@ impl ConditionState {
                 return Err(ConditionError::InvalidReservation);
             }
             if entry.phase == ConditionPhase::Protection
-                && (def
-                    .timing
-                    .protection()
-                    .is_none_or(|limit| entry.remaining > limit.get())
-                    || entry.reserved_by.is_some()
+                && (def.timing.protection().is_none_or(|limit| {
+                    entry
+                        .remaining
+                        .is_none_or(|remaining| remaining > limit.get())
+                }) || entry.reserved_by.is_some()
                     || entry.qualification.is_some())
             {
                 return Err(ConditionError::InvalidPhase);
@@ -444,13 +464,21 @@ impl ConditionState {
         duration: u64,
         immune: bool,
     ) -> Result<ConditionUpdate, ConditionError> {
-        self.apply_qualified(def, source, duration, immune, None)
+        self.apply_qualified(def, source, Some(duration), immune, None)
+    }
+    pub fn apply_persistent(
+        &mut self,
+        def: &ConditionDef,
+        source: ActorId,
+        immune: bool,
+    ) -> Result<ConditionUpdate, ConditionError> {
+        self.apply_qualified(def, source, None, immune, None)
     }
     pub(crate) fn apply_qualified(
         &mut self,
         def: &ConditionDef,
         source: ActorId,
-        duration: u64,
+        duration: Option<u64>,
         immune: bool,
         qualification: Option<TokenQualification>,
     ) -> Result<ConditionUpdate, ConditionError> {
@@ -491,7 +519,9 @@ impl ConditionState {
                 Some(
                     entry
                         .remaining
-                        .checked_add(duration)
+                        .and_then(|remaining| {
+                            remaining.checked_add(duration.expect("finite extension"))
+                        })
                         .filter(|ticks| *ticks <= crate::limits::NUMERIC as u64)
                         .ok_or(ConditionError::InvalidDuration)?,
                 )
@@ -506,7 +536,7 @@ impl ConditionState {
                     ConditionUpdate::Refreshed
                 }
                 Stacking::Extend => {
-                    entry.remaining = extended.expect("validated extension");
+                    entry.remaining = Some(extended.expect("validated extension"));
                     ConditionUpdate::Refreshed
                 }
                 Stacking::Longest => {
@@ -625,7 +655,8 @@ impl ConditionState {
             };
             // Changed/removed definitions are an administrative replacement,
             // not a gameplay end that can grant a new protection window.
-            if entry.protection != definition.timing.protection()
+            if entry.timing != definition.timing
+                || entry.protection != definition.timing.protection()
                 || entry.protected != definition.protected_lifecycle()
             {
                 changed = true;
@@ -642,12 +673,15 @@ impl ConditionState {
     pub fn advance_active(&mut self, ticks: u64) -> bool {
         let mut changed = false;
         self.entries.retain(|_, entry| {
-            if ticks < entry.remaining || entry.reserved_by.is_some() {
-                entry.remaining = entry.remaining.saturating_sub(ticks);
+            let Some(remaining) = entry.remaining else {
+                return true;
+            };
+            if ticks < remaining || entry.reserved_by.is_some() {
+                entry.remaining = Some(remaining.saturating_sub(ticks));
                 return true;
             }
             changed = true;
-            let beyond = ticks - entry.remaining;
+            let beyond = ticks - remaining;
             if entry.phase == ConditionPhase::Active {
                 return end_active(
                     entry,
@@ -671,7 +705,7 @@ impl ConditionState {
     ) -> bool {
         self.entries.values().any(|entry| {
             entry.phase == ConditionPhase::Active
-                && entry.remaining > elapsed
+                && entry.remaining.is_none_or(|remaining| remaining > elapsed)
                 && entry.reserved_by.is_none()
                 && rules
                     .condition(&entry.condition)
@@ -787,7 +821,7 @@ impl ConditionState {
         match entry.reserved_by {
             Some(previous) if previous == owner => Ok(false),
             Some(_) => Err(ConditionError::InvalidReservation),
-            None if entry.remaining > 0 => {
+            None if entry.remaining.is_some_and(|remaining| remaining > 0) => {
                 entry.reserved_by = Some(owner);
                 Ok(true)
             }
@@ -841,11 +875,22 @@ fn key(def: &ConditionDef, source: ActorId) -> (ConditionId, ActorId) {
         },
     )
 }
-fn validate(_: &ConditionDef, source: ActorId, duration: u64) -> Result<(), ConditionError> {
+fn validate(
+    def: &ConditionDef,
+    source: ActorId,
+    duration: Option<u64>,
+) -> Result<(), ConditionError> {
     if source.0 == 0 || source.0 == u64::MAX {
         return Err(ConditionError::InvalidSource);
     }
-    ConditionTicks::new(duration)?;
+    match (def.timing, duration) {
+        (ConditionTiming::UntilRemoved, None)
+            if def.lifecycle == ConditionLifecycle::Timed && def.stacking == Stacking::Keep => {}
+        (ConditionTiming::ActorActive { .. }, Some(duration)) => {
+            ConditionTicks::new(duration)?;
+        }
+        _ => return Err(ConditionError::InvalidDuration),
+    }
     Ok(())
 }
 
@@ -854,6 +899,44 @@ mod tests {
     use super::*;
     use crate::rules::DEFAULT_RULESET_TOML;
 
+    #[test]
+    fn unbounded_condition_has_no_expiry_even_at_maximum_elapsed_time() {
+        let rules = crate::test_creatures::ruleset();
+        let mut definition = rules
+            .condition(&ConditionId::new("readied").unwrap())
+            .unwrap()
+            .clone();
+        definition.timing = ConditionTiming::UntilRemoved;
+        definition.lifecycle = ConditionLifecycle::Timed;
+        definition.stacking = Stacking::Keep;
+        definition.id = ConditionId::new("fixture_persistent").unwrap();
+        definition.family =
+            crate::content_ids::ConditionFamilyId::new("fixture_persistent").unwrap();
+        let mut document = rules.document().clone();
+        document.conditions.push(definition.clone());
+        let rules = Ruleset::validate(document).unwrap();
+        let mut state = ConditionState::default();
+        state
+            .apply_persistent(&definition, ActorId(7), false)
+            .unwrap();
+        let before = state.clone();
+        assert!(!state.advance_active(u64::MAX));
+        assert_eq!(state, before);
+        assert_eq!(state.next_expiry_in(), None);
+        assert_eq!(state.last_boundary_in(), None);
+        assert!(state.has_active(&definition.id));
+        assert!(
+            state
+                .qualifying_tokens(&rules, ActorId(7), false)
+                .is_empty(),
+            "persistent conditions never become reusable preparation tokens"
+        );
+        assert_eq!(
+            state.apply_persistent(&definition, ActorId(8), true),
+            Ok(ConditionUpdate::Immune)
+        );
+        assert!(state.is_empty());
+    }
     #[test]
     fn reconciliation_never_evicts_protected_confusion_with_repeatable_restrictions() {
         for stacking in [Stacking::Keep, Stacking::Extend] {
@@ -927,10 +1010,10 @@ mod tests {
         let entry = state.instances().next().unwrap();
         assert_eq!(
             (entry.remaining, entry.stacks, entry.source),
-            (3800, 1, ActorId(1))
+            (Some(3800), 1, ActorId(1))
         );
         state.advance_active(3799);
-        assert_eq!(state.instances().next().unwrap().remaining, 1);
+        assert_eq!(state.instances().next().unwrap().remaining, Some(1));
         state.advance_active(1);
         assert!(state.is_empty());
         assert_eq!(
@@ -990,7 +1073,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             (entry.phase, entry.remaining),
-            (ConditionPhase::Protection, 700)
+            (ConditionPhase::Protection, Some(700))
         );
         assert_eq!(
             state
@@ -998,7 +1081,7 @@ mod tests {
                 .find(|entry| entry.condition == ordinary.id)
                 .unwrap()
                 .remaining,
-            300
+            Some(300)
         );
         let token = state
             .qualifying_tokens(&rules, ActorId(1), false)
@@ -1010,7 +1093,10 @@ mod tests {
             .instances()
             .find(|entry| entry.condition == ordinary.id)
             .unwrap();
-        assert_eq!((entry.remaining, entry.reserved_by), (0, Some(ActorId(3))));
+        assert_eq!(
+            (entry.remaining, entry.reserved_by),
+            (Some(0), Some(ActorId(3)))
+        );
         assert!(state.consume_reservation(&token, ActorId(3)));
         assert_eq!(state.instances().count(), 1);
     }
@@ -1114,7 +1200,7 @@ mod tests {
         creature.advance_active(301);
         assert_eq!(
             creature.conditions().instances().next().unwrap().remaining,
-            0
+            Some(0)
         );
         creature.consume_tokens(&[token], ActorId(1));
         assert!(creature.conditions().is_empty());
@@ -1132,7 +1218,7 @@ mod tests {
                 .apply_qualified(
                     def,
                     opponent,
-                    300,
+                    Some(300),
                     false,
                     Some(TokenQualification {
                         opponent,
@@ -1157,7 +1243,7 @@ mod tests {
         assert_eq!(state.instances().count(), 1);
         assert!(state.instances().next().unwrap().qualification.is_none());
         // The ordinary Readied definition retains Longest renewal semantics.
-        assert_eq!(state.instances().next().unwrap().remaining, 300);
+        assert_eq!(state.instances().next().unwrap().remaining, Some(300));
     }
 
     #[test]
@@ -1264,7 +1350,7 @@ mod tests {
         assert_eq!(state, held);
         assert!(state.evict_oldest().is_none());
         state.advance_active(80);
-        assert_eq!(state.instances().next().unwrap().remaining, 0);
+        assert_eq!(state.instances().next().unwrap().remaining, Some(0));
         assert!(state.next_expiry_in().is_none());
         assert!(state.sources(&rules).is_empty());
         let restored = ConditionState::from_recorded(

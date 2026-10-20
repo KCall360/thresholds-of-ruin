@@ -258,6 +258,7 @@ impl Chronicler {
                             }
                         }
                         CombatEventView::UnseenAbility { .. }
+                        | CombatEventView::AnonymousAbility { .. }
                         | CombatEventView::EscapeResolved { .. } => {
                             Beat::EscapeHold(tor_client_common::narration::combat_event(e, b, a))
                         }
@@ -443,6 +444,27 @@ mod tests {
                 event: Box::new(event),
             },
         }
+    }
+
+    #[test]
+    fn anonymous_effect_feedback_never_becomes_a_named_ability_beat() {
+        let before = view();
+        let mut after = before.clone();
+        after.observation.tick += 1;
+        let target = after.observation.visible_actors[0].id;
+        after.observation.combat.as_mut().unwrap().events =
+            vec![CombatEventView::AnonymousAbility {
+                caster: Some(after.observation.self_target),
+                target: Some(target),
+                outcome: AbilityOutcome::Unaffected,
+            }];
+        let beats = Chronicler::default().observe(&before, &after, None, &Palette::default());
+        assert!(beats.contains(&Beat::EscapeHold(
+            "You used an unidentified effect on the ruin scout.".into()
+        )));
+        assert!(!beats
+            .iter()
+            .any(|beat| matches!(beat, Beat::AbilityResolved { .. })));
     }
 
     #[test]

@@ -435,3 +435,299 @@ fn healing_overflow_policy_is_required_strict_and_source_matched() {
         }]
     ));
 }
+
+fn persistent_creature() -> crate::creatures::CreatureState {
+    use crate::creatures::{Content, CreatureBuild, CreatureState};
+    use crate::rules::{ConditionLifecycle, ConditionTiming, Stacking};
+    let original = crate::test_creatures::build(crate::test_creatures::species());
+    let mut document = original.ruleset().document().clone();
+    for name in ["fixture_up", "fixture_down"] {
+        let mut definition = document
+            .conditions
+            .iter()
+            .find(|entry| entry.id.as_str() == "readied")
+            .unwrap()
+            .clone();
+        definition.id = ConditionId::new(name).unwrap();
+        definition.family = crate::content_ids::ConditionFamilyId::new(name).unwrap();
+        definition.lifecycle = ConditionLifecycle::Timed;
+        definition.timing = ConditionTiming::UntilRemoved;
+        definition.stacking = Stacking::Keep;
+        document.conditions.push(definition);
+    }
+    let rules = crate::rules::Ruleset::validate(document).unwrap();
+    let content = Content::new(rules, original.content().catalog().clone()).unwrap();
+    CreatureState::new(
+        CreatureBuild::new(
+            content,
+            original.species_id().clone(),
+            original.ledger().clone(),
+            original.binding(),
+            *original.starting_skills(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn persistent_effect_repeats_are_noops_and_opposition_cancels_to_neutral() {
+    let up = ConditionId::new("fixture_up").unwrap();
+    let down = ConditionId::new("fixture_down").unwrap();
+    let mut creature = persistent_creature();
+    let baseline = creature.derived().clone();
+    let apply = |creature: &mut crate::creatures::CreatureState,
+                 id: &ConditionId,
+                 opposite: &ConditionId| {
+        let effects = [PlannedEffect::ApplyPersistentCondition {
+            id: id.clone(),
+            cancels: Some(opposite.clone()),
+        }];
+        let mut rng = 41;
+        let outcome = super::resolve(
+            input(&effects),
+            &Snapshot::capture(creature),
+            &mut rng,
+            &mut (),
+        )
+        .unwrap();
+        assert_eq!(
+            rng, 41,
+            "applying or cancelling persistence consumes no random values"
+        );
+        for effect in &outcome.effects {
+            effect
+                .apply_to(
+                    &mut super::ActorEffectState {
+                        creature,
+                        observed_plan: None,
+                        placement: None,
+                        recovery_context: None,
+                    },
+                    ActorId(1),
+                )
+                .unwrap();
+        }
+        outcome
+    };
+    for (first, opposite) in [(&up, &down), (&down, &up)] {
+        let outcome = apply(&mut creature, first, opposite);
+        assert_eq!(
+            outcome.effects,
+            [ResolvedEffect::ApplyPersistentCondition { id: first.clone() }]
+        );
+        assert_ne!(
+            creature.derived(),
+            &baseline,
+            "persistent condition remains a normal composed source"
+        );
+        let retained = creature.clone();
+        assert!(apply(&mut creature, first, opposite).effects.is_empty());
+        assert_eq!(creature, retained);
+        let outcome = apply(&mut creature, opposite, first);
+        assert_eq!(
+            outcome.effects,
+            [ResolvedEffect::RemoveCondition { id: first.clone() }]
+        );
+        assert!(
+            creature.conditions().is_empty(),
+            "opposition only cancels, without installing the new condition"
+        );
+        assert_eq!(creature.derived(), &baseline);
+    }
+    let effects = [
+        PlannedEffect::ApplyPersistentCondition {
+            id: up.clone(),
+            cancels: None,
+        },
+        PlannedEffect::ApplyPersistentCondition {
+            id: down,
+            cancels: Some(up.clone()),
+        },
+    ];
+    let outcome = super::resolve(
+        input(&effects),
+        &Snapshot::capture(&creature),
+        &mut 41,
+        &mut (),
+    )
+    .unwrap();
+    assert_eq!(
+        outcome.effects,
+        [
+            ResolvedEffect::ApplyPersistentCondition { id: up.clone() },
+            ResolvedEffect::RemoveCondition { id: up }
+        ],
+        "later effects see the live candidate, not an obsolete pre-effect snapshot"
+    );
+}
+
+#[test]
+fn persistent_effect_records_freeze_opposition_and_require_complete_current_fields() {
+    let creature = persistent_creature();
+    let rules = creature.build().ruleset();
+    let source = Effect::ApplyPersistentCondition {
+        condition: ConditionId::new("fixture_up").unwrap(),
+        cancels: Some(ConditionId::new("fixture_down").unwrap()),
+    };
+    let planned = PlannedEffect::ApplyPersistentCondition {
+        id: ConditionId::new("fixture_up").unwrap(),
+        cancels: Some(ConditionId::new("fixture_down").unwrap()),
+    };
+    rules
+        .validate_effects(std::slice::from_ref(&source))
+        .unwrap();
+    assert!(super::plan::effects_valid(
+        std::slice::from_ref(&planned),
+        rules
+    ));
+    assert!(super::plan::item_effects_match_definition(
+        std::slice::from_ref(&source),
+        std::slice::from_ref(&planned)
+    ));
+    let mut changed = planned.clone();
+    if let PlannedEffect::ApplyPersistentCondition { cancels, .. } = &mut changed {
+        *cancels = None;
+    }
+    assert!(!super::plan::item_effects_match_definition(
+        std::slice::from_ref(&source),
+        &[changed]
+    ));
+    for opposite in [None, Some("fixture_down")] {
+        for (kind, mut value) in [
+            (0, serde_json::to_value(&source).unwrap()),
+            (1, serde_json::to_value(&planned).unwrap()),
+        ] {
+            value["cancels"] = json!(opposite);
+            let accepts = |value: serde_json::Value| {
+                if kind == 0 {
+                    serde_json::from_value::<Effect>(value).is_ok()
+                } else {
+                    serde_json::from_value::<PlannedEffect>(value).is_ok()
+                }
+            };
+            assert!(accepts(value.clone()));
+            for field in value.as_object().unwrap().keys() {
+                let mut bad = value.clone();
+                bad.as_object_mut().unwrap().remove(field);
+                assert!(!accepts(bad), "missing {field}");
+            }
+            let mut bad = value.clone();
+            bad["duration"] = json!(1);
+            assert!(!accepts(bad));
+            assert!(!accepts(json!([
+                "apply_persistent_condition",
+                "fixture_up",
+                opposite
+            ])));
+        }
+    }
+    for invalid in [
+        Effect::ApplyPersistentCondition {
+            condition: ConditionId::new("readied").unwrap(),
+            cancels: None,
+        },
+        Effect::ApplyPersistentCondition {
+            condition: ConditionId::new("fixture_up").unwrap(),
+            cancels: Some(ConditionId::new("readied").unwrap()),
+        },
+        Effect::ApplyPersistentCondition {
+            condition: ConditionId::new("fixture_up").unwrap(),
+            cancels: Some(ConditionId::new("fixture_up").unwrap()),
+        },
+        Effect::ApplyCondition {
+            condition: ConditionId::new("fixture_up").unwrap(),
+            duration: 10,
+        },
+        Effect::ApplyConditionForTurns {
+            condition: ConditionId::new("fixture_up").unwrap(),
+            duration: AmountExpr::Fixed { amount: 1 },
+        },
+    ] {
+        assert!(rules.validate_effects(&[invalid]).is_err());
+    }
+}
+
+#[test]
+fn persistent_condition_survives_inactive_region_unload_restore_and_thaw() {
+    use std::{collections::BTreeSet, num::NonZeroU64};
+    use tor_world::{Location, Position, RegionId};
+    let creature = persistent_creature();
+    let build = creature.build().clone();
+    let mut game = crate::Game::two_room_in_stone(42, build.content().clone());
+    let actor = game
+        .spawn_actor(
+            Location {
+                region: RegionId(1),
+                position: Position { x: 1, y: 1, z: 0 },
+            },
+            NonZeroU64::new(100).unwrap(),
+        )
+        .unwrap();
+    game.configure_creature(
+        actor,
+        crate::CreatureIdentity {
+            name: "subject".into(),
+            faction: "neutral".into(),
+        },
+        build,
+    )
+    .unwrap();
+    let id = ConditionId::new("fixture_up").unwrap();
+    game.apply_persistent_condition(actor, &id, actor).unwrap();
+    let original = game
+        .creature(actor)
+        .unwrap()
+        .conditions()
+        .instances()
+        .next()
+        .unwrap()
+        .clone();
+    let mut records = crate::MemoryRecords::default();
+    game.transition_regions(
+        &crate::RegionTransition {
+            active: BTreeSet::new(),
+            loaded: BTreeSet::new(),
+        },
+        &mut records,
+    )
+    .unwrap();
+    assert!(game.creature(actor).is_none());
+    game.tick = 1_000_000;
+    let mut shared = crate::checkpoint::SharedState::default();
+    let checkpoint = game.checkpoint(&mut shared);
+    let (checkpoint, shared) =
+        serde_json::from_slice(&serde_json::to_vec(&(checkpoint, shared)).unwrap()).unwrap();
+    let mut restored =
+        crate::Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap();
+    restored
+        .transition_regions(
+            &crate::RegionTransition {
+                active: BTreeSet::from([RegionId(1), RegionId(2)]),
+                loaded: BTreeSet::from([RegionId(1), RegionId(2)]),
+            },
+            &mut records,
+        )
+        .unwrap();
+    assert_eq!(
+        restored
+            .creature(actor)
+            .unwrap()
+            .conditions()
+            .instances()
+            .next(),
+        Some(&original)
+    );
+    restored
+        .apply_persistent_condition(actor, &id, actor)
+        .unwrap();
+    assert_eq!(
+        restored
+            .creature(actor)
+            .unwrap()
+            .conditions()
+            .instances()
+            .next(),
+        Some(&original)
+    );
+}

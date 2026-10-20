@@ -242,7 +242,7 @@ fn confusion_three_hundred_active_then_four_hundred_protection_never_refreshes()
             .find(|entry| entry.condition == id)
             .unwrap()
             .remaining,
-        1
+        Some(1)
     );
     game.tick = 300;
     game.settle_creature_time().unwrap();
@@ -254,7 +254,7 @@ fn confusion_three_hundred_active_then_four_hundred_protection_never_refreshes()
         .find(|entry| entry.condition == id)
         .unwrap();
     assert_eq!(entry.phase, crate::conditions::ConditionPhase::Protection);
-    assert_eq!(entry.remaining, 400);
+    assert_eq!(entry.remaining, Some(400));
     drop(protected);
     game.tick = 699;
     game.apply_condition(ActorId(2), &id, ActorId(1), 300)
@@ -267,7 +267,7 @@ fn confusion_three_hundred_active_then_four_hundred_protection_never_refreshes()
             .find(|entry| entry.condition == id)
             .unwrap()
             .remaining,
-        1
+        Some(1)
     );
     game.tick = 700;
     game.settle_creature_time().unwrap();

@@ -37,10 +37,10 @@ fn state(rows: &mut Vec<String>, label: &str, value: &DiagnosticCombatant) {
     }
     for condition in &value.conditions {
         rows.push(format!(
-            "  {} from actor {}: {} active ticks",
+            "  {} from actor {}: {}",
             crate::inspection::condition_label(condition),
             condition.source.0,
-            condition.remaining_ticks
+            crate::inspection::condition_lifetime(condition.remaining_ticks)
         ));
     }
 }
@@ -120,9 +120,9 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                 DiagnosticEffect::Heal { target, amount } => {
                     format!("  Actor {}: {amount} healing", target.0)
                 }
-                DiagnosticEffect::HealAndImproveHitDie { target, amount } => {
+                DiagnosticEffect::HealAndImproveHitDice { target, amount, credits } => {
                     format!(
-                        "  Actor {}: {amount} healing; one owned Hit Die Health roll improved by 1",
+                        "  Actor {}: {amount} healing; owned Hit Die Health rolls improved by {credits}",
                         target.0
                     )
                 }
@@ -175,8 +175,8 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                     source,
                     duration,
                 } => format!(
-                    "  Actor {}: {} from {} for {duration} ticks",
-                    target.0, condition.name, source.0
+                    "  Actor {}: {} from {}: {}",
+                    target.0, condition.name, source.0, crate::inspection::condition_lifetime(*duration)
                 ),
             });
         }
@@ -256,5 +256,103 @@ pub(crate) mod tests {
                 "  Cost Focus: start 0, resolution 1"
             ]
         );
+    }
+
+    fn report_with_effects(effects: Vec<DiagnosticEffect>) -> CombatDiagnosticsView {
+        let combatant = DiagnosticCombatant {
+            health: 10,
+            maximum_health: 10,
+            injury: Some(0),
+            dead: false,
+            resources: vec![],
+            conditions: vec![],
+        };
+        let mut report = report();
+        report.enabled = true;
+        report.tick = 10;
+        report.captured = 1;
+        report.retained = 1;
+        report.through = 1;
+        report.records.push(CombatDiagnosticRecord {
+            sequence: 1,
+            tick: 10,
+            actor: ActorId(1),
+            target: ActorId(2),
+            ability: None,
+            intention: None,
+            origin_intention: None,
+            preparation: 5,
+            started: 5,
+            remaining: 5,
+            recovery: 2,
+            charge: None,
+            actor_before: combatant.clone(),
+            target_before: combatant.clone(),
+            actor_after: combatant.clone(),
+            target_after: combatant,
+            outcome: DiagnosticOutcome {
+                result: AbilityOutcome::Applied,
+                effects,
+            },
+            trace: CombatTraceView {
+                steps: vec![],
+                truncated: false,
+            },
+        });
+        report
+    }
+
+    #[test]
+    fn condition_diagnostics_render_persistent_and_timed_lifetimes_and_captured_timing() {
+        for (remaining, lifetime) in [
+            (None, "until removed"),
+            (Some(35), "35 active ticks remaining"),
+        ] {
+            let condition = ContentRef {
+                id: "fixture_condition".into(),
+                name: "Fixture condition".into(),
+            };
+            let mut report = report_with_effects(vec![DiagnosticEffect::Condition {
+                target: ActorId(2),
+                condition: condition.clone(),
+                source: ActorId(1),
+                duration: remaining,
+            }]);
+            report.records[0]
+                .target_after
+                .conditions
+                .push(ConditionView {
+                    condition,
+                    phase: ConditionPhase::Active,
+                    source: ActorId(1),
+                    remaining_ticks: remaining,
+                });
+            let rows = lines(&report).unwrap();
+            assert!(rows.contains(&format!("  Fixture condition from actor 1: {lifetime}")));
+            assert!(rows.contains(&format!("  Actor 2: Fixture condition from 1: {lifetime}")));
+            assert!(rows
+                .iter()
+                .any(|row| row.contains("preparation 5, started 5, remaining 5, recovery 2")));
+        }
+    }
+
+    #[test]
+    fn healing_diagnostics_render_the_disclosed_one_or_two_credits() {
+        for credits in [1, 2] {
+            let report = report_with_effects(vec![DiagnosticEffect::HealAndImproveHitDice {
+                target: ActorId(2),
+                amount: 8,
+                credits,
+            }]);
+            let rows = lines(&report).unwrap();
+            assert_eq!(
+                rows.iter()
+                    .filter(|row| row.contains("healing"))
+                    .collect::<Vec<_>>(),
+                vec![&format!(
+                    "  Actor 2: 8 healing; owned Hit Die Health rolls improved by {credits}"
+                )]
+            );
+        }
     }
 }

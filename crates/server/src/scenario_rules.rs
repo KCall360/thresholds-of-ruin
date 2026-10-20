@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tor_simulation::rules::{RulesetDocument, DEFAULT_RULESET_TOML};
 
+#[path = "scenario_rules_authoring.rs"]
+mod authoring;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Import {
@@ -47,7 +50,7 @@ pub(super) fn resolve(source: &str, file: &str) -> Result<Resolved, Failure> {
     let value: toml::Value = parse(source, file)?;
     if value.get("import").is_none() {
         return Ok(Resolved {
-            document: parse(source, file)?,
+            document: parse::<authoring::Document>(source, file)?.0,
             dependencies: BTreeMap::new(),
             materialized: None,
         });
@@ -88,7 +91,7 @@ pub(super) fn resolve(source: &str, file: &str) -> Result<Resolved, Failure> {
         "Resolved rules exceed source limit",
     )?;
     Ok(Resolved {
-        document: parse(&materialized, file)?,
+        document: parse::<authoring::Document>(&materialized, file)?.0,
         dependencies: BTreeMap::from([(input.import, source_digest(DEFAULT_RULESET_TOML))]),
         materialized: Some(materialized),
     })
@@ -202,6 +205,283 @@ mod tests {
     fn source(overrides: &str) -> String {
         format!("import = \"{RULESET}\"\n{overrides}")
     }
+    const PRODUCTION_UTILITY_RULES: &str =
+        include_str!("../../../scenarios/rogue-exploration/rules.toml");
+
+    fn utility_effect(document: &RulesetDocument, id: &str) -> serde_json::Value {
+        let ability = document
+            .abilities
+            .iter()
+            .find(|ability| ability.id.as_str() == id)
+            .unwrap();
+        let tor_simulation::rules::StrikeSource::Authored { strikes } = &ability.strikes else {
+            panic!("expected authored utility strike");
+        };
+        serde_json::to_value(&strikes[0].on_failure[0]).unwrap()
+    }
+
+    #[test]
+    fn persistent_rule_sources_share_typed_authoring_for_imports_and_full_documents() {
+        let imported = resolve(PRODUCTION_UTILITY_RULES, "production rules").unwrap();
+        let repeated = resolve(PRODUCTION_UTILITY_RULES, "production rules").unwrap();
+        assert_eq!(imported.document, repeated.document);
+        assert_eq!(imported.materialized, repeated.materialized);
+        assert_eq!(
+            imported.dependencies,
+            BTreeMap::from([(RULESET.to_owned(), source_digest(DEFAULT_RULESET_TOML))])
+        );
+        let materialized = imported.materialized.as_ref().unwrap();
+        let full = resolve(materialized, "full rules").unwrap();
+        assert_eq!(full.document, imported.document);
+        assert!(full.dependencies.is_empty());
+        assert!(full.materialized.is_none());
+        assert_eq!(
+            utility_effect(&full.document, "rogue.wand_invisibility"),
+            serde_json::json!({"kind":"apply_persistent_condition","condition":"rogue.invisible","cancels":null})
+        );
+        assert_eq!(
+            utility_effect(&full.document, "rogue.wand_haste")["cancels"],
+            "rogue.slowed"
+        );
+        assert_eq!(
+            utility_effect(&full.document, "rogue.wand_slow")["cancels"],
+            "rogue.hasted"
+        );
+        tor_simulation::rules::Ruleset::validate(full.document).unwrap();
+        let exported = resolve_rules_source(PRODUCTION_UTILITY_RULES, "production rules").unwrap();
+        assert_eq!(&exported.source, materialized);
+        assert_eq!(exported.dependencies, imported.dependencies);
+        let invisibility = exported.document["abilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|ability| ability["id"].as_str() == Some("rogue.wand_invisibility"))
+            .unwrap();
+        assert!(invisibility["strikes"]["strikes"][0]["on_failure"][0].get("cancels").is_none(),
+            "canonical source text/provenance is preserved; null exists only in typed compiled output");
+    }
+
+    #[test]
+    fn persistent_rule_source_rejects_malformed_opposites_and_unknown_fields_before_compilation() {
+        let omitted = "{ kind = \"apply_persistent_condition\", condition = \"rogue.invisible\" }";
+        assert_eq!(PRODUCTION_UTILITY_RULES.matches(omitted).count(), 1);
+        for field in [
+            "cancels = true",
+            "cancels = 1",
+            "cancels = nan",
+            "cancels = 1979-05-27",
+            "cancels = ['rogue.hasted']",
+            "cancels = { rogue = 'hasted' }",
+            "cancels = 'invalid id'",
+            "extra = true",
+            "duration = 100",
+            "cancels = 'rogue.hasted', cancels = 'rogue.slowed'",
+        ] {
+            let effect = format!(
+                "{{ kind = 'apply_persistent_condition', condition = 'rogue.invisible', {field} }}"
+            );
+            let source = PRODUCTION_UTILITY_RULES.replacen(omitted, &effect, 1);
+            assert!(resolve(&source, "malformed source").is_err(), "{field}");
+        }
+        let positional = PRODUCTION_UTILITY_RULES.replacen(
+            omitted,
+            "['apply_persistent_condition', 'rogue.invisible']",
+            1,
+        );
+        assert!(resolve(&positional, "positional source").is_err());
+        for opposite in ["missing", "rogue.invisible"] {
+            let effect = format!("{{ kind = 'apply_persistent_condition', condition = 'rogue.invisible', cancels = '{opposite}' }}");
+            let source = PRODUCTION_UTILITY_RULES.replacen(omitted, &effect, 1);
+            let resolved = resolve(&source, "invalid reference");
+            if opposite == "rogue.invisible" {
+                assert!(
+                    resolved.is_err(),
+                    "self-opposition fails the strike-shape boundary"
+                );
+            } else {
+                assert!(
+                    tor_simulation::rules::Ruleset::validate(resolved.unwrap().document).is_err(),
+                    "unknown opposition fails content-reference validation"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rules_source_adapter_retains_exact_named_field_inventories_and_nested_strictness() {
+        use serde_json::{json, Value};
+        let baseline: RulesetDocument = parse(DEFAULT_RULESET_TOML, "shared rules").unwrap();
+        let mut source = serde_json::to_value(baseline).unwrap();
+        let index = source["abilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|ability| ability["strikes"]["kind"] == "authored")
+            .unwrap();
+        source["abilities"][index]["strikes"]["strikes"][0]["riders"] = json!([{
+            "trigger":"success", "condition":null, "check":null,
+            "effects":[{"kind":"apply_persistent_condition","condition":"fixture_a"}], "descriptors":[]
+        }]);
+        let compiled = serde_json::from_value::<authoring::Document>(source.clone())
+            .unwrap()
+            .0;
+        let effect = &serde_json::to_value(&compiled).unwrap()["abilities"][index]["strikes"]
+            ["strikes"][0]["riders"][0]["effects"][0];
+        assert_eq!(effect["cancels"], Value::Null);
+        assert!(effect.get("cancels").is_some());
+        let paths = [
+            (
+                String::new(),
+                vec![
+                    "id",
+                    "constants",
+                    "point_pools",
+                    "supplies",
+                    "abilities",
+                    "forms",
+                    "ability_tags",
+                    "talents",
+                    "expertises",
+                    "creature_types",
+                    "subtypes",
+                    "classes",
+                    "conditions",
+                    "descriptors",
+                    "flags",
+                    "resources",
+                    "health_recovery",
+                    "nutrition",
+                    "nutrition_condition_trigger",
+                    "advancement",
+                    "growth",
+                    "equipment_slots",
+                ],
+                vec![],
+            ),
+            (
+                format!("/abilities/{index}"),
+                vec![
+                    "interaction",
+                    "id",
+                    "invocation",
+                    "tags",
+                    "name",
+                    "basic_attack",
+                    "outgoing_edge_policy",
+                    "cost",
+                    "cooldown",
+                    "supply_costs",
+                    "timing",
+                    "reach",
+                    "strikes",
+                    "ai",
+                ],
+                vec![
+                    "invocation",
+                    "outgoing_edge_policy",
+                    "cost",
+                    "cooldown",
+                    "supply_costs",
+                ],
+            ),
+            (
+                format!("/abilities/{index}/strikes/strikes/0"),
+                vec![
+                    "offset",
+                    "unlock",
+                    "check",
+                    "on_success",
+                    "on_failure",
+                    "descriptors",
+                    "riders",
+                ],
+                vec!["unlock", "check"],
+            ),
+            (
+                format!("/abilities/{index}/strikes/strikes/0/riders/0"),
+                vec!["trigger", "condition", "check", "effects", "descriptors"],
+                vec!["condition", "check"],
+            ),
+        ];
+        for (path, fields, optional) in paths {
+            let object = source.pointer(&path).unwrap().as_object().unwrap();
+            assert_eq!(object.len(), fields.len(), "{path}");
+            for field in &fields {
+                assert!(object.contains_key(*field), "{path}/{field}");
+                if optional.contains(field) {
+                    continue;
+                }
+                let mut missing = source.clone();
+                missing
+                    .pointer_mut(&path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(*field);
+                assert!(
+                    serde_json::from_value::<authoring::Document>(missing).is_err(),
+                    "{path}/{field}"
+                );
+            }
+            let mut extra = source.clone();
+            extra.pointer_mut(&path).unwrap()["unexpected"] = json!(true);
+            assert!(
+                serde_json::from_value::<authoring::Document>(extra).is_err(),
+                "{path}"
+            );
+            let mut positional = source.clone();
+            *positional.pointer_mut(&path).unwrap() = json!(fields
+                .iter()
+                .map(|field| &object[*field])
+                .collect::<Vec<_>>());
+            assert!(
+                serde_json::from_value::<authoring::Document>(positional).is_err(),
+                "positional {path}"
+            );
+        }
+        // Other strict effect operands retain their old raw-shape contract.
+        for effect in [
+            json!({"kind":"apply_persistent_condition"}),
+            json!({"kind":"apply_persistent_condition","condition":"fixture_a","extra":true}),
+            json!({"kind":"theft","selection":{"kind":"magical_unit"}}),
+            json!({"kind":"corrode_armor","slot":"body_armor","amount":0}),
+        ] {
+            let mut invalid = source.clone();
+            invalid["abilities"][index]["strikes"]["strikes"][0]["on_success"] = json!([effect]);
+            assert!(serde_json::from_value::<authoring::Document>(invalid).is_err());
+        }
+        let bytes = serde_json::to_string(&source).unwrap();
+        let marker = "\"condition\":\"fixture_a\"";
+        let duplicate = bytes.replacen(
+            marker,
+            &format!("{marker},\"cancels\":null,\"cancels\":null"),
+            1,
+        );
+        assert_ne!(bytes, duplicate);
+        assert!(serde_json::from_str::<authoring::Document>(&duplicate).is_err());
+        // Existing authored dice have a broader derived decoder than rules dice;
+        // source-default conversion must not launder that positional shape.
+        let mut dice = source.clone();
+        dice["abilities"][index]["strikes"]["strikes"][0]["on_success"] = json!([{
+            "kind":"heal", "amount":{"kind":"rolled", "dice":[1, 6, 0]}
+        }]);
+        assert!(serde_json::from_value::<authoring::Document>(dice).is_err());
+        // Authored natural riders take the same named adapter, not the permissive
+        // derived source Rider decoder that could canonicalize a positional row.
+        let rider = source["abilities"][index]["strikes"]["strikes"][0]["riders"][0].clone();
+        source["abilities"][index]["strikes"] =
+            json!({"kind":"natural_melee","additional_riders":[rider.clone()]});
+        assert!(serde_json::from_value::<authoring::Document>(source.clone()).is_ok());
+        source["abilities"][index]["strikes"]["additional_riders"][0] = json!([
+            rider["trigger"],
+            rider["condition"],
+            rider["check"],
+            rider["effects"],
+            rider["descriptors"]
+        ]);
+        assert!(serde_json::from_value::<authoring::Document>(source).is_err());
+    }
+
     #[test]
     fn supply_catalog_overrides_use_validated_stable_identities() {
         let resolved = resolve(

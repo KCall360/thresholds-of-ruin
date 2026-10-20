@@ -173,6 +173,24 @@ impl CombatState {
             })
         })
     }
+    pub fn apply_persistent_condition(
+        &mut self,
+        condition: &crate::content_ids::ConditionId,
+        source: ActorId,
+        context: Option<crate::health_recovery::RecoveryContext>,
+    ) -> Result<crate::conditions::ConditionUpdate, GameError> {
+        self.with_recovery_context(context, |creature| {
+            creature.apply_persistent_condition(condition, source)
+        })
+        .map_err(|error| {
+            GameError::Rule(match error {
+                crate::conditions::ConditionError::Capacity => {
+                    crate::abilities::RuleError::ConditionCapacity
+                }
+                _ => crate::abilities::RuleError::InvalidDefinition,
+            })
+        })
+    }
     pub(crate) fn reserve_tokens(
         &mut self,
         tokens: &[crate::conditions::TokenReservation],

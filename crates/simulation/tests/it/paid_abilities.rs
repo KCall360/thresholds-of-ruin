@@ -688,7 +688,7 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
                 condition.source == actor && condition.condition.as_str() == "fear"
             });
             assert_eq!(
-                condition.map(|condition| condition.remaining),
+                condition.and_then(|condition| condition.remaining),
                 duration.map(|duration| duration
                     .saturating_sub(game.tick().saturating_sub(plan.preparation())))
             );

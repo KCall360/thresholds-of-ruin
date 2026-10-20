@@ -1,5 +1,5 @@
 # Candidate timings are inherited and provisional.
-import = "interactions-v46"
+import = "interactions-v47"
 
 [[overrides]]
 op = "set"

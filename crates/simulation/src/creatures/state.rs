@@ -1335,26 +1335,30 @@ impl CreatureState {
             self.costs.restore_resource(resource, amount)
         }
     }
-    /// Apply an already-selected record mutation. Eligibility is cached in the
-    /// permanent sheet; publication checks one exact active row, never reselects.
-    pub(crate) fn heal_and_improve_hit_die(
+    /// Apply one bounded, already-selected prefix in one permanent rebuild.
+    /// Publication checks exact cached acquisition witnesses, never reselects.
+    pub(crate) fn heal_and_improve_hit_dice(
         &mut self,
         amount: u32,
-        claim: &crate::progression::HitDieHealthImprovement,
+        claims: &[crate::progression::HitDieHealthImprovement],
         expected_epoch: BuildEpoch,
     ) -> Result<u32, CreatureStateError> {
         if self.health.dead()
             || self.build_epoch != expected_epoch
-            || self.derived.next_health_improvement.as_ref() != Some(claim)
+            || claims.is_empty()
+            || claims.len() > 2
+            || !self.derived.next_health_improvements.starts_with(claims)
         {
             return Err(CreatureStateError::Inconsistent);
         }
         let mut candidate = self.clone();
         let healed = candidate.heal(amount);
         let mut build = (*candidate.build).clone();
-        build
-            .stage_health_improvement(claim)
-            .map_err(CreatureStateError::Build)?;
+        for claim in claims {
+            build
+                .stage_health_improvement(claim)
+                .map_err(CreatureStateError::Build)?;
+        }
         let context = candidate.recovery_context;
         candidate.rebuild_one_with_recovery_context(
             build,
@@ -1363,6 +1367,15 @@ impl CreatureState {
         )?;
         *self = candidate;
         Ok(healed)
+    }
+    #[cfg(test)]
+    pub(crate) fn heal_and_improve_hit_die(
+        &mut self,
+        amount: u32,
+        claim: &crate::progression::HitDieHealthImprovement,
+        expected_epoch: BuildEpoch,
+    ) -> Result<u32, CreatureStateError> {
+        self.heal_and_improve_hit_dice(amount, std::slice::from_ref(claim), expected_epoch)
     }
     pub fn heal(&mut self, amount: u32) -> u32 {
         let healed = self.health.heal(amount);
@@ -1420,6 +1433,13 @@ impl CreatureState {
     ) -> Result<ConditionUpdate, ConditionError> {
         self.apply_qualified_condition(id, source, duration, None)
     }
+    pub fn apply_persistent_condition(
+        &mut self,
+        id: &ConditionId,
+        source: ActorId,
+    ) -> Result<ConditionUpdate, ConditionError> {
+        self.apply_condition_lifetime(id, source, None, None)
+    }
     /// Cure one condition's active applications without discarding other state,
     /// protection phases, or reservations owned by already-paid work.
     pub fn remove_condition(&mut self, id: &ConditionId) -> Result<bool, ConditionError> {
@@ -1469,6 +1489,15 @@ impl CreatureState {
         id: &ConditionId,
         source: ActorId,
         duration: u64,
+        qualification: Option<crate::conditions::TokenQualification>,
+    ) -> Result<ConditionUpdate, ConditionError> {
+        self.apply_condition_lifetime(id, source, Some(duration), qualification)
+    }
+    fn apply_condition_lifetime(
+        &mut self,
+        id: &ConditionId,
+        source: ActorId,
+        duration: Option<u64>,
         qualification: Option<crate::conditions::TokenQualification>,
     ) -> Result<ConditionUpdate, ConditionError> {
         let definition = self
@@ -1556,10 +1585,10 @@ impl CreatureState {
     pub fn needs_active_time(&self) -> bool {
         self.next_change_in().is_some()
             || (!self.health.dead()
-                && self
-                    .conditions
-                    .instances()
-                    .any(|entry| entry.reserved_by.is_some() && entry.remaining > 0))
+                && self.conditions.instances().any(|entry| {
+                    entry.reserved_by.is_some()
+                        && entry.remaining.is_some_and(|remaining| remaining > 0)
+                }))
     }
 
     /// Random depletion work belongs to the existing actor deadline index.

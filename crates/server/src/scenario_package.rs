@@ -52,13 +52,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v46";
-const VALIDATOR: &str = "tor-scenario-36";
+pub const RULESET: &str = "interactions-v47";
+const VALIDATOR: &str = "tor-scenario-37";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 24;
+pub const FORMAT: u32 = 25;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -4709,8 +4709,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-36");
-        assert_eq!(original.certificate.ruleset, "interactions-v46");
+        assert_eq!(original.certificate.validator, "tor-scenario-37");
+        assert_eq!(original.certificate.ruleset, "interactions-v47");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -4877,6 +4877,9 @@ mod tests {
                 {"archetype":"rogue.healing","weight":1},
                 {"archetype":"rogue.confusion","weight":1},
                 {"archetype":"rogue.blindness","weight":1},
+                {"archetype":"rogue.poison","weight":1},
+                {"archetype":"rogue.see_invisible","weight":1},
+                {"archetype":"rogue.extra_healing","weight":1},
             ])
         );
         assert_eq!(ids[6], "rogue.magic_scrolls");
@@ -4896,7 +4899,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
         let package = read_package(&root).unwrap();
         let rules = package.rules().unwrap();
-        for element in ["fire", "cold", "lightning"] {
+        for element in ["fire", "cold", "lightning", "invisibility", "haste", "slow"] {
+            let utility = matches!(element, "invisibility" | "haste" | "slow");
             let id = format!("rogue.wand_{element}");
             let item = &package.manifest.archetypes[&id];
             assert!(item.magical && !item.stackable);
@@ -4910,7 +4914,14 @@ mod tests {
                     maximum: 7
                 }
             );
-            assert_eq!(device.discovery, ItemDiscovery::OnUse);
+            assert_eq!(
+                device.discovery,
+                if utility {
+                    ItemDiscovery::Never
+                } else {
+                    ItemDiscovery::OnUse
+                }
+            );
             let compiled = device.compile(&rules).unwrap();
             let ability = rules.ability(&compiled.ability).unwrap();
             assert!(
@@ -4920,7 +4931,11 @@ mod tests {
             );
             assert_eq!(
                 ability.invocation,
-                tor_simulation::abilities::InvocationKind::DirectionalRay
+                if utility {
+                    tor_simulation::abilities::InvocationKind::DirectionalContactRay
+                } else {
+                    tor_simulation::abilities::InvocationKind::DirectionalRay
+                }
             );
             let value = serde_json::to_value(ability).unwrap();
             assert_eq!(
@@ -4936,12 +4951,25 @@ mod tests {
                 strike["check"]["against"]["skill"],
                 serde_json::json!({"kind":"named","skill":"lore"})
             );
-            let damage = &strike["on_failure"][0]["damage"]["components"][0];
-            assert_eq!(damage["descriptor"], element);
-            assert_eq!(
-                damage["amount"]["dice"],
-                serde_json::json!({"count":6,"sides":6,"bonus":0})
-            );
+            if utility {
+                let (condition, cancels) = match element {
+                    "invisibility" => ("rogue.invisible", None),
+                    "haste" => ("rogue.hasted", Some("rogue.slowed")),
+                    "slow" => ("rogue.slowed", Some("rogue.hasted")),
+                    _ => unreachable!("utility variants are selected explicitly above"),
+                };
+                assert_eq!(
+                    strike["on_failure"],
+                    serde_json::json!([{"kind":"apply_persistent_condition", "condition":condition, "cancels":cancels}])
+                );
+            } else {
+                let damage = &strike["on_failure"][0]["damage"]["components"][0];
+                assert_eq!(damage["descriptor"], element);
+                assert_eq!(
+                    damage["amount"]["dice"],
+                    serde_json::json!({"count":6,"sides":6,"bonus":0})
+                );
+            }
             // The catalog authors an invocation reference, never a character or
             // talent purchase that permanently grants the device's ability.
             assert!(!rules
@@ -4962,7 +4990,16 @@ mod tests {
     fn device_catalog_is_class_independent_but_rejects_stackable_or_mixed_capabilities() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
         let mut package = read_package(&root).unwrap();
-        for id in ["rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning"] {
+        // Device capability is class-independent, but every concealed alternative
+        // in one appearance group must retain the same physical class.
+        for id in [
+            "rogue.wand_fire",
+            "rogue.wand_cold",
+            "rogue.wand_lightning",
+            "rogue.wand_invisibility",
+            "rogue.wand_haste",
+            "rogue.wand_slow",
+        ] {
             package.manifest.archetypes.get_mut(id).unwrap().class = ItemClass::Tool;
         }
         assert!(package.appearance_mapping(42).is_ok());
@@ -6170,7 +6207,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v46"
+        let source = r#"import = "interactions-v47"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

@@ -173,7 +173,7 @@ fn projectile_stack_package(root: &Path) -> Scenario {
     )
     .unwrap();
     std::fs::write(root.join("scenario.toml"), r#"
-format = 24
+format = 25
 id = "projectile-stack-identity"
 version = "1.0"
 ruleset = "rules.toml"

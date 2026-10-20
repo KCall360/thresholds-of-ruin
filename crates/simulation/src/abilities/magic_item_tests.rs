@@ -25,6 +25,14 @@ fn fixture() -> Game {
     })
 }
 fn device(game: &mut Game, id: u64, charges: u16) -> ItemId {
+    device_with_discovery(game, id, charges, ItemDiscovery::OnUse)
+}
+fn device_with_discovery(
+    game: &mut Game,
+    id: u64,
+    charges: u16,
+    discovery: ItemDiscovery,
+) -> ItemId {
     let mut spec = ItemSpec::ordinary("plain stick".into());
     spec.identity = "fixture.elemental_device".into();
     spec.appearance = "plain stick".into();
@@ -38,7 +46,7 @@ fn device(game: &mut Game, id: u64, charges: u16) -> ItemId {
             minimum: 0,
             maximum: 7,
         },
-        discovery: ItemDiscovery::OnUse,
+        discovery,
     });
     let item = game
         .place_item_stack(id, at(1), Some(ActorId(1)), 1, spec)
@@ -47,6 +55,107 @@ fn device(game: &mut Game, id: u64, charges: u16) -> ItemId {
         .edit(item, |i| i.charges = Some(charges))
         .unwrap();
     item
+}
+
+#[test]
+fn captured_zap_discovery_policy_rejects_source_mismatch_before_payment_and_restore() {
+    for (discovery, forged_discovery) in [
+        (ItemDiscovery::Never, ItemDiscovery::OnUse),
+        (ItemDiscovery::OnUse, ItemDiscovery::Never),
+    ] {
+        let mut game = fixture();
+        let item = device_with_discovery(&mut game, 10, 3, discovery);
+        let captured = game
+            .plan_work(
+                ActorId(1),
+                Work::Zap {
+                    item,
+                    direction: StepDirection::North,
+                },
+            )
+            .unwrap();
+        let mut forged = captured.clone();
+        let Plan::Zap { discovery, .. } = &mut forged else {
+            unreachable!()
+        };
+        *discovery = forged_discovery;
+        assert!(forged.valid(&game.content.rules));
+        let before = game.clone();
+        assert!(game.item_allocation(&captured).is_ok());
+        assert!(game.item_allocation(&forged).is_err());
+        assert_eq!(
+            game, before,
+            "rejected policy cannot reserve or spend a charge"
+        );
+
+        // Keep the authentic preparation pending at the current scheduler boundary.
+        game.actors.get_mut(&ActorId(2)).unwrap().ready_at = 0;
+        execute(
+            &mut game,
+            Action::Zap {
+                item,
+                direction: StepDirection::North,
+            },
+        );
+        assert_eq!(game.preparation(ActorId(1)).unwrap().plan, captured);
+        assert!(game.work_state_valid(ActorId(1)));
+        assert_eq!(game, roundtrip(&game));
+        game.actors
+            .get_mut(&ActorId(1))
+            .unwrap()
+            .pending
+            .as_mut()
+            .unwrap()
+            .plan = forged;
+        assert!(!game.work_state_valid(ActorId(1)));
+        let mut shared = crate::checkpoint::SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err());
+        assert_eq!(game.items[&item].charges, Some(3));
+        assert!(!game.actors[&ActorId(1)]
+            .knowledge
+            .contains("fixture.elemental_device"));
+    }
+}
+
+#[test]
+fn device_never_discovery_spends_charge_without_disclosing_identity_or_count() {
+    let mut game = fixture();
+    let item = device_with_discovery(&mut game, 10, 3, ItemDiscovery::Never);
+    let plan = game
+        .plan_work(
+            ActorId(1),
+            Work::Zap {
+                item,
+                direction: StepDirection::North,
+            },
+        )
+        .unwrap();
+    let encoded = serde_json::to_value(&plan).unwrap();
+    assert_eq!(encoded["discovery"], "never");
+    let mut missing = encoded.clone();
+    missing.as_object_mut().unwrap().remove("discovery");
+    assert!(serde_json::from_value::<Plan>(missing).is_err());
+    let mut unsupported = encoded;
+    unsupported["discovery"] = serde_json::json!("self_effect");
+    assert!(!serde_json::from_value::<Plan>(unsupported)
+        .unwrap()
+        .valid(&game.content.rules));
+    execute(
+        &mut game,
+        Action::Zap {
+            item,
+            direction: StepDirection::North,
+        },
+    );
+    assert_eq!(game.items[&item].charges, Some(2));
+    assert_eq!(game.items[&item].quantity, 1);
+    assert!(game.items[&item].holds.is_empty());
+    assert!(!game.actors[&ActorId(1)]
+        .knowledge
+        .contains("fixture.elemental_device"));
+    assert!(game.actors[&ActorId(1)].known_charges.is_empty());
+    assert_eq!(game, roundtrip(&game));
 }
 fn identify_scroll(game: &mut Game, id: u64, class: ItemClass, quantity: u64) -> ItemId {
     let mut spec = ItemSpec::ordinary("unread page".into());
@@ -79,6 +188,493 @@ fn roundtrip(game: &Game) -> Game {
     let shared = serde_json::from_slice(&serde_json::to_vec(&shared).unwrap()).unwrap();
     let snapshot = serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
     Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap()
+}
+
+// Both games contain both definitions. Only the concealed item's true identity
+// and capability differ; no identifier spelling licenses ordinary disclosure.
+fn private_utility_fixture(
+    alternative: bool,
+    discovery: ItemDiscovery,
+    hidden_target: bool,
+    dodges: bool,
+) -> (Game, ItemId) {
+    use crate::content_ids::{AbilityId, ConditionFamilyId, ConditionId};
+    use crate::rules::*;
+    let mut game = super::ray_tests::fixture_with(|document, ray, species| {
+        species.modifiers.retain(|modifier| {
+            !matches!(&modifier.op, ModifierOp::GrantAbility { ability } if ability == &ray.id)
+        });
+        let prototype = document
+            .conditions
+            .iter()
+            .find(|condition| condition.id.as_str() == "ray_fear")
+            .unwrap()
+            .clone();
+        for (id, rate) in [
+            (
+                "private_state_a",
+                crate::action_duration::ActionDuration::Haste,
+            ),
+            (
+                "private_state_b",
+                crate::action_duration::ActionDuration::Slow,
+            ),
+        ] {
+            let mut condition = prototype.clone();
+            condition.id = ConditionId::new(id).unwrap();
+            condition.family = ConditionFamilyId::new(id).unwrap();
+            condition.name = id.into();
+            condition.timing = ConditionTiming::UntilRemoved;
+            condition.stacking = Stacking::Keep;
+            condition.source_scoped = false;
+            condition.modifiers = vec![Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::ActionDuration { value: rate },
+            }];
+            document.conditions.push(condition);
+        }
+        for (id, op) in [
+            (
+                "private_lore",
+                ModifierOp::Add {
+                    stat: Stat::Attribute {
+                        attribute: crate::attributes::Attribute::Intellect,
+                    },
+                    value: 100,
+                },
+            ),
+            (
+                "private_invisible",
+                ModifierOp::Perception {
+                    value: crate::perception::PerceptionValue::Invisible { enabled: true },
+                },
+            ),
+        ] {
+            let mut condition = prototype.clone();
+            condition.id = ConditionId::new(id).unwrap();
+            condition.family = ConditionFamilyId::new(id).unwrap();
+            condition.name = id.into();
+            condition.modifiers = vec![Modifier {
+                scope: Scope::Always,
+                op,
+            }];
+            document.conditions.push(condition);
+        }
+        ray.name = "First concealed utility".into();
+        ray.invocation = InvocationKind::DirectionalContactRay;
+        let StrikeSource::Authored { strikes } = &mut ray.strikes else {
+            unreachable!()
+        };
+        strikes[0].check.as_mut().unwrap().against = Against::Opposed {
+            skill: SkillSelector::Named {
+                skill: crate::attributes::Skill::Lore,
+            },
+        };
+        strikes[0].on_failure = vec![Effect::ApplyPersistentCondition {
+            condition: ConditionId::new("private_state_a").unwrap(),
+            cancels: None,
+        }];
+        let mut other = ray.clone();
+        other.id = AbilityId::new("fixture_ray_alternative").unwrap();
+        other.name = "Second concealed utility".into();
+        let StrikeSource::Authored { strikes } = &mut other.strikes else {
+            unreachable!()
+        };
+        strikes[0].on_failure = vec![Effect::ApplyPersistentCondition {
+            condition: ConditionId::new("private_state_b").unwrap(),
+            cancels: None,
+        }];
+        document.abilities.push(other);
+    });
+    game.set_region_light(RegionId(1), true).unwrap();
+    let build = game.creature(ActorId(2)).unwrap().build().clone();
+    let mut location = at(1);
+    location.position.y = 2;
+    let bystander = game
+        .spawn_actor(location, std::num::NonZeroU64::new(100).unwrap())
+        .unwrap();
+    assert_eq!(bystander, ActorId(3));
+    game.configure_creature(
+        bystander,
+        crate::CreatureIdentity {
+            name: "uninvolved witness".into(),
+            faction: "third".into(),
+        },
+        build,
+    )
+    .unwrap();
+    game.actors.get_mut(&bystander).unwrap().ready_at = 1000;
+    let (actor, condition) = if dodges {
+        (ActorId(2), "ray_agile")
+    } else {
+        (ActorId(1), "private_lore")
+    };
+    game.apply_condition(actor, &ConditionId::new(condition).unwrap(), actor, 500)
+        .unwrap();
+    if hidden_target {
+        game.apply_condition(
+            ActorId(2),
+            &ConditionId::new("private_invisible").unwrap(),
+            ActorId(2),
+            500,
+        )
+        .unwrap();
+        assert!(!game
+            .observe(ActorId(1))
+            .unwrap()
+            .visible_actors
+            .iter()
+            .any(|actor| actor.id == ActorId(2)));
+    }
+    let item = device_with_discovery(&mut game, 10, 3, discovery);
+    game.items
+        .edit(item, |item| {
+            item.spec.identity = if alternative {
+                "opaque_device_b"
+            } else {
+                "opaque_device_a"
+            }
+            .into();
+            item.spec.name = if alternative {
+                "Second concealed utility"
+            } else {
+                "First concealed utility"
+            }
+            .into();
+            item.spec.device.as_mut().unwrap().ability = AbilityId::new(if alternative {
+                "fixture_ray_alternative"
+            } else {
+                "fixture_ray"
+            })
+            .unwrap();
+        })
+        .unwrap();
+    (game, item)
+}
+
+fn private_utility_views(
+    game: &mut Game,
+    item: ItemId,
+    direction: StepDirection,
+) -> Vec<crate::Observation> {
+    // Reuse the host's actual event-time observation boundary so a bystander
+    // gets a witnessed receipt, rather than reconstructing history on a read.
+    game.host_region_continuation = true;
+    execute(game, Action::Zap { item, direction });
+    let witness = game.event_observation_witness();
+    let mut views = Vec::new();
+    for observer in [ActorId(1), ActorId(2), ActorId(3)] {
+        let (mut view, _, proof) = game.observe_event_scene(observer).unwrap();
+        game.record_event_observation(&witness, &proof, &mut view)
+            .unwrap();
+        views.push(view);
+    }
+    game.seal_event_observations().unwrap();
+    game.host_region_continuation = false;
+    for view in &views {
+        assert_eq!(*view, game.observe(view.actor).unwrap());
+    }
+    views
+}
+
+fn assert_private_utility_identity(game: &Game, item: ItemId) {
+    let view = game.observe(ActorId(1)).unwrap();
+    let row = view.inventory.iter().find(|row| row.id == item).unwrap();
+    assert!(!row.identified);
+    assert_eq!(row.name, "plain stick");
+    assert_eq!(
+        view.interactions
+            .unwrap()
+            .inventory
+            .iter()
+            .find(|row| row.item == item)
+            .unwrap()
+            .charges,
+        None
+    );
+    assert!(game.actors[&ActorId(1)].known_charges.is_empty());
+}
+
+#[test]
+fn unknown_never_device_dodge_keeps_all_ordinary_disclosures_indistinguishable() {
+    let (mut first, first_item) = private_utility_fixture(false, ItemDiscovery::Never, false, true);
+    let (mut second, second_item) =
+        private_utility_fixture(true, ItemDiscovery::Never, false, true);
+    for observer in [ActorId(1), ActorId(2), ActorId(3)] {
+        assert_eq!(
+            first.observe(observer).unwrap(),
+            second.observe(observer).unwrap()
+        );
+    }
+    let first_views = private_utility_views(&mut first, first_item, StepDirection::East);
+    let second_views = private_utility_views(&mut second, second_item, StepDirection::East);
+    for game in [&first, &second] {
+        let outcomes: Vec<_> = game
+            .combat_events()
+            .iter()
+            .filter_map(|event| match event {
+                crate::combat::CombatEvent::Resolved { outcome, .. } => Some(outcome),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            outcomes.len(),
+            1,
+            "the first physical contact was actually checked"
+        );
+        assert!(
+            outcomes[0].check.unwrap().success,
+            "the contact actually dodged"
+        );
+        assert!(outcomes[0].effects.is_empty());
+        assert_private_utility_identity(game, first_item);
+    }
+    for (first, second) in first_views.iter().zip(&second_views) {
+        assert_eq!(
+            first.combat.as_ref().unwrap().events,
+            second.combat.as_ref().unwrap().events,
+            "a dodge cannot name the concealed device ability for observer {:?}",
+            first.actor
+        );
+        assert_eq!(
+            first, second,
+            "all other ordinary disclosure must also agree"
+        );
+    }
+}
+
+#[test]
+fn unknown_never_device_contact_does_not_teach_ability_identity_to_any_observer() {
+    for alternative in [false, true] {
+        let (mut game, item) =
+            private_utility_fixture(alternative, ItemDiscovery::Never, false, true);
+        let known: Vec<_> = [ActorId(1), ActorId(2), ActorId(3)]
+            .map(|actor| game.actors[&actor].recognized_abilities.clone())
+            .into();
+        let views = private_utility_views(&mut game, item, StepDirection::East);
+        for (view, before) in views.iter().zip(&known) {
+            game.record_observation_knowledge(view).unwrap();
+            assert_eq!(
+                game.actors[&view.actor].recognized_abilities, *before,
+                "an unknown Never device must not become recognized ability knowledge"
+            );
+        }
+        let reopened = roundtrip(&game);
+        for (view, before) in views.iter().zip(&known) {
+            assert_eq!(reopened.observe(view.actor).unwrap(), *view);
+            assert_eq!(reopened.actors[&view.actor].recognized_abilities, *before);
+        }
+    }
+}
+
+#[test]
+fn unknown_never_device_hidden_contact_preserves_effects_without_naming_the_source() {
+    let (mut first, first_item) = private_utility_fixture(false, ItemDiscovery::Never, true, false);
+    let (mut second, second_item) =
+        private_utility_fixture(true, ItemDiscovery::Never, true, false);
+    let first_views = private_utility_views(&mut first, first_item, StepDirection::East);
+    let second_views = private_utility_views(&mut second, second_item, StepDirection::East);
+    for (game, expected) in [(&first, "private_state_a"), (&second, "private_state_b")] {
+        assert!(game
+            .creature(ActorId(2))
+            .unwrap()
+            .conditions()
+            .has_active(&crate::content_ids::ConditionId::new(expected).unwrap()));
+        assert_private_utility_identity(game, first_item);
+    }
+    assert_ne!(
+        first_views[1].combat.as_ref().unwrap().own_stats,
+        second_views[1].combat.as_ref().unwrap().own_stats,
+        "the recipient still receives its legitimate, different persistent effects"
+    );
+    for view in [&first_views[0], &second_views[0]] {
+        assert!(
+            view.combat.as_ref().unwrap().events.is_empty(),
+            "an unseen contact must not leak even an anonymous event count or outcome"
+        );
+    }
+    for index in [0, 2] {
+        assert_eq!(
+            first_views[index], second_views[index],
+            "an unseen first contact cannot name its source ability or expose its target"
+        );
+    }
+    assert_eq!(
+        first_views[1].combat.as_ref().unwrap().events,
+        second_views[1].combat.as_ref().unwrap().events,
+        "the recipient's effect state is not permission to name a concealed device"
+    );
+    for (game, views) in [(&first, &first_views), (&second, &second_views)] {
+        let reopened = roundtrip(game);
+        for view in views {
+            assert_eq!(reopened.observe(view.actor).unwrap(), *view);
+        }
+    }
+}
+
+#[test]
+fn unknown_never_device_empty_launch_and_empty_charge_keep_identity_private() {
+    for charges in [0, 3] {
+        let (mut first, first_item) =
+            private_utility_fixture(false, ItemDiscovery::Never, false, false);
+        let (mut second, second_item) =
+            private_utility_fixture(true, ItemDiscovery::Never, false, false);
+        for (game, item) in [(&mut first, first_item), (&mut second, second_item)] {
+            game.items
+                .edit(item, |item| item.charges = Some(charges))
+                .unwrap();
+        }
+        let first_views = private_utility_views(&mut first, first_item, StepDirection::North);
+        let second_views = private_utility_views(&mut second, second_item, StepDirection::North);
+        assert_eq!(first_views, second_views);
+        for (game, item, views) in [
+            (&mut first, first_item, &first_views),
+            (&mut second, second_item, &second_views),
+        ] {
+            assert_eq!(game.items[&item].charges, Some(charges.saturating_sub(1)));
+            assert_private_utility_identity(game, item);
+            for view in views {
+                let known = game.actors[&view.actor].recognized_abilities.clone();
+                game.record_observation_knowledge(view).unwrap();
+                assert_eq!(game.actors[&view.actor].recognized_abilities, known);
+                assert!(view.combat.as_ref().unwrap().events.is_empty());
+            }
+            assert_eq!(*game, roundtrip(game));
+        }
+    }
+}
+
+#[test]
+fn unknown_never_device_pending_zap_has_no_public_plan_or_identity_preview() {
+    let (mut first, first_item) = private_utility_fixture(false, ItemDiscovery::Never, false, true);
+    let (mut second, second_item) =
+        private_utility_fixture(true, ItemDiscovery::Never, false, true);
+    for (game, item) in [(&mut first, first_item), (&mut second, second_item)] {
+        game.actors.get_mut(&ActorId(2)).unwrap().ready_at = 0;
+        execute(
+            game,
+            Action::Zap {
+                item,
+                direction: StepDirection::East,
+            },
+        );
+        assert!(game.preparation(ActorId(1)).is_some());
+        assert_private_utility_identity(game, item);
+        for observer in [ActorId(2), ActorId(3)] {
+            assert_eq!(
+                game.capture_public_plan_observation(observer, ActorId(1))
+                    .unwrap()
+                    .state,
+                crate::public_plan::PublicPlanState::NoPublicPlan
+            );
+        }
+    }
+    for observer in [ActorId(1), ActorId(2), ActorId(3)] {
+        assert_eq!(
+            first.observe(observer).unwrap(),
+            second.observe(observer).unwrap()
+        );
+    }
+}
+
+#[test]
+fn unknown_never_device_later_identification_or_reveal_cannot_upgrade_old_receipts() {
+    for hidden_target in [false, true] {
+        let (mut game, item) =
+            private_utility_fixture(false, ItemDiscovery::Never, hidden_target, true);
+        let views = private_utility_views(&mut game, item, StepDirection::East);
+        for view in &views {
+            assert!(
+                !view
+                    .combat
+                    .as_ref()
+                    .unwrap()
+                    .events
+                    .iter()
+                    .any(|event| matches!(
+                        event,
+                        crate::combat::DisclosedCombatEvent::Ability { .. }
+                    )),
+                "the original unknown-device receipt has no licensed ability identity"
+            );
+        }
+        game.identify_item(ActorId(1), item).unwrap();
+        if hidden_target {
+            // Change current perception without replacing the already sealed batch.
+            let mut update = game.actor_outcome(ActorId(2)).unwrap();
+            let combat = update.state.combat.as_mut().unwrap();
+            let mut creature = combat.creature().clone();
+            assert!(creature
+                .remove_condition(
+                    &crate::content_ids::ConditionId::new("private_invisible").unwrap()
+                )
+                .unwrap());
+            *combat =
+                crate::actor_creatures::CombatState::from_creature(combat.identity(), creature);
+            game.apply_outcome(update).unwrap();
+            assert!(game
+                .observe(ActorId(1))
+                .unwrap()
+                .visible_actors
+                .iter()
+                .any(|actor| actor.id == ActorId(2)));
+        }
+        let reopened = roundtrip(&game);
+        for current in [&game, &reopened] {
+            for view in &views {
+                assert_eq!(
+                    current.observe(view.actor).unwrap().combat.unwrap().events,
+                    view.combat.as_ref().unwrap().events,
+                    "later knowledge and visibility cannot relabel a sealed receipt"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn known_never_and_on_use_devices_retain_licensed_owner_identity_feedback() {
+    for discovery in [ItemDiscovery::Never, ItemDiscovery::OnUse] {
+        for charges in [0, 3] {
+            let (mut game, item) = private_utility_fixture(false, discovery, false, true);
+            game.items
+                .edit(item, |item| item.charges = Some(charges))
+                .unwrap();
+            if discovery == ItemDiscovery::Never {
+                game.identify_item(ActorId(1), item).unwrap();
+            }
+            let known = game.actors[&ActorId(1)].recognized_abilities.clone();
+            let views = private_utility_views(&mut game, item, StepDirection::East);
+            game.record_observation_knowledge(&views[0]).unwrap();
+            if charges > 0 {
+                assert!(views[0]
+                    .combat
+                    .as_ref()
+                    .unwrap()
+                    .events
+                    .iter()
+                    .any(|event| matches!(
+                        event,
+                        crate::combat::DisclosedCombatEvent::Ability { id, name, .. }
+                            if id.as_str() == "fixture_ray" && name == "First concealed utility"
+                    )));
+                assert!(game.actors[&ActorId(1)]
+                    .recognized_abilities
+                    .contains(&crate::content_ids::AbilityId::new("fixture_ray").unwrap()));
+            } else {
+                assert!(views[0].combat.as_ref().unwrap().events.is_empty());
+                assert_eq!(game.actors[&ActorId(1)].recognized_abilities, known);
+            }
+            assert_eq!(
+                game.actors[&ActorId(1)]
+                    .knowledge
+                    .contains("opaque_device_a"),
+                discovery == ItemDiscovery::Never || charges > 0
+            );
+            assert!(game.actors[&ActorId(1)].known_charges.is_empty());
+            assert_eq!(game, roundtrip(&game));
+        }
+    }
 }
 
 #[test]

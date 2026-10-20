@@ -17,6 +17,17 @@ fn fixture(
     adjustment: i64,
     defense: i32,
 ) -> (Game, ActorId) {
+    fixture_with_modifiers(speed, base, scale, adjustment, defense, vec![])
+}
+
+fn fixture_with_modifiers(
+    speed: u16,
+    base: u64,
+    scale: Option<Attribute>,
+    adjustment: i64,
+    defense: i32,
+    modifiers: Vec<Modifier>,
+) -> (Game, ActorId) {
     let mut document = super::creature_fixture::ruleset().document().clone();
     document.constants.base_defense = defense;
     let ability = AbilityId::new("basic_melee").unwrap();
@@ -32,6 +43,7 @@ fn fixture(
     definition.timing.scaled_by = scale;
     let rules = Ruleset::validate(document).unwrap();
     let mut species = super::creature_fixture::species();
+    species.modifiers.extend(modifiers);
     species.default_attributes = Attributes::new(ByAttribute {
         speed,
         ..Default::default()
@@ -99,6 +111,54 @@ fn fixture(
     )
     .unwrap();
     (game, actor)
+}
+
+#[test]
+fn action_duration_sources_scale_actions_without_changing_speed_or_other_operands() {
+    for (rates, expected_ability, expected_wait) in [
+        (vec!["haste"], 32, 50),
+        (vec!["haste", "haste"], 32, 50),
+        (vec!["slow"], 126, 200),
+        (vec!["slow", "slow"], 126, 200),
+        (vec!["haste", "slow"], 63, 100),
+        (vec!["slow", "haste"], 63, 100),
+    ] {
+        let modifiers = rates
+            .iter()
+            .map(|rate| {
+                serde_json::from_value::<Modifier>(serde_json::json!({
+                    "scope": "always", "op": {"kind": "action_duration", "value": rate}
+                }))
+                .expect("shared typed action-duration modifier")
+            })
+            .collect();
+        let (mut game, actor) =
+            fixture_with_modifiers(3, 100, Some(Attribute::Speed), 0, 10, modifiers);
+        let (normal, normal_actor) = fixture(3, 100, Some(Attribute::Speed), 0, 10);
+        let actual_creature = game.creature(actor).unwrap();
+        let baseline_creature = normal.creature(normal_actor).unwrap();
+        let actual = actual_creature.derived();
+        let baseline = baseline_creature.derived();
+        assert_eq!(actual.attributes, baseline.attributes);
+        assert_eq!(actual.defenses, baseline.defenses);
+        assert_eq!(actual.skills, baseline.skills);
+        assert_eq!(actual.resources, baseline.resources);
+        assert_eq!(
+            actual.health_recovery_period,
+            baseline.health_recovery_period
+        );
+        assert_eq!(actual.ability_values, baseline.ability_values);
+        assert_eq!(
+            game.ability_timing(actor, &AbilityId::new("basic_melee").unwrap())
+                .unwrap(),
+            tor_simulation::creatures::AbilityTiming {
+                preparation: expected_ability,
+                recovery: expected_ability,
+            },
+        );
+        game.act(actor, tor_simulation::Action::Wait).unwrap();
+        assert_eq!(game.tick(), expected_wait, "{rates:?}");
+    }
 }
 
 #[test]

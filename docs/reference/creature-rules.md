@@ -34,6 +34,15 @@ sets, protection, flags, abilities and ability-specific values. Flags expand the
 explicit data-defined modifiers. Template priorities retain aggregate-then-floor
 semantics, reject conflicting sets, and do not depend on map insertion order.
 
+The actor-wide `action_duration` operation has exactly the string values
+`normal`, `haste` and `slow`, with `scope = "always"` only. All expanded sources
+participate in one idempotent fold: repeated haste or slow does not stack; any
+haste together with any slow yields normal, regardless of source count. Normal
+is neutral and does not suppress another source. This is independent of Speed,
+attributes, checks and defenses. After ordinary distance/attribute timing,
+haste halves duration rounded up and slow doubles it with checked arithmetic;
+zero-time work remains zero. See [captured action timing](../architecture/simulation.md#actors-and-deterministic-time).
+
 Actors compile their exact permanent build records into one immutable, shared
 basis. It contains source-expanded permanent modifiers, attributes/ranks, HD and
 class counts, talent gates, anatomy, and the exact per-HD Health contributions
@@ -930,6 +939,17 @@ the deterministic bounded dice kernel. Canonical tuning lives in
 strict, identity-keyed overrides. Ability tags select families of abilities for
 modifiers without enumerating each technique ID.
 
+`heal_per_hit_die` captures its dice count at preparation and compares resolved
+healing with current injury. Its explicit overflow policy is `none`,
+`improve_earliest_hit_die` (one credit for strictly positive excess), or
+`improve_earliest_hit_dice_by_excess` (one credit for positive excess, a second
+only when excess exceeds the captured HD count plus one). At most two ordered
+unit improvements are selected from eligible active owned acquisition rows;
+the same earliest row can receive both, up to its original die maximum.
+Resolution retains the exact bounded prefix and build epoch. Application
+validates the entire prefix before changing Health or the ledger; it does not
+resample dice or choose replacement rows. No eligible row means healing only.
+
 `hold_damage` is a hostile melee primary-success payload bound to one exact
 linked hold. Its category is required; TOML authoring omits `descriptor` for
 unmarked damage because TOML has no null value. Stored content and frozen plans
@@ -1266,6 +1286,15 @@ from disclosed exact directional alignment without previewing collision. Optiona
 combat diagnostics attach the shared launch receipt to each real recipient
 encounter; an empty traversal has no fabricated recipient diagnostic.
 
+`directional_contact_ray` uses the same frozen launch, opposed named-skill check
+and physical traversal, but stops at the first creature body whether it dodges,
+is immune or receives the effect. A wall or closed door stops it without bounce;
+later creatures receive no check or effect. Its failure branch may contain the
+same component damage or ordinary finite/persistent condition application and
+condition removal. Success effects, riders, unlocks and selected-weapon payloads
+remain unsupported. Delivery is captured explicitly and validated against the
+pinned invocation on restore; current visibility never predicts collision.
+
 Actor-target and self-step preparation freezes one bounded ordered strike plan.
 Earlier queue admission stores the request, not the plan. Each ability authors strikes
 or selects the current melee source. Every strike-source variant is a named,
@@ -1347,7 +1376,7 @@ share one effect-state kernel; this adds no whole-game clone to an action.
 ## Conditions and active time
 
 Conditions define a family, lifecycle, keep/refresh/longest/extend/bounded stacking
-behavior, source scope, descriptors, explicit actor-active timing, operation
+behavior, source scope, descriptors, explicit finite or until-removed timing, operation
 restrictions, preparation response and a capacity policy. `keep` preserves the first
 application's remaining time and provenance without refreshing or stacking. `extend`
 adds another application's duration to the remaining time of the same single entry,
@@ -1399,7 +1428,7 @@ Other temporary stats use ordinary unconditional sources, apart from the explici
 perception-conditioned Health period scope described above. Unsupported scoped
 operations fail validation rather than being silently ignored.
 
-Timing is a required named `{ kind = "actor_active", on_expiry = ... }` record.
+Finite timing is a required named `{ kind = "actor_active", on_expiry = ... }` record.
 Its end policy is either `{ kind = "remove" }` or
 `{ kind = "protect", duration = N }`; active application and protection durations
 are positive and bounded by 1000000 ticks. Protection replaces the active phase
@@ -1411,6 +1440,20 @@ without granting protection. Administrative changes to mechanical definitions cl
 unreserved applications before the new modifier fold; display-name-only changes
 preserve them. A changed definition still owned by a reserved token rejects the
 rebuild atomically rather than removing or reinterpreting its paid claim.
+
+Alternatively, `{ kind = "until_removed" }` requires lifecycle `timed` and
+stacking `keep`. It has no expiry deadline or protection phase; elapsed time,
+freezing and reopening cannot expire it. Ordinary explicit removal, immunity,
+death and reconciliation retain their existing authority. Persistent application
+uses `apply_persistent_condition`, not a zero or sentinel finite duration. Its
+optional `cancels` names a different until-removed condition: when that condition
+is active, remove it without applying the new condition; otherwise apply normally.
+Cancellation is ordinary condition removal and remains independent of immunity
+to establishing the incoming condition. Delivery and whole-payload protections
+still gate either operation. Repeated application keeps the existing entry and provenance. Canonical stored
+lifetimes require an explicit nullable `remaining`: null means until removed,
+while active finite lifetimes must be positive. The existing private reserved-token
+zero tombstone remains distinct from an active finite or persistent condition.
 
 Restrictions are a bounded, unique set of operation kinds: `voluntary_actions`,
 `ordinary_movement` and `movement_abilities`. The required preparation response is

@@ -5,10 +5,10 @@ Receipts establish owned stock; they must not guide ordinary play or navigation.
 """
 
 MAGIC_ITEM_STAGES = (
-    ("rogue.magic_potions", ("rogue.healing", "rogue.confusion", "rogue.blindness")),
+    ("rogue.magic_potions", ("rogue.healing", "rogue.confusion", "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing")),
     ("rogue.magic_scrolls", ("rogue.identify_potion", "rogue.identify_scroll",
                              "rogue.identify_wand", "rogue.sleep")),
-    ("rogue.magic_devices", ("rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning")),
+    ("rogue.magic_devices", ("rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning", "rogue.wand_invisibility", "rogue.wand_haste", "rogue.wand_slow")),
 )
 MAGIC_ITEM_STAGE_IDS = tuple(identity for identity, _ in MAGIC_ITEM_STAGES)
 

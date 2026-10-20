@@ -489,9 +489,21 @@ impl Engine {
                 unspent: earned.checked_sub(spent).ok_or_else(invalid)?,
             },
             timings: p::AdvancementTimings {
-                purchase_recovery: policy.purchase_recovery,
-                respec_prepare: policy.respec_prepare,
-                respec_recovery: policy.respec_recovery,
+                purchase_recovery: creature
+                    .derived()
+                    .action_duration
+                    .apply_bounded(policy.purchase_recovery)
+                    .map_err(|_| invalid())?,
+                respec_prepare: creature
+                    .derived()
+                    .action_duration
+                    .apply_bounded(policy.respec_prepare)
+                    .map_err(|_| invalid())?,
+                respec_recovery: creature
+                    .derived()
+                    .action_duration
+                    .apply_bounded(policy.respec_recovery)
+                    .map_err(|_| invalid())?,
                 received_loss_interval: policy.received_loss_interval,
                 provisional: true,
             },

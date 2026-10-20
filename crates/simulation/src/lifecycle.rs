@@ -635,8 +635,11 @@ impl Game {
                 continue;
             }
             let alive_before = transition.state.alive();
-            if matches!(effect, ResolvedEffect::ApplyCondition { .. })
-                && !self.actors.contains_key(&outcome.actor)
+            if matches!(
+                effect,
+                ResolvedEffect::ApplyCondition { .. }
+                    | ResolvedEffect::ApplyPersistentCondition { .. }
+            ) && !self.actors.contains_key(&outcome.actor)
                 && !self.detached_actor(outcome.actor)
             {
                 return Err(GameError::UnknownActor);
@@ -658,6 +661,7 @@ impl Game {
             }
             let context = match effect {
                 ResolvedEffect::ApplyCondition { id, .. }
+                | ResolvedEffect::ApplyPersistentCondition { id }
                 | ResolvedEffect::RemoveCondition { id }
                 | ResolvedEffect::ApplyQualifiedConditionToSource { id, .. } => {
                     if self.condition_uses_recovery_context(id)? {
@@ -791,9 +795,14 @@ impl Game {
             }
         }
         // A resolution event precedes its interruption/death consequences.
-        transition
-            .events
-            .insert(0, CombatEvent::Resolved { outcome, strike });
+        transition.events.insert(
+            0,
+            CombatEvent::Resolved {
+                outcome,
+                strike,
+                source_disclosure: crate::combat::SourceAbilityDisclosure::Public,
+            },
+        );
         let receipt = PublishedResolution {
             created_hold,
             event: self.event_log.len(),
@@ -850,7 +859,9 @@ impl Game {
     }
 
     fn published_resolution(&self, receipt: PublishedResolution) -> Result<&Outcome, GameError> {
-        let Some(CombatEvent::Resolved { outcome, strike }) = self.event_log.get(receipt.event)
+        let Some(CombatEvent::Resolved {
+            outcome, strike, ..
+        }) = self.event_log.get(receipt.event)
         else {
             return Err(GameError::Rule(RuleError::InvalidPlan));
         };

@@ -264,14 +264,40 @@ fn directional_plan_is_strict_targetless_and_freezes_source_only() {
         forged[field] = serde_json::json!(null);
         assert!(serde_json::from_value::<RayPlan>(forged).is_err());
     }
-    for field in [
+    let fields = [
+        "actor",
+        "ability",
+        "delivery",
         "origin",
         "direction",
+        "launch_footprint",
+        "clear_visits",
+        "source_skill",
+        "target_skill",
         "source_bonus",
+        "source_edge",
+        "effect_edge",
         "incoming",
+        "effects",
+        "descriptors",
+        "tokens",
+        "preparation",
+        "recovery",
         "cost",
         "cooldown",
-    ] {
+        "supply_costs",
+        "supplies",
+    ];
+    assert_eq!(
+        value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        fields.into_iter().collect()
+    );
+    for field in fields {
         let mut missing = value.clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(
@@ -282,6 +308,161 @@ fn directional_plan_is_strict_targetless_and_freezes_source_only() {
     buff(&mut game, ActorId(1), "ray_strong", ActorId(1));
     assert_ne!(plan(&game).as_ray().unwrap().source_bonus, ray.source_bonus);
     assert_eq!(serde_json::to_value(ray).unwrap(), value);
+}
+
+fn contact_fixture() -> Game {
+    fixture_with(|_, ray, _| {
+        ray.invocation = InvocationKind::DirectionalContactRay;
+        let StrikeSource::Authored { strikes } = &mut ray.strikes else {
+            unreachable!()
+        };
+        strikes[0].on_failure = vec![Effect::ApplyCondition {
+            condition: ConditionId::new("ray_fear").unwrap(),
+            duration: 500,
+        }];
+    })
+}
+
+#[test]
+fn first_contact_ray_stops_on_hit_or_dodge_and_never_bounces() {
+    for dodges in [false, true] {
+        let mut game = contact_fixture();
+        let build = game.creature(ActorId(2)).unwrap().build().clone();
+        let third = game
+            .spawn_actor(at(4), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.configure_creature(
+            third,
+            crate::CreatureIdentity {
+                name: "behind interceptor".into(),
+                faction: "third".into(),
+            },
+            build,
+        )
+        .unwrap();
+        if dodges {
+            buff(&mut game, ActorId(2), "ray_agile", ActorId(2));
+        } else {
+            buff(&mut game, ActorId(1), "ray_strong", ActorId(1));
+        }
+        let frozen = plan(&game);
+        assert_eq!(frozen.as_ray().unwrap().delivery, RayDelivery::FirstContact);
+        game.resolve_ray(frozen.as_ray().unwrap(), None).unwrap();
+        let resolved = outcomes(&game);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].target, ActorId(2));
+        assert_eq!(resolved[0].check.unwrap().success, dodges);
+        assert_eq!(
+            game.creature(ActorId(2))
+                .unwrap()
+                .conditions()
+                .instances()
+                .any(|c| c.condition.as_str() == "ray_fear"),
+            !dodges
+        );
+        assert!(!game
+            .creature(third)
+            .unwrap()
+            .conditions()
+            .instances()
+            .any(|c| c.condition.as_str() == "ray_fear"));
+    }
+    let mut game = contact_fixture();
+    game.world.set_wall(at(2), true).unwrap();
+    let frozen = plan(&game);
+    game.resolve_ray(frozen.as_ray().unwrap(), None).unwrap();
+    assert!(outcomes(&game).is_empty());
+    assert!(game.creature(ActorId(1)).unwrap().conditions().is_empty());
+}
+
+#[test]
+fn first_contact_whole_payload_immunity_stops_without_target_roll_or_token_spend() {
+    let mut game = fixture_with(|_, ray, species| {
+        ray.invocation = InvocationKind::DirectionalContactRay;
+        let StrikeSource::Authored { strikes } = &mut ray.strikes else {
+            unreachable!()
+        };
+        let fire = crate::content_ids::DescriptorId::new("fire").unwrap();
+        strikes[0].descriptors = vec![fire.clone()];
+        strikes[0].on_failure = vec![Effect::ApplyCondition {
+            condition: ConditionId::new("ray_fear").unwrap(),
+            duration: 500,
+        }];
+        species.modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Immunity {
+                selector: Selector::Descriptor { descriptor: fire },
+            },
+        });
+    });
+    let build = game.creature(ActorId(2)).unwrap().build().clone();
+    let rear = game
+        .spawn_actor(at(4), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    game.configure_creature(
+        rear,
+        crate::CreatureIdentity {
+            name: "behind immune interceptor".into(),
+            faction: "rear".into(),
+        },
+        build,
+    )
+    .unwrap();
+    buff(&mut game, ActorId(2), "ray_token", ActorId(2));
+    let before_target = game.creature(ActorId(2)).unwrap().into_owned();
+    let before_rear = game.creature(rear).unwrap().into_owned();
+    let captured = plan(&game);
+    let ray = captured.as_ray().unwrap();
+    let mut expected_rng = game.rules_rng;
+    super::resolve::resolve_ray_launch(ray, &mut expected_rng, &mut ());
+
+    game.resolve_ray(ray, None).unwrap();
+
+    let resolved = outcomes(&game);
+    assert_eq!(
+        resolved.len(),
+        1,
+        "immunity still intercepts the contact ray"
+    );
+    assert_eq!(resolved[0].target, ActorId(2));
+    assert!(resolved[0].check.is_none());
+    assert!(resolved[0].effects.is_empty());
+    assert_eq!(
+        game.rules_rng, expected_rng,
+        "only the source launch rolled"
+    );
+    assert_eq!(game.creature(ActorId(2)).unwrap().as_ref(), &before_target);
+    assert_eq!(game.creature(rear).unwrap().as_ref(), &before_rear);
+    assert!(game
+        .creature(ActorId(2))
+        .unwrap()
+        .conditions()
+        .has_active(&ConditionId::new("ray_token").unwrap()));
+}
+
+#[test]
+fn first_contact_delivery_is_exact_source_bound_in_frozen_plan() {
+    let game = contact_fixture();
+    let captured = plan(&game);
+    let ray = captured.as_ray().unwrap();
+    let value = serde_json::to_value(ray).unwrap();
+    assert_eq!(value["delivery"], "first_contact");
+    assert_eq!(
+        serde_json::from_value::<RayPlan>(value.clone()).unwrap(),
+        *ray
+    );
+    let mut forged = ray.clone();
+    forged.delivery = RayDelivery::Bouncing;
+    assert!(!forged.valid(&game.content.rules));
+    for invalid in [
+        serde_json::json!(null),
+        serde_json::json!({"first_contact":null}),
+        serde_json::json!("piercing"),
+    ] {
+        let mut forged = value.clone();
+        forged["delivery"] = invalid;
+        assert!(serde_json::from_value::<RayPlan>(forged).is_err());
+    }
 }
 
 #[test]
@@ -1196,4 +1377,174 @@ fn opponent_qualified_tokens_of_both_signs_are_not_launch_operands_or_claims() {
         );
         assert_eq!(a, b);
     }
+}
+
+fn opposition_immunity_fixture(payload_immune: bool) -> Game {
+    fixture_with(|document, ray, species| {
+        let fire = crate::content_ids::DescriptorId::new("fire").unwrap();
+        for (name, descriptors) in [
+            ("fixture_opposite_a", vec![]),
+            ("fixture_incoming_b", vec![fire.clone()]),
+        ] {
+            let mut condition = document
+                .conditions
+                .iter()
+                .find(|condition| condition.id.as_str() == "ray_fear")
+                .unwrap()
+                .clone();
+            condition.id = ConditionId::new(name).unwrap();
+            condition.family = crate::content_ids::ConditionFamilyId::new(name).unwrap();
+            condition.name = name.into();
+            condition.timing = ConditionTiming::UntilRemoved;
+            condition.stacking = Stacking::Keep;
+            condition.source_scoped = false;
+            condition.modifiers.clear();
+            condition.descriptors = descriptors;
+            document.conditions.push(condition);
+        }
+        species.modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Immunity {
+                selector: Selector::Descriptor {
+                    descriptor: fire.clone(),
+                },
+            },
+        });
+        ray.invocation = InvocationKind::DirectionalContactRay;
+        let StrikeSource::Authored { strikes } = &mut ray.strikes else {
+            unreachable!()
+        };
+        // Condition immunity is distinct from immunity to the delivery payload.
+        strikes[0].descriptors = if payload_immune { vec![fire] } else { vec![] };
+        strikes[0].on_failure = vec![Effect::ApplyPersistentCondition {
+            condition: ConditionId::new("fixture_incoming_b").unwrap(),
+            cancels: Some(ConditionId::new("fixture_opposite_a").unwrap()),
+        }];
+    })
+}
+
+#[test]
+fn first_contact_opposition_cancels_independently_of_incoming_condition_immunity() {
+    let target = ActorId(2);
+    let opposite = ConditionId::new("fixture_opposite_a").unwrap();
+    let incoming = ConditionId::new("fixture_incoming_b").unwrap();
+    for existing_opposite in [true, false] {
+        let mut game = opposition_immunity_fixture(false);
+        buff(&mut game, ActorId(1), "ray_strong", ActorId(1));
+        buff(&mut game, target, "ray_ward", target);
+        if existing_opposite {
+            game.apply_persistent_condition(target, &opposite, target)
+                .unwrap();
+        }
+        let mut expected = game.creature(target).unwrap().into_owned();
+        assert!(expected
+            .derived()
+            .protection
+            .has_immunity(&Selector::Descriptor {
+                descriptor: crate::content_ids::DescriptorId::new("fire").unwrap(),
+            }));
+        if existing_opposite {
+            assert!(expected.remove_condition(&opposite).unwrap());
+        }
+        let frozen = plan(&game);
+        game.resolve_ray(frozen.as_ray().unwrap(), None).unwrap();
+        let resolved = outcomes(&game);
+        assert_eq!(resolved.len(), 1);
+        assert!(
+            !resolved[0].check.unwrap().success,
+            "delivery reaches its target"
+        );
+        assert_eq!(
+            resolved[0].effects,
+            if existing_opposite {
+                vec![ResolvedEffect::RemoveCondition {
+                    id: opposite.clone(),
+                }]
+            } else {
+                vec![]
+            },
+            "incoming immunity does not block cancellation and still blocks establishment"
+        );
+        assert_eq!(game.creature(target).unwrap().as_ref(), &expected);
+        assert!(!game
+            .creature(target)
+            .unwrap()
+            .conditions()
+            .has_active(&incoming));
+    }
+}
+
+#[test]
+fn failed_first_contact_delivery_preserves_opposition_and_unrelated_conditions() {
+    let target = ActorId(2);
+    let opposite = ConditionId::new("fixture_opposite_a").unwrap();
+    for blocked_by in ["dodge", "wall", "payload_immunity"] {
+        let mut game = opposition_immunity_fixture(blocked_by == "payload_immunity");
+        game.apply_persistent_condition(target, &opposite, target)
+            .unwrap();
+        buff(&mut game, target, "ray_ward", target);
+        if blocked_by == "dodge" {
+            buff(&mut game, target, "ray_agile", target);
+        } else {
+            buff(&mut game, ActorId(1), "ray_strong", ActorId(1));
+        }
+        if blocked_by == "wall" {
+            game.world.set_wall(at(2), true).unwrap();
+        }
+        let before = game.creature(target).unwrap().into_owned();
+        let frozen = plan(&game);
+        game.resolve_ray(frozen.as_ray().unwrap(), None).unwrap();
+        let resolved = outcomes(&game);
+        match blocked_by {
+            "wall" => assert!(resolved.is_empty()),
+            "dodge" => {
+                assert_eq!(resolved.len(), 1);
+                assert!(resolved[0].check.unwrap().success);
+                assert!(resolved[0].effects.is_empty());
+            }
+            _ => {
+                assert_eq!(resolved.len(), 1);
+                assert!(resolved[0].check.is_none());
+                assert!(resolved[0].effects.is_empty());
+            }
+        }
+        assert_eq!(
+            game.creature(target).unwrap().as_ref(),
+            &before,
+            "{blocked_by}"
+        );
+    }
+}
+
+#[test]
+fn rolled_back_first_contact_opposition_restores_all_conditions_and_rng() {
+    let target = ActorId(2);
+    let opposite = ConditionId::new("fixture_opposite_a").unwrap();
+    let incoming = ConditionId::new("fixture_incoming_b").unwrap();
+    let mut game = opposition_immunity_fixture(false);
+    game.apply_persistent_condition(target, &opposite, target)
+        .unwrap();
+    buff(&mut game, target, "ray_ward", target);
+    buff(&mut game, ActorId(1), "ray_strong", ActorId(1));
+    let frozen = plan(&game);
+    let before = game.clone();
+    let result = game.with_recovery_transition(true, |candidate| {
+        candidate.resolve_ray(frozen.as_ray().unwrap(), None)?;
+        let conditions = candidate.creature(target).unwrap().conditions().clone();
+        assert!(
+            !conditions.has_active(&opposite),
+            "the candidate reached cancellation"
+        );
+        assert!(
+            !conditions.has_active(&incoming),
+            "cancellation never installs the incoming condition"
+        );
+        assert!(conditions.has_active(&ConditionId::new("ray_ward").unwrap()));
+        Err::<(), _>(GameError::IdentityExhausted)
+    });
+    assert_eq!(result, Err(GameError::IdentityExhausted));
+    assert_eq!(
+        game, before,
+        "rollback includes conditions, RNG and emitted events"
+    );
 }

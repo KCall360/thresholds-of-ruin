@@ -38,13 +38,13 @@ pub struct OwnStats {
     pub ability_reaches: BTreeMap<AbilityId, crate::rules::Reach>,
 }
 
-/// Timed personal status facts omit causers and private preparation state.
+/// Personal condition status facts omit causers and private preparation state.
 /// One-use tokens retain their separate authorized disclosure contracts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PersonalCondition {
     pub condition: crate::content_ids::ConditionId,
     pub phase: crate::conditions::ConditionPhase,
-    pub remaining_ticks: u64,
+    pub remaining_ticks: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

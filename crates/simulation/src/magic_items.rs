@@ -150,7 +150,8 @@ impl<'de> Deserialize<'de> for DeviceSpec {
 }
 impl DeviceSpec {
     pub fn valid(&self) -> bool {
-        self.initial_charges.valid() && self.discovery == ItemDiscovery::OnUse
+        self.initial_charges.valid()
+            && matches!(self.discovery, ItemDiscovery::OnUse | ItemDiscovery::Never)
     }
     pub fn validate_rules(
         &self,

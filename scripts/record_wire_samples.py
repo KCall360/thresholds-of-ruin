@@ -58,6 +58,13 @@ def amulet_recording_case():
         "test_unique_identity_revisits_source_free_restore_and_text_surface_escape")
 
 
+def utility_wands_recording_case():
+    """Reuse the real utility-zap/Text/reopen acceptance case, not another driver."""
+    from test_rogue_utility_wands_process import RogueUtilityWandsProcesses
+    return RogueUtilityWandsProcesses(
+        "test_persistent_first_contact_utility_state_displays_in_text_and_reopens_without_source")
+
+
 def kind(message):
     """A server message's kind, with an update's body kind."""
     if message["type"] == "update":
@@ -197,6 +204,34 @@ class Recorder(ProcessTestCase):
         sample = run_recording_case(amulet_recording_case(), "escape_sample")
         self.assertEqual(sample["type"], "snapshot")
         server_samples["zz.amulet_escape"] = sample
+
+    def record_persistent_conditions(self, server_samples):
+        case = utility_wands_recording_case()
+        sample = run_recording_case(case, "persistent_condition_sample")
+        self.assertEqual(sample["type"], "snapshot")
+        snapshot = sample["snapshot"]
+        self.assertEqual(snapshot["actor"], "3")
+        self.assertFalse(snapshot["state"]["wizard_game"])
+        rows = snapshot["state"]["observation"]["combat"]["own_stats"]["conditions"]
+        self.assertEqual({row["condition"]["id"] for row in rows},
+                         {"rogue.hasted", "rogue.invisible"})
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertEqual(row["phase"], "active")
+            self.assertIn("remaining_ticks", row)
+            self.assertIsNone(row["remaining_ticks"], "A persistent sample must contain an explicit null deadline")
+        # The same successful process case also retains its live recipient
+        # feedback; both artifacts publish only after every cleanup passed.
+        from utility_wands_package import assert_anonymous_recipient_feedback
+        anonymous = copy.deepcopy(getattr(case, "anonymous_ability_sample", None))
+        self.assertIsNotNone(anonymous, "The utility case must retain its real anonymous event")
+        self.assertEqual(anonymous["type"], "update")
+        self.assertEqual(anonymous["update"]["body"]["type"], "observation_delta")
+        recipient = copy.deepcopy(getattr(case, "anonymous_recipient_context", None))
+        self.assertIsNotNone(recipient, "The event needs its actual pre-effect disclosure context")
+        assert_anonymous_recipient_feedback(self, [anonymous], recipient)
+        server_samples["zz.condition_persistent"] = sample
+        server_samples["zz.anonymous_utility"] = anonymous
 
     def record_public_plan(self, server_samples):
         self.save = self.save.parent / "public-plan-samples.db"
@@ -540,6 +575,7 @@ class Recorder(ProcessTestCase):
         self.record_nutrition(server_samples)
         self.record_magic_items(server_samples)
         self.record_personal_conditions(server_samples)
+        self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)
         self.server_samples = server_samples
 

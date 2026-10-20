@@ -1,6 +1,8 @@
 //! Frozen current-batch disclosure. Reads consume receipts and never infer history
 //! from today's senses. Transient witnesses are discarded on checkpoint restore.
+pub(crate) use crate::combat::SourceAbilityDisclosure;
 use crate::combat::{CombatEvent, DisclosedCombatEvent};
+use crate::content_ids::AbilityId;
 use crate::perception::ActorReferenceKind;
 use crate::{ActorId, Game, GameError, Observation};
 use serde::{Deserialize, Serialize};
@@ -40,16 +42,44 @@ impl<'de> Deserialize<'de> for EventKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct EventKey {
     kind: EventKind,
     actor: ActorId,
     target: ActorId,
     participated: bool,
+    source_disclosure: SourceAbilityDisclosure,
+}
+impl<'de> Deserialize<'de> for EventKey {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            kind: EventKind,
+            actor: ActorId,
+            target: ActorId,
+            participated: bool,
+            source_disclosure: SourceAbilityDisclosure,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            kind: f.kind,
+            actor: f.actor,
+            target: f.target,
+            participated: f.participated,
+            source_disclosure: f.source_disclosure,
+        })
+    }
 }
 impl EventKey {
     fn capture(event: &CombatEvent) -> Self {
+        let source_disclosure = match event {
+            CombatEvent::Resolved {
+                source_disclosure, ..
+            } => *source_disclosure,
+            _ => SourceAbilityDisclosure::Public,
+        };
         let (kind, actor, target, participated) = match event {
             CombatEvent::Resolved { outcome, .. } => (
                 EventKind::Resolved,
@@ -72,6 +102,7 @@ impl EventKey {
             actor,
             target,
             participated,
+            source_disclosure,
         }
     }
 }
@@ -111,10 +142,15 @@ pub(crate) struct EventOrigin {
     target: ActorId,
     source_target: Reference,
     target_source: Reference,
+    ability_disclosure: SourceAbilityDisclosure,
     witness: EventObservationWitness,
     frozen: [bool; 2],
 }
 impl EventOrigin {
+    pub(crate) fn with_ability_disclosure(mut self, ceiling: SourceAbilityDisclosure) -> Self {
+        self.ability_disclosure = self.ability_disclosure.restricted_by(ceiling);
+        self
+    }
     pub(crate) fn cap_contact_target(&mut self) {
         self.source_target = self.source_target.map(|_| ActorReferenceKind::Contact);
     }
@@ -155,7 +191,7 @@ impl PartialEq for EventOrigins {
 }
 impl Eq for EventOrigins {}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct EventReceipt {
     index: usize,
@@ -166,6 +202,9 @@ struct EventReceipt {
     #[serde(deserialize_with = "crate::bounded::required_option")]
     target: Reference,
     participant: bool,
+    /// Frozen exact identity grant; None never acquires later knowledge.
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    disclosed_ability: Option<AbilityId>,
 }
 
 impl<'de> Deserialize<'de> for EventReceipt {
@@ -181,6 +220,8 @@ impl<'de> Deserialize<'de> for EventReceipt {
             #[serde(deserialize_with = "crate::bounded::required_option")]
             target: Reference,
             participant: bool,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            disclosed_ability: Option<AbilityId>,
         }
         let f: Fields = crate::bounded::named_map(d)?;
         Ok(Self {
@@ -189,7 +230,29 @@ impl<'de> Deserialize<'de> for EventReceipt {
             source: f.source,
             target: f.target,
             participant: f.participant,
+            disclosed_ability: f.disclosed_ability,
         })
+    }
+}
+
+/// The raw event is the saved source ceiling; a receipt cannot enlarge it.
+/// This uses no current item/ability knowledge and requires no scene recomputation.
+fn permitted_ability(
+    event: &CombatEvent,
+    observer: ActorId,
+    source: Reference,
+) -> Option<&AbilityId> {
+    match event {
+        CombatEvent::Resolved {
+            outcome,
+            source_disclosure,
+            ..
+        } if source == Some(ActorReferenceKind::Creature)
+            && source_disclosure.permits(observer, outcome.actor) =>
+        {
+            outcome.ability.as_ref()
+        }
+        _ => None,
     }
 }
 
@@ -368,6 +431,7 @@ impl Game {
             target,
             source_target,
             target_source: reference(target, actor),
+            ability_disclosure: SourceAbilityDisclosure::Public,
             witness: self.event_observation_witness(),
             frozen: [self.actor_frozen(actor), self.actor_frozen(target)],
         }
@@ -419,9 +483,24 @@ impl Game {
 
     pub(crate) fn push_event(
         &mut self,
-        event: CombatEvent,
+        mut event: CombatEvent,
         mut origin: Option<EventOrigin>,
     ) -> Result<(), GameError> {
+        if let CombatEvent::Resolved {
+            outcome,
+            source_disclosure,
+            ..
+        } = &mut event
+        {
+            if let Some(origin) = &origin {
+                *source_disclosure = source_disclosure.restricted_by(origin.ability_disclosure);
+            }
+            // Suffix transfers may intentionally discard transient origins. Keep
+            // the already frozen raw ceiling rather than upgrading it to Public.
+            if outcome.ability.is_none() && *source_disclosure != SourceAbilityDisclosure::Public {
+                return Err(invalid());
+            }
+        }
         let key = EventKey::capture(&event);
         if let Some(origin) = origin.as_mut() {
             if origin.event.is_some_and(|bound| bound != key) {
@@ -587,6 +666,7 @@ impl Game {
             if previous.kind != key.kind
                 || previous.actor != key.actor
                 || previous.target != key.target
+                || previous.source_disclosure != key.source_disclosure
             {
                 return Err(invalid());
             }
@@ -652,6 +732,7 @@ impl Game {
                     source,
                     target,
                     participant: owner == key.actor || (owner == key.target && key.participated),
+                    disclosed_ability: permitted_ability(event, owner, source).cloned(),
                 });
             }
         }
@@ -730,6 +811,7 @@ impl Game {
                     target,
                     participant: observer == key.actor
                         || (observer == key.target && key.participated),
+                    disclosed_ability: permitted_ability(event, observer, source).cloned(),
                 });
                 if proof.entries.len() > crate::limits::EVENT_RECEIPTS {
                     return Err(invalid());
@@ -785,7 +867,6 @@ impl Game {
         let additions = proof
             .entries
             .iter()
-            .copied()
             .filter(|entry| {
                 !row.is_some_and(|row| {
                     row.entries
@@ -796,6 +877,7 @@ impl Game {
                         .is_ok()
                 })
             })
+            .cloned()
             .collect();
         self.add_event_receipts(observer, additions, self.event_log.len())?;
         if let Some(combat) = observation.combat.as_mut() {
@@ -826,7 +908,7 @@ impl Game {
         }) else {
             return false;
         };
-        let receipt = row.entries[position];
+        let receipt = &row.entries[position];
         receipt.participant
             && receipt.key.actor == observer
             && self.event_log.get(index).map(EventKey::capture) == Some(receipt.key)
@@ -855,7 +937,7 @@ impl Game {
                 entry.index
             })
             .ok()?;
-        let receipt = row.entries[position];
+        let receipt = &row.entries[position];
         (receipt.participant
             && receipt.key.kind == EventKind::Resolved
             && receipt.key.target == observer
@@ -879,7 +961,10 @@ impl Game {
                     return None;
                 }
                 let event = self.event_log.get(receipt.index)?;
-                if receipt.key != EventKey::capture(event) {
+                if receipt.key != EventKey::capture(event)
+                    || receipt.disclosed_ability.as_ref()
+                        != permitted_ability(event, observer, receipt.source)
+                {
                     return None;
                 }
                 match event {
@@ -900,13 +985,36 @@ impl Game {
                             name: definition.name.clone(),
                         })
                     }
-                    CombatEvent::Resolved { outcome, strike } => {
-                        let ability = outcome.ability.as_ref()?;
+                    CombatEvent::Resolved {
+                        outcome,
+                        strike,
+                        source_disclosure,
+                    } => {
+                        outcome.ability.as_ref()?;
                         if !receipt.participant
                             && (receipt.source != Some(ActorReferenceKind::Creature)
                                 || receipt.target != Some(ActorReferenceKind::Creature))
                         {
                             return None;
+                        }
+                        // A private device's hidden/contact interception is not
+                        // evidence that its initiator saw a target or an effect.
+                        if *source_disclosure != SourceAbilityDisclosure::Public
+                            && outcome.actor == observer
+                            && receipt.target != Some(ActorReferenceKind::Creature)
+                        {
+                            return None;
+                        }
+                        if *source_disclosure != SourceAbilityDisclosure::Public
+                            && receipt.disclosed_ability.is_none()
+                        {
+                            return Some(DisclosedCombatEvent::AnonymousAbility {
+                                caster: receipt.source.map(|_| outcome.actor),
+                                caster_reference: receipt.source,
+                                target: receipt.target.map(|_| outcome.target),
+                                target_reference: receipt.target,
+                                outcome: outcome.result,
+                            });
                         }
                         if outcome.actor != observer
                             && receipt.source != Some(ActorReferenceKind::Creature)
@@ -918,6 +1026,15 @@ impl Game {
                                     outcome: outcome.result,
                                 });
                         }
+                        let Some(ability) = receipt.disclosed_ability.as_ref() else {
+                            return Some(DisclosedCombatEvent::AnonymousAbility {
+                                caster: receipt.source.map(|_| outcome.actor),
+                                caster_reference: receipt.source,
+                                target: receipt.target.map(|_| outcome.target),
+                                target_reference: receipt.target,
+                                outcome: outcome.result,
+                            });
+                        };
                         let definition = self.content.rules.ability(ability)?;
                         Some(DisclosedCombatEvent::Ability {
                             caster: receipt.source.map(|_| outcome.actor),
@@ -961,6 +1078,12 @@ impl Game {
         {
             return false;
         }
+        if self.event_log.iter().any(|event| matches!(event,
+            CombatEvent::Resolved { outcome, source_disclosure, .. }
+            if outcome.ability.is_none() && *source_disclosure != SourceAbilityDisclosure::Public
+        )) {
+            return false;
+        }
         let mut total = 0usize;
         for (owner, row) in self.event_receipts.observers.iter() {
             if owner.0 == 0
@@ -991,6 +1114,12 @@ impl Game {
                     return false;
                 }
                 previous = Some(receipt.index);
+                let event = &self.event_log[receipt.index];
+                if receipt.disclosed_ability.as_ref()
+                    != permitted_ability(event, *owner, receipt.source)
+                {
+                    return false;
+                }
                 if receipt.participant
                     != (*owner == key.actor || (*owner == key.target && key.participated))
                 {

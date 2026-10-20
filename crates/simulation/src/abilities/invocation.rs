@@ -4,14 +4,37 @@ use super::projectile_selection::ProjectileDeliverySelection;
 use crate::ActorId;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InvocationKind {
     #[default]
     ActorTarget,
     SelfStep,
     DirectionalRay,
+    DirectionalContactRay,
     DirectionalProjectile,
+}
+
+impl<'de> Deserialize<'de> for InvocationKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "actor_target" => Ok(Self::ActorTarget),
+            "self_step" => Ok(Self::SelfStep),
+            "directional_ray" => Ok(Self::DirectionalRay),
+            "directional_contact_ray" => Ok(Self::DirectionalContactRay),
+            "directional_projectile" => Ok(Self::DirectionalProjectile),
+            _ => Err(serde::de::Error::custom("invalid invocation kind")),
+        }
+    }
+}
+impl InvocationKind {
+    pub const fn is_directional_ray(self) -> bool {
+        matches!(self, Self::DirectionalRay | Self::DirectionalContactRay)
+    }
+    /// A direction requests an aim, never authority over its delivery behavior.
+    pub(crate) fn accepts(self, requested: Self) -> bool {
+        self == requested || (self.is_directional_ray() && requested == Self::DirectionalRay)
+    }
 }
 
 /// Aim authority and ordinary equipped-weapon selection are separate operands.
@@ -353,7 +376,7 @@ impl crate::rules::AbilityDef {
         let StrikeSource::Authored { strikes } = &self.strikes else {
             return self.invocation == InvocationKind::ActorTarget;
         };
-        if self.invocation == InvocationKind::DirectionalRay {
+        if self.invocation.is_directional_ray() {
             return super::ray::definition_shape_valid(self);
         }
         if self.invocation == InvocationKind::SelfStep {
@@ -419,6 +442,28 @@ impl TryFrom<tor_world::Direction> for StepDirection {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn invocation_kind_requires_exact_string_vocabulary() {
+        for name in [
+            "actor_target",
+            "self_step",
+            "directional_ray",
+            "directional_contact_ray",
+            "directional_projectile",
+        ] {
+            let value = serde_json::json!(name);
+            let decoded: super::InvocationKind = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+            for invalid in [
+                serde_json::json!({(name): null}),
+                serde_json::json!([name]),
+                serde_json::json!(null),
+            ] {
+                assert!(serde_json::from_value::<super::InvocationKind>(invalid).is_err());
+            }
+        }
+    }
+
     use super::{AbilityInvocation, StepDirection};
 
     #[test]

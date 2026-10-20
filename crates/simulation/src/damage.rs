@@ -541,6 +541,7 @@ impl Protection {
             | ModifierOp::Set { .. }
             | ModifierOp::Flag { .. }
             | ModifierOp::GrantAbility { .. }
+            | ModifierOp::ActionDuration { .. }
             | ModifierOp::Locomotion { .. }
             | ModifierOp::Perception { .. } => {}
         }

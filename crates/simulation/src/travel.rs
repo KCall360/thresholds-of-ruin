@@ -1,7 +1,7 @@
 //! Actor knowledge is refreshed only at authoritative perception boundaries.
 //! Planning never reads current terrain or undiscovered topology.
 use crate::navigation_map::RegionMap;
-use crate::{movement_cost, ActorId, Game, GameError};
+use crate::{ActorId, Game, GameError};
 use std::collections::{BTreeMap, BTreeSet};
 use tor_world::{Direction, Location, Position};
 
@@ -304,7 +304,7 @@ impl<'a> RouteSearch<'a> {
                     continue;
                 }
                 let next = (to, tor_world::compose_rotation(node.1, rotation));
-                let Ok(duration) = movement_cost(self.actor.turn_ticks.get(), direction) else {
+                let Ok(duration) = self.actor.movement_duration(direction) else {
                     continue;
                 };
                 let next_cost = cost + u128::from(duration);
@@ -614,8 +614,7 @@ impl Game {
                         continue;
                     }
                     let next = (to, tor_world::compose_rotation(node.1, rotation));
-                    let Ok(duration) = movement_cost(actor_state.turn_ticks.get(), direction)
-                    else {
+                    let Ok(duration) = actor_state.movement_duration(direction) else {
                         continue;
                     };
                     let next_cost = cost + u128::from(duration);

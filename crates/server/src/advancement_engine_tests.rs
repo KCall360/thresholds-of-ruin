@@ -1802,3 +1802,44 @@ fn intellect_entitlement_preview_commit_stale_basis_and_source_free_reopen() {
         );
     }
 }
+
+#[test]
+fn owner_overview_scales_current_action_timings_but_not_received_loss_clock() {
+    for (rate, purchase, prepare, recovery) in [
+        ("normal", 3, 601, 5),
+        ("haste", 2, 301, 3),
+        ("slow", 6, 1202, 10),
+    ] {
+        let base = scenario();
+        let package = base.package.as_ref().unwrap();
+        let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+        manifest["creatures"]["species"]["learner"]["modifiers"] = serde_json::json!([{
+            "scope":"always", "op":{"kind":"action_duration", "value":rate}
+        }]);
+        let mut rules: s::rules::RulesetDocument =
+            toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap();
+        rules.advancement.purchase_recovery = 3;
+        rules.advancement.respec_prepare = 601;
+        rules.advancement.respec_recovery = 5;
+        rules.advancement.received_loss_interval = 701;
+        let package = crate::scenario_package::Package::from_parts(
+            serde_json::from_value(manifest).unwrap(),
+            package.region_defs().unwrap(),
+            &toml::to_string(&rules).unwrap(),
+        )
+        .unwrap();
+        let engine = Engine::memory(Scenario {
+            package: Some(std::sync::Arc::new(package)),
+            ..base
+        })
+        .unwrap();
+        let before = engine.game.clone();
+        let view = overview(&engine);
+        assert_eq!(view.timings.purchase_recovery, purchase, "{rate}");
+        assert_eq!(view.timings.respec_prepare, prepare, "{rate}");
+        assert_eq!(view.timings.respec_recovery, recovery, "{rate}");
+        assert_eq!(view.timings.received_loss_interval, 701, "{rate}");
+        assert!(view.respec.is_none());
+        assert_eq!(engine.game, before, "overview remains read-only");
+    }
+}

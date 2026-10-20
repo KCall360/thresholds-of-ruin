@@ -321,7 +321,7 @@ fn assert_slow_plan_completion(game: &Game) {
         game.combat_events()
             .iter()
             .filter(|event| matches!(event,
-                tor_simulation::combat::CombatEvent::Resolved { outcome, strike: Some(0) }
+                tor_simulation::combat::CombatEvent::Resolved { outcome, strike: Some(0), .. }
                     if outcome.actor == SimActor(2) && outcome.target == SimActor(1)
                         && outcome.ability.as_ref().is_some_and(|id| id.as_str() == "slow_plan")
             ))
@@ -1295,7 +1295,10 @@ fn assert_committed_rider_disclosure_with_visibility(
     let mut primary = None;
     let mut riders = Vec::new();
     for event in engine.game.combat_events() {
-        let CombatEvent::Resolved { outcome, strike } = event else {
+        let CombatEvent::Resolved {
+            outcome, strike, ..
+        } = event
+        else {
             continue;
         };
         if outcome.actor != SimActor(1) || outcome.target != SimActor(2) {

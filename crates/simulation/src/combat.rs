@@ -219,9 +219,55 @@ pub enum ObjectiveKind {
     ReachExit,
 }
 
+/// Historical upper bound on naming the source of a resolved activity.
+/// This is publication metadata, independent of the authoritative Outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceAbilityDisclosure {
+    Public,
+    InitiatorOnly,
+    Concealed,
+}
+impl<'de> Deserialize<'de> for SourceAbilityDisclosure {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match String::deserialize(d)?.as_str() {
+            "public" => Ok(Self::Public),
+            "initiator_only" => Ok(Self::InitiatorOnly),
+            "concealed" => Ok(Self::Concealed),
+            _ => Err(serde::de::Error::custom(
+                "invalid source ability disclosure",
+            )),
+        }
+    }
+}
+impl SourceAbilityDisclosure {
+    pub(crate) fn permits(self, observer: ActorId, initiator: ActorId) -> bool {
+        match self {
+            Self::Public => true,
+            Self::InitiatorOnly => observer == initiator,
+            Self::Concealed => false,
+        }
+    }
+    pub(crate) fn restricted_by(self, ceiling: Self) -> Self {
+        match (self, ceiling) {
+            (Self::Concealed, _) | (_, Self::Concealed) => Self::Concealed,
+            (Self::InitiatorOnly, _) | (_, Self::InitiatorOnly) => Self::InitiatorOnly,
+            _ => Self::Public,
+        }
+    }
+}
+
 /// One disclosed event for every data-defined ability, including the basic attack.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DisclosedCombatEvent {
+    /// Observable activity with no license to name its source ability.
+    AnonymousAbility {
+        caster: Option<ActorId>,
+        caster_reference: Option<crate::perception::ActorReferenceKind>,
+        target: Option<ActorId>,
+        target_reference: Option<crate::perception::ActorReferenceKind>,
+        outcome: crate::abilities::OutcomeStatus,
+    },
     /// Personally experienced activity whose source identity/technique is hidden.
     UnseenAbility {
         caster: Option<ActorId>,
@@ -279,10 +325,12 @@ pub enum CombatEvent {
         #[serde(deserialize_with = "deserialize_intention_context")]
         intention: Option<crate::IntentionId>,
     },
+    #[serde(deserialize_with = "deserialize_resolved")]
     Resolved {
         outcome: crate::abilities::Outcome,
         #[serde(deserialize_with = "crate::bounded::required_option")]
         strike: Option<u16>,
+        source_disclosure: SourceAbilityDisclosure,
     },
     SequenceEnded {
         actor: ActorId,
@@ -309,6 +357,33 @@ pub enum CombatEvent {
     Died {
         actor: ActorId,
     },
+}
+
+fn deserialize_resolved<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<
+    (
+        crate::abilities::Outcome,
+        Option<u16>,
+        SourceAbilityDisclosure,
+    ),
+    D::Error,
+> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fields {
+        outcome: crate::abilities::Outcome,
+        #[serde(deserialize_with = "crate::bounded::required_option")]
+        strike: Option<u16>,
+        source_disclosure: SourceAbilityDisclosure,
+    }
+    let f: Fields = crate::bounded::named_map(d)?;
+    if f.outcome.ability.is_none() && f.source_disclosure != SourceAbilityDisclosure::Public {
+        return Err(serde::de::Error::custom(
+            "source disclosure requires an ability",
+        ));
+    }
+    Ok((f.outcome, f.strike, f.source_disclosure))
 }
 
 fn deserialize_curse_blocked<'de, D: serde::Deserializer<'de>>(

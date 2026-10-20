@@ -159,9 +159,21 @@ impl Game {
             policy: link.policy.clone(),
             check,
             tokens,
-            preparation: crate::creatures::scaled_duration(link.policy.preparation, speed, rules)
+            preparation: creature
+                .derived()
+                .action_duration
+                .apply_bounded(
+                    crate::creatures::scaled_duration(link.policy.preparation, speed, rules)
+                        .map_err(GameError::Build)?,
+                )
                 .map_err(GameError::Build)?,
-            recovery: crate::creatures::scaled_duration(link.policy.recovery, speed, rules)
+            recovery: creature
+                .derived()
+                .action_duration
+                .apply_bounded(
+                    crate::creatures::scaled_duration(link.policy.recovery, speed, rules)
+                        .map_err(GameError::Build)?,
+                )
                 .map_err(GameError::Build)?,
         };
         if !plan.valid(rules) || !self.escape_plan_source_valid(&plan) {
@@ -296,7 +308,14 @@ mod tests {
         }
     }
     fn fixture() -> (Game, HoldId, HoldId) {
+        fixture_with_rate(crate::action_duration::ActionDuration::Normal)
+    }
+    fn fixture_with_rate(rate: crate::action_duration::ActionDuration) -> (Game, HoldId, HoldId) {
         let mut species = crate::test_creatures::species();
+        species.modifiers.push(crate::rules::Modifier {
+            scope: crate::rules::Scope::Always,
+            op: crate::rules::ModifierOp::ActionDuration { value: rate },
+        });
         species.modifiers.push(crate::rules::Modifier {
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::Flag {
@@ -377,6 +396,36 @@ mod tests {
             .unwrap()
             .unwrap();
         (game, first, second)
+    }
+
+    #[test]
+    fn escape_scales_only_captured_action_phases_and_preserves_protection_clock() {
+        let (normal, hold, _) = fixture();
+        let baseline = normal.escape_plan(ActorId(1), hold).unwrap();
+        for rate in [
+            crate::action_duration::ActionDuration::Haste,
+            crate::action_duration::ActionDuration::Slow,
+        ] {
+            let (game, hold, _) = fixture_with_rate(rate);
+            let plan = game.escape_plan(ActorId(1), hold).unwrap();
+            assert_eq!(
+                plan.preparation(),
+                rate.apply(baseline.preparation()).unwrap()
+            );
+            assert_eq!(plan.recovery(), rate.apply(baseline.recovery()).unwrap());
+            let Plan::Escape(escape) = &plan else {
+                unreachable!()
+            };
+            assert_eq!(escape.policy.protection, 400);
+            assert_eq!(
+                game.creature(ActorId(1)).unwrap().derived().attributes,
+                normal.creature(ActorId(1)).unwrap().derived().attributes
+            );
+            let decoded: Plan =
+                serde_json::from_value(serde_json::to_value(&plan).unwrap()).unwrap();
+            assert_eq!(decoded, plan);
+            assert!(decoded.valid(game.content.rules()));
+        }
     }
     fn start(game: &mut Game, hold: HoldId, success: bool) -> EscapePlan {
         let Plan::Escape(plan) = game.escape_plan(ActorId(1), hold).unwrap() else {

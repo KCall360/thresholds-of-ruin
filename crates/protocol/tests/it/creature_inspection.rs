@@ -154,7 +154,7 @@ fn report() -> CreatureInspectionView {
             phase: ConditionPhase::Active,
             condition: content("fixture_condition"),
             source: ActorId(2),
-            remaining_ticks: 20,
+            remaining_ticks: Some(20),
         }],
     }
 }
@@ -282,7 +282,7 @@ fn private_inspection_rejects_structural_inconsistency_without_reimplementing_co
             5 => value.hit_dice[0].health_die = 0,
             6 => value.templates.push(value.templates[0].clone()),
             7 => value.sources.push(value.sources[0].clone()),
-            8 => value.conditions[0].remaining_ticks = 0,
+            8 => value.conditions[0].remaining_ticks = Some(0),
             9 => value.stats.abilities.push(value.stats.abilities[0].clone()),
             10 => value.stats.resources[0].available = u32::MAX,
             11 => value.natural_attack.strike_count = 0,
@@ -795,4 +795,28 @@ fn projectile_inspection_binds_source_to_directional_profile_reach_catalog() {
             "ordinary targeting cannot claim projectile source authority"
         );
     }
+}
+
+#[test]
+fn persistent_inspection_lifetime_is_required_nullable_and_cannot_be_protection() {
+    let mut report = report();
+    report.conditions[0].remaining_ticks = None;
+    report.validate().unwrap();
+    let encoded = serde_json::to_value(&report).unwrap();
+    assert_eq!(
+        encoded["conditions"][0]["remaining_ticks"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        serde_json::from_value::<CreatureInspectionView>(encoded.clone()).unwrap(),
+        report
+    );
+    let mut missing = encoded;
+    missing["conditions"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("remaining_ticks");
+    assert!(serde_json::from_value::<CreatureInspectionView>(missing).is_err());
+    report.conditions[0].phase = ConditionPhase::Protection;
+    assert!(report.validate().is_err());
 }

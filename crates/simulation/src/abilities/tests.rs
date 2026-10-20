@@ -1477,7 +1477,7 @@ fn paused_reserved_token_expiry_projects_active_time_without_scheduling_a_wakeup
             .next()
             .unwrap()
             .remaining,
-        0
+        Some(0)
     );
     assert_eq!(game.preparation(ActorId(1)).unwrap().plan, plan);
     assert!(game.next_creature_event_tick().is_none());
@@ -1676,7 +1676,7 @@ fn public_plan_recipient_self_alias_applies_once() {
         conditions[0].qualification.as_ref().unwrap().opponent,
         ability.actor
     );
-    assert_eq!(conditions[0].remaining, 300);
+    assert_eq!(conditions[0].remaining, Some(300));
 }
 #[test]
 fn public_plan_recipient_rejects_mixed_payload() {

@@ -499,7 +499,10 @@ fn modifier_reconciliation_preserves_older_active_and_protection_entries() {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].condition, retained.condition);
         assert_eq!(entries[0].phase, retained.phase);
-        assert_eq!(entries[0].remaining, retained.remaining - 10);
+        assert_eq!(
+            entries[0].remaining,
+            retained.remaining.map(|remaining| remaining - 10)
+        );
         assert_eq!(creature.derived(), control.derived());
         assert_eq!(entries[0], control.conditions().instances().next().unwrap());
     }
@@ -746,7 +749,8 @@ fn protected_and_reserved_books_keep_claims_when_ordinary_modifier_folds_reconci
                 .unwrap();
             assert_eq!(reserved.reserved_by, Some(ActorId(9)));
             assert_eq!(
-                reserved.remaining, 990,
+                reserved.remaining,
+                Some(990),
                 "an unexpired reservation still contributes no modifiers"
             );
             assert_eq!(creature.costs().reservations(), &holds);

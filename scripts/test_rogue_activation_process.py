@@ -453,9 +453,9 @@ class RogueMagicReceiptTests(unittest.TestCase):
 
     def test_every_reviewed_subtype_is_eligible_only_in_its_magic_stage(self):
         for index, choices in enumerate((
-                ("rogue.healing", "rogue.confusion", "rogue.blindness"),
+                ("rogue.healing", "rogue.confusion", "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing"),
                 ("rogue.identify_potion", "rogue.identify_scroll", "rogue.identify_wand", "rogue.sleep"),
-                ("rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning"))):
+                ("rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning", "rogue.wand_invisibility", "rogue.wand_haste", "rogue.wand_slow"))):
             for choice in choices:
                 with self.subTest(stage=index, content=choice):
                     receipts = self.receipts()

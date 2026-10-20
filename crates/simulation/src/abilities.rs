@@ -27,7 +27,7 @@ mod plan_validation;
 pub(crate) use plan_validation::PlanSourceContext;
 mod ray;
 mod resolve;
-pub use ray::{RayIncomingOwner, RayIncomingSource, RayPlan};
+pub use ray::{RayDelivery, RayIncomingOwner, RayIncomingSource, RayPlan};
 mod spatial;
 mod strikes;
 pub use spatial::{MovementMode, MovementResult, Placement, SpatialInput, StepCommitment};
@@ -97,7 +97,7 @@ pub(crate) fn device_definition_valid(
     id: &crate::content_ids::AbilityId,
 ) -> bool {
     rules.ability(id).is_some_and(|d| {
-        d.invocation == InvocationKind::DirectionalRay
+        d.invocation.is_directional_ray()
             && ray::definition_shape_valid(d)
             && d.cost.is_none()
             && d.cooldown.is_none()

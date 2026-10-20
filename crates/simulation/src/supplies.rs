@@ -361,13 +361,16 @@ impl Game {
                     && match plan {
                         Plan::Drink { .. } => item.spec.consumable.is_some(),
                         Plan::Read { .. } => item.spec.readable.is_some(),
-                        Plan::Zap { charges, ray, .. } => {
+                        Plan::Zap {
+                            charges,
+                            ray,
+                            discovery,
+                            ..
+                        } => {
                             item.charges == Some(*charges)
-                                && item
-                                    .spec
-                                    .device
-                                    .as_ref()
-                                    .is_some_and(|d| d.ability == ray.ability)
+                                && item.spec.device.as_ref().is_some_and(|d| {
+                                    d.ability == ray.ability && d.discovery == *discovery
+                                })
                         }
                         Plan::Eat { .. } => item.spec.edible.is_some(),
                         Plan::Projectile(projectile) => {

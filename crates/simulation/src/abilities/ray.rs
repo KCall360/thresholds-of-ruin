@@ -20,6 +20,32 @@ pub const MAX_RAY_REVERSALS: u16 = 32;
 const MAX_INCOMING_SOURCES: usize = 1024;
 const MAX_RAY_ENCOUNTERS: usize = 1024;
 
+/// Pinned source behavior, frozen before any future collision is inspected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RayDelivery {
+    Bouncing,
+    FirstContact,
+}
+impl<'de> Deserialize<'de> for RayDelivery {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match String::deserialize(d)?.as_str() {
+            "bouncing" => Ok(Self::Bouncing),
+            "first_contact" => Ok(Self::FirstContact),
+            _ => Err(serde::de::Error::custom("invalid directional delivery")),
+        }
+    }
+}
+impl RayDelivery {
+    fn from_invocation(kind: super::InvocationKind) -> Option<Self> {
+        match kind {
+            super::InvocationKind::DirectionalRay => Some(Self::Bouncing),
+            super::InvocationKind::DirectionalContactRay => Some(Self::FirstContact),
+            _ => None,
+        }
+    }
+}
+
 fn invalid() -> GameError {
     GameError::Rule(RuleError::InvalidPlan)
 }
@@ -94,6 +120,7 @@ fn read_footprint<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Location
 pub struct RayPlan {
     pub actor: ActorId,
     pub ability: AbilityId,
+    pub delivery: RayDelivery,
     pub origin: Placement,
     pub direction: StepDirection,
     pub launch_footprint: Vec<Location>,
@@ -121,6 +148,7 @@ impl<'de> Deserialize<'de> for RayPlan {
         struct Fields {
             actor: ActorId,
             ability: AbilityId,
+            delivery: RayDelivery,
             origin: Placement,
             direction: StepDirection,
             #[serde(deserialize_with = "read_footprint")]
@@ -153,6 +181,7 @@ impl<'de> Deserialize<'de> for RayPlan {
         Ok(Self {
             actor: f.actor,
             ability: f.ability,
+            delivery: f.delivery,
             origin: f.origin,
             direction: f.direction,
             launch_footprint: f.launch_footprint,
@@ -177,6 +206,9 @@ impl<'de> Deserialize<'de> for RayPlan {
 }
 
 pub(super) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> bool {
+    let Some(delivery) = RayDelivery::from_invocation(definition.invocation) else {
+        return false;
+    };
     let StrikeSource::Authored { strikes } = &definition.strikes else {
         return false;
     };
@@ -200,13 +232,15 @@ pub(super) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> b
         )
         && strike.on_success.is_empty()
         && !strike.on_failure.is_empty()
-        && strike.on_failure.iter().all(|effect| {
-            matches!(
-                effect,
-                Effect::Damage {
-                    damage: crate::rules::DamageExpr::Components { .. }
-                }
-            )
+        && strike.on_failure.iter().all(|effect| match effect {
+            Effect::Damage {
+                damage: crate::rules::DamageExpr::Components { .. },
+            } => true,
+            Effect::ApplyCondition { .. }
+            | Effect::ApplyConditionForTurns { .. }
+            | Effect::ApplyPersistentCondition { .. }
+            | Effect::RemoveCondition { .. } => delivery == RayDelivery::FirstContact,
+            _ => false,
         })
 }
 impl RayPlan {
@@ -214,7 +248,7 @@ impl RayPlan {
         let Some(definition) = rules.ability(&self.ability) else {
             return false;
         };
-        if definition.invocation != super::InvocationKind::DirectionalRay
+        if RayDelivery::from_invocation(definition.invocation) != Some(self.delivery)
             || !definition_shape_valid(definition)
         {
             return false;
@@ -332,7 +366,12 @@ impl Game {
         let Plan::Ray(ray) = plan else {
             return Err(invalid());
         };
-        Ok(Plan::Zap { item, charges, ray })
+        Ok(Plan::Zap {
+            item,
+            charges,
+            discovery: device.discovery,
+            ray,
+        })
     }
     fn compile_ray_source(
         &self,
@@ -353,9 +392,7 @@ impl Game {
         if item_preparation.is_none() && !caster.derived().abilities.contains(ability) {
             return Err(GameError::Rule(RuleError::UnknownAbility));
         }
-        if definition.invocation != super::InvocationKind::DirectionalRay
-            || !definition_shape_valid(definition)
-        {
+        if !definition.invocation.is_directional_ray() || !definition_shape_valid(definition) {
             return Err(invalid());
         }
         if let Some(cooldown) = definition.cooldown {
@@ -485,6 +522,7 @@ impl Game {
         let plan = RayPlan {
             actor,
             ability: ability.clone(),
+            delivery: RayDelivery::from_invocation(definition.invocation).ok_or_else(invalid)?,
             origin,
             direction,
             launch_footprint,
@@ -570,7 +608,12 @@ impl Game {
         ray: &RayPlan,
         intention: Option<crate::IntentionId>,
     ) -> Result<(), GameError> {
-        self.resolve_ray_release(ray, intention, None)
+        self.resolve_ray_release(
+            ray,
+            intention,
+            None,
+            crate::event_history::SourceAbilityDisclosure::Public,
+        )
     }
 
     pub(crate) fn resolve_prepared_ray(
@@ -578,7 +621,34 @@ impl Game {
         preparation: &crate::combat::Preparation,
     ) -> Result<(), GameError> {
         let ray = preparation.plan.as_ray().ok_or_else(invalid)?;
-        self.resolve_ray_release(ray, preparation.intention, Some(preparation))
+        use crate::event_history::SourceAbilityDisclosure;
+        let disclosure = match &preparation.plan {
+            Plan::Zap {
+                item,
+                charges,
+                discovery,
+                ..
+            } => {
+                // The enclosing release transaction has already spent the exact
+                // held charge. Discovery and these receipts commit together; an
+                // empty device never enters this release path.
+                if *charges == 0 {
+                    return Err(invalid());
+                }
+                let source = self.items.get(item).ok_or(GameError::ItemUnavailable)?;
+                let actor = self.actors.get(&ray.actor).ok_or(GameError::UnknownActor)?;
+                if !source.spec.concealed
+                    || actor.knowledge.contains(&source.spec.identity)
+                    || *discovery == crate::ItemDiscovery::OnUse
+                {
+                    SourceAbilityDisclosure::InitiatorOnly
+                } else {
+                    SourceAbilityDisclosure::Concealed
+                }
+            }
+            _ => SourceAbilityDisclosure::Public,
+        };
+        self.resolve_ray_release(ray, preparation.intention, Some(preparation), disclosure)
     }
 
     fn resolve_ray_release(
@@ -586,6 +656,7 @@ impl Game {
         ray: &RayPlan,
         intention: Option<crate::IntentionId>,
         preparation: Option<&crate::combat::Preparation>,
+        disclosure: crate::event_history::SourceAbilityDisclosure,
     ) -> Result<(), GameError> {
         let mut rng = self.rules_rng;
         // A launch has no actor recipient. Keep its optional receipt locally and
@@ -617,6 +688,9 @@ impl Game {
             }
             match self.world.ray_step(at, direction) {
                 RayStep::Solid => {
+                    if ray.delivery == RayDelivery::FirstContact {
+                        break;
+                    }
                     let (x, y, z) = direction.delta();
                     direction =
                         Direction::from_delta([-i64::from(x), -i64::from(y), -i64::from(z)])
@@ -663,11 +737,17 @@ impl Game {
                             threshold,
                             first_actual_check,
                             intention,
+                            disclosure,
                             &mut budget,
                             &mut activity,
                         )?;
                         let check = outcome.check;
                         self.finish_combat_diagnostic(diagnostic, outcome);
+                        // Contact consumes this directional release even when
+                        // the target dodges or its whole-payload immunity wins.
+                        if ray.delivery == RayDelivery::FirstContact {
+                            return Ok(());
+                        }
                         if let Some(check) = check {
                             encounters.record(target)?;
                             first_actual_check = false;

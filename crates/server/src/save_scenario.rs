@@ -1205,6 +1205,7 @@ struct RelocationGate {
 enum HealingOverflow {
     None,
     ImproveEarliestHitDie,
+    ImproveEarliestHitDiceByExcess,
 }
 #[derive(Serialize)]
 #[serde(
@@ -1285,6 +1286,11 @@ enum Effect {
     ApplyCondition {
         condition: String,
         duration: u64,
+    },
+    ApplyPersistentCondition {
+        condition: String,
+        #[serde(deserialize_with = "required_option")]
+        cancels: Option<String>,
     },
     ApplyConditionForTurns {
         condition: String,
@@ -1860,6 +1866,10 @@ enum ModifierScope {
     deny_unknown_fields
 )]
 enum ModifierOp {
+    ActionDuration {
+        #[serde(with = "mapped")]
+        value: crate::creature_authoring::ActionDuration,
+    },
     Perception {
         #[serde(with = "mapped")]
         value: crate::creature_authoring::Perception,
@@ -1897,6 +1907,16 @@ enum ModifierOp {
     GrantAbility {
         ability: String,
     },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::ActionDuration",
+    rename_all = "snake_case"
+)]
+enum ActionDuration {
+    Normal,
+    Haste,
+    Slow,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
@@ -2521,7 +2541,7 @@ enum ConditionLifecycle {
     NextCheckAgainst,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(
     remote = "tor_simulation::rules::ConditionTiming",
     tag = "kind",
@@ -2529,10 +2549,33 @@ enum ConditionLifecycle {
     deny_unknown_fields
 )]
 enum ConditionTiming {
+    UntilRemoved,
     ActorActive {
         #[serde(with = "mapped")]
         on_expiry: tor_simulation::rules::ConditionExpiry,
     },
+}
+
+impl ConditionTiming {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::ConditionTiming, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            UntilRemoved {},
+            ActorActive {
+                #[serde(with = "mapped")]
+                on_expiry: tor_simulation::rules::ConditionExpiry,
+            },
+        }
+        Ok(match super::named_map(deserializer)? {
+            Fields::UntilRemoved {} => tor_simulation::rules::ConditionTiming::UntilRemoved,
+            Fields::ActorActive { on_expiry } => {
+                tor_simulation::rules::ConditionTiming::ActorActive { on_expiry }
+            }
+        })
+    }
 }
 
 #[derive(Serialize)]
@@ -3657,6 +3700,7 @@ macro_rules! string_remote {
     )+};
 }
 string_remote!(
+    ActionDuration => crate::creature_authoring::ActionDuration,
     WeaponTraitKind => source::WeaponTraitKind,
     ExpertiseCategory => tor_simulation::expertise::ExpertiseCategory,
     HealingOverflow => source::HealingOverflow,
@@ -3806,7 +3850,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 19;
+const RULES_INPUT_FORMAT: u32 = 20;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -3906,7 +3950,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 21;
+const CONTENT_PACKAGE_FORMAT: u32 = 22;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -3984,6 +4028,36 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stored_action_duration_modifier_roundtrips_exact_named_vocabulary() {
+        use super::{Borrowed, Owned};
+        for rate in ["normal", "haste", "slow"] {
+            let value =
+                serde_json::json!({"scope":"always","op":{"kind":"action_duration","value":rate}});
+            let decoded: Owned<crate::creature_authoring::Modifier> =
+                serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&decoded.0)).unwrap(), value);
+            assert!(decoded.0.compile().is_ok());
+            for op in [
+                serde_json::json!({"kind":"action_duration"}),
+                serde_json::json!({"kind":"action_duration","value":"unknown"}),
+                serde_json::json!({"kind":"action_duration","value":{(rate):null}}),
+                serde_json::json!({"kind":"action_duration","value":[rate]}),
+                serde_json::json!({"kind":"action_duration","value":null}),
+                serde_json::json!({"kind":"action_duration","value":true}),
+                serde_json::json!({"kind":"action_duration","value":1}),
+                serde_json::json!({"kind":"action_duration","value":rate,"extra":true}),
+            ] {
+                let mut invalid = value.clone();
+                invalid["op"] = op;
+                assert!(
+                    serde_json::from_value::<Owned<crate::creature_authoring::Modifier>>(invalid)
+                        .is_err()
+                );
+            }
+        }
+    }
+
     #[test]
     fn stored_locomotion_requires_nullable_chance_and_bounded_named_fraction() {
         use super::{Borrowed, Owned};
@@ -4149,14 +4223,14 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (51, 24, "interactions-v46", 19, 5, 21, "tor-arena-run-v5")
+            (52, 25, "interactions-v47", 20, 5, 22, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn projectile_expertise_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 54);
-        assert_eq!(super::RULES_INPUT_FORMAT, 19);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 55);
+        assert_eq!(super::RULES_INPUT_FORMAT, 20);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Expertise ownership, projectile plans and selected weapon profiles advance
         // their owning semantic payloads without changing compiled region inputs
@@ -5929,6 +6003,11 @@ impl Effect {
                 condition: String,
                 duration: u64,
             },
+            ApplyPersistentCondition {
+                condition: String,
+                #[serde(deserialize_with = "required_option")]
+                cancels: Option<String>,
+            },
             ApplyConditionForTurns {
                 condition: String,
                 #[serde(with = "mapped")]
@@ -6009,6 +6088,9 @@ impl Effect {
                 condition,
                 duration,
             },
+            Fields::ApplyPersistentCondition { condition, cancels } => {
+                source::Effect::ApplyPersistentCondition { condition, cancels }
+            }
             Fields::ApplyConditionForTurns {
                 condition,
                 duration,
@@ -6175,7 +6257,7 @@ impl DisplacementProfile {
         })
     }
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(
     remote = "tor_simulation::abilities::InvocationKind",
     rename_all = "snake_case"
@@ -6184,7 +6266,23 @@ enum InvocationKind {
     ActorTarget,
     SelfStep,
     DirectionalRay,
+    DirectionalContactRay,
     DirectionalProjectile,
+}
+impl InvocationKind {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::abilities::InvocationKind, D::Error> {
+        use tor_simulation::abilities::InvocationKind as Runtime;
+        match String::deserialize(deserializer)?.as_str() {
+            "actor_target" => Ok(Runtime::ActorTarget),
+            "self_step" => Ok(Runtime::SelfStep),
+            "directional_ray" => Ok(Runtime::DirectionalRay),
+            "directional_contact_ray" => Ok(Runtime::DirectionalContactRay),
+            "directional_projectile" => Ok(Runtime::DirectionalProjectile),
+            _ => Err(serde::de::Error::custom("invalid stored invocation kind")),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -7642,6 +7740,7 @@ mod consumable_effect_stored_tests {
         for raw in [
             r#"{"kind":"heal_per_hit_die","overflow":"none","sides":4,"bonus":0}"#,
             r#"{"kind":"heal_per_hit_die","overflow":"improve_earliest_hit_die","sides":4,"bonus":0}"#,
+            r#"{"kind":"heal_per_hit_die","overflow":"improve_earliest_hit_dice_by_excess","sides":8,"bonus":0}"#,
             r#"{"kind":"remove_condition","condition":"readied"}"#,
             r#"{"kind":"apply_condition_for_turns","condition":"readied","duration":{"kind":"rolled","dice":{"count":1,"sides":2,"bonus":18}}}"#,
         ] {
@@ -8412,6 +8511,10 @@ mod projectile_definition_codec_tests {
             ("self_step", RuntimeInvocationKind::SelfStep),
             ("directional_ray", RuntimeInvocationKind::DirectionalRay),
             (
+                "directional_contact_ray",
+                RuntimeInvocationKind::DirectionalContactRay,
+            ),
+            (
                 "directional_projectile",
                 RuntimeInvocationKind::DirectionalProjectile,
             ),
@@ -8420,6 +8523,65 @@ mod projectile_definition_codec_tests {
             let restored: Record = serde_json::from_value(value.clone()).unwrap();
             assert_eq!(restored.invocation, invocation);
             assert_eq!(serde_json::to_value(restored).unwrap(), value);
+            for invalid in [json!({(name): null}), json!([name]), json!(null)] {
+                assert!(serde_json::from_value::<Record>(json!({"invocation":invalid})).is_err());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod persistent_condition_stored_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn saved_persistent_effects_require_explicit_opposition_and_unbounded_lifetime() {
+        for cancels in [None, Some("other")] {
+            let good = json!({"kind":"apply_persistent_condition","condition":"fixture","cancels":cancels});
+            let source: source::Effect = serde_json::from_value(good.clone()).unwrap();
+            let saved = serde_json::to_value(Borrowed(&source)).unwrap();
+            assert_eq!(saved, good);
+            assert_eq!(
+                serde_json::from_value::<Owned<source::Effect>>(saved)
+                    .unwrap()
+                    .0,
+                source
+            );
+            for field in good.as_object().unwrap().keys() {
+                let mut bad = good.clone();
+                bad.as_object_mut().unwrap().remove(field);
+                assert!(
+                    serde_json::from_value::<Owned<source::Effect>>(bad).is_err(),
+                    "missing {field}"
+                );
+            }
+            for bad in [
+                json!(["apply_persistent_condition", "fixture", cancels]),
+                json!({"kind":"apply_persistent_condition","condition":"fixture","cancels":cancels,"duration":1}),
+            ] {
+                assert!(serde_json::from_value::<Owned<source::Effect>>(bad).is_err());
+            }
+        }
+        let timing = tor_simulation::rules::ConditionTiming::UntilRemoved;
+        let saved = serde_json::to_value(Borrowed(&timing)).unwrap();
+        assert_eq!(saved, json!({"kind":"until_removed"}));
+        assert_eq!(
+            serde_json::from_value::<Owned<tor_simulation::rules::ConditionTiming>>(saved)
+                .unwrap()
+                .0,
+            timing
+        );
+        for bad in [
+            json!({}),
+            json!(["until_removed"]),
+            json!("until_removed"),
+            json!({"kind":"until_removed","on_expiry":{"kind":"remove"}}),
+        ] {
+            assert!(
+                serde_json::from_value::<Owned<tor_simulation::rules::ConditionTiming>>(bad)
+                    .is_err()
+            );
         }
     }
 }

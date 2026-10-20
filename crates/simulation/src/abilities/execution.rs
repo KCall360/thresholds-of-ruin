@@ -158,6 +158,7 @@ impl Game {
                 crate::combat::CombatEvent::Resolved {
                     outcome: outcome.clone(),
                     strike: Some(index as u16),
+                    source_disclosure: crate::combat::SourceAbilityDisclosure::Public,
                 },
                 Some(origin),
             )?;
@@ -401,6 +402,7 @@ impl Game {
         threshold: i64,
         first_actual_check: bool,
         intention: Option<crate::IntentionId>,
+        disclosure: crate::event_history::SourceAbilityDisclosure,
         budget: &mut resolve::StrikeBudget,
         activity: &mut crate::lifecycle::DamageActivityGuard,
     ) -> Result<Outcome, GameError> {
@@ -463,7 +465,9 @@ impl Game {
             combat.consume_tokens(&selected, ray.actor);
             self.apply_outcome(holder)?;
         }
-        let origin = self.capture_event_origin(ray.actor, target);
+        let origin = self
+            .capture_event_origin(ray.actor, target)
+            .with_ability_disclosure(disclosure);
         let receipt = self.apply_resolved_with_disclosure(
             result.outcome.clone(),
             crate::lifecycle::ResolutionPublication::Primary { strike: 0 },
