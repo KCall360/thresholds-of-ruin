@@ -54,6 +54,31 @@ mod art_contract_tests {
             high.x > 0.14 && low.x < -0.14,
             "locks fall over both shoulders"
         );
+        // One sculpted fall: a continuous mass across the nape that parts
+        // into separate locks towards the tips, with locks lying forward
+        // over the shoulders onto the chest.
+        let form = long_hair_form(3);
+        for k in -4..=4 {
+            let x = k as f32 * 0.02;
+            let behind = form.onto(Vec3::new(x, 0.05, -0.4), Vec3::Z);
+            assert!(
+                form.distance(behind).abs() < 0.002 && behind.z < -0.09,
+                "the fall covers the nape at x {x}: {behind}"
+            );
+        }
+        let tips = (0..=40)
+            .map(|k| Vec3::new(-0.16 + k as f32 * 0.008, -0.19, -0.12))
+            .filter(|&at| form.distance(at) < 0.0)
+            .count();
+        assert!(
+            tips > 0 && tips < 36,
+            "the tips part into locks: {tips} of 41 inside"
+        );
+        let (low, high) = long.matte.bounds();
+        assert!(
+            high.z > 0.08 && low.y < -0.2,
+            "locks lie forward over the chest: {high}"
+        );
         let mut bob = Parts::default();
         hair(&mut bob, &look(true, 4));
         let (low, _) = bob.matte.bounds();
@@ -416,6 +441,131 @@ fn lock(b: &mut Builder, path: &[Vec3], width: f32, thick: f32, color: Vec3) {
     let outward = (path[0] - Vec3::new(0.0, 0.17, -0.005)).normalize_or(Vec3::Y);
     let across = tangent.cross(outward).normalize_or(Vec3::X);
     b.tube_framed(path, &radii, 10, &|_, _, _| color, Some(across));
+}
+
+/// One strand of a sculpted hairstyle: points down its length and its
+/// radius at the root and the tip.
+struct Strand {
+    path: Vec<Vec3>,
+    root: f32,
+    tip: f32,
+}
+
+/// Long loose hair as one sculpt: strands from the crown follow the skull,
+/// wave down the back and spread over the shoulder blades, with locks
+/// falling forward over each shoulder and one swept across the brow. Their
+/// smooth union merges them near the scalp, while their tips, further apart
+/// than the blend, part into separate locks.
+pub(super) fn long_hair_form(seed: u64) -> crate::sdf::Sculpt {
+    use crate::sdf::{Sculpt, Shape::*};
+    let skull = Vec3::new(0.0, 0.17, -0.005);
+    // The skull's horizontal radius at a height, a little proud of the scalp.
+    let around = |y: f32| {
+        let h = ((y - skull.y) / 0.118).clamp(-1.0, 1.0);
+        (1.0 - h * h).max(0.0).sqrt()
+    };
+    let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+    let mut strands = Vec::new();
+    // Down the back, from one ear round to the other.
+    let count = 11;
+    for k in 0..count {
+        let a = (k as f32 / (count - 1) as f32 - 0.5) * 2.3;
+        let reach = -0.21 - 0.05 * rand(seed, 60 + k);
+        let phase = rand(seed, 90 + k) * TAU;
+        let path = (0..=10)
+            .map(|i| {
+                let s = i as f32 / 10.0;
+                let y = lerp(0.27, reach, s);
+                // Over the skull, then hanging clear of the neck and
+                // spreading a little over the shoulder blades.
+                let (wide, deep) = if y > 0.1 {
+                    let r = around(y);
+                    (0.112 * r.max(0.62), 0.122 * r.max(0.62))
+                } else {
+                    let below = (0.1 - y) / (0.1 - reach);
+                    (lerp(0.112 * 0.62, 0.15, below), lerp(0.138, 0.105, below))
+                };
+                // Slow, broad waves: the fall moves as one sheet of hair.
+                let wave = (y * 9.0 + phase).sin() * 0.014 * s;
+                Vec3::new(
+                    a.sin() * wide + a.cos() * wave,
+                    y,
+                    skull.z - a.cos() * deep - 0.012 + a.sin().abs() * 0.02,
+                )
+            })
+            .collect();
+        strands.push(Strand {
+            path,
+            root: 0.03,
+            tip: 0.008,
+        });
+    }
+    for side in [-1.0f32, 1.0] {
+        // Two locks spilling forward over each shoulder onto the chest, as
+        // on the sheets: down past the ear, over the collarbone, and down.
+        for (k, (depth, reach)) in [(0.03f32, -0.25f32), (-0.01, -0.21)]
+            .into_iter()
+            .enumerate()
+        {
+            let phase = rand(seed, 70 + k as u32 + side.max(0.0) as u32 * 4) * TAU;
+            let path = (0..=10)
+                .map(|i| {
+                    let s = i as f32 / 10.0;
+                    let y = lerp(0.22, reach, s);
+                    let wave = (y * 10.0 + phase).sin() * 0.012 * s;
+                    // Forward over the shoulder once past the jaw.
+                    let over = ((s - 0.4) / 0.6).clamp(0.0, 1.0);
+                    Vec3::new(
+                        side * (0.097 + 0.035 * s.powf(0.7) - 0.02 * over + wave),
+                        y,
+                        depth - 0.03 * (1.0 - s) * (1.0 - s) + 0.1 * over * over,
+                    )
+                })
+                .collect();
+            strands.push(Strand {
+                path,
+                root: 0.03,
+                tip: 0.013,
+            });
+        }
+    }
+    // A soft lock swept from the parting across the brow to the temple.
+    let part = if seed.is_multiple_of(2) { 1.0f32 } else { -1.0 };
+    strands.push(Strand {
+        path: vec![
+            Vec3::new(part * 0.03, 0.3, 0.035),
+            Vec3::new(-part * 0.02, 0.285, 0.085),
+            Vec3::new(-part * 0.075, 0.25, 0.09),
+            Vec3::new(-part * 0.103, 0.19, 0.06),
+            Vec3::new(-part * 0.11, 0.12, 0.035),
+        ],
+        root: 0.026,
+        tip: 0.014,
+    });
+    let mut form = Sculpt::default();
+    for strand in &strands {
+        let n = strand.path.len() - 1;
+        for (i, pair) in strand.path.windows(2).enumerate() {
+            let t0 = i as f32 / n as f32;
+            let t1 = (i + 1) as f32 / n as f32;
+            // Full for most of the length, tapering only towards the tip.
+            let radius = |t: f32| lerp(strand.root, strand.tip, t.powi(2));
+            form.add(Capsule(pair[0], pair[1], radius(t0), radius(t1)), 0.03);
+        }
+    }
+    form
+}
+
+/// Combed hair: fine streaks running down each strand, a soft sheen where
+/// it turns to the light and darker undersides.
+fn hair_sheen(at: Vec3, normal: Vec3, seed: u64) -> f32 {
+    let a = at.x.atan2(-at.z);
+    let streak = 1.0
+        + 0.07 * (a * 41.0 + at.y * 5.0 + seed as f32).sin()
+        + 0.035 * (a * 97.0 - at.y * 3.0).sin();
+    let sheen = 1.0 + 0.16 * normal.y.max(0.0).powi(2) * (1.0 - normal.z.abs());
+    let under = if normal.y < -0.4 { 0.86 } else { 1.0 };
+    0.94 * streak * sheen * under
 }
 
 /// A plait hanging from `top`, ending in a little tuft.
@@ -1195,56 +1345,18 @@ fn hair(p: &mut Parts, l: &Look) {
     // Hers: a side-parted crown falling over the ears to the nape.
     crown(p, &tone, 0.235, 0.12, 0.09, 0.015, 0.068, 12);
     match style {
-        // Long and loose over the shoulders, locks framing the face.
+        // Long and loose over the shoulders, locks framing the face: one
+        // sculpted fall of hair whose waving strands merge into a soft mass
+        // at the scalp and part into separate locks towards their tips.
         0 => {
-            // A full fall of separate, gently waving locks down the back.
-            for k in 0..5 {
-                let x = (k as f32 - 2.0) * 0.042;
-                let wave = |y: f32| (y * 22.0 + k as f32 * 1.3).sin() * 0.012;
-                let reach = -0.2 - 0.04 * rand(seed, 60 + k);
-                lock(
-                    &mut p.matte,
-                    &[
-                        Vec3::new(x * 0.8, 0.21, -0.1),
-                        Vec3::new(x + wave(0.1), 0.1, -0.138),
-                        Vec3::new(x * 1.15 + wave(-0.03), -0.03, -0.135),
-                        Vec3::new(x * 1.25 + wave(-0.13), -0.13, -0.115),
-                        Vec3::new(x * 1.2 + wave(reach), reach, -0.1),
-                    ],
-                    0.062,
-                    0.04,
-                    tone(60 + k),
-                );
-            }
-            // Locks fall forward over each shoulder.
-            for side in [-1.0f32, 1.0] {
-                lock(
-                    &mut p.matte,
-                    &[
-                        Vec3::new(side * 0.1, 0.15, -0.04),
-                        Vec3::new(side * 0.125, 0.04, -0.03),
-                        Vec3::new(side * 0.135, -0.05, -0.01),
-                        Vec3::new(side * 0.13, -0.11, 0.01),
-                    ],
-                    0.045,
-                    0.03,
-                    tone(70 + side as u32),
-                );
-            }
-            for side in [-1.0f32, 1.0] {
-                lock(
-                    &mut p.matte,
-                    &[
-                        Vec3::new(side * 0.095, 0.17, 0.03),
-                        Vec3::new(side * 0.11, 0.08, 0.02),
-                        Vec3::new(side * 0.105, -0.02, -0.01),
-                        Vec3::new(side * 0.09, -0.11, -0.03),
-                    ],
-                    0.05,
-                    0.034,
-                    tone(40 + side as u32),
-                );
-            }
+            let form = long_hair_form(seed);
+            form.mesh(
+                &mut p.matte,
+                Vec3::new(-0.21, -0.3, -0.23),
+                Vec3::new(0.21, 0.31, 0.13),
+                0.0075,
+                &|at, normal| c * hair_sheen(at, normal, seed),
+            );
         }
         // A high ponytail.
         1 => {
