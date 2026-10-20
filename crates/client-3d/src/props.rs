@@ -1516,6 +1516,18 @@ impl Builder {
         self.positions.is_empty()
     }
 
+    /// The box enclosing everything built so far.
+    #[cfg(test)]
+    pub(crate) fn bounds(&self) -> (Vec3, Vec3) {
+        self.positions.iter().fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |(low, high), p| {
+                let p = Vec3::from_array(*p);
+                (low.min(p), high.max(p))
+            },
+        )
+    }
+
     /// Take over another builder's finished triangles.
     pub(crate) fn absorb(&mut self, other: Builder) {
         self.positions.extend(other.positions);
