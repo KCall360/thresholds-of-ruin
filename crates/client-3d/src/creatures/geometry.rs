@@ -1420,14 +1420,52 @@ fn trouser_leg(b: &mut Builder, shape: LimbShape, build: f32, knee: bool, color:
     );
 }
 
+/// How hanging cloth is cut: fitted at the waist, rounding out over the
+/// hips, then falling to its hem. Radii are across and front to back.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct SkirtCut {
+    pub waist: Vec2,
+    pub hip: Vec2,
+    /// How far down the cloth, 0 at the waist and 1 at the hem, the hip is.
+    pub hip_at: f32,
+    pub hem: Vec2,
+    /// A cutaway coat: its fronts part from the belt down and sweep back
+    /// around the legs instead of closing over them.
+    pub cutaway: bool,
+}
+
+impl SkirtCut {
+    /// A plain flare from the top edge to the hem, with no hip of its own.
+    pub fn straight(top: Vec2, bottom: Vec2) -> Self {
+        Self {
+            waist: top,
+            hip: top,
+            hip_at: 0.0,
+            hem: bottom,
+            cutaway: false,
+        }
+    }
+
+    /// The radii `t` of the way down: a rounded swell from the waist to the
+    /// hip, then an eased fall to the hem.
+    pub fn radius(&self, t: f32) -> Vec2 {
+        if t < self.hip_at {
+            let s = t / self.hip_at;
+            self.waist.lerp(self.hip, 1.0 - (1.0 - s) * (1.0 - s))
+        } else {
+            let s = (t - self.hip_at) / (1.0 - self.hip_at).max(1e-4);
+            self.hip.lerp(self.hem, ease(s))
+        }
+    }
+}
+
 /// One point of a draped garment at `t` down its length and angle `a`.
 /// A free hem hangs loose: its folds deepen toward the edge, and the cloth
 /// drops lower where each fold swings out, so the hem is never a level ring.
 /// Short pieces such as cowls keep their neat edge.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn drape_point(
-    top: Vec2,
-    bottom: Vec2,
+    cut: SkirtCut,
     length: f32,
     folds: u32,
     split: f32,
@@ -1436,7 +1474,7 @@ pub(super) fn drape_point(
     a: f32,
     inner: bool,
 ) -> Vec3 {
-    let r = top.lerp(bottom, ease(t));
+    let r = cut.radius(t);
     let free = (length / 0.3).clamp(0.0, 1.0);
     let wave = (a * folds as f32 + phase).cos();
     let fold = wave * (0.007 * t.powf(1.2) + 0.01 * free * t.powi(3));
@@ -1444,7 +1482,13 @@ pub(super) fn drape_point(
     let thickness = if inner { 0.007 } else { 0.0 };
     let hem_split =
         split * a.cos().max(0.0).powi(if split < 0.0 { 2 } else { 14 }) * ease((t - 0.55) / 0.45);
-    let opening = split.max(0.0) * a.cos().max(0.0).powi(12) * ease((t - 0.3) / 0.7);
+    // A slit parts only at the front; a cutaway's fronts part from the belt
+    // and swing back across the whole front of the legs.
+    let opening = if cut.cutaway {
+        split.max(0.0) * a.cos().max(0.0).powi(2) * ease(t / 0.6)
+    } else {
+        split.max(0.0) * a.cos().max(0.0).powi(12) * ease((t - 0.3) / 0.7)
+    };
     let side = if a < PI { 1.0 } else { -1.0 };
     Vec3::new(
         a.sin() * (r.x + fold - thickness) + side * opening,
@@ -1521,6 +1565,12 @@ fn plate_lames(
     }
 }
 
+/// Whether a kind's tunic skirt is a cutaway coat, as the leprechauns wear
+/// on their sheet: open from the belt over trousered legs.
+pub(super) fn cutaway_coat(style: Style) -> bool {
+    style == Style::Leprechaun
+}
+
 /// How far each kind's leather jerkin or vest hangs free below the belt.
 pub(super) fn jerkin_peplum(style: Style) -> Option<f32> {
     match style {
@@ -1536,41 +1586,109 @@ pub(super) fn decollete(at: Vec3, normal: Vec3, shoulders: f32) -> bool {
     normal.z > 0.0 && at.y > 0.4 && at.x.abs() < 0.045 * shoulders + (at.y - 0.4) * 0.95
 }
 
-/// A tunic skirt's waist and hem radii (across, front to back), before the
-/// hips' Storybook proportion is applied. Its elliptical section always
-/// contains the widest section of both thighs beneath it, diagonals included,
-/// so fuller hips or heavier builds never push a thigh through the cloth.
-pub(super) fn skirt_radii(body: HumanoidBody, flare: f32, trousered: bool) -> (Vec2, Vec2) {
+/// How a tunic skirt is cut for a body, before the hips' Storybook
+/// proportion is applied. The waistband hugs the pelvis it hangs from; the
+/// cloth rounds out over the hips where the thighs join them, then falls to
+/// a hem flared just enough to contain both thighs, diagonals included, at
+/// every height down its `length`, so fuller hips or heavier builds never
+/// push a thigh through.
+pub(super) fn skirt_cut(
+    body: HumanoidBody,
+    flare: f32,
+    length: f32,
+    trousered: bool,
+    cutaway: bool,
+) -> SkirtCut {
     use super::anatomy::{HIP_SCALE, LIMB_SCALE};
     let b = body.build;
     let thigh = body.thigh;
-    let ease = if trousered { TROUSER_EASE * b } else { 0.0 };
-    // The thigh's fullest section in the hips' space, as worn.
-    let center = Vec2::new(body.leg_root(1.0).x, LIMB_SCALE.z * thigh.belly_center.z);
-    let section = Vec2::new(
-        LIMB_SCALE.x * thigh.radius_top.max(thigh.belly.x),
-        LIMB_SCALE.z * thigh.radius_top.max(thigh.belly.z),
-    ) + Vec2::splat(ease);
+    let ease_room = if trousered { TROUSER_EASE * b } else { 0.0 };
     let proportion = Vec2::new(HIP_SCALE.x, HIP_SCALE.z);
-    let clear = |radii: Vec2, margin: f32| {
-        let worn = radii * proportion;
-        let across = worn.x.max(center.x + section.x + margin * 2.0);
-        // The shallowest depth whose ellipse still holds every point of the
-        // thigh's section, grown by the margin.
-        let depth = (0..32).fold(worn.y, |depth, k| {
-            let a = k as f32 / 32.0 * TAU;
-            let point = center + Vec2::new(a.cos(), a.sin()) * (section + Vec2::splat(margin));
-            let room = (1.0 - (point.x / across).powi(2)).max(0.05);
-            depth.max(point.y.abs() / room.sqrt())
-        });
-        Vec2::new(across, depth) / proportion
+    let root = body.leg_root(1.0);
+    // The thigh as sculpted, in the hips' space and as worn: its surface
+    // found round each height, grown by any trouser ease and a margin.
+    let form = limb_form(thigh);
+    let surface = |y: f32| -> Vec<Vec2> {
+        let along = y - root.y;
+        (0..24)
+            .filter_map(|k| {
+                let a = k as f32 / 24.0 * TAU;
+                let out = Vec3::new(a.cos(), 0.0, a.sin());
+                let hit = form.onto(Vec3::new(0.0, along, 0.0) + out * 0.25, -out);
+                (form.distance(hit).abs() < 0.002).then(|| {
+                    let worn = hit * LIMB_SCALE + out * (ease_room + CLEARANCE);
+                    Vec2::new(root.x + worn.x, worn.z)
+                })
+            })
+            .collect()
     };
-    let top = clear(Vec2::new(0.18 * b * body.hips_width, 0.135 * b), 0.008);
-    let bottom = clear(
-        Vec2::new(flare * b * body.hips_width, flare * 0.74 * b),
-        0.02,
-    );
-    (top, bottom)
+    // Room for the thigh mesh's surface-net step and the cloth's own
+    // thickness, so neither surface's facets meet the other's.
+    const CLEARANCE: f32 = 0.014;
+    // The fold troughs that `drape_point` pulls in at this far down.
+    let free = (length / 0.3).clamp(0.0, 1.0);
+    let trough = |t: f32| 0.007 * t.powf(1.2) + 0.01 * free * t.powi(3);
+    let contains = |radii: Vec2, t: f32, points: &[Vec2]| {
+        let worn = radii * proportion - Vec2::splat(trough(t));
+        points
+            .iter()
+            .all(|&point| (point / worn).length_squared() <= 1.0)
+    };
+    // The waistband sits on the pelvis where it hangs from, just below the
+    // belt: the pelvis's section at that height, past its little wobble.
+    let pelvis = body.pelvis_radii();
+    let waist_y = 0.04;
+    let section = (1.0 - (waist_y / pelvis.y).powi(2)).max(0.0).sqrt() * 1.01;
+    let top = Vec2::new(pelvis.x, pelvis.z) * section + Vec2::splat(0.004);
+    let bottom = Vec2::new(flare * b * body.hips_width, flare * 0.74 * b);
+    // Below the crotch, where the thighs part from the pelvis, down to the hem.
+    // The hip falls just below where the thighs join the pelvis.
+    let hip_y = root.y - 0.015;
+    let mut cut = SkirtCut {
+        waist: top,
+        hip: top,
+        hip_at: ((waist_y - hip_y) / (length + waist_y)).min(0.6),
+        hem: bottom,
+        cutaway,
+    };
+    let rings: Vec<(f32, Vec<Vec2>)> = (0..)
+        .map(|k| -0.02 * k as f32)
+        .take_while(|&y| y > -length)
+        .map(|y| {
+            let mut points = surface(y);
+            // A cutaway's fronts part around the legs.
+            points.retain(|p| !cutaway || p.y < 0.02);
+            (y, points)
+        })
+        .collect();
+    for _ in 0..120 {
+        let (mut hip_short, mut hem_short) = (false, false);
+        for (y, points) in &rings {
+            let t = (waist_y - y) / (length + waist_y);
+            if !contains(cut.radius(t), t, points) {
+                // Widen whichever shapes the cloth here: the hip until the
+                // fall towards the hem is well under way, then the hem.
+                let fall = (t - cut.hip_at) / (1.0 - cut.hip_at).max(1e-4);
+                if ease(fall) < 0.5 {
+                    hip_short = true;
+                } else {
+                    hem_short = true;
+                }
+            }
+        }
+        if !hip_short && !hem_short {
+            break;
+        }
+        if hip_short {
+            cut.hip *= 1.015;
+        }
+        if hem_short {
+            cut.hem *= 1.015;
+        }
+        // Cloth hangs from the hip; it never draws in beneath it.
+        cut.hem = cut.hem.max(cut.hip);
+    }
+    cut
 }
 
 /// Whether her boots have heels: the kinds whose women wear them on their
@@ -1607,8 +1725,7 @@ fn tunic_skirt(l: &Look, tunic: Vec3) -> (Vec3, f32) {
 #[allow(clippy::too_many_arguments)]
 fn draped_cloth(
     b: &mut Builder,
-    top: Vec2,
-    bottom: Vec2,
+    cut: SkirtCut,
     length: f32,
     folds: u32,
     split: f32,
@@ -1617,11 +1734,12 @@ fn draped_cloth(
     hem_color: Option<Vec3>,
 ) {
     let sides = 64;
-    let rows = 12;
+    // Rows no more than a couple of centimetres apart, so a long skirt
+    // still follows the round of the hip instead of cutting across it.
+    let rows = ((length / 0.025).ceil() as usize).max(12);
     let phase = rand(seed + 73, 0) * 0.4;
-    let point = |t: f32, a: f32, inner: bool| {
-        drape_point(top, bottom, length, folds, split, phase, t, a, inner)
-    };
+    let point =
+        |t: f32, a: f32, inner: bool| drape_point(cut, length, folds, split, phase, t, a, inner);
     for row in 0..rows {
         let t0 = row as f32 / rows as f32;
         let t1 = (row + 1) as f32 / rows as f32;
@@ -2983,7 +3101,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         } else {
             0.208 + skirt_len * 0.045
         };
-        let (top, bottom) = skirt_radii(body, flare, trousered);
+        let cut = skirt_cut(body, flare, skirt_len, trousered, cutaway_coat(style));
         // The skirt keeps the hips' Storybook proportion it had when it was
         // built into the pelvis; without it the cloth is a tenth narrower.
         kit.drape_scaled(
@@ -2995,8 +3113,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             |p| {
                 draped_cloth(
                     &mut p.matte,
-                    top,
-                    bottom,
+                    cut,
                     skirt_len,
                     if skirt_len > 0.5 { 12 } else { 8 },
                     match style {
@@ -3027,8 +3144,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             |p| {
                 draped_cloth(
                     &mut p.satin,
-                    top,
-                    bottom,
+                    SkirtCut::straight(top, bottom),
                     length,
                     6,
                     if matches!(style, Style::Hero | Style::Scout) {
@@ -3360,8 +3476,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             p.set_transform(Affine3A::from_translation(Vec3::new(0.0, 0.515, -0.012)));
             draped_cloth(
                 &mut p.matte,
-                Vec2::new(0.087, 0.078) * b,
-                Vec2::new(0.15, 0.118) * b,
+                SkirtCut::straight(Vec2::new(0.087, 0.078) * b, Vec2::new(0.15, 0.118) * b),
                 0.045,
                 8,
                 -0.025,
