@@ -372,7 +372,7 @@ fn repeatable_expiring_restrictions_keep_their_slot_under_capacity_pressure() {
             .expect("the oldest restriction survives ordinary capacity eviction");
         assert_eq!(
             (entry.remaining, entry.stacks, entry.source),
-            (250, 1, ActorId(7))
+            (Some(250), 1, ActorId(7))
         );
         assert!(subject
             .condition_restricts(tor_simulation::rules::ConditionRestriction::VoluntaryActions));
@@ -496,4 +496,92 @@ fn gaining_and_losing_descriptor_immunity_ends_effect_once_without_erasing_prote
         subject.apply_condition(&id, ActorId(8), 200).unwrap();
         assert_eq!(record(&subject)["conditions"][0]["remaining"], 325);
     }
+}
+
+#[test]
+fn persistent_condition_has_no_clock_stacks_and_preserves_generation_through_restore() {
+    let id = ConditionId::new("fixture_persistent").unwrap();
+    let mut value = definition(id.as_str(), None);
+    value["timing"] = json!({"kind":"until_removed"});
+    value["restrictions"] = json!([]);
+    value["preparation"] = json!("preserve");
+    let mut subject = creature(vec![value]);
+    assert_eq!(
+        subject.apply_persistent_condition(&id, ActorId(7)),
+        Ok(ConditionUpdate::Applied)
+    );
+    let instance = subject.conditions().instances().next().unwrap().clone();
+    assert_eq!(instance.remaining, None);
+    assert!(subject.conditions().has_active(&id));
+    assert_eq!(subject.conditions().next_expiry_in(), None);
+    assert_eq!(record(&subject)["conditions"][0]["remaining"], json!(null));
+    subject.advance_active(1_000_000_000);
+    assert_eq!(subject.conditions().instances().next(), Some(&instance));
+    for source in [7, 8, 99] {
+        assert_eq!(
+            subject.apply_persistent_condition(&id, ActorId(source)),
+            Ok(ConditionUpdate::Unchanged)
+        );
+        assert_eq!(subject.conditions().instances().next(), Some(&instance));
+    }
+    subject = restored(&subject);
+    assert_eq!(subject.conditions().instances().next(), Some(&instance));
+    assert!(subject.remove_condition(&id).unwrap());
+    assert!(!subject.remove_condition(&id).unwrap());
+    assert!(!subject.conditions().has_active(&id));
+    subject.apply_persistent_condition(&id, ActorId(8)).unwrap();
+    let fresh = subject.conditions().instances().next().unwrap();
+    assert_eq!(fresh.order, instance.order);
+    assert!(fresh.generation > instance.generation);
+    subject.damage(u32::MAX);
+    assert!(subject.health().dead());
+    assert!(subject.conditions().is_empty());
+    assert_eq!(restored(&subject), subject);
+}
+
+#[test]
+fn persistent_lifetime_records_are_explicit_and_reject_finite_or_protected_aliases() {
+    let id = ConditionId::new("fixture_persistent").unwrap();
+    let mut value = definition(id.as_str(), None);
+    value["timing"] = json!({"kind":"until_removed"});
+    let mut subject = creature(vec![value]);
+    assert!(subject.apply_condition(&id, ActorId(7), 100).is_err());
+    subject.apply_persistent_condition(&id, ActorId(7)).unwrap();
+    let good = record(&subject);
+    for mutation in 0..7 {
+        let mut bad = good.clone();
+        let instance = &mut bad["conditions"][0];
+        match mutation {
+            0 => {
+                instance.as_object_mut().unwrap().remove("remaining");
+            }
+            1 => instance["remaining"] = json!(0),
+            2 => instance["remaining"] = json!(1),
+            3 => instance["phase"] = json!("protection"),
+            4 => instance["reserved_by"] = json!(7),
+            5 => instance["qualification"] = json!({"opponent":8,"ability_tag":"weapon_attack"}),
+            6 => instance["generation"] = good["next_condition_generation"].clone(),
+            _ => unreachable!(),
+        }
+        let accepted = serde_json::from_value::<CreatureRecord>(bad)
+            .ok()
+            .and_then(|record| {
+                record
+                    .restore(subject.build().content().clone(), vec![])
+                    .ok()
+            });
+        assert!(accepted.is_none(), "mutation {mutation}");
+    }
+    let finite = ConditionId::new("fear").unwrap();
+    assert!(subject
+        .apply_persistent_condition(&finite, ActorId(7))
+        .is_err());
+    subject.remove_condition(&id).unwrap();
+    subject.apply_condition(&finite, ActorId(7), 100).unwrap();
+    let mut bad = record(&subject);
+    bad["conditions"][0]["remaining"] = json!(null);
+    assert!(serde_json::from_value::<CreatureRecord>(bad)
+        .unwrap()
+        .restore(subject.build().content().clone(), vec![])
+        .is_err());
 }

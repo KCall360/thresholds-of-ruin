@@ -5,7 +5,7 @@
 //! mutation between them. A prepared action is transient, never a saved job or a
 //! client-visible promise. Persisted attack progress revalidates at each boundary.
 
-use crate::{movement_cost, Action, ActionOutcome, ActorId, Game, GameError, OutcomeKind};
+use crate::{Action, ActionOutcome, ActorId, Game, GameError, OutcomeKind};
 
 /// Valid only inside uninterrupted ordinary or queued AI action execution.
 /// Kept private so callers cannot retain an action across world changes.
@@ -557,21 +557,30 @@ impl Game {
                 self.preview_player_growth_source(id, &basis, &source)?;
                 (
                     OutcomeKind::GrowthSourceChosen { basis, source },
-                    self.content.rules.document().growth.recovery,
+                    actor
+                        .action_duration()
+                        .apply_bounded(self.content.rules.document().growth.recovery)
+                        .map_err(GameError::Build)?,
                 )
             }
             Action::ChooseIntellectExpertise { basis, choice } => {
                 self.preview_player_intellect_expertise(id, &basis, &choice)?;
                 (
                     OutcomeKind::IntellectExpertiseChosen { basis, choice },
-                    self.content.rules.document().advancement.purchase_recovery,
+                    actor
+                        .action_duration()
+                        .apply_bounded(self.content.rules.document().advancement.purchase_recovery)
+                        .map_err(GameError::Build)?,
                 )
             }
             Action::Purchase { basis, purchase } => {
                 self.preview_player_purchase(id, &basis, &purchase)?;
                 (
                     OutcomeKind::Purchased { basis, purchase },
-                    self.content.rules.document().advancement.purchase_recovery,
+                    actor
+                        .action_duration()
+                        .apply_bounded(self.content.rules.document().advancement.purchase_recovery)
+                        .map_err(GameError::Build)?,
                 )
             }
             Action::Escape { .. }
@@ -698,7 +707,7 @@ impl Game {
                 }
                 (
                     OutcomeKind::DoorChanged { door, open },
-                    actor.turn_ticks.get(),
+                    actor.action_duration_ticks(actor.turn_ticks.get())?,
                 )
             }
             Action::Move(direction) if self.is_terminal_exit(id, actor.location, direction) => (
@@ -715,17 +724,14 @@ impl Game {
                             from: actor.location,
                             to,
                         },
-                        movement_cost(actor.turn_ticks.get(), direction)?,
+                        actor.movement_duration(direction)?,
                     )
                 } else if let Some((destination, contacts)) =
                     self.movement_guise_contacts(id, direction)
                 {
                     requested_destination = Some(destination);
                     touches = contacts;
-                    (
-                        OutcomeKind::Waited,
-                        movement_cost(actor.turn_ticks.get(), direction)?,
-                    )
+                    (OutcomeKind::Waited, actor.movement_duration(direction)?)
                 } else {
                     return Err(
                         if self
@@ -748,7 +754,7 @@ impl Game {
                 self.validate_apparent_touch(id, subject, quantity)?;
                 (
                     OutcomeKind::ApparentObjectTouched { subject },
-                    actor.turn_ticks.get().div_ceil(2),
+                    actor.action_duration_ticks(actor.turn_ticks.get().div_ceil(2))?,
                 )
             }
             Action::Take { item, quantity } | Action::Drop { item, quantity } => {
@@ -756,9 +762,15 @@ impl Game {
                 let captured = self.prepare_transfer(id, item, quantity, taking)?;
                 let outcome = captured.outcome(taking);
                 transfer = Some(captured);
-                (outcome, actor.turn_ticks.get().div_ceil(2))
+                (
+                    outcome,
+                    actor.action_duration_ticks(actor.turn_ticks.get().div_ceil(2))?,
+                )
             }
-            Action::Wait => (OutcomeKind::Waited, actor.turn_ticks.get()),
+            Action::Wait => (
+                OutcomeKind::Waited,
+                actor.action_duration_ticks(actor.turn_ticks.get())?,
+            ),
         };
         let at_tick = self.tick;
         let new_orientation = match action {

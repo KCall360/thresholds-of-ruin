@@ -2,13 +2,12 @@
 use std::{num::NonZeroU64, path::Path};
 use tor_server::{
     creature_authoring::actor_health_seed,
-    scenario_package::{resolve_rules_source, resolve_source},
+    scenario_package::{resolve_source, Package},
 };
 use tor_simulation::{
     combat::CombatEvent,
     content_ids::{AbilityId, SpeciesId, TalentId},
     creatures::record::BuildRecord,
-    rules::Ruleset,
     Action, ActorId, CreatureIdentity, Game,
 };
 use tor_world::{Extent, Location, Position, Region, RegionId, World};
@@ -20,8 +19,10 @@ pub(super) fn catalog() -> (
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
     let manifest = resolve_source(&root).unwrap().manifest;
     let authored = std::fs::read_to_string(root.join("rules.toml")).unwrap();
-    let resolved = resolve_rules_source(&authored, "rules.toml").unwrap();
-    let rules = Ruleset::validate(toml::from_str(&resolved.source).unwrap()).unwrap();
+    // Authored effects may omit source-only optional fields; use the same
+    // authoring boundary as real packages rather than the strict runtime codec.
+    let package = Package::from_parts(manifest.clone(), vec![], &authored).unwrap();
+    let rules = package.rules().unwrap();
     (manifest.creatures.compile(rules).unwrap(), manifest)
 }
 
@@ -1053,6 +1054,7 @@ fn production_flying_roster_executes_authored_basic_melee_primaries_and_damage()
                     CombatEvent::Resolved {
                         outcome,
                         strike: Some(ordinal),
+                        ..
                     } if outcome.actor == attacker
                         && outcome.target == subject
                         && outcome.ability.as_ref() == Some(&basic) =>

@@ -1956,6 +1956,27 @@ fn ordered_strikes_checkpoint_rejects_invalid_frozen_offsets_ordinals_and_timing
 
 #[test]
 fn ordered_strikes_checkpoint_keeps_captured_timing_after_a_real_speed_change() {
+    assert_captured_timing_survives_modifier(crate::rules::ModifierOp::Add {
+        stat: crate::rules::Stat::Attribute {
+            attribute: crate::attributes::Attribute::Speed,
+        },
+        value: 100,
+    });
+}
+
+#[test]
+fn ordered_strikes_keep_captured_timing_after_haste_or_slow_and_resume_restore() {
+    for value in [
+        crate::action_duration::ActionDuration::Haste,
+        crate::action_duration::ActionDuration::Slow,
+    ] {
+        assert_captured_timing_survives_modifier(crate::rules::ModifierOp::ActionDuration {
+            value,
+        });
+    }
+}
+
+fn assert_captured_timing_survives_modifier(modifier: crate::rules::ModifierOp) {
     use crate::{attributes::Attribute, checkpoint::SharedState, rules::*, ActorId};
     let (mut game, intention) = sequence_game_custom(
         &[0, 100, 200],
@@ -1969,20 +1990,20 @@ fn ordered_strikes_checkpoint_keeps_captured_timing_after_a_real_speed_change() 
             };
         },
         |rules, _| {
-            rules
+            let mut condition = rules
                 .conditions
-                .iter_mut()
+                .iter()
                 .find(|condition| condition.id.as_str() == "braced")
                 .unwrap()
-                .modifiers = vec![Modifier {
+                .clone();
+            condition.id = crate::content_ids::ConditionId::new("fixture_timing").unwrap();
+            condition.family =
+                crate::content_ids::ConditionFamilyId::new("fixture_timing").unwrap();
+            condition.modifiers = vec![Modifier {
                 scope: Scope::Always,
-                op: ModifierOp::Add {
-                    stat: Stat::Attribute {
-                        attribute: Attribute::Speed,
-                    },
-                    value: 100,
-                },
+                op: modifier,
             }];
+            rules.conditions.push(condition);
         },
     );
     let captured = game.preparation(ActorId(1)).unwrap().plan.clone();
@@ -1993,7 +2014,7 @@ fn ordered_strikes_checkpoint_keeps_captured_timing_after_a_real_speed_change() 
     game.pause_preparation(ActorId(1)).unwrap();
     game.apply_condition(
         ActorId(1),
-        &crate::content_ids::ConditionId::new("braced").unwrap(),
+        &crate::content_ids::ConditionId::new("fixture_timing").unwrap(),
         ActorId(1),
         10_000,
     )
@@ -2568,7 +2589,7 @@ fn ordered_strikes_natural_damage_modifiers_capture_each_primary_branch_without_
             game.tick = 10;
             game.resolve_preparations().unwrap();
             assert!(game.combat_events().iter().any(|event| matches!(event,
-                crate::combat::CombatEvent::Resolved { outcome, strike: Some(0) }
+                crate::combat::CombatEvent::Resolved { outcome, strike: Some(0), .. }
                     if outcome.check.as_ref().is_some_and(|check| check.actor == CheckActor::Target && !check.success)
                         && outcome.effects.len() == 2)));
         }
@@ -3225,7 +3246,7 @@ fn qualified_readied_expired_reservation_survives_pause_restore_and_is_spent_onc
             .next()
             .unwrap()
             .clone();
-        assert_eq!(reserved.remaining, 0);
+        assert_eq!(reserved.remaining, Some(0));
         assert_eq!(reserved.reserved_by, Some(actor));
         assert_eq!(
             reserved.qualification.as_ref().unwrap().opponent,
@@ -3314,6 +3335,7 @@ fn public_plan_review_unavailable_target_has_no_attempt_but_preserves_source_and
                 CombatEvent::Resolved {
                     outcome,
                     strike: Some(1),
+                    ..
                 } => Some(outcome),
                 _ => None,
             })
@@ -3569,6 +3591,7 @@ fn public_plan_rider_review_unattempted_later_strike_and_unavailable_target_do_n
             crate::combat::CombatEvent::Resolved {
                 outcome,
                 strike: Some(0),
+                ..
             } => Some(outcome),
             _ => None,
         })
@@ -3590,6 +3613,7 @@ fn public_plan_rider_review_unattempted_later_strike_and_unavailable_target_do_n
             crate::combat::CombatEvent::Resolved {
                 outcome,
                 strike: Some(1),
+                ..
             } => Some(outcome),
             _ => None,
         })
@@ -3933,7 +3957,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
     game.tick = 10;
     game.resolve_preparations().unwrap();
     assert!(game.combat_events().iter().any(|event| matches!(event,
-        crate::combat::CombatEvent::Resolved { outcome, strike: Some(0) }
+        crate::combat::CombatEvent::Resolved { outcome, strike: Some(0), .. }
         if outcome.actor == ActorId(1) && outcome.ability.as_ref() == Some(&ability_id)
             && outcome.check.is_some_and(|check| check.actor == CheckActor::User && check.success)
     )), "the hit history update must not recreate the growth-discarded preparation");

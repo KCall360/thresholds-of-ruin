@@ -786,6 +786,14 @@ impl Game {
                 let mut candidate = a.equipment.clone();
                 candidate.insert(slot, item);
                 self.equipment_candidate(actor, candidate)?;
+                // Quickdraw is canonical zero-time work. Do not scale or bound
+                // the unused ordinary equip duration before applying that trait.
+                if self
+                    .capture_equip_allocation(actor, item, slot)?
+                    .quickdraw(&self.content.rules)
+                {
+                    return Ok(0);
+                }
                 self.content
                     .rules
                     .equipment_slot(&equipment.slot)
@@ -839,11 +847,15 @@ impl Game {
                 return Err(GameError::ItemUnavailable);
             }
         };
-        a.turn_ticks
+        let duration = a
+            .turn_ticks
             .get()
             .checked_mul(turns)
             .filter(|duration| *duration <= crate::limits::NUMERIC as u64)
-            .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))
+            .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+        a.action_duration()
+            .apply_bounded(duration)
+            .map_err(GameError::Build)
     }
     pub(crate) fn plan_work(
         &self,
@@ -1412,7 +1424,7 @@ impl Game {
                     && p.plan.actor() == actor
                     && match p.plan.work() {
                         Work::Read {item}=>self.items.get(&item).and_then(|i|i.spec.readable.as_ref()).is_some_and(|s|matches!(&p.plan,crate::abilities::Plan::Read {effects,identify,discovery,..} if *identify==s.identify&&*discovery==s.discovery&&crate::abilities::item_effects_match_definition(&s.effects,effects))),
-                        Work::Zap {item,..}=>self.items.get(&item).is_some_and(|i|matches!(&p.plan,crate::abilities::Plan::Zap {charges,ray,..} if i.charges==Some(*charges)&&i.spec.device.as_ref().is_some_and(|d|d.ability==ray.ability))),
+                        Work::Zap {item,..}=>self.items.get(&item).is_some_and(|i|matches!(&p.plan,crate::abilities::Plan::Zap {charges,ray,discovery,..} if i.charges==Some(*charges)&&i.spec.device.as_ref().is_some_and(|d|d.ability==ray.ability && d.discovery == *discovery))),
                         Work::Eat { item } => self
                             .items
                             .get(&item)

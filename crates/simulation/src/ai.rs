@@ -735,24 +735,23 @@ impl Game {
                 }
                 continue;
             }
-            let invocation =
-                if definition.invocation == crate::abilities::InvocationKind::DirectionalRay {
-                    let crate::rules::Reach::Sight { range } = definition.reach else {
-                        continue;
-                    };
-                    let Some(direction) = disclosed_ray_direction(
-                        target,
-                        sight,
-                        view,
-                        self.actors.get(&actor)?.body.eye,
-                        range,
-                    ) else {
-                        continue;
-                    };
-                    crate::abilities::AbilityInvocation::directional_ray(direction)
-                } else {
-                    crate::abilities::AbilityInvocation::actor_target(target)
+            let invocation = if definition.invocation.is_directional_ray() {
+                let crate::rules::Reach::Sight { range } = definition.reach else {
+                    continue;
                 };
+                let Some(direction) = disclosed_ray_direction(
+                    target,
+                    sight,
+                    view,
+                    self.actors.get(&actor)?.body.eye,
+                    range,
+                ) else {
+                    continue;
+                };
+                crate::abilities::AbilityInvocation::directional_ray(direction)
+            } else {
+                crate::abilities::AbilityInvocation::actor_target(target)
+            };
             let Ok(plan) = self.ability_invocation_plan_in_scene(actor, id, invocation, sight)
             else {
                 continue;

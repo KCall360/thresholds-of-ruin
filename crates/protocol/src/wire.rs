@@ -4,7 +4,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 54;
+pub const PROTOCOL_VERSION: u32 = 55;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -1022,6 +1022,13 @@ pub enum CombatEventView {
         target: ActorTarget,
         outcome: AbilityOutcome,
     },
+    /// Observable activity with no licensed ability or item identity.
+    #[serde(deserialize_with = "read_anonymous_ability")]
+    AnonymousAbility {
+        caster: Option<ActorTarget>,
+        target: Option<ActorTarget>,
+        outcome: AbilityOutcome,
+    },
     /// The observer's own Escape result, with no hidden holder details.
     EscapeResolved {
         hold: HoldTarget,
@@ -1047,6 +1054,32 @@ pub enum CombatEventView {
     Died {
         actor: ActorTarget,
     },
+}
+
+fn read_anonymous_ability<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<(Option<ActorTarget>, Option<ActorTarget>, AbilityOutcome), D::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fields {
+        #[serde(deserialize_with = "required_option")]
+        caster: Option<ActorTarget>,
+        #[serde(deserialize_with = "required_option")]
+        target: Option<ActorTarget>,
+        outcome: String,
+    }
+    let fields: Fields = crate::bounded::named_map(deserializer)?;
+    let outcome = match fields.outcome.as_str() {
+        "applied" => AbilityOutcome::Applied,
+        "unaffected" => AbilityOutcome::Unaffected,
+        "miss" => AbilityOutcome::Miss,
+        _ => {
+            return Err(serde::de::Error::custom(
+                "invalid anonymous ability outcome",
+            ))
+        }
+    };
+    Ok((fields.caster, fields.target, outcome))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

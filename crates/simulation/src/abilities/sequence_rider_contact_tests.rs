@@ -100,6 +100,7 @@ fn primary(game: &crate::Game, index: usize) -> &super::Outcome {
             CombatEvent::Resolved {
                 outcome,
                 strike: Some(ordinal),
+                ..
             } if outcome.actor == ActorId(1) && usize::from(*ordinal) == index => Some(outcome),
             _ => None,
         })
@@ -113,6 +114,7 @@ fn riders(game: &crate::Game) -> Vec<&super::Outcome> {
             CombatEvent::Resolved {
                 outcome,
                 strike: None,
+                ..
             } if outcome.actor == ActorId(1) && outcome.ability.is_none() => Some(outcome),
             _ => None,
         })
@@ -259,9 +261,9 @@ fn sequence_rider_equal_offsets_preserve_order_once_and_residual_edge() {
         .combat_events()
         .iter()
         .filter_map(|event| match event {
-            CombatEvent::Resolved { outcome, strike } if outcome.actor == ActorId(1) => {
-                Some(*strike)
-            }
+            CombatEvent::Resolved {
+                outcome, strike, ..
+            } if outcome.actor == ActorId(1) => Some(*strike),
             _ => None,
         })
         .collect::<Vec<_>>();

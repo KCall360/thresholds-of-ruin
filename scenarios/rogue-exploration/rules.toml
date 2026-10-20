@@ -1,4 +1,4 @@
-import = "interactions-v46"
+import = "interactions-v47"
 
 # Equipment expertise is an ordinary HD-point or earned Intellect choice.
 # No preset, species, NPC or default talent receives a free expertise grant.
@@ -226,6 +226,11 @@ value = { id = "rogue.blindness", family = "rogue.blindness", lifecycle = "timed
 
 [[overrides]]
 op = "add"
+path = ["conditions", "rogue.see_invisible"]
+value = { id = "rogue.see_invisible", family = "rogue.see_invisible", lifecycle = "timed", name = "See Invisible", modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "see_invisible", enabled = true } } }], stacking = { kind = "extend" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }
+
+[[overrides]]
+op = "add"
 path = ["conditions", "rogue.sleep"]
 value = { id = "rogue.sleep", family = "rogue.sleep", lifecycle = "timed", name = "Asleep", modifiers = [], stacking = { kind = "extend" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = ["voluntary_actions"], preparation = "pause" }
 
@@ -253,3 +258,36 @@ value = { id = "rogue.wand_cold", name = "Wand of Cold", interaction = "hostile_
 op = "add"
 path = ["abilities", "rogue.wand_lightning"]
 value = { id = "rogue.wand_lightning", name = "Wand of Lightning", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "directional_ray", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "sight", range = 6 }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "target", skill = { kind = "named", skill = "agility" }, against = { kind = "opposed", skill = { kind = "named", skill = "lore" } } }, on_success = [], on_failure = [{ kind = "damage", damage = { kind = "components", components = [{ category = "energy", descriptor = "lightning", amount = { kind = "rolled", dice = { count = 6, sides = 6, bonus = 0 } } }] } }], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+# Utility rays stop at their first physical creature contact, whether dodged or
+# affected, and never bounce. Six-cell reach and Lore versus Agility are explicit
+# TOR adaptations of the source's no-save utilities. Effects persist until removed.
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.invisible"]
+value = { id = "rogue.invisible", family = "rogue.invisible", lifecycle = "timed", name = "Invisible", modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "invisible", enabled = true } } }], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "until_removed" }, restrictions = [], preparation = "preserve" }
+
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.hasted"]
+value = { id = "rogue.hasted", family = "rogue.hasted", lifecycle = "timed", name = "Hasted", modifiers = [{ scope = "always", op = { kind = "action_duration", value = "haste" } }], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "until_removed" }, restrictions = [], preparation = "preserve" }
+
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.slowed"]
+value = { id = "rogue.slowed", family = "rogue.slowed", lifecycle = "timed", name = "Slowed", modifiers = [{ scope = "always", op = { kind = "action_duration", value = "slow" } }], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "until_removed" }, restrictions = [], preparation = "preserve" }
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_invisibility"]
+value = { id = "rogue.wand_invisibility", name = "Wand of Invisibility", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "directional_contact_ray", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "sight", range = 6 }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "target", skill = { kind = "named", skill = "agility" }, against = { kind = "opposed", skill = { kind = "named", skill = "lore" } } }, on_success = [], on_failure = [{ kind = "apply_persistent_condition", condition = "rogue.invisible" }], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_haste"]
+value = { id = "rogue.wand_haste", name = "Wand of Haste Monster", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "directional_contact_ray", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "sight", range = 6 }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "target", skill = { kind = "named", skill = "agility" }, against = { kind = "opposed", skill = { kind = "named", skill = "lore" } } }, on_success = [], on_failure = [{ kind = "apply_persistent_condition", condition = "rogue.hasted", cancels = "rogue.slowed" }], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_slow"]
+value = { id = "rogue.wand_slow", name = "Wand of Slow Monster", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "directional_contact_ray", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "sight", range = 6 }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "target", skill = { kind = "named", skill = "agility" }, against = { kind = "opposed", skill = { kind = "named", skill = "lore" } } }, on_success = [], on_failure = [{ kind = "apply_persistent_condition", condition = "rogue.slowed", cancels = "rogue.hasted" }], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }

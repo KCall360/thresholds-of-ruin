@@ -2292,7 +2292,7 @@ fn personal_condition_rows_are_visible_readonly_and_distinguish_protection() {
                 name: "Fixture Faint".into(),
             },
             phase: ConditionPhase::Active,
-            remaining_ticks: 200,
+            remaining_ticks: Some(200),
         },
         PersonalCondition {
             condition: ContentRef {
@@ -2300,7 +2300,15 @@ fn personal_condition_rows_are_visible_readonly_and_distinguish_protection() {
                 name: "Fixture Ice".into(),
             },
             phase: ConditionPhase::Protection,
-            remaining_ticks: 400,
+            remaining_ticks: Some(400),
+        },
+        PersonalCondition {
+            condition: ContentRef {
+                id: "fixture_haste".into(),
+                name: "Fixture Haste".into(),
+            },
+            phase: ConditionPhase::Active,
+            remaining_ticks: None,
         },
     ];
     let mut app = App::default();
@@ -2309,6 +2317,7 @@ fn personal_condition_rows_are_visible_readonly_and_distinguish_protection() {
     let before = app.state.as_ref().unwrap().snapshot();
     assert_eq!(app.input(Input::Key { key: Key::Stats }), Effect::None);
     let rows = app.stats_rows().join("\n");
+    assert!(rows.contains("Fixture Haste: until removed"));
     assert!(rows.contains("Fixture Faint: 200 active ticks remaining"));
     assert!(rows.contains("Protection against Fixture Ice: 400 active ticks remaining"));
     assert!(!rows.contains("from actor"));

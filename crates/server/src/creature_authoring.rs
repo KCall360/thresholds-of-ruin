@@ -105,6 +105,7 @@ pub enum Scope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Op {
+    ActionDuration { value: ActionDuration },
     Perception { value: Perception },
     Locomotion { value: Locomotion },
     Add { stat: Stat, value: i64 },
@@ -114,6 +115,24 @@ pub enum Op {
     Reduction { selector: Selector, amount: u32 },
     TalentReduction { category: String, amount: u32 },
     GrantAbility { ability: String },
+}
+/// Source-owned action rate, separate from attribute and clock authoring.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionDuration {
+    Normal,
+    Haste,
+    Slow,
+}
+impl<'de> Deserialize<'de> for ActionDuration {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "normal" => Ok(Self::Normal),
+            "haste" => Ok(Self::Haste),
+            "slow" => Ok(Self::Slow),
+            _ => Err(serde::de::Error::custom("invalid authored action duration")),
+        }
+    }
 }
 /// Authoring and stored schemas remain independent of simulation capabilities.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1337,6 +1356,45 @@ impl DisplacementProfile {
                 CreatureSize::Colossal => s::creatures::CreatureSize::Colossal,
             },
             anchored: self.anchored,
+        }
+    }
+}
+
+#[cfg(test)]
+mod action_duration_authoring_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn action_duration_authoring_requires_exact_scalar_names() {
+        for rate in ["normal", "haste", "slow"] {
+            let value = json!(rate);
+            let decoded: ActionDuration = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+            let modifier = json!({
+                "scope":"always", "op":{"kind":"action_duration","value":rate}
+            });
+            let decoded: Modifier = serde_json::from_value(modifier.clone()).unwrap();
+            assert!(decoded.compile().is_ok());
+            assert_eq!(serde_json::to_value(decoded).unwrap(), modifier);
+            let authored: Modifier = toml::from_str(&format!(
+                "scope = 'always'\nop = {{ kind = 'action_duration', value = '{rate}' }}"
+            ))
+            .unwrap();
+            assert!(authored.compile().is_ok());
+            for invalid in [
+                json!({(rate):null}),
+                json!([rate]),
+                json!(null),
+                json!(true),
+                json!(1),
+                json!("fast"),
+            ] {
+                assert!(serde_json::from_value::<ActionDuration>(invalid.clone()).is_err());
+                let mut malformed = modifier.clone();
+                malformed["op"]["value"] = invalid;
+                assert!(serde_json::from_value::<Modifier>(malformed).is_err());
+            }
         }
     }
 }

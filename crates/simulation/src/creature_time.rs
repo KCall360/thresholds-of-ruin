@@ -235,6 +235,23 @@ impl Game {
         source: ActorId,
         duration: u64,
     ) -> Result<crate::conditions::ConditionUpdate, GameError> {
+        self.apply_condition_lifetime(actor, condition, source, Some(duration))
+    }
+    pub fn apply_persistent_condition(
+        &mut self,
+        actor: ActorId,
+        condition: &crate::content_ids::ConditionId,
+        source: ActorId,
+    ) -> Result<crate::conditions::ConditionUpdate, GameError> {
+        self.apply_condition_lifetime(actor, condition, source, None)
+    }
+    fn apply_condition_lifetime(
+        &mut self,
+        actor: ActorId,
+        condition: &crate::content_ids::ConditionId,
+        source: ActorId,
+        duration: Option<u64>,
+    ) -> Result<crate::conditions::ConditionUpdate, GameError> {
         if !self.actors.contains_key(&source) && !self.detached_actor(source) {
             return Err(GameError::UnknownActor);
         }
@@ -246,7 +263,10 @@ impl Game {
             crate::abilities::RuleError::InvalidDefinition,
         ))?;
         let context = self.condition_recovery_context(actor, condition)?;
-        let update = combat.apply_condition(condition, source, duration, context)?;
+        let update = match duration {
+            Some(duration) => combat.apply_condition(condition, source, duration, context)?,
+            None => combat.apply_persistent_condition(condition, source, context)?,
+        };
         let prepared = self.prepare_actor_outcome(outcome)?;
         self.publish_actor_effect(prepared, false)?;
         Ok(update)

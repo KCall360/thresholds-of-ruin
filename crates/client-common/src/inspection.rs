@@ -216,13 +216,19 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
     }
     for condition in &report.conditions {
         rows.push(format!(
-            "{} from actor {}: {} active ticks remaining",
+            "{} from actor {}: {}",
             condition_label(condition),
             condition.source.0,
-            condition.remaining_ticks
+            condition_lifetime(condition.remaining_ticks)
         ));
     }
     Ok(rows)
+}
+pub(crate) fn condition_lifetime(remaining: Option<u64>) -> String {
+    remaining.map_or_else(
+        || "until removed".into(),
+        |ticks| format!("{ticks} active ticks remaining"),
+    )
 }
 pub(crate) fn condition_label(condition: &ConditionView) -> String {
     phase_label(&condition.condition.name, condition.phase)
@@ -468,7 +474,7 @@ pub(crate) mod tests {
             condition: reference("fixture_stillness", "Stillness"),
             phase: ConditionPhase::Protection,
             source: ActorId(2),
-            remaining_ticks: 400,
+            remaining_ticks: Some(400),
         }];
         let rows = lines(&report).unwrap();
         assert!(rows
@@ -483,6 +489,20 @@ pub(crate) mod tests {
         assert!(rows
             .iter()
             .any(|row| row == "Stillness from actor 2: 400 active ticks remaining"));
+    }
+    #[test]
+    fn persistent_conditions_render_an_unbounded_lifetime() {
+        let mut report = report();
+        report.conditions = vec![ConditionView {
+            condition: reference("fixture_haste", "Haste"),
+            phase: ConditionPhase::Active,
+            source: ActorId(2),
+            remaining_ticks: None,
+        }];
+        assert!(lines(&report)
+            .unwrap()
+            .iter()
+            .any(|line| line == "Haste from actor 2: until removed"));
     }
     pub(crate) fn reference(id: &str, name: &str) -> ContentRef {
         ContentRef {

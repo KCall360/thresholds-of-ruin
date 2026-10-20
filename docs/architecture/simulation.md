@@ -38,6 +38,23 @@ Observation reads, unresolved noun ambiguity and rejected actions consume no
 simulation time. Rejected actions leave authoritative state unchanged; a future
 in-world failed attempt needs an explicit rule if it is to charge time.
 
+The table gives ordinary timings before the source-folded
+[`action_duration` rate](../reference/creature-rules.md#derivation-and-sources).
+It applies after distance and attribute scaling to immediate-action recovery and
+to newly captured preparation, strike offsets and recovery, including equipment,
+consumption and replacement work. Positive fractions round upward; overflow or
+an exceeded prepared-work bound rejects atomically. An admitted request captures
+the rate only when execution starts. A paid plan keeps its captured timings
+through pause, cancellation, source changes and reopen; existing readiness or
+recovery debt is never rescaled retroactively.
+
+This rate does not scale elapsed actor-active time. Condition durations, cooldowns,
+nutrition and Health/resource regeneration retain their ordinary clocks, as do
+base-turn operands in effects. Faster actions may therefore fit within the same
+elapsed interval without accelerating those clocks. Until-removed conditions
+have no timer to advance and create no expiry deadline; they use the ordinary
+condition book and removal/reconciliation boundary.
+
 ## Actions and atomicity
 
 Human, autonomous and travel requests admit bounded intentions to a simulation-owned
@@ -149,7 +166,7 @@ including when immunity or a zero result removes effects. Early checked immunity
 leaves the payload explicitly unselected. An unavailable target retains the
 existing uniform Miss without inventing an attempted check or payload. Neither
 these internal reasons nor frozen participation fields enter ordinary wire views.
-The source keeps its own event, and genuinely visible participants remain visible.
+Ordinary granted abilities retain source feedback, and genuinely visible participants remain visible.
 Only actually published riders can add target participation to their own primary's
 single public event. Private publication receipts bind the exact primary, strike
 ordinal and actor/target/intention tuple. This changes no primary check, result,
@@ -163,6 +180,18 @@ gaining See Invisible. Missing receipts disclose nothing; free observations do
 not reconstruct them from current senses. Pre-mutation participant references
 and unchanged visibility witnesses license bounded publication, while ordinary
 condition, damage, interruption and death feedback remains available to its owner.
+
+Item-supplied rays freeze a separate source-identity ceiling at their paid release.
+The raw resolved event retains `public`, `initiator_only` or `concealed`; each
+existing observer receipt also retains a required nullable exact ability ID.
+Only an identified source or a committed `on_use` launch licenses its initiator;
+other observers never inherit that private knowledge. Restore binds the receipt's
+ID to the raw ability, source ceiling, observer and frozen source reference.
+Later identification, reveal, transfer or reopen cannot rename old activity.
+A restricted ray's hidden/contact interception gives its initiator no event.
+Otherwise anonymous feedback carries only permitted participant references and
+outcome, without ability/item identity, strike ordinal or private operands.
+The authoritative Outcome and wizard-only diagnostics retain their original data.
 
 Successful public event-producing mutations finalize participant receipts before
 returning or writing detached records. Existing candidate transactions share this

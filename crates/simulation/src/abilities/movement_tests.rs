@@ -296,7 +296,7 @@ fn guarded_step_moves_only_at_preparation_completion_and_pays_one_move() {
         .filter(|condition| condition.condition.as_str() == "braced")
         .collect();
     assert_eq!(braced.len(), 1);
-    assert_eq!(braced[0].remaining, 200);
+    assert_eq!(braced[0].remaining, Some(200));
 }
 
 #[test]
@@ -377,7 +377,7 @@ fn newly_occupied_step_retains_braced_and_all_committed_timing_and_cost() {
             .find(|condition| condition.condition.as_str() == "braced")
             .unwrap()
             .remaining,
-        158
+        Some(158)
     );
     drop(creature);
     game.act(ActorId(2), Action::Move(tor_world::Direction::North))
@@ -1310,7 +1310,7 @@ fn guarded_step_keeps_captured_speed_and_ordinary_duration_while_rechecking_geom
                 .find(|condition| condition.condition.as_str() == "braced")
                 .unwrap()
                 .remaining,
-            200
+            Some(200)
         );
     }
 }

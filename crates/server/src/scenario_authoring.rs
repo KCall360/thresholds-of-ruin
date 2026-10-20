@@ -567,11 +567,22 @@ pub enum EquippedSelection {
 }
 
 /// Healing overflow is explicitly authored and never inferred from potion identity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HealingOverflow {
     None,
     ImproveEarliestHitDie,
+    ImproveEarliestHitDiceByExcess,
+}
+impl<'de> Deserialize<'de> for HealingOverflow {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "none" => Ok(Self::None),
+            "improve_earliest_hit_die" => Ok(Self::ImproveEarliestHitDie),
+            "improve_earliest_hit_dice_by_excess" => Ok(Self::ImproveEarliestHitDiceByExcess),
+            _ => Err(serde::de::Error::custom("unknown healing overflow policy")),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -634,6 +645,10 @@ pub enum Effect {
         condition: String,
         duration: u64,
     },
+    ApplyPersistentCondition {
+        condition: String,
+        cancels: Option<String>,
+    },
     ApplyConditionForTurns {
         condition: String,
         duration: AmountExpr,
@@ -688,13 +703,23 @@ impl<'de> Deserialize<'de> for HoldPolicy {
     }
 }
 /// Discovery is an explicit content policy, never inferred from the item name.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemDiscovery {
     #[default]
     SelfEffect,
     OnUse,
     Never,
+}
+impl<'de> Deserialize<'de> for ItemDiscovery {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "self_effect" => Ok(Self::SelfEffect),
+            "on_use" => Ok(Self::OnUse),
+            "never" => Ok(Self::Never),
+            _ => Err(serde::de::Error::custom("invalid item discovery policy")),
+        }
+    }
 }
 impl From<ItemDiscovery> for tor_simulation::ItemDiscovery {
     fn from(value: ItemDiscovery) -> Self {
@@ -1041,6 +1066,13 @@ impl<'de> Deserialize<'de> for Effect {
                 condition: String,
                 duration: u64,
             },
+            ApplyPersistentCondition {
+                condition: String,
+                // Authored absence means no opposite; canonical and stored
+                // records still write and require the explicit nullable field.
+                #[serde(default)]
+                cancels: Option<String>,
+            },
             ApplyConditionForTurns {
                 condition: String,
                 duration: AmountExpr,
@@ -1125,6 +1157,9 @@ impl<'de> Deserialize<'de> for Effect {
                 condition,
                 duration,
             },
+            Fields::ApplyPersistentCondition { condition, cancels } => {
+                Self::ApplyPersistentCondition { condition, cancels }
+            }
             Fields::ApplyConditionForTurns {
                 condition,
                 duration,
@@ -1375,12 +1410,83 @@ mod tests {
     }
 
     #[test]
+    fn authored_healing_overflow_requires_exact_scalar_names() {
+        for name in [
+            "none",
+            "improve_earliest_hit_die",
+            "improve_earliest_hit_dice_by_excess",
+        ] {
+            let canonical = serde_json::json!({
+                "kind":"heal_per_hit_die", "sides":8, "bonus":0, "overflow":name
+            });
+            let decoded: Effect = serde_json::from_value(canonical.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), canonical);
+            let source =
+                format!("kind = 'heal_per_hit_die'\nsides = 8\nbonus = 0\noverflow = '{name}'");
+            let decoded: Effect = toml::from_str(&source).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), canonical);
+            for invalid in [
+                serde_json::json!({(name):null}),
+                serde_json::json!([name]),
+                serde_json::json!(null),
+                serde_json::json!(true),
+                serde_json::json!(1),
+                serde_json::json!("unknown"),
+            ] {
+                let mut bad = canonical.clone();
+                bad["overflow"] = invalid;
+                assert!(
+                    serde_json::from_value::<Effect>(bad.clone()).is_err(),
+                    "noncanonical healing overflow: {bad}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn authored_item_discovery_requires_exact_scalar_names() {
+        for name in ["self_effect", "on_use", "never"] {
+            let canonical = serde_json::json!({
+                "ability":"fixture.device_ray",
+                "initial_charges":{"minimum":3,"maximum":7},
+                "discovery":name
+            });
+            let decoded: DeviceSpec = serde_json::from_value(canonical.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), canonical);
+            let source = format!(
+                "ability = 'fixture.device_ray'\ninitial_charges = {{ minimum = 3, maximum = 7 }}\ndiscovery = '{name}'"
+            );
+            let decoded: DeviceSpec = toml::from_str(&source).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), canonical);
+            for invalid in [
+                serde_json::json!({(name):null}),
+                serde_json::json!([name]),
+                serde_json::json!(null),
+                serde_json::json!(true),
+                serde_json::json!(1),
+                serde_json::json!("unknown"),
+            ] {
+                let mut bad = canonical.clone();
+                bad["discovery"] = invalid;
+                assert!(
+                    serde_json::from_value::<DeviceSpec>(bad.clone()).is_err(),
+                    "noncanonical item discovery: {bad}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn hit_die_healing_requires_an_explicit_supported_overflow_policy() {
         for (name, policy) in [
             ("none", HealingOverflow::None),
             (
                 "improve_earliest_hit_die",
                 HealingOverflow::ImproveEarliestHitDie,
+            ),
+            (
+                "improve_earliest_hit_dice_by_excess",
+                HealingOverflow::ImproveEarliestHitDiceByExcess,
             ),
         ] {
             let value = serde_json::json!({
@@ -1811,5 +1917,108 @@ mod projectile_authoring_tests {
         let mut bad = serde_json::to_value(&source).unwrap();
         bad["attack"] = json!({});
         assert!(serde_json::from_value::<ProjectileSpec>(bad).is_err());
+    }
+}
+
+#[cfg(test)]
+mod persistent_condition_authoring_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn persistent_effect_authoring_accepts_toml_absence_and_named_opposite_without_runtime_defaults(
+    ) {
+        for (suffix, cancels) in [("", None), ("\ncancels = 'fixture_b'", Some("fixture_b"))] {
+            let text =
+                format!("kind = 'apply_persistent_condition'\ncondition = 'fixture_a'{suffix}");
+            let authored: Effect = toml::from_str(&text).unwrap();
+            let canonical = json!({"kind":"apply_persistent_condition","condition":"fixture_a","cancels":cancels});
+            assert_eq!(serde_json::to_value(&authored).unwrap(), canonical);
+            assert_eq!(
+                serde_json::from_value::<Effect>(canonical.clone()).unwrap(),
+                authored
+            );
+            assert!(serde_json::from_value::<tor_simulation::rules::Effect>(canonical).is_ok());
+            assert!(toml::from_str::<Effect>(&format!("{text}\nextra = true")).is_err());
+        }
+        let absent = json!({"kind":"apply_persistent_condition","condition":"fixture_a"});
+        assert!(serde_json::from_value::<Effect>(absent.clone()).is_ok());
+        assert!(serde_json::from_value::<tor_simulation::rules::Effect>(absent).is_err());
+        for invalid in [
+            json!({"fixture_b":null}),
+            json!(["fixture_b"]),
+            json!(true),
+            json!(1),
+        ] {
+            let bad = json!({"kind":"apply_persistent_condition","condition":"fixture_a","cancels":invalid});
+            assert!(serde_json::from_value::<Effect>(bad).is_err());
+        }
+        for operand in [
+            "{ fixture_b = true }",
+            "['fixture_b']",
+            "true",
+            "1",
+            "nan",
+            "1979-05-27",
+        ] {
+            let text = format!(
+                "kind = 'apply_persistent_condition'\ncondition = 'fixture_a'\ncancels = {operand}"
+            );
+            assert!(toml::from_str::<Effect>(&text).is_err(), "{operand}");
+        }
+        assert!(serde_json::from_value::<Effect>(json!([
+            "apply_persistent_condition",
+            "fixture_a",
+            null
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn persistent_effect_authoring_compiles_with_optional_named_opposition() {
+        let mut document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        for name in ["fixture_a", "fixture_b"] {
+            let mut definition = document
+                .conditions
+                .iter()
+                .find(|definition| definition.id.as_str() == "fear")
+                .unwrap()
+                .clone();
+            definition.id = tor_simulation::content_ids::ConditionId::new(name).unwrap();
+            definition.family = tor_simulation::content_ids::ConditionFamilyId::new(name).unwrap();
+            definition.timing = tor_simulation::rules::ConditionTiming::UntilRemoved;
+            definition.stacking = tor_simulation::rules::Stacking::Keep;
+            document.conditions.push(definition);
+        }
+        let rules = tor_simulation::rules::Ruleset::validate(document).unwrap();
+        for mut value in [
+            json!({"kind":"apply_persistent_condition","condition":"fixture_a"}),
+            json!({"kind":"apply_persistent_condition","condition":"fixture_a","cancels":"fixture_b"}),
+        ] {
+            let effect: Effect = serde_json::from_value(value.clone()).unwrap();
+            let compiled = ConsumableSpec {
+                discovery: ItemDiscovery::OnUse,
+                effects: vec![effect],
+            }
+            .compile(&rules)
+            .unwrap();
+            if value.get("cancels").is_none() {
+                value["cancels"] = json!(null);
+            }
+            assert_eq!(serde_json::to_value(&compiled.effects[0]).unwrap(), value);
+            value["duration"] = json!(100);
+            assert!(serde_json::from_value::<Effect>(value).is_err());
+        }
+        for condition in ["fear", "missing"] {
+            let spec = ConsumableSpec {
+                discovery: ItemDiscovery::OnUse,
+                effects: vec![Effect::ApplyPersistentCondition {
+                    condition: condition.into(),
+                    cancels: None,
+                }],
+            };
+            assert!(spec.compile(&rules).is_err());
+        }
     }
 }

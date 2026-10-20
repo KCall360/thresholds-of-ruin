@@ -237,8 +237,9 @@ Existing rations share finite stock between ordinary eating and respec. The
 appended ordinary restore-strength stage supplies one finite placement attempt per
 floor from depth 1; this provisional rate is not a guaranteed cure or the complete
 potion catalog. Effective observed restoration identifies the concealed potion.
-The selected ordinary magic-item batch implements healing/confusion/blindness,
-class-restricted identify and sleep, and fire/cold/lightning charged devices.
+The selected ordinary magic-item batch implements healing, confusion, blindness, poison,
+see-invisible and extra healing, class-restricted identify and sleep, and
+fire/cold/lightning plus invisibility/haste-monster/slow-monster charged devices.
 Read and Zap are explicit capabilities; exact instance charges and owner-only
 paid identification extend existing holds and knowledge without granting abilities.
 The device attack uses Intellect + Lore versus Speed + Agility, with no activation
@@ -246,6 +247,14 @@ check or Mana cost. Healing overflow improves the earliest eligible active owned
 HD by one, bounded by its immutable acquisition roll; exact restoration retains
 that credit and a different-source replacement cannot inherit it. Smaller forms
 can temporarily mask the benefit. See [item contracts](../reference/items.md#reading-identification-and-charged-devices).
+
+Poison uses the shared restorable Strength deficit and on-use recognition.
+See-invisible uses finite extending actor-active sight plus the blindness cure,
+without automatic recognition. Sustain-strength, hallucination cures and source
+ring interactions remain gaps. Extra-healing overflow uses the source one/two
+threshold on bounded owned HD records. Utility wands use persistent first-contact
+rays and nonstacking haste/slow that cancel to neutral; the Lore dodge and bounded
+reach are TOR adaptations. See [the bounded item mapping](../reference/items.md#reading-identification-and-charged-devices).
 
 The equipment risk/recovery batch adds instance curses, signed weapon enchantment,
 physical armor penalties, five-category magical armor wards and rust protection.

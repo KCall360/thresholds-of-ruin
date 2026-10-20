@@ -890,7 +890,7 @@ class RouteResumeHardeningTests(unittest.TestCase):
             else:
                 self.assertEqual(current, old, name)
 
-    def test_current_baseline_changes_only_required_physical_projectile_formats(self):
+    def test_historical_baseline_changes_only_required_physical_projectile_formats(self):
         import hashlib
         import tomllib
         from arena_evaluation import files
@@ -898,7 +898,7 @@ class RouteResumeHardeningTests(unittest.TestCase):
         snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v15'
         previous = ROOT / 'scripts/fixtures/rogue-earned-baseline-v14'
         self.assertTrue((snapshot / 'format-transition.json').is_file(),
-                        'the current source-only baseline needs its explicit transition receipt')
+                        'the historical source-only baseline retains its explicit transition receipt')
         transition_bytes = (snapshot / 'format-transition.json').read_bytes()
         transition = json.loads(transition_bytes)
         source = json.loads((snapshot / 'source.json').read_text())
@@ -920,9 +920,8 @@ class RouteResumeHardeningTests(unittest.TestCase):
         self.assertIn('compiler and route qualification pending', source['reference'])
         self.assertIn('source bytes only', transition['only_transformation'])
         self.assertEqual(transition['current_rules_dependencies'], source['rules_dependencies'])
-        bundled = ROOT / 'crates/simulation/data/default-ruleset.toml'
         self.assertEqual(source['rules_dependencies'],
-                         {'interactions-v46': hashlib.sha256(bundled.read_bytes()).hexdigest()})
+                         {'interactions-v46': 'e3eda113c6dadf96bb350df1900c1ed08e63e0a69f049a9703be25237748e907'})
         self.assertEqual(transition['retained_fixture_reference'],
                          '124f31ab331c2c6b1511aa953c7b5ed2afb6801c:scripts/fixtures/rogue-earned-baseline-v14')
         self.assertEqual(set(source['package_inputs']), set(prior['package_inputs']))
@@ -949,6 +948,57 @@ class RouteResumeHardeningTests(unittest.TestCase):
                     if 'anatomy' in species:
                         species['anatomy'].update(capacities={}, primary_attack_socket={'kind': 'none'})
                 self.assertEqual(current_source, prior_source)
+            else:
+                self.assertEqual(current, old, name)
+
+    def test_current_baseline_changes_only_required_utility_magic_formats(self):
+        import hashlib
+        import tomllib
+        from arena_evaluation import files
+        from process_harness import ROOT
+        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v16'
+        previous = ROOT / 'scripts/fixtures/rogue-earned-baseline-v15'
+        transition_bytes = (snapshot / 'format-transition.json').read_bytes()
+        transition = json.loads(transition_bytes)
+        source = json.loads((snapshot / 'source.json').read_text())
+        prior = json.loads((previous / 'source.json').read_text())
+        self.assertEqual((transition['previous_snapshot'], transition['current_snapshot']),
+                         (previous.name, snapshot.name))
+        self.assertEqual((transition['previous_scenario_format'], transition['current_scenario_format']),
+                         (24, 25))
+        self.assertEqual((transition['previous_ruleset'], transition['current_ruleset']),
+                         ('interactions-v46', 'interactions-v47'))
+        self.assertEqual(transition['previous_source_sha256'],
+                         hashlib.sha256((previous / 'source.json').read_bytes()).hexdigest())
+        for name in ('package_inputs', 'rules_dependencies', 'reference'):
+            self.assertEqual(transition['previous_' + name], prior[name])
+        self.assertEqual(files(previous / 'package'), prior['package_inputs'])
+        self.assertEqual(files(snapshot / 'package'), source['package_inputs'])
+        self.assertTrue(source['reference'].startswith(prior['reference'] + '; '))
+        self.assertTrue(source['reference'].endswith(
+            'transition-sha256:' + hashlib.sha256(transition_bytes).hexdigest()))
+        self.assertIn('compiler and route qualification pending', source['reference'])
+        self.assertIn('source bytes only', transition['only_transformation'])
+        self.assertEqual(transition['current_rules_dependencies'], source['rules_dependencies'])
+        bundled = ROOT / 'crates/simulation/data/default-ruleset.toml'
+        self.assertEqual(source['rules_dependencies'],
+                         {'interactions-v47': hashlib.sha256(bundled.read_bytes()).hexdigest()})
+        self.assertEqual(transition['retained_fixture_reference'],
+                         '7afacd26fe78c918c1c64f04fcfcbb72b3f154c8:scripts/fixtures/rogue-earned-baseline-v15')
+        self.assertEqual(set(source['package_inputs']), set(prior['package_inputs']))
+        for name in source['package_inputs']:
+            current = (snapshot / 'package' / name).read_bytes()
+            old = (previous / 'package' / name).read_bytes()
+            if name == 'scenario.toml':
+                self.assertEqual(old.count(b'format = 24'), 1)
+                self.assertEqual(current, old.replace(b'format = 24', b'format = 25', 1))
+                current_source, prior_source = map(tomllib.loads, (current.decode(), old.decode()))
+                self.assertEqual(current_source.pop('format'), 25)
+                self.assertEqual(prior_source.pop('format'), 24)
+                self.assertEqual(current_source, prior_source)
+            elif name == 'rules.toml':
+                self.assertEqual(old.count(b'interactions-v46'), 1)
+                self.assertEqual(current, old.replace(b'interactions-v46', b'interactions-v47', 1))
             else:
                 self.assertEqual(current, old, name)
 

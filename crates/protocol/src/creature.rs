@@ -448,8 +448,8 @@ impl<'de> Deserialize<'de> for RestorableLossesView {
 pub struct PersonalCondition {
     pub condition: ContentRef,
     pub phase: crate::ConditionPhase,
-    #[serde(with = "crate::integers::unsigned")]
-    pub remaining_ticks: u64,
+    #[serde(with = "crate::integers::optional_unsigned")]
+    pub remaining_ticks: Option<u64>,
 }
 impl<'de> Deserialize<'de> for PersonalCondition {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -458,8 +458,8 @@ impl<'de> Deserialize<'de> for PersonalCondition {
         struct Fields {
             condition: ContentRef,
             phase: crate::ConditionPhase,
-            #[serde(with = "crate::integers::unsigned")]
-            remaining_ticks: u64,
+            #[serde(with = "crate::integers::optional_unsigned")]
+            remaining_ticks: Option<u64>,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
@@ -471,7 +471,12 @@ impl<'de> Deserialize<'de> for PersonalCondition {
 }
 impl PersonalCondition {
     pub(crate) fn valid(&self) -> bool {
-        self.condition.valid() && (1..=1_000_000).contains(&self.remaining_ticks)
+        self.condition.valid()
+            && self
+                .remaining_ticks
+                .map_or(self.phase == crate::ConditionPhase::Active, |remaining| {
+                    (1..=1_000_000).contains(&remaining)
+                })
     }
 }
 

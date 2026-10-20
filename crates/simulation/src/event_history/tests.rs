@@ -915,3 +915,426 @@ fn same_batch_reused_strike_ordinal_provokes_only_its_own_reference_domain() {
         );
     }
 }
+
+fn host_source_activity(game: &mut Game, ceiling: SourceAbilityDisclosure) {
+    game.host_region_continuation = true;
+    game.begin_event_batch().unwrap();
+    let origin = game
+        .capture_event_origin(ActorId(1), ActorId(2))
+        .with_ability_disclosure(ceiling);
+    game.apply_resolved_with_disclosure(
+        damage(ActorId(1), ActorId(2), 1),
+        crate::lifecycle::ResolutionPublication::Primary { strike: 0 },
+        &mut crate::lifecycle::DamageActivityGuard::default(),
+        origin,
+    )
+    .unwrap();
+    game.seal_participant_events().unwrap();
+    game.host_region_continuation = false;
+}
+
+#[test]
+fn source_disclosure_raw_records_require_exact_current_named_fields() {
+    use serde_json::json;
+    for (ceiling, spelling) in [
+        (SourceAbilityDisclosure::Public, "public"),
+        (SourceAbilityDisclosure::InitiatorOnly, "initiator_only"),
+        (SourceAbilityDisclosure::Concealed, "concealed"),
+    ] {
+        let event = CombatEvent::Resolved {
+            outcome: damage(ActorId(1), ActorId(2), 1),
+            strike: Some(0),
+            source_disclosure: ceiling,
+        };
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["Resolved"].as_object().unwrap().len(), 3);
+        assert_eq!(value["Resolved"]["source_disclosure"], spelling);
+        assert_eq!(
+            serde_json::from_value::<CombatEvent>(value.clone()).unwrap(),
+            event
+        );
+        for field in ["outcome", "strike", "source_disclosure"] {
+            let mut missing = value.clone();
+            missing["Resolved"].as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<CombatEvent>(missing).is_err(),
+                "{field}"
+            );
+        }
+        for malformed in [
+            json!(null),
+            json!({(spelling):null}),
+            json!([spelling]),
+            json!("known"),
+            json!(true),
+            json!(1),
+        ] {
+            let mut invalid = value.clone();
+            invalid["Resolved"]["source_disclosure"] = malformed;
+            assert!(serde_json::from_value::<CombatEvent>(invalid).is_err());
+        }
+        let mut positional = value.clone();
+        positional["Resolved"] = json!([
+            value["Resolved"]["outcome"],
+            value["Resolved"]["strike"],
+            spelling
+        ]);
+        assert!(serde_json::from_value::<CombatEvent>(positional).is_err());
+        let mut extra = value.clone();
+        extra["Resolved"]["item"] = json!(1);
+        assert!(serde_json::from_value::<CombatEvent>(extra).is_err());
+        let text = serde_json::to_string(&value).unwrap();
+        let old = format!("\"source_disclosure\":\"{spelling}\"");
+        let duplicate = text.replacen(&old, &format!("{old},{old}"), 1);
+        assert_ne!(duplicate, text);
+        assert!(serde_json::from_str::<CombatEvent>(&duplicate).is_err());
+        if ceiling != SourceAbilityDisclosure::Public {
+            let mut no_ability = value;
+            no_ability["Resolved"]["outcome"]["ability"] = json!(null);
+            assert!(serde_json::from_value::<CombatEvent>(no_ability).is_err());
+        }
+    }
+}
+
+#[test]
+fn source_disclosure_ceiling_names_only_licensed_historical_observers() {
+    for ceiling in [
+        SourceAbilityDisclosure::Public,
+        SourceAbilityDisclosure::InitiatorOnly,
+        SourceAbilityDisclosure::Concealed,
+    ] {
+        let mut game = fixture();
+        host_source_activity(&mut game, ceiling);
+        let witness = game.event_observation_witness();
+        capture(&mut game, ActorId(3), &witness);
+        game.seal_event_observations().unwrap();
+        for observer in [ActorId(1), ActorId(2), ActorId(3)] {
+            let disclosed = events(&game, observer);
+            assert_eq!(disclosed.len(), 1);
+            if ceiling.permits(observer, ActorId(1)) {
+                assert!(
+                    matches!(&disclosed[0], DisclosedCombatEvent::Ability { id, .. }
+                    if id.as_str() == "basic_melee")
+                );
+            } else {
+                assert!(matches!(
+                    &disclosed[0],
+                    DisclosedCombatEvent::AnonymousAbility {
+                        caster: Some(ActorId(1)),
+                        caster_reference: Some(ActorReferenceKind::Creature),
+                        target: Some(ActorId(2)),
+                        target_reference: Some(ActorReferenceKind::Creature),
+                        outcome: OutcomeStatus::Applied,
+                    }
+                ));
+            }
+            assert_eq!(events(&restored(&game), observer), disclosed);
+        }
+    }
+}
+
+#[test]
+fn restricted_unseen_source_keeps_neutral_personal_feedback_without_hidden_caster_hit() {
+    let mut hidden_source = fixture();
+    template(&mut hidden_source, ActorId(1), Some("event_invisible"));
+    host_source_activity(&mut hidden_source, SourceAbilityDisclosure::Concealed);
+    let received = events(&hidden_source, ActorId(2));
+    assert!(
+        matches!(received.as_slice(), [DisclosedCombatEvent::AnonymousAbility {
+        caster_reference, target: Some(ActorId(2)),
+        target_reference: Some(ActorReferenceKind::Creature), outcome: OutcomeStatus::Applied, ..
+    }] if *caster_reference != Some(ActorReferenceKind::Creature))
+    );
+    assert!(!received
+        .iter()
+        .any(|event| matches!(event, DisclosedCombatEvent::UnseenAbility { .. })));
+    for ceiling in [
+        SourceAbilityDisclosure::InitiatorOnly,
+        SourceAbilityDisclosure::Concealed,
+    ] {
+        let mut hidden_target = fixture();
+        template(&mut hidden_target, ActorId(2), Some("event_invisible"));
+        host_source_activity(&mut hidden_target, ceiling);
+        assert!(events(&hidden_target, ActorId(1)).is_empty());
+        assert!(matches!(
+            events(&hidden_target, ActorId(2)).as_slice(),
+            [DisclosedCombatEvent::AnonymousAbility {
+                target: Some(ActorId(2)),
+                ..
+            }]
+        ));
+    }
+}
+
+#[test]
+fn later_identification_reads_restore_and_rollback_never_upgrade_source_history() {
+    let mut game = fixture();
+    host_source_activity(&mut game, SourceAbilityDisclosure::Concealed);
+    let witness = game.event_observation_witness();
+    capture(&mut game, ActorId(3), &witness);
+    game.seal_event_observations().unwrap();
+    let before = [ActorId(1), ActorId(2), ActorId(3)].map(|actor| events(&game, actor));
+    for actor in [ActorId(1), ActorId(2), ActorId(3)] {
+        game.learn_identity(actor, "fixture.later_identified_source")
+            .unwrap();
+        let knowledge = game.actors[&actor].recognized_abilities.clone();
+        let view = game.observe(actor).unwrap();
+        game.record_observation_knowledge(&view).unwrap();
+        assert_eq!(game.actors[&actor].recognized_abilities, knowledge);
+    }
+    for candidate in [&game, &restored(&game)] {
+        for (index, actor) in [ActorId(1), ActorId(2), ActorId(3)].into_iter().enumerate() {
+            assert_eq!(events(candidate, actor), before[index]);
+        }
+    }
+    let committed = game.clone();
+    let result = game.with_recovery_transition(true, |candidate| {
+        let origin = candidate
+            .capture_event_origin(ActorId(1), ActorId(2))
+            .with_ability_disclosure(SourceAbilityDisclosure::InitiatorOnly);
+        candidate.apply_resolved_with_disclosure(
+            damage(ActorId(1), ActorId(2), 1),
+            crate::lifecycle::ResolutionPublication::Primary { strike: 0 },
+            &mut crate::lifecycle::DamageActivityGuard::default(),
+            origin,
+        )?;
+        candidate.seal_participant_events()?;
+        assert_eq!(events(candidate, ActorId(1)).len(), before[0].len() + 1);
+        Err::<(), _>(GameError::IdentityExhausted)
+    });
+    assert_eq!(result, Err(GameError::IdentityExhausted));
+    assert_eq!(game, committed);
+}
+
+#[test]
+fn source_receipts_reject_missing_ids_substitution_and_ceiling_or_recipient_forgery() {
+    use serde_json::json;
+    for ceiling in [
+        SourceAbilityDisclosure::Public,
+        SourceAbilityDisclosure::InitiatorOnly,
+        SourceAbilityDisclosure::Concealed,
+    ] {
+        let mut game = fixture();
+        host_source_activity(&mut game, ceiling);
+        let witness = game.event_observation_witness();
+        capture(&mut game, ActorId(3), &witness);
+        game.seal_event_observations().unwrap();
+        let good = serde_json::to_value(&game.event_receipts).unwrap();
+        for owner in ["1", "2", "3"] {
+            let entry = &good["observers"][owner]["entries"][0];
+            assert!(entry.get("disclosed_ability").is_some());
+            assert_eq!(
+                entry["key"]["source_disclosure"],
+                serde_json::to_value(ceiling).unwrap()
+            );
+            let receipt_fields = [
+                "index",
+                "key",
+                "source",
+                "target",
+                "participant",
+                "disclosed_ability",
+            ];
+            let key_fields = [
+                "kind",
+                "actor",
+                "target",
+                "participated",
+                "source_disclosure",
+            ];
+            assert_eq!(entry.as_object().unwrap().len(), receipt_fields.len());
+            assert_eq!(entry["key"].as_object().unwrap().len(), key_fields.len());
+            for field in receipt_fields {
+                let mut missing = good.clone();
+                missing["observers"][owner]["entries"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+                assert!(
+                    serde_json::from_value::<EventReceipts>(missing).is_err(),
+                    "receipt {field}"
+                );
+            }
+            for field in key_fields {
+                let mut missing = good.clone();
+                missing["observers"][owner]["entries"][0]["key"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+                assert!(
+                    serde_json::from_value::<EventReceipts>(missing).is_err(),
+                    "key {field}"
+                );
+            }
+            for invalid in [
+                json!(null),
+                json!("publci"),
+                json!({"public":null}),
+                json!(["public"]),
+                json!(7),
+            ] {
+                let mut malformed = good.clone();
+                malformed["observers"][owner]["entries"][0]["key"]["source_disclosure"] = invalid;
+                assert!(serde_json::from_value::<EventReceipts>(malformed).is_err());
+            }
+            for path in ["", "/key"] {
+                let mut malformed = good.clone();
+                let fields = entry.pointer(path).unwrap().as_object().unwrap();
+                *malformed["observers"][owner]["entries"][0]
+                    .pointer_mut(path)
+                    .unwrap() = json!(fields.values().collect::<Vec<_>>());
+                assert!(serde_json::from_value::<EventReceipts>(malformed).is_err());
+                let mut surplus = good.clone();
+                surplus["observers"][owner]["entries"][0]
+                    .pointer_mut(path)
+                    .unwrap()["extra"] = json!(true);
+                assert!(serde_json::from_value::<EventReceipts>(surplus).is_err());
+            }
+            let text = serde_json::to_string(entry).unwrap();
+            let field = format!("\"disclosed_ability\":{}", entry["disclosed_ability"]);
+            let duplicate = text.replacen(&field, &format!("{field},{field}"), 1);
+            assert_ne!(duplicate, text);
+            assert!(serde_json::from_str::<EventReceipt>(&duplicate).is_err());
+            for replacement in [
+                json!("spark_lance_fire"),
+                if entry["disclosed_ability"].is_null() {
+                    json!("basic_melee")
+                } else {
+                    json!(null)
+                },
+            ] {
+                let mut invalid = good.clone();
+                invalid["observers"][owner]["entries"][0]["disclosed_ability"] = replacement;
+                let mut corrupt = game.clone();
+                corrupt.event_receipts = serde_json::from_value(invalid).unwrap();
+                assert!(!corrupt.event_receipts_valid());
+                let mut shared = crate::checkpoint::SharedState::default();
+                assert!(Game::restore_checkpoint(
+                    corrupt.checkpoint(&mut shared),
+                    &shared,
+                    corrupt.content().clone()
+                )
+                .is_err());
+            }
+        }
+        if ceiling != SourceAbilityDisclosure::Public {
+            let mut forged = good;
+            forged["observers"]["2"]["entries"][0]["key"]["source_disclosure"] = json!("public");
+            forged["observers"]["2"]["entries"][0]["disclosed_ability"] = json!("basic_melee");
+            let mut corrupt = game.clone();
+            corrupt.event_receipts = serde_json::from_value(forged).unwrap();
+            assert!(
+                !corrupt.event_receipts_valid(),
+                "a forged receipt cannot relax raw event authority"
+            );
+        }
+    }
+}
+
+#[test]
+fn raw_source_ceiling_survives_originless_suffix_transfer_without_upgrade() {
+    let mut game = fixture();
+    game.begin_event_batch().unwrap();
+    let origin = game
+        .capture_event_origin(ActorId(1), ActorId(2))
+        .with_ability_disclosure(SourceAbilityDisclosure::Concealed);
+    game.push_event(
+        CombatEvent::Resolved {
+            outcome: damage(ActorId(1), ActorId(2), 1),
+            strike: Some(0),
+            source_disclosure: SourceAbilityDisclosure::Public,
+        },
+        Some(origin),
+    )
+    .unwrap();
+    let (events, _) = game.take_event_suffix(0).unwrap();
+    assert!(matches!(
+        &events[0],
+        CombatEvent::Resolved {
+            source_disclosure: SourceAbilityDisclosure::Concealed,
+            ..
+        }
+    ));
+    game.append_event_suffix(events, vec![None]).unwrap();
+    game.seal_event_observations().unwrap();
+    assert!(matches!(
+        &game.event_log[0],
+        CombatEvent::Resolved {
+            source_disclosure: SourceAbilityDisclosure::Concealed,
+            ..
+        }
+    ));
+    assert!(game.event_receipts.observers.values().all(|row| row
+        .entries
+        .iter()
+        .all(|entry| entry.disclosed_ability.is_none())));
+    assert!(game.event_receipts_valid());
+    assert_eq!(restored(&game), game);
+}
+
+#[test]
+fn typed_checkpoint_rejects_source_grant_substitution_and_initiator_to_spectator_transplant() {
+    let mut game = fixture();
+    host_source_activity(&mut game, SourceAbilityDisclosure::InitiatorOnly);
+    let witness = game.event_observation_witness();
+    capture(&mut game, ActorId(3), &witness);
+    game.seal_event_observations().unwrap();
+    let grant = game.event_receipts.observers[&ActorId(1)].entries[0]
+        .disclosed_ability
+        .clone();
+    assert!(grant.is_some());
+    for mutation in [
+        "different_grant",
+        "different_raw_ability",
+        "spectator_grant",
+        "no_ability",
+    ] {
+        let mut corrupt = game.clone();
+        match mutation {
+            "different_grant" => {
+                corrupt
+                    .event_receipts
+                    .observers
+                    .get_mut(&ActorId(1))
+                    .unwrap()
+                    .entries[0]
+                    .disclosed_ability = Some(AbilityId::new("spark_lance_fire").unwrap());
+            }
+            "different_raw_ability" => {
+                let CombatEvent::Resolved { outcome, .. } = &mut corrupt.event_log[0] else {
+                    unreachable!()
+                };
+                outcome.ability = Some(AbilityId::new("spark_lance_fire").unwrap());
+            }
+            "spectator_grant" => {
+                corrupt
+                    .event_receipts
+                    .observers
+                    .get_mut(&ActorId(3))
+                    .unwrap()
+                    .entries[0]
+                    .disclosed_ability = grant.clone();
+            }
+            _ => {
+                let CombatEvent::Resolved { outcome, .. } = &mut corrupt.event_log[0] else {
+                    unreachable!()
+                };
+                outcome.ability = None;
+                // Raw authority must be invalid even without any receipt to compare.
+                corrupt.event_receipts.observers.clear();
+                corrupt.event_receipts.bindings = 0;
+            }
+        }
+        assert!(!corrupt.event_receipts_valid(), "{mutation}");
+        let mut shared = crate::checkpoint::SharedState::default();
+        assert!(
+            Game::restore_checkpoint(
+                corrupt.checkpoint(&mut shared),
+                &shared,
+                corrupt.content().clone()
+            )
+            .is_err(),
+            "{mutation}"
+        );
+    }
+}

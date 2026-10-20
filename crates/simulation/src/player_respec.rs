@@ -136,6 +136,8 @@ impl<'de> Deserialize<'de> for RespecSafety {
 pub struct RespecPlan {
     pub basis: AdvancementBasis,
     pub replacement: ReplacementOperation,
+    /// Frozen timing witness; validation never consults the actor's live rate.
+    pub action_duration: crate::action_duration::ActionDuration,
     pub preparation: u64,
     pub recovery: u64,
     pub safety: RespecSafety,
@@ -149,6 +151,7 @@ impl<'de> Deserialize<'de> for RespecPlan {
         struct Fields {
             basis: AdvancementBasis,
             replacement: ReplacementOperation,
+            action_duration: crate::action_duration::ActionDuration,
             preparation: u64,
             recovery: u64,
             safety: RespecSafety,
@@ -159,6 +162,7 @@ impl<'de> Deserialize<'de> for RespecPlan {
         Ok(Self {
             basis: f.basis,
             replacement: f.replacement,
+            action_duration: f.action_duration,
             preparation: f.preparation,
             recovery: f.recovery,
             safety: f.safety,
@@ -177,8 +181,8 @@ impl RespecPlan {
         self.basis.valid()
             && self.replacement.structural_valid(rules)
             && self.supplies.valid(1)
-            && self.preparation == policy.respec_prepare
-            && self.recovery == policy.respec_recovery
+            && self.action_duration.apply_bounded(policy.respec_prepare) == Ok(self.preparation)
+            && self.action_duration.apply_bounded(policy.respec_recovery) == Ok(self.recovery)
             && self.safety.received_loss_interval == policy.received_loss_interval
             && self.ration == policy.respec_ration
     }
@@ -258,11 +262,21 @@ impl Game {
         }
         self.preview_player_replacement(actor, &basis, &replacement)?;
         let policy = &self.content.rules.document().advancement;
+        let action_duration = self
+            .creature(actor)
+            .ok_or(GameError::UnknownActor)?
+            .derived()
+            .action_duration;
         let plan = crate::abilities::Plan::Respec(tor_world::Shared::new(RespecPlan {
             basis,
             replacement,
-            preparation: policy.respec_prepare,
-            recovery: policy.respec_recovery,
+            action_duration,
+            preparation: action_duration
+                .apply_bounded(policy.respec_prepare)
+                .map_err(GameError::Build)?,
+            recovery: action_duration
+                .apply_bounded(policy.respec_recovery)
+                .map_err(GameError::Build)?,
             safety: RespecSafety {
                 received_loss_interval: policy.received_loss_interval,
             },

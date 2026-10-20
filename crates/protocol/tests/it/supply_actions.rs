@@ -272,7 +272,7 @@ fn phase5_carried_selection_rejects_explicit_items_key() {
 
 fn recorded_care_request() -> serde_json::Value {
     let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v54.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/wire-v55.json")).unwrap();
     let value = samples["client"]
         .as_array()
         .unwrap()
@@ -315,7 +315,7 @@ fn phase5_codec_ability_action_rejects_outer_positional_tagged_alias() {
 
 fn recorded_ability_response(id: &str) -> (serde_json::Value, usize) {
     let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v54.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/wire-v55.json")).unwrap();
     let (value, index) = samples["server"]
         .as_array()
         .unwrap()

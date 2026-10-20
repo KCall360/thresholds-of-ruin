@@ -127,9 +127,10 @@ pub enum DiagnosticEffect {
         target: ActorId,
         amount: u32,
     },
-    HealAndImproveHitDie {
+    HealAndImproveHitDice {
         target: ActorId,
         amount: u32,
+        credits: u32,
     },
     LoseAttribute {
         target: ActorId,
@@ -170,8 +171,8 @@ pub enum DiagnosticEffect {
         target: ActorId,
         condition: ContentRef,
         source: ActorId,
-        #[serde(with = "crate::integers::unsigned")]
-        duration: u64,
+        #[serde(with = "crate::integers::optional_unsigned")]
+        duration: Option<u64>,
     },
     Observation {
         target: ActorId,
@@ -303,10 +304,14 @@ impl CombatDiagnosticRecord {
                 DiagnosticEffect::CorrodeArmor { target, amount }
                 | DiagnosticEffect::Damage { target, amount }
                 | DiagnosticEffect::Heal { target, amount }
-                | DiagnosticEffect::HealAndImproveHitDie { target, amount }
                 | DiagnosticEffect::Nourish { target, amount } => {
                     target.0 != 0 && *amount <= 1_000_000
                 }
+                DiagnosticEffect::HealAndImproveHitDice {
+                    target,
+                    amount,
+                    credits,
+                } => target.0 != 0 && *amount <= 1_000_000 && (1..=2).contains(credits),
                 DiagnosticEffect::LoseAttribute {
                     target,
                     attribute,
@@ -352,7 +357,7 @@ impl CombatDiagnosticRecord {
                     target.0 != 0
                         && source.0 != 0
                         && condition.valid()
-                        && (1..=1_000_000).contains(duration)
+                        && duration.is_none_or(|duration| (1..=1_000_000).contains(&duration))
                 }
             })
             && self.trace.validate().is_ok()
@@ -417,9 +422,10 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
                 target: ActorId,
                 amount: u32,
             },
-            HealAndImproveHitDie {
+            HealAndImproveHitDice {
                 target: ActorId,
                 amount: u32,
+                credits: u32,
             },
             LoseAttribute {
                 target: ActorId,
@@ -462,8 +468,8 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
                 target: ActorId,
                 condition: ContentRef,
                 source: ActorId,
-                #[serde(with = "crate::integers::unsigned")]
-                duration: u64,
+                #[serde(with = "crate::integers::optional_unsigned")]
+                duration: Option<u64>,
             },
             Observation {
                 target: ActorId,
@@ -486,9 +492,15 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
             Fields::Damage { target, amount } => Self::Damage { target, amount },
             Fields::Heal { target, amount } => Self::Heal { target, amount },
-            Fields::HealAndImproveHitDie { target, amount } => {
-                Self::HealAndImproveHitDie { target, amount }
-            }
+            Fields::HealAndImproveHitDice {
+                target,
+                amount,
+                credits,
+            } => Self::HealAndImproveHitDice {
+                target,
+                amount,
+                credits,
+            },
             Fields::LoseAttribute {
                 target,
                 attribute,

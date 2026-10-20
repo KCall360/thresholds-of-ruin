@@ -293,6 +293,225 @@ class CompleteRecordingContracts(unittest.TestCase):
             self.assertEqual(list(Path(directory).iterdir()), [output])
 
 
+ANONYMOUS_SAMPLE = {
+    "type": "update", "update": {"actor": "3", "body": {"type": "observation_delta", "state": {
+        "combat": {"events": [{"type": "anonymous_ability", "caster": "a_" + "11" * 32,
+                              "target": "a_" + "33" * 32, "outcome": "applied"}]},
+    }}, "context": {"stream": "actual-recipient-stream", "epoch": "1"},
+        "cursor": {"sequence": "15", "tick": "200"}, "branch": "actual-branch"},
+}
+
+
+ANONYMOUS_RECIPIENT = {"state": {"observation": {
+    "self_target": "a_" + "33" * 32, "visible_actors": [{"id": "a_" + "11" * 32}],
+}}}
+
+
+PERSISTENT_SAMPLE = {
+    "type": "snapshot", "request_id": "persistent-owner-request",
+    "snapshot": {"actor": "3", "state": {"wizard_game": False, "observation": {
+        "self_target": "a_" + "77" * 32, "visible_actors": [{"id": "a_" + "88" * 32}],
+        "combat": {"own_stats": {"conditions": [
+            {"condition": {"id": "rogue.hasted", "name": "Hasted"},
+             "phase": "active", "remaining_ticks": None},
+            {"condition": {"id": "rogue.invisible", "name": "Invisible"},
+             "phase": "active", "remaining_ticks": None},
+        ]}},
+    }}, "cursor": {"sequence": "exact-sequence", "tick": "exact-tick"}},
+}
+
+
+class PersistentConditionRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, *, sample=None, anonymous=None):
+        case, trace = recording_case(failure)
+        original = type(case).runTest
+
+        def record(subject):
+            subject.persistent_condition_sample = copy.deepcopy(
+                PERSISTENT_SAMPLE if sample is None else sample)
+            subject.anonymous_ability_sample = copy.deepcopy(
+                ANONYMOUS_SAMPLE if anonymous is None else anonymous)
+            subject.anonymous_recipient_context = copy.deepcopy(ANONYMOUS_RECIPIENT)
+            original(subject)
+
+        type(case).runTest = record
+        return case, trace
+
+    def test_adapter_retains_the_actual_null_duration_owner_snapshot(self):
+        self.assertTrue(callable(getattr(record_wire_samples.Recorder, "record_persistent_conditions", None)),
+                        "The real recorder must retain a persistent owner snapshot")
+        case, trace = self.case()
+        samples = {"existing": {"type": "palette"}}
+        with patch("record_wire_samples.utility_wands_recording_case", return_value=case) as factory:
+            record_wire_samples.Recorder().record_persistent_conditions(samples)
+        factory.assert_called_once_with()
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertEqual(samples, {"existing": {"type": "palette"},
+                                   "zz.condition_persistent": PERSISTENT_SAMPLE,
+                                   "zz.anonymous_utility": ANONYMOUS_SAMPLE})
+        self.assertIsNot(samples["zz.anonymous_utility"], case.anonymous_ability_sample)
+        self.assertIsNot(samples["zz.condition_persistent"], case.persistent_condition_sample)
+
+    def test_factory_reuses_only_the_existing_non_graphical_utility_acceptance_case(self):
+        case = record_wire_samples.utility_wands_recording_case()
+        self.assertEqual(case.id(), "test_rogue_utility_wands_process.RogueUtilityWandsProcesses."
+                         "test_persistent_first_contact_utility_state_displays_in_text_and_reopens_without_source")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_failure_skip_and_incomplete_capture_cannot_add_a_persistent_sample(self):
+        for disposition in ("class_setup", "setup", "body", "teardown", "cleanup", "class_teardown",
+                            "class_cleanup", "skip", "expected_failure", "unexpected_success", "missing_artifact"):
+            with self.subTest(disposition=disposition):
+                failure = "body" if disposition == "expected_failure" else disposition
+                case, _ = self.case(failure)
+                if disposition == "skip":
+                    type(case).runTest = unittest.skip("no actual utility recording")(type(case).runTest)
+                elif disposition in ("expected_failure", "unexpected_success"):
+                    type(case).runTest = unittest.expectedFailure(type(case).runTest)
+                elif disposition == "missing_artifact":
+                    type(case).runTest = lambda subject: None
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.utility_wands_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_persistent_conditions(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+    def test_persistent_recording_requires_explicit_null_active_rows_on_the_actual_owner(self):
+        for changed in ("finite", "zero", "string_null", "missing_duration", "protection",
+                        "wrong_condition", "missing_row", "duplicate_row", "wrong_actor", "wizard"):
+            with self.subTest(changed=changed):
+                sample = copy.deepcopy(PERSISTENT_SAMPLE)
+                snapshot = sample["snapshot"]
+                rows = snapshot["state"]["observation"]["combat"]["own_stats"]["conditions"]
+                if changed in ("finite", "zero", "string_null"):
+                    rows[0]["remaining_ticks"] = {"finite": "100", "zero": "0", "string_null": "null"}[changed]
+                elif changed == "missing_duration":
+                    del rows[0]["remaining_ticks"]
+                elif changed == "protection":
+                    rows[0]["phase"] = "protection"
+                elif changed == "wrong_condition":
+                    rows[0]["condition"]["id"] = "unrelated.condition"
+                elif changed == "missing_row":
+                    rows.pop()
+                elif changed == "duplicate_row":
+                    rows.append(copy.deepcopy(rows[0]))
+                elif changed == "wrong_actor":
+                    snapshot["actor"] = "1"
+                else:
+                    snapshot["state"]["wizard_game"] = True
+                case, _ = self.case(sample=sample)
+                samples = {}
+                with patch("record_wire_samples.utility_wands_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_persistent_conditions(samples)
+                self.assertEqual(samples, {})
+
+    def test_anonymous_recording_requires_an_actual_applied_recipient_delta(self):
+        for changed in ("missing", "missing_context", "named", "identity_field", "wrong_target", "hidden_caster",
+                        "miss", "wrong_actor", "full_observation", "no_events"):
+            with self.subTest(changed=changed):
+                anonymous = copy.deepcopy(ANONYMOUS_SAMPLE)
+                update = anonymous["update"]
+                event = update["body"]["state"]["combat"]["events"][0]
+                if changed == "named":
+                    event["type"] = "ability"
+                elif changed == "identity_field":
+                    event["ability"] = {"id": "rogue.wand_invisibility", "name": "Wand of Invisibility"}
+                elif changed == "wrong_target":
+                    event["target"] = "a_" + "44" * 32
+                elif changed == "hidden_caster":
+                    event["caster"] = "a_" + "55" * 32
+                elif changed == "miss":
+                    event["outcome"] = "miss"
+                elif changed == "wrong_actor":
+                    update["actor"] = "1"
+                elif changed == "full_observation":
+                    update["body"]["type"] = "observation"
+                elif changed == "no_events":
+                    update["body"]["state"]["combat"]["events"] = []
+                case, _ = self.case(anonymous=anonymous)
+                if changed in ("missing", "missing_context"):
+                    original = type(case).runTest
+                    artifact = ("anonymous_ability_sample" if changed == "missing"
+                                else "anonymous_recipient_context")
+
+                    def missing(subject, original=original, artifact=artifact):
+                        original(subject)
+                        delattr(subject, artifact)
+
+                    type(case).runTest = missing
+                samples = {}
+                with patch("record_wire_samples.utility_wands_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_persistent_conditions(samples)
+                self.assertEqual(samples, {}, "Neither artifact publishes after an invalid event")
+
+    def test_anonymous_process_capture_retains_only_the_new_raw_delta(self):
+        case = record_wire_samples.utility_wands_recording_case()
+        target = SimpleNamespace(transcript=[json.dumps({"message": ANONYMOUS_SAMPLE})])
+        start = len(target.transcript)
+        with self.assertRaises(AssertionError):
+            case.capture_anonymous_feedback(target, start, ANONYMOUS_RECIPIENT)
+        sample = copy.deepcopy(ANONYMOUS_SAMPLE)
+        target.transcript.append(json.dumps({"message": sample}))
+        recipient = copy.deepcopy(ANONYMOUS_RECIPIENT)
+        case.capture_anonymous_feedback(target, start, recipient)
+        self.assertEqual(case.anonymous_ability_sample, sample)
+        self.assertIsNot(case.anonymous_ability_sample, sample)
+        recipient["state"]["observation"]["visible_actors"].clear()
+        self.assertEqual(case.anonymous_recipient_context, ANONYMOUS_RECIPIENT)
+
+    def test_anonymous_recording_uses_frozen_event_context_not_reopened_refs(self):
+        case, _ = self.case()
+        samples = {}
+        with patch("record_wire_samples.utility_wands_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_persistent_conditions(samples)
+        old = ANONYMOUS_RECIPIENT["state"]["observation"]
+        reopened = samples["zz.condition_persistent"]["snapshot"]["state"]["observation"]
+        self.assertNotEqual(old["self_target"], reopened["self_target"])
+        self.assertNotEqual(old["visible_actors"], reopened["visible_actors"])
+        self.assertEqual(samples["zz.anonymous_utility"], ANONYMOUS_SAMPLE)
+        self.assertEqual(set(samples), {"zz.condition_persistent", "zz.anonymous_utility"},
+                         "The pre-effect validation context is not a synthetic wire sample")
+
+    def test_service_feedback_assertion_requires_anonymous_activity_not_only_redaction(self):
+        from utility_wands_package import assert_anonymous_recipient_feedback
+        expected = assert_anonymous_recipient_feedback(self, [ANONYMOUS_SAMPLE], ANONYMOUS_RECIPIENT)
+        self.assertIs(expected, ANONYMOUS_SAMPLE)
+        for messages in ([], [{"type": "snapshot", "snapshot": PERSISTENT_SAMPLE["snapshot"]}]):
+            with self.subTest(messages=messages), self.assertRaises(AssertionError):
+                assert_anonymous_recipient_feedback(self, messages, ANONYMOUS_RECIPIENT)
+
+    def capture(self, responses, *, frame=None):
+        case = record_wire_samples.utility_wands_recording_case()
+        target = SimpleNamespace(transcript=[json.dumps({"message": PERSISTENT_SAMPLE})])
+        frame = frame or {"state": copy.deepcopy(PERSISTENT_SAMPLE["snapshot"]["state"])}
+
+        def snapshot(client):
+            self.assertIs(client, target)
+            target.transcript.extend(json.dumps({"message": message}) for message in responses)
+            return frame
+
+        with patch.object(case, "snapshot", side_effect=snapshot):
+            case.capture_persistent_snapshot(target)
+        return case, target
+
+    def test_capture_keeps_the_exact_new_raw_response_and_does_not_synthesize_wire(self):
+        sample = copy.deepcopy(PERSISTENT_SAMPLE)
+        case, _ = self.capture([{"type": "palette"}, sample])
+        self.assertEqual(case.persistent_condition_sample, sample)
+        self.assertIsNot(case.persistent_condition_sample, sample)
+
+    def test_capture_rejects_old_duplicate_or_mismatched_responses(self):
+        changed = copy.deepcopy(PERSISTENT_SAMPLE)
+        changed["snapshot"]["state"]["observation"]["combat"]["own_stats"]["conditions"][0]["remaining_ticks"] = "100"
+        wrong_actor = copy.deepcopy(PERSISTENT_SAMPLE)
+        wrong_actor["snapshot"]["actor"] = "1"
+        for responses in ([], [PERSISTENT_SAMPLE, PERSISTENT_SAMPLE], [changed], [wrong_actor]):
+            with self.subTest(responses=responses), self.assertRaises(AssertionError):
+                self.capture(responses)
+
+
 class ConditionEventSelection(unittest.TestCase):
     def test_full_and_delta_updates_select_only_the_standalone_condition(self):
         event = {"type": "condition", "condition": {"id": "fixture_stupor", "name": "Fixture Faint"}}

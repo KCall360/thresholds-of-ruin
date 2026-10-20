@@ -161,8 +161,19 @@ impl<'a> ResolutionPlan<'a> {
                 if effect.recipient() != role {
                     return false;
                 }
+                if let PlannedEffect::ApplyPersistentCondition {
+                    cancels: Some(id), ..
+                } = effect
+                {
+                    if rules.condition(id).is_some_and(|condition| {
+                        rules.modifiers_use_recovery_context(&condition.modifiers)
+                    }) {
+                        return true;
+                    }
+                }
                 let id = match effect {
                     PlannedEffect::ApplyCondition { id, .. }
+                    | PlannedEffect::ApplyPersistentCondition { id, .. }
                     | PlannedEffect::ApplyConditionForTurns { id, .. }
                     | PlannedEffect::RemoveCondition { id }
                     | PlannedEffect::ApplyQualifiedConditionToSource { id, .. } => id,
@@ -305,9 +316,9 @@ pub enum ResolvedEffect {
     Heal {
         amount: u32,
     },
-    HealAndImproveHitDie {
+    HealAndImproveHitDice {
         amount: u32,
-        improvement: crate::progression::HitDieHealthImprovement,
+        improvements: Vec<crate::progression::HitDieHealthImprovement>,
         build_epoch: crate::creatures::BuildEpoch,
     },
     Nourish {
@@ -337,6 +348,9 @@ pub enum ResolvedEffect {
         id: ConditionId,
         duration: u64,
     },
+    ApplyPersistentCondition {
+        id: ConditionId,
+    },
     RemoveCondition {
         id: ConditionId,
     },
@@ -353,6 +367,28 @@ pub enum ResolvedEffect {
         duration: u64,
         qualification: crate::conditions::TokenQualification,
     },
+}
+fn read_health_improvements<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<crate::progression::HitDieHealthImprovement>, D::Error> {
+    let claims =
+        crate::bounded::Bounded::<crate::progression::HitDieHealthImprovement, 2>::deserialize(d)?
+            .0;
+    let ordered = claims.windows(2).all(|pair| {
+        if pair[0].ordinal == pair[1].ordinal {
+            let mut following = pair[0].clone();
+            following.previous += 1;
+            following == pair[1]
+        } else {
+            pair[0].ordinal < pair[1].ordinal
+        }
+    });
+    if claims.is_empty() || !ordered {
+        return Err(serde::de::Error::custom(
+            "invalid owned Health improvement prefix",
+        ));
+    }
+    Ok(claims)
 }
 impl ResolvedEffect {
     pub(crate) fn recipient(&self) -> EffectRecipient {
@@ -383,9 +419,10 @@ impl ResolvedEffect {
             | Self::RestoreMaximumHealth { amount }
             | Self::Restore { amount, .. } => *amount > 0,
             Self::SearchAdjacentGuises
-            | Self::HealAndImproveHitDie { .. }
+            | Self::HealAndImproveHitDice { .. }
             | Self::ApplyLinkedHold { .. }
             | Self::ApplyCondition { .. }
+            | Self::ApplyPersistentCondition { .. }
             | Self::RemoveCondition { .. }
             | Self::ObservePublicPlan { .. }
             | Self::ApplyQualifiedConditionToSource { .. } => true,
@@ -426,13 +463,13 @@ impl ResolvedEffect {
             Self::Damage { amount } => Self::Damage {
                 amount: creature.damage_without_reset(*amount).applied,
             },
-            Self::HealAndImproveHitDie {
+            Self::HealAndImproveHitDice {
                 amount,
-                improvement,
+                improvements,
                 build_epoch,
-            } => Self::HealAndImproveHitDie {
-                amount: creature.heal_and_improve_hit_die(*amount, improvement, *build_epoch)?,
-                improvement: improvement.clone(),
+            } => Self::HealAndImproveHitDice {
+                amount: creature.heal_and_improve_hit_dice(*amount, improvements, *build_epoch)?,
+                improvements: improvements.clone(),
                 build_epoch: *build_epoch,
             },
             Self::Heal { amount } => Self::Heal {
@@ -516,6 +553,20 @@ impl ResolvedEffect {
                     creature.remove_condition(id)?
                 };
                 if !changed {
+                    return Ok(None);
+                }
+                self.clone()
+            }
+            Self::ApplyPersistentCondition { id } => {
+                let before = creature.clone();
+                if let Some(sensed) = state.recovery_context {
+                    creature.with_recovery_context(sensed, |creature| {
+                        creature.apply_persistent_condition(id, source)
+                    })?;
+                } else {
+                    creature.apply_persistent_condition(id, source)?;
+                }
+                if *creature == before {
                     return Ok(None);
                 }
                 self.clone()
@@ -1081,24 +1132,32 @@ pub(super) fn resolve_batch<'a>(
                     .map(|pool| i64::from(pool.roll(rng, Edge::default()).total))
                     .sum();
                 let amount = (total + i64::from(*bonus)).max(0) as u32;
-                let improvement = (*overflow
-                    == crate::rules::HealingOverflow::ImproveEarliestHitDie
-                    && u64::from(amount) > application.creature.health().injury())
-                .then(|| {
-                    application
-                        .creature
-                        .derived()
-                        .next_health_improvement
-                        .clone()
-                })
-                .flatten();
-                match improvement {
-                    Some(improvement) => ResolvedEffect::HealAndImproveHitDie {
+                let excess =
+                    u64::from(amount).saturating_sub(application.creature.health().injury());
+                let count = match overflow {
+                    crate::rules::HealingOverflow::None => 0,
+                    crate::rules::HealingOverflow::ImproveEarliestHitDie => usize::from(excess > 0),
+                    crate::rules::HealingOverflow::ImproveEarliestHitDiceByExcess => {
+                        let hit_dice: u64 = dice.iter().map(|pool| u64::from(pool.count())).sum();
+                        usize::from(excess > 0) + usize::from(excess > hit_dice + 1)
+                    }
+                };
+                let improvements: Vec<_> = application
+                    .creature
+                    .derived()
+                    .next_health_improvements
+                    .iter()
+                    .take(count)
+                    .cloned()
+                    .collect();
+                if !improvements.is_empty() {
+                    ResolvedEffect::HealAndImproveHitDice {
                         amount,
-                        improvement,
+                        improvements,
                         build_epoch: application.creature.build_epoch(),
-                    },
-                    None => ResolvedEffect::Heal { amount },
+                    }
+                } else {
+                    ResolvedEffect::Heal { amount }
                 }
             }
             PlannedEffect::Heal { amount } => ResolvedEffect::Heal {
@@ -1143,6 +1202,21 @@ pub(super) fn resolve_batch<'a>(
                 ResolvedEffect::ApplyCondition {
                     id: id.clone(),
                     duration,
+                }
+            }
+            PlannedEffect::ApplyPersistentCondition { id, cancels } => {
+                // Delivery has selected this payload. Cancellation is ordinary
+                // removal, so immunity to establishing `id` does not block it.
+                // The establishment branch retains its normal immunity check.
+                if let Some(opposite) = cancels
+                    .as_ref()
+                    .filter(|opposite| application.creature.conditions().has_active(opposite))
+                {
+                    ResolvedEffect::RemoveCondition {
+                        id: opposite.clone(),
+                    }
+                } else {
+                    ResolvedEffect::ApplyPersistentCondition { id: id.clone() }
                 }
             }
             PlannedEffect::RemoveCondition { id } => {
@@ -1202,7 +1276,9 @@ pub(super) fn resolve_batch<'a>(
             ) => return Err(error),
             Err(EffectApplicationError::Condition(error)) => {
                 condition_error.get_or_insert(error);
-                if let ResolvedEffect::ApplyCondition { id, .. } = &effect {
+                if let ResolvedEffect::ApplyCondition { id, .. }
+                | ResolvedEffect::ApplyPersistentCondition { id } = &effect
+                {
                     observer.record(ResolutionStep {
                         id: "condition.rejected",
                         fields: &[text("condition", id.as_str())],
@@ -1263,9 +1339,10 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Heal {
                 amount: u32,
             },
-            HealAndImproveHitDie {
+            HealAndImproveHitDice {
                 amount: u32,
-                improvement: crate::progression::HitDieHealthImprovement,
+                #[serde(deserialize_with = "read_health_improvements")]
+                improvements: Vec<crate::progression::HitDieHealthImprovement>,
                 build_epoch: crate::creatures::BuildEpoch,
             },
             Nourish {
@@ -1294,6 +1371,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             ApplyCondition {
                 id: ConditionId,
                 duration: u64,
+            },
+            ApplyPersistentCondition {
+                id: ConditionId,
             },
             RemoveCondition {
                 id: ConditionId,
@@ -1326,13 +1406,13 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Damage { amount } => Self::Damage { amount },
             Fields::Heal { amount } => Self::Heal { amount },
-            Fields::HealAndImproveHitDie {
+            Fields::HealAndImproveHitDice {
                 amount,
-                improvement,
+                improvements,
                 build_epoch,
-            } => Self::HealAndImproveHitDie {
+            } => Self::HealAndImproveHitDice {
                 amount,
-                improvement,
+                improvements,
                 build_epoch,
             },
             Fields::Nourish { amount } => Self::Nourish { amount },
@@ -1347,6 +1427,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::LoseMaximumHealth { amount } => Self::LoseMaximumHealth { amount },
             Fields::RestoreMaximumHealth { amount } => Self::RestoreMaximumHealth { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
+            Fields::ApplyPersistentCondition { id } => Self::ApplyPersistentCondition { id },
             Fields::RemoveCondition { id } => Self::RemoveCondition { id },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
             Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
@@ -1366,7 +1447,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Self::CorrodeArmor { amount, .. } => {
                 (1..=crate::limits::NUMERIC as u32).contains(&amount)
             }
-            Self::HealAndImproveHitDie { amount, .. } => amount <= crate::limits::NUMERIC as u32,
+            Self::HealAndImproveHitDice { amount, .. } => amount <= crate::limits::NUMERIC as u32,
             Self::DrainLatestHitDie { amount } | Self::RestoreHitDie { amount } => amount <= 1,
             Self::LoseAttribute { amount, .. } | Self::RestoreAttribute { amount, .. } => {
                 amount <= u32::from(crate::limits::DERIVED_ATTRIBUTE)

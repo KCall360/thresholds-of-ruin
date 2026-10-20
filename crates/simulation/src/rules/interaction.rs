@@ -144,6 +144,7 @@ impl Ruleset {
                     PlannedEffect::LoseAttribute { amount, .. }
                     | PlannedEffect::LoseMaximumHealth { amount } => positive(amount),
                     PlannedEffect::ApplyCondition { id, .. }
+                    | PlannedEffect::ApplyPersistentCondition { id, .. }
                     | PlannedEffect::ApplyConditionForTurns { id, .. } => {
                         self.condition_directly_harms(id)
                     }
@@ -205,6 +206,7 @@ impl Ruleset {
                 positive_amount(amount)
             }
             Effect::ApplyCondition { condition, .. }
+            | Effect::ApplyPersistentCondition { condition, .. }
             | Effect::ApplyConditionForTurns { condition, .. } => {
                 self.condition_directly_harms(condition)
             }
@@ -243,6 +245,9 @@ impl Ruleset {
         MODIFIER_VISITS.with(|visits| visits.set(visits.get() + modifiers.len()));
         // Catalog flag graphs and expansion sizes have already been validated.
         modifiers.iter().any(|modifier| match &modifier.op {
+            ModifierOp::ActionDuration { value } => {
+                *value == crate::action_duration::ActionDuration::Slow
+            }
             ModifierOp::Perception { value } => matches!(
                 value,
                 crate::perception::PerceptionValue::Sight { enabled: false }

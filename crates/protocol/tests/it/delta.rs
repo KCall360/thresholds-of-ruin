@@ -1672,3 +1672,44 @@ fn remembered_curse_and_protection_do_not_invent_equipment_slots_or_numeric_know
         );
     }
 }
+
+#[test]
+fn anonymous_ability_feedback_survives_validated_snapshot_codec_and_delta() {
+    let base = room(5, 5, 1);
+    let mut next = room(5, 5, 2);
+    next.observation.combat = Some(CombatView {
+        own_stats: None,
+        public_plan: None,
+        hp: 10,
+        max_hp: 10,
+        preparation_remaining: None,
+        preparation_active: false,
+        recovery_remaining: 0,
+        sequence: None,
+        actors: vec![],
+        events: vec![CombatEventView::AnonymousAbility {
+            caster: Some(next.observation.self_target),
+            target: None,
+            outcome: AbilityOutcome::Miss,
+        }],
+        objective: None,
+        exit: None,
+        victory: false,
+        dead: false,
+        terminal: false,
+    });
+    next.validate().unwrap();
+    round_trip(&base, &next);
+    let message = complete_observation(next, 2);
+    let encoded = encode_bounded_json(&message, MAX_RESPONSE_BYTES).unwrap();
+    assert_eq!(decode_response(&encoded).unwrap(), message);
+    for surplus in [
+        r#""type":"anonymous_ability","ability":{"id":"private","name":"Secret wand"}"#,
+        r#""type":"anonymous_ability","source":"private""#,
+        r#""type":"anonymous_ability","strike":0"#,
+    ] {
+        let malformed = encoded.replace(r#""type":"anonymous_ability""#, surplus);
+        assert_ne!(malformed, encoded);
+        assert!(decode_response(&malformed).is_err());
+    }
+}

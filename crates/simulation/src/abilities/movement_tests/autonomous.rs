@@ -287,7 +287,7 @@ fn autonomous_late_block_retains_paid_self_step_and_braced_without_retargeting()
             .find(|c| c.condition.as_str() == "braced")
             .unwrap()
             .remaining,
-        200
+        Some(200)
     );
 }
 #[test]

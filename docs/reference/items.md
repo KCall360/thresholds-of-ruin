@@ -383,6 +383,16 @@ already maximized. At the cap the potion simply heals. This bounded owned-roll
 policy is an explicit TOR adaptation of Rogue's uncapped permanent maximum-HP
 increase, not a loose permanent Health modifier.
 
+Extra healing rolls independent HDd8 instead of HDd4 and also cures blindness.
+It identifies on use. Strict positive overflow selects one improvement; overflow
+greater than the frozen active-HD count plus one selects two. The improvements
+follow the earliest eligible acquisition records, possibly using two points of
+one row's headroom, and each stays bounded by that row's original die maximum.
+If fewer credits remain, only that eligible prefix is applied. Exact fill or no
+eligible headroom never invents an unbounded maximum-Health bonus. This preserves
+the pinned source's one/two threshold while adapting permanent gains to TOR's
+owned-HD ledger. The source's hallucination cure remains unsupported.
+
 Improvement credit survives level drain only for that exact owned HD. Restoring
 the same source/ordinal/seed restores its original credit; choosing a different
 replacement retires that dormant row and cannot transfer or later resurrect its
@@ -394,6 +404,54 @@ recompilation occurs only when an owned record actually changes. Resolved
 improvement claims also bind the current build epoch, so a later replacement
 that repeats the same source and seed cannot reuse an old claim. The `scenarios/tests/magic-items` package and bounded process
 witness exercise the ordinary drink/read/identify/zap path and source-free reopen.
+
+Rogue poison rolls `1d3` ordinary restorable Strength loss and identifies on use.
+The existing deficit bounds still apply; a restore-strength dose removes the loss.
+See-invisible grants the shared perception capability for `1d85 + 807` source-base
+turns (808–892), converted through the prepared actor's turn ticks. It also removes
+`rogue.blindness`; repeated doses extend the same actor-active condition, which
+expires without protection. Even a successful blindness cure or invisible-creature
+reveal leaves the potion unidentified. Sight still needs the shared illuminated,
+unobstructed eye witness; this does not grant monster detection or pierce a guise.
+These bindings follow the pinned [potion cases](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/potions.c)
+and the actual [spread expression](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/misc.c).
+Sustain-strength defense, poison's hallucination cure, source ring interactions
+and full source presentation remain unsupported. No new immunity or bespoke
+resolver substitutes for those gaps. The seven concealed potion identities have
+seven distinct appearances. The existing finite magic-potion stage chooses equally
+among healing, confusion, blindness, poison, see-invisible and extra healing for one unit;
+restore-strength retains its separate stage. These are provisional TOR availability
+weights, not the source distribution. Stage IDs, order and attempt bounds are unchanged.
+
+Invisibility, haste-monster and slow-monster wands use a directional contact ray:
+the first physically encountered creature gets one Agility-versus-Lore dodge,
+and that contact ends the ray on either outcome. These rays never reflect and
+never reach a second creature behind the contact. Six-cell reach, 100/100 base
+prepare/recovery ticks and the opposed check are explicit TOR adaptations of the
+[source's utility branches](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/sticks.c),
+which have no equivalent save. They have 3–7 initial charges, pay exactly one
+charge through ordinary Zap, and never identify on use or reveal an unknown
+instance's remaining charges. Unknown sources also stay unnamed in combat
+history, observed-ability knowledge, previews and ordinary spectator views.
+Visible changes still produce neutral feedback and source-neutral status identities;
+no event reveals a hidden first contact to the caster. Identification after a use
+cannot rename its frozen history. Known sources and charged `on_use` devices may
+name their ability only to their initiator; authoritative diagnostics remain wizard-only.
+Haste/slow are hostile interactions; invisibility
+is non-hostile, without adding pursuit solely for concealment.
+
+All three utility conditions persist until explicitly removed and repeated use
+keeps one application. Haste against persistent slow removes slow and leaves neutral;
+slow against persistent haste removes haste and leaves neutral. A later application can
+then establish its own effect. Haste halves ordinary action durations with upward
+rounding and a one-tick minimum; slow doubles them. Neither changes Speed,
+checks, defenses, cooldowns, regeneration or condition clocks. Invisibility uses
+the shared perception capability. Existing linked-hold cleanup remains authoritative;
+the source's incidental grouped-branch Flytrap release is not copied. Personal
+status displays “until removed”, and saved conditions retain that lifetime.
+The unchanged one-unit device stage now chooses equally among the three elemental
+and three utility wands, with six distinct concealed appearances. These weights
+remain provisional TOR availability.
 
 ## Quantity expressions
 

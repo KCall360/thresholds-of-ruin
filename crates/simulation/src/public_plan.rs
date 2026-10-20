@@ -1327,6 +1327,7 @@ mod tests {
                 crate::combat::CombatEvent::Resolved {
                     outcome: invalid,
                     strike: None,
+                    source_disclosure: crate::combat::SourceAbilityDisclosure::Public,
                 },
             );
             assert!(
@@ -1409,6 +1410,7 @@ mod tests {
                     crate::combat::CombatEvent::Resolved {
                         outcome,
                         strike: None,
+                        source_disclosure: crate::combat::SourceAbilityDisclosure::Public,
                     },
                 );
                 restored(&candidate).is_ok().then_some(label)
@@ -1447,6 +1449,7 @@ mod tests {
                         effects: vec![],
                     },
                     strike: Some(0),
+                    source_disclosure: crate::combat::SourceAbilityDisclosure::Public,
                 },
             );
             let restored = restored(&candidate).expect(
@@ -1485,6 +1488,7 @@ mod tests {
                 crate::combat::CombatEvent::Resolved {
                     outcome: outcome.clone(),
                     strike,
+                    source_disclosure: crate::combat::SourceAbilityDisclosure::Public,
                 },
             );
             assert!(

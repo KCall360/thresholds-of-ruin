@@ -523,3 +523,31 @@ fn projectile_strike_summary_has_closed_delivery_without_fake_strike_rows() {
     )
     .is_err());
 }
+
+#[test]
+fn persistent_personal_conditions_require_null_and_never_disclose_private_identity() {
+    use serde_json::json;
+    let condition = json!({"condition":{"id":"fixture_haste","name":"Fixture Haste"},"phase":"active","remaining_ticks":null});
+    let mut value = serde_json::to_value(stats()).unwrap();
+    value["conditions"] = json!([condition.clone()]);
+    let parsed: OwnStats = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+    for mutation in 0..5 {
+        let mut invalid = condition.clone();
+        match mutation {
+            0 => {
+                invalid.as_object_mut().unwrap().remove("remaining_ticks");
+            }
+            1 => invalid["remaining_ticks"] = json!(0),
+            2 => invalid["phase"] = json!("unknown"),
+            3 => invalid["source"] = json!("7"),
+            4 => invalid["generation"] = json!("9"),
+            _ => unreachable!(),
+        }
+        value["conditions"] = json!([invalid]);
+        assert!(
+            serde_json::from_value::<OwnStats>(value.clone()).is_err(),
+            "mutation {mutation}"
+        );
+    }
+}

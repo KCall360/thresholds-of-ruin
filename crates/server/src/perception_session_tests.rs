@@ -2,7 +2,7 @@
 //! Production Phantom/Xeroc builds, MI1/MI2 and basic melee are unchanged. Only
 //! room geometry, external control and the observers' harmless probe grants are synthetic.
 use super::*;
-use crate::scenario_package::{resolve_rules_source, resolve_source, Package, RegionDef};
+use crate::scenario_package::{resolve_source, Package, RegionDef};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -14,8 +14,9 @@ fn scenario(xeroc: bool) -> crate::Scenario {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
     let production = resolve_source(&root).unwrap();
     let source = std::fs::read_to_string(root.join(&production.manifest.ruleset)).unwrap();
-    let mut rules: tor_simulation::rules::RulesetDocument =
-        toml::from_str(&resolve_rules_source(&source, "rules.toml").unwrap().source).unwrap();
+    // Compile through the authored package boundary before adding fixture probes.
+    let package = Package::from_parts(production.manifest.clone(), vec![], &source).unwrap();
+    let mut rules = package.rules().unwrap().document().clone();
     let mut manifest = serde_json::to_value(production.manifest).unwrap();
     let production_subjects = ["rogue.phantom", "rogue.xeroc"].map(|id| {
         (

@@ -24,9 +24,9 @@ pub fn lines(combat: Option<&CombatView>) -> Vec<String> {
     }
     for condition in &stats.conditions {
         rows.push(format!(
-            "{}: {} active ticks remaining",
+            "{}: {}",
             crate::inspection::phase_label(&condition.condition.name, condition.phase),
-            condition.remaining_ticks
+            crate::inspection::condition_lifetime(condition.remaining_ticks)
         ));
     }
     rows.push(format!("Type: {}", stats.kind.name));

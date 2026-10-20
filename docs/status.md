@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **54**, save format **51**, scenario format **24**, ruleset
-**`interactions-v46`**, scenario validator **`tor-scenario-36`**. Unsupported
+**Current formats:** protocol **55**, save format **52**, scenario format **25**, ruleset
+**`interactions-v47`**, scenario validator **`tor-scenario-37`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **19**, ContentPackage **21** and
+The independent compiled inputs use RulesInput **20**, ContentPackage **22** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -93,10 +93,13 @@ The current ordinary magic-item slice adds Drink, Read, paid class-restricted
 Identify and directional Zap through the same exact-item preparation and payment
 boundaries. Text, ASCII (F6/F12) and headless use server-owned choices; spectators
 receive neither choices nor exact instance charge details. Rogue includes healing,
-restore-Strength, confusion and blindness potions, selected identify/sleep scrolls,
-and fire/cold/lightning devices. Elemental rays use Intellect + Lore versus
+restore-Strength, confusion, blindness, poison, see-invisible and extra-healing
+potions, selected identify/sleep scrolls, and fire/cold/lightning plus
+invisibility/haste-monster/slow-monster devices. Elemental rays use Intellect + Lore versus
 Speed + Agility; activation has no separate check or Mana cost. Healing overflow
-improves a bounded owned HD record rather than adding an unbounded HP modifier.
+improves bounded owned HD records rather than adding an unbounded HP modifier.
+Utility wands stop on first creature contact, preserve unknown identities, and
+apply persistent nonstacking effects; opposing wand haste/slow cancels to neutral.
 See [items](reference/items.md#reading-identification-and-charged-devices).
 
 A separate trusted no-time effect-injection limitation remains open: removing the

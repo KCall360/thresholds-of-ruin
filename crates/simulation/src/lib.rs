@@ -4,6 +4,7 @@
 //! disclose observations and filter events; they must not serialize raw game state.
 
 pub mod abilities;
+pub mod action_duration;
 mod actions;
 mod actor_creatures;
 mod actor_record;

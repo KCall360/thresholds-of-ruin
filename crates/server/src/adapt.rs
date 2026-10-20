@@ -958,6 +958,21 @@ fn combat_event_view(
             target: targets.actor(target),
             outcome: crate::creature_view::outcome_status(outcome),
         },
+        E::AnonymousAbility {
+            caster,
+            caster_reference,
+            target,
+            target_reference,
+            outcome,
+        } => p::CombatEventView::AnonymousAbility {
+            caster: caster
+                .zip(caster_reference)
+                .map(|(actor, kind)| targets.actor_reference(actor, kind)),
+            target: target
+                .zip(target_reference)
+                .map(|(actor, kind)| targets.actor_reference(actor, kind)),
+            outcome: crate::creature_view::outcome_status(outcome),
+        },
         E::EscapeResolved { hold, success } => p::CombatEventView::EscapeResolved {
             hold: targets.hold(hold),
             success,

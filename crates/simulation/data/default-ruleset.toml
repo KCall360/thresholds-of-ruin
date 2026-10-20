@@ -1,5 +1,5 @@
 # Canonical rules content; initial starter values remain provisional until paired evaluation.
-id = "interactions-v46"
+id = "interactions-v47"
 
 # Expertise identities are authored explicitly; this foundation adds no free grants.
 expertises = []

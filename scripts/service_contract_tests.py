@@ -16,6 +16,8 @@ from arena_matrix import toml_source
 from service_contract_host import HostError, ServiceHost
 from linked_hold_service_contracts import LinkedHoldServiceContracts as LinkedHoldServiceContracts
 from theft_service_contracts import TheftServiceContracts as TheftServiceContracts
+from utility_potions_service_contracts import UtilityPotionsServiceContracts as UtilityPotionsServiceContracts
+from utility_wands_service_contracts import UtilityWandsServiceContracts as UtilityWandsServiceContracts
 
 ROOT = Path(__file__).resolve().parent.parent
 

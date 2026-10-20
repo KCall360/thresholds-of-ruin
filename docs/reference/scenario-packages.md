@@ -161,8 +161,9 @@ Initial charges are sampled once when each instance is created, while remaining
 charges are mutable state and never part of the archetype or appearance mapping.
 Equipment, consumable, readable and device capabilities cannot be combined.
 
-Consumables and readables author `discovery = "self_effect"` or `"on_use"`;
-author omission defaults to `self_effect`. Devices require `on_use`. Source
+Consumables and effect-bearing readables author `discovery = "self_effect"`,
+`"on_use"` or `"never"`; author omission defaults to `self_effect`. Identification
+readables require `on_use`. Devices allow `on_use` or `never`. Source
 conveniences do not weaken the canonical content/save schema, which records all
 capability fields and discovery policies explicitly. A readable may omit its
 unused `effects` or `identify` source field. Canonical content requires the exact
@@ -172,9 +173,13 @@ class and exposed Drink/Read/Zap/Eat affordances, never on hidden effect identit
 user's actor turns, frozen once at effect preparation; `remove_condition` cures
 one named active condition. `heal_per_hit_die` rolls one declared-sided die per
 current Hit Die, plus its declared bonus. It requires an explicit `overflow`
-policy: `none` or `improve_earliest_hit_die`. The latter improves the earliest
+policy: `none`, `improve_earliest_hit_die` or `improve_earliest_hit_dice_by_excess`.
+The single-credit policy improves the earliest
 eligible active owned Hit Die by one only when rolled healing strictly exceeds
 current injury, bounded by that row's original acquisition-time die maximum.
+The excess-based policy allows a second unit only when excess exceeds the
+captured HD count plus one, retaining an exact prefix of at most two eligible
+unit improvements. See [shared effect rules](creature-rules.md#abilities-and-effects).
 These are shared effects, not item-name branches.
 
 Duplicate IDs across `actors`, `items` and the low-level `archetypes` catalog
@@ -402,7 +407,10 @@ that row's original die maximum; the first Hit Die starts at maximum. If every
 active row is already at maximum, overflow adds nothing. An improvement survives
 drain only on restoration of that same Hit Die row and cannot transfer to a
 replacement from another source. This owned-row cap differs from the source's
-unbounded maximum-HP increase. Extra-healing is outside this initial catalog.
+unbounded maximum-HP increase. Extra healing uses the same owned-row cap with
+one or two credits according to frozen excess; poison, see-invisible and persistent
+utility devices are also in the current catalog. Their source operands and TOR
+adaptations are specified in [magic items](items.md#reading-identification-and-charged-devices).
 
 Restore Strength retains its existing deficit-only restoration and
 observed-change discovery policy. Source behavior is pinned to Rogue 5.4.4
@@ -659,7 +667,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v46"
+import = "interactions-v47"
 
 [[overrides]]
 op = "set"
@@ -710,12 +718,34 @@ Stat objects reject unknown fields in rules and scenario authoring, including
 payload-free `health`, `edge` and `check_edge` forms; these contain only `kind`.
 See [condition and edge contracts](creature-rules.md#conditions-and-active-time).
 
+Condition timing also accepts `{ kind = "until_removed" }`, restricted to
+`lifecycle = "timed"` and `stacking = { kind = "keep" }`. Apply it with
+`{ kind = "apply_persistent_condition", condition = "..." }`; an optional
+`cancels = "..."` removes an active opposite persistent condition instead of
+applying the new one. TOML omission lowers to the required canonical null
+`cancels` field. Finite application effects reject persistent definitions;
+zero finite durations do not mean permanent.
+
 Species, templates and equipment expose `modifiers`, each with an explicit scope
 and operation. For example, a physical-defense source is:
 
 ```toml
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 2 } }]
 ```
+
+The actor-wide timing operation is
+`{ scope = "always", op = { kind = "action_duration", value = "haste" } }`.
+Its exact value vocabulary is `normal`, `haste`, `slow`; other scopes and enum
+object/array spellings reject. [Source folding](creature-rules.md#derivation-and-sources)
+defines cancellation and rounding without modifying Speed.
+
+Abilities may select `invocation = "directional_contact_ray"` for bounded,
+non-bouncing first-creature delivery. It retains the directional ray's one
+target-owned opposed named-skill check and empty success branch, while permitting
+component damage and condition application/removal on failure. It stops even on
+a dodge or immunity. [Ray contracts](creature-rules.md#shared-ability-rules)
+define frozen source operands and live physical traversal. Device capabilities
+may reference either supported directional ray kind under their existing cost limits.
 
 Consumables use the same effect vocabulary as abilities. Fixed healing is
 `{ kind = "heal", amount = { kind = "fixed", amount = 5 } }`. Damage uses a

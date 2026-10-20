@@ -420,6 +420,9 @@ pub enum Selector {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModifierOp {
+    ActionDuration {
+        value: crate::action_duration::ActionDuration,
+    },
     Perception {
         value: crate::perception::PerceptionValue,
     },
@@ -460,6 +463,9 @@ impl<'de> Deserialize<'de> for ModifierOp {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            ActionDuration {
+                value: crate::action_duration::ActionDuration,
+            },
             Perception {
                 value: crate::perception::PerceptionValue,
             },
@@ -494,6 +500,7 @@ impl<'de> Deserialize<'de> for ModifierOp {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::ActionDuration { value } => Self::ActionDuration { value },
             Fields::Perception { value } => Self::Perception { value },
             Fields::Locomotion { value } => Self::Locomotion { value },
             Fields::Add { stat, value } => Self::Add { stat, value },
@@ -913,12 +920,14 @@ pub enum AmountExpr {
 pub enum HealingOverflow {
     None,
     ImproveEarliestHitDie,
+    ImproveEarliestHitDiceByExcess,
 }
 impl<'de> Deserialize<'de> for HealingOverflow {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         match String::deserialize(deserializer)?.as_str() {
             "none" => Ok(Self::None),
             "improve_earliest_hit_die" => Ok(Self::ImproveEarliestHitDie),
+            "improve_earliest_hit_dice_by_excess" => Ok(Self::ImproveEarliestHitDiceByExcess),
             _ => Err(serde::de::Error::custom("unknown healing overflow policy")),
         }
     }
@@ -987,6 +996,15 @@ pub enum Effect {
     ApplyCondition {
         condition: ConditionId,
         duration: u64,
+    },
+    /// Establish a condition until removed, or remove the active `cancels`
+    /// condition instead. Cancellation is ordinary removal, independent of
+    /// immunity to establishing `condition`. Delivery and whole-payload
+    /// protections still gate either operation.
+    ApplyPersistentCondition {
+        condition: ConditionId,
+        #[serde(deserialize_with = "crate::bounded::required_option")]
+        cancels: Option<ConditionId>,
     },
     ApplyConditionForTurns {
         condition: ConditionId,
@@ -1082,6 +1100,11 @@ impl<'de> Deserialize<'de> for Effect {
                 condition: ConditionId,
                 duration: u64,
             },
+            ApplyPersistentCondition {
+                condition: ConditionId,
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                cancels: Option<ConditionId>,
+            },
             ApplyConditionForTurns {
                 condition: ConditionId,
                 duration: AmountExpr,
@@ -1156,6 +1179,9 @@ impl<'de> Deserialize<'de> for Effect {
                 condition,
                 duration,
             },
+            Fields::ApplyPersistentCondition { condition, cancels } => {
+                Self::ApplyPersistentCondition { condition, cancels }
+            }
             Fields::ApplyConditionForTurns {
                 condition,
                 duration,
@@ -1277,7 +1303,11 @@ impl<'de> Deserialize<'de> for ConditionTicks {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ConditionTiming {
-    ActorActive { on_expiry: ConditionExpiry },
+    /// No clock advances this condition; only an explicit ending removes it.
+    UntilRemoved,
+    ActorActive {
+        on_expiry: ConditionExpiry,
+    },
 }
 impl ConditionTiming {
     pub const fn expiring() -> Self {
@@ -1287,7 +1317,8 @@ impl ConditionTiming {
     }
     pub(crate) fn protection(self) -> Option<ConditionTicks> {
         match self {
-            Self::ActorActive {
+            Self::UntilRemoved
+            | Self::ActorActive {
                 on_expiry: ConditionExpiry::Remove,
             } => None,
             Self::ActorActive {
@@ -1301,9 +1332,11 @@ impl<'de> Deserialize<'de> for ConditionTiming {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            UntilRemoved {},
             ActorActive { on_expiry: ConditionExpiry },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::UntilRemoved {} => Self::UntilRemoved,
             Fields::ActorActive { on_expiry } => Self::ActorActive { on_expiry },
         })
     }
@@ -1621,6 +1654,12 @@ impl Ruleset {
         let subtypes = catalog!(subtypes);
         let classes = catalog!(classes);
         let conditions = catalog!(conditions);
+        let persistent_conditions = document
+            .conditions
+            .iter()
+            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .map(|condition| condition.id.clone())
+            .collect();
         let qualified_conditions = document
             .conditions
             .iter()
@@ -1644,6 +1683,7 @@ impl Ruleset {
             classes: &classes,
             conditions: &conditions,
             qualified_conditions: &qualified_conditions,
+            persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
             flags: &flags,
             equipment_slots: &equipment_slot_definitions,
@@ -1813,6 +1853,11 @@ impl Ruleset {
         }
         for d in &mut document.conditions {
             d.family.intern(&mut pool);
+            bound(
+                d.timing != ConditionTiming::UntilRemoved
+                    || (d.lifecycle == ConditionLifecycle::Timed && d.stacking == Stacking::Keep),
+                "persistent_condition_shape",
+            )?;
             let unique: BTreeSet<_> = d.restrictions.iter().copied().collect();
             bound(
                 d.restrictions.len() <= 3 && unique.len() == d.restrictions.len(),
@@ -2063,6 +2108,7 @@ impl Ruleset {
                             | ModifierOp::Reduction { .. }
                             | ModifierOp::TalentReduction { .. }
                             | ModifierOp::GrantAbility { .. }
+                            | ModifierOp::ActionDuration { .. }
                             | ModifierOp::Locomotion { .. }
                             | ModifierOp::Perception { .. } => None,
                         })
@@ -2242,6 +2288,7 @@ struct References<'a> {
     classes: &'a BTreeSet<ClassId>,
     conditions: &'a BTreeSet<ConditionId>,
     qualified_conditions: &'a BTreeSet<ConditionId>,
+    persistent_conditions: &'a BTreeSet<ConditionId>,
     descriptors: &'a BTreeSet<DescriptorId>,
     flags: &'a BTreeSet<FlagId>,
     equipment_slots: &'a BTreeMap<EquipmentSlot, &'a EquipmentSlotDef>,
@@ -2314,6 +2361,7 @@ impl References<'_> {
                 ModifierOp::Immunity { selector } => self.selector(selector, pool)?,
                 ModifierOp::Reduction { selector, .. } => self.selector(selector, pool)?,
                 ModifierOp::TalentReduction { .. }
+                | ModifierOp::ActionDuration { .. }
                 | ModifierOp::Locomotion { .. }
                 | ModifierOp::Perception { .. } => {}
                 ModifierOp::GrantAbility { ability } => {
@@ -2516,7 +2564,24 @@ impl References<'_> {
                 } => {
                     reference(self.conditions, condition, "condition")?;
                     condition.intern(pool);
+                    bound(
+                        !self.persistent_conditions.contains(condition),
+                        "condition_timing",
+                    )?;
                     bound(positive_duration_shape(duration), "condition_duration")?;
+                }
+                Effect::ApplyPersistentCondition { condition, cancels } => {
+                    reference(
+                        self.persistent_conditions,
+                        condition,
+                        "persistent_condition",
+                    )?;
+                    condition.intern(pool);
+                    if let Some(opposite) = cancels {
+                        reference(self.persistent_conditions, opposite, "persistent_condition")?;
+                        bound(opposite != condition, "opposite_condition")?;
+                        opposite.intern(pool);
+                    }
                 }
                 Effect::RemoveCondition { condition } => {
                     reference(self.conditions, condition, "condition")?;
@@ -2545,6 +2610,10 @@ impl References<'_> {
                 } => {
                     reference(self.conditions, condition, "condition")?;
                     condition.intern(pool);
+                    bound(
+                        !self.persistent_conditions.contains(condition),
+                        "condition_timing",
+                    )?;
                     bound(
                         *duration > 0 && *duration <= crate::limits::NUMERIC as u64,
                         "condition_duration",
@@ -2629,6 +2698,7 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
                     },
             } => bound(appearance.valid(), "guise_appearance")?,
             ModifierOp::Perception { .. }
+            | ModifierOp::ActionDuration { .. }
             | ModifierOp::Locomotion { .. }
             | ModifierOp::Flag { .. }
             | ModifierOp::Immunity { .. }
@@ -2830,6 +2900,13 @@ impl Ruleset {
         let talents = self.indexes.talents.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
+        let persistent_conditions = self
+            .document
+            .conditions
+            .iter()
+            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .map(|condition| condition.id.clone())
+            .collect();
         let qualified_conditions = self
             .document
             .conditions
@@ -2859,6 +2936,7 @@ impl Ruleset {
             classes: &classes,
             conditions: &conditions,
             qualified_conditions: &qualified_conditions,
+            persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
             flags: &flags,
             equipment_slots: &equipment_slots,
@@ -2980,6 +3058,13 @@ impl Ruleset {
         let talents = self.indexes.talents.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
+        let persistent_conditions = self
+            .document
+            .conditions
+            .iter()
+            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .map(|condition| condition.id.clone())
+            .collect();
         let qualified_conditions = self
             .document
             .conditions
@@ -3009,6 +3094,7 @@ impl Ruleset {
             classes: &classes,
             conditions: &conditions,
             qualified_conditions: &qualified_conditions,
+            persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
             flags: &flags,
             equipment_slots: &equipment_slots,
@@ -3023,6 +3109,13 @@ impl Ruleset {
         let talents = self.indexes.talents.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
+        let persistent_conditions = self
+            .document
+            .conditions
+            .iter()
+            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .map(|condition| condition.id.clone())
+            .collect();
         let qualified_conditions = self
             .document
             .conditions
@@ -3052,6 +3145,7 @@ impl Ruleset {
             classes: &classes,
             conditions: &conditions,
             qualified_conditions: &qualified_conditions,
+            persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
             flags: &flags,
             equipment_slots: &equipment_slots,
@@ -3117,6 +3211,9 @@ impl Effect {
             | Self::RestoreHitDie => true,
             Self::HealPerHitDie { sides, bonus, .. } => DicePool::new(1, *sides, *bonus).is_ok(),
             Self::ApplyConditionForTurns { duration, .. } => positive_duration_shape(duration),
+            Self::ApplyPersistentCondition { condition, cancels } => {
+                cancels.as_ref() != Some(condition)
+            }
             Self::RemoveCondition { .. } => true,
             Self::Heal { amount: value }
             | Self::Nourish { amount: value }
@@ -3507,8 +3604,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v46\"",
-                "id = \"interactions-v46\"\nunknown = true"
+                "id = \"interactions-v47\"",
+                "id = \"interactions-v47\"\nunknown = true"
             ))
             .is_err()
         );

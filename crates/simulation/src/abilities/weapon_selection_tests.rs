@@ -3817,3 +3817,88 @@ fn ranged_loot_requires_fundable_maxima_and_retains_existing_capacity_deficits()
         "current deficits neither drop existing gear nor admit new draws"
     );
 }
+
+#[test]
+fn slow_quickdraw_bypasses_unused_large_equip_duration_but_ordinary_draw_rejects() {
+    let mut game = fixture_sources(
+        |_| {},
+        |_, species| {
+            species.modifiers.push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::ActionDuration {
+                    value: crate::action_duration::ActionDuration::Slow,
+                },
+            });
+        },
+    );
+    let actor = ActorId(1);
+    let item = equip(&mut game, 0, false);
+    stow_fixture_weapon(&mut game, item);
+    let turns = game
+        .content
+        .rules()
+        .equipment_slot(&crate::EquipmentSlot::new("weapon").unwrap())
+        .unwrap()
+        .equip_turns;
+    assert_eq!(
+        turns, 1,
+        "this boundary witness uses the ordinary weapon draw"
+    );
+    game.actors.get_mut(&actor).unwrap().turn_ticks =
+        std::num::NonZeroU64::new(crate::limits::NUMERIC as u64 / 2 + 1).unwrap();
+    let work = crate::Work::Equip {
+        item,
+        slot: EquipmentSlotId(0),
+    };
+    let before = game.clone();
+    assert!(matches!(
+        game.plan_work(actor, work.clone()),
+        Err(crate::GameError::Build(
+            crate::creatures::BuildError::DerivedLimit
+        ))
+    ));
+    assert_eq!(
+        game, before,
+        "ordinary over-bound equipment work rejects atomically"
+    );
+    let mut spec = (*game.items.get(&item).unwrap().spec).clone();
+    spec.equipment
+        .as_mut()
+        .unwrap()
+        .weapon_profile
+        .as_mut()
+        .unwrap()
+        .base_traits
+        .push(WeaponTrait::Quickdraw);
+    game.items
+        .edit(item, |source| source.spec = tor_world::Shared::new(spec))
+        .unwrap();
+    let before = game.clone();
+    let plan = game
+        .plan_work(actor, work.clone())
+        .expect("quickdraw does not use the scaled equip duration");
+    assert_eq!(game, before);
+    assert_eq!(plan.preparation(), 0);
+    assert_eq!(plan.recovery(), 0);
+    assert!(plan.valid(game.content.rules()));
+    let restored: Plan = serde_json::from_value(serde_json::to_value(&plan).unwrap()).unwrap();
+    assert_eq!(restored, plan);
+    let tick = game.tick();
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = tick;
+    let intention = game
+        .admit_intention(actor, work.action(), crate::IntentionOrigin::Human)
+        .unwrap();
+    let execution = game.execute_next_intention().unwrap();
+    assert_eq!(execution.intention.id, intention);
+    execution.outcome.unwrap();
+    assert_eq!(game.tick(), tick);
+    assert_eq!(
+        game.equipment(actor).unwrap().get(&EquipmentSlotId(0)),
+        Some(&item)
+    );
+    assert!(
+        game.plan_work(actor, crate::Work::Unequip { item })
+            .is_err(),
+        "quickdraw never makes sheathing free"
+    );
+}

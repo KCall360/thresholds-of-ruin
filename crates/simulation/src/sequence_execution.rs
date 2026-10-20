@@ -213,7 +213,10 @@ impl Game {
                         }
                     }
                     Work::Zap { .. } => {
-                        let crate::abilities::Plan::Zap { charges, .. } = &resolved.plan else {
+                        let crate::abilities::Plan::Zap {
+                            charges, discovery, ..
+                        } = &resolved.plan
+                        else {
                             unreachable!("zap owns ray plan")
                         };
                         let launched = *charges > 0;
@@ -224,7 +227,7 @@ impl Game {
                             id,
                             &resolved.plan,
                             resolved.intention,
-                            launched,
+                            launched && *discovery == crate::ItemDiscovery::OnUse,
                             consumed_identity,
                         )?;
                     }

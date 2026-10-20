@@ -172,6 +172,45 @@ Protocol/client units own strict condition decoding and display;
 `test_natural_melee_pages_show_species_and_added_riders_in_real_clients` and its
 native counterpart retain transport and actual-client rendering evidence.
 
+## Utility-item assertion ownership
+
+`UtilityPotionsServiceContracts` uses the production poison, see-invisible,
+extra-healing, blindness and restore-strength definitions without altered effects or conditions.
+Ordinary encoded Drink actions establish restorable poison loss, on-use poison
+recognition, the blindness cure, illuminated Phantom disclosure, additive finite
+sight duration and the sight potion's continuing unknown identity. Fixture
+geometry, stock, exempt nutrition and stationary external Phantom control are
+explicit setup. `test_rogue_utility_potions_content` owns exact operands and the
+unchanged bounded stage structure; `test_rogue_utility_potions_process` owns real
+transport/client behavior and source-deleted recovery of the composed state.
+
+`UtilityWandsServiceContracts` composes all three production utility devices with
+an explicitly accurate synthetic caster and two collinear external targets. It
+owns first-contact exclusion, repeated nonstacking status, opposite-rate
+neutralization, unchanged non-timing stats and concealed invisibility charges.
+Its full ordinary frames must also omit the unknown source ability ID/name;
+source-neutral own-condition IDs still expose legitimate persistent state.
+The actual-process wand witness adds Text's “until removed” display and
+source-deleted recovery of combined persistent haste and invisibility. Lower-level
+ray owners retain dodge, wall/no-bounce, source binding and exact charge semantics.
+`abilities::magic_item_tests` owns paired unknown-source miss/empty/hidden-contact
+worlds, recognized-ability privacy, pending-plan exclusion, later-identification
+history and known-Never/charged-versus-empty-OnUse controls. Event-history owners
+bind source ceilings and exact disclosed IDs through receipt/schema corruption
+and origin-discarding suffix transfers; protocol/client owners keep anonymous
+feedback identity-free and neutral. Existing wizard-query authority tests keep
+private diagnostics distinct from ordinary observations;
+
+healing-improvement owners retain one/two-credit thresholds and ledger identity.
+
+Unchanged shared behavior retains its existing owners: simulation
+`abilities::consumable_effect_tests` covers frozen turn conversion and condition
+removal, `conditions::tests::extend_duration_preserves_one_application_and_expires_without_protection`
+covers expiry, `perception::contract_tests` covers illuminated-eye and guise
+limits, and `test_status_condition_process` covers actor-active freeze/reopen.
+`test_magic_items_process` and `test_restorable_loss_process` retain the existing
+Text/native Drink controls; this data addition introduces no new client action.
+
 ## Qualification experiment
 
 The historical catalog bug sent an oversized whole response and disconnected

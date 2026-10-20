@@ -50,6 +50,9 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
         s::rules::Effect::Damage {
             damage: s::rules::DamageExpr::Components { components },
         } => components.len(),
+        s::rules::Effect::ApplyPersistentCondition { cancels, .. } => {
+            1 + usize::from(cancels.is_some())
+        }
         s::rules::Effect::RemoveCondition { .. }
         | s::rules::Effect::Heal { .. }
         | s::rules::Effect::Nourish { .. }
@@ -194,6 +197,15 @@ impl Entry<'_> {
                             })
                         {
                             return Err(invalid());
+                        }
+                    }
+                    s::rules::Effect::ApplyPersistentCondition { condition, cancels } => {
+                        for id in std::iter::once(condition).chain(cancels.iter()) {
+                            if !rules.condition(id).is_some_and(|definition| {
+                                reference_valid(definition.id.as_str(), &definition.name)
+                            }) {
+                                return Err(invalid());
+                            }
                         }
                     }
                     s::rules::Effect::ApplyCondition { condition, .. }
@@ -857,6 +869,71 @@ mod sequence_rider_condition_tests {
                     p::InspectionRiderCondition::SequenceSuccessfulHits { minimum }
                 })
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod persistent_effect_budget_tests {
+    use super::*;
+
+    #[test]
+    fn persistent_effect_inspection_reserves_exact_optional_opposition_fields() {
+        let mut document: s::rules::RulesetDocument =
+            toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap();
+        let base = document
+            .conditions
+            .iter()
+            .find(|condition| condition.id.as_str() == "braced")
+            .unwrap()
+            .clone();
+        let incoming = s::content_ids::ConditionId::new("p".repeat(60)).unwrap();
+        let opposite = s::content_ids::ConditionId::new("o".repeat(60)).unwrap();
+        // Both content references exercise the accepted ID/name size boundaries.
+        for (id, label) in [(incoming.clone(), "P"), (opposite.clone(), "O")] {
+            let mut definition = base.clone();
+            definition.id = id;
+            definition.name = label.repeat(256);
+            definition.timing = s::rules::ConditionTiming::UntilRemoved;
+            definition.stacking = s::rules::Stacking::Keep;
+            document.conditions.push(definition);
+        }
+        let rules = s::rules::Ruleset::validate(document).unwrap();
+        for cancels in [None, Some(opposite.clone())] {
+            let expected = 1 + usize::from(cancels.is_some());
+            let effect = s::rules::Effect::ApplyPersistentCondition {
+                condition: incoming.clone(),
+                cancels,
+            };
+            assert_eq!(effect_fields(&effect), expected);
+            let row = effect_view(&effect, &rules);
+            assert_eq!(row.id, "apply_persistent_condition");
+            assert_eq!(
+                row.fields
+                    .iter()
+                    .map(|field| field.id.as_str())
+                    .collect::<Vec<_>>(),
+                if expected == 1 {
+                    vec!["condition"]
+                } else {
+                    vec!["condition", "cancels"]
+                }
+            );
+            for (rider, success) in [(None, true), (None, false), (Some(0), false)] {
+                let entry = Entry::Effect(0, rider, 0, success, &effect);
+                assert_eq!(entry.fields(), expected);
+                assert_eq!(entry.preflight(&rules).unwrap(), expected);
+                let projected = entry.project(&rules);
+                assert!(projected.valid());
+                assert_eq!(projected.fields(), expected);
+            }
+        }
+        let missing = s::content_ids::ConditionId::new("missing").unwrap();
+        for (condition, cancels) in [(missing.clone(), None), (incoming, Some(missing))] {
+            let effect = s::rules::Effect::ApplyPersistentCondition { condition, cancels };
+            assert!(Entry::Effect(0, None, 0, true, &effect)
+                .preflight(&rules)
+                .is_err());
         }
     }
 }

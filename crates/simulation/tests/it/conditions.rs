@@ -139,7 +139,7 @@ fn recorded_condition_invariants_are_rejected_independently() {
         phase: tor_simulation::conditions::ConditionPhase::Active,
         condition: def.id.clone(),
         source: ActorId(1),
-        remaining: 201,
+        remaining: Some(201),
         stacks: 2,
         order: 7,
         generation: 0,
@@ -224,7 +224,7 @@ fn restored_maximum_order_compacts_without_changing_age_source_or_duration() {
                 phase: tor_simulation::conditions::ConditionPhase::Active,
                 condition: def.id.clone(),
                 source,
-                remaining,
+                remaining: Some(remaining),
                 stacks: 1,
                 order,
                 generation,
@@ -245,9 +245,9 @@ fn restored_maximum_order_compacts_without_changing_age_source_or_duration() {
     assert_eq!(
         compacted,
         [
-            (ActorId(1), 2, 2, 403),
-            (ActorId(2), 1, 1, 302),
-            (ActorId(9), 0, 0, 201)
+            (ActorId(1), 2, 2, Some(403)),
+            (ActorId(2), 1, 1, Some(302)),
+            (ActorId(9), 0, 0, Some(201))
         ]
     );
     let encoded = serde_json::to_vec(&state.instances().cloned().collect::<Vec<_>>()).unwrap();
@@ -268,7 +268,7 @@ fn restored_maximum_order_compacts_without_changing_age_source_or_duration() {
                 oldest.remaining,
                 oldest.stacks
             ),
-            (def.id.clone(), source, remaining, 1)
+            (def.id.clone(), source, Some(remaining), 1)
         );
     }
     assert!(state.is_empty());

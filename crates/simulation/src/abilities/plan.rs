@@ -139,6 +139,11 @@ pub enum PlannedEffect {
         id: ConditionId,
         duration: u64,
     },
+    ApplyPersistentCondition {
+        id: ConditionId,
+        #[serde(deserialize_with = "crate::bounded::required_option")]
+        cancels: Option<ConditionId>,
+    },
     ApplyConditionForTurns {
         id: ConditionId,
         duration: PlannedAmount,
@@ -237,6 +242,7 @@ pub enum Plan {
     Zap {
         item: ItemId,
         charges: u16,
+        discovery: crate::ItemDiscovery,
         ray: tor_world::Shared<super::RayPlan>,
     },
     Respec(tor_world::Shared<crate::player_respec::RespecPlan>),
@@ -579,8 +585,17 @@ impl Plan {
                 Self::Ability(plan) => plan.valid(rules),
                 Self::Ray(plan) => plan.valid(rules),
                 Self::Projectile(plan) => plan.valid(rules),
-                Self::Zap { item, ray, .. } => {
+                Self::Zap {
+                    item,
+                    ray,
+                    discovery,
+                    ..
+                } => {
                     valid_item(*item)
+                        && matches!(
+                            discovery,
+                            crate::ItemDiscovery::OnUse | crate::ItemDiscovery::Never
+                        )
                         && ray.valid(rules)
                         && ray.cost.is_none()
                         && ray.cooldown.is_none()
@@ -726,7 +741,22 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 id,
                 duration,
                 turn_ticks,
-            } => rules.condition(id).is_some() && duration.valid_turn_duration(*turn_ticks),
+            } => {
+                rules.condition(id).is_some_and(|definition| {
+                    definition.timing != crate::rules::ConditionTiming::UntilRemoved
+                }) && duration.valid_turn_duration(*turn_ticks)
+            }
+            PlannedEffect::ApplyPersistentCondition { id, cancels } => {
+                let persistent = |condition: &ConditionId| {
+                    rules.condition(condition).is_some_and(|definition| {
+                        definition.timing == crate::rules::ConditionTiming::UntilRemoved
+                    })
+                };
+                persistent(id)
+                    && cancels
+                        .as_ref()
+                        .is_none_or(|opposite| opposite != id && persistent(opposite))
+            }
             PlannedEffect::RemoveCondition { id } => rules.condition(id).is_some(),
             PlannedEffect::Heal { amount }
             | PlannedEffect::Nourish { amount }
@@ -739,8 +769,9 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 PlannedAmount::Rolled { .. } => true,
             },
             PlannedEffect::ApplyCondition { id, duration } => {
-                rules.condition(id).is_some()
-                    && (1..=crate::limits::NUMERIC as u64).contains(duration)
+                rules.condition(id).is_some_and(|definition| {
+                    definition.timing != crate::rules::ConditionTiming::UntilRemoved
+                }) && (1..=crate::limits::NUMERIC as u64).contains(duration)
             }
             PlannedEffect::SearchAdjacentGuises | PlannedEffect::ObservePublicPlan => true,
             PlannedEffect::ApplyQualifiedConditionToSource {
@@ -888,6 +919,13 @@ pub(super) fn effects_match_definition_scoped(
                         && valid_hit_die_healing(dice, *actual_bonus)
                         && dice.iter().all(|pool| pool.sides() == *sides)
                 }
+                (
+                    Effect::ApplyPersistentCondition { condition, cancels },
+                    PlannedEffect::ApplyPersistentCondition {
+                        id,
+                        cancels: actual,
+                    },
+                ) => condition == id && cancels == actual,
                 (Effect::RemoveCondition { condition }, PlannedEffect::RemoveCondition { id }) => {
                     condition == id
                 }
@@ -1315,6 +1353,12 @@ impl Game {
                         overflow: *overflow,
                     })
                 }
+                Effect::ApplyPersistentCondition { condition, cancels } => {
+                    Ok(PlannedEffect::ApplyPersistentCondition {
+                        id: condition.clone(),
+                        cancels: cancels.clone(),
+                    })
+                }
                 Effect::RemoveCondition { condition } => Ok(PlannedEffect::RemoveCondition {
                     id: condition.clone(),
                 }),
@@ -1482,6 +1526,11 @@ impl<'de> Deserialize<'de> for PlannedEffect {
                 id: ConditionId,
                 duration: u64,
             },
+            ApplyPersistentCondition {
+                id: ConditionId,
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                cancels: Option<ConditionId>,
+            },
             ApplyConditionForTurns {
                 id: ConditionId,
                 duration: PlannedAmount,
@@ -1539,6 +1588,9 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::LoseMaximumHealth { amount } => Self::LoseMaximumHealth { amount },
             Fields::RestoreMaximumHealth { amount } => Self::RestoreMaximumHealth { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
+            Fields::ApplyPersistentCondition { id, cancels } => {
+                Self::ApplyPersistentCondition { id, cancels }
+            }
             Fields::ApplyConditionForTurns {
                 id,
                 duration,
@@ -1563,6 +1615,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             },
         };
         let valid = match &effect {
+            Self::ApplyPersistentCondition { id, cancels } => cancels.as_ref() != Some(id),
             Self::ApplyConditionForTurns {
                 duration,
                 turn_ticks,

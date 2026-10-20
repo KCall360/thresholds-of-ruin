@@ -178,12 +178,15 @@ fn record(
                                 amount: *amount,
                             }
                         }
-                        s::abilities::ResolvedEffect::HealAndImproveHitDie { amount, .. } => {
-                            p::DiagnosticEffect::HealAndImproveHitDie {
-                                target,
-                                amount: *amount,
-                            }
-                        }
+                        s::abilities::ResolvedEffect::HealAndImproveHitDice {
+                            amount,
+                            improvements,
+                            ..
+                        } => p::DiagnosticEffect::HealAndImproveHitDice {
+                            target,
+                            amount: *amount,
+                            credits: improvements.len() as u32,
+                        },
                         s::abilities::ResolvedEffect::LoseAttribute { attribute, amount } => {
                             p::DiagnosticEffect::LoseAttribute {
                                 target,
@@ -242,12 +245,20 @@ fn record(
                                 condition: condition(id, rules),
                             }
                         }
+                        s::abilities::ResolvedEffect::ApplyPersistentCondition { id } => {
+                            p::DiagnosticEffect::Condition {
+                                target,
+                                condition: condition(id, rules),
+                                source: p::ActorId(value.outcome.actor.0),
+                                duration: None,
+                            }
+                        }
                         s::abilities::ResolvedEffect::ApplyCondition { id, duration } => {
                             p::DiagnosticEffect::Condition {
                                 target,
                                 condition: condition(id, rules),
                                 source: p::ActorId(value.outcome.actor.0),
-                                duration: *duration,
+                                duration: Some(*duration),
                             }
                         }
                         s::abilities::ResolvedEffect::SearchAdjacentGuises
@@ -264,7 +275,7 @@ fn record(
                             target: p::ActorId(value.outcome.actor.0),
                             condition: condition(id, rules),
                             source: p::ActorId(qualification.opponent.0),
-                            duration: *duration,
+                            duration: Some(*duration),
                         },
                     })
                 })
@@ -338,7 +349,7 @@ mod token_disclosure_tests {
                 phase: s::conditions::ConditionPhase::Active,
                 condition: s::content_ids::ConditionId::new("readied").unwrap(),
                 source: s::ActorId(1),
-                remaining: 0,
+                remaining: Some(0),
                 stacks: 1,
                 order: 0,
                 generation: 0,
@@ -349,7 +360,7 @@ mod token_disclosure_tests {
                 phase: s::conditions::ConditionPhase::Active,
                 condition: s::content_ids::ConditionId::new("braced").unwrap(),
                 source: s::ActorId(1),
-                remaining: 30,
+                remaining: Some(30),
                 stacks: 1,
                 order: 1,
                 generation: 1,
@@ -370,7 +381,7 @@ mod token_disclosure_tests {
         );
         assert_eq!(disclosed.conditions.len(), 1);
         assert_eq!(disclosed.conditions[0].condition.id, "braced");
-        assert_eq!(disclosed.conditions[0].remaining_ticks, 30);
+        assert_eq!(disclosed.conditions[0].remaining_ticks, Some(30));
         let text = serde_json::to_string(&disclosed).unwrap();
         assert!(!text.contains("reserved_by"));
         assert!(!text.contains("999"));
@@ -381,10 +392,7 @@ mod token_disclosure_tests {
 mod restorable_loss_diagnostic_tests {
     use super::*;
 
-    #[test]
-    fn authoritative_loss_results_project_and_render_actual_applied_amounts() {
-        let rules =
-            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+    fn diagnostic(effects: Vec<s::abilities::ResolvedEffect>) -> d::CombatDiagnostic {
         let state = d::CombatantDiagnostic {
             health: 10,
             maximum_health: 10,
@@ -393,7 +401,7 @@ mod restorable_loss_diagnostic_tests {
             resources: vec![],
             conditions: vec![],
         };
-        let diagnostic = d::CombatDiagnostic {
+        d::CombatDiagnostic {
             tick: 0,
             actor: s::ActorId(1),
             target: s::ActorId(2),
@@ -418,37 +426,44 @@ mod restorable_loss_diagnostic_tests {
                 check: None,
                 participation: s::abilities::AttemptedParticipation::source(),
                 target_rider_participated: false,
-                effects: vec![
-                    s::abilities::ResolvedEffect::LoseAttribute {
-                        attribute: s::attributes::Attribute::Strength,
-                        amount: 1,
-                    },
-                    s::abilities::ResolvedEffect::RestoreAttribute {
-                        attribute: s::attributes::Attribute::Strength,
-                        amount: 0,
-                    },
-                    s::abilities::ResolvedEffect::LoseMaximumHealth { amount: 3 },
-                    s::abilities::ResolvedEffect::RestoreMaximumHealth { amount: 2 },
-                    s::abilities::ResolvedEffect::DrainLatestHitDie { amount: 1 },
-                    s::abilities::ResolvedEffect::RestoreHitDie { amount: 0 },
-                    s::abilities::ResolvedEffect::Theft {
-                        quantity: 987654321,
-                        relocation: Some(s::abilities::Placement {
-                            location: tor_world::Location {
-                                region: tor_world::RegionId(987654321),
-                                position: tor_world::Position {
-                                    x: 731,
-                                    y: 947,
-                                    z: 0,
-                                },
-                            },
-                            orientation: 3,
-                        }),
-                    },
-                ],
+                effects,
             },
             trace: d::ResolutionTrace::default(),
-        };
+        }
+    }
+
+    #[test]
+    fn authoritative_loss_results_project_and_render_actual_applied_amounts() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        let diagnostic = diagnostic(vec![
+            s::abilities::ResolvedEffect::LoseAttribute {
+                attribute: s::attributes::Attribute::Strength,
+                amount: 1,
+            },
+            s::abilities::ResolvedEffect::RestoreAttribute {
+                attribute: s::attributes::Attribute::Strength,
+                amount: 0,
+            },
+            s::abilities::ResolvedEffect::LoseMaximumHealth { amount: 3 },
+            s::abilities::ResolvedEffect::RestoreMaximumHealth { amount: 2 },
+            s::abilities::ResolvedEffect::DrainLatestHitDie { amount: 1 },
+            s::abilities::ResolvedEffect::RestoreHitDie { amount: 0 },
+            s::abilities::ResolvedEffect::Theft {
+                quantity: 987654321,
+                relocation: Some(s::abilities::Placement {
+                    location: tor_world::Location {
+                        region: tor_world::RegionId(987654321),
+                        position: tor_world::Position {
+                            x: 731,
+                            y: 947,
+                            z: 0,
+                        },
+                    },
+                    orientation: 3,
+                }),
+            },
+        ]);
         let record = record(&diagnostic, 1, &rules).unwrap();
         let encoded = serde_json::to_value(&record.outcome.effects).unwrap();
         assert_eq!(
@@ -491,6 +506,137 @@ mod restorable_loss_diagnostic_tests {
             "Actor 2: 0 Hit Die restored",
         ] {
             assert!(text.contains(expected), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn persistent_diagnostics_project_explicit_null_for_effect_and_active_status() {
+        let mut document: s::rules::RulesetDocument =
+            toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap();
+        let mut definition = document
+            .conditions
+            .iter()
+            .find(|condition| condition.id.as_str() == "braced")
+            .unwrap()
+            .clone();
+        let id = s::content_ids::ConditionId::new("fixture_persistent").unwrap();
+        definition.id = id.clone();
+        definition.family = s::content_ids::ConditionFamilyId::new("fixture_persistent").unwrap();
+        definition.name = "Fixture Persistent".into();
+        definition.timing = s::rules::ConditionTiming::UntilRemoved;
+        definition.stacking = s::rules::Stacking::Keep;
+        document.conditions.push(definition);
+        let rules = Ruleset::validate(document).unwrap();
+        let mut diagnostic = diagnostic(vec![
+            s::abilities::ResolvedEffect::ApplyPersistentCondition { id: id.clone() },
+        ]);
+        diagnostic
+            .target_after
+            .conditions
+            .push(s::conditions::ConditionInstance {
+                phase: s::conditions::ConditionPhase::Active,
+                condition: id,
+                source: s::ActorId(1),
+                remaining: None,
+                stacks: 1,
+                order: 0,
+                generation: 7,
+                reserved_by: None,
+                qualification: None,
+            });
+        let projected = record(&diagnostic, 1, &rules).unwrap();
+        let encoded = serde_json::to_value(&projected).unwrap();
+        assert_eq!(
+            encoded["outcome"]["effects"],
+            serde_json::json!([{
+                "type":"condition", "target":"2", "source":"1", "duration":null,
+                "condition":{"id":"fixture_persistent","name":"Fixture Persistent"}
+            }])
+        );
+        assert_eq!(
+            encoded["target_after"]["conditions"],
+            serde_json::json!([{
+                "condition":{"id":"fixture_persistent","name":"Fixture Persistent"},
+                "phase":"active", "source":"1", "remaining_ticks":null
+            }])
+        );
+        let report = p::CombatDiagnosticsView {
+            enabled: true,
+            tick: 0,
+            captured: 1,
+            dropped: 0,
+            retained: 1,
+            through: 1,
+            records: vec![projected],
+        };
+        report.validate().unwrap();
+        assert_eq!(
+            serde_json::from_value::<p::CombatDiagnosticsView>(
+                serde_json::to_value(&report).unwrap()
+            )
+            .unwrap(),
+            report
+        );
+    }
+
+    #[test]
+    fn plural_healing_diagnostics_project_two_credits_without_private_claims() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        let effect = s::abilities::ResolvedEffect::HealAndImproveHitDice {
+            amount: 8,
+            improvements: (1..=2)
+                .map(|ordinal| s::progression::HitDieHealthImprovement {
+                    ordinal: s::HdIndex(ordinal),
+                    source: s::progression::HdSource::Racial,
+                    health_seed: 42,
+                    original_kind: s::content_ids::TypeId::new("humanoid").unwrap(),
+                    original_die: 8,
+                    previous: 0,
+                })
+                .collect(),
+            build_epoch: s::creatures::BuildEpoch::new(987654321).unwrap(),
+        };
+        // The projection fixture itself must satisfy the current strict receipt shape.
+        assert_eq!(
+            serde_json::from_value::<s::abilities::ResolvedEffect>(
+                serde_json::to_value(&effect).unwrap()
+            )
+            .unwrap(),
+            effect
+        );
+        let projected = record(&diagnostic(vec![effect]), 1, &rules).unwrap();
+        assert_eq!(
+            serde_json::to_value(&projected.outcome.effects).unwrap(),
+            serde_json::json!([{
+                "type":"heal_and_improve_hit_dice", "target":"2", "amount":8, "credits":2
+            }])
+        );
+        let report = p::CombatDiagnosticsView {
+            enabled: true,
+            tick: 0,
+            captured: 1,
+            dropped: 0,
+            retained: 1,
+            through: 1,
+            records: vec![projected],
+        };
+        report.validate().unwrap();
+        let encoded = serde_json::to_string(&report).unwrap();
+        for private in [
+            "improvements",
+            "health_seed",
+            "original_kind",
+            "original_die",
+            "previous",
+            "ordinal",
+            "build_epoch",
+            "987654321",
+        ] {
+            assert!(
+                !encoded.contains(private),
+                "private healing claim leaked {private}"
+            );
         }
     }
 }

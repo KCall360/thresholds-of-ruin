@@ -78,7 +78,7 @@ pub(super) fn rider_count(game: &crate::Game) -> usize {
         .iter()
         .filter(|event| {
             matches!(event,
-                CombatEvent::Resolved { outcome, strike: None }
+                CombatEvent::Resolved { outcome, strike: None, .. }
                 if outcome.actor == ActorId(1) && outcome.target == ActorId(2)
                     && outcome.ability.is_none()
             )
@@ -188,7 +188,7 @@ fn sequence_rider_two_hits_apply_one_rider_only_after_the_second_primary() {
     game.tick = 10;
     game.resolve_preparations().unwrap();
     assert_eq!(game.combat_events().iter().filter(|event| matches!(event,
-        CombatEvent::Resolved { outcome, strike: Some(0) }
+        CombatEvent::Resolved { outcome, strike: Some(0), .. }
         if outcome.actor == ActorId(1) && outcome.target == ActorId(2)
             && outcome.check.is_some_and(|check| check.actor == CheckActor::User && check.success)
     )).count(), 1, "tick 10 must resolve the first initiating primary successfully");

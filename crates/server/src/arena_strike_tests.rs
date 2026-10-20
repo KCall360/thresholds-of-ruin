@@ -83,7 +83,10 @@ fn ordered_strikes_arena_denominator_separates_one_admission_primaries_and_rider
         decisions.push((actor, action));
         engine.advance_ai(actor).unwrap();
         for event in engine.game.combat_events() {
-            if let CombatEvent::Resolved { outcome, strike } = event {
+            if let CombatEvent::Resolved {
+                outcome, strike, ..
+            } = event
+            {
                 if outcome.actor != SimActor(1) {
                     continue;
                 }

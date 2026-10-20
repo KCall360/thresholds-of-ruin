@@ -55,7 +55,7 @@ fn history_actions_preserve_the_tagged_wire_shape_and_validate_event_payload() {
 
 #[test]
 fn equipment_magic_commands_and_disclosures_require_protocol_52() {
-    assert_eq!(PROTOCOL_VERSION, 54);
+    assert_eq!(PROTOCOL_VERSION, 55);
 }
 
 #[test]
@@ -452,7 +452,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v54.json"
+            "/tests/fixtures/wire-v55.json"
         ))
         .expect("regenerate current wire samples"),
     )
@@ -710,5 +710,83 @@ fn standalone_personal_condition_event_requires_only_licensed_content_facts() {
         r#"{"type":"condition"}"#,
     ] {
         assert!(serde_json::from_str::<CombatEventView>(forged).is_err());
+    }
+}
+
+#[test]
+fn anonymous_ability_feedback_requires_complete_named_identity_free_fields() {
+    use serde_json::{json, Value};
+    let actor = ActorTarget::from_digest([3; 32]);
+    for caster in [None, Some(actor)] {
+        for target in [None, Some(actor)] {
+            for outcome in ["applied", "unaffected", "miss"] {
+                let canonical = json!({"type":"anonymous_ability", "caster":caster, "target":target, "outcome":outcome});
+                let decoded: CombatEventView = serde_json::from_value(canonical.clone()).unwrap();
+                assert_eq!(serde_json::to_value(&decoded).unwrap(), canonical);
+                for field in ["type", "caster", "target", "outcome"] {
+                    let mut missing = canonical.clone();
+                    missing.as_object_mut().unwrap().remove(field);
+                    assert!(
+                        serde_json::from_value::<CombatEventView>(missing).is_err(),
+                        "missing {field}"
+                    );
+                }
+                for field in [
+                    "ability",
+                    "id",
+                    "name",
+                    "source",
+                    "item",
+                    "charges",
+                    "strike",
+                    "effects",
+                    "private_operand",
+                ] {
+                    let mut extra = canonical.clone();
+                    extra[field] = Value::Null;
+                    assert!(
+                        serde_json::from_value::<CombatEventView>(extra).is_err(),
+                        "surplus {field}"
+                    );
+                }
+                for bad in [
+                    json!(["anonymous_ability", caster, target, outcome]),
+                    json!(["anonymous_ability", {"caster":caster,"target":target,"outcome":outcome}]),
+                    json!({"anonymous_ability":{"caster":caster,"target":target,"outcome":outcome}}),
+                ] {
+                    assert!(serde_json::from_value::<CombatEventView>(bad).is_err());
+                }
+                for invalid in [
+                    json!({(outcome):null}),
+                    json!([outcome]),
+                    json!(null),
+                    json!(true),
+                    json!(1),
+                    json!("unknown"),
+                ] {
+                    let mut bad = canonical.clone();
+                    bad["outcome"] = invalid;
+                    assert!(serde_json::from_value::<CombatEventView>(bad).is_err());
+                }
+                for field in ["caster", "target"] {
+                    for invalid in [json!(1), json!("1"), json!("a_bad"), json!([]), json!({})] {
+                        let mut bad = canonical.clone();
+                        bad[field] = invalid;
+                        assert!(serde_json::from_value::<CombatEventView>(bad).is_err());
+                    }
+                }
+            }
+        }
+    }
+    for raw in [
+        r#"{"type":"anonymous_ability","type":"anonymous_ability","caster":null,"target":null,"outcome":"miss"}"#,
+        r#"{"type":"anonymous_ability","caster":null,"caster":null,"target":null,"outcome":"miss"}"#,
+        r#"{"caster":null,"target":null,"target":null,"outcome":"miss","type":"anonymous_ability"}"#,
+        r#"{"caster":null,"target":null,"outcome":"miss","outcome":"applied","type":"anonymous_ability"}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<CombatEventView>(raw).is_err(),
+            "{raw}"
+        );
     }
 }

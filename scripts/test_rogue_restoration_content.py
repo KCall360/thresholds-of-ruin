@@ -115,7 +115,7 @@ class RogueRestorationContent(unittest.TestCase):
                 "amount": {"kind": "fixed", "amount": int(bound)}}]}})
         self.assertEqual(catalog["appearance_pools"]["rogue.potions"], {
             "asset": "item.potion",
-            "appearances": ["amber potion", "smoky potion", "violet potion", "azure potion"]})
+            "appearances": ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion"]})
         for character in source("scenario.toml")["characters"]:
             self.assertNotIn(POTION, character["known_identities"])
             self.assertNotIn(POTION, [row["archetype"] for row in character["loadout"]])

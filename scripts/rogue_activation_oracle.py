@@ -184,9 +184,9 @@ def reviewed_twenty_six_activation():
                     "choices": [{"archetype": "rogue." + name, "weight": 1}
                                 for name in names]}], "quantity": 1}
         for identity, names in (
-            ("rogue.magic_potions", ("healing", "confusion", "blindness")),
+            ("rogue.magic_potions", ("healing", "confusion", "blindness", "poison", "see_invisible", "extra_healing")),
             ("rogue.magic_scrolls", ("identify_potion", "identify_scroll", "identify_wand", "sleep")),
-            ("rogue.magic_devices", ("wand_fire", "wand_cold", "wand_lightning")),
+            ("rogue.magic_devices", ("wand_fire", "wand_cold", "wand_lightning", "wand_invisibility", "wand_haste", "wand_slow")),
             ("rogue.equipment", ("generated_mace", "long_sword", "dagger", "two_handed_sword", "spear",
                                  "leather_armor", "generated_ring_mail", "studded_leather", "scale_mail",
                                  "chain_mail", "splint_mail", "banded_mail", "plate_mail", "shortbow")),

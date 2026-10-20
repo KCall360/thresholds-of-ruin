@@ -263,6 +263,21 @@ pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Obser
                 format!("Something attacks {object}.")
             }
         }
+        CombatEventView::AnonymousAbility {
+            caster,
+            target,
+            outcome,
+        } => {
+            let (subject, object) = (subject(*caster), object(*target));
+            match outcome {
+                AbilityOutcome::Applied | AbilityOutcome::Unaffected => {
+                    format!("{subject} used an unidentified effect on {object}.")
+                }
+                AbilityOutcome::Miss => {
+                    format!("{subject} used an unidentified effect on {object}, but missed.")
+                }
+            }
+        }
         CombatEventView::Ability {
             caster,
             target,
@@ -1101,6 +1116,75 @@ mod tests {
                 }
             ));
         }
+    }
+
+    #[test]
+    fn anonymous_effect_feedback_stays_neutral_and_has_no_basic_attack_identity() {
+        let before = crate::test_support::observation();
+        let mut after = before.clone();
+        let visible = after.visible_actors[0].id;
+        for (caster, target, phrase) in [
+            (
+                Some(after.self_target),
+                Some(visible),
+                "You used an unidentified effect on the sentinel",
+            ),
+            (
+                Some(visible),
+                Some(after.self_target),
+                "The sentinel used an unidentified effect on you",
+            ),
+            (
+                None,
+                Some(after.self_target),
+                "Something used an unidentified effect on you",
+            ),
+            (
+                Some(after.self_target),
+                None,
+                "You used an unidentified effect on something",
+            ),
+        ] {
+            for outcome in [
+                AbilityOutcome::Applied,
+                AbilityOutcome::Unaffected,
+                AbilityOutcome::Miss,
+            ] {
+                let event = CombatEventView::AnonymousAbility {
+                    caster,
+                    target,
+                    outcome,
+                };
+                after.combat.as_mut().unwrap().events = vec![event.clone()];
+                let expected = if outcome == AbilityOutcome::Miss {
+                    format!("{phrase}, but missed.")
+                } else {
+                    format!("{phrase}.")
+                };
+                assert_eq!(combat_event(&event, &before, &after), expected);
+                let lines = observation_lines(&before, &after, None);
+                let line = lines
+                    .iter()
+                    .find(|line| line.topic == Topic::Combat(event.clone()))
+                    .unwrap();
+                assert_eq!(line.text, expected);
+                assert_eq!(line.basic_attack, None);
+                assert!(!line.text.contains("attacks"));
+                assert!(!line.text.contains("wand"));
+                assert!(!line.text.contains("spell"));
+                assert!(!line.text.contains("no effect"));
+            }
+        }
+        let event = CombatEventView::AnonymousAbility {
+            caster: None,
+            target: Some(after.self_target),
+            outcome: AbilityOutcome::Applied,
+        };
+        after.visible_actors[0].name = "later identified figure".into();
+        assert_eq!(
+            combat_event(&event, &before, &after),
+            "Something used an unidentified effect on you."
+        );
     }
 
     #[test]

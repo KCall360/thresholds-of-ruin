@@ -1007,7 +1007,7 @@ fn independent_region_pins_preserve_active_clocks_and_thaw_reenables_input_pin()
             .next()
             .unwrap()
             .remaining,
-        100
+        Some(100)
     );
     game.advance_physics(200).unwrap();
     assert!(game.condition_allows_voluntary_input(ActorId(1)));

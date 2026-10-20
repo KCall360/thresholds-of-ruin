@@ -441,15 +441,21 @@ impl HdLedger {
         &self,
         kind: &TypeId,
         rules: &Ruleset,
-    ) -> Result<(Vec<HealthContribution>, Option<HitDieHealthImprovement>), HdError> {
-        let mut next = None;
+    ) -> Result<(Vec<HealthContribution>, Vec<HitDieHealthImprovement>), HdError> {
+        let mut next = Vec::with_capacity(2);
         let health = self
             .entries
             .iter()
             .enumerate()
             .map(|(index, entry)| {
-                if next.is_none() {
-                    next = entry.improvement_claim(index);
+                if next.len() < 2 {
+                    if let Some(mut claim) = entry.improvement_claim(index) {
+                        next.push(claim.clone());
+                        claim.previous += 1;
+                        if next.len() < 2 && claim.valid() {
+                            next.push(claim);
+                        }
+                    }
                 }
                 entry.health(kind, rules, index == 0)
             })
