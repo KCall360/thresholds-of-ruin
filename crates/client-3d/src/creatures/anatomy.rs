@@ -185,8 +185,20 @@ impl HumanoidBody {
                 } else {
                     -0.31 * arm_length
                 },
-            thigh: LimbShape::new(0.44, 0.088 * build, 0.06 * build, thigh_belly, 0.008),
-            shin: LimbShape::new(0.4, 0.062 * build, 0.048 * build, 0.068 * build, -0.014),
+            // Hers flow full out of the hip and taper to a finer ankle under
+            // a shapely calf, as on the concept sheets.
+            thigh: LimbShape::new(
+                0.44,
+                0.088 * build * if look.v.woman { 1.1 } else { 1.0 },
+                0.06 * build,
+                thigh_belly,
+                0.008,
+            ),
+            shin: if look.v.woman {
+                LimbShape::new(0.4, 0.062 * build, 0.042 * build, 0.07 * build, -0.016)
+            } else {
+                LimbShape::new(0.4, 0.062 * build, 0.048 * build, 0.068 * build, -0.014)
+            },
             feet: [
                 (
                     Vec3::new(0.0, -0.025, 0.05 * build),
@@ -205,7 +217,9 @@ impl HumanoidBody {
     }
 
     pub fn pelvis_radii(self) -> Vec3 {
-        Vec3::new(0.17 * self.hips_width, 0.12, 0.13) * self.build
+        // Her seat is rounder, front to back.
+        let depth = if self.woman { 0.14 } else { 0.13 };
+        Vec3::new(0.17 * self.hips_width, 0.12, depth) * self.build
     }
 
     pub fn leg_root(self, side: f32) -> Vec3 {

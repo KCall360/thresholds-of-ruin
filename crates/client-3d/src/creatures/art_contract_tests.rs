@@ -486,3 +486,32 @@ fn art_contract_heads_sit_close_on_the_shoulders() {
         }
     }
 }
+
+#[test]
+fn art_contract_womens_legs_are_full_at_the_hip_and_fine_at_the_ankle() {
+    // As on the concept sheets: her upper thigh flows full out of the hip,
+    // her seat is rounder, and her calf tapers to a finer ankle than his.
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Nymph,
+        CreatureModel::Medusa,
+    ] {
+        for build in 0..3 {
+            let her = HumanoidBody::resolve(&appearance(model, true, build));
+            let him = HumanoidBody::resolve(&appearance(model, false, build));
+            let per = |v: f32, body: &HumanoidBody| v / body.build;
+            assert!(
+                per(her.thigh.radius_top, &her) > per(him.thigh.radius_top, &him) * 1.08,
+                "{model:?} build {build}: her upper thigh"
+            );
+            assert!(
+                per(her.shin.radius_bottom, &her) < per(him.shin.radius_bottom, &him) * 0.92,
+                "{model:?} build {build}: her ankle"
+            );
+            assert!(
+                per(her.pelvis_radii().z, &her) > per(him.pelvis_radii().z, &him) * 1.05,
+                "{model:?} build {build}: her seat"
+            );
+        }
+    }
+}
