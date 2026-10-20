@@ -9,6 +9,61 @@ mod art_contract_tests {
     use super::*;
 
     #[test]
+    fn art_contract_her_neckline_is_a_v_over_the_upper_chest_only() {
+        let front = Vec3::Z;
+        assert!(
+            decollete(Vec3::new(0.0, 0.45, 0.1), front, 0.9),
+            "open at the centre"
+        );
+        assert!(
+            decollete(Vec3::new(0.09, 0.52, 0.1), front, 0.9),
+            "wider at the collarbone"
+        );
+        assert!(
+            !decollete(Vec3::new(0.09, 0.42, 0.1), front, 0.9),
+            "covered beside the V"
+        );
+        assert!(
+            !decollete(Vec3::new(0.0, 0.3, 0.1), front, 0.9),
+            "covered below the bust line"
+        );
+        assert!(
+            !decollete(Vec3::new(0.0, 0.45, -0.1), Vec3::NEG_Z, 0.9),
+            "the back stays covered"
+        );
+    }
+
+    #[test]
+    fn art_contract_long_hair_falls_in_locks_and_tails_lie_along_the_nape() {
+        let look = |woman: bool, hair: u8| {
+            Look::with_choice(
+                CreatureModel::Human,
+                3,
+                Some(Variant {
+                    woman,
+                    hair,
+                    ..default()
+                }),
+            )
+        };
+        let mut long = Parts::default();
+        hair(&mut long, &look(true, 0));
+        let (low, high) = long.matte.bounds();
+        assert!(low.y < -0.18, "long hair reaches well down the back: {low}");
+        assert!(
+            high.x > 0.14 && low.x < -0.14,
+            "locks fall over both shoulders"
+        );
+        let mut tied = Parts::default();
+        hair(&mut tied, &look(false, 4));
+        let (low, _) = tied.matte.bounds();
+        assert!(
+            low.z > -0.17,
+            "a tied tail lies along the nape, not jutting back: {low}"
+        );
+    }
+
+    #[test]
     fn art_contract_glowing_eyes_keep_their_lids_and_light_only_the_iris() {
         let mut glowing = Parts::default();
         soft_eyes(
@@ -1425,6 +1480,12 @@ pub(super) fn jerkin_peplum(style: Style) -> Option<f32> {
         Style::Hobgoblin | Style::Orc => Some(0.06),
         _ => None,
     }
+}
+
+/// Whether a point on the front of a woman's bodice lies in its low, shaped
+/// neckline: a V widening from the upper chest up to the collarbones.
+pub(super) fn decollete(at: Vec3, normal: Vec3, shoulders: f32) -> bool {
+    normal.z > 0.0 && at.y > 0.4 && at.x.abs() < 0.045 * shoulders + (at.y - 0.4) * 0.95
 }
 
 /// The skirt of each kind's tunic, robe or coat: its colour and length.
@@ -3026,10 +3087,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 let bare = bare_shoulders && (at.x.abs() > 0.16 * sh || at.y > 0.51);
                 // Women's bodices open in a low, shaped neckline over the
                 // collarbones and upper chest, as on the concept sheets.
-                let decollete = low_neck
-                    && normal.z > 0.0
-                    && at.y > 0.4
-                    && at.x.abs() < 0.045 * sh + (at.y - 0.4) * 0.95;
+                let decollete = low_neck && decollete(at, normal, sh);
                 if decollete {
                     return l.skin;
                 }
