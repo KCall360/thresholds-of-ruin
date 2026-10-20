@@ -160,14 +160,17 @@ pub fn animate(
             super::robe::place(robe, rest, &pose.rot, &pose.off, &mut meshes);
         }
         place_segments(&rig, &anim, fun, &mut joints);
-        swing_drapes(&rig, &anim, &mut joints);
+        swing_drapes(&rig, &anim, dt, &mut joints);
     }
 }
 
-/// Hanging cloth follows its wearer with a little lag: a cloak flares back
-/// as they travel and trails through a turn; skirts and rags sway with the
-/// stride, longer cloth less far. At rest it barely stirs; the dead's lies still.
-fn swing_drapes(rig: &Rig, a: &Anim, joints: &mut Query<&mut Transform, Without<Rig>>) {
+/// Hanging cloth and hair follow their wearer with a little lag: a cloak
+/// flares back as they travel and trails through a turn; skirts and rags
+/// sway with the stride, longer cloth less far; long hair lifts with each
+/// step. At rest they barely stir; the dead's lie still. Each eases toward
+/// its swing rather than taking it at once, so a sudden turn or stop never
+/// snaps it.
+fn swing_drapes(rig: &Rig, a: &Anim, dt: f32, joints: &mut Query<&mut Transform, Without<Rig>>) {
     if rig.drapes.is_empty() {
         return;
     }
@@ -189,9 +192,18 @@ fn swing_drapes(rig: &Rig, a: &Anim, joints: &mut Query<&mut Transform, Without<
                 Quat::from_rotation_z((0.09 * stride * walk + 0.2 * turning) * give)
                     * Quat::from_rotation_x((0.1 * walk + 0.008 * stir) * give)
             }
+            Drape::Hair => {
+                // Back from the crown as she goes, a lift on every step
+                // (twice a stride), swinging out against a turn.
+                let step = (a.walk * 2.0).cos();
+                Quat::from_rotation_x(0.1 * walk + 0.025 * step * walk + 0.012 * stir)
+                    * Quat::from_rotation_z(0.16 * turning + 0.035 * stride * walk)
+            }
         };
         if let Ok(mut transform) = joints.get_mut(e) {
-            transform.rotation = rotation;
+            // Its own inertia: a seventh of a second or so to follow.
+            let follow = 1.0 - (-dt * 7.0).exp();
+            transform.rotation = transform.rotation.slerp(rotation, follow);
         }
     }
 }

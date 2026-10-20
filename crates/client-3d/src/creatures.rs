@@ -995,6 +995,9 @@ pub(crate) enum Drape {
     /// A skirt, kilt, coat tails or rags from the hips, of this length: it
     /// sways with the stride, longer cloth more slowly and less far.
     Skirt(f32),
+    /// Long loose hair from the crown: it trails through turns, lifts and
+    /// settles with each step and stirs at rest.
+    Hair,
 }
 
 impl Rig {
