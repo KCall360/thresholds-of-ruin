@@ -2821,27 +2821,51 @@ pub(super) fn forearm_form(build: f32, length: f32, muscle: f32) -> crate::sdf::
 
 /// A neck widens into the collar and narrows beneath the jaw. The lower
 /// station is buried below the garment opening even when the head turns.
-fn biped_neck(b: &mut Builder, build: f32, slim: f32, color: Vec3) {
+/// The neck from the shoulders up into the head, in the head's space:
+/// points up its middle and its radii (across, front to back) at each.
+pub(super) fn neck_profile(build: f32, slim: f32) -> [(Vec3, Vec2); 4] {
     let scale = build * slim;
+    [
+        (
+            Vec3::new(0.0, -0.065, -0.008),
+            Vec2::new(0.056, 0.052) * scale,
+        ),
+        (
+            Vec3::new(0.0, -0.022, -0.007),
+            Vec2::new(0.05, 0.047) * scale,
+        ),
+        (
+            Vec3::new(0.0, 0.033, -0.008),
+            Vec2::new(0.045, 0.043) * scale,
+        ),
+        (
+            Vec3::new(0.0, 0.085, -0.01),
+            Vec2::new(0.045, 0.045) * scale,
+        ),
+    ]
+}
+
+/// How slender a neck is: hers finer than his, though never a stalk under
+/// the storybook head.
+pub(super) fn neck_slim(woman: bool) -> f32 {
+    if woman {
+        0.85
+    } else {
+        1.0
+    }
+}
+
+fn biped_neck(b: &mut Builder, build: f32, slim: f32, color: Vec3) {
     // Straight profiles need no spline subdivision. Finish still smooths
     // the resulting mesh normally; restoring this flag leaves later forms
     // unchanged and keeps these small transition pieces inexpensive.
     let smooth = b.smooth;
     b.smooth = false;
+    let profile = neck_profile(build, slim);
     tube(
         b,
-        &[
-            Vec3::new(0.0, -0.065, -0.008),
-            Vec3::new(0.0, -0.022, -0.007),
-            Vec3::new(0.0, 0.033, -0.008),
-            Vec3::new(0.0, 0.085, -0.01),
-        ],
-        &[
-            (0.056 * scale, 0.052 * scale),
-            (0.05 * scale, 0.047 * scale),
-            (0.045 * scale, 0.043 * scale),
-            (0.045 * scale, 0.045 * scale),
-        ],
+        &profile.map(|(at, _)| at),
+        &profile.map(|(_, r)| (r.x, r.y)),
         color,
     );
     b.smooth = smooth;
@@ -2948,7 +2972,7 @@ fn biped_pauldron(p: &mut Parts, side: f32, build: f32) {
 
 /// Construction of an existing outer garment, independent of its pigment.
 #[derive(Clone, Copy)]
-enum TorsoMaterial {
+pub(super) enum TorsoMaterial {
     Cloth,
     Leather,
     Plate,
@@ -2964,7 +2988,7 @@ fn torso_garment(
 
 /// Body supports remain exact; garment ease is local to ribs and back so
 /// the waist stays fitted and the shoulder/neck openings keep their anchors.
-fn torso_shape(
+pub(super) fn torso_shape(
     fit: HumanoidBody,
     material: Option<TorsoMaterial>,
     trim_neck: bool,
@@ -3016,11 +3040,14 @@ fn torso_shape(
         0.045,
     )
     .add(
+        // The neck's root stays just inside the neck itself, as slender as
+        // it is, so the neck rises out of the shoulders' slope: never out of
+        // a wider stub whose flat top would show as a ledge round it.
         Capsule(
             Vec3::new(0.0, 0.505, -0.008),
             Vec3::new(0.0, 0.6, -0.008),
-            0.059 * b + grow,
-            0.053 * b + grow,
+            0.059 * b * neck_slim(fem) - 0.002 + grow,
+            0.05 * b * neck_slim(fem) - 0.004 + grow,
         ),
         0.035,
     );
@@ -3849,7 +3876,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     });
     kit.joint(J::Head, torso, body.head, "head", |p| {
         let neck = if furry { l.cloth } else { l.skin };
-        let slim = if fem { 0.85 } else { 1.0 };
+        let slim = neck_slim(fem);
         if blocky || furry || cuirass {
             p.matte.prism(
                 Vec3::Y * -0.03,
@@ -5444,12 +5471,7 @@ fn quadruped(kit: &mut Kit, lift: Entity, look: &Look, centaur: bool) {
                 skin: l.cloth,
                 ..l.clone()
             };
-            biped_neck(
-                &mut p.matte,
-                1.0,
-                if rider.v.woman { 0.85 } else { 1.0 },
-                l.cloth,
-            );
+            biped_neck(&mut p.matte, 1.0, neck_slim(rider.v.woman), l.cloth);
             p.set_transform(
                 Affine3A::from_translation(Vec3::Y * 0.08)
                     * Affine3A::from_scale(Vec3::splat(1.1))

@@ -1,4 +1,4 @@
-use super::anatomy::HumanoidBody;
+use super::anatomy::{storybook_part, HumanoidBody};
 use super::*;
 
 fn appearance(model: CreatureModel, woman: bool, build: u8) -> Look {
@@ -387,6 +387,71 @@ fn art_contract_womens_faces_are_soft_with_full_lips() {
                 lips(&her),
                 lips(&him)
             );
+        }
+    }
+}
+
+#[test]
+fn art_contract_the_neck_rises_from_the_shoulders_without_a_ring() {
+    // Going up the neck all round, its skin emerges from the shoulders once
+    // and stays clear: no rim of the torso's neck stub crosses it again
+    // above, and it never rises out of a flat ledge (the top of a stub
+    // wider than the neck), for either sex or any build. Each part carries its own
+    // storybook proportion.
+    let torso_scale = storybook_part(Plan::Biped, J::Torso);
+    let head_scale = storybook_part(Plan::Biped, J::Head);
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Nymph,
+        CreatureModel::Medusa,
+    ] {
+        for woman in [false, true] {
+            for build in 0..3 {
+                let body = HumanoidBody::resolve(&appearance(model, woman, build));
+                let torso = geometry::torso_shape(body, None, true);
+                let neck = geometry::neck_profile(body.build, geometry::neck_slim(woman));
+                for k in 0..16 {
+                    let a = k as f32 / 16.0 * std::f32::consts::TAU;
+                    let mut emerged = None;
+                    for pair in neck.windows(2) {
+                        for step in 0..8 {
+                            let s = step as f32 / 8.0;
+                            let at = pair[0].0.lerp(pair[1].0, s);
+                            let radii = pair[0].1.lerp(pair[1].1, s);
+                            // A point on the neck's skin, in the torso's own space.
+                            let skin = (at + Vec3::new(a.cos() * radii.x, 0.0, a.sin() * radii.y))
+                                * head_scale
+                                + body.head;
+                            let inner = skin / torso_scale;
+                            let clear = torso.distance(inner) > -0.001;
+                            match (emerged, clear) {
+                                (None, true) => {
+                                    emerged = Some(skin.y);
+                                    let e = 0.002;
+                                    let rise = torso.distance(inner + Vec3::Y * e)
+                                        - torso.distance(inner - Vec3::Y * e);
+                                    let slope = Vec3::new(
+                                        torso.distance(inner + Vec3::X * e)
+                                            - torso.distance(inner - Vec3::X * e),
+                                        rise,
+                                        torso.distance(inner + Vec3::Z * e)
+                                            - torso.distance(inner - Vec3::Z * e),
+                                    )
+                                    .normalize();
+                                    assert!(
+                                        slope.y < 0.9,
+                                        "{model:?} woman {woman} build {build}: the neck rises out of a flat ledge at {skin}"
+                                    );
+                                }
+                                (Some(from), false) => panic!(
+                                    "{model:?} woman {woman} build {build}: a rim crosses the neck at {skin}, above where it emerged at {from:.3}"
+                                ),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
