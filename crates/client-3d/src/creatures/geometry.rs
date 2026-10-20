@@ -54,6 +54,13 @@ mod art_contract_tests {
             high.x > 0.14 && low.x < -0.14,
             "locks fall over both shoulders"
         );
+        let mut bob = Parts::default();
+        hair(&mut bob, &look(true, 4));
+        let (low, _) = bob.matte.bounds();
+        assert!(
+            low.y > -0.02 && low.y < 0.06,
+            "a bob ends at the jaw: {low}"
+        );
         let mut tied = Parts::default();
         hair(&mut tied, &look(false, 4));
         let (low, _) = tied.matte.bounds();
@@ -1282,11 +1289,36 @@ fn hair(p: &mut Parts, l: &Look) {
                     tone(50 + side as u32),
                 );
             }
-            mass(
-                p,
-                Vec3::new(0.0, 0.11, -0.08),
-                Vec3::new(0.105, 0.085, 0.07),
-                c,
+            // Locks round the back of the head curve in under the jaw line,
+            // a softer, layered cut instead of one solid helmet of hair.
+            for k in 0..7 {
+                let a = (k as f32 / 6.0 - 0.5) * 2.6 + PI;
+                let out = Vec3::new(a.sin(), 0.0, a.cos());
+                let root = Vec3::new(out.x * 0.07, 0.24, out.z * 0.06 - 0.02);
+                lock(
+                    &mut p.matte,
+                    &[
+                        root,
+                        Vec3::new(out.x * 0.11, 0.15, out.z * 0.11 - 0.02),
+                        Vec3::new(out.x * 0.115, 0.07, out.z * 0.115 - 0.02),
+                        Vec3::new(out.x * 0.095, 0.03, out.z * 0.095 - 0.02),
+                    ],
+                    0.056,
+                    0.034,
+                    tone(80 + k),
+                );
+            }
+            // A side-swept fringe over the brow.
+            lock(
+                &mut p.matte,
+                &[
+                    Vec3::new(-0.06, 0.272, 0.04),
+                    Vec3::new(0.0, 0.258, 0.072),
+                    Vec3::new(0.055, 0.228, 0.083),
+                ],
+                0.044,
+                0.016,
+                tone(90),
             );
         }
     }
