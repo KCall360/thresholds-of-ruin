@@ -95,9 +95,9 @@ pub fn animate(
             && delta.y.abs() <= 0.001
             && !anim.quiet
             && anim.action.is_none()
-            && anim.hurt.is_none()
-            && anim.dodge.is_none()
             && anim.dead.is_none();
+        // A flinch or a sidestep keeps the feet where they stand: dropping
+        // their support would snap them from the floor in a single frame.
         if !supported || anim.contacts.rig != rig.joint(J::Lift) {
             anim.contacts = WalkContacts::default();
         }
