@@ -1,11 +1,12 @@
 use std::{
+    future::Future,
     net::SocketAddr,
     sync::mpsc::{self, Receiver, SyncSender},
     thread::JoinHandle,
     time::Duration,
 };
 use tokio::{sync::mpsc as async_mpsc, time::timeout};
-use tor_client_common::{Connection, Palette};
+use tor_client_common::{server_before_local, Connection, FirstReady, Palette};
 use tor_protocol::*;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -117,6 +118,15 @@ fn publish(tx: &SyncSender<Event>, event: Event) -> Result<(), Error> {
         .map_err(|_| "Window stopped consuming network updates".into())
 }
 
+/// Apply an already-delivered server boundary before considering a queued
+/// native command. The command retains its original revision and context.
+async fn next_worker_input(
+    server: impl Future<Output = Result<ServerMessage, Error>>,
+    command: impl Future<Output = Option<Command>>,
+) -> FirstReady<Result<ServerMessage, Error>, Option<Command>> {
+    server_before_local(server, command).await
+}
+
 async fn run(
     address: SocketAddr,
     token: String,
@@ -154,24 +164,40 @@ async fn run(
     }
     publish(tx, Event::Ready)?;
     loop {
-        tokio::select! {
-            message=next(&mut connection, &mut shown_palette, tx)=>{
+        match next_worker_input(next(&mut connection, &mut shown_palette, tx), rx.recv()).await {
+            FirstReady::Server(message) => {
                 let message = message?;
                 let reset = matches!(message, ServerMessage::Snapshot { .. });
-                present(message,tx)?;
-                if reset { publish(tx, Event::Ready)?; }
-            },
-            command=rx.recv()=>match command {
-                None => {connection.close().await?;return Ok(());},
+                present(message, tx)?;
+                if reset {
+                    publish(tx, Event::Ready)?;
+                }
+            }
+            FirstReady::Local(command) => match command {
+                None => {
+                    connection.close().await?;
+                    return Ok(());
+                }
                 Some(Command::Request { context, request }) => {
                     if !connection.is_synchronized() {
-                        publish(tx, Event::Status("Resynchronizing; request was not sent.".into()))?;
+                        publish(
+                            tx,
+                            Event::Status("Resynchronizing; request was not sent.".into()),
+                        )?;
                         continue;
                     }
                     let stale_input = matches!(request.as_ref(), Request::Command { context, .. }
                         if context != &connection.state.input_context());
-                    if &context != connection.state.context() || stale_input {
-                        publish(tx, Event::Status("State changed; request was not sent. Review the new state.".into()))?;
+                    let stale_action = matches!(request.as_ref(), Request::Command {
+                        command: tor_protocol::Command::Act { expected_revision, .. }, ..
+                    } if *expected_revision != connection.state.state().revision);
+                    if &context != connection.state.context() || stale_input || stale_action {
+                        publish(
+                            tx,
+                            Event::Refused(
+                                "State changed; request was not sent. Review the new state.".into(),
+                            ),
+                        )?;
                         publish(tx, Event::Ready)?;
                         continue;
                     }
@@ -187,9 +213,9 @@ async fn run(
                         publish(tx, Event::Ready)?;
                         continue;
                     }
-                    transact(&mut connection,&mut shown_palette,*request,tx).await?;
-                    publish(tx,Event::Ready)?;
-                },
+                    transact(&mut connection, &mut shown_palette, *request, tx).await?;
+                    publish(tx, Event::Ready)?;
+                }
                 Some(Command::Skip) => connection.skip(),
                 Some(Command::Pace(pace)) => connection.set_pace(pace),
             },
@@ -400,6 +426,81 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
 mod tests {
     use super::*;
 
+    fn queued_run_step() -> Command {
+        let stream = StreamContext {
+            stream: StreamId("run".into()),
+            epoch: 0,
+        };
+        Command::Request {
+            context: stream.clone(),
+            request: Box::new(Request::Command {
+                context: InputContext {
+                    stream,
+                    readiness_revision: 0,
+                },
+                branch: BranchId("main".into()),
+                command: tor_protocol::Command::Act {
+                    expected_revision: 0,
+                    action: Action::Move {
+                        direction: Direction::East,
+                    },
+                },
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn worker_applies_a_delivered_server_boundary_before_an_already_queued_run_step() {
+        let update = StreamUpdate {
+            context: StreamContext {
+                stream: StreamId("run".into()),
+                epoch: 0,
+            },
+            actor: ActorId(1),
+            branch: BranchId("main".into()),
+            cursor: StreamCursor {
+                sequence: 1,
+                tick: 0,
+            },
+            body: UpdateBody::Readiness {
+                readiness: Readiness {
+                    revision: 1,
+                    admission: true,
+                    resume: vec![],
+                    cancel: vec![],
+                },
+            },
+        };
+        let (commands, mut queued) = async_mpsc::channel(1);
+        commands.send(queued_run_step()).await.unwrap();
+        let selected = next_worker_input(
+            std::future::ready(Ok(ServerMessage::Update {
+                update: Box::new(update.clone()),
+            })),
+            queued.recv(),
+        )
+        .await;
+        assert!(
+            matches!(selected, FirstReady::Server(Ok(ServerMessage::Update { update: received })) if *received == update)
+        );
+        assert!(
+            matches!(queued.try_recv(), Ok(Command::Request { .. })),
+            "the old command remains queued for the new boundary's stale-input check"
+        );
+    }
+
+    #[tokio::test]
+    async fn worker_accepts_a_queued_command_when_no_server_boundary_is_ready() {
+        let (commands, mut queued) = async_mpsc::channel(1);
+        commands.send(queued_run_step()).await.unwrap();
+        let selected = next_worker_input(std::future::pending(), queued.recv()).await;
+        assert!(matches!(
+            selected,
+            FirstReady::Local(Some(Command::Request { .. }))
+        ));
+        assert!(queued.try_recv().is_err());
+    }
+
     #[test]
     fn palette_only_changes_reach_the_ui_once_including_stale_and_recovery() {
         let (tx, rx) = mpsc::sync_channel(8);
@@ -574,16 +675,26 @@ mod tests {
         queued_request_after_context_change(QueuedChange::Observation).await;
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_queued_run_step_from_an_older_observation_is_refused_without_retry() {
+        queued_request_after_context_change(QueuedChange::MovementObservation).await;
+    }
+
     #[derive(Clone, Copy)]
     enum QueuedChange {
         Reset,
         Authority,
         Observation,
+        MovementObservation,
     }
 
     async fn queued_request_after_context_change(change: QueuedChange) {
         let reset = matches!(change, QueuedChange::Reset);
         let advancement = matches!(change, QueuedChange::Observation);
+        let observation = matches!(
+            change,
+            QueuedChange::Observation | QueuedChange::MovementObservation
+        );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let samples: serde_json::Value = serde_json::from_str(
@@ -624,7 +735,7 @@ mod tests {
         let mut fresh = initial.clone();
         if reset {
             fresh.context.epoch += 1;
-        } else if advancement {
+        } else if observation {
             std::sync::Arc::make_mut(&mut fresh.state).revision += 1;
         } else {
             fresh.readiness.revision += 1;
@@ -684,7 +795,7 @@ mod tests {
                                 sequence: fresh.cursor.sequence + 1,
                                 tick: fresh.cursor.tick,
                             },
-                            body: if advancement {
+                            body: if observation {
                                 UpdateBody::Observation {
                                     state: fresh.state,
                                     event: None,
@@ -803,10 +914,10 @@ mod tests {
                 Event::Snapshot(snapshot) => reset && snapshot.context == current,
                 Event::Update(update) => match &update.body {
                     UpdateBody::Readiness { readiness } => {
-                        !reset && !advancement && readiness.revision == current_generation
+                        !reset && !observation && readiness.revision == current_generation
                     }
                     UpdateBody::Observation { state, .. } => {
-                        advancement && state.revision == current_revision
+                        observation && state.revision == current_revision
                     }
                     _ => false,
                 },
@@ -834,7 +945,9 @@ mod tests {
                         } else {
                             tor_protocol::Command::Act {
                                 expected_revision: old_revision,
-                                action: Action::Wait,
+                                action: Action::Move {
+                                    direction: Direction::East,
+                                },
                             }
                         },
                     }),
@@ -856,8 +969,24 @@ mod tests {
                         assert!(status.contains("not sent"));
                         true
                     }
-                    Event::Status(status) if !advancement => {
-                        status.starts_with("State changed; request was not sent")
+                    Event::Refused(status) if !advancement => {
+                        assert!(status.starts_with("State changed; request was not sent"));
+                        // Match the native loop: a rejected queued step may be
+                        // followed by Ready, but neither can restart the run.
+                        let mut app = tor_client_ascii::App::new();
+                        app.running = Some(Direction::East);
+                        app.busy = true;
+                        app.refused(status);
+                        app.ready();
+                        assert_eq!(app.running, None);
+                        assert_eq!(app.continue_run(), tor_client_ascii::Effect::None);
+                        true
+                    }
+                    Event::Status(status)
+                        if !advancement
+                            && status.starts_with("State changed; request was not sent") =>
+                    {
+                        panic!("a rejected queued run must be refused, not left running: {status}")
                     }
                     _ => false,
                 } {

@@ -23,24 +23,43 @@ strike navigation; reopen the report after a stale-source error. See [wizard too
   you act again, then move to the message log (Ctrl-P). Prompts and refusals
   appear on the row below them.
 - **Map** (the window's width). One map for every height; see [the map](#the-map).
-- **Status lines** (bottom). The place you're in (or your name) and the
-  objective; then hit points, time in ticks, and conditions such as
-  Recovering, Attack paused, Travelling or Running.
+- **Status lines** (bottom). Disclosed Strength, Speed, Intellect, Willpower,
+  Awareness, Presence and hit dice, followed by your place/name and objective.
+  The next two rows show health, Stamina (`Stm`), Focus (`Foc`), Mana, identified
+  gold carried, time in ticks and conditions such as Recovering, Attack paused,
+  Travelling or Running. Resource balances are current/maximum; `[-n]` marks
+  the part reserved for paid work. Gold counts only identified currency, never
+  names or appearances. Status keeps its readable type size and omits whole
+  lower-priority fields rather than cutting numbers; `+` marks omitted fields. Press `@` for personal
+  stats, `i` for carried currency, and use the action prompts for pending work.
 - **Key hint and control** (bottom row). Whether you're in control, observing
   or spectating, and whether a request is waiting for the server.
 
+Picking up one reachable floor stack immediately requests the whole disclosed
+stack. Multiple stacks still open the letter/quantity selector; dropping always
+asks. The server checks held units, capacity and ordinary action costs; a partly
+reserved stack can be refused without moving anything.
+
 Inventory, creature details, help and logs never take permanent space; they
 open on demand over the map.
+
+Automatic running waits for both your character's turn and permission to submit
+the next action. It sends only one step at a time. A stale or rejected request
+stops the run; review the new state before starting it again. Visible creatures,
+messages and uncertain terrain still stop running intentionally.
 
 ### Messages
 
 The client composes messages from the shared narration of each disclosed
 observation (see [client narration](../architecture/clients.md#narration-and-stream-recovery))
 and leaves out what the screen already shows: your own steps and waits,
-"You can act again" and "You must wait", hit point lines, starting an attack,
-and creatures leaving sight. It merges related lines: a hit that kills reads
-"You kill the ruin scout!"; starting and finishing item work reads as the
-finished action, adding "It was a potion of poison." when the item turned out
+"You can act again" and "You must wait", hit point lines, routine preparation
+for your basic attack, and creatures leaving sight. Your ordinary attack reads
+"You hit the ruin scout." or "You miss the ruin scout." Names come only from
+disclosed observations; an unnamed target remains "something" or "the figure". Death,
+interruptions, special abilities and actionable failures keep their own messages.
+Starting and finishing item work reads as the finished action, adding
+"It was a potion of poison." when the item turned out
 to be something else; a repeated line is counted ("(x3)"). After you move it
 says what's underfoot ("You see here a sword.", "There is a staircase down
 here."). A creature is announced when it first comes into sight and again
@@ -289,6 +308,13 @@ control characters or leading/trailing whitespace; renaming requires control.
 
 ## Combat, equipment and observation
 
+Horizontal bump attacks use the disclosed creature drawn in the adjacent column,
+including a locally adjacent flying body above foot height. Exact foot-height
+occupants take priority; hostile-only mode never skips a displayed peaceful
+creature to attack another above it. Distant high flyers leave ordinary movement
+available. This selects a target only: the server still checks actual melee reach.
+
+
 Use `a` to choose a visible creature, Up/Down to select and Enter to attack.
 `--bump-attacks hostile|any|off` controls manual movement interpretation; the
 default is `hostile`. Travel stops rather than attacking. Exact own HP and action
@@ -334,7 +360,7 @@ readers must share delete access to permit replacement; the test harness's
 `read_capture` helper does this. A capture write or replacement failure is
 reported as an error, rather than as a successfully captured frame.
 Frames include raw observation `narration`, displayed `messages`, `map_tiles`,
-`status_lines` and the modal `screen`. These options expose only the connected
+full `status_lines`, fitted `rendered_status_lines`, and the modal `screen` (including the pickup selector). These options expose only the connected
 actor’s disclosed state/history, potentially including the user’s private notes.
 They do not bypass authentication, revisions, control or rules.
 

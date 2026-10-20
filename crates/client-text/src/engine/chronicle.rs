@@ -477,7 +477,7 @@ mod tests {
         let item = ItemTarget::from_digest([8; 32]);
         state.observation.inventory.push(
             serde_json::from_value(serde_json::json!({
-                "known_supply":null,"quantity":"1","class":"weapon","appearance":"item",
+                "known_currency":null,"known_supply":null,"quantity":"1","class":"weapon","appearance":"item",
                 "identified":true,"id":item,"name":"iron sword","description":""
             }))
             .unwrap(),

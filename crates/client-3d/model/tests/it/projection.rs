@@ -51,6 +51,7 @@ pub(super) fn state() -> ClientState {
         appearance: "wrapped object".into(),
         identified: false,
         asset: None,
+        known_currency: None,
         known_supply: None,
     });
     from_observation(observed)
@@ -91,6 +92,7 @@ fn own_body_and_corpses_use_disclosed_appearance_without_parsing_names() {
             appearance: "remains".into(),
             identified: true,
             asset: Some("item.corpse".into()),
+            known_currency: None,
             known_supply: None,
         },
         reachable: true,

@@ -286,7 +286,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":53,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":54,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -1455,3 +1455,13 @@ results grant no authority, alter no state, and are discarded during stream
 repair like private creature inspection. Players and spectators are rejected
 before parsing. See [named spawning](../development/wizard.md#named-creature-spawning)
 for resolution and mutation semantics.
+
+
+### Identified currency
+
+Item views require nullable `known_currency`. The typed value `gold` is disclosed
+only for identified coin items; its amount is the exact stack quantity. Null
+means currency is not known, even if a label or asset resembles gold. Apparent
+objects never disclose this capability. Attached spectators see only the same
+ordinary identified item facts already available in their observation; this field
+does not reveal private equipment knowledge or hidden item definitions.

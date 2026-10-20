@@ -782,6 +782,13 @@ fn quantity_picker_submits_partial_pickup_and_drop() {
     Arc::make_mut(&mut snapshot.state).observation.ground_items[0]
         .item
         .quantity = 10;
+    // Multiple floor stacks keep the explicit partial-quantity picker.
+    let mut other = snapshot.state.observation.ground_items[0].clone();
+    other.item.id = super::item_target(5);
+    Arc::make_mut(&mut snapshot.state)
+        .observation
+        .ground_items
+        .push(other);
     let mut carried = snapshot.state.observation.ground_items[0].item.clone();
     carried.id = super::item_target(4);
     Arc::make_mut(&mut snapshot.state)
@@ -1006,7 +1013,7 @@ fn state() -> ClientState {
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
-            "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
+            "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true
         }}
@@ -1149,6 +1156,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
                 description: String::new(),
                 id: super::item_target(4),
                 name: "another token".into(),
+                known_currency: None,
                 known_supply: None,
             },
             position,
@@ -1562,7 +1570,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             id: super::actor_target(2),
             name: "guard".into(),
             description: String::new(),
-            position: Position { x: 1, y: 0, z: 0 },
+            position: Position { x: 2, y: 1, z: 0 },
         });
         view.observation.combat = Some(CombatView {
             public_plan: None,
@@ -2387,4 +2395,144 @@ fn wizard_creature_catalog_is_discoverable_in_ascii_help() {
     assert!(tor_client_ascii::HELP
         .iter()
         .any(|line| line.contains("F7") && line.contains("creature list")));
+}
+
+#[test]
+fn one_reachable_stack_is_taken_whole_without_a_quantity_menu() {
+    for quantity in [1, 6, u64::MAX] {
+        let mut snapshot = state().snapshot();
+        Arc::make_mut(&mut snapshot.state).observation.ground_items[0]
+            .item
+            .quantity = quantity;
+        let target = snapshot.state.observation.ground_items[0].item.id;
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+        app.ready();
+        let effect = app.input(Input::Key { key: Key::Pickup });
+        assert!(matches!(super::request(effect), Some(Request::Command {
+            command: Command::Act { action: Action::Take { item, quantity: None }, .. }, ..
+        }) if item == target));
+        assert!(app.pickup.is_empty());
+        assert!(
+            matches!(app.input(Input::Key { key: Key::Pickup }), Effect::None),
+            "a pending request must not repeat pickup"
+        );
+    }
+}
+
+#[test]
+fn status_reports_disclosed_attributes_resources_and_exact_gold_without_name_inference() {
+    let mut snapshot = creature_snapshot();
+    let mut coin = snapshot.state.observation.ground_items[0].item.clone();
+    coin.id = super::item_target(800);
+    coin.class = ItemClass::Coin;
+    coin.identified = true;
+    coin.known_currency = Some(CurrencyKind::Gold);
+    coin.name = "unusual tender".into();
+    coin.quantity = u64::MAX;
+    let mut second = coin.clone();
+    second.id = super::item_target(801);
+    let mut fake = coin.clone();
+    fake.id = super::item_target(802);
+    fake.name = "gold coins".into();
+    fake.known_currency = None;
+    Arc::make_mut(&mut snapshot.state).observation.inventory = vec![coin, second, fake];
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    let state = app.state.as_ref().unwrap();
+    let before = state.snapshot();
+    let rows = tor_client_ascii::status_lines(&app, state);
+    for term in ["Str:2", "Spd:1", "Int:3", "Wil:2", "Awr:1", "Pre:0", "HD:1"] {
+        assert!(rows[0].contains(term), "{term}: {rows:?}");
+    }
+    for term in [
+        "HP:7(12)",
+        "Stm:2/3[-1]",
+        "Foc:2/3[-1]",
+        "Mana:2/3[-1]",
+        "Gold:36893488147419103230",
+    ] {
+        assert!(rows[1].contains(term), "{term}: {rows:?}");
+    }
+    for width in [0, 1, 24, 72, 146] {
+        let fitted = tor_client_ascii::status_lines_at_width(&app, state, width);
+        assert!(fitted.iter().all(|row| row.chars().count() <= width));
+        if width > 0 && rows[0].chars().count() > width {
+            assert!(fitted[0].ends_with('+'));
+        }
+    }
+    let fitted = tor_client_ascii::status_lines_at_width(&app, state, 72).join(" ");
+    for term in [
+        "HP:7(12)",
+        "Stm:2/3[-1]",
+        "Foc:2/3[-1]",
+        "Mana:2/3[-1]",
+        "Gold:36893488147419103230",
+    ] {
+        assert!(fitted.contains(term), "{term}: {fitted}");
+    }
+    for width in [8, 12, 24, 48, 72] {
+        let fitted = tor_client_ascii::status_lines_at_width(&app, state, width);
+        for token in fitted[1..].iter().flat_map(|line| line.split_whitespace()) {
+            assert!(
+                token == "+" || rows[1].split_whitespace().any(|original| original == token),
+                "partial field {token}"
+            );
+        }
+    }
+    assert_eq!(state.snapshot(), before);
+}
+
+#[test]
+fn status_does_not_invent_unavailable_personal_stats_or_hidden_gold() {
+    let mut snapshot = creature_snapshot();
+    let observation = &mut Arc::make_mut(&mut snapshot.state).observation;
+    observation.combat.as_mut().unwrap().own_stats = None;
+    let mut item = observation.ground_items[0].item.clone();
+    item.id = super::item_target(803);
+    item.name = "gold".into();
+    item.class = ItemClass::Coin;
+    item.identified = false;
+    item.known_currency = None;
+    observation.inventory = vec![item];
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    let rows = tor_client_ascii::status_lines(&app, app.state.as_ref().unwrap());
+    assert!(!rows[0].contains("Str:"));
+    assert!(!rows[1].contains("Mana:"));
+    assert!(rows[1].contains("Gold:0"));
+    assert!(rows[1].contains("HP:7(12)"));
+}
+
+#[test]
+fn fitted_status_preserves_paused_state_with_large_counters() {
+    let mut snapshot = ordered_strike_snapshot(1, false, true);
+    let combat = Arc::make_mut(&mut snapshot.state)
+        .observation
+        .combat
+        .as_mut()
+        .unwrap();
+    combat.preparation_remaining = Some(u64::MAX);
+    let sequence = combat.sequence.as_mut().unwrap();
+    sequence.next_strike_remaining = u64::MAX;
+    sequence.cancel_recovery_remaining = u64::MAX;
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    let state = app.state.as_ref().unwrap();
+    let rows = tor_client_ascii::status_lines_at_width(&app, state, 72);
+    let shown = rows.join(" ");
+    assert!(shown.contains("Sequence paused"), "{shown}");
+    assert!(shown.contains("Gold:0"), "{shown}");
+    assert!(shown.contains("HP:"), "{shown}");
+    assert!(rows.iter().all(|row| row.chars().count() <= 72));
+    for width in 1..72 {
+        let rows = tor_client_ascii::status_lines_at_width(&app, state, width);
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.contains("Sequence +") || row.ends_with("Sequence")),
+            "{rows:?}"
+        );
+    }
 }

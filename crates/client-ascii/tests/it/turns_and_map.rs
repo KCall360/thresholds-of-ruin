@@ -10,6 +10,7 @@ fn line(topic: Topic, text: &str) -> Line {
     Line {
         topic,
         text: text.into(),
+        basic_attack: None,
     }
 }
 
@@ -33,10 +34,10 @@ fn snapshot() -> Snapshot {
         "state":{"wizard_game":false,"revision":"5","observation":{"linked_holds":[],
             "actor":"1","self_target":super::actor_target(1),"tick":"100","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells,
-            "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"weapon","appearance":"sword","identified":true,"id":super::item_target(7),"name":"sword"},"position":{"x":-1,"y":0,"z":0}}],
+            "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"weapon","appearance":"sword","identified":true,"id":super::item_target(7),"name":"sword"},"position":{"x":-1,"y":0,"z":0}}],
             "inventory":[
-                {"known_supply":null,"quantity":"1","class":"potion","appearance":"red potion","identified":false,"id":super::item_target(1),"name":"red potion"},
-                {"known_supply":null,"quantity":"1","class":"armor","appearance":"mail","identified":true,"id":super::item_target(2),"name":"mail"}
+                {"known_currency":null,"known_supply":null,"quantity":"1","class":"potion","appearance":"red potion","identified":false,"id":super::item_target(1),"name":"red potion"},
+                {"known_currency":null,"known_supply":null,"quantity":"1","class":"armor","appearance":"mail","identified":true,"id":super::item_target(2),"name":"mail"}
             ],
             "visible_actors":[
                 {"id":super::actor_target(1),"name":"delver","position":{"x":0,"y":0,"z":1}},
@@ -84,6 +85,342 @@ fn update(app: &mut App, sequence: u64, change: impl FnOnce(&mut Observation)) {
         },
     })
     .unwrap();
+}
+
+fn basic_attack_view() -> Observation {
+    let mut view = view();
+    let mut stats = tor_client_common::test_support::stats();
+    let mut attack = tor_client_common::test_support::ability("custom.strike");
+    attack.name = "Ordinary attack".into();
+    attack.basic_attack = true;
+    attack.reach = AbilityReach::Melee;
+    attack.weapon_selection = true;
+    stats.abilities = vec![attack];
+    view.combat.as_mut().unwrap().own_stats = Some(stats);
+    view
+}
+
+fn own_strike(view: &Observation, outcome: AbilityOutcome) -> CombatEventView {
+    CombatEventView::Ability {
+        caster: Some(view.self_target),
+        target: Some(super::actor_target(2)),
+        ability: ContentRef {
+            id: "custom.strike".into(),
+            name: "Ordinary attack".into(),
+        },
+        outcome,
+        strike: None,
+    }
+}
+
+#[test]
+fn basic_attack_messages_show_only_hit_or_miss_and_keep_full_narration() {
+    use tor_client_common::narration::observation_lines;
+
+    for (outcome, expected, full) in [
+        (
+            AbilityOutcome::Applied,
+            "You hit the ruin scout.",
+            "You used Ordinary attack on the ruin scout.",
+        ),
+        (
+            AbilityOutcome::Miss,
+            "You miss the ruin scout.",
+            "You used Ordinary attack on the ruin scout, but missed.",
+        ),
+    ] {
+        let before = basic_attack_view();
+        let mut preparing = before.clone();
+        preparing.tick += 1;
+        let start = Event::AbilityStarted {
+            ability: ContentRef {
+                id: "custom.strike".into(),
+                name: "Ordinary attack".into(),
+            },
+            target: super::actor_target(2),
+        };
+        let started = observation_lines(&before, &preparing, Some(&start));
+        assert_eq!(started[0].text, "You prepare to use Ordinary attack.");
+        assert_eq!(started[0].topic, Topic::Own(start));
+        let mut messages = Messages::default();
+        messages.absorb(&started, &preparing);
+        assert_eq!(messages.text(), "", "routine preparation should be quiet");
+
+        let mut after = preparing.clone();
+        after.tick += 1;
+        let hit = own_strike(&after, outcome);
+        after.combat.as_mut().unwrap().events = vec![hit.clone()];
+        let resolved = observation_lines(&preparing, &after, None);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].text, full);
+        assert_eq!(resolved[0].topic, Topic::Combat(hit.clone()));
+        messages.absorb(&resolved, &after);
+        assert_eq!(messages.text(), expected);
+        assert_eq!(after.combat.as_ref().unwrap().events, [hit]);
+        messages.begin_turn();
+        assert_eq!(messages.log().collect::<Vec<_>>(), [expected]);
+    }
+}
+
+#[test]
+fn streamed_basic_attack_keeps_history_and_stays_quiet_until_its_result() {
+    let mut initial = snapshot();
+    Arc::make_mut(&mut initial.state).observation = basic_attack_view();
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(initial.clone()).unwrap());
+    let mut preparing = Arc::unwrap_or_clone(initial.state.clone());
+    preparing.revision += 1;
+    preparing.observation.tick += 1;
+    preparing.observation.ready = false;
+    let combat = preparing.observation.combat.as_mut().unwrap();
+    combat.preparation_remaining = Some(10);
+    combat.preparation_active = true;
+    let target = super::actor_target(2);
+    let started = HistoryEntry {
+        id: EntryId("basic-attack-start".into()),
+        branch: initial.branch.clone(),
+        actor: initial.actor,
+        tick: preparing.observation.tick,
+        author: Author::User {
+            user: "test".into(),
+        },
+        audience: Audience::Actor,
+        content: HistoryContent::Action {
+            action: Action::UseAbility {
+                id: "custom.strike".into(),
+                invocation: AbilityInvocation {
+                    aim: AbilityAim::ActorTarget { target },
+                    weapon: WeaponSelection::Default,
+                },
+                supplies: Default::default(),
+            },
+            event: Box::new(Event::AbilityStarted {
+                ability: ContentRef {
+                    id: "custom.strike".into(),
+                    name: "Ordinary attack".into(),
+                },
+                target,
+            }),
+        },
+    };
+    app.update(StreamUpdate {
+        context: initial.context.clone(),
+        actor: initial.actor,
+        branch: initial.branch.clone(),
+        cursor: StreamCursor {
+            sequence: 1,
+            tick: preparing.observation.tick,
+        },
+        body: UpdateBody::Observation {
+            state: preparing.into(),
+            event: Some(Box::new(started.clone())),
+        },
+    })
+    .unwrap();
+    assert_eq!(app.messages.text(), "");
+    assert!(app
+        .state
+        .as_ref()
+        .unwrap()
+        .narration()
+        .iter()
+        .any(|line| line == "You prepare to use Ordinary attack."));
+
+    update(&mut app, 2, |view| {
+        let strike = own_strike(view, AbilityOutcome::Applied);
+        view.ready = true;
+        let combat = view.combat.as_mut().unwrap();
+        combat.preparation_remaining = None;
+        combat.preparation_active = false;
+        combat.events = vec![strike];
+    });
+    assert_eq!(app.messages.text(), "You hit the ruin scout.");
+    let state = app.state.as_ref().unwrap();
+    assert_eq!(state.history(), [started]);
+    assert!(state
+        .narration()
+        .iter()
+        .any(|line| line == "You used Ordinary attack on the ruin scout."));
+    update(&mut app, 3, |view| {
+        view.combat.as_mut().unwrap().events.clear()
+    });
+    assert_eq!(app.messages.text(), "You hit the ruin scout.");
+}
+
+#[test]
+fn basic_attack_messages_keep_each_strike_and_the_disclosed_departed_target() {
+    let mut before = basic_attack_view();
+    before.visible_actors[1].name = "ruin\n scout".into();
+    let mut after = before.clone();
+    after.tick += 1;
+    after
+        .visible_actors
+        .retain(|actor| actor.id == after.self_target);
+    // A last strike can remove the granted ability together with the target.
+    after.combat.as_mut().unwrap().own_stats = None;
+    let mut first = own_strike(&before, AbilityOutcome::Applied);
+    let mut second = first.clone();
+    if let CombatEventView::Ability { strike, .. } = &mut first {
+        *strike = Some(0);
+    }
+    if let CombatEventView::Ability { strike, .. } = &mut second {
+        *strike = Some(1);
+    }
+    after.combat.as_mut().unwrap().events = vec![
+        first.clone(),
+        second.clone(),
+        CombatEventView::Died {
+            actor: super::actor_target(2),
+        },
+    ];
+    let lines = tor_client_common::narration::observation_lines(&before, &after, None);
+    let mut messages = Messages::default();
+    messages.absorb(&lines, &after);
+    assert_eq!(
+        messages.text(),
+        "You hit the ruin scout. (x2)  The ruin scout died."
+    );
+    assert!(lines.iter().any(|line| {
+        line.topic == Topic::Combat(second.clone())
+            && line.text == "You used Ordinary attack (strike 2) on the ruin scout."
+    }));
+    assert_eq!(after.combat.as_ref().unwrap().events[0], first);
+}
+
+#[test]
+fn concise_combat_never_infers_anonymous_names_or_unknown_ability_semantics() {
+    let before = basic_attack_view();
+    let mut after = before.clone();
+    after.tick += 1;
+    for (caster, target, id, name, outcome, expected) in [
+        (
+            Some(before.self_target),
+            None,
+            "custom.strike",
+            "Ordinary attack",
+            AbilityOutcome::Applied,
+            "You hit something.",
+        ),
+        (
+            Some(before.self_target),
+            Some(super::actor_target(99)),
+            "custom.strike",
+            "Ordinary attack",
+            AbilityOutcome::Miss,
+            "You miss the figure.",
+        ),
+        (
+            Some(before.self_target),
+            Some(before.self_target),
+            "custom.strike",
+            "Ordinary attack",
+            AbilityOutcome::Applied,
+            "You hit yourself.",
+        ),
+        (
+            None,
+            Some(before.self_target),
+            "custom.strike",
+            "Ordinary attack",
+            AbilityOutcome::Applied,
+            "Something used Ordinary attack on you.",
+        ),
+        (
+            Some(super::actor_target(2)),
+            Some(before.self_target),
+            "custom.strike",
+            "Ordinary attack",
+            AbilityOutcome::Applied,
+            "The ruin scout used Ordinary attack on you.",
+        ),
+        (
+            Some(before.self_target),
+            Some(super::actor_target(2)),
+            "unknown.technique",
+            "Basic Melee",
+            AbilityOutcome::Applied,
+            "You used Basic Melee on the ruin scout.",
+        ),
+        (
+            Some(before.self_target),
+            Some(super::actor_target(2)),
+            "custom.strike",
+            "Ordinary attack",
+            AbilityOutcome::Unaffected,
+            "You used Ordinary attack on the ruin scout.",
+        ),
+    ] {
+        after.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
+            caster,
+            target,
+            ability: ContentRef {
+                id: id.into(),
+                name: name.into(),
+            },
+            outcome,
+            strike: None,
+        }];
+        let lines = tor_client_common::narration::observation_lines(&before, &after, None);
+        let mut messages = Messages::default();
+        messages.absorb(&lines, &after);
+        assert_eq!(messages.text(), expected);
+    }
+    for caster in [None, Some(super::actor_target(2))] {
+        after.combat.as_mut().unwrap().events = vec![CombatEventView::UnseenAbility {
+            caster,
+            target: after.self_target,
+            outcome: AbilityOutcome::Applied,
+        }];
+        let lines = tor_client_common::narration::observation_lines(&before, &after, None);
+        let mut messages = Messages::default();
+        messages.absorb(&lines, &after);
+        assert_eq!(messages.text(), "Something attacks you.");
+    }
+}
+
+#[test]
+fn concise_combat_keeps_special_effects_interruptions_and_actionable_feedback() {
+    let before = basic_attack_view();
+    let mut after = before.clone();
+    after.tick += 1;
+    after.combat.as_mut().unwrap().events = vec![
+        CombatEventView::Ability {
+            caster: Some(after.self_target),
+            target: Some(super::actor_target(2)),
+            ability: tor_client_common::test_support::content("fear"),
+            outcome: AbilityOutcome::Applied,
+            strike: None,
+        },
+        CombatEventView::Condition {
+            condition: tor_client_common::test_support::content("poisoned"),
+        },
+        CombatEventView::Interrupted {
+            actor: after.self_target,
+        },
+        CombatEventView::Died {
+            actor: after.self_target,
+        },
+    ];
+    let start = Event::AbilityStarted {
+        ability: tor_client_common::test_support::content("fear"),
+        target: super::actor_target(2),
+    };
+    let lines = tor_client_common::narration::observation_lines(&before, &after, Some(&start));
+    let mut messages = Messages::default();
+    messages.absorb(&lines, &after);
+    messages.absorb(
+        &[line(
+            Topic::Own(Event::PreparationPaused),
+            "Your preparation is paused until you act again.",
+        )],
+        &after,
+    );
+    messages.push("The target is out of reach.");
+    assert_eq!(
+        messages.text(),
+        "You prepare to use Fear.  You used Fear on the ruin scout.  You are affected by Poisoned.  Your attack was interrupted.  You died.  Your preparation is paused until you act again.  The target is out of reach."
+    );
 }
 
 #[test]
@@ -441,6 +778,583 @@ fn running_refuses_with_a_creature_in_view_and_stops_at_walls() {
 }
 
 #[test]
+fn automatic_run_waits_for_character_readiness_after_acknowledgement_and_execution() {
+    fn apply(app: &mut App, body: UpdateBody) {
+        let state = app.state.as_ref().unwrap();
+        app.update(StreamUpdate {
+            context: state.context().clone(),
+            actor: state.state().observation.actor,
+            branch: state.branch().clone(),
+            cursor: StreamCursor {
+                sequence: state.cursor().sequence + 1,
+                tick: state.state().observation.tick,
+            },
+            body,
+        })
+        .unwrap();
+    }
+
+    for ready_before_permissions in [false, true] {
+        let mut initial = snapshot();
+        let view = &mut Arc::make_mut(&mut initial.state).observation;
+        view.visible_actors
+            .retain(|actor| actor.id == view.self_target);
+        view.ground_items.clear();
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(ClientState::from_snapshot(initial).unwrap());
+        app.ready();
+        assert!(matches!(
+            app.input(Input::Key { key: Key::RunRight }),
+            Effect::Request(_)
+        ));
+        assert_eq!(app.continue_run(), Effect::None, "request is in flight");
+
+        let status = IntentionStatus {
+            actor: ActorId(1),
+            branch: BranchId("turns".into()),
+            intention: IntentionId("run-step".into()),
+            entry_id: EntryId("run-step-entry".into()),
+            phase: IntentionPhase::Queued,
+        };
+        apply(
+            &mut app,
+            UpdateBody::Intention {
+                status: status.clone(),
+            },
+        );
+        apply(
+            &mut app,
+            UpdateBody::Readiness {
+                readiness: Readiness {
+                    revision: 1,
+                    admission: false,
+                    resume: vec![],
+                    cancel: vec![status.intention.clone()],
+                },
+            },
+        );
+        // The request acknowledgement releases transport busy, not gameplay.
+        app.ready();
+        assert_eq!(app.continue_run(), Effect::None, "move is still queued");
+        update(&mut app, 3, |view| view.ready = ready_before_permissions);
+        assert_eq!(
+            app.continue_run(),
+            Effect::None,
+            "execution is not yet disclosed"
+        );
+        apply(
+            &mut app,
+            UpdateBody::Intention {
+                status: IntentionStatus {
+                    phase: IntentionPhase::Resolved,
+                    ..status
+                },
+            },
+        );
+        assert_eq!(
+            app.continue_run(),
+            Effect::None,
+            "permissions must follow execution"
+        );
+        apply(
+            &mut app,
+            UpdateBody::Readiness {
+                readiness: Readiness {
+                    revision: 2,
+                    admission: true,
+                    resume: vec![],
+                    cancel: vec![],
+                },
+            },
+        );
+        if !ready_before_permissions {
+            // An empty intention slot permits explicit queued input while other
+            // actors still advance. Automatic running must await their results.
+            assert!(app.state.as_ref().unwrap().can_admit_intention());
+            assert_eq!(
+                app.continue_run(),
+                Effect::None,
+                "admission is not character readiness"
+            );
+            assert_eq!(app.running, Some(Direction::East));
+            update(&mut app, 6, |view| view.ready = true);
+        }
+        let expected_revision = app.state.as_ref().unwrap().state().revision;
+        assert!(matches!(
+            super::request(app.continue_run()),
+            Some(Request::Command {
+                context: InputContext { readiness_revision: 2, .. },
+                command: Command::Act {
+                    expected_revision: actual_revision,
+                    action: Action::Move { direction: Direction::East },
+                },
+                ..
+            }) if actual_revision == expected_revision
+        ));
+        assert_eq!(
+            app.continue_run(),
+            Effect::None,
+            "only one next step is submitted"
+        );
+    }
+}
+
+#[test]
+fn an_explicit_step_can_still_use_an_available_queue_slot_before_character_readiness() {
+    let mut initial = snapshot();
+    let view = &mut Arc::make_mut(&mut initial.state).observation;
+    view.visible_actors
+        .retain(|actor| actor.id == view.self_target);
+    view.ground_items.clear();
+    view.ready = false;
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(initial).unwrap());
+    app.ready();
+    assert!(matches!(
+        super::request(app.input(Input::Key { key: Key::Right })),
+        Some(Request::Command {
+            command: Command::Act {
+                action: Action::Move {
+                    direction: Direction::East
+                },
+                ..
+            },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn running_ignores_own_body_occurrences_but_keeps_current_creature_stops() {
+    for hostile in [false, true] {
+        let mut app = app();
+        update(&mut app, 1, |o| {
+            o.visible_actors.retain(|actor| actor.id == o.self_target);
+            o.ground_items.clear();
+            // A second view of our own body is still us, even in a different
+            // map column. The fixture already includes our head at z = 1.
+            let mut own = o.visible_actors[0].clone();
+            own.position = Position { x: 2, y: 0, z: 1 };
+            o.visible_actors.push(own);
+        });
+        assert!(!app.creature_in_view());
+        assert!(matches!(
+            app.input(Input::Key { key: Key::RunRight }),
+            Effect::Request(_)
+        ));
+        app.ready();
+        assert!(matches!(app.continue_run(), Effect::Request(_)));
+        app.ready();
+        update(&mut app, 2, |o| {
+            let mut creature = o.visible_actors[0].clone();
+            creature.id = super::actor_target(2);
+            creature.name = "nearby creature".into();
+            creature.position = Position { x: 2, y: 0, z: 1 };
+            o.visible_actors.push(creature);
+            o.combat.as_mut().unwrap().actors[0].hostile = hostile;
+        });
+        // Clear the discovery message to prove the creature itself is a stop.
+        app.messages.begin_turn();
+        assert_eq!(app.continue_run(), Effect::None);
+        assert_eq!(app.running, None);
+        assert_eq!(app.input(Input::Key { key: Key::RunRight }), Effect::None);
+        assert_eq!(app.status, "You can't run with a creature in view.");
+        update(&mut app, 3, |o| {
+            o.visible_actors.retain(|actor| actor.id == o.self_target);
+        });
+        // A remembered sighting does not keep blocking a later run.
+        assert!(!app.creature_in_view());
+        assert!(matches!(
+            app.input(Input::Key { key: Key::RunRight }),
+            Effect::Request(_)
+        ));
+    }
+}
+
+#[test]
+fn running_stops_for_messages_and_a_fresh_key_without_an_extra_action() {
+    for stop_with_key in [false, true] {
+        let mut app = app();
+        update(&mut app, 1, |o| {
+            o.visible_actors.retain(|actor| actor.id == o.self_target);
+            o.ground_items.clear();
+        });
+        assert!(matches!(
+            app.input(Input::Key { key: Key::RunRight }),
+            Effect::Request(_)
+        ));
+        app.ready();
+        let before = app.state.as_ref().unwrap().snapshot();
+        if stop_with_key {
+            assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
+        } else {
+            app.messages.push("Something happens.");
+            assert_eq!(app.continue_run(), Effect::None);
+        }
+        assert_eq!(app.running, None);
+        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    }
+}
+
+#[test]
+fn horizontal_bumps_select_disclosed_flying_body_occurrences() {
+    for (key, x, y) in [
+        (Key::Up, 0, -1),
+        (Key::Down, 0, 1),
+        (Key::Left, -1, 0),
+        (Key::Right, 1, 0),
+        (Key::NorthWest, -1, -1),
+        (Key::NorthEast, 1, -1),
+        (Key::SouthWest, -1, 1),
+        (Key::SouthEast, 1, 1),
+    ] {
+        for z in [1, 2] {
+            let mut snapshot = snapshot();
+            let view = &mut Arc::make_mut(&mut snapshot.state).observation;
+            view.ground_items.clear();
+            for cell in &mut view.visible_cells {
+                if cell.position.z == 2 {
+                    cell.wall = false;
+                }
+            }
+            view.visible_actors[1].position = Position { x, y, z };
+            view.combat.as_mut().unwrap().own_stats =
+                Some(tor_client_common::test_support::stats());
+            let target = view.visible_actors[1].id;
+            let mut app = App::new();
+            app.role = AccessRole::Player;
+            app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+            app.ready();
+            let Some(Request::Command {
+                command: Command::Act { action, .. },
+                ..
+            }) = super::request(app.input(Input::Key { key }))
+            else {
+                panic!("expected one bump command")
+            };
+            assert!(
+                matches!(action, Action::UseAbility { ref id, ref invocation, .. }
+                if id == "basic_melee"
+                    && invocation.aim == (AbilityAim::ActorTarget { target })),
+                "{key:?} must select the adjacent flying creature at z = {z}: {action:?}"
+            );
+        }
+    }
+}
+
+fn bump_app(change: impl FnOnce(&mut Observation)) -> App {
+    let mut snapshot = snapshot();
+    let view = &mut Arc::make_mut(&mut snapshot.state).observation;
+    view.ground_items.clear();
+    view.visible_actors
+        .retain(|actor| actor.id == view.self_target);
+    for cell in &mut view.visible_cells {
+        if cell.position.z == 2 {
+            cell.wall = false;
+        }
+    }
+    let combat = view.combat.as_mut().unwrap();
+    combat.actors.clear();
+    combat.own_stats = Some(tor_client_common::test_support::stats());
+    change(view);
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.palette.apply(&PaletteUpdate {
+        revision: 1,
+        body: PaletteBody::Full {
+            assets: ["creature.bird.kestrel".into(), "creature.griffin".into()].into(),
+        },
+    });
+    app.ready();
+    app
+}
+
+fn bump_actor(view: &mut Observation, id: u64, z: i32, hostile: bool) {
+    let kestrel = id == 2;
+    view.visible_actors.push(ActorView {
+        appearance_seed: None,
+        asset: Some(
+            if kestrel {
+                "creature.bird.kestrel"
+            } else {
+                "creature.griffin"
+            }
+            .into(),
+        ),
+        id: super::actor_target(id),
+        name: if kestrel { "kestrel" } else { "griffin" }.into(),
+        description: String::new(),
+        position: Position { x: 1, y: 0, z },
+    });
+    if !view
+        .combat
+        .as_ref()
+        .unwrap()
+        .actors
+        .iter()
+        .any(|actor| actor.actor == super::actor_target(id))
+    {
+        view.combat.as_mut().unwrap().actors.push(CombatActorView {
+            actor: super::actor_target(id),
+            hostile,
+            allied: false,
+            injury: Injury::Healthy,
+        });
+    }
+}
+
+fn bump_action(app: &mut App, key: Key) -> Action {
+    let Some(Request::Command {
+        command: Command::Act { action, .. },
+        ..
+    }) = super::request(app.input(Input::Key { key }))
+    else {
+        panic!("expected a gameplay action")
+    };
+    action
+}
+
+fn assert_bump_target(action: Action, target: u64) {
+    assert!(
+        matches!(action, Action::UseAbility { ref id, ref invocation, .. }
+        if id == "basic_melee"
+            && invocation.aim == (AbilityAim::ActorTarget { target: super::actor_target(target) })),
+        "expected basic melee against {target}, got {action:?}"
+    );
+}
+
+#[test]
+fn bump_map_and_look_choose_the_nearby_actor_over_a_high_column_occupant() {
+    for low_height in [0, 1, 2] {
+        for high_first in [false, true] {
+            let mut app = bump_app(|view| {
+                if high_first {
+                    bump_actor(view, 3, 3, true);
+                }
+                bump_actor(view, 2, low_height, true);
+                if !high_first {
+                    bump_actor(view, 3, 3, true);
+                }
+            });
+            let state = app.state.as_ref().unwrap();
+            let tile = render::map_tiles(state, &app.palette)
+                .into_iter()
+                .find(|tile| (tile.position.x, tile.position.y) == (1, 0))
+                .unwrap();
+            assert_eq!(tile.glyph, 'K');
+            assert!(
+                tor_client_ascii::describe(state, &app.palette, 1, 0).starts_with("K - a kestrel")
+            );
+            assert_bump_target(bump_action(&mut app, Key::Right), 2);
+        }
+    }
+}
+
+#[test]
+fn bump_column_priority_prefers_the_exact_destination_and_deduplicates_a_body() {
+    let mut app = bump_app(|view| {
+        bump_actor(view, 3, 1, true);
+        bump_actor(view, 3, 2, true);
+        bump_actor(view, 2, 0, true);
+    });
+    assert_bump_target(bump_action(&mut app, Key::Right), 2);
+    let mut app = bump_app(|view| {
+        bump_actor(view, 2, 2, true);
+        bump_actor(view, 2, 1, true);
+    });
+    assert_bump_target(bump_action(&mut app, Key::Right), 2);
+    assert_eq!(
+        app.input(Input::Key { key: Key::Right }),
+        Effect::None,
+        "one body produces one request while it is outstanding"
+    );
+}
+
+#[test]
+fn bump_height_envelope_uses_only_the_origin_connected_disclosed_body() {
+    for connected in [false, true] {
+        let mut app = bump_app(|view| {
+            let mut own = view.visible_actors[0].clone();
+            own.position = if connected {
+                Position { x: 0, y: 0, z: 2 }
+            } else {
+                Position { x: 6, y: 0, z: 2 }
+            };
+            view.visible_actors.push(own);
+            bump_actor(view, 2, 3, true);
+        });
+        let action = bump_action(&mut app, Key::Right);
+        if connected {
+            assert_bump_target(action, 2);
+        } else {
+            assert_eq!(
+                action,
+                Action::Move {
+                    direction: Direction::East
+                },
+                "a high flyer and a remote self occurrence do not block a legal step"
+            );
+        }
+    }
+}
+
+#[test]
+fn elevated_bumps_preserve_modes_disclosure_and_server_refusal() {
+    use tor_client_ascii::BumpAttacks;
+    for (mode, hostile, attack) in [
+        (BumpAttacks::Hostile, true, true),
+        (BumpAttacks::Hostile, false, false),
+        (BumpAttacks::Any, false, true),
+        (BumpAttacks::Off, true, false),
+    ] {
+        let mut app = bump_app(|view| bump_actor(view, 2, 1, hostile));
+        app.bump_attacks = mode;
+        let action = bump_action(&mut app, Key::Right);
+        if attack {
+            assert_bump_target(action, 2);
+            app.ready();
+            app.refused("You can't do that now.".into());
+            assert_eq!(app.status, "You can't do that now.");
+            assert_eq!(
+                app.continue_run(),
+                Effect::None,
+                "refusal does not retry or silently substitute a move"
+            );
+        } else {
+            assert_eq!(
+                action,
+                Action::Move {
+                    direction: Direction::East
+                }
+            );
+        }
+    }
+    let mut app = bump_app(|view| {
+        bump_actor(view, 2, 1, true);
+        view.visible_actors
+            .retain(|actor| actor.id == view.self_target);
+    });
+    assert_eq!(
+        bump_action(&mut app, Key::Right),
+        Action::Move {
+            direction: Direction::East
+        },
+        "a combat relationship alone never supplies a hidden target"
+    );
+    let mut app = bump_app(|view| bump_actor(view, 2, 4, true));
+    assert_eq!(
+        bump_action(&mut app, Key::Right),
+        Action::Move {
+            direction: Direction::East
+        },
+        "an occurrence outside the rendered height band is not a bump target"
+    );
+}
+
+#[test]
+fn hostile_bumps_do_not_skip_a_rendered_neutral_actor_for_another_column_occupant() {
+    for hostile_first in [false, true] {
+        let mut app = bump_app(|view| {
+            if hostile_first {
+                bump_actor(view, 3, 1, true);
+            }
+            bump_actor(view, 2, 0, false);
+            if !hostile_first {
+                bump_actor(view, 3, 1, true);
+            }
+        });
+        let state = app.state.as_ref().unwrap();
+        assert!(tor_client_ascii::describe(state, &app.palette, 1, 0)
+            .starts_with("K - a kestrel (peaceful"));
+        assert_eq!(
+            bump_action(&mut app, Key::Right),
+            Action::Move {
+                direction: Direction::East
+            }
+        );
+        app.ready();
+        app.bump_attacks = tor_client_ascii::BumpAttacks::Any;
+        assert_bump_target(bump_action(&mut app, Key::Right), 2);
+    }
+}
+
+#[test]
+fn a_connected_horizontal_self_body_extension_can_supply_a_local_bump_candidate() {
+    for connected in [false, true] {
+        let mut app = bump_app(|view| {
+            let own = view.visible_actors[0].clone();
+            if connected {
+                view.visible_actors.push(ActorView {
+                    position: Position { x: 1, y: 0, z: 1 },
+                    ..own.clone()
+                });
+            }
+            view.visible_actors.push(ActorView {
+                position: Position { x: 1, y: 0, z: 2 },
+                ..own
+            });
+            bump_actor(view, 2, 3, true);
+        });
+        let action = bump_action(&mut app, Key::Right);
+        if connected {
+            assert_bump_target(action, 2);
+        } else {
+            assert_eq!(
+                action,
+                Action::Move {
+                    direction: Direction::East
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn vertical_bumps_keep_exact_occurrence_selection() {
+    for (key, z) in [(Key::Ascend, 1), (Key::Descend, -1)] {
+        let mut app = bump_app(|view| {
+            view.visible_actors.clear();
+            bump_actor(view, 2, z, true);
+            view.visible_actors[0].position.x = 0;
+            bump_actor(view, 3, z, true);
+        });
+        assert_bump_target(bump_action(&mut app, key), 2);
+    }
+}
+
+#[test]
+fn bump_columns_use_the_observation_origin_and_checked_neighbor_coordinates() {
+    let mut app = bump_app(|view| {
+        bump_actor(view, 2, 1, true);
+        let translate = |position: &mut Position| {
+            position.x += 12;
+            position.y -= 9;
+            position.z += 4;
+        };
+        translate(&mut view.position);
+        for cell in &mut view.visible_cells {
+            translate(&mut cell.position);
+        }
+        for actor in &mut view.visible_actors {
+            translate(&mut actor.position);
+        }
+    });
+    let state = app.state.as_ref().unwrap();
+    assert!(tor_client_ascii::describe(state, &app.palette, 13, -9).starts_with("K - a kestrel"));
+    assert_bump_target(bump_action(&mut app, Key::Right), 2);
+
+    let mut app = bump_app(|view| {
+        view.position.x = i32::MAX;
+        view.visible_actors.clear();
+    });
+    assert_eq!(bump_action(&mut app, Key::Right), Action::Move { direction: Direction::East },
+        "an overflowing client coordinate does not fabricate a target or replace server movement authority");
+}
+
+#[test]
 fn a_refused_move_says_the_way_is_blocked() {
     let mut app = app();
     assert!(matches!(
@@ -476,7 +1390,7 @@ fn refusals_status_lines_and_the_end_screen_use_plain_words() {
     let mut app = app();
     let [first, second] = tor_client_ascii::status_lines(&app, app.state.as_ref().unwrap());
     assert!(first.contains("Retrieve the objective item"));
-    assert_eq!(second, "HP:40(50)  T:100");
+    assert_eq!(second, "HP:40(50)  Gold:0  T:100");
     update(&mut app, 1, |o| {
         let combat = o.combat.as_mut().unwrap();
         combat.victory = true;

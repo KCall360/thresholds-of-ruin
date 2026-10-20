@@ -35,12 +35,12 @@ fn state() -> StateView {
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"supply_reachable":false,"reachable":false,"item":{"known_supply":null,"quantity":"1","class":"food","appearance":"item","identified":true,"id":super::item_target(2),"name":"food ration","description":""},"position":{"x":1,"y":0,"z":0}},
-            {"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"corpse","appearance":"item","identified":true,"id":super::item_target(3),"name":"ruin scout corpse","description":""},"position":{"x":0,"y":0,"z":0}}
+            {"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"supply_reachable":false,"reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"food","appearance":"item","identified":true,"id":super::item_target(2),"name":"food ration","description":""},"position":{"x":1,"y":0,"z":0}},
+            {"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"corpse","appearance":"item","identified":true,"id":super::item_target(3),"name":"ruin scout corpse","description":""},"position":{"x":0,"y":0,"z":0}}
         ],
         "inventory":[
-            {"known_supply":null,"quantity":"1","class":"weapon","appearance":"item","identified":true,"id":super::item_target(4),"name":"iron greatsword","description":""}
+            {"known_currency":null,"known_supply":null,"quantity":"1","class":"weapon","appearance":"item","identified":true,"id":super::item_target(4),"name":"iron greatsword","description":""}
         ],
         "linked_holds":[],"visible_actors":[
             {"id":super::actor_target(2),"name":"goblin","description":"","position":{"x":3,"y":0,"z":0}}

@@ -50,6 +50,7 @@ fn appearance_and_corpse_disclosures_survive_full_and_delta_round_trips() {
         identified: true,
         description: String::new(),
         asset: Some("item.corpse".into()),
+        known_currency: None,
         known_supply: None,
     });
     round_trip(&base, &next);
@@ -80,6 +81,7 @@ fn equipped_state(requires_attack: bool) -> StateView {
         quantity: 1,
         identified: true,
         asset: None,
+        known_currency: None,
         known_supply: None,
     }];
     state.observation.interactions = Some(InteractionView {
@@ -107,6 +109,48 @@ fn equipped_state(requires_attack: bool) -> StateView {
         }],
     });
     state
+}
+
+#[test]
+fn known_currency_survives_full_and_delta_updates_and_rejects_hidden_facts() {
+    let mut base = room(5, 5, 1);
+    base.observation.inventory.push(ItemView {
+        corpse: None,
+        id: ItemTarget::from_digest([83; 32]),
+        class: ItemClass::Coin,
+        quantity: 9_007_199_254_740_993,
+        appearance: "unmarked discs".into(),
+        identified: false,
+        description: String::new(),
+        name: "unmarked discs".into(),
+        asset: None,
+        known_supply: None,
+        known_currency: None,
+    });
+    let mut next = base.clone();
+    next.revision += 1;
+    next.observation.inventory[0].identified = true;
+    next.observation.inventory[0].known_currency = Some(CurrencyKind::Gold);
+    next.validate().unwrap();
+    round_trip(&base, &next);
+    assert_eq!(
+        serde_json::from_value::<StateView>(serde_json::to_value(&next).unwrap()).unwrap(),
+        next
+    );
+    let mut changed = next.clone();
+    changed.revision += 1;
+    changed.observation.inventory[0].quantity -= 1;
+    round_trip(&next, &changed);
+    for (class, identified) in [(ItemClass::Coin, false), (ItemClass::Gem, true)] {
+        let mut invalid = next.clone();
+        invalid.observation.inventory[0].class = class;
+        invalid.observation.inventory[0].identified = identified;
+        assert_eq!(invalid.validate(), Err(InvalidState::InvalidItem));
+        let delta = StateDelta::between(&base, &invalid).unwrap();
+        assert!(
+            serde_json::from_value::<StateDelta>(serde_json::to_value(delta).unwrap()).is_err()
+        );
+    }
 }
 
 // Synthetic disclosed identities for wire-only tests; not server target derivation.
@@ -735,6 +779,7 @@ fn collection_view(count: usize) -> StateView {
             id: ItemTarget::from_digest(synthetic_digest(index as u64 + 1)),
             name: format!("carried item {index}"),
             asset: None,
+            known_currency: None,
             known_supply: None,
         };
         state.observation.inventory.push(item.clone());
@@ -1445,6 +1490,7 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
         corpse: None,
         description: String::new(),
         asset: None,
+        known_currency: None,
         known_supply: None,
     });
     next.observation.interactions = Some(InteractionView {

@@ -379,8 +379,8 @@ fn state() -> StateView {
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"supply_reachable":false,"reachable":false,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"supply_reachable":false,"reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"linked_holds":[],"visible_actors":[],
         "combat":{"own_stats":tor_client_common::test_support::stats(),"public_plan":null,"hp":"50","max_hp":"50","sequence":null,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
@@ -1753,7 +1753,7 @@ async fn stacks_of_alike_things_are_counted_together() {
     let stack = |id: u64, name: &str, quantity: u64| {
         serde_json::from_value::<GroundItemView>(serde_json::json!({"supply_reachable":false,
             "reachable": true, "position": {"x": 0, "y": 0, "z": 0},
-            "item": {"known_supply":null,"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
+            "item": {"known_currency":null,"known_supply":null,"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
                 "id": super::item_target(id), "name": name, "description": ""}}))
         .unwrap()
     };
@@ -2060,7 +2060,7 @@ fn open_ground(find: usize) -> Scripted {
                 there.observation.ground_items.push(
                     serde_json::from_value(serde_json::json!({"supply_reachable":false,
                         "reachable": false, "position": {"x": 5, "y": 0, "z": 0},
-                        "item": {"known_supply":null,"quantity": "1", "class":"misc","appearance": "item", "identified": true,
+                        "item": {"known_currency":null,"known_supply":null,"quantity": "1", "class":"misc","appearance": "item", "identified": true,
                             "id":super::item_target(7), "name": "pebble", "description": ""}}))
                     .unwrap(),
                 );
@@ -2183,7 +2183,7 @@ async fn a_count_from_alike_stacks_is_some_of_them_not_the_ones() {
     // arrows" said "You drop the two arrows".
     let mut s = state();
     let arrows = |id: u64, quantity: u64| {
-        serde_json::from_value::<ItemView>(serde_json::json!({"known_supply":null,
+        serde_json::from_value::<ItemView>(serde_json::json!({"known_currency":null,"known_supply":null,
             "quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
             "id": super::item_target(id), "name": "arrow", "description": ""}))
         .unwrap()
@@ -3102,7 +3102,7 @@ fn with_corpse(mut s: StateView, x: i32) -> StateView {
     s.observation.ground_items.push(
         serde_json::from_value(serde_json::json!({
             "supply_reachable":false,"reachable":x == 0,
-            "item":{"known_supply":null,"quantity":"1","class":"corpse","appearance":"item","identified":true,
+            "item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"corpse","appearance":"item","identified":true,
                 "id":super::item_target(7),"name":"ruin scout corpse","description":""},
             "position":{"x":x,"y":0,"z":0}}))
         .unwrap(),

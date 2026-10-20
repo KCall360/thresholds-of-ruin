@@ -5,8 +5,8 @@
 //! only a frame. Routine lines the map or status line already show (moving,
 //! waiting, readiness, hit points) are left out.
 use std::collections::{BTreeMap, VecDeque};
-use tor_client_common::narration::{Line, Topic};
-use tor_protocol::{Event, Observation};
+use tor_client_common::narration::{BasicAttack, Line, Topic};
+use tor_protocol::{AbilityOutcome, Event, Observation};
 
 /// Characters per message row.
 pub const WIDTH: usize = 72;
@@ -62,9 +62,31 @@ impl Messages {
 
     /// Compose one observation's narrated lines into this turn.
     pub fn absorb(&mut self, lines: &[Line], view: &Observation) {
-        let mut index = 0;
-        while index < lines.len() {
-            let line = &lines[index];
+        for line in lines {
+            match &line.basic_attack {
+                Some(BasicAttack::Preparing) => continue,
+                Some(BasicAttack::Resolved {
+                    target,
+                    outcome: AbilityOutcome::Applied,
+                }) => {
+                    self.push(format!("You hit {target}."));
+                    continue;
+                }
+                Some(BasicAttack::Resolved {
+                    target,
+                    outcome: AbilityOutcome::Miss,
+                }) => {
+                    self.push(format!("You miss {target}."));
+                    continue;
+                }
+                // An unchanged primary does not reveal whether other effects
+                // landed. Preserve its neutral narration and all special work.
+                Some(BasicAttack::Resolved {
+                    outcome: AbilityOutcome::Unaffected,
+                    ..
+                })
+                | None => {}
+            }
             match &line.topic {
                 Topic::Own(Event::Moved { .. }) => self.here(view),
                 Topic::Own(Event::Waited) => {}
@@ -95,7 +117,6 @@ impl Messages {
                     }
                 }
             }
-            index += 1;
         }
         for actor in &view.visible_actors {
             if actor.id != view.self_target {

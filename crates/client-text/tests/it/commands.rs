@@ -222,8 +222,8 @@ fn state() -> StateView {
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
             "ground_items":[
-                {"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(10),"name":"copper token"},"position":{"x":1,"y":1,"z":0}},
-                {"supply_reachable":false,"reachable":false,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(11),"name":"silver token"},"position":{"x":2,"y":1,"z":0}}
+                {"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(10),"name":"copper token"},"position":{"x":1,"y":1,"z":0}},
+                {"supply_reachable":false,"reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(11),"name":"silver token"},"position":{"x":2,"y":1,"z":0}}
             ], "inventory":[], "linked_holds":[],"visible_actors":[], "exits":[],  "ready":true
         }
     }))

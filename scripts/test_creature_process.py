@@ -719,6 +719,11 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         self.assertEqual(attacks[0]["ability"]["id"], "basic_melee")
         self.assertIsNone(attacks[0]["charge"])
         self.assertTrue(any(step["id"] == "check" for step in attacks[0]["trace"]["steps"]))
+        turn = completed["messages"]["turn"]
+        self.assertEqual(sum(turn.count(text) for text in (
+            "You hit the practice target.", "You miss the practice target.")), 1, turn)
+        self.assertNotIn("You prepare to use", turn)
+        self.assertNotIn("You used Attack on", turn)
 
     def test_os_stats_and_ability_keys_preserve_turn_until_target_confirmation(self):
         package = creature_package(self, "os-ability-keys", abilities=("fixture_mana_bolt",))

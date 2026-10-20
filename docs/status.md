@@ -6,7 +6,7 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **53**, save format **51**, scenario format **24**, ruleset
+**Current formats:** protocol **54**, save format **51**, scenario format **24**, ruleset
 **`interactions-v46`**, scenario validator **`tor-scenario-36`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
@@ -119,6 +119,7 @@ state; equipment and devices remain nonstackable.
 | Area | Current capability | Authoritative detail |
 | --- | --- | --- |
 | Default adventure | Authored five-chamber retrieval/escape dungeon, persistent death, shared text and ASCII play | [Gameplay](play/gameplay.md) |
+| ASCII play | Three readable status rows with disclosed attributes, resources and typed identified gold; shared displayed-column bump selection; immediate whole-stack pickup for a single eligible stack; conservative Shift-run safety stops | [ASCII guide](play/ascii.md) |
 | Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, finite supply costs and cooldowns, universal Bind Wounds, ordered strikes and explicit-branch riders, anatomy equipment, timed consumption and explicitly authored nutrition/recovery policies | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
 | Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, self-or-ally targeting, immutable strike plans with live execution validation, atomic cancel-and-step with retained commitment, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
 | World | Region-local 3D geometry, all 24 portal rotations, multi-cell bodies, gravity, source-derived flight/stationary/erratic movement, finite material volumes, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |

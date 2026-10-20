@@ -241,6 +241,7 @@ fn map_appearances_roundtrip_without_live_handles_and_with_canonical_wide_counts
             "reachable",
             "approaches",
             "known_supply",
+            "known_currency",
             "actor",
             "age",
         ] {

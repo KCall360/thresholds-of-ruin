@@ -27,4 +27,5 @@ mod creature_catalog;
 mod linked_holds;
 mod map_pages;
 
+mod currency;
 mod magic_items;

@@ -42,6 +42,21 @@ pub enum Topic {
 pub struct Line {
     pub topic: Topic,
     pub text: String,
+    /// Optional compact presentation for an observer-owned basic attack.
+    /// The ordinary text and underlying event remain unchanged.
+    pub basic_attack: Option<BasicAttack>,
+}
+
+/// Basic-attack facts derived from the observer's disclosed ability catalog,
+/// never from an ability's name or an undisclosed opponent capability.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BasicAttack {
+    Preparing,
+    Resolved {
+        /// An already-disclosed object phrase, such as "the ruin scout".
+        target: String,
+        outcome: AbilityOutcome,
+    },
 }
 
 impl Line {
@@ -49,7 +64,44 @@ impl Line {
         Self {
             topic,
             text: text.into(),
+            basic_attack: None,
         }
+    }
+
+    fn with_basic_attack(mut self, before: &Observation, after: &Observation) -> Self {
+        // Prefer a current disclosed capability over an older one. The prior
+        // view still covers a strike that removes a grant or ends the run.
+        let basic = |ability: &ContentRef| {
+            crate::abilities::available(after)
+                .iter()
+                .chain(crate::abilities::available(before))
+                .find(|candidate| candidate.id == ability.id)
+                .is_some_and(|candidate| candidate.basic_attack)
+        };
+        self.basic_attack = match &self.topic {
+            Topic::Own(Event::AbilityStarted { ability, .. }) if basic(ability) => {
+                Some(BasicAttack::Preparing)
+            }
+            Topic::Combat(CombatEventView::Ability {
+                caster: Some(caster),
+                target,
+                ability,
+                outcome,
+                ..
+            }) if *caster == after.self_target && basic(ability) => {
+                let target = match target {
+                    Some(actor) if *actor == after.self_target => "yourself".into(),
+                    Some(actor) => format!("the {}", actor_name(*actor, before, after)),
+                    None => "something".into(),
+                };
+                Some(BasicAttack::Resolved {
+                    target,
+                    outcome: *outcome,
+                })
+            }
+            _ => None,
+        };
+        self
     }
 }
 
@@ -134,7 +186,8 @@ pub fn observation_lines(
     if let Some(event) = event {
         lines.insert(
             0,
-            Line::new(Topic::Own(event.clone()), action(event, after)),
+            Line::new(Topic::Own(event.clone()), action(event, after))
+                .with_basic_attack(before, after),
         );
     }
     lines.extend(
@@ -158,6 +211,7 @@ pub fn observation_lines(
                     Topic::Combat(event.clone()),
                     combat_event(event, before, after),
                 )
+                .with_basic_attack(before, after)
             }));
             if before.combat.as_ref().is_none_or(|c| {
                 c.hp != combat.hp
@@ -580,6 +634,7 @@ mod tests {
             id: item,
             name: "red potion".into(),
             asset: None,
+            known_currency: None,
             known_supply: None,
         });
         let event = Event::ItemStarted {
@@ -674,6 +729,7 @@ mod tests {
             id: item,
             name: "Amulet\nof Yendor".into(),
             description: String::new(),
+            known_currency: None,
             known_supply: None,
         });
         assert_eq!(
@@ -711,6 +767,7 @@ mod tests {
             id: tor_protocol::ItemTarget::from_digest([9; 32]),
             name: "copper\ntoken".into(),
             description: String::new(),
+            known_currency: None,
             known_supply: None,
         });
         assert_eq!(
@@ -937,6 +994,57 @@ mod tests {
         );
         assert_eq!(lines[3].text, "You used Basic Melee on the ruin scout.");
     }
+
+    #[test]
+    fn compact_basic_attacks_require_the_current_disclosed_flag() {
+        let mut before = crate::test_support::observation();
+        let granted = &mut before
+            .combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .abilities[0];
+        granted.id = "custom.attack".into();
+        granted.name = "Disclosed attack".into();
+        let ability = granted.content();
+        let target = before.visible_actors[0].id;
+        let start = Event::AbilityStarted {
+            ability: ability.clone(),
+            target,
+        };
+        let event = CombatEventView::Ability {
+            caster: Some(before.self_target),
+            target: Some(target),
+            ability,
+            outcome: AbilityOutcome::Applied,
+            strike: None,
+        };
+        for (current_flag, expected) in [(true, true), (false, false)] {
+            let mut after = before.clone();
+            after.tick += 1;
+            let combat = after.combat.as_mut().unwrap();
+            combat.own_stats.as_mut().unwrap().abilities[0].basic_attack = current_flag;
+            combat.events = vec![event.clone()];
+            let lines = observation_lines(&before, &after, Some(&start));
+            assert_eq!(lines.len(), 2);
+            assert_eq!(lines[0].text, "You prepare to use Disclosed attack.");
+            assert_eq!(lines[1].text, "You used Disclosed attack on the sentinel.");
+            assert_eq!(
+                lines[0].basic_attack,
+                expected.then_some(BasicAttack::Preparing)
+            );
+            assert_eq!(
+                lines[1].basic_attack,
+                expected.then_some(BasicAttack::Resolved {
+                    target: "the sentinel".into(),
+                    outcome: AbilityOutcome::Applied,
+                })
+            );
+        }
+    }
+
     #[test]
     fn unaffected_primary_keeps_neutral_narration_with_visible_or_concealed_riders() {
         // The ordinary event deliberately contains no rider outcome. A fully
