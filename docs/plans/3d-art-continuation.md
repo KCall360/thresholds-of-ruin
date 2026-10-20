@@ -146,6 +146,27 @@ belts, shoulder layers, held items and future worn equipment. Preserve determini
 appearance identity and include every future independent visual choice in cache
 identity. Do not infer anatomy or equipment slots from display prose.
 
+Progress: outfit selection is now internal recipe data apart from the body. An
+outfit names what each slot wears: arms (bare, sleeved or plate), legs (fitted,
+trousered or plate), boots (height, heel, buckles, cuff), hands, cuffs, an outer
+layer (a jerkin, vest or coat, or a cuirass with tabard and gorget), the tunic
+skirt and a cloak. Each clothed kind's own outfit reproduces its concept-sheet
+garments exactly; mesh fingerprints of every humanoid kind, sex, build and shade
+were unchanged by the extraction. A kind's own trimmings (lacing, baldrics,
+cowls, loincloths, rags, charms) come only with its own outfit, while what its
+body grows, such as the medusa's serpents, stays whatever it wears. Skirts are
+cut for the body: a waistband seated on the pelvis, a hip rounding over where
+the thighs join it, and a hem flared just enough to contain the thighs, with
+leprechaun coats cut away at the front as on their sheet.
+
+An offline wardrobe (commoner, ranger, knight, courtier) dresses any humanoid
+that wears separable clothes; stone, fur and robed casters do not. Each dressed
+look has its own cache identity. The bestiary's `--outfit NAME` dresses its
+humanoids, and O, or `--wardrobe-cycle SECONDS`, redresses them mid-stride,
+replacing only the model while motion carries on. This is presentation for
+review only: live creatures still wear their kind's outfit, as observations
+carry no equipment list (see 5).
+
 ### 4. Review motion families at real speed
 
 Review people, heavy humanoids, birds, equines/centaurs, serpents and floaters
@@ -172,7 +193,11 @@ Measure first-use mesh generation, warm reuse and cloth/mesh-update costs with
 controlled inputs. Keep raw timing claims separate from correctness tests.
 Interchangeable worn armor needs disclosed visual recipes, anatomical attachment
 mapping, coverage/layer ordering, clearance/deformation rules and loadout-aware
-cache identity. NPC equipment cannot be invented when its observation has no
+cache identity. The client side of that now exists for review (see 3): plate
+lames are fitted to the wearer's own thigh and upper arm and stay nested, for
+every build and figure, and sculpts evaluate only the steps that can shape
+each block of their grid, exactly near the surface, which roughly halves
+first-use mesh generation for a dressed person. NPC equipment cannot be invented when its observation has no
 equipment list. Protocol/content-format changes require their own agreed scope.
 
 ## Review and verification discipline

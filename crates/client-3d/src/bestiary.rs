@@ -329,12 +329,22 @@ pub fn run(diagnostics: Diagnostics) {
     .insert_resource(diagnostics)
     .init_resource::<Director>()
     .add_systems(Startup, setup)
+    .add_systems(
+        Startup,
+        |mut commands: Commands, diagnostics: Res<Diagnostics>| {
+            commands.insert_resource(Dress {
+                wardrobe: diagnostics.outfit,
+                since: 0.0,
+            });
+        },
+    )
     .init_resource::<Lineup>()
     .add_systems(
         Update,
         (
             direct,
             lineup,
+            redress,
             creatures::animate,
             creatures::snuff,
             creatures::effects,
@@ -392,6 +402,104 @@ fn roster(diagnostics: &Diagnostics) -> Vec<&'static str> {
                 || diagnostics.families.iter().any(|family| family == name)
         })
         .collect()
+}
+
+/// What the bestiary's humanoids are wearing, and since when.
+#[derive(Resource)]
+struct Dress {
+    wardrobe: creatures::Wardrobe,
+    since: f32,
+}
+
+/// A creature as it was made, before it was dressed, and what it holds.
+#[derive(Component)]
+struct Wearer {
+    look: Look,
+    sword: bool,
+}
+
+impl Wearer {
+    /// Build its model dressed from the wardrobe under `entity`, armed as before.
+    fn dress(
+        &self,
+        commands: &mut Commands,
+        library: &mut PropLibrary,
+        meshes: &mut Assets<Mesh>,
+        entity: Entity,
+        wardrobe: creatures::Wardrobe,
+    ) -> creatures::Rig {
+        let look = self.look.clone().dressed(wardrobe);
+        let rig = creatures::spawn(commands, library, meshes, entity, &look);
+        if self.sword {
+            let sword = library.item(tor_client_3d_model::ItemModel::Greatsword, meshes);
+            if let Some(hand) = rig.joint(creatures::J::HandR) {
+                let held = commands
+                    .spawn((
+                        Transform::from_rotation(
+                            Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)
+                                * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                        )
+                        .with_translation(Vec3::new(0.0, -0.02, 0.29)),
+                        Visibility::default(),
+                    ))
+                    .with_children(|p| sword.attach(p))
+                    .id();
+                commands.entity(hand).add_child(held);
+            }
+        }
+        rig
+    }
+}
+
+/// Swap every humanoid into the next outfit on O, or on the diagnostics'
+/// cycle. Only the model is replaced: each keeps its motion, pose clock and
+/// place, so the change lands mid-stride.
+#[allow(clippy::too_many_arguments)]
+fn redress(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    keys: Option<Res<ButtonInput<KeyCode>>>,
+    diagnostics: Res<Diagnostics>,
+    dress: Option<ResMut<Dress>>,
+    mut library: ResMut<PropLibrary>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    wearers: Query<(Entity, &Wearer, &creatures::Rig)>,
+) {
+    let Some(mut dress) = dress else {
+        return;
+    };
+    let now = time.elapsed_secs();
+    let pressed = keys.is_some_and(|keys| keys.just_pressed(KeyCode::KeyO));
+    let due = diagnostics
+        .wardrobe_cycle
+        .is_some_and(|every| now - dress.since >= every);
+    if !pressed && !due {
+        return;
+    }
+    dress.wardrobe = dress.wardrobe.next();
+    dress.since = now;
+    let mut redressed = 0;
+    for (entity, wearer, rig) in &wearers {
+        if !wearer.look.dresses() {
+            continue;
+        }
+        if let Some(model) = rig.joint(creatures::J::Lift) {
+            commands.entity(model).despawn();
+        }
+        let rig = wearer.dress(
+            &mut commands,
+            &mut library,
+            &mut meshes,
+            entity,
+            dress.wardrobe,
+        );
+        commands.entity(entity).insert(rig);
+        redressed += 1;
+    }
+    eprintln!(
+        "Wardrobe redressed {redressed} humanoids as {:?}",
+        dress.wardrobe
+    );
 }
 
 fn setup(
@@ -487,25 +595,18 @@ fn setup(
                     Visibility::default(),
                 ))
                 .id();
-            let rig = creatures::spawn(&mut commands, &mut library, &mut meshes, entity, &look);
-            if *name == "Warrior" {
-                let sword = library.item(tor_client_3d_model::ItemModel::Greatsword, &mut meshes);
-                if let Some(hand) = rig.joint(creatures::J::HandR) {
-                    let held = commands
-                        .spawn((
-                            Transform::from_rotation(
-                                Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)
-                                    * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
-                            )
-                            .with_translation(Vec3::new(0.0, -0.02, 0.29)),
-                            Visibility::default(),
-                        ))
-                        .with_children(|p| sword.attach(p))
-                        .id();
-                    commands.entity(hand).add_child(held);
-                }
-            }
-            commands.entity(entity).insert(rig);
+            let wearer = Wearer {
+                look,
+                sword: *name == "Warrior",
+            };
+            let rig = wearer.dress(
+                &mut commands,
+                &mut library,
+                &mut meshes,
+                entity,
+                diagnostics.outfit,
+            );
+            commands.entity(entity).insert((rig, wearer));
             commands.spawn((
                 Caption(home + Vec3::new(0.0, 0.0, 0.7), name.to_string(), row),
                 Text::new(*name),
@@ -913,8 +1014,15 @@ fn lineup(
                     Visibility::default(),
                 ))
                 .id();
-            let rig = creatures::spawn(&mut commands, &mut library, &mut meshes, entity, &look);
-            commands.entity(entity).insert(rig);
+            let wearer = Wearer { look, sword: false };
+            let rig = wearer.dress(
+                &mut commands,
+                &mut library,
+                &mut meshes,
+                entity,
+                diagnostics.outfit,
+            );
+            commands.entity(entity).insert((rig, wearer));
             state.group.push(entity);
         }
         state.height = height;

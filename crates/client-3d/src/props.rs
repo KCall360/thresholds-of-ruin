@@ -93,6 +93,12 @@ pub struct PropMaterials {
 }
 
 impl PropMaterials {
+    /// The polished metal every model's armour and fittings share.
+    #[cfg(test)]
+    pub fn metal(&self) -> &Handle<StandardMaterial> {
+        &self.metal
+    }
+
     pub fn new(materials: &mut Assets<StandardMaterial>) -> Self {
         let glow = [
             Accent::Teal,

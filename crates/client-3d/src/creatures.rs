@@ -42,6 +42,8 @@ pub struct Look {
     stride: f32,
     /// This individual's variation within its kind.
     v: Variant,
+    /// The clothes and armour it was dressed in, if not its kind's own.
+    outfit: Option<outfit::Outfit>,
 }
 
 /// How one individual differs from others of its kind: for people, sex,
@@ -250,6 +252,23 @@ impl Look {
         look
     }
 
+    /// The same individual dressed from the wardrobe. Only humanoids that
+    /// wear separable clothes can be redressed; the rest are returned as they
+    /// are. Each outfit is cut for this wearer and cached apart.
+    pub fn dressed(mut self, wardrobe: Wardrobe) -> Look {
+        if !outfit::dresses(&self) || wardrobe == Wardrobe::Native {
+            return self;
+        }
+        self.outfit = Some(outfit::Outfit::from_wardrobe(wardrobe, &self));
+        self.key = format!("{}:{wardrobe:?}", self.key);
+        self
+    }
+
+    /// Whether this look can be redressed from the wardrobe.
+    pub fn dresses(&self) -> bool {
+        outfit::dresses(self)
+    }
+
     /// Apply this individual's variation to the designed look.
     fn individualise(&mut self) {
         let v = self.v;
@@ -444,6 +463,7 @@ impl Look {
             hunch: 0.0,
             stride: 1.0,
             v: Variant::default(),
+            outfit: None,
         };
         let teal = Vec3::new(0.045, 0.6, 0.55);
         if model == CreatureModel::Placeholder {
@@ -1213,6 +1233,7 @@ mod art_contract_tests;
 mod corpse;
 mod effects;
 mod geometry;
+mod outfit;
 #[cfg(test)]
 mod reaction_tests;
 mod robe;
@@ -1223,6 +1244,7 @@ pub use animation::{animate, Boredom, BORED_AFTER};
 pub use corpse::{snuff, spawn_corpse, Snuffed};
 pub use effects::{effects, stage, Bolt, Fade};
 pub use geometry::spawn;
+pub use outfit::Wardrobe;
 
 /// Convert only the shared cosmetic seed to this renderer's variation stream.
 /// Unknown appearance uses one neutral recipe; interaction targets never seed it.

@@ -148,6 +148,33 @@ class Native3DProcesses(ProcessTestCase):
         # Only the named families are lined up.
         self.assertEqual(len(list(captures.glob("*.png"))), len(families) * 3)
 
+    def test_wardrobe_dresses_lineups_and_redresses_them_live(self):
+        """Humanoids of different kinds are dressed in one outfit from the
+        wardrobe, then redressed while they move, reaching real GPU frames."""
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        captures = self.directory / "wardrobe-lineup"
+        captures.mkdir(parents=True)
+        families = ["Warrior", "medusa"]
+        window = self.launch("tor-client-3d", [
+            "--lineups", "--family", ",".join(families), "--outfit", "knight",
+            "--wardrobe-cycle", "1.5", "--capture", captures, "--capture-warmup", "2",
+        ], executable=executable)
+        self.assertEqual(window.child.wait(timeout=240), 0, "line-ups must finish while being redressed")
+        for index, name in enumerate(families):
+            for view in ("line", "close-a", "close-b"):
+                image = captures / f"{index:02d}-{view}-{name}.png"
+                self.assertTrue(image.exists(), f"missing {image.name}")
+                data = image.read_bytes()
+                self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+                self.assertGreater(len(data), 4096, image.name)
+        log = window.stdout_path.read_text(encoding="utf-8")
+        redressed = [line for line in log.splitlines() if line.startswith("Wardrobe redressed")]
+        self.assertTrue(redressed, "the wardrobe must redress the line-ups while they run")
+        # Knight is followed by Courtier, then the kinds' own outfits.
+        self.assertIn("as Courtier", redressed[0])
+        self.assertTrue(any(" 0 humanoids" not in line for line in redressed), log[-2000:])
+        self.assertNotIn("panicked", log)
+
     def own_private_backend_cleanup(self, pid):
         """Retain an OS process handle so failed tests cannot leak a backend
         or accidentally terminate a later process that reuses its PID.

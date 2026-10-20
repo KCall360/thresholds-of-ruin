@@ -1026,3 +1026,99 @@ fn points_under(world: &World, meshes: &Assets<Mesh>, root: Entity) -> Vec<Vec3>
     }
     out
 }
+
+#[test]
+fn every_dressable_humanoid_wears_every_outfit() {
+    // Clothes and armour are cut for the wearer, not its kind: every
+    // humanoid that wears separable clothes can be dressed from the whole
+    // wardrobe, and each outfit brings exactly its own garments.
+    // Kinds that differ in what they natively wear: plate, a jerkin, a
+    // coat, bare limbs, rags and a ghost's translucent body.
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Sentinel,
+        CreatureModel::Vampire,
+        CreatureModel::Troll,
+        CreatureModel::Leprechaun,
+        CreatureModel::Nymph,
+        CreatureModel::Medusa,
+        CreatureModel::Phantom,
+    ] {
+        for woman in [false, true] {
+            let look = Look::with_choice(
+                model,
+                2,
+                Some(Variant {
+                    woman,
+                    ..Default::default()
+                }),
+            );
+            assert!(look.dresses(), "{model:?} wears separable clothes");
+            assert_eq!(look.clone().dressed(Wardrobe::Native).key, look.key);
+            let mut keys = BTreeSet::new();
+            for wardrobe in Wardrobe::ALL {
+                let dressed = look.clone().dressed(wardrobe);
+                assert!(
+                    keys.insert(dressed.key.clone()),
+                    "{wardrobe:?} is cached apart"
+                );
+                let outfit = outfit::Outfit::worn(&dressed);
+                let (world, rig, library, meshes) = spawn_one(&dressed);
+                // What the body grows stays with it whatever it wears.
+                if model == CreatureModel::Medusa {
+                    assert!(!rig.segments.is_empty(), "{wardrobe:?} keeps her serpents");
+                }
+                for (_, mesh) in meshes.iter() {
+                    if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(ps)) =
+                        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                    {
+                        assert!(ps.iter().flatten().all(|v| v.is_finite()));
+                    }
+                }
+                let cloaks = rig
+                    .drapes
+                    .iter()
+                    .filter(|(_, kind)| *kind == Drape::Cloak)
+                    .count();
+                let skirts = rig
+                    .drapes
+                    .iter()
+                    .filter(|(_, kind)| matches!(kind, Drape::Skirt(_)))
+                    .count();
+                if wardrobe != Wardrobe::Native {
+                    assert_eq!(
+                        cloaks,
+                        usize::from(outfit.cloak.is_some()),
+                        "{model:?} {wardrobe:?} cloak"
+                    );
+                    assert!(skirts >= usize::from(outfit.skirt.is_some()));
+                }
+                // Plate is steel on the arms and legs; cloth outfits have none
+                // there. A ghost's whole body below the head is translucent.
+                if dressed.style.ghostly() {
+                    continue;
+                }
+                let metal = library.materials.metal().clone();
+                let steel_on = |joint: J| {
+                    let e = rig.joint(joint).expect("limb");
+                    world
+                        .get::<Children>(e)
+                        .into_iter()
+                        .flat_map(|children| children.iter())
+                        .any(|child| {
+                            world
+                                .get::<MeshMaterial3d<StandardMaterial>>(child)
+                                .is_some_and(|m| m.0 == metal)
+                        })
+                };
+                let plated = outfit.arms == outfit::Arms::Plate;
+                assert_eq!(steel_on(J::ArmL), plated, "{model:?} {wardrobe:?} arms");
+                assert_eq!(
+                    steel_on(J::LegL),
+                    outfit.legs == outfit::Legs::Plate,
+                    "{model:?} {wardrobe:?} legs"
+                );
+            }
+        }
+    }
+}

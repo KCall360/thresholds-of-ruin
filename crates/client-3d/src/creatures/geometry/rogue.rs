@@ -471,6 +471,18 @@ fn head_space(at: Vec3, woman: bool) -> Vec3 {
 }
 
 /// Garments and growths hung on the finished humanoid rig.
+/// What a kind's body grows beyond the shared human form, whatever it
+/// wears: the medusa's serpents for hair.
+pub(super) fn biped_features(kit: &mut Kit, l: &Look) {
+    if l.style == Style::Medusa {
+        if let Some(head) = kit.rig.joint(J::Head) {
+            medusa_serpents(kit, l, head);
+        }
+    }
+}
+
+/// A kind's own costume beyond the outfit's garments: loincloths, rags,
+/// charms and the like, worn only with its own outfit.
 pub(super) fn biped_extras(
     kit: &mut Kit,
     l: &Look,
@@ -624,7 +636,7 @@ pub(super) fn biped_extras(
             );
         }
         Style::Medusa => {
-            // Bronze discs on the shoulders, and serpents for hair.
+            // Bronze discs on the shoulders.
             for (arm, side) in [(J::ArmL, 1.0f32), (J::ArmR, -1.0)] {
                 if let Some(joint) = kit.rig.joint(arm) {
                     let trim = l.trim;
@@ -647,9 +659,6 @@ pub(super) fn biped_extras(
                         );
                     });
                 }
-            }
-            if let Some(head) = kit.rig.joint(J::Head) {
-                medusa_serpents(kit, l, head);
             }
         }
         Style::Phantom | Style::Wraith => {
