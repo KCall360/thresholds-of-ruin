@@ -31,7 +31,8 @@ from rogue_magic_receipts import (
 )
 
 from rogue_test_support import (
-    DisclosedFloorGraph, assert_room_gold_receipt, disclosed_melee_candidate, first_floor_foes,
+    DisclosedFloorGraph, assert_room_gold_receipt, disclosed_melee_candidate, disclosed_step_action,
+    first_floor_foes,
 )
 
 
@@ -203,6 +204,22 @@ class WalkthroughRouteTests(unittest.TestCase):
 
 class WalkthroughTransportTests(unittest.TestCase):
     """Pure local file fixtures; never launch a process or compile a package."""
+    def test_playable_opening_returns_without_submitting_the_old_move(self):
+        from copy import deepcopy
+        driver = RoguePlayableProcesses()
+        current = {"state": {"observation": {
+            "visible_cells": [
+                {"key": "here", "position": {"x": 0, "y": 0, "z": 0}, "wall": False},
+                {"key": "gate", "position": {"x": 1, "y": 0, "z": 0}, "wall": False,
+                 "door": {"id": "observed-gate", "open": False, "reachable": True}}],
+            "combat": {"dead": False}}}}
+        refreshed = deepcopy(current)
+        refreshed["state"]["observation"]["visible_cells"][1]["door"]["open"] = True
+        with patch.object(driver, "settled_action", return_value=refreshed) as action:
+            self.assertEqual(driver.disclosed_step(None, current, "east"), (refreshed, False))
+        action.assert_called_once_with(None,
+            {"type": "set_door", "door": "observed-gate", "open": True}, survive=True)
+
     def setUp(self):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -457,6 +474,17 @@ class RogueChecks:
         self.assertIsNone(frame["error"], action)
         return settle_rogue_action(self, player, frame, survive=survive)
 
+    def disclosed_step(self, player, current, direction, *, survive=True):
+        """Do one paid opening or one move, never replay a move after opening."""
+        action = disclosed_step_action(observation(current), direction)
+        origin = underfoot(current["state"])["key"]
+        result = self.settled_action(player, action, survive=survive)
+        moved = action["type"] == "move"
+        if not moved and not observation(result)["combat"]["dead"]:
+            self.assertEqual(underfoot(result["state"])["key"], origin,
+                             "Opening a disclosed entrance must not move the actor")
+        return result, moved
+
     def clear_first_floor(self, player):
         """Choose the first talent, then fight and collect through ordinary play."""
         growth = self.overview(player)
@@ -556,7 +584,9 @@ class RogueChecks:
             self.assertIsNotNone(route, "No disclosed route to remaining foes, supplies or unexplored cells")
             target, direction = route[0]
             before = underfoot(current["state"])["key"]
-            current = self.settled_action(player, {"type": "move", "direction": direction})
+            current, moved = self.disclosed_step(player, current, direction)
+            if not moved:
+                continue
             self.assertNotEqual(underfoot(current["state"])["key"], before)
             at = target
         else:
@@ -595,7 +625,9 @@ class RogueChecks:
                 route = floor_graph.route_to_any(here["key"], floor_graph.edges.keys() - visited)
             self.assertTrue(route, "No disclosed route to stairs or an unexplored approach")
             key, direction = route[0]
-            current = self.settled_action(player, {"type": "move", "direction": direction})
+            current, moved = self.disclosed_step(player, current, direction)
+            if not moved:
+                continue
             self.assertEqual(underfoot(current["state"])["key"], key,
                              "Disclosed stair-approach step did not reach its observed key")
         self.fail("The ordinary stair approach exceeded its 2500-action bound")
@@ -1044,9 +1076,9 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
             self.assertIsNotNone(route, "No disclosed route to an ordinary hostile")
             target, direction = route[0]
             before = underfoot(current["state"])["key"]
-            current = self.settled_action(player, {"type": "move", "direction": direction}, survive=False)
+            current, moved = self.disclosed_step(player, current, direction, survive=False)
             self.assertIsNone(current["error"])
-            if not observation(current)["combat"]["dead"]:
+            if moved and not observation(current)["combat"]["dead"]:
                 self.assertNotEqual(underfoot(current["state"])["key"], before)
                 at = target
         else:

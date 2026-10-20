@@ -263,6 +263,38 @@ def cell(key, x, y, *, z=0, wall=False, down=False):
             "wall": wall, "stairs_down": down, "stairs_up": False}
 
 
+class DisclosedStepActions(unittest.TestCase):
+    def action(self, cells, direction="east"):
+        from rogue_test_support import disclosed_step_action
+        return disclosed_step_action({"visible_cells": cells}, direction)
+
+    def gate(self, *, x=1, y=0, z=0, opened=False, reachable=True, wall=False):
+        result = cell("gate", x, y, z=z, wall=wall)
+        result["door"] = {"id": "observed-gate", "open": opened, "reachable": reachable}
+        return result
+
+    def test_closed_reachable_destination_opens_without_mutating_the_view(self):
+        cells = [cell("here", 0, 0), self.gate()]
+        before = copy.deepcopy(cells)
+        self.assertEqual(self.action(cells),
+                         {"type": "set_door", "door": "observed-gate", "open": True})
+        self.assertEqual(cells, before)
+
+    def test_open_destination_moves_normally(self):
+        self.assertEqual(self.action([self.gate(opened=True)]),
+                         {"type": "move", "direction": "east"})
+
+    def test_other_direction_distance_height_and_hidden_wall_never_select_a_door(self):
+        for row in [self.gate(x=-1), self.gate(x=2), self.gate(z=1),
+                    cell("unknown-wall", 1, 0, wall=True)]:
+            with self.subTest(row=row):
+                self.assertEqual(self.action([row]), {"type": "move", "direction": "east"})
+
+    def test_unreachable_closed_destination_is_not_silently_walked_or_opened(self):
+        with self.assertRaisesRegex(AssertionError, "not reachable"):
+            self.action([self.gate(reachable=False)])
+
+
 class DisclosedFloorRoutes(unittest.TestCase):
     def graph(self, *cells):
         from rogue_test_support import DisclosedFloorGraph

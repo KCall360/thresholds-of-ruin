@@ -203,6 +203,29 @@ def ground_sight_candidate(actor, distance):
     return p["z"] == 0 and abs(p["x"]) + abs(p["y"]) + 1 <= distance
 
 
+def disclosed_step_action(observation, direction):
+    """Open the current disclosed cardinal destination before attempting its step.
+
+    This is not a movement solver: callers still select a disclosed route and
+    the server validates it. A paid opening replaces, never accompanies, the
+    old move; the caller must reconsider the resulting observation.
+    """
+    offset = next(((dx, dy, 0) for dx, dy, name in DisclosedFloorGraph.directions
+                   if name == direction), None)
+    if offset is None:
+        raise ValueError("Expected a cardinal disclosed step")
+    closed = [cell["door"] for cell in observation["visible_cells"]
+              if tuple(cell["position"][axis] for axis in ("x", "y", "z")) == offset
+              and not cell["wall"] and cell.get("door") and not cell["door"]["open"]]
+    if len(closed) > 1:
+        raise AssertionError("Ambiguous disclosed closed destination")
+    if closed:
+        if not closed[0]["reachable"]:
+            raise AssertionError("Disclosed closed destination is not reachable")
+        return {"type": "set_door", "door": closed[0]["id"], "open": True}
+    return {"type": "move", "direction": direction}
+
+
 class DisclosedFloorGraph:
     """Remember flat-floor links by opaque observed keys, never saved geometry.
 

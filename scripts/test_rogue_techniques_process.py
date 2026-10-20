@@ -16,7 +16,7 @@ from rogue_magic_receipts import (
 
 from rogue_test_support import (
     assert_room_gold_receipt, care_combat_action, disclosed_actor_candidates,
-    disclosed_melee_candidate, disclosed_sight_candidate,
+    disclosed_melee_candidate, disclosed_sight_candidate, disclosed_step_action,
     first_floor_foes, disclosed_frames, resolved_events,
 )
 
@@ -43,6 +43,26 @@ def visible_foes(frame):
     hostile = {row["actor"] for row in combat(frame)["actors"] if row["hostile"]}
     return disclosed_actor_candidates(row for row in observation(frame)["visible_actors"]
                                       if row["id"] in hostile)
+
+
+class RogueTechniqueRouteTests(unittest.TestCase):
+    def test_technique_opening_preserves_origin_for_fresh_route_selection(self):
+        from copy import deepcopy
+        from unittest.mock import patch
+        driver = RogueTechniquesProcesses()
+        current = {"state": {"observation": {
+            "visible_cells": [
+                {"key": "here", "position": {"x": 0, "y": 0, "z": 0}, "wall": False},
+                {"key": "gate", "position": {"x": 1, "y": 0, "z": 0}, "wall": False,
+                 "door": {"id": "observed-gate", "open": False, "reachable": True}}],
+            "combat": {"actors": []}, "visible_actors": [], "self_target": "self"}}}
+        refreshed = deepcopy(current)
+        refreshed["state"]["observation"]["visible_cells"][1]["door"]["open"] = True
+        with patch.object(driver, "act_settled", return_value=refreshed) as action:
+            self.assertEqual(driver.explore(None, current, (4, 7), set(), set()),
+                             (refreshed, (4, 7)))
+        action.assert_called_once_with(None,
+            {"type": "set_door", "door": "observed-gate", "open": True})
 
 
 class RogueTechniquesProcesses(ProcessTestCase):
@@ -131,7 +151,12 @@ class RogueTechniquesProcesses(ProcessTestCase):
         self.assertIsNotNone(route, "No disclosed route to an ordinary Rogue foe")
         target, direction = route[0]
         before = underfoot(current["state"])["key"]
-        current = self.act_settled(player, {"type": "move", "direction": direction})
+        action = disclosed_step_action(observation(current), direction)
+        current = self.act_settled(player, action)
+        if action["type"] == "set_door":
+            self.assertEqual(underfoot(current["state"])["key"], before,
+                             "Opening a disclosed entrance must not move the actor")
+            return current, at
         self.assertNotEqual(underfoot(current["state"])["key"], before)
         return current, target
 

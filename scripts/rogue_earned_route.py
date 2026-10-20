@@ -16,9 +16,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 
 from scalar_wire import u64
-from rogue_test_support import DisclosedFloorGraph, cardinal_melee_candidate, ground_sight_candidate
+from rogue_test_support import (
+    DisclosedFloorGraph, cardinal_melee_candidate, disclosed_step_action, ground_sight_candidate,
+)
 
-POLICY_REVISION = 5
+POLICY_REVISION = 6
 CHECKPOINT_DEPTHS = (1, 5, 8, 11, 17, 26, 27)
 CHARACTERS = {1: ("Warrior", "warrior", "rattling_blow"),
               2: ("Mage", "mage", "spark_lance_cold")}
@@ -321,6 +323,10 @@ class Controller:
         self._planned = deepcopy(action)
         return Decision(deepcopy(action), phase, outcome)
 
+    def _step_decision(self, view, direction, phase):
+        action = disclosed_step_action(view, direction)
+        return self._decision(action, "open_door" if action["type"] == "set_door" else phase)
+
     def choose(self, state):
         """Choose one fixed-policy action; never issue or pay for it here."""
         view, here = state["observation"], _here(state)
@@ -363,7 +369,7 @@ class Controller:
                     if (x, y, 0) in cells and (x, y, 0) not in occupied and distance(x, y) > best:
                         best, direction = distance(x, y), candidate
                 if direction is not None:
-                    return self._decision({"type": "move", "direction": direction}, "retreat")
+                    return self._step_decision(view, direction, "retreat")
             counts = Counter(_actor_key(target) for target in foes)
             for target in foes:
                 if counts[_actor_key(target)] > 1:
@@ -388,13 +394,13 @@ class Controller:
                     if (x + dx, y + dy, 0) in cells and (x + dx, y + dy, 0) not in occupied}
                 route = floor.route(here["key"], neighbors, blocked)
                 if route:
-                    return self._decision({"type": "move", "direction": route[0][1]}, "combat_approach")
+                    return self._step_decision(view, route[0][1], "combat_approach")
             # Visibility of a foot need not disclose any cardinal approach.
             # Explore one already disclosed frontier step, then reassess from
             # the next ordinary state. Never infer hidden connecting terrain.
             route = floor.route(here["key"], floor.graph.edges.keys() - floor.visited, blocked)
             if route:
-                return self._decision({"type": "move", "direction": route[0][1]}, "combat_explore")
+                return self._step_decision(view, route[0][1], "combat_explore")
             return self._decision(outcome="censored_no_disclosed_combat_route")
         supplies = sorted((row for row in view["ground_items"]
             if row["reachable"] and int(row["item"]["quantity"]) > 0
@@ -430,7 +436,7 @@ class Controller:
                 (floor.graph.stairs_down, "descend")]:
             route = floor.route(here["key"], targets, blocked)
             if route:
-                return self._decision({"type": "move", "direction": route[0][1]}, phase)
+                return self._step_decision(view, route[0][1], phase)
             if route == [] and phase == "descend" and here["stairs_down"]:
                 return self._decision({"type": "move", "direction": "down"}, "descend")
         return self._decision(outcome="censored_route_exhausted")

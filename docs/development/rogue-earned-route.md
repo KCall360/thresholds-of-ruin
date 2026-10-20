@@ -1,4 +1,4 @@
-# Bounded ordinary earned-route qualification, revision 5
+# Bounded ordinary earned-route qualification, revision 6
 
 Status: experimental tooling with explicit acceptance gates. A run is complete
 only when its ordinary, committed-flow, replay and source-identity checks pass. This is a fixed experimental controller, not a recommended
@@ -48,9 +48,10 @@ explicit source snapshots and never silently copies newly activated production
 into the old baseline arm. No weights, dispositions, kits, skills, supplies or
 nutrition values are adjusted by measurement.
 
-Earlier reports, controller dumps and frozen cohorts remain unchanged. Revision 5
-accepts only the current canonical wide-scalar wire representation and binds it
-to the live compiler input fingerprint. This revision creates a new campaign; it does not import
+Earlier reports, controller dumps and frozen cohorts remain unchanged. Revision 6
+retains the current canonical wide-scalar wire representation and live compiler
+input fingerprint, and opens a disclosed closed entrance before attempting its
+planned cardinal step. This revision creates a new campaign; it does not import
 or migrate old controller memory. A saved game retains its embedded package, so
 continuing an old E/S save is not evidence for the new Vampire arm.
 
@@ -107,6 +108,12 @@ opaque-ID tie break. Opaque IDs are target handles and equality keys only.
 Resolve cells by deterministic breadth-first traversal with that direction order. Only observed hostile faction relations identify visible foes.
 Use server-disclosed available resources, supply quantities, ability costs,
 cooldown and reach; never infer a hidden immunity from species name.
+
+A selected cardinal step into a currently disclosed, reachable closed door first
+issues one ordinary `set_door` opening instead. It consumes the same command
+budget as other actions, does not advance the remembered position, and requires
+a fresh settled observation before selecting the next action. No hidden wall is
+interpreted as a door and no rejected move is retried.
 
 Decision priority:
 
