@@ -153,6 +153,14 @@ together. Check travel, sharp turns, stopping, action interruption, falls and
 revival. Fix common support/weight-transfer rules before individual pose garnish.
 Retain different family rhythms and the current disclosed ability-selection rules.
 
+Progress: a real-speed walk review now runs as a test. It walks seventeen
+families at a steady pace through the actual animation and support systems
+and measures how far each planted foot slides between frames. Every planted
+foot's median slide is zero; it found the shortened griffin and dragon legs
+dragging through their stance (a horse's stride on shorter legs), now fixed by
+scaling each beast's stride to its leg length. Turns, stops, interruptions and
+revival still need watching at real speed.
+
 ### 5. Measure cost, then expand equipment integration separately
 
 Measure first-use mesh generation, warm reuse and cloth/mesh-update costs with
