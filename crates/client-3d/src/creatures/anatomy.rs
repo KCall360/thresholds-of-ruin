@@ -3,6 +3,9 @@
 //! mesh scales enlarge masses separately from the body's joint landmarks.
 use super::{Look, Plan, Style, Vec3, J};
 
+/// Where the head sits on the torso: just above the shoulder line.
+pub(super) const NECK_SEAT: f32 = 0.535;
+
 pub(super) const HIP_SCALE: Vec3 = Vec3::new(1.10, 1.0, 1.08);
 pub(super) const LIMB_SCALE: Vec3 = Vec3::new(1.12, 1.0, 1.12);
 pub(super) const FOOT_SCALE: Vec3 = Vec3::new(1.22, 1.0, 1.22);
@@ -173,7 +176,9 @@ impl HumanoidBody {
             arm_length,
             hips: Vec3::Y * 0.95,
             torso: Vec3::Y * 0.06,
-            head: Vec3::Y * 0.6,
+            // The head sits close on the shoulders on a short neck, as on
+            // the concept sheets, not raised on a stalk.
+            head: Vec3::Y * NECK_SEAT,
             hand: Vec3::Y
                 * if look.style == Style::Guardian {
                     -0.38
