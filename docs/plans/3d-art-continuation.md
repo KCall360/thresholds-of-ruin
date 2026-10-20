@@ -167,6 +167,20 @@ replacing only the model while motion carries on. This is presentation for
 review only: live creatures still wear their kind's outfit, as observations
 carry no equipment list (see 5).
 
+Outfits also carry headwear: bare, a hood up or pushed back, or a closed helm.
+A hood or helm covers hair and what is worn in it, and pointed ears fold inside
+it; what the body grows, such as serpents, still shows. Redressing reuses the
+head and hanging hair when the outfit leaves them alone.
+
+Set beside the concept sheets, the people now keep closer proportions: the head
+sits close on the shoulders on a short neck, the neck rises from the shoulders
+without a ring, and shoulders slope into the arms. Women's faces are soft, with
+full cheeks held above the jaw, a small chin and full lips, and their legs are
+full at the hip and fine at the ankle. Long loose hair is one sculpted fall
+hanging from the crown, and it swings: every cloak, skirt and lock of hair eases
+into its swing instead of snapping through a turn. Contract tests pin each of
+these proportions for every sex and build.
+
 ### 4. Review motion families at real speed
 
 Review people, heavy humanoids, birds, equines/centaurs, serpents and floaters
