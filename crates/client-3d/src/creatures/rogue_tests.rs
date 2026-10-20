@@ -869,3 +869,103 @@ fn women_of_the_heeled_kinds_wear_heels_and_others_do_not() {
         );
     }
 }
+
+#[test]
+fn skirts_clear_the_thighs_for_every_figure() {
+    // The spawned skirt, swept around the body in 20-degree sectors, is never
+    // inside the spawned thighs anywhere down their length. The front sector
+    // is left out, where some skirts are split to show the legs.
+    let sectors = 18;
+    let in_sector = |p: &Vec3, k: usize| {
+        let lo = -PI + TAU * k as f32 / sectors as f32;
+        (lo..lo + TAU / sectors as f32).contains(&p.x.atan2(p.z))
+    };
+    let reach = |points: &[Vec3], k: usize, y: f32| {
+        points
+            .iter()
+            .filter(|p| (y - 0.05..y).contains(&p.y) && in_sector(p, k))
+            .map(|p| Vec2::new(p.x, p.z).length())
+            .fold(None, |m: Option<f32>, r| Some(m.map_or(r, |m| m.max(r))))
+    };
+    for model in [
+        CreatureModel::Medusa,
+        CreatureModel::Human,
+        CreatureModel::Leprechaun,
+        CreatureModel::Nymph,
+    ] {
+        for woman in [false, true] {
+            for build in 0..3 {
+                let look = Look::with_choice(
+                    model,
+                    1,
+                    Some(Variant {
+                        woman,
+                        build,
+                        ..Default::default()
+                    }),
+                );
+                let (world, rig, _, meshes) = spawn_one(&look);
+                let placed = |e: Entity| {
+                    let at = world.get::<Transform>(e).unwrap().compute_affine();
+                    points_under(&world, &meshes, e)
+                        .into_iter()
+                        .map(move |p| at.transform_point3(p))
+                };
+                let thighs: Vec<Vec3> = [J::LegL, J::LegR]
+                    .into_iter()
+                    .flat_map(|j| placed(rig.joint(j).expect("legs")))
+                    .collect();
+                let skirt = rig
+                    .drapes
+                    .iter()
+                    .filter(|(_, kind)| matches!(kind, Drape::Skirt(_)))
+                    .map(|&(e, _)| placed(e).collect::<Vec<_>>())
+                    .max_by_key(|points| points.len())
+                    .expect("a skirt");
+                let hem = skirt.iter().fold(0.0f32, |m, p| m.min(p.y));
+                let mut y = 0.0;
+                while y > hem + 0.05 {
+                    for k in (0..sectors).filter(|&k| k != sectors / 2) {
+                        if let (Some(cloth), Some(leg)) =
+                            (reach(&skirt, k, y), reach(&thighs, k, y))
+                        {
+                            assert!(
+                                cloth > leg,
+                                "{model:?} woman {woman} build {build}: thigh {leg:.3} through skirt {cloth:.3} at height {y:.2}, sector {k}"
+                            );
+                        }
+                    }
+                    y -= 0.05;
+                }
+            }
+        }
+    }
+}
+
+/// Every mesh vertex under `root`, in `root`'s own space.
+fn points_under(world: &World, meshes: &Assets<Mesh>, root: Entity) -> Vec<Vec3> {
+    let mut out = Vec::new();
+    let mut stack = vec![(root, Affine3A::IDENTITY)];
+    while let Some((e, to_root)) = stack.pop() {
+        if let Some(mesh) = world.get::<Mesh3d>(e).and_then(|m| meshes.get(&m.0)) {
+            if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(positions)) =
+                mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            {
+                out.extend(
+                    positions
+                        .iter()
+                        .map(|v| to_root.transform_point3(Vec3::from(*v))),
+                );
+            }
+        }
+        if let Some(children) = world.get::<Children>(e) {
+            for child in children.iter() {
+                let local = world
+                    .get::<Transform>(child)
+                    .map_or(Affine3A::IDENTITY, |t| t.compute_affine());
+                stack.push((child, to_root * local));
+            }
+        }
+    }
+    out
+}
