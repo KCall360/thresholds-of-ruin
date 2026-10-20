@@ -375,3 +375,134 @@ fn leather_jerkins_hang_free_below_the_belt_and_stay_shorter_than_the_tunic() {
     }
     assert!(geometry::jerkin_peplum(Look::of(CreatureModel::Mage, 4).style).is_none());
 }
+
+/// Walk a creature at a steady pace with the real animation system and
+/// return, for each foot, the median horizontal slide between consecutive
+/// frames while it is planted (within 3 mm of its lowest height), and the
+/// share of those frames that slide more than a millimetre.
+fn planted_foot_slide(model: CreatureModel, step: f32) -> Vec<(J, f32, f32)> {
+    use bevy::time::TimeUpdateStrategy;
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
+        .insert_resource(TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(16),
+        ))
+        .init_resource::<Assets<Mesh>>()
+        .add_systems(Update, animate);
+    let mut materials = Assets::<StandardMaterial>::default();
+    let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
+    let look = Look::of(model, 21);
+    let root = app
+        .world_mut()
+        .spawn((
+            Anim::new(21, Vec3::ZERO),
+            Transform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    let mut queue = bevy::ecs::world::CommandQueue::default();
+    let rig = {
+        let world = app.world_mut();
+        let mut meshes = Assets::<Mesh>::default();
+        let rig = spawn(
+            &mut Commands::new(&mut queue, world),
+            &mut library,
+            &mut meshes,
+            root,
+            &look,
+        );
+        queue.apply(world);
+        rig
+    };
+    let feet: Vec<J> = [
+        J::FootL,
+        J::FootR,
+        J::HoofFL,
+        J::HoofFR,
+        J::HoofBL,
+        J::HoofBR,
+    ]
+    .into_iter()
+    .filter(|j| rig.joint(*j).is_some())
+    .collect();
+    let entities: Vec<Entity> = feet.iter().map(|j| rig.joint(*j).unwrap()).collect();
+    app.world_mut().entity_mut(root).insert(rig);
+    let mut tracks: Vec<Vec<Vec3>> = vec![Vec::new(); feet.len()];
+    for frame in 0..200 {
+        app.world_mut()
+            .get_mut::<Transform>(root)
+            .unwrap()
+            .translation = Vec3::Z * frame as f32 * step;
+        app.update();
+        if frame >= 60 {
+            for (track, e) in tracks.iter_mut().zip(&entities) {
+                track.push(
+                    app.world()
+                        .get::<GlobalTransform>(*e)
+                        .unwrap()
+                        .translation(),
+                );
+            }
+        }
+    }
+    feet.into_iter()
+        .zip(tracks)
+        .map(|(foot, track)| {
+            let low = track.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+            let mut slides: Vec<f32> = track
+                .windows(2)
+                .filter(|w| w[0].y < low + 0.003 && w[1].y < low + 0.003)
+                .map(|w| (w[1] - w[0]).with_y(0.0).length())
+                .collect();
+            slides.sort_by(f32::total_cmp);
+            assert!(
+                slides.len() > 40,
+                "{model:?} {foot:?} is hardly ever planted"
+            );
+            let median = slides[slides.len() / 2];
+            let sliding =
+                slides.iter().filter(|s| **s > 0.001).count() as f32 / slides.len() as f32;
+            (foot, median, sliding)
+        })
+        .collect()
+}
+
+#[test]
+fn real_speed_walk_review_keeps_planted_feet_from_sliding() {
+    let mut report = Vec::new();
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Scout,
+        CreatureModel::Hobgoblin,
+        CreatureModel::Zombie,
+        CreatureModel::Guardian,
+        CreatureModel::Yeti,
+        CreatureModel::Orc,
+        CreatureModel::Troll,
+        CreatureModel::Leprechaun,
+        CreatureModel::Emu,
+        CreatureModel::Quagga,
+        CreatureModel::Centaur,
+        CreatureModel::Griffin,
+        CreatureModel::Dragon,
+        CreatureModel::Jabberwock,
+        CreatureModel::Aquator,
+        CreatureModel::Xeroc,
+    ] {
+        for (foot, median, sliding) in planted_foot_slide(model, 0.03) {
+            report.push(format!(
+                "{model:?} {foot:?} median {median:.4} sliding {sliding:.2}"
+            ));
+            assert!(
+                median < 0.001,
+                "{model:?} {foot:?} slides while planted: {median}"
+            );
+            // Touchdown and lift-off frames may move; the stance between may not.
+            assert!(
+                sliding < 0.2,
+                "{model:?} {foot:?} drags through its stance: {sliding}"
+            );
+        }
+    }
+    eprintln!("{}", report.join("\n"));
+}

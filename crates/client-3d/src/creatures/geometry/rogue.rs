@@ -1426,6 +1426,9 @@ pub(super) fn beast(kit: &mut Kit, lift: Entity, look: &Look) {
     let s = stance(style);
     kit.rig.ankle_floor = s.depth + 0.008;
     kit.rig.legs = (s.front.upper + s.front.lower) / 0.84;
+    // Shorter legs take shorter strides: a horse's reach at 0.85 cycles a
+    // cell, scaled to these legs, so planted feet stay within reach.
+    kit.rig.stride = kit.rig.stride.max(0.85 / kit.rig.legs);
     kit.rig.girth = match style {
         Style::Aquator => 0.33,
         Style::Xeroc => 0.36,
