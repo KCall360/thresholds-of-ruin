@@ -151,7 +151,7 @@ impl PropMaterials {
                 ..default()
             }),
             ghost: materials.add(StandardMaterial {
-                base_color: Color::srgba(1.0, 1.0, 1.0, 0.58),
+                base_color: Color::srgba(1.0, 1.0, 1.0, 0.78),
                 emissive: LinearRgba::rgb(0.035, 0.05, 0.09),
                 perceptual_roughness: 0.6,
                 alpha_mode: AlphaMode::Blend,
