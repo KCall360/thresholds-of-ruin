@@ -31,6 +31,27 @@ pub struct MapDoorAppearance {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct MapTrapAppearance {
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub family: Option<tor_world::TrapFamily>,
+}
+impl<'de> Deserialize<'de> for MapTrapAppearance {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            family: Option<tor_world::TrapFamily>,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            family: fields.family,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MapItemAppearance {
     pub class: ItemClass,
     pub description: String,
@@ -54,6 +75,8 @@ pub struct MapAppearance {
     pub stairs_down: bool,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub door: Option<MapDoorAppearance>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub trap: Option<MapTrapAppearance>,
     #[serde(deserialize_with = "read_items")]
     pub ground_items: Vec<MapItemAppearance>,
 }
@@ -160,6 +183,8 @@ impl<'de> Deserialize<'de> for MapAppearance {
             stairs_down: bool,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             door: Option<MapDoorAppearance>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            trap: Option<MapTrapAppearance>,
             #[serde(deserialize_with = "read_items")]
             ground_items: Vec<MapItemAppearance>,
         }
@@ -172,6 +197,7 @@ impl<'de> Deserialize<'de> for MapAppearance {
             stairs_up: fields.stairs_up,
             stairs_down: fields.stairs_down,
             door: fields.door,
+            trap: fields.trap,
             ground_items: fields.ground_items,
         })
     }
@@ -862,7 +888,7 @@ impl MapAppearance {
                 })
             })
         };
-        let mut bytes = 384usize
+        let mut bytes = 400usize
             .saturating_add(text(&self.material))
             .saturating_add(asset(&self.asset));
         if let Some(d) = &self.door {
@@ -871,6 +897,9 @@ impl MapAppearance {
                 .saturating_add(text(&d.name))
                 .saturating_add(text(&d.description))
                 .saturating_add(asset(&d.asset));
+        }
+        if self.trap.is_some() {
+            bytes = bytes.saturating_add(64);
         }
         for i in &self.ground_items {
             bytes = bytes
@@ -1320,6 +1349,32 @@ impl Game {
 mod tests {
     use super::*;
     use std::num::NonZeroU64;
+    #[test]
+    fn trap_memory_is_strict_nullable_appearance_without_authority_or_private_operands() {
+        for family in [
+            None,
+            Some(tor_world::TrapFamily::Rust),
+            Some(tor_world::TrapFamily::SleepingGas),
+        ] {
+            let value = MapTrapAppearance { family };
+            let encoded = serde_json::to_value(&value).unwrap();
+            assert_eq!(encoded.as_object().unwrap().len(), 1);
+            assert_eq!(
+                serde_json::from_value::<MapTrapAppearance>(encoded).unwrap(),
+                value
+            );
+        }
+        for invalid in [
+            serde_json::json!({}),
+            serde_json::json!([null]),
+            serde_json::json!({"family":null,"id":1}),
+            serde_json::json!({"family":null,"dc":12}),
+            serde_json::json!({"family":{"rust":null}}),
+            serde_json::json!({"family":{"sleeping_gas":null}}),
+        ] {
+            assert!(serde_json::from_value::<MapTrapAppearance>(invalid).is_err());
+        }
+    }
     fn pos(x: i32, y: i32, z: i32) -> Position {
         Position { x, y, z }
     }
@@ -1337,6 +1392,7 @@ mod tests {
             place_hint: false,
             stairs_up: false,
             stairs_down: false,
+            trap: None,
             door: None,
             ground_items: Vec::new(),
         }

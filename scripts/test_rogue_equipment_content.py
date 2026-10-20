@@ -102,13 +102,13 @@ class RogueEquipmentContent(unittest.TestCase):
             "choices": [{"archetype": "rogue.arrow", "weight": 1}]}]})
 
 
-    def test_ten_concealed_rings_have_exact_generation_weights_and_food_rates(self):
+    def test_eleven_concealed_rings_have_exact_generation_weights_and_food_rates(self):
         catalog = source("catalog/items.toml")
         expected = {
             "protection": (9, 30), "add_strength": (9, 30), "sustain_strength": (5, 30),
             "see_invisible": (10, 6), "adornment": (1, 0), "dexterity": (8, 10),
             "increase_damage": (8, 10), "regeneration": (4, 60),
-            "slow_digestion": (9, -15), "maintain_armor": (5, 30),
+            "slow_digestion": (9, -15), "maintain_armor": (5, 30), "searching": (5, 10),
         }
         rings = {key: value for key, value in catalog["items"].items() if value.get("class") == "ring"}
         self.assertEqual(set(rings), {"rogue.ring_" + key for key in expected})
@@ -132,8 +132,8 @@ class RogueEquipmentContent(unittest.TestCase):
                                  "stat": {"kind": "nutrition_rate_thirtieths"}, "value": rate}}]
                                  if rate else [])
         appearances = catalog["appearance_pools"]["rogue.rings"]["appearances"]
-        self.assertEqual(len(appearances), 10)
-        self.assertEqual(len(set(appearances)), 10)
+        self.assertEqual(len(appearances), 11)
+        self.assertEqual(len(set(appearances)), 11)
         stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual(stages[11], {"id": "rogue.rings", "version": 1, "kind": "items",
                          "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},
@@ -147,13 +147,14 @@ class RogueEquipmentContent(unittest.TestCase):
         expected = {
             "protection": [{"kind": "signed_reduction", "selector": {"kind": "category", "category": category},
                             "amount": 1} for category in ("energy", "impact", "keen", "spirit", "vital", "psychic")],
-            "add_strength": [{"kind": "add", "stat": {"kind": "attribute", "attribute": "strength"}, "value": 1}],
+            "add_strength": [{"kind": "attribute_without_defense", "attribute": "strength", "defense": "physical", "value": 1}],
             "dexterity": [{"kind": "attribute_without_defense", "attribute": "speed", "defense": "physical", "value": 1}],
             "increase_damage": [{"kind": "add", "stat": {"kind": "attack_damage_roll_bonus"}, "value": 1}],
             "sustain_strength": [{"kind": "sustain_attribute", "attribute": "strength"}],
             "see_invisible": [{"kind": "perception", "value": {"kind": "see_invisible", "enabled": True}}],
             "regeneration": [{"kind": "health_recovery_rate", "multiplier": 2}],
             "maintain_armor": [{"kind": "protect_armor"}], "adornment": [], "slow_digestion": [],
+            "searching": [{"kind": "perception", "value": {"kind": "periodic_search", "interval": 100}}],
         }
         signed = {"protection", "add_strength", "dexterity", "increase_damage"}
         for key, effects in expected.items():

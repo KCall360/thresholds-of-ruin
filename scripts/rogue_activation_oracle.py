@@ -197,7 +197,7 @@ def reviewed_twenty_six_activation():
         "id": "rogue.ammunition", "version": 1, "kind": "items", "count": [1, 1],
         "bands": [{"depth": {"kind": "open", "minimum": 1},
                    "choices": [{"archetype": "rogue.arrow", "weight": 1}]}], "quantity": 6})
-    # Approved append-only ten-ring batch; retain independent exact weights.
+    # Approved append-only ring stock, including searching; keep weights independent.
     activation["profiles"]["rogue.low_depth"]["stages"].append({
         "id": "rogue.rings", "version": 1, "kind": "items", "count": [1, 1], "quantity": 1,
         "bands": [{"depth": {"kind": "open", "minimum": 1}, "choices": [
@@ -205,5 +205,5 @@ def reviewed_twenty_six_activation():
                 ("protection", 9), ("add_strength", 9), ("sustain_strength", 5),
                 ("see_invisible", 10), ("adornment", 1), ("dexterity", 8),
                 ("increase_damage", 8), ("regeneration", 4), ("slow_digestion", 9),
-                ("maintain_armor", 5))]}]})
+                ("maintain_armor", 5), ("searching", 5))]}]})
     return activation

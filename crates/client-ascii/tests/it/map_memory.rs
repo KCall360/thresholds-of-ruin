@@ -11,7 +11,7 @@ fn snapshot(hidden: bool) -> Snapshot {
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":(0..if hidden {1} else {4}).map(|x|serde_json::json!({
                 "key":x.to_string(),"position":{"x":x,"y":0,"z":0},"wall":x==3,
-                "stairs_up":x==2,"stairs_down":false,"lit":true,"place_hint":false
+                "trap":null,"stairs_up":x==2,"stairs_down":false,"lit":true,"place_hint":false
             })).collect::<Vec<_>>(),
             "ground_items":if hidden {vec![]} else {vec![serde_json::json!({"supply_reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"token"},"position":{"x":1,"y":0,"z":0},"reachable":false})]},
             "visible_actors":if hidden {vec![]} else {vec![serde_json::json!({"id":super::actor_target(2),"position":{"x":2,"y":0,"z":0}})]},
@@ -379,6 +379,7 @@ fn cold_hydrated_item_and_door_draw_without_action_handles_and_preserve_cell_tra
         place_hint: false,
         stairs_up: false,
         stairs_down: false,
+        trap: None,
         door: None,
         ground_items: vec![],
     };
@@ -475,4 +476,33 @@ fn current_pile_wins_over_a_lower_remembered_pile_in_the_same_column() {
     state.replace_snapshot(next).unwrap();
     let tiles = render::map_tiles(&state, &Default::default());
     assert_eq!(tiles.iter().find(|t| t.position.x == 1).unwrap().glyph, ')');
+}
+
+#[test]
+fn remembered_trap_draws_grey_but_selected_look_cannot_examine_it() {
+    let mut initial = snapshot(false);
+    let o = &mut Arc::make_mut(&mut initial.state).observation;
+    o.ground_items.clear();
+    o.visible_cells[1].trap = Some(TrapView {
+        id: TrapTarget::from_digest([64; 32]),
+        family: None,
+        reachable: true,
+    });
+    let mut state = ClientState::from_snapshot(initial).unwrap();
+    state.replace_snapshot(snapshot(true)).unwrap();
+    let tiles = render::map_tiles(&state, &Default::default());
+    let tile = tiles.iter().find(|tile| tile.position.x == 1).unwrap();
+    assert_eq!(tile.kind, tor_client_ascii::map::Kind::Trap);
+    assert_eq!(tile.color, render::MEMORY_COLOR);
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state);
+    app.ready();
+    app.look_cursor = Some(Position { x: 1, y: 0, z: 0 });
+    assert_eq!(
+        app.input(Input::Key {
+            key: tor_client_ascii::Key::Enter
+        }),
+        Effect::None
+    );
 }

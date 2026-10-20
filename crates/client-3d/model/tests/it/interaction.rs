@@ -21,6 +21,7 @@ fn cell(position: Position, key: &str) -> CellView {
         position,
         wall: false,
         material: String::new(),
+        trap: None,
         door: None,
         asset: None,
         stairs_up: false,
@@ -215,6 +216,7 @@ fn remembered_door_reachability_never_grants_a_current_action() {
         place_hint: live.place_hint,
         stairs_up: false,
         stairs_down: false,
+        trap: None,
         door: live.door.map(|d| tor_protocol::MapDoorAppearance {
             name: d.name,
             description: d.description,

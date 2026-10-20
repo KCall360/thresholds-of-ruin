@@ -13,6 +13,7 @@ pub enum Key {
     Item(ItemTarget),
     Actor(ActorTarget),
     Door(DoorTarget),
+    Trap(TrapTarget),
     Surface(Surface),
     /// A feature of the place: a way out, the exit, the limit of sight.
     Feature(u8),
@@ -31,6 +32,7 @@ pub enum Kind {
     Thing,
     Figure,
     Door,
+    Trap,
     Surface,
     /// Part of the place itself: a passage, the exit.
     Feature,
@@ -186,6 +188,7 @@ fn naming(name: &str, kind: Kind, class: Option<ItemClass>) -> (Vec<String>, Vec
         Kind::Thing => &["thing", "item", "object"],
         Kind::Figure => &["figure", "creature", "someone", "monster", "enemy", "foe"],
         Kind::Door => &["door"],
+        Kind::Trap => &["trap", "hazard"],
         Kind::Surface | Kind::Feature | Kind::Me => &[],
     };
     heads.extend(generic.iter().map(|s| (*s).to_owned()));
@@ -333,6 +336,42 @@ impl<'a> Scene<'a> {
                 reachable: door.reachable,
                 position: Some(cell.position),
                 open: Some(door.open),
+                class: None,
+                equipped: None,
+                hostile: None,
+                height: 0,
+                way: None,
+            });
+        }
+        let mut traps = BTreeSet::new();
+        for cell in &o.visible_cells {
+            let Some(trap) = &cell.trap else { continue };
+            if !traps.insert(trap.id) {
+                continue;
+            }
+            let name = trap.family.map_or("trap", TrapFamily::name).to_owned();
+            let (words, heads) = naming(&name, Kind::Trap, None);
+            referents.push(Referent {
+                key: Key::Trap(trap.id),
+                kind: Kind::Trap,
+                identity: format!("trap:{}", trap.id),
+                name,
+                words,
+                heads,
+                description: trap
+                    .family
+                    .map_or("Its mechanism is not yet known.", |family| match family {
+                        TrapFamily::Rust => "A rust trap. Discovering it has not disarmed it.",
+                        TrapFamily::SleepingGas => {
+                            "A sleeping gas trap. Discovering it has not disarmed it."
+                        }
+                    })
+                    .into(),
+                quantity: 1,
+                carried: false,
+                reachable: trap.reachable,
+                position: Some(cell.position),
+                open: None,
                 class: None,
                 equipped: None,
                 hostile: None,
@@ -513,7 +552,7 @@ impl<'a> Scene<'a> {
                     .find(|c| c.position == at && !c.wall)
                     .map(|c| c.key.clone())
             }
-            Key::Surface(_) | Key::Me => None,
+            Key::Trap(_) | Key::Surface(_) | Key::Me => None,
         }
     }
 }

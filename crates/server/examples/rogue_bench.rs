@@ -211,12 +211,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let start = Instant::now();
-            let generated = generation_recipe::materialize(
+            let generated = generation_recipe::materialize_with_feature_bases(
                 &identity,
                 &group,
                 &source.manifest.generation_recipes[&group.recipe],
                 defs,
                 seed,
+                // The geometry-only workload has no authored/generated features.
+                generation_recipe::FeatureBases { doors: 1, traps: 1 },
             )?
             .regions;
             let elapsed = start.elapsed();

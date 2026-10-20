@@ -1,10 +1,11 @@
 use crate::{
     ActorId, ActorTarget, DoorTarget, HoldTarget, ItemTarget, StreamContext, StreamCursor,
+    TrapTarget,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 56;
+pub const PROTOCOL_VERSION: u32 = 57;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -275,6 +276,9 @@ pub enum Action {
         choice: IntentionId,
         item: Option<ItemTarget>,
     },
+    ExamineTrap {
+        trap: TrapTarget,
+    },
     SetDoor {
         door: DoorTarget,
         open: bool,
@@ -350,6 +354,9 @@ impl<'de> Deserialize<'de> for Action {
                 #[serde(deserialize_with = "required_nullable")]
                 item: Option<ItemTarget>,
             },
+            ExamineTrap {
+                trap: TrapTarget,
+            },
             SetDoor {
                 door: DoorTarget,
                 open: bool,
@@ -410,6 +417,7 @@ impl<'de> Deserialize<'de> for Action {
             Fields::Read { item } => Self::Read { item },
             Fields::Zap { item, direction } => Self::Zap { item, direction },
             Fields::Identify { choice, item } => Self::Identify { choice, item },
+            Fields::ExamineTrap { trap } => Self::ExamineTrap { trap },
             Fields::SetDoor { door, open } => Self::SetDoor { door, open },
             Fields::Move { direction } => Self::Move { direction },
             Fields::Take { item, quantity } => Self::Take { item, quantity },
@@ -1102,6 +1110,9 @@ pub struct CellView {
     /// Current server illumination, independent of sight or body awareness.
     pub lit: bool,
     pub door: Option<DoorView>,
+    /// Discovered physical presence only; family stays absent until examined or witnessed.
+    #[serde(deserialize_with = "required_option")]
+    pub trap: Option<TrapView>,
     /// Cosmetic material of a solid cell, not a physical interaction rule.
     /// Floors and ceilings are ordinary seen solid cells; clients derive them.
     #[serde(default)]
@@ -1118,6 +1129,70 @@ pub struct CellView {
     /// scenario names none; clients then fall back to their own look.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<String>,
+}
+
+/// A disclosed trap family; no effect operands or discovery difficulty cross the wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrapFamily {
+    Rust,
+    SleepingGas,
+}
+
+impl<'de> Deserialize<'de> for TrapFamily {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = TrapFamily;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a canonical trap family string")
+            }
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                match value {
+                    "rust" => Ok(TrapFamily::Rust),
+                    "sleeping_gas" => Ok(TrapFamily::SleepingGas),
+                    _ => Err(E::unknown_variant(value, &["rust", "sleeping_gas"])),
+                }
+            }
+        }
+        d.deserialize_str(Visitor)
+    }
+}
+
+impl TrapFamily {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rust => "rust trap",
+            Self::SleepingGas => "sleeping gas trap",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrapView {
+    pub id: TrapTarget,
+    #[serde(deserialize_with = "required_option")]
+    pub family: Option<TrapFamily>,
+    pub reachable: bool,
+}
+impl<'de> Deserialize<'de> for TrapView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            id: TrapTarget,
+            #[serde(deserialize_with = "required_option")]
+            family: Option<TrapFamily>,
+            reachable: bool,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            id: fields.id,
+            family: fields.family,
+            reachable: fields.reachable,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

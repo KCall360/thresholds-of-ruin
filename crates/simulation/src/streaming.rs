@@ -200,6 +200,7 @@ pub struct RegionIdentities {
     pub actors: BTreeSet<ActorId>,
     pub items: BTreeSet<ItemId>,
     pub doors: BTreeSet<u64>,
+    pub traps: BTreeSet<u64>,
 }
 
 /// Records kept in memory.
@@ -244,6 +245,7 @@ struct Directory {
     actors: BTreeMap<ActorId, RegionId>,
     items: BTreeMap<ItemId, RegionId>,
     doors: BTreeMap<u64, RegionId>,
+    traps: BTreeMap<u64, RegionId>,
     /// Derived from the maps above and never saved: each region's
     /// identities, so attaching a region touches only its own.
     by_region: BTreeMap<RegionId, RegionIdentities>,
@@ -256,6 +258,7 @@ struct DirectoryData {
     actors: BTreeMap<ActorId, RegionId>,
     items: BTreeMap<ItemId, RegionId>,
     doors: BTreeMap<u64, RegionId>,
+    traps: BTreeMap<u64, RegionId>,
 }
 
 impl From<DirectoryData> for Directory {
@@ -270,10 +273,14 @@ impl From<DirectoryData> for Directory {
         for (id, region) in &data.doors {
             by_region.entry(*region).or_default().doors.insert(*id);
         }
+        for (id, region) in &data.traps {
+            by_region.entry(*region).or_default().traps.insert(*id);
+        }
         Self {
             actors: data.actors,
             items: data.items,
             doors: data.doors,
+            traps: data.traps,
             by_region,
         }
     }
@@ -285,6 +292,7 @@ impl From<Directory> for DirectoryData {
             actors: directory.actors,
             items: directory.items,
             doors: directory.doors,
+            traps: directory.traps,
         }
     }
 }
@@ -302,10 +310,13 @@ impl Directory {
             .extend(identities.items.iter().map(|id| (*id, region)));
         self.doors
             .extend(identities.doors.iter().map(|id| (*id, region)));
+        self.traps
+            .extend(identities.traps.iter().map(|id| (*id, region)));
         let listed = self.by_region.entry(region).or_default();
         listed.actors.extend(identities.actors);
         listed.items.extend(identities.items);
         listed.doors.extend(identities.doors);
+        listed.traps.extend(identities.traps);
     }
 
     /// Remove and return `region`'s identities, touching only those.
@@ -319,6 +330,9 @@ impl Directory {
         }
         for id in &identities.doors {
             self.doors.remove(id);
+        }
+        for id in &identities.traps {
+            self.traps.remove(id);
         }
         identities
     }
@@ -386,6 +400,13 @@ impl RegionRecordData {
             .any(|(id, map)| !self.actors.contains_key(id) || !maps.structure(map))
         {
             return Err(crate::checkpoint::PersistError::ExploredMap);
+        }
+        if self
+            .world
+            .traps()
+            .any(|trap| !crate::trap_kind_valid(content.rules(), &trap.kind))
+        {
+            return Err(crate::checkpoint::PersistError::World);
         }
         for (id, item) in &self.items {
             item.spec.validate_rules(content.rules()).map_err(|error| {
@@ -493,6 +514,7 @@ impl RegionRecord {
             actors: self.actors.keys().copied().collect(),
             items: self.items.keys().copied().collect(),
             doors: self.world.door_ids().collect(),
+            traps: self.world.trap_ids().collect(),
         }
     }
 
@@ -513,6 +535,9 @@ pub(crate) struct Lifecycle {
     pub(crate) scenes: crate::observation::ActorScenes,
     #[serde(skip)]
     pub(crate) recovery_contexts: crate::recovery_context::RecoveryContexts,
+    #[serde(skip)]
+    pub(crate) discovery_contexts: crate::discovery::DiscoveryContexts,
+    pub(crate) discovery_started: bool,
     points: BTreeMap<ReferencePointId, ReferencePoint>,
     next_point: u64,
     /// Loaded regions whose time is stopped.
@@ -537,6 +562,8 @@ impl Default for Lifecycle {
         Self {
             scenes: crate::observation::ActorScenes::default(),
             recovery_contexts: crate::recovery_context::RecoveryContexts::default(),
+            discovery_contexts: crate::discovery::DiscoveryContexts::default(),
+            discovery_started: false,
             points: BTreeMap::new(),
             next_point: 1,
             frozen: BTreeSet::new(),
@@ -697,6 +724,19 @@ impl Game {
 
     pub(crate) fn region_frozen(&self, region: RegionId) -> bool {
         !self.lifecycle.frozen.is_empty() && self.lifecycle.frozen.contains(&region)
+    }
+
+    pub(crate) fn knows_concealed_feature(&self, feature: tor_world::ConcealedFeatureId) -> bool {
+        match feature {
+            tor_world::ConcealedFeatureId::Door(id) => {
+                self.world.door_location(id).is_some()
+                    || self.lifecycle.directory.doors.contains_key(&id)
+            }
+            tor_world::ConcealedFeatureId::Trap(id) => {
+                self.world.trap_location(id).is_some()
+                    || self.lifecycle.directory.traps.contains_key(&id)
+            }
+        }
     }
 
     pub(crate) fn actor_frozen(&self, id: ActorId) -> bool {
@@ -1566,6 +1606,12 @@ impl Game {
                 .any(|i| i.0 == 0 || self.items.contains_key(i) || directory.items.contains_key(i))
             || identities.doors.iter().any(|d| {
                 *d == 0 || self.world.door_location(*d).is_some() || directory.doors.contains_key(d)
+            })
+            || identities.traps.iter().any(|trap| {
+                *trap == 0
+                    || *trap == u64::MAX
+                    || self.world.trap_location(*trap).is_some()
+                    || directory.traps.contains_key(trap)
             });
         let next = |ids: &mut dyn Iterator<Item = u64>, current: u64| {
             ids.max().map_or(Some(current), |max| {
@@ -1613,6 +1659,10 @@ impl Game {
             let region = definition.region.id;
             let invalid = TransitionError::InvalidRecord(region);
             if !record.valid_contents(region, next.tick)
+                || record
+                    .world
+                    .traps()
+                    .any(|trap| !crate::trap_kind_valid(next.content.rules(), &trap.kind))
                 || record.stamps.values().any(|stamp| *stamp != 0)
                 || record.identities() != definition.identities
             {
@@ -1625,6 +1675,56 @@ impl Game {
                     definition.identities,
                 )
                 .map_err(|_| invalid)?;
+            } else {
+                // A compact source can declare its structural region before
+                // bounded generation chooses concealed features. Refine only
+                // an untouched unbuilt declaration, never existing entities or
+                // a record that has already been published.
+                let previous = next
+                    .lifecycle
+                    .directory
+                    .by_region
+                    .get(&region)
+                    .cloned()
+                    .unwrap_or_default();
+                let wanted = &definition.identities;
+                if !next.lifecycle.unbuilt.contains(&region)
+                    || previous.actors != wanted.actors
+                    || previous.items != wanted.items
+                    || (!previous.doors.is_empty() && previous.doors != wanted.doors)
+                    || (!previous.traps.is_empty() && previous.traps != wanted.traps)
+                    || wanted.doors.iter().any(|id| {
+                        *id == 0
+                            || *id == u64::MAX
+                            || next.world.door_location(*id).is_some()
+                            || next
+                                .lifecycle
+                                .directory
+                                .doors
+                                .get(id)
+                                .is_some_and(|owner| *owner != region)
+                    })
+                    || wanted.traps.iter().any(|id| {
+                        *id == 0
+                            || *id == u64::MAX
+                            || next.world.trap_location(*id).is_some()
+                            || next
+                                .lifecycle
+                                .directory
+                                .traps
+                                .get(id)
+                                .is_some_and(|owner| *owner != region)
+                    })
+                {
+                    return Err(invalid);
+                }
+                if let Some(maximum) = wanted.doors.iter().next_back() {
+                    next.next_door_id = next
+                        .next_door_id
+                        .max(maximum.checked_add(1).ok_or(invalid)?);
+                }
+                next.lifecycle.directory.remove_region(region);
+                next.lifecycle.directory.insert(region, wanted.clone());
             }
             if !next.lifecycle.unbuilt.remove(&region)
                 || next.world.known_region(region) != Some(record.world.region())
@@ -1721,6 +1821,7 @@ impl Game {
                 actors: actors.iter().copied().collect(),
                 items: items.iter().copied().collect(),
                 doors: world.door_ids().collect(),
+                traps: world.trap_ids().collect(),
             },
         );
         let mut record = RegionRecord {
@@ -1842,6 +1943,7 @@ impl Game {
             || !self.intentions_valid()
             || !self.physics_valid()
             || !self.loaded_holds_valid()
+            || !self.loaded_traps_valid()
         {
             return Err(TransitionError::InvalidRecord(first));
         }
@@ -1970,6 +2072,10 @@ impl Game {
             };
             expected.insert(*region, record.identities());
             if !record.valid_contents(*region, self.tick)
+                || record
+                    .world
+                    .traps()
+                    .any(|trap| !crate::trap_kind_valid(self.content.rules(), &trap.kind))
                 || !record
                     .explored_maps
                     .values()
@@ -2026,6 +2132,10 @@ impl Game {
             && l.directory.actors.values().all(detached)
             && l.directory.items.values().all(detached)
             && l.directory.doors.values().all(detached)
+            && l.directory.traps.values().all(detached)
+            && l.directory.traps.keys().all(|trap| {
+                *trap != 0 && *trap != u64::MAX && self.world.trap_location(*trap).is_none()
+            })
             && l.directory
                 .actors
                 .keys()
@@ -2880,6 +2990,88 @@ mod tests {
     }
 
     #[test]
+    fn generated_feature_refinement_is_atomic_and_cannot_steal_reserved_identity() {
+        use tor_world::{Extent, World};
+        let make = |region: u64, door: u64, trap: u64| {
+            let mut world = World::new(vec![], vec![]).unwrap();
+            world
+                .add_chamber(Region {
+                    id: RegionId(region),
+                    name: "features".into(),
+                    bounds: Extent::new(5, 5, 2).unwrap(),
+                })
+                .unwrap();
+            let at = Location {
+                region: RegionId(region),
+                position: Position { x: 2, y: 2, z: 0 },
+            };
+            let mut template = Game::new(world, 1, crate::test_creatures::content());
+            template.place_authored_door(door, at, false, 2).unwrap();
+            template
+                .conceal_door(at, tor_world::Concealment { dc: 12 })
+                .unwrap();
+            template
+                .place_trap(
+                    at,
+                    tor_world::Trap {
+                        id: trap,
+                        dc: 12,
+                        kind: tor_world::TrapKind::Rust {
+                            slot: "body_armor".into(),
+                            amount: 1,
+                        },
+                    },
+                )
+                .unwrap();
+            let record = template.into_region_record(RegionId(region)).unwrap();
+            (
+                UnbuiltRegion {
+                    region: Region {
+                        id: RegionId(region),
+                        name: "features".into(),
+                        bounds: Extent::new(5, 5, 2).unwrap(),
+                    },
+                    chamber: true,
+                    identities: record.identities(),
+                },
+                record,
+            )
+        };
+        let mut game = Game::new(
+            World::new(vec![], vec![]).unwrap(),
+            1,
+            crate::test_creatures::content(),
+        );
+        for id in [1, 2] {
+            game.add_unbuilt_region(
+                Region {
+                    id: RegionId(id),
+                    name: "features".into(),
+                    bounds: Extent::new(5, 5, 2).unwrap(),
+                },
+                true,
+                RegionIdentities::default(),
+            )
+            .unwrap();
+        }
+        let mut store = MemoryRecords::default();
+        let before = game.clone();
+        assert!(game
+            .register_generated_regions(vec![make(1, 10, 20), make(2, 10, 21)], &mut store)
+            .is_err());
+        assert_eq!(game, before);
+        assert_eq!(store.len(), 0);
+        game.register_generated_regions(vec![make(1, 10, 20), make(2, 11, 21)], &mut store)
+            .unwrap();
+        assert!(game.lifecycle_state_valid());
+        assert_eq!(store.len(), 2);
+        assert_eq!(game.lifecycle.directory.traps[&20], RegionId(1));
+        assert_eq!(game.next_door_id, 12);
+        // Detached records retain metadata; reopening cannot reroll a generated choice.
+        assert!(game.detached_records_valid(&mut store));
+    }
+
+    #[test]
     fn invalid_generated_batch_does_not_publish_any_member() {
         let (template, mut game, _) = unbuilt_corridor();
         let mut source = TemplateSource {
@@ -3161,6 +3353,7 @@ mod tests {
             actors: BTreeSet::from([ActorId(actor)]),
             items: BTreeSet::from([ItemId(item)]),
             doors: BTreeSet::from([door]),
+            traps: BTreeSet::from([door + 100]),
         };
         let mut directory = Directory::default();
         directory.insert(RegionId(1), identities(2, 3, 4));
@@ -3296,6 +3489,7 @@ mod explored_map_tests {
             place_hint: false,
             stairs_up: false,
             stairs_down: true,
+            trap: None,
             door: None,
             ground_items: Vec::new(),
         })

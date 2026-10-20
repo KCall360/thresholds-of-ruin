@@ -1012,7 +1012,7 @@ fn state() -> ClientState {
         "state":{"wizard_game":false,"revision":"3","observation":{"linked_holds":[],
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":1,"y":1,"z":0},
 
-            "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
+            "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"trap":null,"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
             "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true
@@ -1074,6 +1074,7 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
     other_level.visible_cells.push(CellView {
         lit: true,
         asset: None,
+        trap: None,
         door: None,
         material: "stone".into(),
         key: "wall".into(),
@@ -2544,4 +2545,115 @@ fn fitted_status_preserves_paused_state_with_large_counters() {
             "{rows:?}"
         );
     }
+}
+
+#[test]
+fn discovered_trap_draws_and_selected_adjacent_look_examines_without_moving() {
+    let target = TrapTarget::from_digest([61; 32]);
+    let mut snapshot = state().snapshot();
+    let o = &mut Arc::make_mut(&mut snapshot.state).observation;
+    o.ground_items.clear();
+    let position = Position {
+        x: o.position.x + 1,
+        y: o.position.y,
+        z: o.position.z,
+    };
+    let cell = o
+        .visible_cells
+        .iter_mut()
+        .find(|cell| cell.position == position)
+        .unwrap();
+    cell.trap = Some(TrapView {
+        id: target,
+        family: None,
+        reachable: true,
+    });
+    assert_eq!(
+        glyph_at(o, &Default::default(), position.x, position.y),
+        '^'
+    );
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::Look }), Effect::None);
+    assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
+    assert!(
+        matches!(super::request(app.input(Input::Key { key: Key::Enter })),
+        Some(Request::Command { command: Command::Act { action: Action::ExamineTrap { trap }, .. }, .. }) if trap == target)
+    );
+    assert!(app.look_cursor.is_none());
+}
+
+#[test]
+fn distant_or_identified_trap_look_never_creates_an_examination_action() {
+    let target = TrapTarget::from_digest([62; 32]);
+    for reachable in [false, true] {
+        let mut snapshot = state().snapshot();
+        let o = &mut Arc::make_mut(&mut snapshot.state).observation;
+        o.ground_items.clear();
+        let position = Position {
+            x: o.position.x + 1,
+            y: o.position.y,
+            z: o.position.z,
+        };
+        o.visible_cells
+            .iter_mut()
+            .find(|cell| cell.position == position)
+            .unwrap()
+            .trap = Some(TrapView {
+            id: target,
+            family: reachable.then_some(TrapFamily::Rust),
+            reachable,
+        });
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+        app.ready();
+        assert_eq!(app.input(Input::Key { key: Key::Look }), Effect::None);
+        assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
+        assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+    }
+}
+
+#[test]
+fn running_stops_before_a_known_trap_even_when_an_item_covers_its_glyph() {
+    let mut snapshot = state().snapshot();
+    let o = &mut Arc::make_mut(&mut snapshot.state).observation;
+    let position = Position {
+        x: o.position.x + 1,
+        ..o.position
+    };
+    o.ground_items[0].position = position;
+    o.visible_cells
+        .iter_mut()
+        .find(|cell| cell.position == position)
+        .unwrap()
+        .trap = Some(TrapView {
+        id: TrapTarget::from_digest([63; 32]),
+        family: None,
+        reachable: true,
+    });
+    assert_eq!(
+        glyph_at(o, &Default::default(), position.x, position.y),
+        '('
+    );
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::RunRight }), Effect::None);
+    assert!(app.running.is_none());
+    assert!(matches!(
+        super::request(app.input(Input::Key { key: Key::Right })),
+        Some(Request::Command {
+            command: Command::Act {
+                action: Action::Move {
+                    direction: Direction::East
+                },
+                ..
+            },
+            ..
+        })
+    ));
 }

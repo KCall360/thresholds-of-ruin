@@ -14,7 +14,7 @@ fn definitions(
         .iter()
         .find(|(_, group)| group.depth == depth)
         .expect("fixture depth");
-    generation_recipe::materialize(
+    generation_recipe::materialize_with_feature_bases(
         name,
         group,
         &package.manifest.generation_recipes[&group.recipe],
@@ -24,6 +24,8 @@ fn definitions(
             .map(|id| (*package.region_def(*id).unwrap()).clone())
             .collect(),
         42,
+        // This helper describes the feature-free explicit-grid geometry fixture.
+        generation_recipe::FeatureBases { doors: 1, traps: 1 },
     )
     .unwrap()
     .regions

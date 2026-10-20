@@ -64,6 +64,7 @@ fn request_kind(request: &Request) -> &'static str {
                 Action::Read { .. } => "act.read",
                 Action::Zap { .. } => "act.zap",
                 Action::Identify { .. } => "act.identify",
+                Action::ExamineTrap { .. } => "act.examine_trap",
                 Action::Eat { .. } => "act.eat",
                 Action::SetDoor { .. } => "act.set_door",
                 Action::Move { .. } => "act.move",
@@ -105,6 +106,7 @@ const CLIENT_KINDS: &[&str] = &[
     "act.read",
     "act.zap",
     "act.identify",
+    "act.examine_trap",
     "act.eat",
     "act.use_ability",
     "act.choose_growth_source",
@@ -678,4 +680,50 @@ fn public_plan_recorded_snapshot_contains_only_paid_frozen_disclosed_fields() {
     ] {
         assert!(!encoded.contains(hidden), "paid result leaked {hidden}");
     }
+}
+
+#[test]
+fn recorded_discovery_samples_keep_presence_family_and_shared_opening_distinct() {
+    let value = samples();
+    let mut unknown = false;
+    let mut known = false;
+    let mut opened = false;
+    for message in value["server"].as_array().unwrap() {
+        if message["type"] != "snapshot" {
+            continue;
+        }
+        let observation = &message["snapshot"]["state"]["observation"];
+        let cells = observation["visible_cells"].as_array().unwrap();
+        let traps: Vec<_> = cells
+            .iter()
+            .filter_map(|cell| cell.get("trap"))
+            .filter(|trap| !trap.is_null())
+            .collect();
+        if traps.is_empty() {
+            continue;
+        }
+        round_trip::<ServerMessage>(message);
+        for trap in &traps {
+            assert_eq!(
+                trap.as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from(["family", "id", "reachable"])
+            );
+            assert!(trap["id"].as_str().unwrap().starts_with("t_"));
+            unknown |= trap["family"].is_null();
+            known |= trap["family"] == "rust";
+        }
+        opened |= traps.iter().any(|trap| trap["family"].is_null())
+            && traps.iter().any(|trap| trap["family"] == "rust")
+            && cells.iter().any(|cell| {
+                cell["door"]["name"] == "secret entrance" && cell["door"]["open"] == true
+            });
+    }
+    assert!(
+        unknown && known && opened,
+        "record actual presence, family, and shared entrance opening"
+    );
 }

@@ -70,6 +70,46 @@ class EarnedRouteControllerTests(unittest.TestCase):
         controller.observe(current, advancement or overview(character))
         return controller, controller.choose(current)
 
+    def test_disclosed_closed_route_step_opens_and_reconsiders_after_paid_command(self):
+        gate = cell("west", -1)
+        gate["door"] = {"id": "known-door", "open": False, "reachable": True}
+        current = state(cells=[cell("home"), gate])
+        controller, decision = self.choose(current)
+        self.assertEqual(decision.action,
+                         {"type": "set_door", "door": "known-door", "open": True})
+        self.assertEqual(decision.phase, "open_door")
+        self.assertEqual(controller.commands, 0, "Choosing is read-only")
+        controller.consume_command(action=decision.action)
+        self.assertEqual(controller.commands, 1, "Opening consumes one ordinary command")
+        self.assertEqual(controller.floors[1].visited, {"home"})
+        checkpoint = controller.dump()
+        restored = Controller.load(checkpoint)
+        current["observation"]["visible_cells"][1]["door"]["open"] = True
+        _, after = self.choose(current, controller=restored)
+        self.assertEqual(after.action, {"type": "move", "direction": "west"})
+        self.assertEqual(after.phase, "explore")
+        changed = state(cells=current["observation"]["visible_cells"],
+                        foes=[foe("actor:newly-visible", 0, -1)])
+        _, reconsidered = self.choose(changed, controller=Controller.load(checkpoint))
+        self.assertEqual(reconsidered.phase, "combat")
+        self.assertEqual(reconsidered.action["type"], "use_ability")
+        self.assertEqual(reconsidered.action["id"], "basic_melee")
+        self.assertEqual(reconsidered.action["invocation"]["aim"]["target"],
+                         "actor:newly-visible")
+
+    def test_disclosed_door_opening_exhausts_the_exact_one_command_budget(self):
+        gate = cell("west", -1)
+        gate["door"] = {"id": "known-door", "open": False, "reachable": True}
+        current = state(cells=[cell("home"), gate])
+        controller, decision = self.choose(current, controller=Controller(1, first_limit=1))
+        self.assertEqual(decision.action,
+                         {"type": "set_door", "door": "known-door", "open": True})
+        controller.consume_command(action=decision.action)
+        current["observation"]["visible_cells"][1]["door"]["open"] = True
+        _, after = self.choose(current, controller=Controller.load(controller.dump()))
+        self.assertIsNone(after.action)
+        self.assertEqual(after.outcome, "censored_action_budget")
+
     def test_health_threshold_uses_exact_current_wire_decimals(self):
         current = state(hp=2**53 + 1, maximum=4 * (2**53 + 1), foes=[foe("actor:f", 1, 0)])
         _, decision = self.choose(current)

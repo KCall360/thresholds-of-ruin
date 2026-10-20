@@ -7,7 +7,7 @@ The package selects the canonical K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/
 The L/N/O theft/gold additions still need the qualification described below.
 Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
-The calibrated depth curve, traps and full survival loop remain unfinished. The Amulet
+The calibrated depth curve and full survival loop remain unfinished. The Amulet
 and intentional surface escape provide the retrieval/ascent objective. The default launch still selects the separate
 [first dungeon](gameplay.md).
 
@@ -387,12 +387,41 @@ ends the run immediately without advancing world time or giving dungeon actors
 another turn; internal stair travel still takes its ordinary time. Death and escape are
 persistent terminal outcomes; restarting does not grant a new Amulet or victory.
 
+## Searching, concealed entrances and traps
+
+Perception uses Awareness and the shared 3d6 check. When a concealed feature first
+enters genuine observation range, your character makes one harder passive attempt
+(the same DC with one disadvantage). Leaving, reconnecting and reloading do not
+retry it. Sleep or incapacity does not spend that first opportunity.
+
+Use **Search** repeatedly when needed: each attempt pays its normal 50 ticks of
+preparation and 50 ticks of recovery, including ordinary time and hunger costs.
+It still reveals adjacent object guises without a discovery roll. A worn ring of
+searching runs the active discovery check free once per 100 actor-active ticks;
+two searching rings do not double that cadence.
+
+Finding a secret entrance reveals it only to that character. **Open** changes the
+shared physical world; until opened, the entrance blocks sight and movement.
+Ordinary room entrances remain doorless.
+
+Finding a trap reveals its presence, not its mechanism or a safe route across it.
+Text **examine trap**, or selecting a discovered adjacent trap with ASCII **;**
+then **Enter**, learns its family without spending time. This explicit action is
+unavailable during pending work; merely viewing the map never examines it.
+Rust traps corrode susceptible worn armor; sleeping gas uses the shared timed
+Sleep effect. Discovery does not disarm either. Actual new ground contact can
+trigger a trap, including a return visit; standing still or loading cannot.
+Genuine flight avoids ground contact, not collision imposed by the world.
+
+Placement, discovery DCs and effect strengths/durations are provisional authored
+choices, not an approved numerical balance target.
+
 ## Scope and verification
 
 All starting stats, equipment bonuses, foe timing, quantities, XP policy and the
 depth-selected population are provisional TOR tuning. A successful seeded
 walkthrough is behavioral coverage, not evidence of balanced Warrior/Mage runs. Bow/arrows,
-traps, wandering populations, calibrated food pressure and complete
+further trap families, wandering populations, calibrated food pressure and complete
 run balancing remain in the [Rogue plan](../plans/rogue.md).
 
 Shared engine support and playable content have different acceptance boundaries.

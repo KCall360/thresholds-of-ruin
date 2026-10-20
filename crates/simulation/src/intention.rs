@@ -905,6 +905,7 @@ impl Game {
                         }
                         IntentionWork::Action(Action::TouchApparentObject { subject, quantity }) => subject.0 > 0 && subject.0 < self.next_actor_id && quantity.is_none_or(|n| n == 1),
                         IntentionWork::Action(Action::Escape { hold }) => hold.0 > 0 && hold.0 < self.next_hold_id,
+                        IntentionWork::Action(Action::ExamineTrap { trap }) => trap != 0,
                         IntentionWork::Action(Action::SetDoor { door, .. }) => door != 0,
                         IntentionWork::Action(Action::Identify {choice,item})=>self.intention_issued(choice)&&item.is_none_or(|id|id.0>0&&id.0<self.next_item_id),
                         IntentionWork::Action(Action::Equip { item, slot }) => {

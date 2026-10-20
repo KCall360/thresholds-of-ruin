@@ -52,6 +52,9 @@ pub enum Action {
         choice: tor_simulation::IntentionId,
         item: Option<u64>,
     },
+    ExamineTrap {
+        trap: u64,
+    },
     SetDoor {
         door: u64,
         open: bool,

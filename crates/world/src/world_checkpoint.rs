@@ -22,6 +22,8 @@ fn same_geometry(a: &World, b: &World) -> bool {
     // checkpoint sharing decision, rather than silently coalescing distinct worlds.
     let World {
         doors: _,
+        secret_doors,
+        traps,
         regions,
         passages,
         rotations,
@@ -38,7 +40,9 @@ fn same_geometry(a: &World, b: &World) -> bool {
         absent,
         sight: _,
     } = a;
-    regions == &b.regions
+    secret_doors == &b.secret_doors
+        && traps == &b.traps
+        && regions == &b.regions
         && passages == &b.passages
         && rotations == &b.rotations
         && physical_vertical == &b.physical_vertical

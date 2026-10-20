@@ -60,10 +60,13 @@ pub(crate) fn inputs(
                     stairs_up: up.contains(&location),
                     stairs_down: down.contains(&location),
                     door: cell.door.map(|d| s::MapDoorAppearance {
-                        name: crate::adapt::WOODEN_DOOR_NAME.into(),
-                        description: crate::adapt::WOODEN_DOOR_DESCRIPTION.into(),
+                        name: crate::adapt::door_appearance(cell.door_secret).0.into(),
+                        description: crate::adapt::door_appearance(cell.door_secret).1.into(),
                         open: d.open,
                         asset: door,
+                    }),
+                    trap: cell.trap.as_ref().map(|trap| s::MapTrapAppearance {
+                        family: trap.family,
                     }),
                     ground_items: items.remove(&location).unwrap_or_default(),
                 },
@@ -96,6 +99,9 @@ pub(crate) fn wire_cell(
             description: d.description.clone(),
             open: d.open,
             asset: d.asset.clone(),
+        }),
+        trap: a.trap.as_ref().map(|trap| p::MapTrapAppearance {
+            family: trap.family.map(crate::adapt::trap_family),
         }),
         ground_items: a
             .ground_items

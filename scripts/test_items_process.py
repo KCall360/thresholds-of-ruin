@@ -156,14 +156,14 @@ class ItemProcesses(ProcessTestCase):
 
     def test_ascii_quantity_picker_and_drop_present_authoritative_counts(self):
         p = self.launch('tor-client-ascii', ['--connect', self.address, '--automation'])
-        self.ascii_frame(p, lambda f: f['state'] is not None and not f['busy'])
+        self.ascii_frame(p, lambda f: f['state'] is not None and not f['busy'] and f['can_admit_intention'])
         self.key(p, 'pickup')
         p.child.stdin.write(json.dumps({'type':'text','text':'3'}) + '\n'); p.child.stdin.flush()
-        taken = self.key(p, 'enter')
+        taken = self.key(p, 'enter', wait_for_admission=True)
         self.assertEqual(taken['state']['observation']['inventory'][0]['quantity'], '3')
         self.key(p, 'drop')
         p.child.stdin.write(json.dumps({'type':'text','text':'2'}) + '\n'); p.child.stdin.flush()
-        dropped = self.key(p, 'enter')
+        dropped = self.key(p, 'enter', wait_for_admission=True)
         self.assertEqual(dropped['state']['observation']['inventory'][0]['quantity'], '1')
         self.assertNotIn('healing', json.dumps(dropped))
         self.assertTrue(dropped['window_open'])

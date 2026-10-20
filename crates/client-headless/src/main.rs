@@ -358,6 +358,7 @@ mod tests {
                 stairs_up: false,
                 stairs_down: false,
                 place_hint: false,
+                trap: None,
                 door: None,
                 material: "stone".into(),
                 asset: None,

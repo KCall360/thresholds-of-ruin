@@ -260,7 +260,7 @@ it with no themes. These are content identifiers, not client asset disclosures.
 
 Each region file holds one region's fields at its top level. Regions have stable positive numeric `id`,
 `name`, `size = [width, depth, height]`, and optional `chamber`, `zone`,
-`anchors`, `walls`, `openings`, `places`, `portals`, `doors`, `items`, and `actors`.
+`anchors`, `walls`, `openings`, `places`, `portals`, `doors`, `traps`, `items`, and `actors`.
 All positions are region-local integer `[x, y, z]` triples. Chambers add a finite
 stone shell. Walls/openings explicitly alter cells. Named anchors are single-cell
 authoring references such as `1/start`; they are separate from disclosed place
@@ -624,10 +624,37 @@ anchors. The current group does not read the destination source or generate its
 room early. See [generation recipes and groups](generation.md) for the
 preparation, publication, and independent streaming contracts.
 
-Actors, items, and doors have positive numeric IDs, unique within their entity
+Actors, items, doors and traps have positive numeric IDs, unique within their entity
 kind. Array order does not assign identities. Doors specify `at`, `open`, and `height` (default 1). Validation rejects a door
 that doesn't fit, or that leaves its walled doorway open above it; see
-[doors](movement.md).
+[doors](movement.md). An optional `concealment = { dc = 12 }` makes the physical
+door a secret entrance. It remains an ordinary shared opaque/colliding closure;
+discovery never creates observer-specific geometry.
+
+A trap specifies `id`, `at`, `dc` and a typed `kind` payload, for example:
+
+```toml
+[[traps]]
+id = 1
+at = [2, 2, 0]
+dc = 12
+kind = { kind = "rust", slot = "body_armor", amount = 1 }
+
+[[traps]]
+id = 2
+at = [4, 2, 0]
+dc = 12
+kind = { kind = "sleeping_gas", condition = "rogue.sleep", duration = 200 }
+```
+
+The location must be a nonsolid cell supported by a real solid local downward
+face in the same region, not an abstract stair destination or a remote floor across
+a vertical aperture. Horizontal and rotated traversal into the trap remains valid. Trap references are checked against the
+pinned content during compilation and loaded/detached save restoration. Presence
+and family knowledge belong to each observer; the definition itself never crosses
+the ordinary client boundary. See [feature generation](generation.md#secret-entrances-and-hidden-traps)
+for bounds, independent streams and provisional Rogue defaults.
+
 Items specify `at`, `name` or an `archetype`, and optional `carried_by`. A carried
 item is authored in the region file where its carrier starts, so building a
 region reads only that region's file and its neighbours'. Archetype
@@ -667,7 +694,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v48"
+import = "interactions-v49"
 
 [[overrides]]
 op = "set"

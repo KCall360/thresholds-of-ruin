@@ -35,6 +35,8 @@ pub struct GridRoomsPreset {
     pub room_height: [u32; 2],
     pub extra_connections: [u32; 2],
     pub lighting: Option<RoomLighting>,
+    pub secret_entrances: Option<SecretEntrances>,
+    pub hidden_traps: Option<HiddenTraps>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -42,6 +44,24 @@ pub struct GridRoomsPreset {
 pub struct RoomLighting {
     pub darkness_roll: u32,
     pub darkness_start: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecretEntrances {
+    pub chance_per_mille: u32,
+    pub maximum: u32,
+    pub dc: i32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HiddenTraps {
+    pub count: [u32; 2],
+    pub dc: i32,
+    pub rust_slot: String,
+    pub rust_amount: u32,
+    pub sleep_condition: String,
+    pub sleep_duration: u64,
 }
 
 impl GridRoomsPreset {
@@ -78,8 +98,30 @@ impl GridRoomsPreset {
                 },
             ));
         }
+        if let Some(config) = &self.secret_entrances {
+            stages.push((
+                "secret_entrances",
+                Operation::SecretEntrances {
+                    config: config.clone(),
+                },
+            ));
+        }
+        if let Some(config) = &self.hidden_traps {
+            stages.push((
+                "hidden_traps",
+                Operation::HiddenTraps {
+                    config: config.clone(),
+                },
+            ));
+        }
         let recipe = Recipe {
-            version: if self.lighting.is_some() { 2 } else { 1 },
+            version: if self.secret_entrances.is_some() || self.hidden_traps.is_some() {
+                3
+            } else if self.lighting.is_some() {
+                2
+            } else {
+                1
+            },
             stages: stages
                 .into_iter()
                 .map(|(id, operation)| Stage {
@@ -128,6 +170,12 @@ pub enum Operation {
         darkness_roll: u32,
         darkness_start: u32,
     },
+    SecretEntrances {
+        config: SecretEntrances,
+    },
+    HiddenTraps {
+        config: HiddenTraps,
+    },
 }
 
 fn fail(message: impl AsRef<str>) -> Failure {
@@ -155,13 +203,15 @@ pub(crate) fn check_group(group: &GenerationGroup) -> Result<(), Failure> {
 
 pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
     if !((recipe.version == 1 && recipe.stages.len() == 6)
-        || (recipe.version == 2 && recipe.stages.len() == 7))
+        || (recipe.version == 2 && recipe.stages.len() == 7)
+        || (recipe.version == 3 && (7..=9).contains(&recipe.stages.len())))
     {
         return Err(fail(
-            "Recipe requires six ordered stages in version 1, seven in version 2",
+            "Recipe requires ordered geometry, then optional lighting, secret entrances and traps",
         ));
     }
     let mut names = BTreeSet::new();
+    let mut extra_order = 0;
     for (position, stage) in recipe.stages.iter().enumerate() {
         if stage.version != 1
             || stage.id.is_empty()
@@ -180,7 +230,34 @@ pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
             | (Operation::Corridors, 4)
             | (Operation::Stairs, 5) => true,
             (Operation::RoomLighting { darkness_roll, .. }, 6) => {
+                extra_order = 1;
                 (1..=10_000).contains(darkness_roll)
+            }
+            (Operation::SecretEntrances { config }, n)
+                if n >= 6 && recipe.version == 3 && extra_order < 2 =>
+            {
+                extra_order = 2;
+                config.chance_per_mille <= 1000
+                    && config.maximum <= 64
+                    && tor_world::Concealment { dc: config.dc }.valid()
+            }
+            (Operation::HiddenTraps { config }, n)
+                if n >= 6 && recipe.version == 3 && extra_order < 3 =>
+            {
+                extra_order = 3;
+                config.count[0] <= config.count[1]
+                    && config.count[1] <= 64
+                    && tor_world::Concealment { dc: config.dc }.valid()
+                    && tor_world::TrapKind::Rust {
+                        slot: config.rust_slot.clone(),
+                        amount: config.rust_amount,
+                    }
+                    .valid()
+                    && tor_world::TrapKind::SleepingGas {
+                        condition: config.sleep_condition.clone(),
+                        duration: config.sleep_duration,
+                    }
+                    .valid()
             }
             (Operation::Rooms { width, height }, 2) => {
                 width[0] >= 3
@@ -396,12 +473,31 @@ pub struct GeneratedGroup {
     pub rooms: Vec<tor_simulation::floor_activation::PreparedRoomGroup>,
 }
 
+#[cfg(test)]
 pub fn materialize(
     identity: &str,
     group: &GenerationGroup,
     recipe: &Recipe,
     definitions: Vec<RegionDef>,
     seed: u64,
+) -> Result<GeneratedGroup, Failure> {
+    materialize_with_feature_bases(
+        identity,
+        group,
+        recipe,
+        definitions,
+        seed,
+        FeatureBases { doors: 1, traps: 1 },
+    )
+}
+
+pub fn materialize_with_feature_bases(
+    identity: &str,
+    group: &GenerationGroup,
+    recipe: &Recipe,
+    definitions: Vec<RegionDef>,
+    seed: u64,
+    feature_bases: FeatureBases,
 ) -> Result<GeneratedGroup, Failure> {
     check(recipe)?;
     check_group(group)?;
@@ -535,7 +631,11 @@ pub fn materialize(
             }
         }
         run.stairs(def, &room_cells[slot])?;
-        if let Some(stage) = recipe.stages.get(6) {
+        if let Some(stage) = recipe
+            .stages
+            .get(6)
+            .filter(|stage| matches!(stage.operation, Operation::RoomLighting { .. }))
+        {
             let mut rng = stream(seed, identity, group, recipe, stage, &format!("room/{id}"))?;
             def.lit = false;
             def.lighting.clear();
@@ -593,6 +693,17 @@ pub fn materialize(
             }
         }
     }
+    place_concealed_features(
+        &run,
+        &open,
+        &room_cells,
+        &mut definitions,
+        size,
+        feature_bases,
+    )?;
+    // Opening every discoverable closure restores exactly this connected carving;
+    // features never erase a corridor, stair or room from the required route graph.
+    validate_carving(&open, [width, height, size[2]])?;
     let rooms = group
         .members
         .iter()
@@ -681,6 +792,8 @@ mod tests {
             room_height: [3, 3],
             extra_connections: [0, 0],
             lighting: None,
+            secret_entrances: None,
+            hidden_traps: None,
         }
         .to_recipe()
         .unwrap();
@@ -785,6 +898,8 @@ mod tests {
             room_height: [3, 5],
             extra_connections: [0, 2],
             lighting: None,
+            secret_entrances: None,
+            hidden_traps: None,
         };
         let recipe = preset.to_recipe().unwrap();
         for seed in [0, 42, u64::MAX] {
@@ -1091,6 +1206,121 @@ mod tests {
     }
 
     #[test]
+    fn discovery_stages_preserve_geometry_stairs_and_each_others_streams() {
+        let (group, baseline_recipe, mut defs) = fixture();
+        defs[0].generate = Some(toml::from_str("generator='group'\nversion=1\ngroup='floor-1'\nrooms=[1,1]\nstair_anchors=['up','down']\n").unwrap());
+        let secret = Stage {
+            id: "secret_entrances".into(),
+            version: 1,
+            operation: Operation::SecretEntrances {
+                config: SecretEntrances {
+                    chance_per_mille: 1000,
+                    maximum: 64,
+                    dc: 12,
+                },
+            },
+        };
+        let traps = Stage {
+            id: "hidden_traps".into(),
+            version: 1,
+            operation: Operation::HiddenTraps {
+                config: HiddenTraps {
+                    count: [8, 8],
+                    dc: 12,
+                    rust_slot: "body_armor".into(),
+                    rust_amount: 1,
+                    sleep_condition: "rogue.sleep".into(),
+                    sleep_duration: 200,
+                },
+            },
+        };
+        let mut secret_recipe = baseline_recipe.clone();
+        secret_recipe.version = 3;
+        secret_recipe.stages.push(secret.clone());
+        let mut trap_recipe = baseline_recipe.clone();
+        trap_recipe.version = 3;
+        trap_recipe.stages.push(traps.clone());
+        let mut both_recipe = secret_recipe.clone();
+        both_recipe.stages.push(traps);
+        let mut doors = 0;
+        for seed in [0, 42, u64::MAX] {
+            let baseline =
+                materialize("floor-1", &group, &baseline_recipe, defs.clone(), seed).unwrap();
+            let secrets =
+                materialize("floor-1", &group, &secret_recipe, defs.clone(), seed).unwrap();
+            let traps = materialize("floor-1", &group, &trap_recipe, defs.clone(), seed).unwrap();
+            let both = materialize("floor-1", &group, &both_recipe, defs.clone(), seed).unwrap();
+            assert_eq!(both.values().map(|r| r.traps.len()).sum::<usize>(), 8);
+            let mut door_ids = BTreeSet::new();
+            let mut trap_ids = BTreeSet::new();
+            for id in &group.members {
+                assert_eq!(both[id].walls, baseline[id].walls);
+                assert_eq!(both[id].anchors, baseline[id].anchors);
+                assert_eq!(
+                    serde_json::to_value(&both[id].doors).unwrap(),
+                    serde_json::to_value(&secrets[id].doors).unwrap()
+                );
+                assert_eq!(
+                    serde_json::to_value(&both[id].traps).unwrap(),
+                    serde_json::to_value(&traps[id].traps).unwrap()
+                );
+                for door in &both[id].doors {
+                    assert!(!door.open && door.height == 2 && door.concealment.is_some());
+                    assert!(!both[id].walls.contains(&door.at));
+                    assert!(!both[id].anchors.values().any(|at| *at == door.at));
+                    assert!(door_ids.insert(door.id));
+                    doors += 1;
+                }
+                for trap in &both[id].traps {
+                    assert!(!both[id].walls.contains(&trap.at));
+                    assert!(!both[id].anchors.values().any(|at| *at == trap.at));
+                    assert!(!both[id].doors.iter().any(|d| d.at == trap.at));
+                    assert!(trap_ids.insert(trap.id));
+                }
+            }
+            // The all-open graph is the unchanged baseline carving, so required
+            // routes cannot be removed by feature placement.
+            assert!(both
+                .values()
+                .flat_map(|r| &r.doors)
+                .all(|door| door.concealment.is_some()));
+        }
+        assert!(doors > 0, "test must exercise actual opaque entrances");
+    }
+
+    #[test]
+    fn hidden_trap_minimum_cannot_silently_exceed_room_capacity() {
+        let recipe = GridRoomsPreset {
+            version: 1,
+            room_width: [3, 3],
+            room_height: [3, 3],
+            extra_connections: [0, 0],
+            lighting: None,
+            secret_entrances: None,
+            hidden_traps: Some(HiddenTraps {
+                count: [10, 10],
+                dc: 12,
+                rust_slot: "body_armor".into(),
+                rust_amount: 1,
+                sleep_condition: "rogue.sleep".into(),
+                sleep_duration: 200,
+            }),
+        }
+        .to_recipe()
+        .unwrap();
+        let group = GenerationGroup {
+            depth: 1,
+            recipe: "small".into(),
+            grid: [1, 1],
+            members: vec![1],
+        };
+        let definition =
+            toml::from_str("id=1\nname='small'\nsize=[5,5,2]\nchamber=true\n").unwrap();
+        let error = materialize("small", &group, &recipe, vec![definition], 42).unwrap_err();
+        assert!(error.message.contains("capacity"), "{}", error.message);
+    }
+
+    #[test]
     fn stair_positions_are_isolated_from_graph_and_corridor_streams() {
         let (group, mut recipe, mut defs) = fixture();
         defs[0].generate = Some(toml::from_str("generator='group'\nversion=1\ngroup='floor-1'\nrooms=[1,1]\nstair_anchors=['up','down']\n").unwrap());
@@ -1179,3 +1409,8 @@ mod tests {
         assert!(materialize("floor-1", &group, &recipe, defs, 42).is_err());
     }
 }
+
+#[path = "generation_features.rs"]
+mod features;
+use features::place_concealed_features;
+pub use features::{FeatureBases, FEATURE_IDENTITY_STRIDE};

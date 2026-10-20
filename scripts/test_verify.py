@@ -372,6 +372,7 @@ class Tiers(unittest.TestCase):
     def test_tool_tests_exclude_process_tests(self):
         steps = {n: c for n, c, _ in verify.plan("quick", set(), [])}
         self.assertIn("test_verify", steps["python-tools"])
+        self.assertIn("test_rogue_magic_receipts", steps["python-tools"])
         self.assertFalse(any(arg.endswith("process") for arg in steps["python-tools"]))
 
 

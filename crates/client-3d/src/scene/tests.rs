@@ -196,6 +196,7 @@ fn app(model: CreatureModel) -> App {
         position: actor.position,
         wall: false,
         material: String::new(),
+        trap: None,
         door: None,
         asset: None,
         stairs_up: false,
@@ -421,6 +422,7 @@ fn remembered_terrain_builds_dim_geometry_without_decorative_lighting() {
         place_hint: false,
         stairs_up: false,
         stairs_down: false,
+        trap: None,
         door: None,
         ground_items: vec![],
     };

@@ -55,7 +55,7 @@ fn history_actions_preserve_the_tagged_wire_shape_and_validate_event_payload() {
 
 #[test]
 fn equipment_magic_commands_and_disclosures_require_protocol_52() {
-    assert_eq!(PROTOCOL_VERSION, 56);
+    assert_eq!(PROTOCOL_VERSION, 57);
 }
 
 #[test]
@@ -452,7 +452,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v56.json"
+            "/tests/fixtures/wire-v57.json"
         ))
         .expect("regenerate current wire samples"),
     )

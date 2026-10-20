@@ -303,6 +303,7 @@ impl Game {
         ai: Option<(crate::ai::Ai, crate::behavior::Behavior)>,
     ) -> Result<ActionOutcome, GameError> {
         let mut candidate = self.clone();
+        candidate.initialize_discovery()?;
         let id = prepared.actor;
         candidate.begin_action_boundary(id)?;
         candidate.redirect_confused_movement(&mut prepared);
@@ -315,6 +316,8 @@ impl Game {
         }
         candidate.sync_actor_lifecycle(id)?;
         let outcome = candidate.finish_action(prepared)?;
+        candidate.reconcile_passive_discovery()?;
+        candidate.settle_periodic_searches()?;
         candidate.seal_participant_events()?;
         *self = candidate;
         Ok(outcome)
@@ -549,6 +552,19 @@ impl Game {
         let mut touches = Vec::new();
         let mut requested_destination = None;
         let (kind, duration) = match action.clone() {
+            Action::ExamineTrap { trap } => {
+                let location = self
+                    .world
+                    .trap_location(trap)
+                    .ok_or(GameError::ItemUnavailable)?;
+                if actor.pending.is_some()
+                    || !self.feature_known(id, tor_world::ConcealedFeatureId::Trap(trap))
+                    || !self.trap_reachable(id, location)
+                {
+                    return Err(GameError::ItemUnavailable);
+                }
+                (OutcomeKind::TrapExamined { trap }, 0)
+            }
             Action::Identify { choice, item } => {
                 self.validate_identification(id, choice, item)?;
                 (OutcomeKind::IdentificationResolved { choice, item }, 0)
@@ -696,11 +712,10 @@ impl Game {
                 let cells: Vec<_> = self.world.door_cells(location).collect();
                 if current.open == open
                     || !self.door_reachable_from(actor.location, location)
-                    || !self
-                        .observe(id)?
-                        .visible_cells
-                        .iter()
-                        .any(|c| cells.contains(&c.location))
+                    || !self.observe(id)?.visible_cells.iter().any(|c| {
+                        cells.contains(&c.location)
+                            && c.door.is_some_and(|visible| visible.id == door)
+                    })
                     || (!open && self.door_obstructed(location, current.height))
                 {
                     return Err(GameError::DoorUnavailable);
@@ -823,6 +838,9 @@ impl Game {
             let (_, outcome) = self.prepare_player_growth_source(id, basis, source)?;
             return self.publish_actor_outcome(outcome);
         }
+        if let OutcomeKind::TrapExamined { trap } = kind {
+            return self.reveal_feature_family(id, tor_world::ConcealedFeatureId::Trap(trap));
+        }
         if let OutcomeKind::IdentificationResolved { choice, item } = kind {
             return self.resolve_identification(id, choice, item);
         }
@@ -880,6 +898,9 @@ impl Game {
                 unreachable!("Intellect expertise uses one actor publication")
             }
             OutcomeKind::Purchased { .. } => unreachable!("purchase uses one actor publication"),
+            OutcomeKind::TrapExamined { .. } => {
+                unreachable!("trap examination uses one actor publication")
+            }
             OutcomeKind::IdentificationResolved { .. } => {
                 unreachable!("identification uses one actor publication")
             }

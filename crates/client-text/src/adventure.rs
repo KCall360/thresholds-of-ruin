@@ -271,6 +271,13 @@ pub(crate) fn sights(state: &dyn ScenicView) -> Vec<(String, String, String)> {
         ));
     }
     for cell in &o.visible_cells {
+        if let Some(trap) = &cell.trap {
+            seen.push((
+                format!("trap:{}", trap.id),
+                prose::indefinite(trap.family.map_or("trap", TrapFamily::name)),
+                whereabouts(cell.position),
+            ));
+        }
         if let Some(door) = &cell.door {
             let name = if door.name.trim().is_empty() {
                 "door".to_owned()
@@ -795,6 +802,18 @@ fn contents(state: &dyn ScenicView, palette: &Palette, place: &Place) -> Option<
             .map(|s| prose::sentence(&s)),
     );
     sentences.extend(other_doors(state, place));
+    let mut traps = BTreeSet::new();
+    for cell in &state.current().observation.visible_cells {
+        if let Some(trap) = &cell.trap {
+            if traps.insert(trap.id) {
+                sentences.push(format!(
+                    "There is {} {}.",
+                    prose::indefinite(trap.family.map_or("trap", TrapFamily::name)),
+                    whereabouts(cell.position)
+                ));
+            }
+        }
+    }
     (!sentences.is_empty()).then(|| prose::paragraph(&sentences))
 }
 

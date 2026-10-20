@@ -2035,6 +2035,13 @@ impl Ruleset {
                     || (d.reach == Reach::SelfOnly && d.interaction == Interaction::NonHostile),
                 "search_self_only",
             )?;
+            bound(
+                !searches
+                    || matches!(&d.strikes, StrikeSource::Authored { strikes }
+                if matches!(strikes.as_slice(), [StrikeDef { offset: 0, unlock: None, check: None, on_success, on_failure, riders, .. }]
+                    if matches!(on_success.as_slice(), [Effect::SearchAdjacentGuises]) && on_failure.is_empty() && riders.is_empty())),
+                "search_single_check",
+            )?;
             if let StrikeSource::Authored { strikes } = &d.strikes {
                 bound(
                     !strikes.iter().any(|strike| {
@@ -2780,6 +2787,12 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
                         appearance: Some(appearance),
                     },
             } => bound(appearance.valid(), "guise_appearance")?,
+            ModifierOp::Perception {
+                value: crate::perception::PerceptionValue::PeriodicSearch { interval },
+            } => bound(
+                (1..=crate::limits::NUMERIC as u64).contains(interval),
+                "periodic_search",
+            )?,
             ModifierOp::Perception { .. }
             | ModifierOp::ActionDuration { .. }
             | ModifierOp::Locomotion { .. }
@@ -3689,8 +3702,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v48\"",
-                "id = \"interactions-v48\"\nunknown = true"
+                "id = \"interactions-v49\"",
+                "id = \"interactions-v49\"\nunknown = true"
             ))
             .is_err()
         );

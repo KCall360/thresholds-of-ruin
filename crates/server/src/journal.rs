@@ -92,6 +92,10 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Event {
+    /// Private knowledge mutation; observations disclose only the learned family.
+    TrapExamined {
+        trap: u64,
+    },
     /// Private paid-choice outcome; no item identity or charge data is public history.
     IdentificationResolved {
         choice: tor_simulation::IntentionId,

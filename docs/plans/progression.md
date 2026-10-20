@@ -122,7 +122,8 @@ without claiming final Rogue balance, and no source contributes twice for one fa
 
 - Unit: ledger invariants for every HD count and pool definition; requirement
   evaluation for each new kind; drain, restore and ledger rebuilds preserving injury,
-  cooldowns, charges and failed-knowledge locks.
+  cooldowns, charges and failed property-interpretation locks. Physical discovery
+  retains exact first-observation receipts while allowing repeated paid Search.
 - Integration: rebuilds through save and replay; arena matrix regenerated with
   the new economy.
 - Actual process: a text and headless client level up, spend a point, see the
@@ -239,7 +240,7 @@ wire/save fixtures and package certificates use the coordinated format identitie
 
 Tests must cover ordinary control/reconnect, stale previews, cancellation and
 unsafe-place rejection, one ration consumed only on committed replacement, and
-preservation of injury, cooldowns, charges, item identities and failed-knowledge
+preservation of injury, cooldowns, charges, item identities and failed property-interpretation
 locks across save and replay. No separate reservation or quantity ledger is added.
 
 ## Phase 6: Warrior and Mage slice

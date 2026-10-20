@@ -163,6 +163,7 @@ fn hydrated_terrain_is_dim_and_never_grants_live_occupants_or_door_controls() {
         place_hint: false,
         stairs_up: false,
         stairs_down: true,
+        trap: None,
         door: Some(MapDoorAppearance {
             name: "old door".into(),
             description: "stale".into(),
@@ -226,6 +227,7 @@ fn visible_terrain_uses_explicit_illumination_instead_of_visibility() {
         material: "stone".into(),
         place_hint: false,
         asset: None,
+        trap: None,
         door: None,
     };
     let bright = tor_protocol::CellView {

@@ -185,6 +185,7 @@ pub(crate) fn check(def: &RegionDef, generate: &Generate) -> Result<(), Failure>
             || !def.walls.is_empty()
             || !def.openings.is_empty()
             || !def.doors.is_empty()
+            || !def.traps.is_empty()
             || !def.items.is_empty()
             || !def.actors.is_empty()
             || !def.places.is_empty()
@@ -243,6 +244,7 @@ pub(crate) fn check(def: &RegionDef, generate: &Generate) -> Result<(), Failure>
         || !def.openings.is_empty()
         || !def.places.is_empty()
         || !def.doors.is_empty()
+        || !def.traps.is_empty()
         || !def.items.is_empty()
         || !def.actors.is_empty()
         || !def.gravity_overrides.is_empty()
@@ -664,6 +666,24 @@ mod tests {
             assert!(before.actors.is_empty());
             assert_eq!(after.actors.len(), 3);
         }
+    }
+
+    #[test]
+    fn independent_generated_sources_cannot_smuggle_authored_hidden_traps() {
+        let (mut def, generate) = cave();
+        def.traps.push(crate::scenario_package::Trap {
+            id: 1,
+            at: [1, 1, 0],
+            dc: 12,
+            kind: crate::scenario_package::TrapKind::Rust {
+                slot: "body_armor".into(),
+                amount: 1,
+            },
+        });
+        assert!(check(&def, &generate)
+            .unwrap_err()
+            .message
+            .contains("authors only"));
     }
 
     #[test]

@@ -511,6 +511,10 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
                     ("object_guise", appearance.is_some())
                 }
                 PerceptionValue::AmbushFromGuise { enabled } => ("ambush_from_guise", *enabled),
+                PerceptionValue::PeriodicSearch { interval } => {
+                    fields.push(unsigned("interval", *interval));
+                    ("periodic_search", true)
+                }
             };
             fields.push(text("capability", name));
             fields.push(text("enabled", if enabled { "true" } else { "false" }));

@@ -1,4 +1,4 @@
-# Bounded ordinary earned-route qualification, revision 5
+# Bounded ordinary earned-route qualification, revision 6
 
 Status: experimental tooling with explicit acceptance gates. A run is complete
 only when its ordinary, committed-flow, replay and source-identity checks pass. This is a fixed experimental controller, not a recommended
@@ -18,13 +18,14 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v17` retains exact package inputs and its
+`scripts/fixtures/rogue-earned-baseline-v18` retains exact package inputs and its
 current bundled-rule dependency hash. Its source-only transition advances the
 previous scenario format and bundled rules import to the current identities.
 All other authored package bytes, including anatomy, items, player kits and
-population stages, are unchanged; no utility-magic or ring loot is imported. Frozen
-v6–v16 inputs and their source/transition receipts remain immutable research
-evidence. Shared wearable, utility-magic, persistent-condition and action-duration rules
+population stages, are unchanged; no utility-magic or ring loot, discovery stages, traps or secret closures are
+imported. Frozen v6–v17 inputs and their source/transition receipts remain immutable research
+evidence. Shared discovery, wearable, utility-magic, persistent-condition and
+action-duration rules
 make this a new experiment input, with no claim of identical outcomes or a
 requalified pilot. The source
 receipt alone does not establish compiler validation, regenerated certificates
@@ -47,9 +48,10 @@ explicit source snapshots and never silently copies newly activated production
 into the old baseline arm. No weights, dispositions, kits, skills, supplies or
 nutrition values are adjusted by measurement.
 
-Earlier reports, controller dumps and frozen cohorts remain unchanged. Revision 5
-accepts only the current canonical wide-scalar wire representation and binds it
-to the live compiler input fingerprint. This revision creates a new campaign; it does not import
+Earlier reports, controller dumps and frozen cohorts remain unchanged. Revision 6
+retains the current canonical wide-scalar wire representation and live compiler
+input fingerprint, and opens a disclosed closed entrance before attempting its
+planned cardinal step. This revision creates a new campaign; it does not import
 or migrate old controller memory. A saved game retains its embedded package, so
 continuing an old E/S save is not evidence for the new Vampire arm.
 
@@ -106,6 +108,12 @@ opaque-ID tie break. Opaque IDs are target handles and equality keys only.
 Resolve cells by deterministic breadth-first traversal with that direction order. Only observed hostile faction relations identify visible foes.
 Use server-disclosed available resources, supply quantities, ability costs,
 cooldown and reach; never infer a hidden immunity from species name.
+
+A selected cardinal step into a currently disclosed, reachable closed door first
+issues one ordinary `set_door` opening instead. It consumes the same command
+budget as other actions, does not advance the remembered position, and requires
+a fresh settled observation before selecting the next action. No hidden wall is
+interpreted as a door and no rejected move is retried.
 
 Decision priority:
 
@@ -335,7 +343,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v17"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v18"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```

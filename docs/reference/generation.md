@@ -120,7 +120,8 @@ resolved through its named anchor after that group publishes. Leaving a generate
 group for an authored chamber uses the same traversal and persistence machinery.
 
 Family-domain selection, port-slot selection, room geometry, graph connections,
-corridors, stair-cell selection and optional lighting use separated deterministic
+corridors, stair-cell selection, optional lighting, secret entrances and hidden traps
+use separated deterministic
 streams. Family/group identity, seed and relevant normalized parameters participate;
 source comments, unrelated catalogs, exploration order and worker timing do not.
 Changing population tables does not reroll terrain or stairs.
@@ -152,7 +153,7 @@ all generated worlds or gameplay.
 
 An independent region file with a `[generate]` table authors only the region's structure:
 `id`, `name`, `size`, optional `zone` and `chamber`, its entry `anchors` and its
-`portals`. Walls, openings, places, doors, items, actors and gravity overrides
+`portals`. Walls, openings, places, doors, traps, items, actors and gravity overrides
 are refused there. The generator fills the region the first time it's built:
 
 ```toml
@@ -245,10 +246,52 @@ Group geometry is not an arbitrary graph callback.
 The compiler lowers `grid_rooms` into private stable stage identities. The strict
 low-level fixture representation remains available: recipe version 1 has stone
 fill, grid partition, rooms, connected graph, corridors and stairs; version 2 adds
-lighting. Stage order is fixed by this algorithm, not freely composable. Unique
+lighting. Recipe version 3 appends optional secret entrances and hidden traps after
+any lighting stage. Stage order is fixed by this algorithm, not freely composable. Unique
 stage IDs are bounded ASCII alphanumeric/hyphen/underscore names, each stage uses
 version 1, room-range bounds are 3–30, and extra-edge ranges are ordered and at most
 4. See [recipe validation](../../crates/server/src/generation_recipe.rs).
+
+### Secret entrances and hidden traps
+
+These optional `grid_rooms` fields add independent feature stages:
+
+```toml
+secret_entrances = { chance_per_mille = 250, maximum = 2, dc = 12 }
+hidden_traps = { count = [1, 2], dc = 12, rust_slot = "body_armor", rust_amount = 1, sleep_condition = "rogue.sleep", sleep_duration = 200 }
+```
+
+These are the current Rogue package's **provisional TOR tuning**, not accepted
+historical numerical parity. `chance_per_mille` is 0–1,000, secret `maximum` and
+trap count bounds are 0–64, and discovery DCs are 0–100. Rust amount is 1–100;
+sleep duration is 1–1,000,000 actor-active ticks. Referenced slots and conditions
+must exist in the pinned rules; sleeping-gas conditions must be timed,
+block voluntary actions and pause preparation.
+
+Secrets select one-cell-wide corridor mouths immediately outside room interiors.
+Each is a real full-height, initially closed opaque barrier: undiscovered observers
+see wall, not an open doorway with a hidden label. Ordinary room entrances remain
+doorless. A lit room illuminates its closure's exterior surface, not the corridor
+beyond it. Discovery is actor-owned; opening changes the one shared physical world.
+The all-open required-route graph is validated against the unchanged connected
+carving. There is no promise of an always-visible alternate route, and this stage
+does not add mazes or omitted rooms.
+
+Traps select room-interior floor cells, avoiding reserved entry/stair anchors.
+They do not overlap secret mouths. Their placements and family draws are
+independent of the secret stage, and neither stage changes prior geometry,
+stairs, lighting rolls or population random streams. Trap count samples within
+its bounds and available cells; a minimum exceeding capacity fails construction.
+Each trap independently selects rust or sleeping gas. Finding presence does not
+disarm it or disclose its family; examination and perceptible activation are
+separate simulation rules.
+
+Generated feature identities occupy checked, disjoint region ranges above all
+authored IDs, with separate door and trap namespaces. The complete descriptor
+domain is reserved without materializing floors. Group publication may refine
+only an untouched unbuilt region's feature identities, atomically checking all
+members and rejecting aliases. Metadata travels with ordinary region records,
+so replay and source-free reopening retain the same entrances and traps.
 
 ## Present-room item population
 

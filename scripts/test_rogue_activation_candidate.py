@@ -221,6 +221,8 @@ class RogueActivationCandidateTests(unittest.TestCase):
                          {"rogue." + name for name in PLAYABLE_SPECIES})
 
     def test_twenty_six_rejects_finite_stock_count_choice_boundary_and_order_drift(self):
+        self.assertEqual(population_shape(encounter_sources()["manifest"]),
+                         "reviewed_twenty_six_species_input")
         for identity in ("rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices",
                          "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings"):
             def stages(activation):

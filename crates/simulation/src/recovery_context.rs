@@ -192,7 +192,10 @@ impl Game {
         requires_candidate: bool,
         change: impl FnOnce(&mut Self) -> Result<R, GameError>,
     ) -> Result<R, GameError> {
-        if !requires_candidate && self.actors.contextual_recovery_owners().next().is_none() {
+        if !requires_candidate
+            && self.actors.contextual_recovery_owners().next().is_none()
+            && (!self.lifecycle.discovery_started || !self.world.has_concealed_features())
+        {
             let result = change(self)?;
             self.retire_settled_falls();
             return Ok(result);

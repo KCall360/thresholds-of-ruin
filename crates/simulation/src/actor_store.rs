@@ -208,6 +208,7 @@ pub(crate) struct ActorStore {
     suspended_timers: Shared<BTreeSet<ActorId>>,
     contextual_recovery: Shared<BTreeSet<ActorId>>,
     active_falls: Shared<BTreeSet<ActorId>>,
+    pending_searches: Shared<BTreeSet<ActorId>>,
     perception_revision: u64,
     visibility_epoch: u64,
     bodies: Mutex<Bodies>,
@@ -223,6 +224,7 @@ impl Clone for ActorStore {
             suspended_timers: self.suspended_timers.clone(),
             contextual_recovery: self.contextual_recovery.clone(),
             active_falls: self.active_falls.clone(),
+            pending_searches: self.pending_searches.clone(),
             perception_revision: self.perception_revision,
             visibility_epoch: self.visibility_epoch,
             bodies: Mutex::new(
@@ -262,8 +264,12 @@ impl ActorStore {
         let mut regions = Members::default();
         let mut held_owners = Members::default();
         let mut timer_deadlines = BTreeSet::new();
+        let mut pending_searches = BTreeSet::new();
         for (&id, actor) in &entries {
             add_member(&mut regions, actor.location.region, id);
+            if actor.search_clock.pending() {
+                pending_searches.insert(id);
+            }
             if actor.holds.has_links() {
                 add_member(&mut held_owners, actor.location.region, id);
             }
@@ -287,6 +293,7 @@ impl ActorStore {
             suspended_timers: Shared::default(),
             contextual_recovery: Shared::new(contextual_recovery),
             active_falls: Shared::new(active_falls),
+            pending_searches: Shared::new(pending_searches),
             perception_revision: fresh_perception_revision(),
             visibility_epoch: fresh_perception_revision(),
             bodies: Mutex::default(),
@@ -303,6 +310,12 @@ impl ActorStore {
             .iter()
             .copied()
             .inspect(|_| crate::diagnostics::timer_candidate())
+    }
+
+    /// Derived pending owners, ordered like ordinary timer settlement. This is
+    /// rebuilt from authoritative actor clocks, never serialized or polled by UI.
+    pub(crate) fn pending_searches(&self) -> impl Iterator<Item = ActorId> + '_ {
+        self.pending_searches.iter().copied()
     }
 
     /// Lifecycle-derived index state; never changes the actor's raw clock.
@@ -420,6 +433,7 @@ impl ActorStore {
     }
 
     pub fn insert(&mut self, id: ActorId, actor: Actor) -> Option<Actor> {
+        update_pending_search(&mut self.pending_searches, id, actor.search_clock.pending());
         if self
             .entries
             .get(&id)
@@ -488,6 +502,7 @@ impl ActorStore {
         self.suspended_timers.remove(id);
         self.contextual_recovery.remove(id);
         self.active_falls.remove(id);
+        self.pending_searches.remove(id);
         if let Some(interval) = next_timer(&old) {
             self.timer_deadlines.remove(&(interval, *id));
         }
@@ -540,6 +555,7 @@ impl ActorStore {
             timer_deadlines: &mut self.timer_deadlines,
             contextual_recovery: &mut self.contextual_recovery,
             active_falls: &mut self.active_falls,
+            pending_searches: &mut self.pending_searches,
         })
     }
 }
@@ -560,6 +576,7 @@ pub(crate) struct ActorEdit<'a> {
     timer_deadlines: &'a mut Shared<BTreeSet<(u64, ActorId)>>,
     contextual_recovery: &'a mut Shared<BTreeSet<ActorId>>,
     active_falls: &'a mut Shared<BTreeSet<ActorId>>,
+    pending_searches: &'a mut Shared<BTreeSet<ActorId>>,
 }
 impl Deref for ActorEdit<'_> {
     type Target = Actor;
@@ -574,6 +591,11 @@ impl DerefMut for ActorEdit<'_> {
 }
 impl Drop for ActorEdit<'_> {
     fn drop(&mut self) {
+        update_pending_search(
+            self.pending_searches,
+            self.id,
+            self.actor.search_clock.pending(),
+        );
         if self.before_visibility != VisibilityInputs::capture(self.actor) {
             *self.visibility_epoch = fresh_perception_revision();
         }
@@ -619,6 +641,16 @@ impl Drop for ActorEdit<'_> {
     }
 }
 
+fn update_pending_search(index: &mut Shared<BTreeSet<ActorId>>, id: ActorId, pending: bool) {
+    if pending != index.contains(&id) {
+        if pending {
+            index.insert(id);
+        } else {
+            index.remove(&id);
+        }
+    }
+}
+
 fn watches_recovery(actor: &Actor) -> bool {
     actor.alive()
         && actor
@@ -641,6 +673,12 @@ fn next_timer(actor: &Actor) -> Option<u64> {
         .and_then(|interval| actor.active_since.checked_add(interval));
     creature
         .into_iter()
+        .chain(
+            actor
+                .search_clock
+                .next_in(actor)
+                .and_then(|interval| actor.active_since.checked_add(interval)),
+        )
         .chain(
             actor
                 .holds
@@ -695,6 +733,38 @@ mod tests {
         game.spawn_actor(at(1, 15), NonZeroU64::new(100).unwrap())
             .unwrap();
         game
+    }
+
+    #[test]
+    fn pending_search_index_follows_actor_publication_edit_clone_rebuild_and_removal() {
+        let mut game = game();
+        let id = ActorId(1);
+        let check = crate::discovery::FrozenDiscoveryCheck { bonus: 0, edge: 0 };
+        assert!(game.actors.pending_searches().next().is_none());
+        game.actors
+            .get_mut(&id)
+            .unwrap()
+            .search_clock
+            .advance(100, check)
+            .unwrap();
+        assert_eq!(game.actors.pending_searches().collect::<Vec<_>>(), vec![id]);
+        let mut branch = game.actors.clone();
+        assert!(branch
+            .get_mut(&id)
+            .unwrap()
+            .search_clock
+            .take_pending()
+            .is_some());
+        assert!(branch.pending_searches().next().is_none());
+        assert_eq!(game.actors.pending_searches().collect::<Vec<_>>(), vec![id]);
+        let rebuilt = ActorStore::from_entries(game.actors.raw_entries().clone());
+        assert_eq!(rebuilt.pending_searches().collect::<Vec<_>>(), vec![id]);
+        game.actors.insert(id, branch[&id].clone());
+        assert!(game.actors.pending_searches().next().is_none());
+        game.actors.insert(id, rebuilt[&id].clone());
+        assert_eq!(game.actors.pending_searches().collect::<Vec<_>>(), vec![id]);
+        game.actors.remove(&id).unwrap();
+        assert!(game.actors.pending_searches().next().is_none());
     }
 
     fn assert_reference(game: &Game) {

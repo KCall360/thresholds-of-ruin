@@ -57,11 +57,25 @@ impl<'de> Deserialize<'de> for GuiseAppearance {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PerceptionValue {
-    Invisible { enabled: bool },
-    SeeInvisible { enabled: bool },
-    Sight { enabled: bool },
-    ObjectGuise { appearance: Option<GuiseAppearance> },
-    AmbushFromGuise { enabled: bool },
+    Invisible {
+        enabled: bool,
+    },
+    SeeInvisible {
+        enabled: bool,
+    },
+    Sight {
+        enabled: bool,
+    },
+    ObjectGuise {
+        appearance: Option<GuiseAppearance>,
+    },
+    AmbushFromGuise {
+        enabled: bool,
+    },
+    /// One strongest periodic source; duplicate wearables share the actor clock.
+    PeriodicSearch {
+        interval: u64,
+    },
 }
 impl<'de> Deserialize<'de> for PerceptionValue {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -84,6 +98,9 @@ impl<'de> Deserialize<'de> for PerceptionValue {
             AmbushFromGuise {
                 enabled: bool,
             },
+            PeriodicSearch {
+                interval: u64,
+            },
         }
         Ok(match crate::bounded::named_map(d)? {
             Fields::Invisible { enabled } => Self::Invisible { enabled },
@@ -91,6 +108,7 @@ impl<'de> Deserialize<'de> for PerceptionValue {
             Fields::Sight { enabled } => Self::Sight { enabled },
             Fields::ObjectGuise { appearance } => Self::ObjectGuise { appearance },
             Fields::AmbushFromGuise { enabled } => Self::AmbushFromGuise { enabled },
+            Fields::PeriodicSearch { interval } => Self::PeriodicSearch { interval },
         })
     }
 }
@@ -102,6 +120,7 @@ pub struct PerceptionCapabilities {
     pub sight: bool,
     pub object_guise: Option<GuiseAppearance>,
     pub ambush_from_guise: bool,
+    pub search_interval: Option<u64>,
 }
 impl Default for PerceptionCapabilities {
     fn default() -> Self {
@@ -111,6 +130,7 @@ impl Default for PerceptionCapabilities {
             sight: true,
             object_guise: None,
             ambush_from_guise: false,
+            search_interval: None,
         }
     }
 }
@@ -149,6 +169,16 @@ impl PerceptionCapabilities {
                         return Err(crate::creatures::BuildError::InvalidDefinition);
                     }
                     result.object_guise = Some(appearance.clone());
+                }
+                PerceptionValue::PeriodicSearch { interval } => {
+                    if !(1..=crate::limits::NUMERIC as u64).contains(interval) {
+                        return Err(crate::creatures::BuildError::InvalidDefinition);
+                    }
+                    result.search_interval = Some(
+                        result
+                            .search_interval
+                            .map_or(*interval, |old| old.min(*interval)),
+                    );
                 }
                 PerceptionValue::AmbushFromGuise { enabled } => {
                     result.ambush_from_guise |= enabled;
@@ -702,6 +732,9 @@ impl Game {
     }
 }
 
+#[cfg(test)]
+#[path = "perception/contract_fixtures.rs"]
+pub(crate) mod contract_fixtures;
 #[cfg(test)]
 mod contract_tests;
 #[cfg(test)]

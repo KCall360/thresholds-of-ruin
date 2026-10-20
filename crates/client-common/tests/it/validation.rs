@@ -12,8 +12,8 @@ pub(super) fn snapshot(revision: u64) -> Snapshot {
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
             "places":[{"key":"here","name":"Here","origin":"authored"}],
             "visible_cells":[
-                {"key":"here","position":{"x":0,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false},
-                {"key":"there","position":{"x":1,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false}
+                {"key":"here","position":{"x":0,"y":0,"z":0},"wall":false,"trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false},
+                {"key":"there","position":{"x":1,"y":0,"z":0},"wall":false,"trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false}
             ],
             "ground_items":[{"supply_reachable":false,"reachable":false,"position":{"x":1,"y":0,"z":0},"item":{"known_currency":null,"known_supply":null,"id":tor_protocol::ItemTarget::from_digest([8; 32]),"quantity":"1","name":"stone","class":"misc","appearance":"stone","identified":true}}],
             "inventory":[{"known_currency":null,"known_supply":null,"id":tor_protocol::ItemTarget::from_digest([7; 32]),"quantity":"1","name":"stone","class":"misc","appearance":"stone","identified":true}],

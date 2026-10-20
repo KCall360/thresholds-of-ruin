@@ -255,6 +255,30 @@ impl DerivedCreature {
             .cloned()
             .ok_or(BuildError::InvalidDefinition)
     }
+    /// A targetless physical search uses outgoing sources only. An explicit token
+    /// selection keeps automatic discovery from spending or borrowing paid claims.
+    pub(crate) fn discovery_edge(
+        &self,
+        rules: &Ruleset,
+        actor: crate::ActorId,
+        ability: Option<&AbilityId>,
+        selected: &[crate::conditions::TokenReservation],
+        policy: crate::rules::OutgoingEdgePolicy,
+    ) -> Result<i64, BuildError> {
+        fold_edges(
+            rules,
+            EdgeUse::Check,
+            [EdgeContext {
+                sources: &self.sources,
+                role: Some(crate::rules::CheckActor::User),
+                opponent: actor,
+                ability,
+                incoming: None,
+                tokens: Some((actor, selected)),
+                policy,
+            }],
+        )
+    }
     /// Tactical modifiers are selected for the check before families and talent
     /// signs collapse. This includes inherited flag contributions in their owner.
     pub fn check_edge(
@@ -3252,6 +3276,82 @@ mod worn_modifier_tests {
         let set_dex = derive_with_sources(&build, &source(vec![set, dexterity(2)]), &[]).unwrap();
         assert_eq!(set_dex.attributes, set_only.attributes);
         assert_eq!(set_dex.defenses, set_only.defenses);
+    }
+
+    #[test]
+    fn strength_ring_excludes_only_its_own_physical_defense_contribution() {
+        for initial in [0, 1, 4] {
+            let mut build = crate::test_creatures::build(crate::test_creatures::species());
+            build
+                .set_initial_attributes(
+                    Attributes::new(ByAttribute {
+                        strength: initial,
+                        speed: 3,
+                        ..Default::default()
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            let strength = |value| ModifierOp::AttributeWithoutDefense {
+                attribute: Attribute::Strength,
+                defense: DefenseKind::Physical,
+                value,
+            };
+            let ordinary = |value| ModifierOp::Add {
+                stat: Stat::Attribute {
+                    attribute: Attribute::Strength,
+                },
+                value,
+            };
+            for potency in [-10, -1, 0, 1, 2] {
+                for loss in [0, 1] {
+                    let losses = super::super::RestorableLosses {
+                        attributes: ByAttribute {
+                            strength: loss,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+                    let base = derive_with_losses(&build, &source(vec![ordinary(2)]), &[], losses)
+                        .unwrap();
+                    let worn = derive_with_losses(
+                        &build,
+                        &source(vec![ordinary(2), strength(potency)]),
+                        &[],
+                        losses,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        worn.defenses.physical, base.defenses.physical,
+                        "initial={initial}, potency={potency}, loss={loss}"
+                    );
+                    // Every ordinary Strength consumer still sees the same effective
+                    // attribute as the corresponding ordinary signed contribution.
+                    let reference = derive_with_losses(
+                        &build,
+                        &source(vec![ordinary(2), ordinary(potency)]),
+                        &[],
+                        losses,
+                    )
+                    .unwrap();
+                    assert_eq!(worn.attributes, reference.attributes);
+                    assert_eq!(worn.maximum_health, reference.maximum_health);
+                    assert_eq!(worn.natural_attack, reference.natural_attack);
+                    assert_eq!(worn.selected_attack, reference.selected_attack);
+                }
+                let set = ModifierOp::Set {
+                    stat: Stat::Attribute {
+                        attribute: Attribute::Strength,
+                    },
+                    value: 4,
+                };
+                let base = derive_with_sources(&build, &source(vec![set.clone()]), &[]).unwrap();
+                let worn = derive_with_sources(&build, &source(vec![set, strength(potency)]), &[])
+                    .unwrap();
+                assert_eq!(worn.attributes, base.attributes);
+                assert_eq!(worn.defenses, base.defenses);
+            }
+        }
     }
 
     #[test]

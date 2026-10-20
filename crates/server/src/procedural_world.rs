@@ -383,6 +383,7 @@ impl WorldFamily {
             places: vec![],
             portals,
             doors: vec![],
+            traps: vec![],
             items: vec![],
             actors: vec![],
             generate: Some(crate::generator::Generate {

@@ -23,6 +23,8 @@ pub enum Topic {
     LostSight(ActorTarget),
     /// A door changed state without the observer acting on it.
     Door,
+    /// A newly disclosed entrance, trap presence, or trap family.
+    Discovery,
     /// Involuntary motion or a collision.
     Motion,
     /// The observer finished timed item work.
@@ -402,6 +404,45 @@ pub fn sequence_status(c: &CombatView) -> Option<String> {
     ))
 }
 
+pub fn discovery_changes(before: &Observation, after: &Observation) -> Vec<String> {
+    let mut lines = Vec::new();
+    let traps = |view: &Observation| -> BTreeMap<TrapTarget, Option<TrapFamily>> {
+        view.visible_cells
+            .iter()
+            .filter_map(|cell| cell.trap.as_ref())
+            .map(|trap| (trap.id, trap.family))
+            .collect()
+    };
+    let old = traps(before);
+    for (id, family) in traps(after) {
+        match (old.get(&id), family) {
+            (None, None) => lines.push("You notice a trap.".into()),
+            (None | Some(None), Some(family)) => {
+                lines.push(format!("You recognize a {}.", family.name()))
+            }
+            _ => {}
+        }
+    }
+    let old: BTreeMap<_, _> = before
+        .visible_cells
+        .iter()
+        .map(|cell| (&cell.key, cell))
+        .collect();
+    let mut doors = std::collections::BTreeSet::new();
+    for cell in &after.visible_cells {
+        if let Some(door) = &cell.door {
+            if old
+                .get(&cell.key)
+                .is_some_and(|old| old.wall && old.door.is_none())
+                && doors.insert(door.id)
+            {
+                lines.push("You notice a door.".into());
+            }
+        }
+    }
+    lines
+}
+
 fn describe_changes(
     before: &Observation,
     after: &Observation,
@@ -416,7 +457,10 @@ fn describe_changes(
     };
     let old = actors(before);
     let new = actors(after);
-    let mut lines = Vec::new();
+    let mut lines: Vec<_> = discovery_changes(before, after)
+        .into_iter()
+        .map(|text| Line::new(Topic::Discovery, text))
+        .collect();
     if after.tick != before.tick {
         if let Some(motion) = &after.motion {
             if motion.displaced {
@@ -693,6 +737,7 @@ mod tests {
             stairs_up: false,
             stairs_down: false,
             asset: None,
+            trap: None,
             door: Some(DoorView {
                 id: tor_protocol::DoorTarget::from_digest([3; 32]),
                 name: "iron gate".into(),

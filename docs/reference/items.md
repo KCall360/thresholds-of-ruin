@@ -346,7 +346,7 @@ PCs and NPCs; identified values are private to the entitled actor.
 | Ring | Worn effect | Food surcharge in thirtieths |
 | --- | --- | --- |
 | Protection | Signed reduction against all six damage categories, including Psychic | 30 |
-| Add strength | Signed Strength bonus | 30 |
+| Add strength | Signed Strength bonus, excluded from Physical Defense | 30 |
 | Sustain strength | Prevents new restorable Strength loss; does not restore existing loss | 30 |
 | See invisible | Source-owned see-invisible capability | 6 |
 | Adornment | No mechanical benefit | 0 |
@@ -355,12 +355,14 @@ PCs and NPCs; identified values are private to the entitled actor.
 | Regeneration | Doubles Health recovery rate; multiple rings do not stack the benefit | 60 |
 | Slow digestion | Reduces ordinary positive-reserve digestion | −15 |
 | Maintain armor | Prevents corrosion while worn; does not repair or permanently protect armor | 30 |
+| Searching | One free active Perception Search per 100 eligible actor-active ticks; multiple sources do not add scans | 10 |
 
 Protection is separate from the five-category magical armor ward. Signed
 reductions compose with ordinary reduction and the strongest applicable talent
 before the final zero floor; negative potency never creates vulnerability.
-Dexterity excludes its own Speed contribution from Physical Defense at source
-folding, preserving other Speed modifiers, initial attributes and losses.
+Add strength and dexterity exclude only their own attribute contributions from
+Physical Defense at source folding, preserving other Strength/Speed modifiers,
+initial attributes and losses. Their other attribute effects remain ordinary.
 
 The attack bonus is captured at preparation and applies once to each canonical
 rolled damage pool, including natural, melee, ranged, spell, device and damaging
@@ -377,9 +379,15 @@ Fractions persist across equipment changes, freezes and source-free restart.
 Two slow-digestion rings stop ordinary digestion while reserves remain positive;
 empty-reserve starvation and nutrition spent by actual recovery are unchanged.
 
-The appended finite `rogue.rings` birth stage chooses one ring with weights
-9/9/5/10/1/8/8/4/9/5 in the table's order, without reordering existing streams.
-Ten concealed appearances are shared by the catalog. The paid identify-ring-or-wand
+Searching accrues only while its source is active and the actor is awake and able
+to see. Unequipping, sleep, freezing and re-equipping do not grant an immediate
+scan or accrue suppressed time; the earned fraction survives. Each scan uses the
+shared active Search check without spending next-check benefits or interrupting
+paid work. See [discovery](../architecture/perception.md).
+
+The finite `rogue.rings` birth stage chooses one ring with weights
+9/9/5/10/1/8/8/4/9/5/5 in the table's order, without reordering other stage streams.
+Eleven concealed appearances are shared by the catalog. The paid identify-ring-or-wand
 scroll permits either class through one server-owned choice, without exposing
 unidentified potency or curse state.
 

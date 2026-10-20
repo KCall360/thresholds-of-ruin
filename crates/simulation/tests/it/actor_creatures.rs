@@ -478,15 +478,39 @@ fn anatomy_configuration_cannot_desynchronize_a_creature_build() {
 #[test]
 fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
     let mut game = game();
-    let gear: tor_simulation::EquipmentSpec = serde_json::from_value(serde_json::json!({
-        "slot":"weapon", "armor":null, "weapon_profile":null, "modifiers":[], "potency_modifiers":[],
-        "attack":{"skill":"light_weaponry", "bonus":100,"damage_enchantment":0,"wind_up":90,"recovery":70,
-            "damage":{"primary":{"category":"energy","descriptor":"fire","sides":6},
-                "components":[
-                    {"category":"energy","descriptor":"fire","amount":{"type":"rolled","count":2,"sides":6,"bonus":-1}},
-                    {"category":"keen","amount":{"type":"fixed","value":3}}
-                ]}}
-    })).unwrap();
+    // Positive gameplay fixtures use exhaustive typed fields. Raw JSON shape
+    // acceptance/rejection belongs to the independent schema tests.
+    let fire = tor_simulation::damage::DamageComponent::rolled(
+        DamageType::Energy,
+        Some(tor_simulation::content_ids::DescriptorId::new("fire").unwrap()),
+        tor_simulation::dice::DicePool::new(2, 6, -1).unwrap(),
+    );
+    let primary = fire.key();
+    let damage = tor_simulation::damage::DamageSpec::new(
+        vec![
+            fire,
+            tor_simulation::damage::DamageComponent::fixed(DamageType::Keen, None, 3),
+        ],
+        Some(primary),
+    )
+    .unwrap();
+    let gear = tor_simulation::EquipmentSpec {
+        slot: tor_simulation::EquipmentSlot::new("weapon").unwrap(),
+        armor: None,
+        attack: Some(
+            tor_simulation::attacks::MeleeAttack::new(
+                tor_simulation::attributes::Skill::LightWeaponry,
+                100,
+                90,
+                70,
+                damage,
+            )
+            .unwrap(),
+        ),
+        weapon_profile: None,
+        modifiers: vec![],
+        potency_modifiers: vec![],
+    };
     let mut weapon = tor_simulation::ItemSpec::ordinary("fire blade".into());
     weapon.class = tor_simulation::ItemClass::Weapon;
     weapon.equipment = Some(gear);

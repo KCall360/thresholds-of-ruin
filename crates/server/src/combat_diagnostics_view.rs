@@ -261,7 +261,7 @@ fn record(
                                 duration: Some(*duration),
                             }
                         }
-                        s::abilities::ResolvedEffect::SearchAdjacentGuises
+                        s::abilities::ResolvedEffect::SearchAdjacentGuises { .. }
                         | s::abilities::ResolvedEffect::ObservePublicPlan { .. } => {
                             p::DiagnosticEffect::Observation {
                                 target: p::ActorId(value.outcome.actor.0),

@@ -630,6 +630,7 @@ fn ordered_strikes_legitimate_large_snapshot_keeps_its_independent_32_mib_assemb
             visible_cells: vec![CellView {
                 lit: true,
                 asset: None,
+                trap: None,
                 door: None,
                 material: "stone".into(),
                 key: String::new(),

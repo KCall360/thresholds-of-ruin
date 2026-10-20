@@ -158,7 +158,7 @@ impl Ruleset {
                     | PlannedEffect::Restore { .. }
                     | PlannedEffect::RestoreAttribute { .. }
                     | PlannedEffect::RestoreMaximumHealth { .. }
-                    | PlannedEffect::SearchAdjacentGuises
+                    | PlannedEffect::SearchAdjacentGuises { .. }
                     | PlannedEffect::ObservePublicPlan
                     | PlannedEffect::ApplyQualifiedConditionToSource { .. } => false,
                 }),

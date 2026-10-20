@@ -1992,6 +1992,7 @@ async fn spectator_map_hydration_survives_cancellation_without_blocking_live_sta
             place_hint: false,
             stairs_up: false,
             stairs_down: false,
+            trap: None,
             door: None,
             ground_items: vec![],
         };

@@ -73,6 +73,7 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
                 | Action::Drink { .. }
                 | Action::Eat { .. } => unreachable!("prepared work has separate timing tests"),
                 Action::Identify { .. }
+                | Action::ExamineTrap { .. }
                 | Action::TouchApparentObject { .. }
                 | Action::Drop { .. }
                 | Action::ChooseIntellectExpertise { .. }

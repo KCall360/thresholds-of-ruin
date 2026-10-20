@@ -80,12 +80,20 @@ Each column of cells is drawn as what stands at your own height there:
 | common asset glyph | A creature, using the shared asset vocabulary (for example `u` for an equine); `&` when its asset is absent, unknown or unavailable |
 | `#` (blue-grey) | Wall |
 | `#` (tan) | Low wall, ledge or step: solid at your feet, open above |
-| `^` | A drop or pit: open at your feet and below |
+| `^` (blue) | A drop or pit: open at your feet and below |
+| `^` (orange) | A discovered trap; its family may still be unknown |
 | `.` | Floor |
 | `<` `>` | Stairs up / down |
 | `+` `/` | Closed / open door, at foot or head height |
 | `)` `[` `!` `%` `(` `=` `"` `?` `/` `$` `*` | Items, by disclosed asset with class fallback, at your level or down in a drop |
 | grey | Remembered, not in sight now |
+
+Undiscovered closed secret entrances look like walls. After discovery, use the
+ordinary open/close controls; finding an entrance does not open it. A trap marker
+does not mean the trap is disarmed. With **;**, select a current adjacent trap and
+press **Enter** to examine an unknown mechanism. This is an explicit no-time
+server action, not passive inspection; distant or remembered markers grant no
+action. Known mechanisms are described without another action.
 
 Map, look and inventory share the same current [asset palette](../reference/protocol.md#palettes-in-the-clients).
 Authored names still identify things and commands. A palette-only update redraws

@@ -2,7 +2,7 @@
 //! It never consults live world state, so receipts survive target removal.
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
-use tor_protocol::{ActorTarget, AppearanceSeed, DoorTarget, HoldTarget, ItemTarget};
+use tor_protocol::{ActorTarget, AppearanceSeed, DoorTarget, HoldTarget, ItemTarget, TrapTarget};
 use tor_simulation::{ActorId, ItemId};
 use uuid::Uuid;
 
@@ -94,6 +94,10 @@ impl TargetScope {
 
     pub fn item(&self, identity: ItemId) -> ItemTarget {
         ItemTarget::from_digest(self.digest(b'i', identity.0))
+    }
+
+    pub fn trap(&self, identity: u64) -> TrapTarget {
+        TrapTarget::from_digest(self.digest(b't', identity))
     }
 
     pub fn door(&self, identity: u64) -> DoorTarget {

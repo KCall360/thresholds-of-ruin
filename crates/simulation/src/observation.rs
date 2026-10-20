@@ -4,7 +4,7 @@ use tor_world::{Direction, Location, Position, Region, RegionId};
 use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SceneWitness {
+pub(crate) struct SceneWitness {
     world: tor_world::PerceptionSnapshot,
     location: Location,
     orientation: u8,
@@ -152,12 +152,21 @@ pub struct ExitView {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrapView {
+    pub id: u64,
+    pub family: Option<tor_world::TrapFamily>,
+    pub reachable: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CellView {
     /// Illumination of this disclosed occurrence, including dark awareness.
     pub lit: bool,
     pub frame: u8,
     pub door: Option<tor_world::Door>,
+    pub trap: Option<TrapView>,
     pub door_reachable: bool,
+    pub door_secret: bool,
     pub door_approaches: Vec<Location>,
     pub material: &'static str,
     pub location: Location,
@@ -256,14 +265,14 @@ impl Game {
         let eyes: BTreeSet<_> = sight.iter().map(|cell| cell.location).collect();
         let perceived = self.perception_projection(id, scene, sight)?;
         let door_base = |location: Location| {
-            self.world
-                .door(location)
+            self.disclosed_door(id, location)
                 .is_some_and(|door| self.world.door_location(door.id) == Some(location))
         };
         // A location can occur in several frames and at several distances;
         // each (location, frame) pair is disclosed once. Floors and ceilings
         // are ordinary seen solid cells, derived by clients.
         let occurrences: BTreeSet<_> = scene.iter().map(|c| (c.location, c.rotation)).collect();
+        let trap_contacts = std::cell::OnceCell::new();
         let mut ground_items = Vec::new();
         let mut inventory = Vec::new();
         let mut item_interactions = Vec::new();
@@ -491,7 +500,27 @@ impl Game {
                 .map(|&(location, frame)| CellView {
                     lit: self.world.is_lit(location) == Some(true),
                     frame,
-                    door: self.world.door(location),
+                    door: self.disclosed_door(id, location),
+                    door_secret: self.disclosed_door(id, location).is_some()
+                        && self.world.secret_door(location).is_some(),
+                    trap: self
+                        .world
+                        .trap(location)
+                        .filter(|trap| {
+                            self.feature_known(id, tor_world::ConcealedFeatureId::Trap(trap.id))
+                        })
+                        .map(|trap| TrapView {
+                            id: trap.id,
+                            family: self
+                                .feature_family_known(
+                                    id,
+                                    tor_world::ConcealedFeatureId::Trap(trap.id),
+                                )
+                                .then(|| trap.kind.family()),
+                            reachable: trap_contacts
+                                .get_or_init(|| self.trap_contacts_in_scene(id, scene))
+                                .contains(&location),
+                        }),
                     // A tall door is one door: only its base cell is offered
                     // for interaction, so it isn't reachable twice.
                     door_reachable: door_base(location)
@@ -502,12 +531,13 @@ impl Game {
                         vec![]
                     },
                     material: match self.world.terrain(location) {
+                        _ if self.concealed_door_wall(id, location) => "stone",
                         Some(tor_world::Terrain::Solid(material)) => material.name(),
                         _ if self.world.is_chamber(location.region) => "",
                         _ => "stone", // Cosmetic fallback for raw diagnostic regions.
                     },
                     location,
-                    wall: self.world.is_wall(location),
+                    wall: self.world.is_wall(location) || self.concealed_door_wall(id, location),
                     place_hint: self.world.has_place_hint(location),
                 })
                 .collect(),
@@ -585,6 +615,49 @@ impl Game {
                         .clone(),
                 })
                 .collect(),
+        })
+    }
+
+    /// Closed undiscovered entrances disclose the same solid appearance as the wall.
+    /// Opening remains one shared physical world change for every observer.
+    fn concealed_door_wall(&self, actor: ActorId, location: Location) -> bool {
+        self.world.secret_door(location).is_some()
+            && self.world.door(location).is_some_and(|door| {
+                !door.open
+                    && !self.feature_known(actor, tor_world::ConcealedFeatureId::Door(door.id))
+            })
+    }
+
+    pub(crate) fn disclosed_door(
+        &self,
+        actor: ActorId,
+        location: Location,
+    ) -> Option<tor_world::Door> {
+        (!self.concealed_door_wall(actor, location))
+            .then(|| self.world.door(location))
+            .flatten()
+    }
+
+    fn trap_contacts_in_scene(
+        &self,
+        actor: ActorId,
+        scene: &[tor_world::SightCell],
+    ) -> BTreeSet<Location> {
+        let mut contacts = self.melee_contact_locations_in_scene(actor, scene, None);
+        if let Some(owner) = self.actors.get(&actor) {
+            if let Some(body) = self.body_cells(owner.location, owner.orientation, &owner.body) {
+                contacts.extend(body.into_iter().map(|(location, _)| location));
+            }
+        }
+        contacts
+    }
+
+    pub(crate) fn trap_reachable(&self, actor: ActorId, location: Location) -> bool {
+        self.scene_snapshot(actor).is_ok_and(|(scene, _)| {
+            scene.iter().any(|cell| cell.location == location)
+                && self
+                    .trap_contacts_in_scene(actor, &scene)
+                    .contains(&location)
         })
     }
 
@@ -725,7 +798,7 @@ impl Game {
         cache.insert(id, scene);
     }
 
-    fn scene_witness(&self, id: ActorId) -> Result<SceneWitness, GameError> {
+    pub(crate) fn scene_witness(&self, id: ActorId) -> Result<SceneWitness, GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         Ok(SceneWitness {
             world: self.world.perception_snapshot(),

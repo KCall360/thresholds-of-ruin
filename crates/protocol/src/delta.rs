@@ -160,6 +160,7 @@ impl StateDelta {
                     let CellView {
                         lit,
                         door,
+                        trap,
                         material,
                         key,
                         stairs_up,
@@ -173,6 +174,7 @@ impl StateDelta {
                         || *key != is.key
                         || *asset != is.asset
                         || *door != is.door
+                        || *trap != is.trap
                         || *material != is.material
                         || *stairs_up != is.stairs_up
                         || *stairs_down != is.stairs_down

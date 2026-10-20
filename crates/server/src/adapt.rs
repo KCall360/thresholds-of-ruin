@@ -272,6 +272,7 @@ pub fn action(action: &a::Action) -> s::Action {
             },
             supplies: simulation_supplies(supplies),
         },
+        a::Action::ExamineTrap { trap } => s::Action::ExamineTrap { trap: *trap },
         a::Action::SetDoor { door, open } => s::Action::SetDoor {
             door: *door,
             open: *open,
@@ -368,6 +369,7 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
             direction: step_direction(*direction),
         },
         a::Action::Identify { .. }
+        | a::Action::ExamineTrap { .. }
         | a::Action::SetDoor { .. }
         | a::Action::Move { .. }
         | a::Action::Take { .. }
@@ -500,6 +502,7 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
             },
             supplies: recorded_supplies(supplies),
         },
+        s::Action::ExamineTrap { trap } => a::Action::ExamineTrap { trap },
         s::Action::SetDoor { door, open } => a::Action::SetDoor { door, open },
         s::Action::Take { item, quantity } => a::Action::Take {
             item: item.0,
@@ -534,6 +537,7 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
 
 pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
     match kind {
+        s::OutcomeKind::TrapExamined { trap } => crate::journal::Event::TrapExamined { trap },
         s::OutcomeKind::IdentificationResolved { choice, item } => {
             crate::journal::Event::IdentificationResolved {
                 choice,
@@ -597,8 +601,25 @@ pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
 /// A region's floor, wall and door assets, if its scenario names them.
 pub type Terrain<'a> = &'a dyn Fn(w::RegionId) -> [Option<String>; 3];
 
+pub(crate) fn trap_family(family: w::TrapFamily) -> p::TrapFamily {
+    match family {
+        w::TrapFamily::Rust => p::TrapFamily::Rust,
+        w::TrapFamily::SleepingGas => p::TrapFamily::SleepingGas,
+    }
+}
+
 pub(crate) const WOODEN_DOOR_NAME: &str = "wooden door";
 pub(crate) const WOODEN_DOOR_DESCRIPTION: &str = "A plain wooden door with an iron handle.";
+pub(crate) fn door_appearance(secret: bool) -> (&'static str, &'static str) {
+    if secret {
+        (
+            "secret entrance",
+            "A concealed entrance in the surrounding stone.",
+        )
+    } else {
+        (WOODEN_DOOR_NAME, WOODEN_DOOR_DESCRIPTION)
+    }
+}
 
 pub fn observation(
     view: s::Observation,
@@ -635,11 +656,11 @@ pub fn observation(
         let [floor, wall, door_asset] = terrain(cell.location.region);
         visible_cells.push(p::CellView {
             lit: visible.lit,
-            asset: if cell.wall { wall } else { floor },
+            asset: if visible.wall { wall } else { floor },
             door: visible.door.map(|door| p::DoorView {
                 id: targets.door(door.id),
-                name: WOODEN_DOOR_NAME.into(),
-                description: WOODEN_DOOR_DESCRIPTION.into(),
+                name: door_appearance(visible.door_secret).0.into(),
+                description: door_appearance(visible.door_secret).1.into(),
                 open: door.open,
                 reachable: visible.door_reachable,
                 approaches: visible
@@ -649,10 +670,15 @@ pub fn observation(
                     .collect(),
                 asset: door_asset,
             }),
+            trap: visible.trap.as_ref().map(|trap| p::TrapView {
+                id: targets.trap(trap.id),
+                family: trap.family.map(trap_family),
+                reachable: trap.reachable,
+            }),
             material: visible.material.into(),
             key: cell_key(salt, view.actor.0, cell.location),
             position: offset(cell.offset),
-            wall: cell.wall,
+            wall: visible.wall,
             place_hint: visible.place_hint,
             stairs_up: view
                 .exits

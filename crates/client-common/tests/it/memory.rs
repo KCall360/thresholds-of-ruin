@@ -9,7 +9,7 @@ fn snapshot(cell_id: u64, tick: u64, revision: u64) -> Snapshot {
         "has_control":false, "intentions":[],"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":tick.to_string(),"position":{"x":1,"y":1,"z":0},
-            "places":[],"visible_cells":[{"key":cell_id.to_string(),"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"lit":true,"place_hint":false}],"ground_items":[],"inventory":[],"linked_holds":[],"visible_actors":[],
+            "places":[],"visible_cells":[{"key":cell_id.to_string(),"trap":null,"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"lit":true,"place_hint":false}],"ground_items":[],"inventory":[],"linked_holds":[],"visible_actors":[],
             "ready":true
         }}
     }))
@@ -254,6 +254,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         .push(CellView {
             lit: true,
             asset: None,
+            trap: None,
             door: None,
             material: "stone".into(),
             key: "distant".into(),
@@ -301,6 +302,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         .push(CellView {
             lit: true,
             asset: None,
+            trap: None,
             door: None,
             material: "stone".into(),
             key: "distant".into(),

@@ -8,6 +8,7 @@ fn cell(key: &str, x: i32) -> CellView {
         position: Position { x, y: 0, z: 0 },
         wall: false,
         material: String::new(),
+        trap: None,
         door: None,
         asset: None,
         stairs_up: false,

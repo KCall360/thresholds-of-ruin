@@ -39,6 +39,9 @@ pub enum Goal {
         item: ItemTarget,
         quantity: Option<u64>,
     },
+    ExamineTrap {
+        trap: TrapTarget,
+    },
     Door {
         door: DoorTarget,
         open: bool,
@@ -780,7 +783,9 @@ fn look_toward(direction: Direction, scene: &Scene) -> String {
     let mut seen: Vec<&Referent> = scene
         .referents
         .iter()
-        .filter(|r| matches!(r.kind, Kind::Thing | Kind::Figure | Kind::Door) && !r.carried)
+        .filter(|r| {
+            matches!(r.kind, Kind::Thing | Kind::Figure | Kind::Door | Kind::Trap) && !r.carried
+        })
         .filter(|r| r.position.and_then(bearing) == Some(direction))
         .collect();
     seen.sort_by_key(|r| r.position.map_or(0, super::scene::distance));
@@ -1137,15 +1142,31 @@ fn transitive_meaning(
         )
         | (Verb::Search, _) => bind(direct, scene, referents, Domain::Any, &|r| {
             say(match r.kind {
-                Kind::Me => "You check yourself over. Nothing is hidden on you.".into(),
+                Kind::Me => "To search for concealed features nearby, use SEARCH.".into(),
                 Kind::Figure => format!(
                     "You can't search {} while it's alive and watching you.",
                     r.the()
                 ),
-                _ => format!("You find nothing hidden about {}.", r.the()),
+                _ => "To search for concealed features nearby, use SEARCH.".into(),
             })
         }),
         (Verb::Examine | Verb::Look, _) => bind(direct, scene, referents, Domain::Any, &|r| {
+            if let Key::Trap(trap) = r.key {
+                let unknown = scene
+                    .state
+                    .observation
+                    .visible_cells
+                    .iter()
+                    .filter_map(|cell| cell.trap.as_ref())
+                    .any(|candidate| candidate.id == trap && candidate.family.is_none());
+                if unknown {
+                    return if r.reachable {
+                        goal(Goal::ExamineTrap { trap })
+                    } else {
+                        say("Come within reach to examine the trap's mechanism.")
+                    };
+                }
+            }
             say(examine(r, scene))
         }),
         (Verb::Fight | Verb::Follow, _) => {
@@ -1657,6 +1678,7 @@ pub fn examine(r: &Referent, scene: &Scene) -> String {
             sentences.retain(|s| !s.is_empty());
             sentences.join(" ")
         }
+        Kind::Trap => prose::sentence(&r.description),
         Kind::Feature => feature_text(r),
         Kind::Thing => {
             let mut sentences = vec![if r.description.is_empty() {

@@ -98,6 +98,7 @@ mod tests {
         CellView {
             lit: true,
             asset: None,
+            trap: None,
             door: None,
             material: material.into(),
             key: format!("{x},{y},{z}"),

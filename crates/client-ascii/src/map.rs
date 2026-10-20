@@ -5,8 +5,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use tor_client_common::{presentation, presentation::AsciiAppearance, Palette};
 use tor_protocol::{
-    ActorView, CellView, ItemClass, ItemView, MapDoorAppearance, MapItemAppearance, Observation,
-    Position, RememberedMapCell,
+    ActorView, CellView, ItemClass, ItemView, MapDoorAppearance, MapItemAppearance,
+    MapTrapAppearance, Observation, Position, RememberedMapCell,
 };
 
 /// Map cells shown across and down; odd, so the player is centred.
@@ -43,6 +43,7 @@ pub enum Kind {
     /// Open at the feet and below: a pit, hole or drop.
     Drop,
     Door,
+    Trap,
     StairsUp,
     StairsDown,
     Floor,
@@ -253,6 +254,8 @@ impl Column<'_> {
                     },
                     feet,
                 )
+            } else if feet.trap.is_some() {
+                (Kind::Trap, feet)
             } else if feet.stairs_down {
                 (Kind::StairsDown, feet)
             } else if feet.stairs_up {
@@ -303,6 +306,9 @@ pub(crate) fn appearance_cells(o: &Observation) -> Vec<RememberedMapCell> {
             place_hint: cell.place_hint,
             stairs_up: cell.stairs_up,
             stairs_down: cell.stairs_down,
+            trap: cell.trap.as_ref().map(|trap| MapTrapAppearance {
+                family: trap.family,
+            }),
             door: cell.door.as_ref().map(|d| MapDoorAppearance {
                 name: d.name.clone(),
                 description: d.description.clone(),
@@ -411,6 +417,7 @@ pub(crate) fn appearance_tiles(
                         ),
                     )
                 }
+                Kind::Trap => (Kind::Trap, '^', 0xe9a05c),
                 Kind::Wall => (Kind::Wall, '#', tint(cell.asset.as_deref(), TERRAIN)),
                 Kind::LowWall => (Kind::LowWall, '#', LOW_WALL),
                 Kind::Drop => (Kind::Drop, '^', DROP),

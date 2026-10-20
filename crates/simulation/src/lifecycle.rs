@@ -290,6 +290,15 @@ impl Game {
         let clock = self.actor_clock(id);
         let elapsed = clock.saturating_sub(state.active_since);
         if elapsed > 0 {
+            if state.search_clock.next_in(state).is_some() {
+                let creature = state
+                    .combat
+                    .as_ref()
+                    .expect("search source creature")
+                    .creature();
+                let check = crate::discovery::FrozenDiscoveryCheck::capture_for(creature, id)?;
+                state.search_clock.advance(elapsed, check)?;
+            }
             if let Some(combat) = state.combat.as_mut() {
                 let denied = combat
                     .creature()
@@ -346,7 +355,18 @@ impl Game {
     /// External effect application owns one transaction; internal lifecycle callers
     /// use the already existing action/physics transaction and actor-local snapshots.
     pub fn apply(&mut self, outcome: Outcome) -> Result<(), GameError> {
-        self.with_effect_publication(|candidate| candidate.apply_outcome(outcome))
+        self.with_effect_publication(|candidate| {
+            // Standalone resolved effects can arrive between timer sweeps. Earned
+            // automatic work belongs to the old policy, before this effect can
+            // change senses, placement or eligibility.
+            let mut owners = [outcome.actor, outcome.target];
+            owners.sort();
+            candidate.settle_actor_time(owners[0])?;
+            if owners[1] != owners[0] {
+                candidate.settle_actor_time(owners[1])?;
+            }
+            candidate.apply_outcome(outcome)
+        })
     }
 
     /// Publish one complete public effect operation. Internal effect/rider work
@@ -375,6 +395,8 @@ impl Game {
 
     pub(crate) fn finish_effect_publication(&mut self) -> Result<(), GameError> {
         self.reconcile_recovery_contexts()?;
+        self.reconcile_passive_discovery()?;
+        self.settle_periodic_searches()?;
         self.seal_participant_events()
     }
 
@@ -387,13 +409,28 @@ impl Game {
         requires_candidate: bool,
     ) -> Result<(), GameError> {
         let requires_candidate = requires_candidate
+            || prepared.outcome.state.search_clock.pending()
             || prepared.emits_events()
             || prepared
                 .creature()
                 .is_some_and(|creature| creature.derived().contextual_health_recovery());
         self.with_recovery_transition(requires_candidate, |candidate| {
-            candidate.publish_actor_outcome(prepared)
+            candidate.publish_actor_outcome_after_search(prepared)
         })
+    }
+
+    /// Trusted source/placement changes settle an earned scan at the old place,
+    /// before installing the new policy. Pure previews never call this boundary.
+    pub(crate) fn publish_actor_outcome_after_search(
+        &mut self,
+        mut prepared: PreparedActorOutcome,
+    ) -> Result<(), GameError> {
+        if let Some(check) = prepared.outcome.state.search_clock.take_pending() {
+            let id = prepared.outcome.id;
+            self.run_active_discovery(id, &check)?;
+            prepared.outcome.state.discovery = self.actors[&id].discovery.clone();
+        }
+        self.publish_actor_outcome(prepared)
     }
 
     pub(crate) fn apply_outcome(
@@ -576,11 +613,13 @@ impl Game {
         let mut created_hold = None;
         for index in 0..outcome.effects.len() {
             let effect = &outcome.effects[index];
-            if matches!(effect, ResolvedEffect::SearchAdjacentGuises) {
+            if let ResolvedEffect::SearchAdjacentGuises { total } = effect {
                 if recipient_id != outcome.actor || outcome.actor != outcome.target {
                     return Err(GameError::Rule(RuleError::InvalidPlan));
                 }
                 self.reveal_adjacent_guises(outcome.actor)?;
+                self.apply_discovery_total(outcome.actor, *total)?;
+                transition.state.discovery = self.actors[&outcome.actor].discovery.clone();
                 outcome.effects[applied_count] = effect.clone();
                 applied_count += 1;
                 continue;
@@ -1093,6 +1132,10 @@ impl Game {
                 outcome.state.recognized_abilities.extend(learned);
             }
         }
+        outcome
+            .state
+            .search_clock
+            .rephase(outcome.state.perception().search_interval);
         Ok(PreparedActorOutcome {
             outcome,
             death,
@@ -1111,6 +1154,9 @@ impl Game {
         let id = outcome.id;
         let from = self.actors[&id].location;
         let to = outcome.state.location;
+        let ground_contact_changed = from != to
+            || self.actors[&id].orientation != outcome.state.orientation
+            || self.actors[&id].locomotion().flying != outcome.state.locomotion().flying;
         let entry_cause = outcome.entry_cause;
         let disclosure_origin = outcome
             .disclosure_origin
@@ -1249,6 +1295,19 @@ impl Game {
                     .map_err(GameError::Creature)?;
                 self.commit_actor_outcome(owner)?;
             }
+        }
+        if ground_contact_changed {
+            if self.actor_frozen(id) {
+                // Trusted relocation can move a frozen actor. Old contact
+                // identity must not follow it, and an active destination must
+                // thaw before its new contact is evaluated.
+                self.actors
+                    .get_mut(&id)
+                    .expect("published actor")
+                    .trap_contacts = tor_world::Shared::new(crate::traps::TrapContacts::default());
+                self.sync_actor_lifecycle(id)?;
+            }
+            self.reconcile_trap_contacts(id, None)?;
         }
         if self.floor_activation.is_some() && from.region != to.region {
             self.sync_actor_lifecycle(id)?;

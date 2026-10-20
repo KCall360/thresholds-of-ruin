@@ -201,6 +201,10 @@ pub struct World {
     named_anchors: Shared<BTreeMap<RegionId, BTreeMap<String, Position>>>,
     #[serde(with = "crate::checkpoint_map::shared")]
     doors: Shared<BTreeMap<Location, Door>>,
+    #[serde(with = "crate::checkpoint_map::shared")]
+    secret_doors: Shared<BTreeMap<Location, Concealment>>,
+    #[serde(with = "crate::checkpoint_map::shared")]
+    traps: Shared<BTreeMap<Location, Trap>>,
     regions: Shared<BTreeMap<RegionId, Region>>,
     #[serde(with = "crate::checkpoint_map::shared")]
     passages: Shared<BTreeMap<(Location, Direction), Passage>>,
@@ -402,15 +406,30 @@ impl World {
                         && self.door_entry(cell).map(|(base, _)| base) == Some(*location)
                 })
                 && self.door_cells(*location).count() == usize::from(door.height)
-        }) && self.lighting.iter().all(|(region, light)| {
-            self.region(*region).is_some()
-                && light.cells.keys().all(|position| {
-                    self.contains(Location {
-                        region: *region,
-                        position: *position,
-                    })
+        }) && self
+            .secret_doors
+            .iter()
+            .all(|(at, concealment)| self.doors.contains_key(at) && concealment.valid())
+            && {
+                let mut traps = BTreeSet::new();
+                self.traps.iter().all(|(at, trap)| {
+                    self.contains(*at)
+                        && !self.is_wall(*at)
+                        && self.trap_supported(*at)
+                        && trap.valid()
+                        && traps.insert(trap.id)
                 })
-        }) && self.terrain.keys().all(|location| self.contains(*location))
+            }
+            && self.lighting.iter().all(|(region, light)| {
+                self.region(*region).is_some()
+                    && light.cells.keys().all(|position| {
+                        self.contains(Location {
+                            region: *region,
+                            position: *position,
+                        })
+                    })
+            })
+            && self.terrain.keys().all(|location| self.contains(*location))
             && self
                 .place_hints
                 .keys()
@@ -552,6 +571,8 @@ impl World {
     pub fn new(regions: Vec<Region>, passages: Vec<Passage>) -> Result<Self, WorldError> {
         let mut world = Self {
             doors: Shared::new(BTreeMap::new()),
+            secret_doors: Shared::default(),
+            traps: Shared::default(),
             regions: Shared::new(BTreeMap::new()),
             passages: Shared::new(BTreeMap::new()),
             rotations: Shared::new(BTreeMap::new()),
@@ -1311,3 +1332,7 @@ mod gravity_sharing_tests {
             .shares_storage(&original.region_gravity));
     }
 }
+
+#[path = "concealed.rs"]
+mod concealed;
+pub use concealed::{ConcealedFeatureId, Concealment, Trap, TrapFamily, TrapKind};

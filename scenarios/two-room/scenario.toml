@@ -1,5 +1,5 @@
 # Ordinary authored scenario; validate after every edit.
-format = 26
+format = 27
 id = "two-room"
 version = "1.1"
 ruleset = "rules.toml"

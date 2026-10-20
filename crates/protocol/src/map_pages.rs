@@ -235,6 +235,15 @@ impl MapDoorAppearance {
         }
     }
 }
+record!(MapTrapAppearance {
+    #[serde(deserialize_with = "required_option")]
+    family: Option<crate::TrapFamily>,
+});
+impl MapTrapAppearance {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        Ok(())
+    }
+}
 record!(MapItemAppearance {
     #[serde(deserialize_with = "item_class")]
     class: ItemClass,
@@ -279,6 +288,8 @@ record!(RememberedMapCell {
     stairs_down: bool,
     #[serde(deserialize_with = "required_option")]
     door: Option<MapDoorAppearance>,
+    #[serde(deserialize_with = "required_option")]
+    trap: Option<MapTrapAppearance>,
     #[serde(deserialize_with = "items")]
     ground_items: Vec<MapItemAppearance>,
 });

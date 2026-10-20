@@ -256,16 +256,17 @@ threshold on bounded owned HD records. Utility wands use persistent first-contac
 rays and nonstacking haste/slow that cancel to neutral; the Lore dodge and bounded
 reach are TOR adaptations. See [the bounded item mapping](../reference/items.md#reading-identification-and-charged-devices).
 
-The approved ten-ring batch implements protection, add strength, sustain strength,
+The current ring catalog implements protection, add strength, sustain strength,
 see invisible, adornment, dexterity, increase damage, regeneration, slow digestion
-and maintain armor through shared wearable modifiers. Protection reduces all six
-damage types; dexterity affects Speed but excludes its own Physical Defense
+and maintain armor through shared wearable modifiers, plus searching through the
+shared active discovery resolver. Protection reduces all six
+damage types; Strength and dexterity rings exclude only their own Physical Defense
 contribution; attack bonuses apply to canonical rolled attack pools. Health
 regeneration benefits do not stack, while per-ring nutrition costs do. Signed
 potency and curse knowledge stay instance-private; one paid identification choice
-can permit both rings and wands. The appended finite ring stage follows ammunition,
-bringing the current production profile to twelve stages. Searching, aggravation,
-teleportation and stealth rings remain outside this batch. See
+can permit both rings and wands. The finite ring stage follows ammunition; independent
+secret-entrance and trap stages extend generation without changing geometry or
+stair streams. Aggravation, teleportation and stealth rings remain outside this batch. See
 [worn magic contracts](../reference/items.md#worn-magic-and-the-finite-rogue-ring-catalog).
 These mechanics do not establish calibrated food pressure or complete Rogue parity.
 

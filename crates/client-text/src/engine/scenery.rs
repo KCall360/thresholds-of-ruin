@@ -89,6 +89,7 @@ pub fn seen(client: &ClientState) -> Seen {
             lit: false,
             // Stale door appearance is stored separately; no DoorView or target
             // can be recovered from it. The geometry alone has no action handle.
+            trap: None,
             door: None,
             material: cell.material.clone(),
             key: cell.key.clone(),

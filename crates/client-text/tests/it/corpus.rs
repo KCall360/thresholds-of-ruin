@@ -32,7 +32,7 @@ fn state() -> StateView {
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
             "wall":false,"material":"stone","lit":true,"place_hint":x==1,
-            "stairs_up":false,"stairs_down":false
+            "trap":null,"stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
             {"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
@@ -316,7 +316,10 @@ const CORPUS: &[(&str, Means)] = &[
         "search",
         Means::Refuses("find nothing you hadn't already seen"),
     ),
-    ("search the corpse", Means::Says("You find nothing hidden")),
+    (
+        "search the corpse",
+        Means::Says("To search for concealed features nearby, use SEARCH."),
+    ),
     // Moving.
     ("wait", Means::Waits),
     ("z", Means::Waits),

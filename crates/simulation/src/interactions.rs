@@ -1256,7 +1256,7 @@ impl Game {
             candidate.apply_effects_in_transaction(actor, effects)
         })
     }
-    fn apply_effects_in_transaction(
+    pub(crate) fn apply_effects_in_transaction(
         &mut self,
         actor: ActorId,
         effects: &[crate::rules::Effect],

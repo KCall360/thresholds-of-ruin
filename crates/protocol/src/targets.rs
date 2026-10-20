@@ -109,6 +109,12 @@ target!(
 );
 
 target!(
+    TrapTarget,
+    b't',
+    "Observer-scoped reference to a discovered trap."
+);
+
+target!(
     AppearanceSeed,
     b'p',
     "Shared cosmetic identity of one creature, independent of observer and interaction authority."

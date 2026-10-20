@@ -79,7 +79,9 @@ impl Game {
         for id in due {
             self.settle_actor_time(id)?;
         }
-        self.reconcile_recovery_contexts()
+        self.reconcile_recovery_contexts()?;
+        self.reconcile_passive_discovery()?;
+        self.settle_periodic_searches()
     }
 
     pub(crate) fn settle_actor_time(&mut self, id: ActorId) -> Result<(), GameError> {
@@ -101,7 +103,8 @@ impl Game {
                 !creature.condition_restricts(crate::rules::ConditionRestriction::VoluntaryActions)
             });
         if !eligible {
-            return self.apply_outcome(outcome);
+            self.apply_outcome(outcome)?;
+            return self.settle_periodic_search_for(id);
         }
         let mut rng = self.rules_rng;
         let effect = trigger.sample(&mut rng);
@@ -109,6 +112,12 @@ impl Game {
         // paid-work pause and events share one candidate publication boundary.
         let mut candidate = self.clone();
         candidate.apply_outcome(outcome)?;
+        // A scan earned under the preceding active policy belongs before a
+        // condition introduced at this same deadline. Publish the sampled RNG
+        // first, then carry the scan's draws into ordinary effect resolution.
+        candidate.rules_rng = rng;
+        candidate.settle_periodic_search_for(id)?;
+        let mut rng = candidate.rules_rng;
         if let Some(effect) = effect {
             let crate::abilities::PlannedEffect::ApplyCondition {
                 id: ref condition, ..
