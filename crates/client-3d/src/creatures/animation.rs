@@ -1331,6 +1331,25 @@ fn idle(p: &mut Pose, rig: &Rig, time: f32, seed: f32, k: f32) {
         Plan::Biped => {
             p.r(J::Lift, Quat::from_rotation_z(sway * 0.025 * k));
             p.r(J::Hips, Quat::from_rotation_z(-sway * 0.04 * k));
+            if rig.humanoid.is_some_and(|body| body.woman)
+                && !matches!(rig.style, Style::Zombie | Style::Guardian)
+            {
+                // She rests her weight on one leg, as the women stand on the
+                // concept sheets: the hip rises over it, the shoulders and
+                // head counter it, and the free knee softens. The side
+                // changes now and then, easing across.
+                let side = (time * 0.07 + seed).sin().clamp(-0.4, 0.4) / 0.4;
+                p.r(J::Hips, Quat::from_rotation_z(0.07 * side * k));
+                p.r(J::Torso, Quat::from_rotation_z(-0.08 * side * k));
+                p.r(J::Head, Quat::from_rotation_z(0.05 * side * k));
+                let (free, shin) = if side > 0.0 {
+                    (J::LegR, J::ShinR)
+                } else {
+                    (J::LegL, J::ShinL)
+                };
+                p.r(free, fwd(0.1 * side.abs() * k));
+                p.r(shin, fwd(-0.16 * side.abs() * k));
+            }
             p.r(J::LegL, Quat::from_rotation_z(sway * 0.03 * k));
             p.r(J::LegR, Quat::from_rotation_z(sway * 0.03 * k));
             p.r(J::Head, Quat::from_rotation_y(look * k));

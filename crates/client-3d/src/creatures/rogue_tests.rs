@@ -219,6 +219,11 @@ fn animate_along(
     frames: usize,
     path: impl Fn(usize) -> Vec3,
 ) -> (App, Entity) {
+    animate_look(Look::of(model, 9), frames, path)
+}
+
+/// As `animate_along`, for an exact individual.
+fn animate_look(look: Look, frames: usize, path: impl Fn(usize) -> Vec3) -> (App, Entity) {
     use bevy::time::TimeUpdateStrategy;
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
@@ -229,7 +234,6 @@ fn animate_along(
         .add_systems(Update, animate);
     let mut materials = Assets::<StandardMaterial>::default();
     let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
-    let look = Look::of(model, 9);
     let root = app
         .world_mut()
         .spawn((Anim::new(9, path(0)), Transform::from_translation(path(0))))
@@ -771,4 +775,35 @@ fn ending_an_action_hands_back_to_the_idle_without_a_snap() {
         let pop = action_exit_pop(model);
         assert!(pop < 0.12, "{model:?} snaps back to its idle: {pop}");
     }
+}
+
+#[test]
+fn at_rest_women_stand_with_their_weight_on_one_leg() {
+    let tilt = |woman: bool| {
+        let look = Look::with_choice(
+            CreatureModel::Human,
+            9,
+            Some(Variant {
+                woman,
+                ..Default::default()
+            }),
+        );
+        let (mut app, root) = animate_look(look, 1, |_| Vec3::ZERO);
+        let hips = app
+            .world()
+            .get::<Rig>(root)
+            .unwrap()
+            .joint(J::Hips)
+            .unwrap();
+        let mut most = 0.0f32;
+        for _ in 0..2000 {
+            app.update();
+            let rotation = app.world().get::<Transform>(hips).unwrap().rotation;
+            most = most.max(rotation.to_euler(EulerRot::ZXY).0.abs());
+        }
+        most
+    };
+    let (hers, his) = (tilt(true), tilt(false));
+    assert!(hers > 0.08, "her hip rises over the standing leg: {hers}");
+    assert!(his < hers * 0.7, "he stands squarer: {his} against {hers}");
 }

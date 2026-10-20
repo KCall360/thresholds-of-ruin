@@ -182,7 +182,9 @@ impl Kit<'_, '_, '_> {
 
     fn part(&mut self, part: &str, build: impl FnOnce(&mut Parts)) -> Model {
         let soft = true;
-        let ghost = self.ghost;
+        // A phantom's face and hair stay solid, as on its sheet, so its
+        // hair can never show through its face; the rest is translucent.
+        let ghost = self.ghost && part != "head";
         self.library
             .get(format!("creature/{}/{part}", self.key), self.meshes, || {
                 let mut p = Parts::default();
