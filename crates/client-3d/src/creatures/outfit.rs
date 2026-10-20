@@ -47,6 +47,21 @@ pub(crate) struct Boots {
     pub cuffed: bool,
 }
 
+/// What is worn on the head.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Headwear {
+    Bare,
+    /// A deep hood over the head, perhaps ending in a long soft point.
+    Hood {
+        color: Vec3,
+        pointed: bool,
+    },
+    /// A hood pushed back as a cowl over the shoulders.
+    HoodDown(Vec3),
+    /// A closed plumed helm.
+    Helm,
+}
+
 /// A fitted layer over the tunic.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Outer {
@@ -66,6 +81,7 @@ pub(crate) enum Outer {
 /// One humanoid's clothes and armour.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Outfit {
+    pub head: Headwear,
     pub tunic: Vec3,
     pub arms: Arms,
     pub cuffs: Option<Vec3>,
@@ -145,6 +161,7 @@ impl Outfit {
             Wardrobe::Commoner => {
                 let tunic = Vec3::new(0.52, 0.45, 0.34);
                 Outfit {
+                    head: Headwear::Bare,
                     tunic,
                     arms: Arms::Sleeves(tunic),
                     cuffs: None,
@@ -159,6 +176,7 @@ impl Outfit {
             Wardrobe::Ranger => {
                 let tunic = Vec3::new(0.27, 0.4, 0.24);
                 Outfit {
+                    head: Headwear::HoodDown(Vec3::new(0.2, 0.28, 0.17)),
                     tunic,
                     arms: Arms::Sleeves(tunic),
                     cuffs: Some(LEATHER),
@@ -183,6 +201,7 @@ impl Outfit {
                 }
             }
             Wardrobe::Knight => Outfit {
+                head: Headwear::Helm,
                 tunic: l.cloth,
                 arms: Arms::Plate,
                 cuffs: Some(STEEL * 0.85),
@@ -202,6 +221,7 @@ impl Outfit {
             Wardrobe::Courtier => {
                 let gown = l.cloth * 0.9 + Vec3::new(0.05, 0.0, 0.06);
                 Outfit {
+                    head: Headwear::Bare,
                     tunic: gown,
                     arms: Arms::Sleeves(gown),
                     cuffs: Some(l.trim),
@@ -365,7 +385,25 @@ impl Outfit {
             Style::Vampire => Some((DARK, l.trim)),
             _ => None,
         };
+        // Scouts and casters wear their hoods up unless pushed back; a
+        // wraith's is always up. Hoods sometimes end in a long soft point.
+        let hood_down = matches!(style, Style::Caster | Style::Scout) && l.v.pattern >= 2;
+        let hood = match style {
+            Style::Caster => l.cloth,
+            Style::Wraith => l.cloth * 0.85,
+            _ => Vec3::new(0.3, 0.42, 0.22),
+        };
+        let head = match style {
+            Style::Sentinel => Headwear::Helm,
+            Style::Caster | Style::Scout if hood_down => Headwear::HoodDown(hood),
+            Style::Caster | Style::Scout | Style::Wraith => Headwear::Hood {
+                color: hood,
+                pointed: style == Style::Scout || l.aura == Some(Accent::Ember),
+            },
+            _ => Headwear::Bare,
+        };
         Outfit {
+            head,
             tunic,
             arms,
             cuffs,
