@@ -38,12 +38,12 @@ class PhysicsProcesses(ProcessTestCase):
         here=[t for t in initial['map_tiles'] if (t['position']['x'],t['position']['y'])==(0,0)]
         self.assertEqual([t['glyph'] for t in here],['@'])
         self.assertFalse(any(t['kind']=='creature' for t in here))
-        falling = self.key(player, 'wait')['state']['observation']
+        falling = self.key(player, 'wait', wait_for_admission=True)['state']['observation']
         self.assertTrue(falling['motion']['displaced'])
         self.assertLess(int(falling['motion']['velocity'][2]), 0)
         impacted = False
         for _ in range(5):
-            current = self.key(player, 'wait')
+            current = self.key(player, 'wait', wait_for_admission=True)
             impacted |= current['state']['observation']['motion']['impacted']
         self.assertTrue(impacted)
         self.assertEqual(current['state']['observation']['motion']['velocity'], ['0', '0', '0'])
