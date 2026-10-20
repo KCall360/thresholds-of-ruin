@@ -472,9 +472,11 @@ pub(super) fn long_hair_form(seed: u64) -> crate::sdf::Sculpt {
         let a = (k as f32 / (count - 1) as f32 - 0.5) * 2.3;
         let reach = -0.21 - 0.05 * rand(seed, 60 + k);
         let phase = rand(seed, 90 + k) * TAU;
-        let path = (0..=10)
+        // Six segments carry its slow waves; each extra one costs every
+        // sample of the sculpt.
+        let path = (0..=6)
             .map(|i| {
-                let s = i as f32 / 10.0;
+                let s = i as f32 / 6.0;
                 let y = lerp(0.27, reach, s);
                 // Over the skull, then hanging clear of the neck and
                 // spreading a little over the shoulder blades.
@@ -508,9 +510,9 @@ pub(super) fn long_hair_form(seed: u64) -> crate::sdf::Sculpt {
             .enumerate()
         {
             let phase = rand(seed, 70 + k as u32 + side.max(0.0) as u32 * 4) * TAU;
-            let path = (0..=10)
+            let path = (0..=6)
                 .map(|i| {
-                    let s = i as f32 / 10.0;
+                    let s = i as f32 / 6.0;
                     let y = lerp(0.22, reach, s);
                     let wave = (y * 10.0 + phase).sin() * 0.012 * s;
                     // Forward over the shoulder once past the jaw.
@@ -1354,7 +1356,7 @@ fn hair(p: &mut Parts, l: &Look) {
                 &mut p.matte,
                 Vec3::new(-0.21, -0.3, -0.23),
                 Vec3::new(0.21, 0.31, 0.13),
-                0.0075,
+                0.009,
                 &|at, normal| c * hair_sheen(at, normal, seed),
             );
         }
