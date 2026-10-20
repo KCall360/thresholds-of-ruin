@@ -164,6 +164,8 @@ class AsciiMessageProcesses(ProcessTestCase):
             self.assertNotIn("You can act again", turn)
             self.assertNotIn("You move east", turn)
             self.assertNotIn("HP ", turn)
+            self.assertNotIn("You prepare to use Attack.", turn)
+            self.assertNotIn("You used Attack on", turn)
             seen.append(turn)
             observation = frame["state"]["observation"]
             trace.append({"key": key, "input_done": frame.get("input_done"),
@@ -178,7 +180,7 @@ class AsciiMessageProcesses(ProcessTestCase):
                 killed = frame
                 break
         self.assertIsNotNone(killed, {"messages": seen, "input_trace": trace})
-        self.assertIn("You used Attack on the ruin scout.", killed["messages"]["turn"])
+        self.assertIn("You hit the ruin scout.", killed["messages"]["turn"])
         self.assertEqual(killed["messages"]["shown"][0][:24], killed["messages"]["turn"][:24])
         # Earlier turns went to the log.
         self.assertTrue(any("ruin scout" in turn for turn in killed["messages"]["log"]))

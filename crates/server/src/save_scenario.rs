@@ -4155,7 +4155,7 @@ mod tests {
 
     #[test]
     fn projectile_expertise_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 53);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 54);
         assert_eq!(super::RULES_INPUT_FORMAT, 19);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Expertise ownership, projectile plans and selected weapon profiles advance

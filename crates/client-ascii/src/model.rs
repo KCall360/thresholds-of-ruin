@@ -627,7 +627,10 @@ impl App {
             self.running = None;
             return Effect::None;
         }
-        if self.busy || !state.can_admit_intention() {
+        // Admission opens a queue slot even while other actors are advancing.
+        // A run must inspect their settled results before choosing its next step;
+        // unlike explicit one-step input it must not queue from an intermediate view.
+        if self.busy || !state.state().observation.ready || !state.can_admit_intention() {
             return Effect::None;
         }
         if !self.messages.text().is_empty()
@@ -2700,8 +2703,9 @@ impl App {
                         .into();
                         Effect::None
                     }
-                    // A lone object is picked up at once; dropping always asks.
-                    [item] if item.quantity == 1 && !self.dropping => self.act(Action::Take {
+                    // One reachable stack is taken whole; the server checks free units.
+                    // Dropping and choosing among multiple stacks always ask.
+                    [item] if !self.dropping => self.act(Action::Take {
                         item: item.id,
                         quantity: None,
                     }),
@@ -3099,18 +3103,34 @@ impl App {
                 Direction::Down => (0, 0, -1),
             };
             let view = &state.state().observation;
-            if let Some(target) = view.visible_actors.iter().find(|a| {
-                a.id != view.self_target
-                    && a.position == (Position { x, y, z })
-                    && match self.bump_attacks {
-                        BumpAttacks::Any => true,
-                        BumpAttacks::Off => false,
-                        BumpAttacks::Hostile => view.combat.as_ref().is_some_and(|c| {
-                            c.actors
-                                .iter()
-                                .any(|other| other.actor == a.id && other.hostile)
-                        }),
-                    }
+            let columns = crate::map::CreatureColumns::new(view);
+            let destination = match (
+                view.position.x.checked_add(x),
+                view.position.y.checked_add(y),
+                view.position.z.checked_add(z),
+            ) {
+                (Some(x), Some(y), Some(z)) => Some(Position { x, y, z }),
+                _ => None,
+            };
+            let target = destination.and_then(|at| {
+                if z == 0 {
+                    columns
+                        .actor(at.x, at.y)
+                        .filter(|actor| columns.near_body(actor.position))
+                } else {
+                    view.visible_actors
+                        .iter()
+                        .find(|actor| actor.id != view.self_target && actor.position == at)
+                }
+            });
+            if let Some(target) = target.filter(|actor| match self.bump_attacks {
+                BumpAttacks::Any => true,
+                BumpAttacks::Off => false,
+                BumpAttacks::Hostile => view.combat.as_ref().is_some_and(|c| {
+                    c.actors
+                        .iter()
+                        .any(|other| other.actor == actor.id && other.hostile)
+                }),
             }) {
                 match tor_client_common::abilities::basic_action(view, target.id) {
                     Ok(attack) => action = attack,
@@ -3471,11 +3491,7 @@ pub fn describe(
     if (x, y) == (o.position.x, o.position.y) {
         return "That's you.".into();
     }
-    if let Some(actor) = o
-        .visible_actors
-        .iter()
-        .find(|a| a.id != o.self_target && (a.position.x, a.position.y) == (x, y))
-    {
+    if let Some(actor) = crate::map::CreatureColumns::new(o).actor(x, y) {
         let phrase = if actor.name.trim().is_empty() {
             tor_client_common::presentation::resolve(palette, actor.asset.as_deref())
                 .map_or("a figure", |entry| entry.noun.indefinite)
@@ -3597,8 +3613,8 @@ fn sequence_label(combat: &CombatView) -> Option<String> {
     ))
 }
 
-/// NetHack's two status lines: where you are and what you're after, then
-/// hit points, time and conditions.
+/// Compact disclosed attributes and location, then health, resource balances,
+/// reserved amounts, identified gold, time and conditions.
 pub fn status_lines(app: &App, state: &ClientState) -> [String; 2] {
     let o = &state.state().observation;
     let me = o
@@ -3606,7 +3622,28 @@ pub fn status_lines(app: &App, state: &ClientState) -> [String; 2] {
         .iter()
         .find(|a| a.id == o.self_target && !a.name.trim().is_empty())
         .map(|a| a.name.as_str());
-    let mut first = place_name(o).or(me).unwrap_or_default().to_owned();
+    let mut first = Vec::new();
+    if let Some(stats) = o
+        .combat
+        .as_ref()
+        .and_then(|combat| combat.own_stats.as_ref())
+    {
+        let a = &stats.attributes;
+        first.push(format!(
+            "Str:{} Spd:{} Int:{} Wil:{} Awr:{} Pre:{} HD:{}",
+            a.strength,
+            a.speed,
+            a.intellect,
+            a.willpower,
+            a.awareness,
+            a.presence,
+            stats.hit_dice.total,
+        ));
+    }
+    if let Some(place) = place_name(o).or(me) {
+        first.push(place.to_owned());
+    }
+    let mut first = first.join("  ");
     if let Some(objective) = o.combat.as_ref().and_then(|c| c.objective) {
         if !first.is_empty() {
             first.push_str("   ");
@@ -3616,11 +3653,38 @@ pub fn status_lines(app: &App, state: &ClientState) -> [String; 2] {
     let mut second = Vec::new();
     if let Some(combat) = &o.combat {
         second.push(format!("HP:{}({})", combat.hp, combat.max_hp));
-        if let Some(NutritionView::Required { hunger, .. }) =
-            combat.own_stats.as_ref().map(|s| s.nutrition)
-        {
-            second.push(tor_client_common::stats::hunger_label(hunger).into());
+        if let Some(stats) = &combat.own_stats {
+            for resource in &stats.resources {
+                let label = match resource.resource.id.as_str() {
+                    "stamina" => "Stm",
+                    "focus" => "Foc",
+                    "mana" => "Mana",
+                    _ => resource.resource.name.as_str(),
+                };
+                let mut pool = format!("{label}:{}/{}", resource.balance, resource.maximum);
+                if resource.reserved > 0 {
+                    pool.push_str(&format!("[-{}]", resource.reserved));
+                }
+                second.push(pool);
+            }
         }
+    }
+    // Currency is a disclosed typed capability, never inferred from appearance.
+    // Sum in u128: the bounded inventory can contain several full u64 stacks.
+    let gold: u128 = o
+        .inventory
+        .iter()
+        .filter(|item| item.known_currency == Some(CurrencyKind::Gold))
+        .map(|item| u128::from(item.quantity))
+        .sum();
+    second.push(format!("Gold:{gold}"));
+    if let Some(NutritionView::Required { hunger, .. }) = o
+        .combat
+        .as_ref()
+        .and_then(|combat| combat.own_stats.as_ref())
+        .map(|stats| stats.nutrition)
+    {
+        second.push(tor_client_common::stats::hunger_label(hunger).into());
     }
     second.push(format!("T:{}", o.tick));
     if !o.linked_holds.is_empty() {
@@ -3662,6 +3726,95 @@ pub fn status_lines(app: &App, state: &ClientState) -> [String; 2] {
         second.push("Wizard".into());
     }
     [first, second.join("  ")]
+}
+
+/// Readable, bounded status rows. Whole fields wrap before optional details are
+/// omitted; `+` marks omissions, never an abbreviated numeric value.
+pub fn status_lines_at_width(app: &App, state: &ClientState, columns: usize) -> [String; 3] {
+    let [first, second] = status_lines(app, state);
+    let mut fields = Vec::new();
+    for field in second.split("  ") {
+        if field.starts_with("Sequence") {
+            // Preserve the state even when the three exact counters are long.
+            if let Some((label, detail)) = field.split_once(':') {
+                fields.push(label.to_owned());
+                let mut details = detail.split_whitespace();
+                if let Some(progress) = details.next() {
+                    fields.push(format!("Seq:{progress}"));
+                }
+                fields.extend(details.map(str::to_owned));
+            }
+        } else {
+            fields.push(field.to_owned());
+        }
+    }
+    fields.sort_by_key(|field| {
+        if field.starts_with("HP:") {
+            0
+        } else if matches!(
+            field.as_str(),
+            "Dead" | "Victorious" | "hungry" | "weak" | "empty" | "Recovering"
+        ) || field.starts_with("Held:")
+            || field.starts_with("Sequence")
+            || field.starts_with("Attack")
+        {
+            1
+        } else if field.starts_with("Gold:") {
+            2
+        } else if field.starts_with("Stm:")
+            || field.starts_with("Foc:")
+            || field.starts_with("Mana:")
+        {
+            3
+        } else if field.starts_with("T:") {
+            5
+        } else {
+            4
+        }
+    });
+    fn fit(fields: impl IntoIterator<Item = String>, columns: usize, rows: &mut [String]) {
+        let mut packed: Vec<Vec<String>> = vec![Vec::new(); rows.len()];
+        let mut row = 0;
+        let mut omitted = false;
+        for field in fields {
+            if field.chars().count() > columns {
+                omitted = true;
+                continue;
+            }
+            while row < packed.len()
+                && packed[row].join(" ").chars().count()
+                    + usize::from(!packed[row].is_empty())
+                    + field.chars().count()
+                    > columns
+            {
+                row += 1;
+            }
+            if row == packed.len() {
+                omitted = true;
+                continue;
+            }
+            packed[row].push(field);
+        }
+        if omitted && columns > 0 {
+            let last = packed.last_mut().expect("at least one status row");
+            while last.join(" ").chars().count() + usize::from(!last.is_empty()) + 1 > columns {
+                last.pop();
+            }
+            last.push("+".into());
+        }
+        for (row, fields) in rows.iter_mut().zip(packed) {
+            *row = fields.join(" ");
+        }
+    }
+
+    let mut rows = [String::new(), String::new(), String::new()];
+    fit(
+        first.split_whitespace().map(str::to_owned),
+        columns,
+        &mut rows[..1],
+    );
+    fit(fields, columns, &mut rows[1..]);
+    rows
 }
 
 /// Who controls the character, and whether a request is out.

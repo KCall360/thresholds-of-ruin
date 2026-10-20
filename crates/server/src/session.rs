@@ -3428,8 +3428,24 @@ mod tests {
         let item = ItemTarget::from_digest([72; 32]);
         let mut state = service.engine.state(ActorId(1)).unwrap();
         state.observation.inventory.push(serde_json::from_value(serde_json::json!({
-            "id":item,"class":"wand","quantity":"1","appearance":"ivory wand","identified":true,"name":"Known wand","known_supply":null
+            "id":item,"class":"wand","quantity":"1","appearance":"ivory wand","identified":true,"name":"Known wand","known_currency":null,"known_supply":null
         })).unwrap());
+        let coin = ItemTarget::from_digest([84; 32]);
+        state.observation.inventory.push(
+            serde_json::from_value(serde_json::json!({
+                "id":coin,"class":"coin","quantity":"9007199254740993",
+                "appearance":"unmarked discs","identified":true,"name":"Known tender",
+                "known_currency":"gold","known_supply":null
+            }))
+            .unwrap(),
+        );
+        let public = Arc::new(state.clone());
+        for role in [AccessRole::Player, AccessRole::Spectator] {
+            assert!(Arc::ptr_eq(
+                &service.item_observation(Arc::clone(&public), role),
+                &public
+            ));
+        }
         state.observation.interactions = Some(InteractionView {
             curse_blocked: vec![],
             completed: vec![],
@@ -3514,6 +3530,14 @@ mod tests {
                 );
             }
             let disclosed = &retained.observation;
+            let tender = disclosed
+                .inventory
+                .iter()
+                .find(|row| row.id == coin)
+                .unwrap();
+            assert_eq!(tender.known_currency, Some(CurrencyKind::Gold));
+            assert_eq!(tender.quantity, 9_007_199_254_740_993);
+            assert!(text.contains("\"known_currency\":\"gold\""));
             let interaction = disclosed.interactions.as_ref().unwrap();
             assert_eq!(
                 interaction.identification.is_some(),
@@ -3568,7 +3592,7 @@ mod tests {
         public.observation.inventory.push(
             serde_json::from_value(serde_json::json!({
                 "id":item,"class":"ring","quantity":"1","appearance":"silver ring",
-                "identified":true,"name":"Known ring","known_supply":null
+                "identified":true,"name":"Known ring","known_currency":null,"known_supply":null
             }))
             .unwrap(),
         );

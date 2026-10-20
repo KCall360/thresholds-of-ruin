@@ -2,11 +2,11 @@
 //! as what stands at the player's own level there: a wall, a low wall, a
 //! floor, a drop, a door, stairs, an item or a creature. Heights well above
 //! or below the player (a stair's far landing, a distant ceiling) are left out.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use tor_client_common::{presentation, presentation::AsciiAppearance, Palette};
 use tor_protocol::{
-    CellView, ItemClass, ItemView, MapDoorAppearance, MapItemAppearance, Observation, Position,
-    RememberedMapCell,
+    ActorView, CellView, ItemClass, ItemView, MapDoorAppearance, MapItemAppearance, Observation,
+    Position, RememberedMapCell,
 };
 
 /// Map cells shown across and down; odd, so the player is centred.
@@ -69,6 +69,115 @@ pub fn creature(palette: &Palette, asset: Option<&str>) -> AsciiAppearance {
         },
         |entry| entry.ascii,
     )
+}
+
+/// One disclosed occupant per drawn column, shared by map, look and bump input.
+/// Body adjacency is only an input-selection hint: terrain, portal contact and
+/// actual melee reach remain server authority.
+pub(crate) struct CreatureColumns<'a> {
+    actors: BTreeMap<(i32, i32), &'a ActorView>,
+    body: BTreeSet<Position>,
+}
+
+impl<'a> CreatureColumns<'a> {
+    pub(crate) fn new(view: &'a Observation) -> Self {
+        // The origin is omitted from visible_actors. Other own occurrences can
+        // be distant portal images, so only the origin-connected disclosed
+        // component can extend the local input envelope.
+        let mut unseen: BTreeSet<_> = view
+            .visible_actors
+            .iter()
+            .filter(|actor| actor.id == view.self_target)
+            .map(|actor| actor.position)
+            .collect();
+        unseen.remove(&view.position);
+        let mut body = BTreeSet::from([view.position]);
+        let mut pending = vec![view.position];
+        while let Some(from) = pending.pop() {
+            for (dx, dy, dz) in [
+                (1, 0, 0),
+                (-1, 0, 0),
+                (0, 1, 0),
+                (0, -1, 0),
+                (0, 0, 1),
+                (0, 0, -1),
+            ] {
+                let (Some(x), Some(y), Some(z)) = (
+                    from.x.checked_add(dx),
+                    from.y.checked_add(dy),
+                    from.z.checked_add(dz),
+                ) else {
+                    continue;
+                };
+                let next = Position { x, y, z };
+                if unseen.remove(&next) {
+                    body.insert(next);
+                    pending.push(next);
+                }
+            }
+        }
+        let mut result = Self {
+            actors: BTreeMap::new(),
+            body,
+        };
+        for actor in &view.visible_actors {
+            if actor.id == view.self_target
+                || !actor
+                    .position
+                    .z
+                    .checked_sub(view.position.z)
+                    .is_some_and(|height| BAND.contains(&height))
+            {
+                continue;
+            }
+            // Prefer the actual step-height occupant, then a nearby body
+            // occurrence over a high flyer. Equal priorities keep disclosed
+            // source order; opaque actor tokens carry no selection meaning.
+            let priority = |candidate: &ActorView| {
+                (
+                    candidate.position.z != view.position.z,
+                    !result.near_body(candidate.position),
+                    candidate.position.z.abs_diff(view.position.z),
+                )
+            };
+            let column = (actor.position.x, actor.position.y);
+            if result
+                .actors
+                .get(&column)
+                .is_none_or(|current| priority(actor) < priority(current))
+            {
+                result.actors.insert(column, actor);
+            }
+        }
+        result
+    }
+
+    pub(crate) fn actor(&self, x: i32, y: i32) -> Option<&'a ActorView> {
+        self.actors.get(&(x, y)).copied()
+    }
+
+    pub(crate) fn near_body(&self, position: Position) -> bool {
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if (dx, dy, dz) == (0, 0, 0) {
+                        continue;
+                    }
+                    let (Some(x), Some(y), Some(z)) = (
+                        position.x.checked_add(dx),
+                        position.y.checked_add(dy),
+                        position.z.checked_add(dz),
+                    ) else {
+                        continue;
+                    };
+                    if self.body.contains(&Position { x, y, z }) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 /// Map, look and inventory use the same disclosed item asset. Its disclosed
@@ -243,14 +352,7 @@ pub(crate) fn appearance_tiles(
             .entry(dz)
             .or_insert(cell);
     }
-    let mut creatures: BTreeMap<(i32, i32), &tor_protocol::ActorView> = BTreeMap::new();
-    for actor in &o.visible_actors {
-        if actor.id != o.self_target && BAND.contains(&(actor.position.z - feet.z)) {
-            creatures
-                .entry((actor.position.x, actor.position.y))
-                .or_insert(actor);
-        }
-    }
+    let creatures = CreatureColumns::new(o);
     let mut items: BTreeMap<(i32, i32), (ItemClass, Option<&str>)> = BTreeMap::new();
     // Current piles retain their disclosed order and win over every stale
     // occurrence in this column, even a lower remembered height plane.
@@ -284,7 +386,7 @@ pub(crate) fn appearance_tiles(
                 .and_then(|actor| presentation::resolve(palette, actor.asset.as_deref()))
                 .map_or(SELF, |entry| entry.ascii.color);
             (Kind::Player, '@', color)
-        } else if let Some(actor) = creatures.get(&(*x, *y)).filter(|_| !remembered) {
+        } else if let Some(actor) = creatures.actor(*x, *y).filter(|_| !remembered) {
             let look = creature(palette, actor.asset.as_deref());
             (Kind::Creature, look.glyph, look.color)
         } else if let Some(item) = items.get(&(*x, *y)) {

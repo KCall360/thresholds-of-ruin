@@ -15,7 +15,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
     let fixture: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v53.json"
+            "/tests/fixtures/wire-v54.json"
         ))
         .expect("regenerate current wire samples"),
     )
@@ -52,6 +52,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
             id: ItemTarget::from_digest(synthetic_digest(index as u64 + 1)),
             name: format!("item {index}"),
             asset: None,
+            known_currency: None,
             known_supply: None,
         };
         o.inventory.push(item.clone());

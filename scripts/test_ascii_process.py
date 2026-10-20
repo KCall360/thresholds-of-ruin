@@ -5,10 +5,15 @@ after the real native window successfully presents its pixel buffer.
 """
 import json
 import os
+import shutil
+import sqlite3
 import subprocess
+import tomllib
 import unittest
 
-from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN
+from arena_matrix import toml_source
+from process_harness import ProcessTestCase, ROOT, TOKEN, SPECTATOR_TOKEN
+from scalar_wire import u64
 
 
 class AsciiProcesses(ProcessTestCase):
@@ -182,6 +187,121 @@ class AsciiProcesses(ProcessTestCase):
         pixels = data.split(b"\n", 3)[3]
         self.assertEqual(len(pixels), 1200 * 800 * 3)
         self.assertGreater(len(set(pixels)), 8)
+
+
+class AsciiHudPickupProcesses(ProcessTestCase):
+    graphical = True
+
+    def assert_displayed_status(self, frame, gold):
+        """Check the fitted rows passed to the real renderer, not the raw model text."""
+        rows = frame["rendered_status_lines"]
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(len(row) <= 72 for row in rows), rows)
+        observation = frame["state"]["observation"]
+        combat = observation["combat"]
+        stats = combat["own_stats"]
+        attributes = stats["attributes"]
+        labels = {"strength": "Str", "speed": "Spd", "intellect": "Int",
+                  "willpower": "Wil", "awareness": "Awr", "presence": "Pre"}
+        for attribute, label in labels.items():
+            self.assertIn(f"{label}:{attributes[attribute]}", rows[0].split())
+        self.assertIn(f"HD:{stats['hit_dice']['total']}", rows[0].split())
+        fields = " ".join(rows[1:]).split()
+        self.assertIn(f"HP:{combat['hp']}({combat['max_hp']})", fields)
+        self.assertIn(f"Gold:{gold}", fields)
+        resources = {pool["resource"]["id"]: pool for pool in stats["resources"]}
+        for resource, label in {"stamina": "Stm", "focus": "Foc", "mana": "Mana"}.items():
+            pool = resources[resource]
+            expected = f"{label}:{pool['balance']}/{pool['maximum']}"
+            if pool["reserved"]:
+                expected += f"[-{pool['reserved']}]"
+            self.assertIn(expected, fields)
+
+    def test_native_single_stack_pickup_updates_typed_gold_and_fitted_resource_hud(self):
+        # Ordinary validated content supplies real personal stats and item capabilities.
+        # Keep the original native token test and its two-room assumptions unchanged.
+        package = self.directory / "ascii-hud-pickup"
+        shutil.copytree(ROOT / "scenarios/tests/interactions", package)
+        manifest_path = package / "scenario.toml"
+        manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["id"] = "ascii-hud-pickup"
+        manifest["characters"][0]["turn_ticks"] = 100
+        manifest["archetypes"]["hud_tender"] = {
+            "name": "unusual tender", "class": "coin", "stackable": True,
+            "currency": "gold"}
+        manifest["archetypes"]["hud_decoy"] = {
+            "name": "gold coin", "class": "coin", "stackable": True}
+        manifest_path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+        region_path = package / "regions/1.toml"
+        region = tomllib.loads(region_path.read_text(encoding="utf-8"))
+        region["items"] = [
+            {"id": 10, "at": [1, 1, 0], "archetype": "hud_tender", "quantity": 7},
+            {"id": 11, "at": [1, 1, 0], "archetype": "hud_decoy", "quantity": 11,
+             "carried_by": 1}]
+        region_path.write_text(toml_source(region), encoding="utf-8", newline="\n")
+        validated = subprocess.run(
+            [self.bin / ("tor-scenario" + self.suffix), "validate", package],
+            capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.server(scenario=package)
+        observer, _ = self.client(SPECTATOR_TOKEN)
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
+        initial = self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
+        self.assertTrue(initial["window_open"])
+        before = initial["state"]["observation"]
+        self.assertEqual(len(before["ground_items"]), 1)
+        ground = before["ground_items"][0]
+        self.assertTrue(ground["reachable"])
+        tender = ground["item"]
+        self.assertEqual((tender["name"], tender["known_currency"], u64(tender["quantity"])),
+                         ("unusual tender", "gold", 7))
+        self.assertEqual(len(before["inventory"]), 1)
+        decoy = before["inventory"][0]
+        self.assertEqual((decoy["name"], decoy["known_currency"], u64(decoy["quantity"])),
+                         ("gold coin", None, 11))
+        self.assert_displayed_status(initial, gold=0)
+
+        native = self.native_keys(window)
+        picked = self.native_press(window, native, "g", "pickup", wait_for_ready=True)
+        self.assertTrue(picked["window_open"])
+        self.assertFalse(picked["busy"])
+        self.assertFalse(picked["screen"]["pickup"], "one stack must not open a picker")
+        after = picked["state"]["observation"]
+        self.assertEqual(after["ground_items"], [])
+        self.assertEqual(len(after["inventory"]), 2)
+        carried = next(item for item in after["inventory"] if item["id"] == tender["id"])
+        self.assertEqual((carried["known_currency"], u64(carried["quantity"])), ("gold", 7))
+        self.assertEqual(next(item for item in after["inventory"] if item["id"] == decoy["id"]),
+                         decoy)
+        self.assertEqual(u64(after["tick"]) - u64(before["tick"]), 50,
+                         "one ordinary take costs half of the authored 100-tick turn")
+        self.assertEqual(picked["intentions"], [])
+        self.assert_displayed_status(picked, gold=7)
+        actions = [entry["content"] for entry in picked["history"]
+                   if entry["content"]["type"] == "action"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["action"],
+                         {"type": "take", "item": tender["id"], "quantity": None})
+        self.assertEqual(actions[0]["event"],
+                         {"type": "taken", "item": tender["id"],
+                          "result": carried["id"], "quantity": "7"})
+        authoritative = self.request(observer, {"type": "snapshot"})["state"]["observation"]
+        for field in ("tick", "inventory", "ground_items"):
+            self.assertEqual(authoritative[field], after[field])
+
+        # The acknowledged native release plus durable admission count catches repeats.
+        self.flush_save()
+        with sqlite3.connect(self.save) as db:
+            records = db.execute(
+                "SELECT sequence,frame FROM journal WHERE sequence>0 "
+                "UNION ALL SELECT sequence,frame FROM history WHERE sequence>0 "
+                "ORDER BY sequence").fetchall()
+        records = [json.loads(blob[24:])["record"] for _, blob in records]
+        admissions = [record for record in records
+                      if record["entry"]["content"]["type"] == "intention_admitted"]
+        self.assertEqual(len(admissions), 1, "one native g must admit exactly one take")
+        self.assertEqual(admissions[0]["receipt"]["command"]["action"],
+                         {"type": "take", "item": 10, "quantity": None})
 
 
 if __name__ == "__main__":

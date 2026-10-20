@@ -208,6 +208,7 @@ mod tests {
             quantity: 1,
             appearance: "weapon".into(),
             identified: false,
+            known_currency: None,
             known_supply: None,
             asset: None,
         });

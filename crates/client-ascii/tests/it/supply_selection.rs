@@ -35,6 +35,7 @@ fn app() -> App {
             description: String::new(),
             name: "clean bandage".into(),
             asset: None,
+            known_currency: None,
             known_supply: Some(SupplyView {
                 id: "bandage".into(),
                 name: "Bandage".into(),

@@ -586,7 +586,7 @@ fn window_loop(
                 "narration":state.map(|s|s.narration())});
             let screen_report = serde_json::json!({
                 "messages":{"shown":app.messages.shown(app.role!=tor_protocol::AccessRole::Spectator),"more":app.messages.more(),"turn":app.messages.text(),"log":app.messages.log().collect::<Vec<_>>()},
-                "screen":{"inventory":app.inventory_open,"help":app.help_open,"stats":app.stats_open,"stats_scroll":app.stats_scroll,"message_log":app.message_log,"look_cursor":app.look_cursor,"running":app.running},
+                "screen":{"pickup":!app.pickup.is_empty(),"inventory":app.inventory_open,"help":app.help_open,"stats":app.stats_open,"stats_scroll":app.stats_scroll,"message_log":app.message_log,"look_cursor":app.look_cursor,"running":app.running},
                 "inventory_rows":if app.inventory_open { state.map(|s|tor_client_ascii::inventory_entries(&app,&s.state().observation).iter().take(26).map(|entry|entry.long()).collect::<Vec<_>>()) } else { None },
                 "stats_rows":if app.stats_open { Some(app.stats_rows()) } else { None },
                 "advancement_open":app.advancement_open,"advancement_rows":app.advancement_rows(),"advancement_command":app.advancement_command,
@@ -599,6 +599,7 @@ fn window_loop(
                 "projectile_selection":app.projectile_selection,"projectile_rows":app.projectile_rows(),
                 "selected_weapon":app.selected_weapon,"weapon_selection":app.weapon_selection,"weapon_rows":app.weapon_rows(),
                 "status_lines":state.map(|s|tor_client_ascii::status_lines(&app,s)),
+                "rendered_status_lines":state.map(|s|tor_client_ascii::status_lines_at_width(&app,s,(tor_client_ascii::render::WIDTH-48)/16)),
                 "status":app.status,"input_done":done,"native_input_sequence":native_input_sequence,
                 "wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)});
             let serde_json::Value::Object(screen_fields) = screen_report else {

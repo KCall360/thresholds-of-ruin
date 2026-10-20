@@ -26,6 +26,7 @@ fn snapshot(identify: bool) -> Snapshot {
         description: String::new(),
         corpse: None,
         asset: None,
+        known_currency: None,
         known_supply: None,
     })
     .collect();

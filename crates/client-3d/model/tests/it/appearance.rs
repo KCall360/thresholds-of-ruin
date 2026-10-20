@@ -75,6 +75,7 @@ fn an_unidentified_potion_uses_only_its_disclosed_appearance_and_class() {
         appearance: "cloudy potion".into(),
         identified: false,
         asset: Some(asset.into()),
+        known_currency: None,
         known_supply: None,
     };
     assert_eq!(item_model(&palette(&[asset]), &item), ItemModel::Potion);
@@ -92,6 +93,7 @@ fn an_unknown_item_has_a_class_fallback() {
         appearance: "wrapped object".into(),
         identified: false,
         asset: None,
+        known_currency: None,
         known_supply: None,
     };
     assert_eq!(item_model(&palette(&[]), &item), ItemModel::Placeholder);
@@ -109,6 +111,7 @@ fn an_unknown_miscellaneous_item_does_not_claim_to_be_a_container() {
         appearance: "unfamiliar object".into(),
         identified: false,
         asset: None,
+        known_currency: None,
         known_supply: None,
     };
     assert_ne!(item_model(&palette(&[]), &item), ItemModel::Pouch);

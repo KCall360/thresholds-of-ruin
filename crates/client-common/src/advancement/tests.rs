@@ -423,6 +423,7 @@ fn respec_exact_supplies_reuse_known_touch_ground_facts_and_one_cost_ordinal() {
             name: "ration source".into(),
             description: String::new(),
             asset: None,
+            known_currency: None,
             known_supply: Some(SupplyView {
                 id: "ration".into(),
                 name: "Ration".into(),

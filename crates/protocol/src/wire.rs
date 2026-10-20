@@ -4,7 +4,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 53;
+pub const PROTOCOL_VERSION: u32 = 54;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -444,6 +444,21 @@ pub struct CreatureAppearance {
     pub asset: Option<String>,
 }
 
+/// Disclosed currency identity; stack quantity counts units of this currency.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CurrencyKind {
+    Gold,
+}
+impl<'de> Deserialize<'de> for CurrencyKind {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match String::deserialize(d)?.as_str() {
+            "gold" => Ok(Self::Gold),
+            _ => Err(serde::de::Error::custom("unknown currency kind")),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ItemView {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -460,12 +475,17 @@ pub struct ItemView {
     pub asset: Option<String>,
     /// Capability is known only after item identity is known. Holds remain private.
     pub known_supply: Option<crate::SupplyView>,
+    /// Currency capability is disclosed only for identified coins.
+    pub known_currency: Option<CurrencyKind>,
 }
 impl ItemView {
     pub(crate) fn valid_disclosure(&self) -> bool {
         self.known_supply
             .as_ref()
             .is_none_or(|supply| self.identified && supply.valid())
+            && self
+                .known_currency
+                .is_none_or(|_| self.identified && self.class == ItemClass::Coin)
             && (self.corpse.is_none() || (self.identified && self.class == ItemClass::Corpse))
     }
 }
@@ -489,6 +509,8 @@ impl<'de> Deserialize<'de> for ItemView {
             asset: Option<String>,
             #[serde(deserialize_with = "required_option")]
             known_supply: Option<crate::SupplyView>,
+            #[serde(deserialize_with = "required_option")]
+            known_currency: Option<CurrencyKind>,
         }
         let f: Fields = crate::bounded::named_map(d)?;
         let value = Self {
@@ -502,6 +524,7 @@ impl<'de> Deserialize<'de> for ItemView {
             name: f.name,
             asset: f.asset,
             known_supply: f.known_supply,
+            known_currency: f.known_currency,
         };
         if value.valid_disclosure() {
             Ok(value)

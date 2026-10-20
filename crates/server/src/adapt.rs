@@ -678,6 +678,7 @@ pub fn observation(
                     quantity: item.quantity,
                     appearance: item.appearance.clone(),
                     identified: item.identified,
+                    known_currency: item.known_currency.map(currency_kind),
                     known_supply: item.known_supply.as_ref().map(|value| p::SupplyView {
                         id: value.id.to_string(),
                         name: value.name.clone(),
@@ -704,6 +705,7 @@ pub fn observation(
                     quantity: 1,
                     appearance: object.appearance.name.clone(),
                     identified: true,
+                    known_currency: None,
                     known_supply: None,
                     description: object.appearance.description.clone(),
                     id: targets.apparent_object(object.subject),
@@ -909,6 +911,7 @@ pub fn observation(
                 quantity: item.quantity,
                 appearance: item.appearance.clone(),
                 identified: item.identified,
+                known_currency: item.known_currency.map(currency_kind),
                 known_supply: item.known_supply.as_ref().map(|value| p::SupplyView {
                     id: value.id.to_string(),
                     name: value.name.clone(),
@@ -1014,6 +1017,12 @@ pub fn cell_key(salt: &str, actor: u64, location: w::Location) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn currency_kind(currency: s::CurrencyKind) -> p::CurrencyKind {
+    match currency {
+        s::CurrencyKind::Gold => p::CurrencyKind::Gold,
+    }
 }
 
 pub(crate) fn item_class(class: s::ItemClass) -> p::ItemClass {

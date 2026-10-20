@@ -464,6 +464,7 @@ mod tests {
             quantity: 2,
             appearance: "stone".into(),
             identified: true,
+            known_currency: None,
             known_supply: None,
             description: String::new(),
             asset: None,
@@ -685,6 +686,7 @@ mod supply_tests {
                 appearance: "bandage".into(),
                 identified: true,
                 asset: None,
+                known_currency: None,
                 known_supply: Some(SupplyView {
                     id: "bandage".into(),
                     name: "Bandage".into(),

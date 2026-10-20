@@ -248,9 +248,107 @@ fn apparent_object_projection_is_an_ordinary_item_without_creature_or_supply_fac
     assert_eq!(item["item"]["identified"], true);
     assert_eq!(item["item"]["corpse"], Value::Null);
     assert_eq!(item["item"]["known_supply"], Value::Null);
+    assert_eq!(item["item"].get("known_currency"), Some(&Value::Null));
     assert_eq!(item["supply_reachable"], false);
     assert!(wire["visible_actors"].as_array().unwrap().is_empty());
     withheld(&wire, &scope);
+}
+
+#[test]
+fn currency_projection_preserves_identification_ownership_and_exact_stack_units() {
+    let mut game = s::Game::two_room_in_stone(42, crate::engine::diagnostic_content().unwrap());
+    let at = tor_world::Location {
+        region: tor_world::RegionId(1),
+        position: tor_world::Position { x: 1, y: 1, z: 0 },
+    };
+    let actor = game
+        .spawn_actor(at, std::num::NonZeroU64::new(100).unwrap())
+        .unwrap();
+    let other = game
+        .spawn_actor(
+            tor_world::Location {
+                position: tor_world::Position { x: 2, y: 1, z: 0 },
+                ..at
+            },
+            std::num::NonZeroU64::new(100).unwrap(),
+        )
+        .unwrap();
+    for (id, owner, concealed, currency, quantity) in [
+        (80, Some(actor), false, true, 9_007_199_254_740_993),
+        (81, Some(actor), true, true, 7),
+        (82, Some(actor), false, false, 11),
+        (83, None, false, true, 13),
+        (84, None, true, true, 17),
+        (85, Some(other), false, true, 19),
+    ] {
+        let mut spec = s::ItemSpec::ordinary(format!("currency fixture {id}"));
+        spec.class = s::ItemClass::Coin;
+        spec.stackable = true;
+        spec.concealed = concealed;
+        spec.appearance = "gold".into();
+        spec.asset = Some("item.gold".into());
+        spec.currency = currency.then_some(s::CurrencyKind::Gold);
+        game.place_item_stack(id, at, owner, quantity, spec)
+            .unwrap();
+    }
+    let scope = TargetScope::new(uuid::Uuid::from_u128(7), actor);
+    let (mut observation, scene) = game.observe_scene(actor).unwrap();
+    observation.apparent_objects.push(ApparentObjectView {
+        subject: SUBJECT,
+        location: at,
+        appearance: GuiseAppearance {
+            name: "gold".into(),
+            description: String::new(),
+            class: s::ItemClass::Coin,
+            asset: Some("item.gold".into()),
+        },
+    });
+    let wire = projected(observation, scene, &scope);
+    let inventory = wire["inventory"].as_array().unwrap();
+    assert_eq!(inventory.len(), 3);
+    for (id, expected, quantity) in [
+        (80, json!("gold"), "9007199254740993"),
+        (81, Value::Null, "7"),
+        (82, Value::Null, "11"),
+    ] {
+        let item = inventory
+            .iter()
+            .find(|item| item["id"] == json!(scope.item(s::ItemId(id))))
+            .unwrap();
+        assert_eq!(item.get("known_currency"), Some(&expected));
+        assert_eq!(item["quantity"], quantity);
+    }
+    let ground = wire["ground_items"].as_array().unwrap();
+    for (target, expected) in [
+        (scope.item(s::ItemId(83)), json!("gold")),
+        (scope.item(s::ItemId(84)), Value::Null),
+        (scope.apparent_object(SUBJECT), Value::Null),
+    ] {
+        let item = &ground
+            .iter()
+            .find(|row| row["item"]["id"] == json!(target))
+            .unwrap()["item"];
+        assert_eq!(item.get("known_currency"), Some(&expected));
+    }
+    assert!(!wire
+        .to_string()
+        .contains(&scope.item(s::ItemId(85)).to_string()));
+    game.learn_identity(actor, "currency fixture 81").unwrap();
+    let (learned, learned_scene) = game.observe_scene(actor).unwrap();
+    let learned = projected(learned, learned_scene, &scope);
+    let revealed = learned["inventory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == json!(scope.item(s::ItemId(81))))
+        .unwrap();
+    assert_eq!(revealed["known_currency"], "gold");
+    let (other_view, other_scene) = game.observe_scene(other).unwrap();
+    let other_scope = TargetScope::new(uuid::Uuid::from_u128(7), other);
+    let other_wire = projected(other_view, other_scene, &other_scope);
+    assert_eq!(other_wire["inventory"].as_array().unwrap().len(), 1);
+    assert_eq!(other_wire["inventory"][0]["known_currency"], "gold");
+    assert_eq!(other_wire["inventory"][0]["quantity"], "19");
 }
 
 #[test]
@@ -559,6 +657,7 @@ fn apparent_mundane_mace_matches_ordinary_ground_mace_except_opaque_identity() {
             ("asset", json!("item.weapon.mace")),
             ("identified", json!(true)),
             ("known_supply", Value::Null),
+            ("known_currency", Value::Null),
         ] {
             assert_eq!(row["item"].get(field), Some(&expected), "{field}");
         }

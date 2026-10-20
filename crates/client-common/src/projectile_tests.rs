@@ -26,6 +26,7 @@ fn state() -> ClientState {
             quantity: 1,
             appearance: "weapon".into(),
             identified: true,
+            known_currency: None,
             known_supply: None,
             description: String::new(),
             asset: None,

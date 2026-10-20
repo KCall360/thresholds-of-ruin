@@ -31,6 +31,8 @@ class CorruptedItemShapes(unittest.TestCase):
     def assert_nonsupply(self, item):
         self.assertIn('known_supply', tuple(item))
         self.assertIsNone(item['known_supply'])
+        self.assertIn('known_currency', tuple(item))
+        self.assertIsNone(item['known_currency'])
         self.assertFalse(item['identified'])
 
     def test_invalid_quantity_preserves_current_item_metadata(self):

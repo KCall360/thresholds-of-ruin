@@ -1,7 +1,7 @@
 //! Fixed logical canvas, scaled by the native window without changing game state.
 //!
 //! Layout, as in NetHack: message and prompt lines across the top, the map
-//! across the full width, two status lines at the bottom. Everything else
+//! across the full width, three status rows at the bottom. Everything else
 //! (inventory, creature details, help, logs) opens on demand over the map.
 use crate::map::{self, Kind};
 use crate::{history_lines, App};
@@ -236,12 +236,19 @@ impl Canvas {
         }
     }
 
-    /// Two status lines, as in NetHack, and a one-line key hint.
+    /// Three status rows, as in NetHack, and a one-line key hint.
     fn draw_status(&mut self, app: &App) {
         if let Some(state) = &app.state {
-            let [first, second] = crate::status_lines(app, state);
-            self.text(24, 700, &first, TEXT, 2, 72);
-            self.text(24, 724, &second, TEXT, 2, 72);
+            // Preserve readable 16-pixel glyphs. Lower-priority whole fields
+            // yield to health, warnings, gold and resources rather than shrinking.
+            let scale = 2;
+            let columns = (WIDTH.saturating_sub(48)) / (8 * scale);
+            for (row, line) in crate::status_lines_at_width(app, state, columns)
+                .iter()
+                .enumerate()
+            {
+                self.text(24, 696 + row * 20, line, TEXT, scale, columns);
+            }
         }
         let hint = if app.role == AccessRole::Spectator {
             "READ-ONLY   ? help   ^P messages   F2 history   F5 places   Esc quit".into()

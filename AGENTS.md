@@ -150,7 +150,7 @@ generation, then adds shared mechanics and content. Preserve the distinction
 between existing foundations and unfinished survival, content and objective work.
 
 The ASCII client uses messages on top, one full-width map that merges heights,
-two status lines and on-demand screens. Its controls and limitations live in the
+three status rows and on-demand screens. Its controls and limitations live in the
 [ASCII guide](docs/play/ascii.md); clients do not invent missing server authority.
 
 Preserve the original dirty interactions checkout; it contains unpublished work

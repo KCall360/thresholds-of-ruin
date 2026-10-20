@@ -17,7 +17,7 @@ fn item(index: u8) -> serde_json::Value {
 fn disclosed_item() -> serde_json::Value {
     serde_json::json!({"id":ItemTarget::from_digest([1;32]),"class":"misc","quantity":"1",
         "appearance":"bandage","identified":true,"description":"","name":"Bandage",
-        "known_supply":{"id":"bandage","name":"Bandage"}})
+        "known_currency":null,"known_supply":{"id":"bandage","name":"Bandage"}})
 }
 
 #[test]
@@ -38,6 +38,7 @@ fn phase5_container_item_requires_a_named_object() {
         "name",
         "asset",
         "known_supply",
+        "known_currency",
     ];
     let object = named.as_object().unwrap();
     assert_eq!(object.len(), fields.len());
@@ -187,7 +188,7 @@ fn phase5_supply_selection_rejects_missing_unbounded_duplicate_and_quantity_rows
 
 #[test]
 fn phase5_known_supply_is_explicit_and_unknown_items_cannot_expose_it() {
-    let value = serde_json::json!({"id":ItemTarget::from_digest([1;32]),"class":"misc","quantity":"1","appearance":"bandage","identified":true,"description":"","name":"Bandage","known_supply":{"id":"bandage","name":"Bandage"}});
+    let value = serde_json::json!({"id":ItemTarget::from_digest([1;32]),"class":"misc","quantity":"1","appearance":"bandage","identified":true,"description":"","name":"Bandage","known_currency":null,"known_supply":{"id":"bandage","name":"Bandage"}});
     let decoded: ItemView = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(decoded).unwrap(), value);
     let mut missing = value.clone();
@@ -200,7 +201,7 @@ fn phase5_known_supply_is_explicit_and_unknown_items_cannot_expose_it() {
 
 #[test]
 fn phase5_ground_supply_touch_is_explicit_and_does_not_change_pickup() {
-    let item = serde_json::json!({"id":ItemTarget::from_digest([1;32]),"class":"misc","quantity":"1","appearance":"bandage","identified":true,"description":"","name":"Bandage","known_supply":{"id":"bandage","name":"Bandage"}});
+    let item = serde_json::json!({"id":ItemTarget::from_digest([1;32]),"class":"misc","quantity":"1","appearance":"bandage","identified":true,"description":"","name":"Bandage","known_currency":null,"known_supply":{"id":"bandage","name":"Bandage"}});
     let value = serde_json::json!({"reachable":false,"supply_reachable":true,"item":item,"position":{"x":1,"y":0,"z":0}});
     let decoded: GroundItemView = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(decoded).unwrap(), value);
@@ -271,7 +272,7 @@ fn phase5_carried_selection_rejects_explicit_items_key() {
 
 fn recorded_care_request() -> serde_json::Value {
     let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v53.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/wire-v54.json")).unwrap();
     let value = samples["client"]
         .as_array()
         .unwrap()
@@ -314,7 +315,7 @@ fn phase5_codec_ability_action_rejects_outer_positional_tagged_alias() {
 
 fn recorded_ability_response(id: &str) -> (serde_json::Value, usize) {
     let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v53.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/wire-v54.json")).unwrap();
     let (value, index) = samples["server"]
         .as_array()
         .unwrap()
