@@ -332,6 +332,7 @@ fn cloaks_flare_and_skirts_sway_as_their_wearers_travel() {
             match kind {
                 Drape::Cloak => cloak = Some(angle),
                 Drape::Skirt(_) => skirt = Some(angle),
+                Drape::Hair => {}
             }
         }
         (
@@ -364,7 +365,7 @@ fn leather_jerkins_hang_free_below_the_belt_and_stay_shorter_than_the_tunic() {
             .iter()
             .filter_map(|(_, kind)| match kind {
                 Drape::Skirt(length) => Some(*length),
-                Drape::Cloak => None,
+                Drape::Cloak | Drape::Hair => None,
             })
             .collect();
         let peplum = geometry::jerkin_peplum(look.style).expect("a jerkin with a free hem");
@@ -921,7 +922,7 @@ fn skirts_hug_the_waist_and_clear_the_thighs_for_every_figure() {
                     .iter()
                     .filter_map(|&(e, kind)| match kind {
                         Drape::Skirt(length) => Some((e, length)),
-                        Drape::Cloak => None,
+                        Drape::Cloak | Drape::Hair => None,
                     })
                     .max_by(|a, b| a.1.total_cmp(&b.1))
                     .map(|(e, _)| placed(e).collect::<Vec<_>>())
@@ -1119,6 +1120,116 @@ fn every_dressable_humanoid_wears_every_outfit() {
                     "{model:?} {wardrobe:?} legs"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn long_hair_hangs_where_it_did_and_swings_smoothly_as_she_moves() {
+    let look = Look::with_choice(
+        CreatureModel::Nymph,
+        9,
+        Some(Variant {
+            woman: true,
+            ..Default::default()
+        }),
+    );
+    assert!(
+        geometry::loose_fall(&look),
+        "the nymph wears her hair long and loose"
+    );
+    // At rest the fall sits exactly where it would on the head: its own
+    // part, pivoted at the crown, carries the head's proportions.
+    let (world, rig, _, meshes) = spawn_one(&look);
+    let (hair, _) = *rig
+        .drapes
+        .iter()
+        .find(|(_, kind)| *kind == Drape::Hair)
+        .expect("long hair hangs on its own");
+    let at = world.get::<Transform>(hair).unwrap().compute_affine();
+    let placed: Vec<Vec3> = points_under(&world, &meshes, hair)
+        .into_iter()
+        .map(|p| at.transform_point3(p))
+        .collect();
+    let mut on_head = Parts::default();
+    on_head.set_transform(
+        Affine3A::from_translation(Vec3::Y * 0.08)
+            * Affine3A::from_scale(Vec3::splat(1.1))
+            * Affine3A::from_translation(Vec3::Y * -0.08),
+    );
+    geometry::long_hair_form_for(&mut on_head, &look);
+    let (low, high) = on_head.matte.bounds();
+    let scale = anatomy::storybook_part(Plan::Biped, J::Head);
+    let (low, high) = (low * scale, high * scale);
+    let bounds = placed.iter().fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| {
+        (lo.min(*p), hi.max(*p))
+    });
+    assert!(
+        (bounds.0 - low).abs().max_element() < 1e-4 && (bounds.1 - high).abs().max_element() < 1e-4,
+        "{bounds:?} against {low} {high}"
+    );
+    // Walking, then turning a right angle: it trails and lifts with each
+    // step, more through the turn, and never jumps between frames.
+    let path = |f: usize| {
+        if f < 70 {
+            Vec3::Z * f as f32 * 0.03
+        } else {
+            Vec3::Z * 70.0 * 0.03 + Vec3::X * (f - 70) as f32 * 0.03
+        }
+    };
+    let (mut app, root) = animate_look(look, 1, path);
+    let hair = app
+        .world()
+        .get::<Rig>(root)
+        .unwrap()
+        .drapes
+        .iter()
+        .find(|(_, kind)| *kind == Drape::Hair)
+        .unwrap()
+        .0;
+    let mut previous = Quat::IDENTITY;
+    let (mut walking, mut turning, mut jump) = (0.0f32, 0.0f32, 0.0f32);
+    for frame in 1..140 {
+        app.world_mut()
+            .get_mut::<Transform>(root)
+            .unwrap()
+            .translation = path(frame);
+        app.update();
+        let rotation = app.world().get::<Transform>(hair).unwrap().rotation;
+        if frame > 1 {
+            jump = jump.max(rotation.angle_between(previous));
+        }
+        previous = rotation;
+        let swing = rotation.angle_between(Quat::IDENTITY);
+        if (40..70).contains(&frame) {
+            walking = walking.max(swing);
+        } else if (70..100).contains(&frame) {
+            turning = turning.max(swing);
+        }
+    }
+    assert!(walking > 0.06, "her hair trails as she walks: {walking}");
+    assert!(
+        turning > walking,
+        "and swings out through a turn: {turning} {walking}"
+    );
+    assert!(jump < 0.03, "and never jumps between frames: {jump}");
+    // Cloth on the same walk and turn eases into its swing just as smoothly.
+    let (mut app, root) = animate_along(CreatureModel::Human, 1, path);
+    let drapes = app.world().get::<Rig>(root).unwrap().drapes.clone();
+    let mut previous: Vec<Quat> = vec![Quat::IDENTITY; drapes.len()];
+    for frame in 1..140 {
+        app.world_mut()
+            .get_mut::<Transform>(root)
+            .unwrap()
+            .translation = path(frame);
+        app.update();
+        for (k, &(e, kind)) in drapes.iter().enumerate() {
+            let rotation = app.world().get::<Transform>(e).unwrap().rotation;
+            if frame > 1 {
+                let jump = rotation.angle_between(previous[k]);
+                assert!(jump < 0.04, "{kind:?} jumps {jump} at frame {frame}");
+            }
+            previous[k] = rotation;
         }
     }
 }

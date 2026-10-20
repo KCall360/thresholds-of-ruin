@@ -48,7 +48,7 @@ mod art_contract_tests {
             )
         };
         let mut long = Parts::default();
-        hair(&mut long, &look(true, 0));
+        hair(&mut long, &look(true, 0), true);
         let (low, high) = long.matte.bounds();
         assert!(low.y < -0.18, "long hair reaches well down the back: {low}");
         assert!(
@@ -81,14 +81,14 @@ mod art_contract_tests {
             "locks lie forward over the chest: {high}"
         );
         let mut bob = Parts::default();
-        hair(&mut bob, &look(true, 4));
+        hair(&mut bob, &look(true, 4), true);
         let (low, _) = bob.matte.bounds();
         assert!(
             low.y > -0.02 && low.y < 0.06,
             "a bob ends at the jaw: {low}"
         );
         let mut tied = Parts::default();
-        hair(&mut tied, &look(false, 4));
+        hair(&mut tied, &look(false, 4), true);
         let (low, _) = tied.matte.bounds();
         assert!(
             low.z > -0.18,
@@ -210,7 +210,8 @@ impl Kit<'_, '_, '_> {
         let soft = true;
         // A phantom's face and hair stay solid, as on its sheet, so its
         // hair can never show through its face; the rest is translucent.
-        let ghost = self.ghost && part != "head";
+        // Long hair hangs as its own part, and stays solid with the head.
+        let ghost = self.ghost && part != "head" && part != "hair";
         self.library
             .get(format!("creature/{}/{part}", self.key), self.meshes, || {
                 let mut p = Parts::default();
@@ -1326,10 +1327,11 @@ fn crown(
 /// Hair as sculpted clumps over a fitted cap, with volume where the style
 /// carries it. Men: swept, cropped, tousled, slicked, tied back. Women: long,
 /// ponytail, bun, braid, bob, all falling over the ears and temples.
-fn hair(p: &mut Parts, l: &Look) {
-    let c = hair_color(l);
+/// Which cut a person's hair takes: for men swept, cropped, tousled,
+/// slicked or tied back; for women long, ponytail, bun, braid or bob.
+fn hair_style(l: &Look) -> u8 {
     let v = l.v;
-    let style = match l.style {
+    match l.style {
         Style::Vampire if !v.woman => 3,
         Style::Vampire => [0, 2, 0, 2, 4][v.hair as usize],
         Style::Zombie if !v.woman => 2,
@@ -1343,8 +1345,72 @@ fn hair(p: &mut Parts, l: &Look) {
         Style::Phantom if !v.woman => [4, 3, 4, 4, 3][v.hair as usize],
         Style::Phantom => 0,
         _ => v.hair,
-    };
-    let seed = u64::from(v.hair_tone) * 31 + u64::from(style) + u64::from(v.skin) * 7;
+    }
+}
+
+/// Whether a person's head is hooded rather than showing hair.
+fn hooded(l: &Look) -> bool {
+    let hood_down = matches!(l.style, Style::Caster | Style::Scout) && l.v.pattern >= 2;
+    matches!(
+        l.style,
+        Style::Caster | Style::Scout | Style::Sentinel | Style::Wraith
+    ) && !hood_down
+}
+
+/// Whether a person shows hair at all: not under a hood, and not a kind
+/// whose head is bald, crested or crowned with serpents.
+fn shows_hair(l: &Look) -> bool {
+    !hooded(l)
+        && !matches!(
+            l.style,
+            Style::Guardian
+                | Style::Yeti
+                | Style::Hobgoblin
+                | Style::Orc
+                | Style::Troll
+                | Style::Medusa
+        )
+}
+
+/// Whether a person wears long loose hair, which hangs from the crown on
+/// its own and swings as she moves.
+pub(super) fn loose_fall(l: &Look) -> bool {
+    l.plan == Plan::Biped && l.v.woman && shows_hair(l) && hair_style(l) == 0
+}
+
+/// The point on the crown long hair hangs from, in the head's space.
+const CROWN: Vec3 = Vec3::new(0.0, 0.25, -0.05);
+
+/// The long fall of loose hair as it would sit on the head, for tests.
+#[cfg(test)]
+pub(super) fn long_hair_form_for(p: &mut Parts, l: &Look) {
+    long_fall(p, l);
+}
+
+/// The long fall of loose hair, in the head's space.
+fn long_fall(p: &mut Parts, l: &Look) {
+    let c = hair_color(l);
+    let seed = hair_seed(l, 0);
+    let form = long_hair_form(seed);
+    form.mesh(
+        &mut p.matte,
+        Vec3::new(-0.21, -0.3, -0.23),
+        Vec3::new(0.21, 0.31, 0.13),
+        0.009,
+        &|at, normal| c * hair_sheen(at, normal, seed),
+    );
+}
+
+fn hair_seed(l: &Look, style: u8) -> u64 {
+    u64::from(l.v.hair_tone) * 31 + u64::from(style) + u64::from(l.v.skin) * 7
+}
+
+/// A person's hair, without the long fall when that hangs on its own.
+fn hair(p: &mut Parts, l: &Look, with_fall: bool) {
+    let c = hair_color(l);
+    let v = l.v;
+    let style = hair_style(l);
+    let seed = hair_seed(l, style);
     let tone = move |k: u32| c * (0.9 + 0.18 * rand(seed, k));
     let mass = |p: &mut Parts, at: Vec3, r: Vec3, color: Vec3| p.matte.blob(at, r, 2, 0.0, color);
     // The fitted cap under the clumps fills any gaps between them.
@@ -1436,14 +1502,9 @@ fn hair(p: &mut Parts, l: &Look) {
         // sculpted fall of hair whose waving strands merge into a soft mass
         // at the scalp and part into separate locks towards their tips.
         0 => {
-            let form = long_hair_form(seed);
-            form.mesh(
-                &mut p.matte,
-                Vec3::new(-0.21, -0.3, -0.23),
-                Vec3::new(0.21, 0.31, 0.13),
-                0.009,
-                &|at, normal| c * hair_sheen(at, normal, seed),
-            );
+            if with_fall {
+                long_fall(p, l);
+            }
         }
         // A high ponytail.
         1 => {
@@ -3874,7 +3935,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             _ => rogue::torso_details(p, &l, body, garment, &body_shape),
         }
     });
-    kit.joint(J::Head, torso, body.head, "head", |p| {
+    let head = kit.joint(J::Head, torso, body.head, "head", |p| {
         let neck = if furry { l.cloth } else { l.skin };
         let slim = neck_slim(fem);
         if blocky || furry || cuirass {
@@ -4036,17 +4097,8 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 );
                 human_face(p, &l, !matches!(style, Style::Hobgoblin | Style::Troll));
                 let hood_down = matches!(style, Style::Caster | Style::Scout) && l.v.pattern >= 2;
-                let hooded = matches!(
-                    style,
-                    Style::Caster | Style::Scout | Style::Sentinel | Style::Wraith
-                ) && !hood_down;
-                if !hooded
-                    && !matches!(
-                        style,
-                        Style::Hobgoblin | Style::Orc | Style::Troll | Style::Medusa
-                    )
-                {
-                    hair(p, &l);
+                if shows_hair(&l) {
+                    hair(p, &l, !loose_fall(&l));
                 }
                 if (l.v.beard
                     && matches!(
@@ -4768,6 +4820,26 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         });
     }
     rogue::biped_features(kit, &l);
+    // Long loose hair hangs from the crown on its own and swings as she
+    // moves, cut in the head's space exactly as it would sit on the head.
+    if loose_fall(&l) {
+        let size = if fem { 1.1 } else { 1.14 };
+        let face = Affine3A::from_translation(Vec3::Y * 0.08)
+            * Affine3A::from_scale(Vec3::splat(size))
+            * Affine3A::from_translation(Vec3::Y * -0.08);
+        let proportion = storybook_part(Plan::Biped, J::Head);
+        kit.drape_scaled(
+            head,
+            Transform::from_translation(CROWN * proportion),
+            Drape::Hair,
+            "hair",
+            proportion,
+            |p| {
+                p.set_transform(Affine3A::from_translation(-CROWN) * face);
+                long_fall(p, &l);
+            },
+        );
+    }
     if native {
         rogue::biped_extras(kit, &l, body, torso, hips);
     }
@@ -5478,7 +5550,7 @@ fn quadruped(kit: &mut Kit, lift: Entity, look: &Look, centaur: bool) {
                     * Affine3A::from_translation(Vec3::Y * -0.08),
             );
             human_face(p, &rider, true);
-            hair(p, &rider);
+            hair(p, &rider, true);
             if !rider.v.woman {
                 beard(p, hair_color(&rider));
             }
