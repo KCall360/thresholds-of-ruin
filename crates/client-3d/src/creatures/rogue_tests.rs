@@ -871,7 +871,7 @@ fn women_of_the_heeled_kinds_wear_heels_and_others_do_not() {
 }
 
 #[test]
-fn skirts_clear_the_thighs_for_every_figure() {
+fn skirts_hug_the_waist_and_clear_the_thighs_for_every_figure() {
     // The spawned skirt, swept around the body in 20-degree sectors, is never
     // inside the spawned thighs anywhere down their length. The front sector
     // is left out, where some skirts are split to show the legs.
@@ -915,17 +915,74 @@ fn skirts_clear_the_thighs_for_every_figure() {
                     .into_iter()
                     .flat_map(|j| placed(rig.joint(j).expect("legs")))
                     .collect();
+                // The tunic's skirt: longer than any jerkin's peplum over it.
                 let skirt = rig
                     .drapes
                     .iter()
-                    .filter(|(_, kind)| matches!(kind, Drape::Skirt(_)))
-                    .map(|&(e, _)| placed(e).collect::<Vec<_>>())
-                    .max_by_key(|points| points.len())
+                    .filter_map(|&(e, kind)| match kind {
+                        Drape::Skirt(length) => Some((e, length)),
+                        Drape::Cloak => None,
+                    })
+                    .max_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(e, _)| placed(e).collect::<Vec<_>>())
                     .expect("a skirt");
+                // The pelvis's own meshes, without the legs and drapes it carries.
+                let hips = rig.joint(J::Hips).expect("hips");
+                let pelvis: Vec<Vec3> = world
+                    .get::<Children>(hips)
+                    .expect("pelvis")
+                    .iter()
+                    .filter(|&child| world.get::<Mesh3d>(child).is_some())
+                    .flat_map(|child| {
+                        let at = world.get::<Transform>(child).unwrap().compute_affine();
+                        points_under(&world, &meshes, child)
+                            .into_iter()
+                            .map(move |p| at.transform_point3(p))
+                    })
+                    .collect();
+                // The waistband sits on the hips, not standing off them.
+                for k in 0..sectors {
+                    let band = |points: &[Vec3]| {
+                        points
+                            .iter()
+                            .filter(|p| (0.025..0.045).contains(&p.y) && in_sector(p, k))
+                            .map(|p| Vec2::new(p.x, p.z).length())
+                            .reduce(f32::max)
+                    };
+                    if let (Some(cloth), Some(body)) = (band(&skirt), band(&pelvis)) {
+                        assert!(
+                            cloth < body + 0.015,
+                            "{model:?} woman {woman} build {build}: waistband {cloth:.3} stands off the hips {body:.3}, sector {k}"
+                        );
+                    }
+                }
+                // Cloth flares only as far as it needs to: never into a bell.
+                // Measured behind, where no split parts the front panels.
+                let flare = skirt
+                    .iter()
+                    .filter(|p| p.z < 0.0)
+                    .map(|p| p.x.abs())
+                    .fold(0.0f32, f32::max);
+                // The body's hip line: the pelvis and the thigh roots below it.
+                let hips = pelvis
+                    .iter()
+                    .chain(thighs.iter().filter(|p| p.y > -0.1))
+                    .map(|p| p.x.abs())
+                    .fold(0.0f32, f32::max);
+                assert!(
+                    flare < hips * 1.55,
+                    "{model:?} woman {woman} build {build}: skirt flares to {flare:.3} over hips {hips:.3}"
+                );
                 let hem = skirt.iter().fold(0.0f32, |m, p| m.min(p.y));
                 let mut y = 0.0;
+                // A cutaway coat's fronts part around the legs: only its sides
+                // and back must clear them.
+                let open = |k: usize| {
+                    let mid = -PI + TAU * (k as f32 + 0.5) / sectors as f32;
+                    k == sectors / 2 || (geometry::cutaway_coat(look.style) && mid.cos() > 0.1)
+                };
                 while y > hem + 0.05 {
-                    for k in (0..sectors).filter(|&k| k != sectors / 2) {
+                    for k in (0..sectors).filter(|&k| !open(k)) {
                         if let (Some(cloth), Some(leg)) =
                             (reach(&skirt, k, y), reach(&thighs, k, y))
                         {

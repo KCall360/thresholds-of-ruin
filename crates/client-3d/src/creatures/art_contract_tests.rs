@@ -177,7 +177,16 @@ fn art_contract_long_hems_hang_free_while_short_edges_stay_neat() {
         let heights: Vec<f32> = (0..64)
             .map(|k| {
                 let a = k as f32 / 64.0 * std::f32::consts::TAU;
-                let p = geometry::drape_point(top, bottom, length, 8, 0.0, 0.2, 1.0, a, false);
+                let p = geometry::drape_point(
+                    geometry::SkirtCut::straight(top, bottom),
+                    length,
+                    8,
+                    0.0,
+                    0.2,
+                    1.0,
+                    a,
+                    false,
+                );
                 assert!(p.is_finite());
                 p.y
             })
@@ -194,7 +203,16 @@ fn art_contract_long_hems_hang_free_while_short_edges_stay_neat() {
     // The waist stays where the garment is fitted.
     for k in 0..16 {
         let a = k as f32 / 16.0 * std::f32::consts::TAU;
-        let waist = geometry::drape_point(top, bottom, 0.4, 8, 0.0, 0.2, 0.0, a, false);
+        let waist = geometry::drape_point(
+            geometry::SkirtCut::straight(top, bottom),
+            0.4,
+            8,
+            0.0,
+            0.2,
+            0.0,
+            a,
+            false,
+        );
         assert!((waist.y - 0.04).abs() < 1e-5);
     }
 }
