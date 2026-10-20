@@ -1522,6 +1522,16 @@ pub(super) fn decollete(at: Vec3, normal: Vec3, shoulders: f32) -> bool {
     normal.z > 0.0 && at.y > 0.4 && at.x.abs() < 0.045 * shoulders + (at.y - 0.4) * 0.95
 }
 
+/// Whether her boots have heels: the kinds whose women wear them on their
+/// concept sheets.
+pub(super) fn heeled_boots(style: Style, woman: bool) -> bool {
+    woman
+        && matches!(
+            style,
+            Style::Vampire | Style::Medusa | Style::Phantom | Style::Wraith | Style::Leprechaun
+        )
+}
+
 /// The skirt of each kind's tunic, robe or coat: its colour and length.
 fn tunic_skirt(l: &Look, tunic: Vec3) -> (Vec3, f32) {
     match l.style {
@@ -4386,6 +4396,20 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     (2 - i) as u64,
                     0.0,
                     if i == 2 { boot * 0.55 } else { boot },
+                );
+            }
+            if heeled_boots(style, fem) {
+                // A slim tapering heel under the back of her boot, as the
+                // women wear on the concept sheets, its tip on the sole line.
+                let heel = Vec3::new(0.0, -0.4, -0.03 * b);
+                p.satin.prism(
+                    heel + Vec3::Y * -0.03,
+                    heel + Vec3::new(0.0, -0.077, 0.006),
+                    0.03 * b,
+                    0.016 * b,
+                    10,
+                    boot * 0.5,
+                    0.0,
                 );
             }
             if furry || style == Style::Troll {
