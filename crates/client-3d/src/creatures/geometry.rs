@@ -2972,6 +2972,21 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         // same supports with material-specific room and chest construction.
         use crate::sdf::{Sculpt, Shape::*};
         let (sh, w) = (shoulders * b, waist * b);
+        let low_neck = fem
+            && matches!(
+                style,
+                Style::Hero
+                    | Style::Scout
+                    | Style::Common
+                    | Style::Vampire
+                    | Style::Leprechaun
+                    | Style::Medusa
+                    | Style::Nymph
+                    | Style::Phantom
+                    | Style::Wraith
+                    | Style::Orc
+                    | Style::Troll
+            );
         let trim_neck = !matches!(
             style,
             Style::Sentinel | Style::Hobgoblin | Style::Zombie | Style::Orc | Style::Troll
@@ -2985,6 +3000,15 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             0.0085,
             &|at, normal| {
                 let bare = bare_shoulders && (at.x.abs() > 0.16 * sh || at.y > 0.51);
+                // Women's bodices open in a low, shaped neckline over the
+                // collarbones and upper chest, as on the concept sheets.
+                let decollete = low_neck
+                    && normal.z > 0.0
+                    && at.y > 0.4
+                    && at.x.abs() < 0.045 * sh + (at.y - 0.4) * 0.95;
+                if decollete {
+                    return l.skin;
+                }
                 if style == Style::Zombie && normal.z > 0.35 {
                     let tear = ((at.x - 0.055 * b) / (0.068 * b)).powi(2)
                         + ((at.y - 0.25) / 0.105).powi(2);
@@ -3004,6 +3028,56 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 }
             },
         );
+        if low_neck {
+            // A sewn edge finishes the neckline on both sides.
+            let edge = if style == Style::Medusa {
+                l.trim
+            } else {
+                tunic * 0.72
+            };
+            for side in [-1.0f32, 1.0] {
+                let at = |y: f32| Vec2::new(side * (0.045 * sh + (y - 0.4) * 0.95), y);
+                fitted_ribbon(
+                    &mut p.matte,
+                    &body_shape,
+                    &[
+                        (at(0.395), 0.011),
+                        (at(0.44), 0.012),
+                        (at(0.49), 0.012),
+                        (at(0.53), 0.011),
+                    ],
+                    true,
+                    0.004,
+                    edge,
+                );
+            }
+        }
+        if matches!(style, Style::Medusa | Style::Phantom | Style::Nymph) {
+            // A sleeveless bodice ends in sewn edges where the shoulders
+            // and arms are bare, front and back.
+            let edge = if style == Style::Medusa {
+                l.trim
+            } else {
+                tunic * 0.72
+            };
+            for front in [true, false] {
+                for side in [-1.0f32, 1.0] {
+                    let x = side * 0.16 * sh;
+                    fitted_ribbon(
+                        &mut p.matte,
+                        &body_shape,
+                        &[
+                            (Vec2::new(x * 0.98, 0.1), 0.011),
+                            (Vec2::new(x, 0.3), 0.012),
+                            (Vec2::new(x, 0.5), 0.011),
+                        ],
+                        front,
+                        0.004,
+                        edge,
+                    );
+                }
+            }
+        }
         // A fitted outer garment: a jerkin, vest or coat over the tunic.
         let outer = match style {
             Style::Hero => Some((LEATHER, 0.465, true)),
@@ -3031,15 +3105,27 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 }
                 if matches!(style, Style::Hero | Style::Scout | Style::Orc) {
                     // A shaped neckline leaves the fitted upper sides high
-                    // while the centre opens over the under-tunic.
+                    // while the centre opens over the under-tunic; hers
+                    // plunges lower to frame the open bodice beneath.
+                    let (depth, reach) = if fem { (0.0, 0.125) } else { (0.055, 0.105) };
                     shell.carve(
                         Ellipsoid(
-                            Vec3::new(0.0, top + 0.055, 0.135 * b),
-                            Vec3::new(0.11 * sh, 0.105, 0.14 * b),
+                            Vec3::new(0.0, top + depth, 0.135 * b),
+                            Vec3::new(0.11 * sh, reach, 0.15 * b),
                         ),
                         0.006,
                     );
                 }
+            }
+            if fem && matches!(style, Style::Vampire | Style::Wraith) {
+                // Her coat falls open from the collar in a deep V.
+                shell.carve(
+                    Ellipsoid(
+                        Vec3::new(0.0, top + 0.01, 0.15 * b),
+                        Vec3::new(0.085 * sh, 0.15, 0.13 * b),
+                    ),
+                    0.006,
+                );
             }
             if style == Style::Leprechaun {
                 // The coat hangs open over the waistcoat.
