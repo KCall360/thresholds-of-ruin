@@ -705,13 +705,14 @@ pub(super) fn face_shape(l: &Look, nose: bool) -> FaceShape {
         );
     }
     if soft {
-        // Full, soft lower cheeks round the face from the cheekbones to the
-        // mouth and jaw, instead of a flat front meeting flat sides.
+        // Full, soft cheeks round the face under the cheekbones, instead of
+        // a flat front meeting flat sides; held above the jaw line so they
+        // never sag into jowls.
         for side in [-1.0f32, 1.0] {
             head.add(
                 Ellipsoid(
-                    Vec3::new(side * 0.047, 0.1, 0.06),
-                    Vec3::new(0.031, 0.032, 0.031),
+                    Vec3::new(side * 0.046, 0.108, 0.061),
+                    Vec3::new(0.031, 0.027, 0.03),
                 ),
                 0.03,
             );
@@ -755,12 +756,18 @@ pub(super) fn face_shape(l: &Look, nose: bool) -> FaceShape {
     }
     // A shallow perioral plane supports the lips and flows into the chin.
     // Keep its sides inside the cheek planes, including the undead hollows.
+    // On a soft face it is wider and shallower, melting into the cheeks so
+    // no edge of it shows beside the mouth corners.
     head.add(
         Ellipsoid(
             Vec3::new(0.0, 0.088, 0.071),
-            Vec3::new(if gaunt { 0.035 } else { 0.04 }, 0.028, 0.025),
+            if soft {
+                Vec3::new(0.05, 0.028, 0.023)
+            } else {
+                Vec3::new(if gaunt { 0.035 } else { 0.04 }, 0.028, 0.025)
+            },
         ),
-        0.014,
+        if soft { 0.028 } else { 0.014 },
     );
     // Lip heights exceed the surface-net spacing; narrow carved slits below
     // that spacing produce alternating normals and dark, broken mouth corners.
@@ -778,7 +785,7 @@ pub(super) fn face_shape(l: &Look, nose: bool) -> FaceShape {
     } else {
         1.0
     };
-    let pout = if soft { 0.0045 } else { 0.0 };
+    let pout = if soft { 0.0055 } else { 0.0 };
     head.add(
         Ellipsoid(
             Vec3::new(0.0, 0.098, 0.093 + pout * 0.5),

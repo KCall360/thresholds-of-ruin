@@ -374,6 +374,13 @@ fn art_contract_womens_faces_are_soft_with_full_lips() {
                     "{model:?} build {build}: her face falls {fall:.4} across the cheek at {y}"
                 );
             }
+            // Beside and below the mouth her face stays full, rather than a
+            // narrow muzzle standing out of cheeks that fall away behind it.
+            let corner = depth(0.064, 0.078);
+            assert!(
+                corner > 0.04,
+                "{model:?} build {build}: her face falls away beside the mouth: {corner:.4}"
+            );
             let lips = |shape: &geometry::FaceShape| {
                 // The lips' height, front to back: how far they stand over
                 // the plane below them.
