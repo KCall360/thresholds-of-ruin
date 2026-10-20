@@ -1039,35 +1039,53 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
         fem,
         l.eyes,
     );
-    // Arched brows, heavier on men, drawn down at the centre in a scowl.
-    let brow_scowl = match l.style {
+    let brow = hair_color(l) * 0.85;
+    for side in [-1.0f32, 1.0] {
+        let profile = brow_profile(l, side);
+        let points: Vec<Vec3> = profile.iter().map(|(at, _)| *at).collect();
+        let radii: Vec<(f32, f32)> = profile.iter().map(|(_, r)| *r).collect();
+        tube(&mut p.matte, &points, &radii, brow);
+    }
+}
+
+/// One eyebrow on `side`: points along it from the inner end to the outer
+/// and its half-width and half-thickness at each. Brows arch and are drawn
+/// down at the centre in a scowl, heavier on men. Hers are fine, high and
+/// calm, as on the concept sheets: a thin line swelling a little toward
+/// the inner third and tapering to both ends, only lightly drawn down even
+/// on the stern kinds.
+pub(super) fn brow_profile(l: &Look, side: f32) -> Vec<(Vec3, (f32, f32))> {
+    let fem = l.v.woman;
+    let scowl = match l.style {
         Style::Hobgoblin | Style::Sentinel | Style::Orc | Style::Troll => 0.009,
         Style::Vampire | Style::Medusa | Style::Wraith => 0.005,
         Style::Zombie => -0.004,
         _ => -0.002,
-    };
-    let brow = hair_color(l) * 0.85;
-    // Hers are fine and high-arched, as on the concept sheets.
-    let (bw, bt) = if fem {
-        (0.0036, 0.0026)
+    } * if fem { 0.4 } else { 1.0 };
+    if fem {
+        let (w, h) = (0.0027, 0.0019);
+        vec![
+            (
+                Vec3::new(side * 0.017, 0.189 - scowl, 0.101),
+                (w * 0.75, h * 0.75),
+            ),
+            (Vec3::new(side * 0.033, 0.2 - scowl * 0.5, 0.1), (w, h)),
+            (Vec3::new(side * 0.051, 0.203, 0.097), (w * 0.85, h * 0.85)),
+            (
+                Vec3::new(side * 0.068, 0.193 + scowl * 0.3, 0.089),
+                (w * 0.3, h * 0.3),
+            ),
+        ]
     } else {
-        (0.009, 0.006)
-    };
-    for side in [-1.0f32, 1.0] {
-        tube(
-            &mut p.matte,
-            &[
-                Vec3::new(side * 0.018, 0.187 - brow_scowl, 0.101),
-                Vec3::new(
-                    side * 0.042,
-                    0.197 + if fem { 0.007 } else { 0.0 } - brow_scowl * 0.3,
-                    0.099,
-                ),
-                Vec3::new(side * 0.066, 0.189 + brow_scowl * 0.3, 0.09),
-            ],
-            &[(bw, bt), (bw, bt), (bw * 0.6, bt * 0.6)],
-            brow,
-        );
+        let (w, h) = (0.009, 0.006);
+        vec![
+            (Vec3::new(side * 0.018, 0.187 - scowl, 0.101), (w, h)),
+            (Vec3::new(side * 0.042, 0.197 - scowl * 0.3, 0.099), (w, h)),
+            (
+                Vec3::new(side * 0.066, 0.189 + scowl * 0.3, 0.09),
+                (w * 0.6, h * 0.6),
+            ),
+        ]
     }
 }
 

@@ -515,3 +515,35 @@ fn art_contract_womens_legs_are_full_at_the_hip_and_fine_at_the_ankle() {
         }
     }
 }
+
+#[test]
+fn art_contract_womens_brows_are_fine_high_and_calm() {
+    // As on the concept sheets: her brows are fine lines swelling a little
+    // toward the inner third and tapering at both ends, arched high, and only
+    // lightly drawn down even on the stern kinds; his are heavier.
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Medusa,
+        CreatureModel::Vampire,
+    ] {
+        let her = geometry::brow_profile(&appearance(model, true, 1), 1.0);
+        let him = geometry::brow_profile(&appearance(model, false, 1), 1.0);
+        let widest = |b: &[(Vec3, (f32, f32))]| b.iter().map(|(_, r)| r.0).fold(0.0, f32::max);
+        assert!(
+            widest(&her) < widest(&him) * 0.5,
+            "{model:?}: her brow is fine"
+        );
+        let peak = her.iter().position(|(_, r)| r.0 == widest(&her)).unwrap();
+        assert!(
+            peak > 0 && peak < 3,
+            "{model:?}: hers swells within, not at an end"
+        );
+        assert!(
+            her[3].1 .0 < widest(&her) * 0.4,
+            "{model:?}: and tapers outward"
+        );
+        // The arch: her brow rises well above its inner end.
+        let rise = her.iter().map(|(at, _)| at.y).fold(f32::MIN, f32::max) - her[0].0.y;
+        assert!(rise > 0.012, "{model:?}: her brow arches high: {rise}");
+    }
+}
