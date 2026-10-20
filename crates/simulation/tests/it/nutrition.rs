@@ -58,7 +58,7 @@ fn build_with_policy(policy: Value) -> CreatureBuild {
 }
 
 fn required(reserve: i32, elapsed: u64) -> Value {
-    json!({"kind":"required", "reserve":reserve, "elapsed":elapsed, "regeneration_remainder":0})
+    json!({"kind":"required", "reserve":reserve, "elapsed":elapsed, "digestion_remainder":0,"regeneration_remainder":0})
 }
 
 fn recovery(reserve: i32) -> Value {
@@ -2052,4 +2052,78 @@ fn explicit_nutrition_recovery_rephases_once_at_each_simultaneous_condition_boun
             assert_eq!(bulk, incremental, "reserve {reserve}, ticks {ticks}");
         }
     }
+}
+
+fn digestion_source(
+    item: u64,
+    socket: u16,
+    surcharge: i64,
+) -> tor_simulation::creatures::EquipmentSource {
+    tor_simulation::creatures::EquipmentSource {
+        item: ItemId(item),
+        socket: tor_simulation::EquipmentSlotId(socket),
+        attack: None,
+        weapon_profile: None,
+        modifiers: vec![Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::NutritionRateThirtieths,
+                value: surcharge,
+            },
+        }],
+    }
+}
+
+#[test]
+fn wearable_digestion_preserves_exact_fraction_across_remove_restore_and_two_sources() {
+    let mut creature = required_creature(8, 0);
+    creature
+        .set_equipment(vec![digestion_source(11, 0, 10)])
+        .unwrap();
+    creature.advance_active(1);
+    assert_eq!(nutrition(&creature)["elapsed"], 1);
+    assert_eq!(nutrition(&creature)["digestion_remainder"], 10);
+    creature.set_equipment(vec![]).unwrap();
+    creature.advance_active(99);
+    assert_eq!(nutrition(&creature)["reserve"], 7);
+    assert_eq!(nutrition(&creature)["digestion_remainder"], 10);
+
+    let sources = vec![digestion_source(11, 0, -15), digestion_source(12, 1, -15)];
+    creature.set_equipment(sources.clone()).unwrap();
+    let saved = serde_json::to_value(CreatureRecord::capture(&creature)).unwrap();
+    let mut restored = serde_json::from_value::<CreatureRecord>(saved)
+        .unwrap()
+        .restore(creature.build().content().clone(), sources)
+        .unwrap();
+    let before = nutrition(&restored);
+    restored.advance_active(1_000_000);
+    assert_eq!(nutrition(&restored), before);
+    restored
+        .set_equipment(vec![digestion_source(12, 1, -15)])
+        .unwrap();
+    restored.advance_active(200);
+    assert_eq!(nutrition(&restored)["reserve"], 6);
+    assert_eq!(nutrition(&restored)["digestion_remainder"], 10);
+}
+
+#[test]
+fn wearable_digestion_is_ignored_at_empty_and_charged_in_diagnostics() {
+    let mut empty = required_creature(0, 0);
+    empty
+        .set_equipment(vec![digestion_source(11, 0, -30)])
+        .unwrap();
+    let outcome = empty.advance_active(100);
+    assert_eq!(nutrition(&empty)["reserve"], -1);
+    assert_eq!(outcome.nutrition_time_demand, 1);
+    assert!(!outcome.died);
+    assert!(empty.advance_active(200).died);
+
+    let mut charged = required_creature(8, 0);
+    charged
+        .set_equipment(vec![digestion_source(11, 0, 60)])
+        .unwrap();
+    let outcome = charged.advance_active(100);
+    assert_eq!(nutrition(&charged)["reserve"], 5);
+    assert_eq!(outcome.nutrition_time_demand, 3);
+    assert_eq!(outcome.nutrition_regeneration_demand, 0);
 }

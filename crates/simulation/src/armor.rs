@@ -58,6 +58,29 @@ impl ArmorSpec {
 }
 
 impl crate::EquipmentSpec {
+    /// Compile per-instance signed potency into ordinary source-owned operands.
+    /// Only numeric operations are scalable: boolean grants never gain accidental
+    /// inverse or duplicate semantics from a cursed instance.
+    pub(crate) fn scaled_potency_modifiers(&self, potency: i32) -> Option<Vec<Modifier>> {
+        if !(-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(potency)) {
+            return None;
+        }
+        let mut modifiers = self.potency_modifiers.clone();
+        for modifier in &mut modifiers {
+            match &mut modifier.op {
+                ModifierOp::Add { value, .. }
+                | ModifierOp::AttributeWithoutDefense { value, .. } => {
+                    *value = value.checked_mul(i64::from(potency))?;
+                }
+                ModifierOp::SignedReduction { amount, .. } => {
+                    *amount = amount.checked_mul(potency)?;
+                }
+                _ => return None,
+            }
+        }
+        crate::rules::validate_modifier_shapes(&modifiers).ok()?;
+        Some(modifiers)
+    }
     pub(crate) fn modifiers_with_armor(&self, corrosion: u32) -> Option<Vec<Modifier>> {
         let mut modifiers = self.modifiers.clone();
         if let Some(armor) = self.armor {
@@ -101,6 +124,7 @@ pub(crate) struct ItemCondition {
     pub armor_enchantment: u32,
     pub hit_enchantment: i32,
     pub damage_enchantment: i32,
+    pub potency: i32,
 }
 impl<'de> Deserialize<'de> for ItemCondition {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -114,6 +138,7 @@ impl<'de> Deserialize<'de> for ItemCondition {
             armor_enchantment: u32,
             hit_enchantment: i32,
             damage_enchantment: i32,
+            potency: i32,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
         let condition = Self {
@@ -124,6 +149,7 @@ impl<'de> Deserialize<'de> for ItemCondition {
             armor_enchantment: fields.armor_enchantment,
             hit_enchantment: fields.hit_enchantment,
             damage_enchantment: fields.damage_enchantment,
+            potency: fields.potency,
         };
         if !condition.valid() {
             return Err(serde::de::Error::custom("invalid item condition"));
@@ -160,7 +186,7 @@ impl ItemCondition {
         self.corrosion <= crate::limits::NUMERIC as u32
             && self.armor_penalty <= crate::limits::NUMERIC as u32
             && self.armor_enchantment <= crate::limits::NUMERIC as u32
-            && [self.hit_enchantment, self.damage_enchantment]
+            && [self.hit_enchantment, self.damage_enchantment, self.potency]
                 .into_iter()
                 .all(|value| {
                     (-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(value))
@@ -273,6 +299,9 @@ impl Item {
             }
         };
         armor_valid
+            && (self.condition.potency == 0
+                || gear.is_some_and(|g| !g.potency_modifiers.is_empty()))
+            && gear.is_none_or(|g| g.scaled_potency_modifiers(self.condition.potency).is_some())
             && self
                 .condition
                 .weapon_capabilities_valid(gear, self.spec.projectile.as_ref())
@@ -289,6 +318,10 @@ impl Item {
             armor.physical_reduction = self.condition.effective_armor(*armor)?;
         }
         equipment.modifiers = equipment.modifiers_with_armor(0)?;
+        equipment
+            .modifiers
+            .extend(equipment.scaled_potency_modifiers(self.condition.potency)?);
+        equipment.potency_modifiers.clear();
         if equipment.armor.is_some() && self.condition.armor_enchantment != 0 {
             for category in [DamageType::Energy, DamageType::Spirit, DamageType::Vital] {
                 equipment.modifiers.push(Modifier {
@@ -356,7 +389,13 @@ impl crate::Game {
                 crate::abilities::RuleError::InvalidPlan,
             ));
         }
-        if !outcome.state.alive() {
+        if !outcome.state.alive()
+            || outcome
+                .state
+                .combat
+                .as_ref()
+                .is_some_and(|combat| combat.creature().derived().protects_armor)
+        {
             return Ok(0);
         }
         let Some((_, item_id)) = outcome.state.equipment.iter().find(|(socket, _)| {
@@ -442,6 +481,7 @@ mod tests {
         let mut spec = ItemSpec::ordinary("mail".into());
         spec.class = crate::ItemClass::Armor;
         spec.equipment = Some(EquipmentSpec {
+            potency_modifiers: Vec::new(),
             weapon_profile: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             armor: Some(armor),
@@ -485,6 +525,7 @@ mod tests {
             armor_enchantment: 3,
             hit_enchantment: -2,
             damage_enchantment: 1,
+            potency: -1,
         };
         assert_eq!(
             condition.uncurse(),
@@ -764,6 +805,7 @@ mod tests {
             "armor_enchantment",
             "hit_enchantment",
             "damage_enchantment",
+            "potency",
         ] {
             let mut missing = raw.clone();
             missing.as_object_mut().unwrap().remove(field);
@@ -778,6 +820,7 @@ mod tests {
             "armor_enchantment",
             "hit_enchantment",
             "damage_enchantment",
+            "potency",
         ] {
             let mut invalid = raw.clone();
             invalid[field] = serde_json::json!(crate::limits::NUMERIC + 1);
@@ -791,6 +834,7 @@ mod tests {
             "armor_enchantment",
             "hit_enchantment",
             "damage_enchantment",
+            "potency",
         ] {
             let mut invalid = raw.clone();
             invalid[field] = serde_json::json!(-crate::limits::NUMERIC - 1);
@@ -826,5 +870,43 @@ mod tests {
         missing.as_object_mut().unwrap().remove("condition");
         assert!(serde_json::from_value::<Item>(missing).is_err());
         assert!(serde_json::from_value::<Item>(raw).is_ok());
+    }
+    #[test]
+    fn potency_and_armor_share_the_source_modifier_budget() {
+        let mut worn = item(metal());
+        let mut spec = (*worn.spec).clone();
+        let gear = spec.equipment.as_mut().unwrap();
+        let zero = Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: crate::rules::Stat::AttackDamageRollBonus,
+                value: 0,
+            },
+        };
+        gear.modifiers = vec![zero.clone(); crate::limits::MODIFIERS_PER_SOURCE - 2];
+        gear.potency_modifiers = vec![zero];
+        assert!(
+            !gear.valid_shape(),
+            "armor adds two modifiers to the combined ordinary and potency source"
+        );
+        assert!(gear
+            .validate_rules(crate::ItemClass::Armor, &crate::test_creatures::ruleset())
+            .is_err());
+        gear.modifiers.pop();
+        assert!(gear.valid_shape());
+        gear.validate_rules(crate::ItemClass::Armor, &crate::test_creatures::ruleset())
+            .unwrap();
+        worn.spec = tor_world::Shared::new(spec);
+        let source = worn
+            .equipment_source(
+                ItemId(1),
+                EquipmentSlotId(0),
+                &crate::test_creatures::ruleset(),
+            )
+            .unwrap();
+        assert_eq!(source.modifiers.len(), crate::limits::MODIFIERS_PER_SOURCE);
+        crate::test_creatures::ruleset()
+            .validate_modifiers(&source.modifiers)
+            .unwrap();
     }
 }

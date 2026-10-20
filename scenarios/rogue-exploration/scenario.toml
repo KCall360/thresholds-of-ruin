@@ -1,4 +1,4 @@
-format = 25
+format = 26
 id = "rogue-exploration"
 version = "1.0"
 ruleset = "rules.toml"
@@ -250,6 +250,15 @@ count = [1, 1]
 bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.arrow", weight = 1 }] }]
 quantity = 6
 
+# Finite concealed ring stock, appended without changing earlier stage streams.
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.rings"
+version = 1
+kind = "items"
+count = [1, 1]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.ring_protection", weight = 9 }, { archetype = "rogue.ring_add_strength", weight = 9 }, { archetype = "rogue.ring_sustain_strength", weight = 5 }, { archetype = "rogue.ring_see_invisible", weight = 10 }, { archetype = "rogue.ring_adornment", weight = 1 }, { archetype = "rogue.ring_dexterity", weight = 8 }, { archetype = "rogue.ring_increase_damage", weight = 8 }, { archetype = "rogue.ring_regeneration", weight = 4 }, { archetype = "rogue.ring_slow_digestion", weight = 9 }, { archetype = "rogue.ring_maintain_armor", weight = 5 }] }]
+quantity = 1
+
 # Structure-only forecast, independent of depth, spawn rolls and hidden contents.
 [assets]
 dungeon = [
@@ -289,5 +298,6 @@ dungeon = [
   "item.potion",
   "item.scroll",
   "item.wand",
+  "item.ring",
   "item.coin",
 ]

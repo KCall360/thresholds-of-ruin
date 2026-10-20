@@ -150,6 +150,11 @@ pub struct HitDiceSummary {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DerivedCreature {
     pub action_duration: crate::action_duration::ActionDuration,
+    pub attack_damage_roll_bonus: i32,
+    pub nutrition_rate_thirtieths: i64,
+    pub sustained_attributes: BTreeSet<Attribute>,
+    pub protects_armor: bool,
+    defense_attributes: BTreeMap<DefenseKind, Attributes>,
     pub perception: crate::perception::PerceptionCapabilities,
     pub locomotion: crate::locomotion::LocomotionCapabilities,
     pub kind: TypeId,
@@ -1059,6 +1064,11 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
     })?;
     let mut derived = DerivedCreature {
         action_duration: Default::default(),
+        attack_damage_roll_bonus: 0,
+        nutrition_rate_thirtieths: 0,
+        sustained_attributes: BTreeSet::new(),
+        protects_armor: false,
+        defense_attributes: BTreeMap::new(),
         locomotion: Default::default(),
         perception: Default::default(),
         kind,
@@ -1309,6 +1319,8 @@ fn fold_stat_targets(
         | Stat::HealthRecoveryPeriod
         | Stat::HealthRecoveryPeriodPercent
         | Stat::HealthRecoveryResetPercent
+        | Stat::AttackDamageRollBonus
+        | Stat::NutritionRateThirtieths
         | Stat::ResourceMax { .. }
         | Stat::Ability { .. }
         | Stat::Edge
@@ -1350,6 +1362,13 @@ fn collect_stats(
     sources: &BTreeMap<SourceId, Vec<Modifier>>,
     rules: &Ruleset,
 ) -> Result<BTreeMap<Stat, Accumulator>, BuildError> {
+    collect_stats_for_defense(sources, rules, None)
+}
+fn collect_stats_for_defense(
+    sources: &BTreeMap<SourceId, Vec<Modifier>>,
+    rules: &Ruleset,
+    excluded: Option<DefenseKind>,
+) -> Result<BTreeMap<Stat, Accumulator>, BuildError> {
     let mut values: BTreeMap<Stat, Accumulator> = BTreeMap::new();
     for modifier in sources
         .values()
@@ -1357,6 +1376,20 @@ fn collect_stats(
         .filter(|m| m.scope == Scope::Always)
     {
         match &modifier.op {
+            ModifierOp::AttributeWithoutDefense {
+                attribute,
+                defense,
+                value,
+            } => {
+                if excluded != Some(*defense) {
+                    values
+                        .entry(Stat::Attribute {
+                            attribute: *attribute,
+                        })
+                        .or_default()
+                        .add(*value)?;
+                }
+            }
             ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. }
                 if matches!(
                     stat,
@@ -1382,6 +1415,10 @@ fn collect_stats(
             | ModifierOp::Immunity { .. }
             | ModifierOp::Reduction { .. }
             | ModifierOp::TalentReduction { .. }
+            | ModifierOp::SignedReduction { .. }
+            | ModifierOp::SustainAttribute { .. }
+            | ModifierOp::ProtectArmor {}
+            | ModifierOp::HealthRecoveryRate { .. }
             | ModifierOp::GrantAbility { .. }
             | ModifierOp::ActionDuration { .. }
             | ModifierOp::Locomotion { .. }
@@ -1427,6 +1464,16 @@ pub(super) fn source_attributes(
         .filter(|m| m.scope == Scope::Always)
     {
         match &modifier.op {
+            ModifierOp::AttributeWithoutDefense {
+                attribute, value, ..
+            } => {
+                values
+                    .entry(Stat::Attribute {
+                        attribute: *attribute,
+                    })
+                    .or_default()
+                    .add(*value)?;
+            }
             ModifierOp::Add {
                 stat: stat @ Stat::Attribute { .. },
                 value,
@@ -1701,7 +1748,70 @@ fn fold(
         derived.effect_edge_against(rules, *target)?;
     }
 
-    derived.attributes = attribute_values(derived.attributes, &values, rules)?;
+    let base_attributes = derived.attributes;
+    // Ordinary builds need no counterfactual attribute fold. Only defenses
+    // explicitly excluded by a source need their own projection; duplicate
+    // sources share that projection and all others use the effective attributes.
+    let excluded_defenses: BTreeSet<_> = derived
+        .sources
+        .values()
+        .flatten()
+        .filter_map(|modifier| {
+            if let ModifierOp::AttributeWithoutDefense { defense, .. } = modifier.op {
+                Some(defense)
+            } else {
+                None
+            }
+        })
+        .collect();
+    derived.defense_attributes = excluded_defenses
+        .into_iter()
+        .map(|defense| {
+            Ok((
+                defense,
+                attribute_values(
+                    base_attributes,
+                    &collect_stats_for_defense(&derived.sources, rules, Some(defense))?,
+                    rules,
+                )?,
+            ))
+        })
+        .collect::<Result<_, BuildError>>()?;
+    derived.attributes = attribute_values(base_attributes, &values, rules)?;
+    derived.attack_damage_roll_bonus = value(&values, Stat::AttackDamageRollBonus, 0)?
+        .try_into()
+        .map_err(|_| BuildError::DerivedLimit)?;
+    derived.nutrition_rate_thirtieths = value(&values, Stat::NutritionRateThirtieths, 0)?;
+    derived.sustained_attributes = derived
+        .sources
+        .values()
+        .flatten()
+        .filter_map(|modifier| {
+            if let ModifierOp::SustainAttribute { attribute } = modifier.op {
+                Some(attribute)
+            } else {
+                None
+            }
+        })
+        .collect();
+    derived.protects_armor = derived
+        .sources
+        .values()
+        .flatten()
+        .any(|modifier| matches!(modifier.op, ModifierOp::ProtectArmor {}));
+    let recovery_rate = derived
+        .sources
+        .values()
+        .flatten()
+        .filter_map(|modifier| {
+            if let ModifierOp::HealthRecoveryRate { multiplier } = modifier.op {
+                Some(u64::from(multiplier))
+            } else {
+                None
+            }
+        })
+        .max()
+        .unwrap_or(1);
     derived.flags = flags(&derived.sources);
     derived.action_duration =
         crate::action_duration::ActionDuration::from_modifiers(derived.sources.values().flatten());
@@ -1734,6 +1844,14 @@ fn fold(
     }
     derived.quiet_health_recovery_period =
         recovery_period(derived.base_health_recovery_period, &quiet_values)?;
+    derived.health_recovery_period = derived
+        .health_recovery_period
+        .div_ceil(recovery_rate)
+        .max(1);
+    derived.quiet_health_recovery_period = derived
+        .quiet_health_recovery_period
+        .div_ceil(recovery_rate)
+        .max(1);
     let reset = value(&values, Stat::HealthRecoveryResetPercent, 100)?;
     if !(0..=100).contains(&reset) {
         return Err(BuildError::DerivedLimit);
@@ -1760,13 +1878,18 @@ fn fold(
                 }
                 ModifierOp::Immunity { .. }
                 | ModifierOp::Reduction { .. }
-                | ModifierOp::TalentReduction { .. } => {
+                | ModifierOp::TalentReduction { .. }
+                | ModifierOp::SignedReduction { .. } => {
                     derived
                         .protection
                         .apply(&modifier.op)
                         .map_err(|_| BuildError::DerivedLimit)?;
                 }
-                ModifierOp::Add { .. }
+                ModifierOp::AttributeWithoutDefense { .. }
+                | ModifierOp::SustainAttribute { .. }
+                | ModifierOp::ProtectArmor {}
+                | ModifierOp::HealthRecoveryRate { .. }
+                | ModifierOp::Add { .. }
                 | ModifierOp::Set { .. }
                 | ModifierOp::Flag { .. }
                 | ModifierOp::ActionDuration { .. }
@@ -1774,6 +1897,9 @@ fn fold(
                 | ModifierOp::Perception { .. } => {}
             }
         }
+    }
+    if !derived.protection.valid() {
+        return Err(BuildError::DerivedLimit);
     }
     // Validate tactical override slots when sources change, not later when a
     // player first attempts the affected check. Untargeted checks (including
@@ -1950,6 +2076,14 @@ fn fold(
         }
     }
     if losses.has_attribute_loss() {
+        for attributes in derived.defense_attributes.values_mut() {
+            *attributes = Attributes::from_derived(ByAttribute::from_fn(|attribute| {
+                attributes
+                    .get(attribute)
+                    .saturating_sub(*losses.attributes.get(attribute))
+            }))
+            .map_err(|_| BuildError::DerivedLimit)?;
+        }
         // First validate all ordinary computations above. Reduced attributes
         // cannot conceal an invalid undrained Health/resource/timing result.
         derived.attributes = Attributes::from_derived(ByAttribute::from_fn(|attribute| {
@@ -1978,10 +2112,16 @@ fn fold_attribute_dependents(
     let rules = build.ruleset();
     let attribute = |a| i64::from(derived.attributes.get(a));
     let defense = |kind, left, right| {
+        let attributes = derived
+            .defense_attributes
+            .get(&kind)
+            .unwrap_or(&derived.attributes);
         value(
             values,
             Stat::Defense { defense: kind },
-            i64::from(rules.constants().base_defense) + attribute(left) + attribute(right),
+            i64::from(rules.constants().base_defense)
+                + i64::from(attributes.get(left))
+                + i64::from(attributes.get(right)),
         )
         .map(|v| v as i32)
     };
@@ -3008,6 +3148,209 @@ mod loss_fold_tests {
         assert_eq!(
             scaled_duration(crate::limits::NUMERIC as u64 + 1, None, &rules),
             Err(BuildError::DerivedLimit)
+        );
+    }
+}
+
+#[cfg(test)]
+mod worn_modifier_tests {
+    use super::*;
+
+    #[test]
+    fn counterfactual_attribute_cache_exists_only_for_explicitly_excluded_defenses() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        assert!(derive(&build).unwrap().defense_attributes.is_empty());
+        let ordinary = derive_with_sources(
+            &build,
+            &source(vec![ModifierOp::Add {
+                stat: Stat::Attribute {
+                    attribute: Attribute::Speed,
+                },
+                value: 2,
+            }]),
+            &[],
+        )
+        .unwrap();
+        assert!(ordinary.defense_attributes.is_empty());
+        let selective = ModifierOp::AttributeWithoutDefense {
+            attribute: Attribute::Speed,
+            defense: DefenseKind::Physical,
+            value: 1,
+        };
+        let dexterity =
+            derive_with_sources(&build, &source(vec![selective.clone(), selective]), &[]).unwrap();
+        assert_eq!(
+            dexterity
+                .defense_attributes
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![DefenseKind::Physical]
+        );
+        assert_eq!(dexterity.defenses.cognitive, ordinary.defenses.cognitive);
+        assert_eq!(dexterity.defenses.spiritual, ordinary.defenses.spiritual);
+    }
+
+    fn source(ops: Vec<ModifierOp>) -> BTreeMap<SourceId, Vec<Modifier>> {
+        BTreeMap::from([(
+            SourceId::Equipment(crate::ItemId(1)),
+            ops.into_iter()
+                .map(|op| Modifier {
+                    scope: Scope::Always,
+                    op,
+                })
+                .collect(),
+        )])
+    }
+    fn dexterity(value: i64) -> ModifierOp {
+        ModifierOp::AttributeWithoutDefense {
+            attribute: Attribute::Speed,
+            defense: DefenseKind::Physical,
+            value,
+        }
+    }
+
+    #[test]
+    fn selective_attribute_uses_the_actual_source_fold_and_deficit_for_defense() {
+        let mut species = crate::test_creatures::species();
+        species.default_attributes = Attributes::new(ByAttribute {
+            speed: 1,
+            strength: 2,
+            ..Default::default()
+        })
+        .unwrap();
+        let build = crate::test_creatures::build(species);
+        let base = derive(&build).unwrap();
+        let positive = derive_with_sources(&build, &source(vec![dexterity(2)]), &[]).unwrap();
+        assert_eq!(
+            positive.attributes.get(Attribute::Speed),
+            base.attributes.get(Attribute::Speed) + 2
+        );
+        assert_eq!(positive.defenses.physical, base.defenses.physical);
+        let negative = derive_with_sources(&build, &source(vec![dexterity(-10)]), &[]).unwrap();
+        assert_eq!(negative.attributes.get(Attribute::Speed), 0);
+        assert_eq!(negative.defenses.physical, base.defenses.physical);
+        let losses = super::super::RestorableLosses {
+            attributes: ByAttribute {
+                speed: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let with_loss =
+            derive_with_losses(&build, &source(vec![dexterity(2)]), &[], losses).unwrap();
+        let base_loss = derive_with_losses(&build, &BTreeMap::new(), &[], losses).unwrap();
+        assert_eq!(with_loss.defenses.physical, base_loss.defenses.physical);
+        assert_eq!(with_loss.attributes.get(Attribute::Speed), 2);
+        let set = ModifierOp::Set {
+            stat: Stat::Attribute {
+                attribute: Attribute::Speed,
+            },
+            value: 4,
+        };
+        let set_only = derive_with_sources(&build, &source(vec![set.clone()]), &[]).unwrap();
+        let set_dex = derive_with_sources(&build, &source(vec![set, dexterity(2)]), &[]).unwrap();
+        assert_eq!(set_dex.attributes, set_only.attributes);
+        assert_eq!(set_dex.defenses, set_only.defenses);
+    }
+
+    #[test]
+    fn duplicate_recovery_rates_use_strongest_and_independent_sources_compose() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let base = derive(&build).unwrap();
+        let ops = vec![
+            ModifierOp::HealthRecoveryRate { multiplier: 2 },
+            ModifierOp::HealthRecoveryRate { multiplier: 2 },
+            ModifierOp::Add {
+                stat: Stat::AttackDamageRollBonus,
+                value: 2,
+            },
+            ModifierOp::Add {
+                stat: Stat::AttackDamageRollBonus,
+                value: -1,
+            },
+            ModifierOp::Add {
+                stat: Stat::NutritionRateThirtieths,
+                value: 60,
+            },
+            ModifierOp::Add {
+                stat: Stat::NutritionRateThirtieths,
+                value: -15,
+            },
+            ModifierOp::SustainAttribute {
+                attribute: Attribute::Strength,
+            },
+            ModifierOp::ProtectArmor {},
+        ];
+        let derived = derive_with_sources(&build, &source(ops), &[]).unwrap();
+        assert_eq!(
+            derived.health_recovery_period,
+            base.health_recovery_period.div_ceil(2).max(1)
+        );
+        assert_eq!(
+            derived.quiet_health_recovery_period,
+            base.quiet_health_recovery_period.div_ceil(2).max(1)
+        );
+        assert_eq!(derived.attack_damage_roll_bonus, 1);
+        assert_eq!(derived.nutrition_rate_thirtieths, 45);
+        assert!(derived.sustained_attributes.contains(&Attribute::Strength));
+        assert!(derived.protects_armor);
+    }
+
+    #[test]
+    fn sustain_prevents_only_new_matching_loss_not_existing_deficits() {
+        let mut species = crate::test_creatures::species();
+        species.default_attributes = Attributes::new(ByAttribute {
+            strength: 3,
+            speed: 3,
+            ..Default::default()
+        })
+        .unwrap();
+        let mut creature =
+            super::super::CreatureState::new(crate::test_creatures::build(species)).unwrap();
+        assert_eq!(
+            creature
+                .lose_attribute(Attribute::Strength, 1)
+                .unwrap()
+                .applied,
+            1
+        );
+        creature
+            .set_equipment(vec![EquipmentSource {
+                item: crate::ItemId(1),
+                socket: crate::EquipmentSlotId(1),
+                modifiers: vec![Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::SustainAttribute {
+                        attribute: Attribute::Strength,
+                    },
+                }],
+                attack: None,
+                weapon_profile: None,
+            }])
+            .unwrap();
+        assert_eq!(creature.derived().attributes.get(Attribute::Strength), 2);
+        assert_eq!(
+            creature
+                .lose_attribute(Attribute::Strength, 1)
+                .unwrap()
+                .applied,
+            0
+        );
+        assert_eq!(
+            creature
+                .lose_attribute(Attribute::Speed, 1)
+                .unwrap()
+                .applied,
+            1
+        );
+        creature.set_equipment(vec![]).unwrap();
+        assert_eq!(
+            creature
+                .lose_attribute(Attribute::Strength, 1)
+                .unwrap()
+                .applied,
+            1
         );
     }
 }

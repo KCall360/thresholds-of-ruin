@@ -264,7 +264,7 @@ class Recorder(ProcessTestCase):
         current = self.act(player, {"type": "read", "item": scroll})
         self.assertIsNone(current["error"])
         pending = current["state"]["observation"]["interactions"]["identification"]
-        self.assertEqual(pending["class"], "wand")
+        self.assertEqual(pending["classes"], ["wand"])
         self.request(player, {"type": "snapshot"})
         messages = [json.loads(line).get("message") for line in player.transcript if line.startswith("{")]
         server_samples["zz.magic_paid_choice"] = next(message for message in reversed(messages)

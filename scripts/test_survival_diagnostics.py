@@ -14,9 +14,9 @@ def anchor(row):
     return {key: row[key] for key in ANCHOR_KEYS}
 
 
-def nutrition(reserve, elapsed=0, remainder=0):
+def nutrition(reserve, elapsed=0, remainder=0, digestion_remainder=0):
     return {"kind": "required", "reserve": reserve, "elapsed": elapsed,
-            "regeneration_remainder": remainder}
+            "digestion_remainder": digestion_remainder, "regeneration_remainder": remainder}
 
 
 def fixture():
@@ -351,6 +351,8 @@ class SurvivalDiagnosticReports(unittest.TestCase):
     def test_required_nutrition_boundaries_have_exact_fractional_shapes(self):
         invalid = (False, [], {}, {"kind": "other"}, {"kind": "exempt", "reserve": 0},
                    {"kind": "required", "reserve": 1},
+                   {key: value for key, value in nutrition(1).items()
+                    if key != "digestion_remainder"},
                    {**nutrition(1), "future": 0})
         for key in ("nutrition_before", "nutrition_after"):
             for value in invalid:
@@ -360,12 +362,21 @@ class SurvivalDiagnosticReports(unittest.TestCase):
                     validate_records(rows)
             for field, values in (("reserve", (-2**31 - 1, 2**31, True, 1.0)),
                                   ("elapsed", (-1, 2**64, True, 1.0)),
+                                  ("digestion_remainder", (-1, 30, True, 1.0)),
                                   ("regeneration_remainder", (-1, 2**32, True, 1.0))):
                 for value in values:
                     rows = fixture()
                     rows[1]["flows"]["actors"]["1"][key][field] = value
                     with self.subTest(key=key, field=field, value=value), self.assertRaises(ValueError):
                         validate_records(rows)
+
+    def test_fractional_only_digestion_is_not_rounded_into_whole_nutrition(self):
+        rows = fixture()
+        flow = rows[1]["flows"]["actors"]["1"]
+        flow.update(nutrition_time_demand=0, nutrition_spent=0,
+                    nutrition_before=nutrition(10, 0, digestion_remainder=0),
+                    nutrition_after=nutrition(10, 1, digestion_remainder=29))
+        self.assertEqual(validate_records(rows)["actors"]["1"]["nutrition_spent"], 0)
 
     def test_fractional_only_recovery_is_not_rounded_into_whole_nutrition(self):
         rows = fixture()

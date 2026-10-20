@@ -1344,6 +1344,7 @@ mod tests {
         spec.concealed = concealed;
         spec.appearance = "silver ring".into();
         spec.equipment = Some(crate::EquipmentSpec {
+            potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("ring").unwrap(),
@@ -1607,6 +1608,7 @@ mod tests {
             let mut spec = crate::ItemSpec::ordinary(format!("armor-{id}"));
             spec.class = crate::ItemClass::Armor;
             spec.equipment = Some(crate::EquipmentSpec {
+                potency_modifiers: Vec::new(),
                 weapon_profile: None,
                 slot: slot.clone(),
                 armor: Some(crate::ArmorSpec {
@@ -2129,6 +2131,7 @@ mod tests {
         let mut item = crate::ItemSpec::ordinary("private armor".into());
         item.class = crate::ItemClass::Armor;
         item.equipment = Some(crate::EquipmentSpec {
+            potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),

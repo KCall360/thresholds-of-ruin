@@ -227,7 +227,7 @@ pub fn decode_action(
                         .iter()
                         .find(|candidate| {
                             scope.item(candidate.id) == token
-                                && candidate.class == pending.class
+                                && pending.classes.contains(&candidate.class)
                                 && pending.items.contains(&candidate.id)
                         })
                         .map(|candidate| candidate.id.0)

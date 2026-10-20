@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **55**, save format **52**, scenario format **25**, ruleset
-**`interactions-v47`**, scenario validator **`tor-scenario-37`**. Unsupported
+**Current formats:** protocol **56**, save format **53**, scenario format **26**, ruleset
+**`interactions-v48`**, scenario validator **`tor-scenario-38`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **20**, ContentPackage **22** and
+The independent compiled inputs use RulesInput **21**, ContentPackage **23** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -116,6 +116,12 @@ plating only. Equipment scrolls use frozen targets and the shared paid Read path
 their success and no-op outcomes do not automatically identify the scroll type.
 Generic stack transfers require matching exact per-unit condition and charge
 state; equipment and devices remain nonstackable.
+
+The ten-ring slice adds shared signed potency, all-category damage reduction,
+attack-roll bonuses, source-aware Speed defense exclusion, sustained attributes,
+worn corrosion protection, nonstacking Health recovery acceleration and exact
+fractional digestion. Rings remain concealed until identified; a paid choice can
+permit both rings and wands. See [worn magic](reference/items.md#worn-magic-and-the-finite-rogue-ring-catalog).
 
 ## Implemented scope
 

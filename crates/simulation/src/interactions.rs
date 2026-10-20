@@ -83,6 +83,8 @@ pub struct EquipmentSpec {
     pub attack: Option<crate::attacks::MeleeAttack>,
     pub weapon_profile: Option<crate::weapon_profiles::WeaponProfileSpec>,
     pub modifiers: Vec<crate::rules::Modifier>,
+    /// Numeric modifiers scaled by the exact instance potency before the source fold.
+    pub potency_modifiers: Vec<crate::rules::Modifier>,
 }
 impl<'de> Deserialize<'de> for EquipmentSpec {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -96,7 +98,10 @@ impl<'de> Deserialize<'de> for EquipmentSpec {
             attack: Option<crate::attacks::MeleeAttack>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             weapon_profile: Option<crate::weapon_profiles::WeaponProfileSpec>,
+            #[serde(deserialize_with = "read_equipment_modifiers")]
             modifiers: Vec<crate::rules::Modifier>,
+            #[serde(deserialize_with = "read_equipment_modifiers")]
+            potency_modifiers: Vec<crate::rules::Modifier>,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
         let equipment = Self {
@@ -105,6 +110,7 @@ impl<'de> Deserialize<'de> for EquipmentSpec {
             attack: fields.attack,
             weapon_profile: fields.weapon_profile,
             modifiers: fields.modifiers,
+            potency_modifiers: fields.potency_modifiers,
         };
         if !equipment.valid_shape() {
             return Err(serde::de::Error::custom("invalid equipment"));
@@ -112,19 +118,36 @@ impl<'de> Deserialize<'de> for EquipmentSpec {
         Ok(equipment)
     }
 }
+fn read_equipment_modifiers<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<crate::rules::Modifier>, D::Error> {
+    Ok(crate::bounded::Bounded::<crate::rules::Modifier, { crate::limits::MODIFIERS_PER_SOURCE }>::deserialize(d)?.0)
+}
 impl EquipmentSpec {
     pub fn valid_shape(&self) -> bool {
-        self.armor.is_none_or(crate::ArmorSpec::valid)
+        self.potency_modifiers
+            .len()
+            .saturating_add(self.modifiers.len())
+            <= crate::limits::MODIFIERS_PER_SOURCE
+            && self.scaled_potency_modifiers(1).is_some()
+            && self.armor.is_none_or(crate::ArmorSpec::valid)
             && (self.weapon_profile.is_none() || self.attack.is_some())
-            && self
-                .modifiers_with_armor(0)
-                .is_some_and(|modifiers| crate::rules::validate_modifier_shapes(&modifiers).is_ok())
+            && self.modifiers_with_armor(0).is_some_and(|modifiers| {
+                modifiers.len().saturating_add(self.potency_modifiers.len())
+                    <= crate::limits::MODIFIERS_PER_SOURCE
+                    && crate::rules::validate_modifier_shapes(&modifiers).is_ok()
+            })
     }
     pub fn validate_rules(
         &self,
         class: ItemClass,
         rules: &crate::rules::Ruleset,
     ) -> Result<(), crate::rules::RulesetError> {
+        if !self.valid_shape() {
+            return Err(crate::rules::RulesetError::Bound {
+                field: "equipment_modifiers".into(),
+            });
+        }
         let slot = rules.equipment_slot(&self.slot).ok_or_else(|| {
             crate::rules::RulesetError::UnknownReference {
                 category: "equipment_slot",
@@ -141,6 +164,7 @@ impl EquipmentSpec {
                 field: "equipment_capability".into(),
             });
         }
+        rules.validate_modifiers(&self.potency_modifiers)?;
         rules.validate_modifiers(&self.modifiers_with_armor(0).ok_or_else(|| {
             crate::rules::RulesetError::Bound {
                 field: "armor_reduction".into(),
@@ -942,7 +966,7 @@ impl Game {
                     item,
                     preparation,
                     effects: self.effect_plan(actor, &readable.effects)?,
-                    identify: readable.identify,
+                    identify: readable.identify.clone(),
                     discovery: readable.discovery,
                 }
             }
@@ -1456,5 +1480,27 @@ impl Game {
                         .iter()
                         .all(|threat| threat.actor != actor && (self.actors.contains_key(&threat.actor) || self.detached_actor(threat.actor)))
             })
+    }
+}
+
+#[cfg(test)]
+mod equipment_collection_format_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn equipment_modifier_vectors_stop_before_decoding_excess_entry() {
+        let modifier = json!({"scope":"always", "op":{"kind":"add", "stat":{"kind":"attack_damage_roll_bonus"}, "value":1}});
+        for field in ["modifiers", "potency_modifiers"] {
+            let mut equipment = json!({"slot":"ring", "armor":null, "attack":null, "weapon_profile":null, "modifiers":[], "potency_modifiers":[]});
+            let mut entries = vec![modifier.clone(); crate::limits::MODIFIERS_PER_SOURCE];
+            entries.push(json!({"invalid_excess_entry":true}));
+            equipment[field] = json!(entries);
+            let error = serde_json::from_str::<EquipmentSpec>(&equipment.to_string()).unwrap_err();
+            assert!(
+                error.to_string().contains("collection exceeds limit"),
+                "{field}: {error}"
+            );
+        }
     }
 }

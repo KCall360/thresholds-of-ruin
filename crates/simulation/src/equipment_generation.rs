@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EquipmentGeneration {
+    /// Uniform nonzero signed potency; negative outcomes start cursed.
+    SignedPotency { negative: u32, positive: u32 },
     Authored {
         hit_enchantment: i32,
         damage_enchantment: i32,
@@ -28,6 +30,10 @@ impl<'de> Deserialize<'de> for EquipmentGeneration {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            SignedPotency {
+                negative: u32,
+                positive: u32,
+            },
             Authored {
                 hit_enchantment: i32,
                 damage_enchantment: i32,
@@ -46,6 +52,9 @@ impl<'de> Deserialize<'de> for EquipmentGeneration {
             },
         }
         let value = match Fields::deserialize(d)? {
+            Fields::SignedPotency { negative, positive } => {
+                Self::SignedPotency { negative, positive }
+            }
             Fields::Authored {
                 hit_enchantment,
                 damage_enchantment,
@@ -88,6 +97,13 @@ impl<'de> Deserialize<'de> for EquipmentGeneration {
 impl EquipmentGeneration {
     pub fn valid(self) -> bool {
         match self {
+            Self::SignedPotency { negative, positive } => {
+                negative <= crate::limits::NUMERIC as u32
+                    && positive <= crate::limits::NUMERIC as u32
+                    && negative
+                        .checked_add(positive)
+                        .is_some_and(|total| total > 0)
+            }
             Self::Authored {
                 hit_enchantment,
                 damage_enchantment,
@@ -131,6 +147,14 @@ impl EquipmentGeneration {
             return false;
         }
         match self {
+            Self::SignedPotency { negative, positive } => {
+                projectile.is_none()
+                    && equipment.is_some_and(|gear| {
+                        !gear.potency_modifiers.is_empty()
+                            && gear.scaled_potency_modifiers(-(negative as i32)).is_some()
+                            && gear.scaled_potency_modifiers(positive as i32).is_some()
+                    })
+            }
             Self::Authored {
                 hit_enchantment,
                 damage_enchantment,
@@ -195,6 +219,25 @@ impl EquipmentGeneration {
             ));
         }
         let (curse_percent, enchant_percent, minimum, maximum) = match self {
+            Self::SignedPotency { negative, positive } => {
+                let mut candidate = *rng;
+                let roll = crate::quantity::QuantityRange::new(
+                    1,
+                    u64::from(negative) + u64::from(positive),
+                )?
+                .sample(&mut candidate)?;
+                let potency = if roll <= u64::from(negative) {
+                    -(roll as i32)
+                } else {
+                    (roll - u64::from(negative)) as i32
+                };
+                *rng = candidate;
+                return Ok(ItemCondition {
+                    potency,
+                    cursed: potency < 0,
+                    ..Default::default()
+                });
+            }
             Self::Authored {
                 hit_enchantment,
                 damage_enchantment,
@@ -247,7 +290,9 @@ impl EquipmentGeneration {
                     );
                 }
                 Self::Armor { .. } => condition.armor_enchantment = amount,
-                Self::Authored { .. } => unreachable!("authored policy returned before sampling"),
+                Self::Authored { .. } | Self::SignedPotency { .. } => {
+                    unreachable!("direct policy returned before sampling")
+                }
             }
         }
         *rng = candidate;
@@ -261,6 +306,7 @@ mod tests {
 
     fn armor() -> EquipmentSpec {
         EquipmentSpec {
+            potency_modifiers: Vec::new(),
             weapon_profile: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             armor: Some(crate::ArmorSpec {
@@ -382,6 +428,7 @@ mod tests {
         );
         let primary = component.key();
         EquipmentSpec {
+            potency_modifiers: Vec::new(),
             weapon_profile: None,
             slot: crate::EquipmentSlot::new("weapon").unwrap(),
             armor: None,
@@ -515,5 +562,95 @@ mod tests {
             game.items[&first].condition,
             after_birth.items[&first].condition
         );
+    }
+}
+
+#[cfg(test)]
+mod potency_tests {
+    use super::*;
+    use crate::rules::{Modifier, ModifierOp, Scope, Stat};
+
+    fn gear() -> EquipmentSpec {
+        EquipmentSpec {
+            slot: crate::EquipmentSlot::new("ring").unwrap(),
+            armor: None,
+            attack: None,
+            weapon_profile: None,
+            modifiers: vec![],
+            potency_modifiers: vec![Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Add {
+                    stat: Stat::AttackDamageRollBonus,
+                    value: 1,
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn signed_birth_has_three_exact_outcomes_and_negative_curse() {
+        let policy = EquipmentGeneration::SignedPotency {
+            negative: 1,
+            positive: 2,
+        };
+        let gear = gear();
+        let before = gear.clone();
+        let mut counts = std::collections::BTreeMap::new();
+        for mut seed in 1..301 {
+            let condition = policy
+                .sample(ItemClass::Ring, Some(&gear), None, &mut seed)
+                .unwrap();
+            assert!([-1, 1, 2].contains(&condition.potency));
+            assert_eq!(condition.cursed, condition.potency < 0);
+            *counts.entry(condition.potency).or_insert(0) += 1;
+        }
+        assert_eq!(counts.len(), 3);
+        assert_eq!(gear, before);
+    }
+
+    #[test]
+    fn potency_scaling_is_signed_and_rejects_boolean_or_overflow() {
+        let mut gear = gear();
+        assert!(matches!(
+            gear.scaled_potency_modifiers(-1).unwrap()[0].op,
+            ModifierOp::Add { value: -1, .. }
+        ));
+        gear.potency_modifiers[0].op = ModifierOp::ProtectArmor {};
+        assert!(gear.scaled_potency_modifiers(-1).is_none());
+        gear.potency_modifiers[0].op = ModifierOp::Add {
+            stat: Stat::AttackDamageRollBonus,
+            value: crate::limits::NUMERIC,
+        };
+        assert!(gear.scaled_potency_modifiers(2).is_none());
+    }
+
+    #[test]
+    fn invalid_potency_policy_rolls_back_rng_and_strict_roundtrip() {
+        let policy = EquipmentGeneration::SignedPotency {
+            negative: 0,
+            positive: 0,
+        };
+        let mut rng = 17;
+        assert!(policy
+            .sample(ItemClass::Ring, Some(&gear()), None, &mut rng)
+            .is_err());
+        assert_eq!(rng, 17);
+        let policy = EquipmentGeneration::SignedPotency {
+            negative: 1,
+            positive: 2,
+        };
+        let wire = serde_json::to_value(policy).unwrap();
+        assert_eq!(
+            serde_json::from_value::<EquipmentGeneration>(wire.clone()).unwrap(),
+            policy
+        );
+        for field in ["negative", "positive"] {
+            let mut bad = wire.clone();
+            bad.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<EquipmentGeneration>(bad).is_err());
+        }
+        let mut bad = wire;
+        bad["extra"] = serde_json::json!(0);
+        assert!(serde_json::from_value::<EquipmentGeneration>(bad).is_err());
     }
 }

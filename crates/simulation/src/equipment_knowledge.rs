@@ -14,6 +14,7 @@ pub(crate) struct EquipmentNumbers {
     armor_enchantment: u32,
     hit_enchantment: i32,
     damage_enchantment: i32,
+    potency: i32,
 }
 impl From<ItemCondition> for EquipmentNumbers {
     fn from(value: ItemCondition) -> Self {
@@ -23,6 +24,7 @@ impl From<ItemCondition> for EquipmentNumbers {
             armor_enchantment: value.armor_enchantment,
             hit_enchantment: value.hit_enchantment,
             damage_enchantment: value.damage_enchantment,
+            potency: value.potency,
         }
     }
 }
@@ -34,6 +36,7 @@ impl EquipmentNumbers {
             armor_enchantment: self.armor_enchantment,
             hit_enchantment: self.hit_enchantment,
             damage_enchantment: self.damage_enchantment,
+            potency: self.potency,
             ..ItemCondition::default()
         }
     }
@@ -48,6 +51,7 @@ impl<'de> Deserialize<'de> for EquipmentNumbers {
             armor_enchantment: u32,
             hit_enchantment: i32,
             damage_enchantment: i32,
+            potency: i32,
         }
         let f: Fields = crate::bounded::named_map(d)?;
         let result = Self {
@@ -56,6 +60,7 @@ impl<'de> Deserialize<'de> for EquipmentNumbers {
             armor_enchantment: f.armor_enchantment,
             hit_enchantment: f.hit_enchantment,
             damage_enchantment: f.damage_enchantment,
+            potency: f.potency,
         };
         if !result.condition().valid() {
             return Err(serde::de::Error::custom("invalid equipment numbers"));
@@ -390,6 +395,44 @@ mod tests {
         assert_eq!(round.facts.curse(ItemId(1)), Some(true));
         assert_eq!(round.facts.remembered_condition(ItemId(1)), None);
     }
+    #[test]
+    fn signed_potency_is_private_exact_instance_memory_and_strictly_persisted() {
+        let item = ItemId(7);
+        let original = ItemCondition {
+            potency: -1,
+            cursed: true,
+            ..ItemCondition::default()
+        };
+        let mut known = EquipmentKnowledge::default();
+        known.learn_curse(item, true).unwrap();
+        assert!(known.remembered_condition(item).is_none());
+        known.identify(item, original).unwrap();
+        assert_eq!(known.remembered_condition(item), Some(original));
+        assert!(known.remembered_condition(ItemId(8)).is_none());
+        let serialized = serde_json::to_value(&known).unwrap();
+        let fact: EquipmentFact = serde_json::from_value(serialized[0].clone()).unwrap();
+        assert_eq!(fact.numbers.unwrap().potency, -1);
+        let mut missing = serialized[0].clone();
+        missing["numbers"]
+            .as_object_mut()
+            .unwrap()
+            .remove("potency");
+        assert!(serde_json::from_value::<EquipmentFact>(missing).is_err());
+        let changed = ItemCondition {
+            potency: 2,
+            ..original
+        };
+        known.observe_change(
+            item,
+            changed,
+            ItemCondition {
+                potency: 1,
+                ..changed
+            },
+        );
+        assert_eq!(known.remembered_condition(item), Some(original));
+    }
+
     #[test]
     fn curse_blocked_event_requires_named_exact_item_and_intention_fields() {
         let event = crate::combat::CombatEvent::ItemCurseBlocked {

@@ -153,7 +153,7 @@ magical = true
 class = "scroll"
 stackable = true
 appearance_pool = "rogue.scrolls"
-readable = { identify = "potion", discovery = "on_use" }
+readable = { identify = ["potion"], discovery = "on_use" }
 
 [items."rogue.sleep"]
 asset = "item.scroll"
@@ -177,18 +177,18 @@ magical = true
 class = "scroll"
 stackable = true
 appearance_pool = "rogue.scrolls"
-readable = { identify = "scroll", discovery = "on_use" }
+readable = { identify = ["scroll"], discovery = "on_use" }
 
-# Wand-only is the initial TOR subset of the source's ring-or-wand category.
+# One paid ring-or-wand identification choice; identity remains stable.
 [items."rogue.identify_wand"]
 asset = "item.scroll"
-name = "scroll of identify wand"
+name = "scroll of identify ring or wand"
 identity = "rogue.identify_wand"
 magical = true
 class = "scroll"
 stackable = true
 appearance_pool = "rogue.scrolls"
-readable = { identify = "wand", discovery = "on_use" }
+readable = { identify = ["ring", "wand"], discovery = "on_use" }
 
 [items."rogue.wand_fire"]
 asset = "item.wand"
@@ -436,7 +436,7 @@ magical = true
 class = "scroll"
 stackable = true
 appearance_pool = "rogue.scrolls"
-readable = { identify = "weapon", discovery = "on_use" }
+readable = { identify = ["weapon"], discovery = "on_use" }
 
 [items."rogue.identify_armor"]
 asset = "item.scroll"
@@ -446,4 +446,115 @@ magical = true
 class = "scroll"
 stackable = true
 appearance_pool = "rogue.scrolls"
-readable = { identify = "armor", discovery = "on_use" }
+readable = { identify = ["armor"], discovery = "on_use" }
+
+# Worn magic shares generic source modifiers. Signed potency is private instance
+# state; it is not identified merely by wearing, and curses survive removal attempts.
+
+[items."rogue.ring_protection"]
+asset = "item.ring"
+name = "ring of protection"
+identity = "rogue.ring_protection"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "signed_potency", negative = 1, positive = 2 }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }], potency_modifiers = [{ scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "energy" }, amount = 1 } }, { scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "impact" }, amount = 1 } }, { scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "keen" }, amount = 1 } }, { scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "spirit" }, amount = 1 } }, { scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "vital" }, amount = 1 } }, { scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "psychic" }, amount = 1 } }] }
+
+[items."rogue.ring_add_strength"]
+asset = "item.ring"
+name = "ring of add strength"
+identity = "rogue.ring_add_strength"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "signed_potency", negative = 1, positive = 2 }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }], potency_modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "attribute", attribute = "strength" }, value = 1 } }] }
+
+[items."rogue.ring_sustain_strength"]
+asset = "item.ring"
+name = "ring of sustain strength"
+identity = "rogue.ring_sustain_strength"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }, { scope = "always", op = { kind = "sustain_attribute", attribute = "strength" } }], potency_modifiers = [] }
+
+[items."rogue.ring_see_invisible"]
+asset = "item.ring"
+name = "ring of see invisible"
+identity = "rogue.ring_see_invisible"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 6 } }, { scope = "always", op = { kind = "perception", value = { kind = "see_invisible", enabled = true } } }], potency_modifiers = [] }
+
+[items."rogue.ring_adornment"]
+asset = "item.ring"
+name = "ring of adornment"
+identity = "rogue.ring_adornment"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [], potency_modifiers = [] }
+
+[items."rogue.ring_dexterity"]
+asset = "item.ring"
+name = "ring of dexterity"
+identity = "rogue.ring_dexterity"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "signed_potency", negative = 1, positive = 2 }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 10 } }], potency_modifiers = [{ scope = "always", op = { kind = "attribute_without_defense", attribute = "speed", defense = "physical", value = 1 } }] }
+
+[items."rogue.ring_increase_damage"]
+asset = "item.ring"
+name = "ring of increase damage"
+identity = "rogue.ring_increase_damage"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "signed_potency", negative = 1, positive = 2 }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 10 } }], potency_modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "attack_damage_roll_bonus" }, value = 1 } }] }
+
+[items."rogue.ring_regeneration"]
+asset = "item.ring"
+name = "ring of regeneration"
+identity = "rogue.ring_regeneration"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 60 } }, { scope = "always", op = { kind = "health_recovery_rate", multiplier = 2 } }], potency_modifiers = [] }
+
+[items."rogue.ring_slow_digestion"]
+asset = "item.ring"
+name = "ring of slow digestion"
+identity = "rogue.ring_slow_digestion"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = -15 } }], potency_modifiers = [] }
+
+[items."rogue.ring_maintain_armor"]
+asset = "item.ring"
+name = "ring of maintain armor"
+identity = "rogue.ring_maintain_armor"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }, { scope = "always", op = { kind = "protect_armor" } }], potency_modifiers = [] }
+
+[appearance_pools."rogue.rings"]
+asset = "item.ring"
+appearances = ["agate ring", "bronze ring", "coral ring", "diamond ring", "emerald ring", "ivory ring", "jade ring", "opal ring", "ruby ring", "sapphire ring"]

@@ -449,7 +449,7 @@ class RogueMagicReceiptTests(unittest.TestCase):
 
     def test_all_three_stages_return_every_placed_identity_for_cross_stage_duplicate_checks(self):
         self.assertEqual(assert_magic_item_receipts(self, self.receipts(), require_placed=True),
-                         [("item", 100), ("item", 101), ("item", 102)])
+                         [("item", 100), ("item", 101), ("item", 102), ("item", 103)])
 
     def test_every_reviewed_subtype_is_eligible_only_in_its_magic_stage(self):
         for index, choices in enumerate((
@@ -461,7 +461,7 @@ class RogueMagicReceiptTests(unittest.TestCase):
                     receipts = self.receipts()
                     receipts[index]["result"]["attempts"][0]["content"] = choice
                     self.assertEqual(len(assert_magic_item_receipts(self, receipts)), 3)
-                    receipts[(index + 1) % 3]["result"]["attempts"][0]["content"] = choice
+                    receipts[(index + 1) % 4]["result"]["attempts"][0]["content"] = choice
                     with self.assertRaises(AssertionError):
                         assert_magic_item_receipts(self, receipts)
 
@@ -524,11 +524,12 @@ class RogueEquipmentReceiptTests(unittest.TestCase):
             for index, (identity, content) in enumerate((
                 ("rogue.equipment", "rogue.generated_mace"),
                 ("rogue.equipment_scrolls", "rogue.enchant_armor"),
-                ("rogue.ammunition", "rogue.arrow")))]
+                ("rogue.ammunition", "rogue.arrow"),
+                ("rogue.rings", "rogue.ring_protection")))]
 
     def test_equipment_and_ammunition_stages_preserve_cross_stage_identity_checks(self):
         self.assertEqual(assert_equipment_item_receipts(self, self.receipts(), require_placed=True),
-                         [("item", 100), ("item", 101), ("item", 102)])
+                         [("item", 100), ("item", 101), ("item", 102), ("item", 103)])
 
     def test_every_reviewed_subtype_is_eligible_only_in_its_equipment_stage(self):
         for index, choices in enumerate((
@@ -538,13 +539,13 @@ class RogueEquipmentReceiptTests(unittest.TestCase):
                  "rogue.shortbow"),
                 ("rogue.enchant_armor", "rogue.protect_armor", "rogue.enchant_weapon", "rogue.remove_curse",
                  "rogue.identify_weapon", "rogue.identify_armor"),
-                ("rogue.arrow",))):
+                ("rogue.arrow",), ('rogue.ring_protection', 'rogue.ring_add_strength', 'rogue.ring_sustain_strength', 'rogue.ring_see_invisible', 'rogue.ring_adornment', 'rogue.ring_dexterity', 'rogue.ring_increase_damage', 'rogue.ring_regeneration', 'rogue.ring_slow_digestion', 'rogue.ring_maintain_armor'))):
             for choice in choices:
                 with self.subTest(stage=index, content=choice):
                     receipts = self.receipts()
                     receipts[index]["result"]["attempts"][0]["content"] = choice
-                    self.assertEqual(len(assert_equipment_item_receipts(self, receipts)), 3)
-                    receipts[(index + 1) % 3]["result"]["attempts"][0]["content"] = choice
+                    self.assertEqual(len(assert_equipment_item_receipts(self, receipts)), 4)
+                    receipts[(index + 1) % 4]["result"]["attempts"][0]["content"] = choice
                     with self.assertRaises(AssertionError):
                         assert_equipment_item_receipts(self, receipts)
 

@@ -248,7 +248,7 @@ impl Game {
                             consumed_identity,
                         )?;
                         let crate::abilities::Plan::Read {
-                            identify: Some(class),
+                            identify: Some(classes),
                             ..
                         } = &resolved.plan
                         else {
@@ -262,7 +262,7 @@ impl Game {
                             outcome.state.identification =
                                 Some(crate::magic_items::IdentificationChoice {
                                     choice: resolved.origin.ok_or(GameError::ItemUnavailable)?,
-                                    class: *class,
+                                    classes: classes.clone(),
                                 });
                             self.apply_outcome(outcome)?;
                         }

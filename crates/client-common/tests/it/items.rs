@@ -198,7 +198,7 @@ fn identification_binds_exact_pending_choice_category_and_carried_instance() {
     let choice = IntentionId("opaque-paid-choice".into());
     view.interactions.as_mut().unwrap().identification = Some(IdentificationChoiceView {
         choice: choice.clone(),
-        class: ItemClass::Ring,
+        classes: vec![ItemClass::Ring],
         items: vec![target(2)],
     });
     assert_eq!(
@@ -213,6 +213,18 @@ fn identification_binds_exact_pending_choice_category_and_carried_instance() {
         Action::Identify { choice, item: None }
     );
     assert!(identification_action(&view, Some(target(1))).is_err());
+    view.interactions
+        .as_mut()
+        .unwrap()
+        .identification
+        .as_mut()
+        .unwrap()
+        .classes = vec![ItemClass::Ring, ItemClass::Wand];
+    view.inventory[1].class = ItemClass::Wand;
+    assert!(identification_action(&view, Some(target(2))).is_ok());
+    assert!(tor_client_common::items::identification_prompt(&view)
+        .unwrap()
+        .contains(&view.inventory[1].name));
     view.inventory[1].class = ItemClass::Potion;
     assert!(identification_action(&view, Some(target(2))).is_err());
     view.inventory.pop();

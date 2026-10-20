@@ -370,6 +370,7 @@ fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
             let mut spec = ItemSpec::ordinary(format!("gear {item}"));
             spec.class = class;
             spec.equipment = Some(EquipmentSpec {
+                potency_modifiers: Vec::new(),
                 weapon_profile: None,
                 armor: None,
                 slot,

@@ -340,6 +340,8 @@ pub enum Stat {
     HealthRecoveryPeriod,
     HealthRecoveryPeriodPercent,
     HealthRecoveryResetPercent,
+    AttackDamageRollBonus,
+    NutritionRateThirtieths,
     ResourceMax {
         resource: Resource,
     },
@@ -376,6 +378,8 @@ impl<'de> Deserialize<'de> for Stat {
             HealthRecoveryPeriod {},
             HealthRecoveryPeriodPercent {},
             HealthRecoveryResetPercent {},
+            AttackDamageRollBonus {},
+            NutritionRateThirtieths {},
             ResourceMax {
                 resource: Resource,
             },
@@ -400,6 +404,8 @@ impl<'de> Deserialize<'de> for Stat {
             Recorded::HealthRecoveryPeriod {} => Self::HealthRecoveryPeriod,
             Recorded::HealthRecoveryPeriodPercent {} => Self::HealthRecoveryPeriodPercent,
             Recorded::HealthRecoveryResetPercent {} => Self::HealthRecoveryResetPercent,
+            Recorded::AttackDamageRollBonus {} => Self::AttackDamageRollBonus,
+            Recorded::NutritionRateThirtieths {} => Self::NutritionRateThirtieths,
             Recorded::ResourceMax { resource } => Self::ResourceMax { resource },
             Recorded::Ability { ability, stat } => Self::Ability { ability, stat },
             Recorded::AbilityTag { tag, stat } => Self::AbilityTag { tag, stat },
@@ -420,6 +426,25 @@ pub enum Selector {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModifierOp {
+    /// Add an attribute contribution without feeding one nominated defense.
+    AttributeWithoutDefense {
+        attribute: Attribute,
+        defense: DefenseKind,
+        value: i64,
+    },
+    /// Signed adjustment combines with ordinary and talent DR before its zero floor.
+    SignedReduction {
+        selector: Selector,
+        amount: i32,
+    },
+    SustainAttribute {
+        attribute: Attribute,
+    },
+    ProtectArmor {},
+    /// Strongest source wins; this rate never stacks with duplicate sources.
+    HealthRecoveryRate {
+        multiplier: u16,
+    },
     ActionDuration {
         value: crate::action_duration::ActionDuration,
     },
@@ -463,6 +488,25 @@ impl<'de> Deserialize<'de> for ModifierOp {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            /// Add an attribute contribution without feeding one nominated defense.
+            AttributeWithoutDefense {
+                attribute: Attribute,
+                defense: DefenseKind,
+                value: i64,
+            },
+            /// Signed adjustment combines with ordinary and talent DR before its zero floor.
+            SignedReduction {
+                selector: Selector,
+                amount: i32,
+            },
+            SustainAttribute {
+                attribute: Attribute,
+            },
+            ProtectArmor {},
+            /// Strongest source wins; this rate never stacks with duplicate sources.
+            HealthRecoveryRate {
+                multiplier: u16,
+            },
             ActionDuration {
                 value: crate::action_duration::ActionDuration,
             },
@@ -500,6 +544,21 @@ impl<'de> Deserialize<'de> for ModifierOp {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::AttributeWithoutDefense {
+                attribute,
+                defense,
+                value,
+            } => Self::AttributeWithoutDefense {
+                attribute,
+                defense,
+                value,
+            },
+            Fields::SignedReduction { selector, amount } => {
+                Self::SignedReduction { selector, amount }
+            }
+            Fields::SustainAttribute { attribute } => Self::SustainAttribute { attribute },
+            Fields::ProtectArmor {} => Self::ProtectArmor {},
+            Fields::HealthRecoveryRate { multiplier } => Self::HealthRecoveryRate { multiplier },
             Fields::ActionDuration { value } => Self::ActionDuration { value },
             Fields::Perception { value } => Self::Perception { value },
             Fields::Locomotion { value } => Self::Locomotion { value },
@@ -2107,6 +2166,11 @@ impl Ruleset {
                             | ModifierOp::Immunity { .. }
                             | ModifierOp::Reduction { .. }
                             | ModifierOp::TalentReduction { .. }
+                            | ModifierOp::SignedReduction { .. }
+                            | ModifierOp::AttributeWithoutDefense { .. }
+                            | ModifierOp::SustainAttribute { .. }
+                            | ModifierOp::ProtectArmor {}
+                            | ModifierOp::HealthRecoveryRate { .. }
                             | ModifierOp::GrantAbility { .. }
                             | ModifierOp::ActionDuration { .. }
                             | ModifierOp::Locomotion { .. }
@@ -2349,6 +2413,8 @@ impl References<'_> {
                     | Stat::HealthRecoveryPeriod
                     | Stat::HealthRecoveryPeriodPercent
                     | Stat::HealthRecoveryResetPercent
+                    | Stat::AttackDamageRollBonus
+                    | Stat::NutritionRateThirtieths
                     | Stat::ResourceMax { .. }
                     | Stat::Edge
                     | Stat::CheckEdge
@@ -2359,8 +2425,13 @@ impl References<'_> {
                     flag.intern(pool);
                 }
                 ModifierOp::Immunity { selector } => self.selector(selector, pool)?,
-                ModifierOp::Reduction { selector, .. } => self.selector(selector, pool)?,
+                ModifierOp::Reduction { selector, .. }
+                | ModifierOp::SignedReduction { selector, .. } => self.selector(selector, pool)?,
                 ModifierOp::TalentReduction { .. }
+                | ModifierOp::AttributeWithoutDefense { .. }
+                | ModifierOp::SustainAttribute { .. }
+                | ModifierOp::ProtectArmor {}
+                | ModifierOp::HealthRecoveryRate { .. }
                 | ModifierOp::ActionDuration { .. }
                 | ModifierOp::Locomotion { .. }
                 | ModifierOp::Perception { .. } => {}
@@ -2679,6 +2750,18 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
             ModifierOp::Add { stat, value } | ModifierOp::Set { stat, value } => {
                 valid_modifier_value(stat, *value)?
             }
+            ModifierOp::AttributeWithoutDefense { value, .. } => bound(
+                (-crate::limits::STAT_MAGNITUDE..=crate::limits::STAT_MAGNITUDE).contains(value),
+                "attribute_without_defense",
+            )?,
+            ModifierOp::SignedReduction { amount, .. } => bound(
+                (-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(*amount)),
+                "signed_reduction",
+            )?,
+            ModifierOp::HealthRecoveryRate { multiplier } => {
+                bound((1..=10000).contains(multiplier), "health_recovery_rate")?
+            }
+            ModifierOp::SustainAttribute { .. } | ModifierOp::ProtectArmor {} => {}
             ModifierOp::Reduction { amount, .. } | ModifierOp::TalentReduction { amount, .. } => {
                 bound(i64::from(*amount) <= crate::limits::NUMERIC, "reduction")?
             }
@@ -2717,9 +2800,11 @@ fn valid_modifier_value(stat: &Stat, value: i64) -> Result<(), RulesetError> {
             -crate::limits::STAT_MAGNITUDE,
             crate::limits::STAT_MAGNITUDE,
         ),
-        Stat::Health | Stat::HealthRecoveryPeriod | Stat::ResourceMax { .. } => {
-            (-crate::limits::NUMERIC, crate::limits::NUMERIC)
-        }
+        Stat::AttackDamageRollBonus
+        | Stat::NutritionRateThirtieths
+        | Stat::Health
+        | Stat::HealthRecoveryPeriod
+        | Stat::ResourceMax { .. } => (-crate::limits::NUMERIC, crate::limits::NUMERIC),
         Stat::HealthRecoveryPeriodPercent => (-10_000, 10_000),
         Stat::HealthRecoveryResetPercent => (-100, 100),
         Stat::Ability { stat, .. } | Stat::AbilityTag { stat, .. } => match stat {
@@ -3604,8 +3689,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v47\"",
-                "id = \"interactions-v47\"\nunknown = true"
+                "id = \"interactions-v48\"",
+                "id = \"interactions-v48\"\nunknown = true"
             ))
             .is_err()
         );

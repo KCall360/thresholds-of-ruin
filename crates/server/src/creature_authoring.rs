@@ -105,16 +105,56 @@ pub enum Scope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Op {
-    ActionDuration { value: ActionDuration },
-    Perception { value: Perception },
-    Locomotion { value: Locomotion },
-    Add { stat: Stat, value: i64 },
-    Set { stat: Stat, value: i64 },
-    Flag { flag: String },
-    Immunity { selector: Selector },
-    Reduction { selector: Selector, amount: u32 },
-    TalentReduction { category: String, amount: u32 },
-    GrantAbility { ability: String },
+    SignedReduction {
+        selector: Selector,
+        amount: i32,
+    },
+    AttributeWithoutDefense {
+        attribute: String,
+        defense: String,
+        value: i64,
+    },
+    SustainAttribute {
+        attribute: String,
+    },
+    ProtectArmor {},
+    HealthRecoveryRate {
+        multiplier: u16,
+    },
+    ActionDuration {
+        value: ActionDuration,
+    },
+    Perception {
+        value: Perception,
+    },
+    Locomotion {
+        value: Locomotion,
+    },
+    Add {
+        stat: Stat,
+        value: i64,
+    },
+    Set {
+        stat: Stat,
+        value: i64,
+    },
+    Flag {
+        flag: String,
+    },
+    Immunity {
+        selector: Selector,
+    },
+    Reduction {
+        selector: Selector,
+        amount: u32,
+    },
+    TalentReduction {
+        category: String,
+        amount: u32,
+    },
+    GrantAbility {
+        ability: String,
+    },
 }
 /// Source-owned action rate, separate from attribute and clock authoring.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -178,6 +218,8 @@ pub enum Stat {
     HealthRecoveryPeriod,
     HealthRecoveryPeriodPercent,
     HealthRecoveryResetPercent,
+    AttackDamageRollBonus,
+    NutritionRateThirtieths,
     ResourceMax { resource: String },
     Ability { ability: String, stat: String },
     AbilityTag { tag: String, stat: String },
@@ -200,6 +242,8 @@ impl<'de> Deserialize<'de> for Stat {
             HealthRecoveryPeriod {},
             HealthRecoveryPeriodPercent {},
             HealthRecoveryResetPercent {},
+            AttackDamageRollBonus {},
+            NutritionRateThirtieths {},
             ResourceMax { resource: String },
             Ability { ability: String, stat: String },
             AbilityTag { tag: String, stat: String },
@@ -214,6 +258,8 @@ impl<'de> Deserialize<'de> for Stat {
             Recorded::HealthRecoveryPeriod {} => Self::HealthRecoveryPeriod,
             Recorded::HealthRecoveryPeriodPercent {} => Self::HealthRecoveryPeriodPercent,
             Recorded::HealthRecoveryResetPercent {} => Self::HealthRecoveryResetPercent,
+            Recorded::AttackDamageRollBonus {} => Self::AttackDamageRollBonus,
+            Recorded::NutritionRateThirtieths {} => Self::NutritionRateThirtieths,
             Recorded::ResourceMax { resource } => Self::ResourceMax { resource },
             Recorded::Ability { ability, stat } => Self::Ability { ability, stat },
             Recorded::AbilityTag { tag, stat } => Self::AbilityTag { tag, stat },
@@ -1038,6 +1084,8 @@ mod strict_stat_tests {
             Stat::HealthRecoveryPeriod,
             Stat::HealthRecoveryPeriodPercent,
             Stat::HealthRecoveryResetPercent,
+            Stat::AttackDamageRollBonus,
+            Stat::NutritionRateThirtieths,
             Stat::Edge,
             Stat::CheckEdge,
             Stat::IncomingEdge { defense: None },
@@ -1090,6 +1138,8 @@ mod strict_stat_tests {
             "health_recovery_period",
             "health_recovery_period_percent",
             "health_recovery_reset_percent",
+            "attack_damage_roll_bonus",
+            "nutrition_rate_thirtieths",
         ] {
             let json = serde_json::json!({"kind": kind, "private_owner": 999});
             if serde_json::from_value::<Stat>(json).is_ok() {
@@ -1465,5 +1515,44 @@ mod expertise_purchase_tests {
             r#"{"kind":"expertise","expertise":"fixture.knife","free":true}"#
         )
         .is_err());
+    }
+}
+
+#[cfg(test)]
+mod wearable_modifier_tests {
+    use super::*;
+    #[test]
+    fn shared_wearable_modifiers_round_trip_and_compile_without_ring_identity() {
+        let ops = [
+            Op::SignedReduction {
+                selector: Selector::Category {
+                    category: DamageType::Psychic,
+                },
+                amount: -1,
+            },
+            Op::AttributeWithoutDefense {
+                attribute: "speed".into(),
+                defense: "physical".into(),
+                value: 2,
+            },
+            Op::SustainAttribute {
+                attribute: "strength".into(),
+            },
+            Op::ProtectArmor {},
+            Op::HealthRecoveryRate { multiplier: 2 },
+        ];
+        for op in ops {
+            let modifier = Modifier {
+                scope: Scope::Always,
+                op,
+            };
+            let value = serde_json::to_value(&modifier).unwrap();
+            let restored: Modifier = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(restored, modifier);
+            assert!(restored.compile().is_ok());
+            let mut extra = value;
+            extra["op"]["secret_ring"] = serde_json::json!(true);
+            assert!(serde_json::from_value::<Modifier>(extra).is_err());
+        }
     }
 }

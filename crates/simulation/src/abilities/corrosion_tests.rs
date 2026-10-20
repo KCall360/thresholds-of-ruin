@@ -146,6 +146,7 @@ fn fixture_config(
                 let mut spec = ItemSpec::ordinary("mail".into());
                 spec.class = crate::ItemClass::Armor;
                 spec.equipment = Some(EquipmentSpec {
+                    potency_modifiers: Vec::new(),
                     weapon_profile: None,
                     slot: EquipmentSlot::new("body_armor").unwrap(),
                     armor: Some(armor),
@@ -473,4 +474,62 @@ fn corrosion_survives_death_pickup_unequip_drop_and_re_equip() {
         1
     );
     assert_eq!(game.items[&ItemId(21)].condition.corrosion, 0);
+}
+
+#[test]
+fn worn_armor_protection_prevents_new_corrosion_without_repair_and_removal_restores_risk() {
+    let mut game = fixture(Some(armor()), 1);
+    let owner = ActorId(2);
+    let body = EquipmentSlot::new("body_armor").unwrap();
+    let corrode = |game: &mut Game| {
+        let mut outcome = game.settled_actor_outcome(owner).unwrap();
+        let applied = game
+            .corrode_armor_in_outcome(&mut outcome, &body, 1)
+            .unwrap();
+        game.apply_outcome(outcome).unwrap();
+        applied
+    };
+    assert_eq!(corrode(&mut game), 1);
+    let (socket, slot) = game.actors[&owner]
+        .anatomy
+        .slots
+        .iter()
+        .enumerate()
+        .find(|(socket, slot)| {
+            slot.as_str() == "ring"
+                && !game.actors[&owner]
+                    .equipment
+                    .contains_key(&EquipmentSlotId(*socket as u16))
+        })
+        .map(|(socket, slot)| (EquipmentSlotId(socket as u16), slot.clone()))
+        .unwrap();
+    let mut spec = ItemSpec::ordinary("armor ward".into());
+    spec.class = crate::ItemClass::Ring;
+    spec.equipment = Some(EquipmentSpec {
+        potency_modifiers: Vec::new(),
+        weapon_profile: None,
+        slot,
+        armor: None,
+        attack: None,
+        modifiers: vec![Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::ProtectArmor {},
+        }],
+    });
+    let at = game.actors[&owner].location;
+    game.place_item_stack(22, at, Some(owner), 1, spec).unwrap();
+    game.equip_authored(owner, ItemId(22), socket).unwrap();
+    assert!(game.creature(owner).unwrap().derived().protects_armor);
+    assert_eq!(game.items[&ItemId(20)].condition.corrosion, 1);
+    assert_eq!(corrode(&mut game), 0);
+    assert_eq!(game.items[&ItemId(20)].condition.corrosion, 1);
+    let mut outcome = game.settled_actor_outcome(owner).unwrap();
+    let mut equipment = outcome.state.equipment.clone();
+    equipment.remove(&socket);
+    game.refresh_equipment_outcome(&mut outcome, equipment)
+        .unwrap();
+    game.apply_outcome(outcome).unwrap();
+    assert!(!game.creature(owner).unwrap().derived().protects_armor);
+    assert_eq!(corrode(&mut game), 1);
+    assert_eq!(game.items[&ItemId(20)].condition.corrosion, 2);
 }

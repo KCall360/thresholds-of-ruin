@@ -23,7 +23,7 @@ fn magic_commands_round_trip_only_current_named_opaque_operands() {
         json!({"type":"zap","item":item(),"direction":{"north":null}}),
         json!({"type":"identify","item":item()}),
         json!({"type":"identify","choice":"opaque-choice"}),
-        json!({"type":"identify","choice":"opaque-choice","item":item(),"class":"wand"}),
+        json!({"type":"identify","choice":"opaque-choice","item":item(),"classes":["wand"]}),
     ] {
         assert!(
             serde_json::from_value::<Action>(value.clone()).is_err(),
@@ -70,17 +70,31 @@ fn magic_affordances_require_explicit_flags_and_instance_count_and_reject_privat
 }
 #[test]
 fn identification_choices_require_named_unique_typed_targets_and_no_private_metadata() {
-    let good = json!({"choice":"opaque-choice","class":"wand","items":[item()]});
+    let good = json!({"choice":"opaque-choice","classes":["wand"],"items":[item()]});
     let decoded: IdentificationChoiceView = serde_json::from_value(good.clone()).unwrap();
     assert_eq!(serde_json::to_value(decoded).unwrap(), good);
+    let both = json!({"choice":"opaque-choice","classes":["ring","wand"],"items":[item()]});
+    assert_eq!(
+        serde_json::to_value(
+            serde_json::from_value::<IdentificationChoiceView>(both.clone()).unwrap()
+        )
+        .unwrap(),
+        both
+    );
     for value in [
+        json!({"choice":"opaque-choice","class":"wand","items":[]}),
+        json!({"choice":"opaque-choice","classes":[],"items":[]}),
+        json!({"choice":"opaque-choice","classes":["wand","ring"],"items":[]}),
+        json!({"choice":"opaque-choice","classes":["wand","wand"],"items":[]}),
+        json!({"choice":"opaque-choice","classes":[{"wand":null}],"items":[]}),
+        json!({"choice":"opaque-choice","classes":["missing"],"items":[]}),
         json!(["opaque-choice", "wand", [item()]]),
-        json!({"choice":"","class":"wand","items":[]}),
-        json!({"choice":"opaque-choice","class":"wand","items":[item(),item()]}),
-        json!({"choice":"opaque-choice","class":"wand","items":["71"]}),
+        json!({"choice":"","classes":["wand"],"items":[]}),
+        json!({"choice":"opaque-choice","classes":["wand"],"items":[item(),item()]}),
+        json!({"choice":"opaque-choice","classes":["wand"],"items":["71"]}),
         json!({"choice":"opaque-choice","class":{"wand":null},"items":[]}),
-        json!({"choice":"opaque-choice","class":"wand","items":(0..65).map(|n| ItemTarget::from_digest([n;32])).collect::<Vec<_>>()}),
-        json!({"choice":"opaque-choice","class":"wand","items":[item()],"source":"identify_wand"}),
+        json!({"choice":"opaque-choice","classes":["wand"],"items":(0..65).map(|n| ItemTarget::from_digest([n;32])).collect::<Vec<_>>()}),
+        json!({"choice":"opaque-choice","classes":["wand"],"items":[item()],"source":"identify_wand"}),
     ] {
         assert!(
             serde_json::from_value::<IdentificationChoiceView>(value.clone()).is_err(),

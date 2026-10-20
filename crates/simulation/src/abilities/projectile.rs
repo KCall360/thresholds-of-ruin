@@ -701,6 +701,8 @@ impl crate::Game {
             damage: attack
                 .attack
                 .damage_with_modifiers(modifiers.dice, modifiers.flat, 0)
+                .map_err(|_| crate::GameError::Rule(super::RuleError::NumericBudget))?
+                .with_roll_bonus(caster.derived().attack_damage_roll_bonus)
                 .map_err(|_| crate::GameError::Rule(super::RuleError::NumericBudget))?,
         }];
         let bonus = attack

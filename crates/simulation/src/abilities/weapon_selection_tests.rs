@@ -100,6 +100,7 @@ fn equip_configured(
     );
     let primary = component.key();
     item.equipment = Some(crate::EquipmentSpec {
+        potency_modifiers: Vec::new(),
         slot: crate::EquipmentSlot::new("weapon").unwrap(),
         armor: None,
         attack: Some(
@@ -1356,6 +1357,7 @@ fn frozen_equip_compares_only_its_complete_pool_and_rejects_capacity_changes() {
     let mut ring = crate::ItemSpec::ordinary("ring".into());
     ring.class = crate::ItemClass::Ring;
     ring.equipment = Some(crate::EquipmentSpec {
+        potency_modifiers: Vec::new(),
         slot: ring_slot,
         armor: None,
         attack: None,
@@ -3901,4 +3903,79 @@ fn slow_quickdraw_bypasses_unused_large_equip_duration_but_ordinary_draw_rejects
             .is_err(),
         "quickdraw never makes sheathing free"
     );
+}
+#[test]
+fn projectile_attack_bonus_augments_only_rolled_pool_once() {
+    let (mut game, launch, selection, launcher, ammo) = projectile_launch_fixture();
+    let rolled = crate::damage::DamageComponent::rolled(
+        crate::combat::DamageType::Keen,
+        None,
+        crate::dice::DicePool::new(2, 6, 0).unwrap(),
+    );
+    let primary = rolled.key();
+    let damage = crate::damage::DamageSpec::new(
+        vec![
+            rolled,
+            crate::damage::DamageComponent::fixed(crate::combat::DamageType::Vital, None, 3),
+        ],
+        Some(primary),
+    )
+    .unwrap();
+    game.items
+        .edit(ammo, |item| {
+            item.spec.projectile.as_mut().unwrap().damage = damage
+        })
+        .unwrap();
+    let baseline = game
+        .capture_projectile_plan(ActorId(1), &launch, StepDirection::East, selection)
+        .unwrap();
+    game.items
+        .edit(launcher, |item| {
+            item.spec
+                .equipment
+                .as_mut()
+                .unwrap()
+                .modifiers
+                .push(Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Add {
+                        stat: Stat::AttackDamageRollBonus,
+                        value: 2,
+                    },
+                })
+        })
+        .unwrap();
+    game.actors
+        .get_mut(&ActorId(1))
+        .unwrap()
+        .equipment
+        .remove(&EquipmentSlotId(0));
+    game.equip_authored(ActorId(1), launcher, EquipmentSlotId(0))
+        .unwrap();
+    let captured = game
+        .capture_projectile_plan(ActorId(1), &launch, StepDirection::East, selection)
+        .unwrap();
+    let [PlannedEffect::Damage { damage: before }] = baseline.effects.as_slice() else {
+        panic!("before")
+    };
+    let [PlannedEffect::Damage { damage: after }] = captured.effects.as_slice() else {
+        panic!("after")
+    };
+    let mut rolled_count = 0;
+    let mut fixed_count = 0;
+    for (before, after) in before.components().iter().zip(after.components()) {
+        match (before.amount(), after.amount()) {
+            (crate::damage::DamageAmount::Rolled(a), crate::damage::DamageAmount::Rolled(b)) => {
+                assert_eq!(b.bonus(), a.bonus() + 2);
+                assert_eq!(a.count(), b.count());
+                rolled_count += 1;
+            }
+            (crate::damage::DamageAmount::Fixed(a), crate::damage::DamageAmount::Fixed(b)) => {
+                assert_eq!(a, b);
+                fixed_count += 1;
+            }
+            _ => panic!("shape changed"),
+        }
+    }
+    assert_eq!((rolled_count, fixed_count), (1, 1));
 }

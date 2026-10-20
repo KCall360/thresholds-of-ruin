@@ -108,6 +108,7 @@ fn natural_melee_source_ignores_equipped_weapon_operands_and_timing() {
     let mut weapon = crate::ItemSpec::ordinary("source selection probe".into());
     weapon.class = crate::ItemClass::Weapon;
     weapon.equipment = Some(crate::EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
         slot: crate::EquipmentSlot::new("weapon").unwrap(),
@@ -410,6 +411,7 @@ fn natural_melee_selected_weapon_checks_keep_user_and_target_sources_separate() 
         let mut weapon = crate::ItemSpec::ordinary("opposed source probe".into());
         weapon.class = crate::ItemClass::Weapon;
         weapon.equipment = Some(crate::EquipmentSpec {
+            potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("weapon").unwrap(),
@@ -454,4 +456,76 @@ fn natural_melee_selected_weapon_checks_keep_user_and_target_sources_separate() 
             .selected_attack
             .check_bonus
     );
+}
+#[test]
+fn natural_rider_rolls_receive_attack_bonus_but_not_primary_only_melee_bonus() {
+    let (game, _) = super::strike_tests::sequence_game_custom(
+        &[0],
+        |ability| {
+            let mut rolled_rider = rider(3);
+            rolled_rider.effects.push(Effect::Damage {
+                damage: DamageExpr::Components {
+                    components: vec![DamageComponentExpr {
+                        category: crate::combat::DamageType::Energy,
+                        descriptor: None,
+                        amount: AmountExpr::Rolled {
+                            dice: DiceExpr {
+                                count: 2,
+                                sides: 6,
+                                bonus: 0,
+                            },
+                        },
+                    }],
+                },
+            });
+            ability.strikes = StrikeSource::NaturalMelee {
+                additional_riders: vec![rolled_rider],
+            };
+        },
+        |rules, species| {
+            let ability = rules
+                .abilities
+                .iter()
+                .find(|a| a.basic_attack)
+                .unwrap()
+                .id
+                .clone();
+            for (stat, value) in [
+                (Stat::AttackDamageRollBonus, 2),
+                (
+                    Stat::Ability {
+                        ability,
+                        stat: AbilityStat::FlatBonus,
+                    },
+                    5,
+                ),
+            ] {
+                species.modifiers.push(Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Add { stat, value },
+                });
+            }
+        },
+    );
+    let plan = game
+        .preparation(ActorId(1))
+        .unwrap()
+        .plan
+        .as_ability()
+        .unwrap();
+    let rider = &plan.strikes[0].riders[0];
+    let PlannedEffect::Damage { damage: fixed } = &rider.effects[0] else {
+        panic!("fixed")
+    };
+    assert_eq!(
+        fixed.components()[0].amount(),
+        crate::damage::DamageAmount::Fixed(3)
+    );
+    let PlannedEffect::Damage { damage: rolled } = &rider.effects[1] else {
+        panic!("rolled")
+    };
+    let crate::damage::DamageAmount::Rolled(pool) = rolled.components()[0].amount() else {
+        panic!("pool")
+    };
+    assert_eq!((pool.count(), pool.bonus()), (2, 2));
 }

@@ -771,7 +771,7 @@ pub fn observation(
                 .identification
                 .map(|choice| p::IdentificationChoiceView {
                     choice: targets.identification_choice(choice.choice),
-                    class: item_class(choice.class),
+                    classes: choice.classes.into_iter().map(item_class).collect(),
                     items: choice
                         .items
                         .into_iter()

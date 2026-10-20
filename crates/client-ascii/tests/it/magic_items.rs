@@ -34,7 +34,7 @@ fn snapshot(identify: bool) -> Snapshot {
         curse_blocked: vec![],
         identification: identify.then(|| IdentificationChoiceView {
             choice: IntentionId("paid-choice".into()),
-            class: ItemClass::Wand,
+            classes: vec![ItemClass::Wand],
             items: vec![super::item_target(2), super::item_target(3)],
         }),
         slots: vec![],
@@ -197,7 +197,10 @@ fn zap_cancels_freely_and_stale_views_control_loss_or_disconnect_clear_selection
 #[test]
 fn identification_is_category_bound_and_cancel_submits_the_paid_choice() {
     let mut app = self::app(true);
-    assert_eq!(app.identification_choice().unwrap().class, ItemClass::Wand);
+    assert_eq!(
+        app.identification_choice().unwrap().classes,
+        vec![ItemClass::Wand]
+    );
     let rows = app.identification_rows();
     assert_eq!(rows.len(), 2);
     assert!(rows[0].contains("b -"));

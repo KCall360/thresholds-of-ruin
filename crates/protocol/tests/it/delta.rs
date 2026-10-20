@@ -1497,7 +1497,7 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
         curse_blocked: vec![],
         identification: Some(IdentificationChoiceView {
             choice: IntentionId("opaque-paid-choice".into()),
-            class: ItemClass::Wand,
+            classes: vec![ItemClass::Wand],
             items: vec![item],
         }),
         completed: vec![Action::Read {
@@ -1536,7 +1536,7 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
                 interaction.identification.as_mut().unwrap().items =
                     vec![ItemTarget::from_digest([77; 32])]
             }
-            1 => interaction.identification.as_mut().unwrap().class = ItemClass::Potion,
+            1 => interaction.identification.as_mut().unwrap().classes = vec![ItemClass::Potion],
             2 => interaction
                 .identification
                 .as_mut()

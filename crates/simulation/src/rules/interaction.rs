@@ -245,6 +245,11 @@ impl Ruleset {
         MODIFIER_VISITS.with(|visits| visits.set(visits.get() + modifiers.len()));
         // Catalog flag graphs and expansion sizes have already been validated.
         modifiers.iter().any(|modifier| match &modifier.op {
+            ModifierOp::AttributeWithoutDefense { value, .. } => *value < 0,
+            ModifierOp::SignedReduction { amount, .. } => *amount < 0,
+            ModifierOp::SustainAttribute { .. }
+            | ModifierOp::ProtectArmor {}
+            | ModifierOp::HealthRecoveryRate { .. } => false,
             ModifierOp::ActionDuration { value } => {
                 *value == crate::action_duration::ActionDuration::Slow
             }
@@ -272,7 +277,8 @@ impl Ruleset {
                 Stat::IncomingEdge { .. }
                 | Stat::HealthRecoveryPeriod
                 | Stat::HealthRecoveryPeriodPercent
-                | Stat::HealthRecoveryResetPercent => *value > 0,
+                | Stat::HealthRecoveryResetPercent
+                | Stat::NutritionRateThirtieths => *value > 0,
                 Stat::Ability {
                     stat: AbilityStat::Preparation | AbilityStat::Recovery,
                     ..

@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 52;
+pub(crate) const ARCHIVE_VERSION: u32 = 53;
 #[path = "action_resolution.rs"]
 mod action_resolution;
 #[path = "advancement_query.rs"]
@@ -4996,8 +4996,8 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 52);
-        assert_eq!(engine.archive.ruleset, "interactions-v47");
+        assert_eq!(engine.archive.version, ARCHIVE_VERSION);
+        assert_eq!(engine.archive.ruleset, "interactions-v48");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {

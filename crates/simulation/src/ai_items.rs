@@ -609,6 +609,12 @@ pub(crate) fn required_nutrition(view: &Observation) -> Option<crate::nutrition:
 #[derive(PartialEq, Eq)]
 struct GearScore {
     maximum_health: u64,
+    // Lower effective upkeep is useful, but higher upkeep alone does not veto
+    // a combat upgrade. Exempt creatures and a floored-zero rate gain nothing.
+    nutrition_rate_thirtieths: i64,
+    sustained_attributes: std::collections::BTreeSet<crate::attributes::Attribute>,
+    protects_armor: bool,
+    see_invisible: bool,
     stats: std::collections::BTreeMap<crate::rules::Stat, i64>,
     flags: std::collections::BTreeSet<crate::content_ids::FlagId>,
     abilities: std::collections::BTreeSet<crate::content_ids::AbilityId>,
@@ -635,6 +641,10 @@ impl GearScore {
             .iter()
             .any(|(stat, value)| *value > old.stats.get(stat).copied().unwrap_or(0))
             || self.maximum_health > old.maximum_health
+            || self.nutrition_rate_thirtieths < old.nutrition_rate_thirtieths
+            || self.sustained_attributes.len() > old.sustained_attributes.len()
+            || (self.protects_armor && !old.protects_armor)
+            || (self.see_invisible && !old.see_invisible)
             || self.flags.len() > old.flags.len()
             || self.abilities.len() > old.abilities.len()
             || self
@@ -655,6 +665,11 @@ impl GearScore {
                 .any(|(key, value)| *value > old.attack.damage.get(key).copied().unwrap_or(0));
         improved
             && self.maximum_health >= old.maximum_health
+            && self
+                .sustained_attributes
+                .is_superset(&old.sustained_attributes)
+            && (!old.protects_armor || self.protects_armor)
+            && (!old.see_invisible || self.see_invisible)
             && old
                 .stats
                 .iter()
@@ -714,6 +729,11 @@ fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
         Stat::HealthRecoveryResetPercent,
         -i64::from(derived.health_recovery_reset_percent),
     );
+    // Food cost is an upkeep tradeoff, not a Pareto combat regression.
+    stats.insert(
+        Stat::AttackDamageRollBonus,
+        i64::from(derived.attack_damage_roll_bonus),
+    );
     for resource in crate::resources::Resource::ALL {
         stats.insert(
             Stat::ResourceMax { resource },
@@ -742,8 +762,9 @@ fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
     }
     let mut protection = std::collections::BTreeMap::new();
     for modifier in derived.sources.values().flatten() {
-        if let ModifierOp::Immunity { selector } | ModifierOp::Reduction { selector, .. } =
-            &modifier.op
+        if let ModifierOp::Immunity { selector }
+        | ModifierOp::Reduction { selector, .. }
+        | ModifierOp::SignedReduction { selector, .. } = &modifier.op
         {
             protection.insert(
                 selector.clone(),
@@ -762,6 +783,10 @@ fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
         Err(crate::attacks::SelectedDamageError::NoPrimaryDamage) => None,
         Err(crate::attacks::SelectedDamageError::InvalidDefinition) => return None,
     };
+    let damage = damage
+        .map(|damage| damage.with_roll_bonus(derived.attack_damage_roll_bonus))
+        .transpose()
+        .ok()?;
     let mut estimates = std::collections::BTreeMap::new();
     for component in damage.iter().flat_map(|damage| damage.components()) {
         let estimate = match component.amount() {
@@ -779,6 +804,15 @@ fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
     let timing = game.ability_timing(actor, &basic).ok()?;
     Some(GearScore {
         maximum_health: derived.maximum_health,
+        nutrition_rate_thirtieths: match creature.nutrition() {
+            crate::nutrition::Nutrition::Exempt => 0,
+            crate::nutrition::Nutrition::Required { .. } => {
+                (30 + derived.nutrition_rate_thirtieths).max(0)
+            }
+        },
+        sustained_attributes: derived.sustained_attributes.clone(),
+        protects_armor: derived.protects_armor,
+        see_invisible: derived.perception.see_invisible,
         stats,
         flags: derived.flags.clone(),
         abilities: derived.abilities.clone(),
@@ -1092,6 +1126,7 @@ mod tests {
         );
         let primary = component.key();
         EquipmentSpec {
+            potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
             slot: EquipmentSlot::new("weapon").unwrap(),
@@ -1175,6 +1210,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    potency_modifiers: Vec::new(),
                     weapon_profile: None,
                     armor: None,
                     slot: EquipmentSlot::new("head_armor").unwrap(),
@@ -1202,6 +1238,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    potency_modifiers: Vec::new(),
                     weapon_profile: None,
                     armor: None,
                     slot: EquipmentSlot::new("head_armor").unwrap(),
@@ -1240,6 +1277,7 @@ mod tests {
                     at,
                     20,
                     EquipmentSpec {
+                        potency_modifiers: Vec::new(),
                         weapon_profile: None,
                         armor: None,
                         slot: EquipmentSlot::new("body_armor").unwrap(),
@@ -1262,6 +1300,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    potency_modifiers: Vec::new(),
                     weapon_profile: None,
                     armor: None,
                     slot: EquipmentSlot::new("head_armor").unwrap(),

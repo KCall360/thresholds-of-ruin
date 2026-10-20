@@ -1,4 +1,4 @@
-format = 25
+format = 26
 id = "magic-items"
 version = "1.0"
 ruleset = "rules.toml"
@@ -20,7 +20,7 @@ name = "scroll of identify wand"
 identity = "magic.identify_wand"
 appearance_pool = "scrolls"
 stackable = true
-readable = { identify = "wand", discovery = "on_use" }
+readable = { identify = ["wand"], discovery = "on_use" }
 
 [archetypes.ember]
 class = "wand"

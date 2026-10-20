@@ -4,7 +4,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 55;
+pub const PROTOCOL_VERSION: u32 = 56;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -797,7 +797,7 @@ impl<'de> Deserialize<'de> for ItemInteractionView {
 #[serde(deny_unknown_fields)]
 pub struct IdentificationChoiceView {
     pub choice: IntentionId,
-    pub class: ItemClass,
+    pub classes: Vec<ItemClass>,
     pub items: Vec<ItemTarget>,
 }
 impl<'de> Deserialize<'de> for IdentificationChoiceView {
@@ -806,8 +806,8 @@ impl<'de> Deserialize<'de> for IdentificationChoiceView {
         #[serde(deny_unknown_fields)]
         struct Fields {
             choice: IntentionId,
-            #[serde(deserialize_with = "read_item_class_token")]
-            class: ItemClass,
+            #[serde(deserialize_with = "read_item_classes")]
+            classes: Vec<ItemClass>,
             #[serde(deserialize_with = "crate::bounded::bounded::<_, _, 64>")]
             items: Vec<ItemTarget>,
         }
@@ -815,16 +815,31 @@ impl<'de> Deserialize<'de> for IdentificationChoiceView {
         let mut seen = std::collections::BTreeSet::new();
         if fields.choice.0.is_empty()
             || fields.choice.0.len() > 256
+            || !valid_identification_classes(&fields.classes)
             || !fields.items.iter().all(|item| seen.insert(*item))
         {
             return Err(serde::de::Error::custom("invalid identification choice"));
         }
         Ok(Self {
             choice: fields.choice,
-            class: fields.class,
+            classes: fields.classes,
             items: fields.items,
         })
     }
+}
+
+pub(crate) fn valid_identification_classes(classes: &[ItemClass]) -> bool {
+    !classes.is_empty() && classes.len() <= 14 && classes.windows(2).all(|pair| pair[0] < pair[1])
+}
+fn read_item_classes<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<ItemClass>, D::Error> {
+    #[derive(Deserialize)]
+    struct Token(#[serde(deserialize_with = "read_item_class_token")] ItemClass);
+    let values: Vec<Token> = crate::bounded::bounded::<_, _, 14>(d)?;
+    let classes: Vec<_> = values.into_iter().map(|value| value.0).collect();
+    if !valid_identification_classes(&classes) {
+        return Err(serde::de::Error::custom("invalid identification class set"));
+    }
+    Ok(classes)
 }
 
 fn read_direction_token<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Direction, D::Error> {
@@ -1752,7 +1767,7 @@ pub enum TravelPhase {
 }
 
 /// Disclosed physical category; independent of true identity and item effects.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemClass {
     #[default]

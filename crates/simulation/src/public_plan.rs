@@ -667,6 +667,7 @@ mod tests {
         let mut equipment = ItemSpec::ordinary("private mail".into());
         equipment.class = ItemClass::Armor;
         equipment.equipment = Some(EquipmentSpec {
+            potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
