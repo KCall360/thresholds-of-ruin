@@ -1,5 +1,6 @@
 use super::anatomy::{storybook_part, BootShape, HumanoidBody, LimbShape};
 use super::animation::ease;
+use super::outfit::{Arms, Feet, Legs, Outer, Outfit};
 use super::*;
 
 mod rogue;
@@ -1621,51 +1622,80 @@ pub(super) struct Lame {
     pub radius_bottom: f32,
 }
 
-/// Overlapping lames down a limb: each band's upper edge tucks inside the
-/// lower edge of the one above, so the plates can slide as the limb bends
-/// without opening a gap. Radii taper from `radius_top` to `radius_bottom`.
-pub(super) fn lames(
+/// The cuisse over a thigh: four lames from the hip to the knee cop, cut
+/// for this wearer's thigh.
+pub(super) fn cuisse_lames(body: HumanoidBody) -> Vec<Lame> {
+    fitted_lames(&limb_form(body.thigh), -0.04, 4, 0.085, PLATE_CLEARANCE)
+}
+
+/// The rerebrace below a pauldron: three lames down the upper arm, cut for
+/// this wearer's arm.
+pub(super) fn rerebrace_lames(body: HumanoidBody) -> Vec<Lame> {
+    let arm = upper_arm_form(1.0, body.build, body.arm_length, body.profile.muscle, 0.94);
+    let length = body.arm_length;
+    fitted_lames(&arm, -0.08 * length, 3, 0.055 * length, PLATE_CLEARANCE)
+}
+
+/// How far plate stands off the limb it covers: room for the padding and
+/// mail beneath it, and for the limb's mesh facets.
+const PLATE_CLEARANCE: f32 = 0.007;
+
+/// How far a sculpted limb reaches from its axis at a height.
+fn limb_reach(form: &crate::sdf::Sculpt, y: f32) -> f32 {
+    (0..24)
+        .filter_map(|k| {
+            let a = k as f32 / 24.0 * TAU;
+            let out = Vec3::new(a.cos(), 0.0, a.sin());
+            let hit = form.onto(Vec3::new(0.0, y, 0.0) + out * 0.3, -out);
+            (form.distance(hit).abs() < 0.002).then(|| Vec2::new(hit.x, hit.z).length())
+        })
+        .fold(0.0, f32::max)
+}
+
+/// Overlapping lames fitted over a limb's sculpted form. Each band clears
+/// the limb along its whole span, and its upper edge tucks inside the lower
+/// edge of the band above, so the plates slide as the limb bends without
+/// opening a gap; a swelling muscle widens the plates above it rather than
+/// turning a shingle the wrong way.
+pub(super) fn fitted_lames(
+    form: &crate::sdf::Sculpt,
     top: f32,
     count: usize,
     length: f32,
-    radius_top: f32,
-    radius_bottom: f32,
+    clearance: f32,
 ) -> Vec<Lame> {
+    const TUCK: f32 = 0.004;
+    const FLARE: f32 = 0.003;
     let overlap = length * 0.3;
-    let radius = |y: f32| {
-        let t = ((top - y) / (length * count as f32)).clamp(0.0, 1.0);
-        radius_top + (radius_bottom - radius_top) * t
-    };
-    (0..count)
+    let mut bands: Vec<Lame> = (0..count)
         .map(|k| {
             let upper = top - k as f32 * (length - overlap);
             let lower = upper - length;
-            // Each band flares slightly at its lower edge and starts a little
-            // inside the band above it.
-            let tuck = if k == 0 { 0.0 } else { 0.004 };
+            let need = (0..=4)
+                .map(|s| limb_reach(form, upper + (lower - upper) * s as f32 / 4.0))
+                .fold(0.0, f32::max)
+                + clearance;
             Lame {
                 top: upper,
                 bottom: lower,
-                radius_top: radius(upper) - tuck,
-                radius_bottom: radius(lower) + 0.003,
+                radius_top: need,
+                radius_bottom: need + FLARE,
             }
         })
-        .collect()
+        .collect();
+    for k in (0..count.saturating_sub(1)).rev() {
+        let inside = bands[k + 1].radius_top + TUCK;
+        if bands[k].radius_bottom < inside {
+            bands[k].radius_bottom = inside;
+            bands[k].radius_top = bands[k].radius_top.max(inside - FLARE);
+        }
+    }
+    bands
 }
 
 /// Draw overlapping lames as shallow metal bands with darker lower edges.
-fn plate_lames(
-    b: &mut Builder,
-    top: f32,
-    count: usize,
-    length: f32,
-    radius_top: f32,
-    radius_bottom: f32,
-) {
-    for (k, lame) in lames(top, count, length, radius_top, radius_bottom)
-        .into_iter()
-        .enumerate()
-    {
+fn plate_lames(b: &mut Builder, bands: &[Lame]) {
+    for (k, &lame) in bands.iter().enumerate() {
         let shade = 1.0 - 0.04 * k as f32;
         b.tube(
             &[Vec3::Y * lame.top, Vec3::Y * lame.bottom],
@@ -1813,25 +1843,6 @@ pub(super) fn heeled_boots(style: Style, woman: bool) -> bool {
             style,
             Style::Vampire | Style::Medusa | Style::Phantom | Style::Wraith | Style::Leprechaun
         )
-}
-
-/// The skirt of each kind's tunic, robe or coat: its colour and length.
-fn tunic_skirt(l: &Look, tunic: Vec3) -> (Vec3, f32) {
-    match l.style {
-        Style::Sentinel => (CREAM * 0.86, 0.26),
-        Style::Caster => (l.cloth, 0.84),
-        Style::Zombie => (tunic * 0.8, 0.2),
-        Style::Vampire => (DARK, 0.3),
-        Style::Orc => (LEATHER * 0.8, 0.18),
-        Style::Troll => (l.cloth, 0.26),
-        Style::Leprechaun => (l.cloth, 0.4),
-        Style::Nymph => (l.cloth, 0.2),
-        Style::Medusa => (l.cloth, 0.62),
-        Style::Phantom => (l.cloth * 0.9, 0.5),
-        Style::Wraith => (l.cloth, 0.66),
-        Style::Hero | Style::Scout if l.v.woman => (tunic * 0.98, 0.19),
-        _ => (tunic * 0.98, 0.22),
-    }
 }
 
 /// A hollow garment with vertical folds, an elliptical silhouette and a
@@ -3004,10 +3015,19 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     let b = body.build;
     let (shoulders, waist, hips_w) = (body.shoulders, body.waist, body.hips_width);
     let arm_len = body.arm_length;
-    // Footwear is an outfit choice fitted to the resolved wearer.
+    // What it wears, slot by slot: its kind's own outfit unless it was
+    // dressed in another. A kind's own trimmings (lacing, straps, rags,
+    // charms) come only with its own outfit; another outfit brings its own.
+    let outfit = Outfit::worn(&l);
+    let native = l.outfit.is_none();
+    let boots = match outfit.feet {
+        Feet::Boots(boots) => Some(boots),
+        Feet::Bare(_) => None,
+    };
+    // Footwear is fitted to the resolved wearer.
     let boot_shape = BootShape::fitted(
         b,
-        if fem && matches!(style, Style::Hero | Style::Scout) {
+        if boots.is_some_and(|boots| boots.tall) {
             -0.075
         } else {
             -0.24
@@ -3015,91 +3035,16 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     );
     let blocky = style == Style::Guardian;
     let furry = style == Style::Yeti;
+    let cuirass = outfit.outer == Some(Outer::Cuirass);
     // The colour of each layer.
-    let tunic = match style {
-        Style::Orc | Style::Troll => LEATHER * 0.9,
-        // A purple waistcoat under the open green coat.
-        Style::Leprechaun => Vec3::new(0.34, 0.16, 0.36),
-        _ => l.cloth,
-    };
-    let trousers = [
-        Vec3::new(0.25, 0.17, 0.12),
-        Vec3::new(0.2, 0.22, 0.16),
-        Vec3::new(0.34, 0.28, 0.2),
-        Vec3::new(0.16, 0.17, 0.22),
-        Vec3::new(0.36, 0.2, 0.14),
-    ];
-    let pants = match style {
-        Style::Hero => trousers[l.v.shade as usize],
-        Style::Sentinel => IRON,
-        Style::Guardian => l.skin,
-        Style::Yeti => l.cloth,
-        Style::Zombie => Vec3::new(0.3, 0.26, 0.2),
-        Style::Vampire => DARK * 2.0,
-        Style::Scout => Vec3::new(0.22, 0.2, 0.15),
-        Style::Orc => Vec3::new(0.3, 0.2, 0.13),
-        Style::Troll | Style::Nymph => l.skin,
-        Style::Leprechaun => Vec3::new(0.2, 0.17, 0.15),
-        Style::Medusa => Vec3::new(0.16, 0.1, 0.1),
-        Style::Phantom => Vec3::new(0.2, 0.18, 0.24),
-        Style::Wraith => DARK * 2.6,
-        _ => l.cloth * 0.55 + LEATHER * 0.45,
-    };
-    // Bare-limbed kinds show skin where others wear sleeves and leggings.
-    let bare_arms = matches!(
-        style,
-        Style::Hobgoblin
-            | Style::Zombie
-            | Style::Orc
-            | Style::Troll
-            | Style::Nymph
-            | Style::Medusa
-            | Style::Phantom
-    );
-    let barefoot = matches!(style, Style::Troll | Style::Nymph);
-    // Cloth trousers stand off the leg; skin, stockings and mail stay fitted.
-    let trousered = matches!(
-        style,
-        Style::Hero
-            | Style::Scout
-            | Style::Common
-            | Style::Vampire
-            | Style::Hobgoblin
-            | Style::Zombie
-            | Style::Orc
-            | Style::Leprechaun
-            | Style::Phantom
-            | Style::Wraith
-    );
-    let boot = match style {
-        Style::Guardian => l.skin * 0.85,
-        Style::Yeti => l.skin,
-        Style::Sentinel => STEEL,
-        Style::Zombie => l.skin * 0.8,
-        Style::Vampire => DARK,
-        Style::Troll => l.skin * 0.88,
-        Style::Nymph => l.skin,
-        Style::Leprechaun => LEATHER * 0.9,
-        Style::Medusa => Vec3::new(0.4, 0.24, 0.14),
-        Style::Wraith => Vec3::new(0.2, 0.16, 0.14),
-        _ => LEATHER * 0.75,
-    };
-    let sleeve = match style {
-        Style::Guardian | Style::Hobgoblin => l.skin,
-        Style::Yeti => l.cloth,
-        Style::Sentinel => STEEL,
-        Style::Zombie => l.skin,
-        Style::Vampire => Vec3::new(0.22, 0.12, 0.17),
-        _ if bare_arms => l.skin,
-        Style::Leprechaun => l.cloth,
-        _ => tunic,
-    };
-    let hand_color = match style {
-        Style::Yeti => l.skin,
-        Style::Sentinel => STEEL,
-        Style::Hero | Style::Scout => LEATHER,
-        _ => l.skin,
-    };
+    let tunic = outfit.tunic;
+    let pants = outfit.pants();
+    let bare_arms = outfit.arms == Arms::Bare;
+    let barefoot = boots.is_none();
+    let trousered = matches!(outfit.legs, Legs::Trousers(_));
+    let boot = outfit.boot();
+    let sleeve = outfit.sleeve(l.skin);
+    let hand_color = outfit.hands;
     let hips = kit.joint(J::Hips, lift, body.hips, "hips", |p| {
         if blocky {
             stone(
@@ -3124,7 +3069,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             return;
         }
         // The tunic's own skirt is a separate drape (see below).
-        if style == Style::Zombie {
+        if native && style == Style::Zombie {
             for k in 0..5 {
                 let a = k as f32 * 1.3;
                 let at = Vec3::new(a.cos() * 0.2 * body.profile.hips, -0.2, a.sin() * 0.2);
@@ -3139,7 +3084,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 );
             }
         }
-        if style == Style::Sentinel {
+        if cuirass {
             // Long tabard panels front and back, gilt-edged, falling past the belt.
             for (z, lean) in [(0.19f32, -0.07f32), (-0.19, 0.07)] {
                 let down = Vec3::new(0.0, 1.0, lean).normalize();
@@ -3208,14 +3153,19 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         }
     });
     // The tunic's skirt hangs from the pelvis on its own, free to sway.
-    if !blocky && !furry && style != Style::Caster {
-        let (skirt_color, skirt_len) = tunic_skirt(&l, tunic);
-        let flare = if style == Style::Sentinel {
+    if let Some((skirt_color, skirt_len)) = outfit.skirt.filter(|_| !blocky && !furry) {
+        let flare = if cuirass {
             0.185
         } else {
             0.208 + skirt_len * 0.045
         };
-        let cut = skirt_cut(body, flare, skirt_len, trousered, cutaway_coat(style));
+        let cut = skirt_cut(
+            body,
+            flare,
+            skirt_len,
+            trousered,
+            native && cutaway_coat(style),
+        );
         // The skirt keeps the hips' Storybook proportion it had when it was
         // built into the pelvis; without it the cloth is a tenth narrower.
         kit.drape_scaled(
@@ -3246,8 +3196,19 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     }
     // A jerkin's free region: below the belt its leather is no longer
     // supported by the body and hangs as a short flared peplum over the tunic.
-    if let Some(length) = jerkin_peplum(style) {
-        let leather = LEATHER * if style == Style::Scout { 0.85 } else { 0.9 };
+    if let Some(Outer::Shell {
+        peplum: Some(length),
+        color,
+        ..
+    }) = outfit.outer
+    {
+        // A kind's own peplum keeps its sheet's leather; another jerkin's
+        // hem is a shade darker than its body.
+        let leather = if native {
+            LEATHER * if style == Style::Scout { 0.85 } else { 0.9 }
+        } else {
+            color * 0.9
+        };
         let top = Vec2::new(0.19 * b * hips_w, 0.143 * b);
         let bottom = Vec2::new(0.215 * b * hips_w, 0.162 * b);
         kit.drape(
@@ -3490,21 +3451,21 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             }
         }
         // A fitted outer garment: a jerkin, vest or coat over the tunic.
-        let outer = match style {
-            Style::Hero => Some((LEATHER, 0.465, true)),
-            Style::Scout => Some((LEATHER * 0.85, 0.465, true)),
-            Style::Hobgoblin => Some((LEATHER * 0.9, 0.43, true)),
-            Style::Vampire => Some((Vec3::new(0.32, 0.05, 0.07), 0.47, false)),
-            Style::Orc => Some((LEATHER * 0.95, 0.44, true)),
-            Style::Leprechaun => Some((l.cloth, 0.47, false)),
-            Style::Wraith => Some((l.cloth * 1.15, 0.48, false)),
+        let outer = match outfit.outer {
+            Some(Outer::Shell {
+                color,
+                top,
+                sleeveless,
+                leather,
+                ..
+            }) => Some((color, top, sleeveless, leather)),
             _ => None,
         };
-        let shell = outer.map(|(color, top, sleeveless)| {
-            let material = if matches!(style, Style::Vampire | Style::Leprechaun | Style::Wraith) {
-                TorsoMaterial::Cloth
-            } else {
+        let shell = outer.map(|(color, top, sleeveless, leather)| {
+            let material = if leather {
                 TorsoMaterial::Leather
+            } else {
+                TorsoMaterial::Cloth
             };
             let mut shell = torso_garment(body, material, trim_neck);
             shell
@@ -3514,7 +3475,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 for side in [-1.0f32, 1.0] {
                     shell.carve(Beyond(Vec3::X * side, 0.185 * sh), 0.008);
                 }
-                if matches!(style, Style::Hero | Style::Scout | Style::Orc) {
+                if !native || matches!(style, Style::Hero | Style::Scout | Style::Orc) {
                     // A shaped neckline leaves the fitted upper sides high
                     // while the centre opens over the under-tunic; hers
                     // plunges lower to frame the open bodice beneath.
@@ -3528,7 +3489,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     );
                 }
             }
-            if fem && matches!(style, Style::Vampire | Style::Wraith) {
+            if native && fem && matches!(style, Style::Vampire | Style::Wraith) {
                 // Her coat falls open from the collar in a deep V.
                 shell.carve(
                     Ellipsoid(
@@ -3538,7 +3499,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     0.006,
                 );
             }
-            if style == Style::Leprechaun {
+            if native && style == Style::Leprechaun {
                 // The coat hangs open over the waistcoat.
                 shell.carve(
                     Ellipsoid(
@@ -3569,7 +3530,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         // Where something sits on the front (or back) of the outer garment.
         let garment = shell.as_ref().unwrap_or(&body_shape);
         let on = |x: f32, y: f32, front: bool| -> Vec3 { torso_surface(garment, x, y, front) };
-        if style == Style::Sentinel {
+        if cuirass {
             // The separate gorget belongs to the articulated plate armour.
             p.matte
                 .torus(Vec3::Y * 0.555, Vec3::Y, 0.07, 0.022, 12, 4, l.trim);
@@ -3577,7 +3538,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             fitted_band(&mut p.matte, &body_shape, 0.535, 0.552, 0.0015, l.trim);
         }
         // A soft cowl or scarf gathered round the neck and draped over the shoulders.
-        let cowl = match style {
+        let cowl = match if native { style } else { Style::Common } {
             Style::Hero => Some((tunic * 0.75, false)),
             Style::Caster => Some((l.cloth * 0.85, false)),
             Style::Scout => Some((Vec3::new(0.3, 0.42, 0.22), true)),
@@ -3615,7 +3576,53 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             }
         }
 
-        match style {
+        if cuirass {
+            // One fitted cuirass follows the rib cage and waist. Cloth
+            // is an open panel laid on its surface, never a second torso
+            // intersecting the metal or several circular gold bands.
+            let mut cuirass = torso_garment(body, TorsoMaterial::Plate, trim_neck);
+            cuirass
+                .carve(Beyond(Vec3::Y, 0.525), 0.004)
+                .carve(Beyond(Vec3::NEG_Y, -0.012), 0.0);
+            cuirass.mesh(
+                &mut p.metal,
+                Vec3::new(-0.34, -0.025, -0.23) * b.max(1.0),
+                Vec3::new(0.34, 0.55, 0.255) * b.max(1.0),
+                0.008,
+                &|_, normal| STEEL * (0.92 + 0.08 * normal.z.abs()),
+            );
+            fitted_band(&mut p.metal, &cuirass, 0.018, 0.034, 0.004, GILT);
+            for front in [true, false] {
+                let edge = [
+                    (0.035, 0.112 * w),
+                    (0.16, 0.143 * sh),
+                    (0.31, 0.166 * sh),
+                    (0.435, 0.149 * sh),
+                    (0.512, 0.075 * b),
+                ];
+                let cloth = [
+                    (0.048, 0.1 * w),
+                    (0.16, 0.13 * sh),
+                    (0.31, 0.153 * sh),
+                    (0.435, 0.136 * sh),
+                    (0.501, 0.064 * b),
+                ];
+                fitted_panel(&mut p.matte, &cuirass, &edge, front, 0.009, GILT);
+                fitted_panel(&mut p.matte, &cuirass, &cloth, front, 0.014, l.cloth);
+                fitted_emblem(
+                    &mut p.matte,
+                    &cuirass,
+                    Vec2::new(0.0, 0.31),
+                    0.075 * b,
+                    front,
+                    CREAM,
+                    l.cloth,
+                    l.v.pattern,
+                );
+            }
+        }
+        // A kind's own trimmings come with its own outfit.
+        match if native { style } else { Style::Common } {
             Style::Hero => {
                 // Lacing up the front of the jerkin and a strap across it.
                 for k in 0..4 {
@@ -3647,51 +3654,6 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     0.0,
                     Vec3::new(0.74, 0.5, 0.26),
                 );
-            }
-            Style::Sentinel => {
-                // One fitted cuirass follows the rib cage and waist. Cloth
-                // is an open panel laid on its surface, never a second torso
-                // intersecting the metal or several circular gold bands.
-                let mut cuirass = torso_garment(body, TorsoMaterial::Plate, trim_neck);
-                cuirass
-                    .carve(Beyond(Vec3::Y, 0.525), 0.004)
-                    .carve(Beyond(Vec3::NEG_Y, -0.012), 0.0);
-                cuirass.mesh(
-                    &mut p.metal,
-                    Vec3::new(-0.34, -0.025, -0.23) * b.max(1.0),
-                    Vec3::new(0.34, 0.55, 0.255) * b.max(1.0),
-                    0.008,
-                    &|_, normal| STEEL * (0.92 + 0.08 * normal.z.abs()),
-                );
-                fitted_band(&mut p.metal, &cuirass, 0.018, 0.034, 0.004, GILT);
-                for front in [true, false] {
-                    let edge = [
-                        (0.035, 0.112 * w),
-                        (0.16, 0.143 * sh),
-                        (0.31, 0.166 * sh),
-                        (0.435, 0.149 * sh),
-                        (0.512, 0.075 * b),
-                    ];
-                    let cloth = [
-                        (0.048, 0.1 * w),
-                        (0.16, 0.13 * sh),
-                        (0.31, 0.153 * sh),
-                        (0.435, 0.136 * sh),
-                        (0.501, 0.064 * b),
-                    ];
-                    fitted_panel(&mut p.matte, &cuirass, &edge, front, 0.009, GILT);
-                    fitted_panel(&mut p.matte, &cuirass, &cloth, front, 0.014, l.cloth);
-                    fitted_emblem(
-                        &mut p.matte,
-                        &cuirass,
-                        Vec2::new(0.0, 0.31),
-                        0.075 * b,
-                        front,
-                        CREAM,
-                        l.cloth,
-                        l.v.pattern,
-                    );
-                }
             }
             Style::Caster => {
                 fitted_panel(
@@ -3804,7 +3766,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     kit.joint(J::Head, torso, body.head, "head", |p| {
         let neck = if furry { l.cloth } else { l.skin };
         let slim = if fem { 0.85 } else { 1.0 };
-        if blocky || furry || style == Style::Sentinel {
+        if blocky || furry || cuirass {
             p.matte.prism(
                 Vec3::Y * -0.03,
                 Vec3::Y * 0.08,
@@ -4281,7 +4243,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     ] {
         let tag = if side > 0.0 { "l" } else { "r" };
         let shoulder = body.shoulder(side);
-        let metal = style == Style::Sentinel;
+        let metal = outfit.arms == Arms::Plate;
         let upper = kit.joint(arm, torso, shoulder, &format!("arm{tag}"), |p| {
             let m = if metal { &mut p.metal } else { &mut p.matte };
             if blocky {
@@ -4333,14 +4295,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             if metal {
                 biped_pauldron(p, side, b);
                 // Rerebrace lames below the pauldron, each tucked under the last.
-                plate_lames(
-                    &mut p.metal,
-                    -0.08 * arm_len,
-                    3,
-                    0.055 * arm_len,
-                    0.064 * b,
-                    0.058 * b,
-                );
+                plate_lames(&mut p.metal, &rerebrace_lames(body));
             }
         });
         let lower = kit.joint(fore, upper, body.elbow(), &format!("fore{tag}"), |p| {
@@ -4406,15 +4361,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             } else {
                 biped_forearm(m, b, arm_len, body.profile.muscle, bare_arms, sleeve);
             }
-            let cuff = match style {
-                Style::Hero | Style::Scout | Style::Hobgoblin => Some(LEATHER),
-                Style::Orc | Style::Troll | Style::Nymph | Style::Phantom => Some(LEATHER * 0.85),
-                Style::Leprechaun => Some(CREAM),
-                Style::Medusa => Some(l.trim),
-                Style::Sentinel => Some(STEEL * 0.85),
-                Style::Caster | Style::Vampire | Style::Wraith => Some(l.trim),
-                _ => None,
-            };
+            let cuff = outfit.cuffs;
             if style == Style::Caster {
                 biped_cuff(m, b, arm_len, body.profile.muscle, true, sleeve, l.trim);
             } else if let Some(cuff) = cuff {
@@ -4534,10 +4481,10 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     ],
                     pants,
                 );
-            } else if style == Style::Sentinel {
+            } else if outfit.legs == Legs::Plate {
                 // Cuisses over the mail: overlapping lames down to the knee cop.
                 sculpted_limb(&mut p.matte, body.thigh, pants);
-                plate_lames(&mut p.metal, -0.04, 4, 0.085, 0.104 * b, 0.075 * b);
+                plate_lames(&mut p.metal, &cuisse_lames(body));
             } else if trousered {
                 // Trousers ease over the thigh, which stays fullest above the middle.
                 trouser_leg(&mut p.matte, body.thigh, b, false, pants);
@@ -4570,7 +4517,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 );
                 return;
             }
-            if style == Style::Sentinel {
+            if outfit.legs == Legs::Plate {
                 // A knee cop with a wing.
                 p.metal.blob(
                     Vec3::new(0.0, 0.0, 0.03),
@@ -4630,7 +4577,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     p.satin
                         .torus(Vec3::Y * y, Vec3::Y, 0.062 * b, 0.01, 12, 3, LEATHER * 0.8);
                 }
-            } else if !matches!(style, Style::Zombie | Style::Yeti) {
+            } else if boots.is_some_and(|boots| boots.cuffed) {
                 let (radius, thickness) = (boot_shape.cuff_radius, boot_shape.cuff_thickness);
                 p.satin.torus(
                     Vec3::Y * boot_top,
@@ -4642,10 +4589,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     boot * 1.15,
                 );
             }
-            if matches!(
-                style,
-                Style::Hero | Style::Scout | Style::Hobgoblin | Style::Orc | Style::Leprechaun
-            ) {
+            if boots.is_some_and(|boots| boots.buckles) {
                 for y in [-0.3f32, -0.37] {
                     p.satin
                         .torus(Vec3::Y * y, Vec3::Y, 0.068 * b, 0.009, 12, 3, boot * 0.6);
@@ -4682,7 +4626,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     if i == 2 { boot * 0.55 } else { boot },
                 );
             }
-            if heeled_boots(style, fem) {
+            if boots.is_some_and(|boots| boots.heel) {
                 // A slim tapering heel under the back of her boot, as the
                 // women wear on the concept sheets, its tip on the sole line.
                 let heel = Vec3::new(0.0, -0.4, -0.03 * b);
@@ -4712,14 +4656,12 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             }
         });
     }
-    rogue::biped_extras(kit, &l, body, torso, hips);
+    rogue::biped_features(kit, &l);
+    if native {
+        rogue::biped_extras(kit, &l, body, torso, hips);
+    }
     // Capes and cloaks hang from the shoulders.
-    if matches!(style, Style::Hero | Style::Vampire) {
-        let (cloak, lining) = if style == Style::Vampire {
-            (DARK, l.trim)
-        } else {
-            (l.cloth * 0.62, l.trim)
-        };
+    if let Some((cloak, lining)) = outfit.cloak {
         kit.drape(
             torso,
             Transform::from_xyz(0.0, 0.53, -0.15),

@@ -220,7 +220,13 @@ fn art_contract_long_hems_hang_free_while_short_edges_stay_neat() {
 #[test]
 fn art_contract_plate_lames_overlap_like_shingles() {
     for (count, length, top_r, bottom_r) in [(3, 0.055, 0.064, 0.058), (4, 0.085, 0.104, 0.075)] {
-        let bands = geometry::lames(-0.04, count, length, top_r, bottom_r);
+        // A limb tapering from the hip down.
+        let mut limb = crate::sdf::Sculpt::default();
+        limb.add(
+            crate::sdf::Shape::Capsule(Vec3::ZERO, Vec3::Y * -0.4, top_r, bottom_r),
+            0.0,
+        );
+        let bands = geometry::fitted_lames(&limb, -0.04, count, length, 0.007);
         assert_eq!(bands.len(), count);
         for pair in bands.windows(2) {
             let (upper, lower) = (pair[0], pair[1]);
@@ -272,6 +278,74 @@ fn art_contract_deltoids_round_off_level_with_the_shoulder_line() {
                 top < 0.02 * build,
                 "build {build} muscle {muscle}: the arm rises {top:.3} over the shoulder"
             );
+        }
+    }
+}
+
+/// How far a limb's sculpted surface reaches from its axis at a height.
+fn limb_reach(form: &crate::sdf::Sculpt, y: f32) -> f32 {
+    (0..24)
+        .filter_map(|k| {
+            let a = k as f32 / 24.0 * std::f32::consts::TAU;
+            let out = Vec3::new(a.cos(), 0.0, a.sin());
+            let hit = form.onto(Vec3::new(0.0, y, 0.0) + out * 0.3, -out);
+            (form.distance(hit).abs() < 0.002).then(|| Vec2::new(hit.x, hit.z).length())
+        })
+        .fold(0.0, f32::max)
+}
+
+#[test]
+fn art_contract_plate_lames_cover_every_wearer() {
+    // Any humanoid can be dressed in plate: the cuisses and rerebraces are
+    // cut from the wearer's own thigh and upper arm, over every build and
+    // figure, and still overlap like shingles.
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Medusa,
+        CreatureModel::Orc,
+        CreatureModel::Troll,
+        CreatureModel::Nymph,
+    ] {
+        for woman in [false, true] {
+            for build in 0..3 {
+                let body = HumanoidBody::resolve(&appearance(model, woman, build));
+                let arm = geometry::upper_arm_form(
+                    1.0,
+                    body.build,
+                    body.arm_length,
+                    body.profile.muscle,
+                    0.94,
+                );
+                for (what, form, bands) in [
+                    (
+                        "cuisse",
+                        geometry::limb_form(body.thigh),
+                        geometry::cuisse_lames(body),
+                    ),
+                    ("rerebrace", arm, geometry::rerebrace_lames(body)),
+                ] {
+                    for pair in bands.windows(2) {
+                        assert!(
+                            pair[1].radius_top < pair[0].radius_bottom,
+                            "{model:?} woman {woman} build {build}: {what} lames must nest"
+                        );
+                    }
+                    for (k, lame) in bands.iter().enumerate() {
+                        for step in 0..=4 {
+                            let s = step as f32 / 4.0;
+                            let y = lame.top + (lame.bottom - lame.top) * s;
+                            let plate =
+                                lame.radius_top + (lame.radius_bottom - lame.radius_top) * s;
+                            let reach = limb_reach(&form, y);
+                            assert!(
+                                plate > reach + 0.002,
+                                "{model:?} woman {woman} build {build}: {what} lame {k} \
+                                 {plate:.3} inside the limb {reach:.3} at {y:.3}"
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 }
