@@ -643,7 +643,7 @@ pub(super) fn place(
         .action
         .filter(|_| a.dead.is_none())
         .map_or((None, 0.0), |(m, t)| (Some(m), t));
-    let d = a.dead.map_or(0.0, ease);
+    let d = ease(a.dead.unwrap_or(a.fallen));
     let alive = 1.0 - d;
     let (gather, strike) = m.map_or((0.0, 0.0), |m| {
         let (g, s, _) = timing(m, t);
