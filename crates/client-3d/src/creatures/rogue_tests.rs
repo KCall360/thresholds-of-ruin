@@ -1266,3 +1266,62 @@ fn long_hair_hangs_where_it_did_and_swings_smoothly_as_she_moves() {
         }
     }
 }
+
+#[test]
+fn redressing_reuses_the_head_and_hair_the_outfit_leaves_alone() {
+    // Changing clothes rebuilds only what they shape: outfits that leave
+    // the head bare share its face and hair, and a helm gets its own head.
+    let mut materials = Assets::<StandardMaterial>::default();
+    let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
+    let mut meshes = Assets::<Mesh>::default();
+    let mut world = World::new();
+    let base = Look::with_choice(
+        CreatureModel::Nymph,
+        2,
+        Some(Variant {
+            woman: true,
+            ..Default::default()
+        }),
+    );
+    let mut dress = |wardrobe: Wardrobe| {
+        let parent = world.spawn(Transform::default()).id();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let rig = spawn(
+            &mut Commands::new(&mut queue, &world),
+            &mut library,
+            &mut meshes,
+            parent,
+            &base.clone().dressed(wardrobe),
+        );
+        queue.apply(&mut world);
+        let meshes_of = |e: Entity| -> Vec<AssetId<Mesh>> {
+            world
+                .get::<Children>(e)
+                .into_iter()
+                .flat_map(|children| children.iter())
+                .filter_map(|child| world.get::<Mesh3d>(child).map(|m| m.0.id()))
+                .collect()
+        };
+        let hair = rig
+            .drapes
+            .iter()
+            .find(|(_, kind)| *kind == Drape::Hair)
+            .map(|&(e, _)| meshes_of(e));
+        (
+            meshes_of(rig.joint(J::Head).unwrap()),
+            hair,
+            meshes_of(rig.joint(J::Torso).unwrap()),
+        )
+    };
+    let commoner = dress(Wardrobe::Commoner);
+    let courtier = dress(Wardrobe::Courtier);
+    let knight = dress(Wardrobe::Knight);
+    assert_eq!(
+        commoner.0, courtier.0,
+        "a bare head is shared between outfits"
+    );
+    assert_eq!(commoner.1, courtier.1, "and so is her hanging hair");
+    assert!(commoner.1.is_some());
+    assert_ne!(commoner.2, courtier.2, "while the clothes are their own");
+    assert_ne!(commoner.0, knight.0, "a helm makes its own head");
+}

@@ -177,6 +177,11 @@ struct Kit<'a, 'w, 's> {
     meshes: &'a mut Assets<Mesh>,
     rig: Rig,
     key: String,
+    /// The cache identity of parts that only some of the outfit shapes:
+    /// the head (by its headwear and whether a gorget hides the neck) and
+    /// hanging hair (by nothing worn at all). Redressing reuses them.
+    head_key: String,
+    hair_key: String,
     /// Every part is drawn translucent (a phantom).
     ghost: bool,
 }
@@ -212,8 +217,17 @@ impl Kit<'_, '_, '_> {
         // hair can never show through its face; the rest is translucent.
         // Long hair hangs as its own part, and stays solid with the head.
         let ghost = self.ghost && part != "head" && part != "hair";
-        self.library
-            .get(format!("creature/{}/{part}", self.key), self.meshes, || {
+        self.library.get(
+            format!(
+                "creature/{}/{part}",
+                match part {
+                    "head" => &self.head_key,
+                    "hair" => &self.hair_key,
+                    _ => &self.key,
+                }
+            ),
+            self.meshes,
+            || {
                 let mut p = Parts::default();
                 if soft {
                     p.soften();
@@ -223,7 +237,8 @@ impl Kit<'_, '_, '_> {
                     p.ghostify();
                 }
                 p
-            })
+            },
+        )
     }
 
     /// Hanging cloth on its own entity, swung by the animation.
@@ -308,6 +323,16 @@ pub fn spawn(
             drapes: Vec::new(),
         },
         key: look.key.clone(),
+        head_key: {
+            let outfit = Outfit::worn(look);
+            format!(
+                "{}:{:?}:{}",
+                look.body_key.as_deref().unwrap_or(&look.key),
+                outfit.head,
+                outfit.outer == Some(Outer::Cuirass)
+            )
+        },
+        hair_key: look.body_key.clone().unwrap_or_else(|| look.key.clone()),
         ghost: look.style.ghostly(),
     };
     let lift = kit
