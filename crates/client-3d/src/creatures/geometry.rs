@@ -1097,15 +1097,17 @@ fn hair(p: &mut Parts, l: &Look) {
                     4,
                     c * 0.6,
                 );
+                // A slim tail that lies along the nape instead of jutting out.
                 lock(
                     &mut p.matte,
                     &[
-                        Vec3::new(0.0, 0.165, -0.135),
-                        Vec3::new(0.0, 0.1, -0.165),
-                        Vec3::new(0.0, 0.03, -0.15),
+                        Vec3::new(0.0, 0.165, -0.13),
+                        Vec3::new(0.0, 0.11, -0.148),
+                        Vec3::new(0.0, 0.04, -0.142),
+                        Vec3::new(0.0, -0.04, -0.125),
                     ],
-                    0.045,
-                    0.04,
+                    0.034,
+                    0.026,
                     c,
                 );
             }
@@ -1117,18 +1119,40 @@ fn hair(p: &mut Parts, l: &Look) {
     match style {
         // Long and loose over the shoulders, locks framing the face.
         0 => {
-            lock(
-                &mut p.matte,
-                &[
-                    Vec3::new(0.0, 0.2, -0.1),
-                    Vec3::new(0.0, 0.1, -0.135),
-                    Vec3::new(0.0, -0.03, -0.13),
-                    Vec3::new(0.0, -0.16, -0.1),
-                ],
-                0.125,
-                0.05,
-                c,
-            );
+            // A full fall of separate, gently waving locks down the back.
+            for k in 0..5 {
+                let x = (k as f32 - 2.0) * 0.042;
+                let wave = |y: f32| (y * 22.0 + k as f32 * 1.3).sin() * 0.012;
+                let reach = -0.2 - 0.04 * rand(seed, 60 + k);
+                lock(
+                    &mut p.matte,
+                    &[
+                        Vec3::new(x * 0.8, 0.21, -0.1),
+                        Vec3::new(x + wave(0.1), 0.1, -0.138),
+                        Vec3::new(x * 1.15 + wave(-0.03), -0.03, -0.135),
+                        Vec3::new(x * 1.25 + wave(-0.13), -0.13, -0.115),
+                        Vec3::new(x * 1.2 + wave(reach), reach, -0.1),
+                    ],
+                    0.062,
+                    0.04,
+                    tone(60 + k),
+                );
+            }
+            // Locks fall forward over each shoulder.
+            for side in [-1.0f32, 1.0] {
+                lock(
+                    &mut p.matte,
+                    &[
+                        Vec3::new(side * 0.1, 0.15, -0.04),
+                        Vec3::new(side * 0.125, 0.04, -0.03),
+                        Vec3::new(side * 0.135, -0.05, -0.01),
+                        Vec3::new(side * 0.13, -0.11, 0.01),
+                    ],
+                    0.045,
+                    0.03,
+                    tone(70 + side as u32),
+                );
+            }
             for side in [-1.0f32, 1.0] {
                 lock(
                     &mut p.matte,
