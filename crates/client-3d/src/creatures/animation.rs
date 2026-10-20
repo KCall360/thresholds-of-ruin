@@ -1522,6 +1522,17 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
             Quat::from_rotation_y(-cycle.cos() * if lumber { 0.014 } else { 0.025 } * blend),
         );
     }
+    if walking
+        && rig.humanoid.is_some_and(|body| body.woman)
+        && !matches!(rig.style, Style::Zombie | Style::Guardian)
+    {
+        // Her hips sway over each planted foot as she walks, the shoulders
+        // countering, as the women carry themselves on the concept sheets.
+        let sway = cycle.sin() * blend;
+        p.r(J::Hips, Quat::from_rotation_z(0.075 * sway));
+        p.r(J::Torso, Quat::from_rotation_z(-0.06 * sway));
+        p.r(J::Head, Quat::from_rotation_z(-0.02 * sway));
+    }
     if lumber {
         let roll = if walking {
             -cycle.cos() * 0.03 * blend
