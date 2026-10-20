@@ -558,7 +558,7 @@ fn real_speed_turns_and_stops_keep_planted_feet_from_sliding() {
 
 /// The largest frame-to-frame jump of any foot or the head while a creature
 /// walks, is interrupted by an action, falls dead and is revived.
-fn largest_pop(model: CreatureModel) -> (f32, f32) {
+fn largest_pop(model: CreatureModel) -> (f32, f32, f32) {
     use bevy::time::TimeUpdateStrategy;
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
@@ -605,7 +605,7 @@ fn largest_pop(model: CreatureModel) -> (f32, f32) {
     .filter_map(|j| rig.joint(j))
     .collect();
     app.world_mut().entity_mut(root).insert(rig);
-    let (mut interrupt, mut revive) = (0.0f32, 0.0f32);
+    let (mut interrupt, mut revive, mut react) = (0.0f32, 0.0f32, 0.0f32);
     let mut last: Vec<Vec3> = Vec::new();
     for frame in 0..320 {
         let travel = frame.min(100) as f32 * 0.03;
@@ -616,7 +616,9 @@ fn largest_pop(model: CreatureModel) -> (f32, f32) {
         {
             let mut anim = app.world_mut().get_mut::<Anim>(root).unwrap();
             match frame {
+                30 => anim.hit(0.0),
                 80 => anim.act(Move::Strike),
+                140 => anim.miss(0.0),
                 160 => anim.dead = Some(0.0),
                 260 => anim.dead = None,
                 _ => {}
@@ -638,7 +640,9 @@ fn largest_pop(model: CreatureModel) -> (f32, f32) {
                 .zip(&last)
                 .map(|(a, b)| a.distance(*b))
                 .fold(0.0, f32::max);
-            if (80..140).contains(&frame) {
+            if (30..70).contains(&frame) || (140..160).contains(&frame) {
+                react = react.max(jump);
+            } else if (80..140).contains(&frame) {
                 interrupt = interrupt.max(jump);
             } else if (260..320).contains(&frame) {
                 revive = revive.max(jump);
@@ -646,7 +650,7 @@ fn largest_pop(model: CreatureModel) -> (f32, f32) {
         }
         last = now;
     }
-    (interrupt, revive)
+    (interrupt, revive, react)
 }
 
 #[test]
@@ -665,7 +669,9 @@ fn real_speed_interruptions_and_revival_do_not_pop() {
         CreatureModel::Bat,
         CreatureModel::Flytrap,
     ] {
-        let (interrupt, revive) = largest_pop(model);
+        let (interrupt, revive, react) = largest_pop(model);
+        // A flinch or sidestep while walking keeps the feet planted.
+        assert!(react < 0.25, "{model:?} pops when hit or missed: {react}");
         report.push(format!(
             "{model:?} interrupt {interrupt:.3} revive {revive:.3}"
         ));

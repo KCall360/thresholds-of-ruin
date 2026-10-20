@@ -1195,12 +1195,10 @@ impl Anim {
     }
 
     pub fn hit(&mut self, delay: f32) {
-        self.contacts = WalkContacts::default();
         self.hurt = Some(-delay);
     }
 
     pub fn miss(&mut self, delay: f32) {
-        self.contacts = WalkContacts::default();
         self.dodge = Some(-delay);
     }
 }
