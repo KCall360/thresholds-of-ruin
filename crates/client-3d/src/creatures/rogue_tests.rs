@@ -807,3 +807,47 @@ fn at_rest_women_stand_with_their_weight_on_one_leg() {
     assert!(hers > 0.08, "her hip rises over the standing leg: {hers}");
     assert!(his < hers * 0.7, "he stands squarer: {his} against {hers}");
 }
+
+#[test]
+fn walking_women_sway_their_hips_and_men_do_not() {
+    let sway = |woman: bool| {
+        let look = Look::with_choice(
+            CreatureModel::Human,
+            9,
+            Some(Variant {
+                woman,
+                ..Default::default()
+            }),
+        );
+        let (mut app, root) = animate_look(look, 1, |_| Vec3::ZERO);
+        let hips = app
+            .world()
+            .get::<Rig>(root)
+            .unwrap()
+            .joint(J::Hips)
+            .unwrap();
+        let (mut low, mut high) = (f32::INFINITY, f32::NEG_INFINITY);
+        for frame in 1..240 {
+            app.world_mut()
+                .get_mut::<Transform>(root)
+                .unwrap()
+                .translation = Vec3::Z * frame as f32 * 0.03;
+            app.update();
+            if frame > 60 {
+                let roll = app
+                    .world()
+                    .get::<Transform>(hips)
+                    .unwrap()
+                    .rotation
+                    .to_euler(EulerRot::ZXY)
+                    .0;
+                low = low.min(roll);
+                high = high.max(roll);
+            }
+        }
+        high - low
+    };
+    let (hers, his) = (sway(true), sway(false));
+    assert!(hers > 0.1, "her hips sway as she walks: {hers}");
+    assert!(his < hers * 0.6, "his stay squarer: {his} against {hers}");
+}
