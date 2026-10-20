@@ -299,14 +299,15 @@ impl Sculpt {
         // surface vertex: the steps near each block that holds surface,
         // gathered once per block.
         const REACH: f32 = 0.04;
-        const SURFACE_BLOCK: usize = 8;
+        const NORMAL_REACH: f32 = 0.002;
+        const SURFACE_BLOCK: usize = 4;
         let surface_blocks = (
             nx.div_ceil(SURFACE_BLOCK),
             ny.div_ceil(SURFACE_BLOCK),
             nz.div_ceil(SURFACE_BLOCK),
         );
         let surface_half = step * SURFACE_BLOCK as f32 * 0.5;
-        let mut near: Vec<Option<Vec<usize>>> =
+        let mut near: Vec<Option<(Vec<usize>, Vec<usize>)>> =
             vec![None; surface_blocks.0 * surface_blocks.1 * surface_blocks.2];
         let field_done = profile_started.map(|time| time.elapsed());
         // One vertex per cell the surface passes through, at the mean of its
@@ -376,13 +377,17 @@ impl Sculpt {
                             let center =
                                 at(bi * SURFACE_BLOCK, bj * SURFACE_BLOCK, bk * SURFACE_BLOCK)
                                     + Vec3::splat(surface_half);
-                            let mut steps = Vec::new();
-                            self.steps_near(center, surface_half * 3f32.sqrt() + REACH, &mut steps);
-                            steps
+                            // Normals sample within a couple of millimetres;
+                            // occlusion reaches out a few centimetres.
+                            let reach = surface_half * 3f32.sqrt();
+                            let (mut close, mut wide) = (Vec::new(), Vec::new());
+                            self.steps_near(center, reach + NORMAL_REACH, &mut close);
+                            self.steps_near(center, reach + REACH, &mut wide);
+                            (close, wide)
                         });
-                    let normal = self.normal(position, steps);
+                    let normal = self.normal(position, &steps.0);
                     let pigment = paint(position, normal);
-                    let shade = self.occlusion(position, normal, steps);
+                    let shade = self.occlusion(position, normal, &steps.1);
                     grid_vertex[cell(i, j, k)] = vertex.len();
                     vertex.push(SurfaceVertex {
                         position,
