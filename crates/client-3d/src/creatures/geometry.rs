@@ -2390,12 +2390,14 @@ pub(super) fn upper_arm_form(
 ) -> crate::sdf::Sculpt {
     use crate::sdf::{Sculpt, Shape::*};
     let mut arm = Sculpt::default();
+    // The root overlaps the clavicle's end and the deltoid caps it, both
+    // rounding off level with the shoulder line rather than rising over it.
     arm.add(
         Capsule(
-            Vec3::new(-side * 0.082 * build, 0.018, -0.005),
-            Vec3::new(-side * 0.012 * build, -0.055 * length, 0.0),
-            0.035 * build,
-            0.059 * build * fullness,
+            Vec3::new(-side * 0.082 * build, -0.014 * build, -0.005),
+            Vec3::new(-side * 0.012 * build, -0.06 * length, 0.0),
+            0.03 * build,
+            0.057 * build * fullness,
         ),
         0.0,
     )
@@ -2410,10 +2412,10 @@ pub(super) fn upper_arm_form(
     )
     .add(
         Ellipsoid(
-            Vec3::new(-side * 0.008 * build, -0.065 * length, -0.003),
+            Vec3::new(-side * 0.008 * build, -0.08 * length, -0.003),
             Vec3::new(
                 0.066 * build * fullness * muscle,
-                0.088 * length,
+                0.082 * length,
                 0.064 * build * muscle,
             ),
         ),

@@ -222,3 +222,38 @@ fn art_contract_plate_lames_overlap_like_shingles() {
         }
     }
 }
+
+/// The highest point of a sculpted form, found by sampling down from above.
+fn crown(form: &crate::sdf::Sculpt) -> f32 {
+    let mut top = f32::NEG_INFINITY;
+    for i in -30..=30 {
+        for k in -20..=20 {
+            let (x, z) = (i as f32 * 0.005, k as f32 * 0.005);
+            let mut y = 0.15;
+            while y > -0.1 {
+                if form.distance(Vec3::new(x, y, z)) < 0.0 {
+                    top = top.max(y);
+                    break;
+                }
+                y -= 0.002;
+            }
+        }
+    }
+    top
+}
+
+#[test]
+fn art_contract_deltoids_round_off_level_with_the_shoulder_line() {
+    // The top of the upper arm rounds off level with the clavicle that
+    // ends at the shoulder pivot, rather than rising above it like a pad.
+    for (build, muscle) in [(0.9, 0.9), (1.0, 1.0), (1.1, 1.08), (1.2, 1.2)] {
+        for fullness in [0.94, 1.0] {
+            let arm = geometry::upper_arm_form(1.0, build, 1.0, muscle, fullness);
+            let top = crown(&arm);
+            assert!(
+                top < 0.02 * build,
+                "build {build} muscle {muscle}: the arm rises {top:.3} over the shoulder"
+            );
+        }
+    }
+}
