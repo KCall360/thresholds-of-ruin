@@ -266,7 +266,8 @@ may share an identity while differing in birth policy; their underlying equipmen
 behavior must still agree exactly.
 
 Production keeps `rogue.equipment` and `rogue.equipment_scrolls` after the eight
-preceding population stages, then appends `rogue.ammunition`, for eleven stages.
+preceding population stages, then appends `rogue.ammunition` and the finite
+`rogue.rings` stage, for twelve stages.
 Each makes one placement attempt per first-entered floor from depth 1, with no
 replenishment or retry after a recorded skip. Equipment and scroll attempts have
 quantity one; ammunition attempts place one finite six-arrow stack. The gear
@@ -331,6 +332,57 @@ observations, deltas, checkpoints and replay. The validated
 `scenarios/tests/interactions` package and `test_interactions_process.py` cover
 starting gear, timing, disclosure, consumption and checkpoint restart.
 
+## Worn magic and the finite Rogue ring catalog
+
+Wearable effects use shared source modifiers, not item-name dispatch. Equipment
+may author `potency_modifiers`: checked numeric templates multiplied by its
+signed instance potency, alongside ordinary unscaled `modifiers`. The
+`signed_potency` birth policy samples one value uniformly from its negative and
+positive ranges. Rogue's numeric rings have equally likely −1, +1 and +2;
+negative instances are cursed. Equipping does not identify the type, potency or
+curse. Existing exact-instance knowledge and cursed-removal rules apply to both
+PCs and NPCs; identified values are private to the entitled actor.
+
+| Ring | Worn effect | Food surcharge in thirtieths |
+| --- | --- | --- |
+| Protection | Signed reduction against all six damage categories, including Psychic | 30 |
+| Add strength | Signed Strength bonus | 30 |
+| Sustain strength | Prevents new restorable Strength loss; does not restore existing loss | 30 |
+| See invisible | Source-owned see-invisible capability | 6 |
+| Adornment | No mechanical benefit | 0 |
+| Dexterity | Signed Speed bonus for checks and timing, excluded from Physical Defense | 10 |
+| Increase damage | Signed bonus to every actual attack damage roll | 10 |
+| Regeneration | Doubles Health recovery rate; multiple rings do not stack the benefit | 60 |
+| Slow digestion | Reduces ordinary positive-reserve digestion | −15 |
+| Maintain armor | Prevents corrosion while worn; does not repair or permanently protect armor | 30 |
+
+Protection is separate from the five-category magical armor ward. Signed
+reductions compose with ordinary reduction and the strongest applicable talent
+before the final zero floor; negative potency never creates vulnerability.
+Dexterity excludes its own Speed contribution from Physical Defense at source
+folding, preserving other Speed modifiers, initial attributes and losses.
+
+The attack bonus is captured at preparation and applies once to each canonical
+rolled damage pool, including natural, melee, ranged, spell, device and damaging
+attack-rider pools. It is not a per-die bonus and does not affect fixed damage,
+hazards, healing, restoration, attribute-loss or resource-cost rolls. Homogeneous
+merged components receive one bonus; distinct typed pools each receive it.
+
+Regeneration halves the otherwise-derived Health period, rounded up with a
+one-tick minimum, and retains quiet recovery and damage-reset behavior. It does
+not accelerate Focus or Breath recovery. Each worn ring still adds its own food
+cost. Digestion uses a baseline of 30 thirtieths per ordinary unit interval
+(100 active ticks in Rogue), plus the summed worn surcharges, floored at zero.
+Fractions persist across equipment changes, freezes and source-free restart.
+Two slow-digestion rings stop ordinary digestion while reserves remain positive;
+empty-reserve starvation and nutrition spent by actual recovery are unchanged.
+
+The appended finite `rogue.rings` birth stage chooses one ring with weights
+9/9/5/10/1/8/8/4/9/5 in the table's order, without reordering existing streams.
+Ten concealed appearances are shared by the catalog. The paid identify-ring-or-wand
+scroll permits either class through one server-owned choice, without exposing
+unidentified potency or curse state.
+
 ## Reading, identification and charged devices
 
 Read and Zap are explicit item capabilities, independent of an item's name or
@@ -343,10 +395,10 @@ No target, a successful dodge or immunity still spends a charged launch. Pausing
 resuming, dropping, death, checkpoint restoration and transaction rollback reuse
 the existing exact-item hold and preparation rules.
 
-An unknown identify scroll is consumed before its permitted category appears.
-Its owner gets one persisted choice among at most 64 current carried items of that
-category. `identify <name or #id>` resolves it; `identify cancel` declines without
-refund. Both require the original opaque choice token. A stale, wrong-category or
+An unknown identify scroll is consumed before its permitted class set appears.
+Its owner gets one persisted choice among at most 64 current carried items in that
+class set. `identify <name or #id>` resolves it; `identify cancel` declines without
+refund. Both require the original opaque choice token. A stale, wrong-class or
 other actor's target rejects atomically. Another Read cannot bank another choice;
 death clears it. Declining is an explicit TOR usability adaptation: pinned Rogue
 insists on an eligible selection. Reading while blind is permitted, as in that
@@ -415,9 +467,9 @@ reveal leaves the potion unidentified. Sight still needs the shared illuminated,
 unobstructed eye witness; this does not grant monster detection or pierce a guise.
 These bindings follow the pinned [potion cases](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/potions.c)
 and the actual [spread expression](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/misc.c).
-Sustain-strength defense, poison's hallucination cure, source ring interactions
-and full source presentation remain unsupported. No new immunity or bespoke
-resolver substitutes for those gaps. The seven concealed potion identities have
+Sustain-strength uses the shared worn attribute-loss protection above. Poison's
+hallucination cure and full source presentation remain unsupported; no bespoke
+resolver substitutes for those remaining gaps. The seven concealed potion identities have
 seven distinct appearances. The existing finite magic-potion stage chooses equally
 among healing, confusion, blindness, poison, see-invisible and extra healing for one unit;
 restore-strength retains its separate stage. These are provisional TOR availability
@@ -545,8 +597,12 @@ and actual-process tests cover known healing, knowledge isolation, consumption
 timing and restart. AI equipment
 replacement and nearby looting use the same ordinary action path.
 
-Known gear must strictly improve the actor’s derived combat attributes without
-losing attack speed, damage kinds or typed protection. Candidate evaluation uses
+Known gear must strictly improve the actor’s derived combat capabilities or
+reduce effective basal nutrition use, without losing attack speed, damage kinds
+or typed protection. Nutrition savings count only for actors with Required
+nutrition and use the effective rate floored at zero; exempt actors gain no
+nutrition benefit. Extra food upkeep does not veto an otherwise strict combat
+upgrade. Candidate evaluation uses
 the production modifier fold on a private loadout snapshot. Free matching sockets
 are considered before replacement; removal completes through ordinary timed work,
 and the upgrade is recomputed afterward. AI avoids gear work while fleeing or
@@ -683,6 +739,11 @@ The implementation lives in [interactions.rs](../../crates/simulation/src/intera
 [AI item decisions](../../crates/simulation/src/ai_items.rs). Coverage includes
 [AI regressions](../../crates/simulation/src/ai.rs) and
 [actual interaction processes](../../scripts/test_interactions_process.py).
+The non-graphical ring witness in
+[magic-item processes](../../scripts/test_magic_items_process.py)
+(`test_ring_wear_paid_union_choice_curse_and_source_free_restart`) covers ordinary
+wear, paid ring-or-wand selection, exact-instance curse/knowledge isolation and
+source-free restart; it does not depend on native-window tests.
 
 
 ## Explicit edibility

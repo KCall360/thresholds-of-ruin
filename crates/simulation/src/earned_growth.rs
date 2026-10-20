@@ -874,6 +874,7 @@ mod tests {
             Nutrition::Required {
                 reserve: 6,
                 elapsed: 37,
+                digestion_remainder: 0,
                 regeneration_remainder: 0
             }
         );

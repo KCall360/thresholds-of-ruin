@@ -64,7 +64,7 @@ class LightingProcesses(ProcessTestCase):
         native.stop()
         window, initial = self.window()
         for _ in range(4):
-            moved = self.key(window, "right")
+            moved = self.key(window, "right", wait_for_admission=True)
         destination = next(
             tile
             for tile in moved["map_tiles"]
@@ -77,10 +77,11 @@ class LightingProcesses(ProcessTestCase):
         self.key(window, "enter")
         arrived = self.ascii_frame(
             window, lambda f: (f.get("travel") or {}).get("phase") == "arrived"
+            and f["can_admit_intention"]
         )
         self.assertEqual(arrived["travel"]["completed_steps"], "5")
         for _ in range(5):
-            moved = self.key(window, "right")
+            moved = self.key(window, "right", wait_for_admission=True)
         destination = next(
             tile
             for tile in moved["map_tiles"]

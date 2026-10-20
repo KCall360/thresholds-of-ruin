@@ -81,11 +81,13 @@ def _nutrition(value):
     if value.get("kind") == "exempt":
         _shape(value, ("kind",), "invalid exempt nutrition boundary")
         return
-    _shape(value, ("kind", "reserve", "elapsed", "regeneration_remainder"),
+    _shape(value, ("kind", "reserve", "elapsed", "digestion_remainder", "regeneration_remainder"),
            "invalid required nutrition boundary")
     _require(value["kind"] == "required", "invalid nutrition boundary kind")
     _integer(value["reserve"], -2**31, 2**31 - 1, "invalid nutrition reserve")
     _counter(value["elapsed"])
+    _integer(value["digestion_remainder"], 0, 29,
+             "invalid nutrition digestion remainder")
     _integer(value["regeneration_remainder"], 0, 2**32 - 1,
              "invalid nutrition regeneration remainder")
     # These are serialized primitive bounds. The rate denominator, starvation

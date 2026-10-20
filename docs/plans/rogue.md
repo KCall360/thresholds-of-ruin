@@ -250,11 +250,24 @@ can temporarily mask the benefit. See [item contracts](../reference/items.md#rea
 
 Poison uses the shared restorable Strength deficit and on-use recognition.
 See-invisible uses finite extending actor-active sight plus the blindness cure,
-without automatic recognition. Sustain-strength, hallucination cures and source
-ring interactions remain gaps. Extra-healing overflow uses the source one/two
+without automatic recognition. Sustain-strength now uses the shared worn
+attribute-loss protection described below; hallucination cures remain a gap. Extra-healing overflow uses the source one/two
 threshold on bounded owned HD records. Utility wands use persistent first-contact
 rays and nonstacking haste/slow that cancel to neutral; the Lore dodge and bounded
 reach are TOR adaptations. See [the bounded item mapping](../reference/items.md#reading-identification-and-charged-devices).
+
+The approved ten-ring batch implements protection, add strength, sustain strength,
+see invisible, adornment, dexterity, increase damage, regeneration, slow digestion
+and maintain armor through shared wearable modifiers. Protection reduces all six
+damage types; dexterity affects Speed but excludes its own Physical Defense
+contribution; attack bonuses apply to canonical rolled attack pools. Health
+regeneration benefits do not stack, while per-ring nutrition costs do. Signed
+potency and curse knowledge stay instance-private; one paid identification choice
+can permit both rings and wands. The appended finite ring stage follows ammunition,
+bringing the current production profile to twelve stages. Searching, aggravation,
+teleportation and stealth rings remain outside this batch. See
+[worn magic contracts](../reference/items.md#worn-magic-and-the-finite-rogue-ring-catalog).
+These mechanics do not establish calibrated food pressure or complete Rogue parity.
 
 The equipment risk/recovery batch adds instance curses, signed weapon enchantment,
 physical armor penalties, five-category magical armor wards and rust protection.
@@ -275,8 +288,8 @@ archetype remains 2d4; an explicit authored +1 hit/+1 damage instance policy kee
 the starting mace's effective stats unchanged and bypasses birth randomness.
 The starting ring-mail policy likewise bypasses random condition.
 
-Two append-only stages, `rogue.equipment` and `rogue.equipment_scrolls`, bring the
-production profile to ten stages while preserving the original eight stage IDs,
+The equipment batch appended `rogue.equipment` and `rogue.equipment_scrolls`,
+bringing that checkpoint to ten stages while preserving the original eight stage IDs,
 order and choices. Each makes one finite quantity-one attempt per first entered
 floor from depth 1; gear's thirteen choices and scrolls' six choices have equal
 provisional weights. The scroll pool adds enchant armor, protect armor, enchant

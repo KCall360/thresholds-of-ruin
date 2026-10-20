@@ -223,6 +223,7 @@ fn remaining_family(index: usize) -> (Game, ActorId, Action, u64) {
                     timing.unequip_turns
                 };
             spec.equipment = Some(EquipmentSpec {
+                potency_modifiers: Vec::new(),
                 weapon_profile: None,
                 armor: None,
                 slot: kind,

@@ -531,7 +531,7 @@ fn identification_commands_bind_current_choice_and_exact_category() {
         .unwrap()
         .identification = Some(IdentificationChoiceView {
         choice: choice.clone(),
-        class: ItemClass::Wand,
+        classes: vec![ItemClass::Wand],
         items: vec![wand],
     });
     assert_eq!(

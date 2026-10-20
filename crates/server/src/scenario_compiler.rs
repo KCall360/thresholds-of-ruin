@@ -1043,6 +1043,7 @@ mod tests {
                 Nutrition::Required {
                     reserve: 8,
                     elapsed: 0,
+                    digestion_remainder: 0,
                     regeneration_remainder: 0
                 }
             );
@@ -1063,6 +1064,7 @@ mod tests {
             Nutrition::Required {
                 reserve: 8,
                 elapsed: 0,
+                digestion_remainder: 0,
                 regeneration_remainder: 0
             }
         );

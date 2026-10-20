@@ -52,13 +52,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v47";
-const VALIDATOR: &str = "tor-scenario-37";
+pub const RULESET: &str = "interactions-v48";
+const VALIDATOR: &str = "tor-scenario-38";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 25;
+pub const FORMAT: u32 = 26;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -4709,8 +4709,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-37");
-        assert_eq!(original.certificate.ruleset, "interactions-v47");
+        assert_eq!(original.certificate.validator, "tor-scenario-38");
+        assert_eq!(original.certificate.ruleset, "interactions-v48");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -4821,7 +4821,14 @@ mod tests {
         ] {
             let item = &package.manifest.archetypes[id];
             let readable = item.readable.as_ref().unwrap();
-            assert_eq!(readable.identify, Some(class));
+            assert_eq!(
+                readable.identify,
+                Some(if class == ItemClass::Wand {
+                    vec![ItemClass::Ring, ItemClass::Wand]
+                } else {
+                    vec![class]
+                })
+            );
             assert!(readable.effects.is_empty());
             assert_eq!(readable.discovery, ItemDiscovery::OnUse);
         }
@@ -5018,7 +5025,7 @@ mod tests {
         device.stackable = false;
         device.readable = Some(ReadableSpec {
             effects: vec![],
-            identify: Some(ItemClass::Wand),
+            identify: Some(vec![ItemClass::Wand]),
             discovery: ItemDiscovery::OnUse,
         });
         assert!(package.appearance_mapping(42).is_err());
@@ -5956,7 +5963,7 @@ mod tests {
         let mut package = read_package(&path).unwrap();
         let readable = ReadableSpec {
             effects: vec![],
-            identify: Some(ItemClass::Potion),
+            identify: Some(vec![ItemClass::Potion]),
             discovery: ItemDiscovery::OnUse,
         };
         package
@@ -6207,7 +6214,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v47"
+        let source = r#"import = "interactions-v48"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

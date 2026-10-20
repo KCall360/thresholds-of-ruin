@@ -1738,3 +1738,74 @@ fn hold_damage_without_exact_context_cannot_manufacture_damage_from_positive_edg
     value.as_object_mut().unwrap().remove("descriptor");
     assert!(serde_json::from_value::<PlannedEffect>(value).is_err());
 }
+
+#[test]
+fn attack_roll_bonus_is_captured_for_damage_but_not_consumable_effects() {
+    use crate::rules::{Modifier, ModifierOp, Scope, Stat};
+    let (game, plan) = captured_plan_with_modifiers(
+        "basic_melee",
+        vec![Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::AttackDamageRollBonus,
+                value: 2,
+            },
+        }],
+    );
+    let actor = plan.actor();
+    let effects = vec![Effect::Damage {
+        damage: DamageExpr::Components {
+            components: vec![
+                crate::rules::DamageComponentExpr {
+                    category: crate::combat::DamageType::Impact,
+                    descriptor: None,
+                    amount: AmountExpr::Rolled {
+                        dice: crate::rules::DiceExpr {
+                            count: 2,
+                            sides: 6,
+                            bonus: 0,
+                        },
+                    },
+                },
+                crate::rules::DamageComponentExpr {
+                    category: crate::combat::DamageType::Vital,
+                    descriptor: None,
+                    amount: AmountExpr::Fixed { amount: 3 },
+                },
+            ],
+        },
+    }];
+    let captured = game
+        .compile_effects(actor, &effects, &Default::default())
+        .unwrap();
+    let item = game.effect_plan(actor, &effects).unwrap();
+    let pools = |effects: &[PlannedEffect]| {
+        let PlannedEffect::Damage { damage } = &effects[0] else {
+            panic!("damage")
+        };
+        damage
+            .components()
+            .iter()
+            .filter_map(|component| match component.amount() {
+                crate::damage::DamageAmount::Rolled(pool) => Some(pool.bonus()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(pools(&captured), [2]);
+    assert_eq!(pools(&item), [0]);
+    assert!(super::plan::effects_match_definition(&effects, &captured));
+    assert!(super::plan::item_effects_match_definition(&effects, &item));
+    // A separately derived source context cannot rewrite the frozen pool.
+    let (game, plan) = captured_plan_with_modifiers("basic_melee", Vec::new());
+    let actor = plan.actor();
+    assert_eq!(pools(&captured), [2]);
+    assert_eq!(
+        pools(
+            &game
+                .compile_effects(actor, &effects, &Default::default())
+                .unwrap()
+        ),
+        [0]
+    );
+}

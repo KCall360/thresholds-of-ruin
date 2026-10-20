@@ -3671,7 +3671,7 @@ async fn ordinary_read_discloses_paid_choice_then_identifies_without_another_scr
             interactions.completed = vec![Action::Read { item: scroll }];
             interactions.identification = Some(IdentificationChoiceView {
                 choice: bound.clone(),
-                class: ItemClass::Wand,
+                classes: vec![ItemClass::Wand],
                 items: vec![wand],
             });
             after.observation.tick += 10;
@@ -3734,7 +3734,7 @@ async fn ordinary_zap_and_paid_abort_use_current_authority_and_no_hidden_names()
         .unwrap()
         .identification = Some(IdentificationChoiceView {
         choice: IntentionId("cancel-choice".into()),
-        class: ItemClass::Wand,
+        classes: vec![ItemClass::Wand],
         items: vec![wand],
     });
     let mut link = Scripted::new(initial, move |request, now| {

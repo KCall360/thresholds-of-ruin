@@ -227,6 +227,7 @@ fn multiple_weapon_sockets_select_only_the_authored_primary() {
             let mut item = ItemSpec::ordinary(format!("weapon {id}"));
             item.class = ItemClass::Weapon;
             item.equipment = Some(tor_simulation::EquipmentSpec {
+                potency_modifiers: Vec::new(),
                 weapon_profile: None,
                 armor: None,
                 slot: EquipmentSlot::new("weapon").unwrap(),
@@ -272,6 +273,7 @@ fn ordinary_equipment_does_not_require_a_combat_creature() {
     let mut armor = ItemSpec::ordinary("mail".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(tor_simulation::EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {
             physical_reduction: 3,
@@ -426,5 +428,157 @@ fn out_of_range_equipment_sockets_cannot_enter_cached_attack_provenance() {
             Err(CreatureStateError::Inconsistent)
         );
         assert_eq!(creature, before);
+    }
+}
+
+#[test]
+fn selective_speed_equipment_preserves_real_seed_defense_through_set_floor_and_removal() {
+    use tor_simulation::attributes::{Attribute, Attributes, ByAttribute};
+    let mut build = super::creature_fixture::build(super::creature_fixture::species());
+    build
+        .set_initial_attributes(
+            Attributes::new(ByAttribute {
+                speed: 4,
+                strength: 3,
+                ..ByAttribute::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let mut creature = CreatureState::new(build).unwrap();
+    let baseline = creature.derived().defenses.physical;
+    let speed = creature.derived().attributes.get(Attribute::Speed);
+    let selective = |value| {
+        modifier(ModifierOp::AttributeWithoutDefense {
+            attribute: Attribute::Speed,
+            defense: DefenseKind::Physical,
+            value,
+        })
+    };
+    equipped(&mut creature, vec![(ItemId(91), vec![selective(2)])]).unwrap();
+    assert_eq!(
+        creature.derived().attributes.get(Attribute::Speed),
+        speed + 2
+    );
+    assert_eq!(creature.derived().defenses.physical, baseline);
+    equipped(&mut creature, vec![(ItemId(91), vec![selective(-100)])]).unwrap();
+    assert_eq!(creature.derived().attributes.get(Attribute::Speed), 0);
+    assert_eq!(creature.derived().defenses.physical, baseline);
+    let set = modifier(ModifierOp::Set {
+        stat: Stat::Attribute {
+            attribute: Attribute::Speed,
+        },
+        value: 6,
+    });
+    equipped(&mut creature, vec![(ItemId(92), vec![set.clone()])]).unwrap();
+    let set_defense = creature.derived().defenses.physical;
+    equipped(
+        &mut creature,
+        vec![(ItemId(92), vec![set]), (ItemId(91), vec![selective(2)])],
+    )
+    .unwrap();
+    assert_eq!(creature.derived().attributes.get(Attribute::Speed), 6);
+    assert_eq!(creature.derived().defenses.physical, set_defense);
+    equipped(&mut creature, vec![]).unwrap();
+    assert_eq!(creature.derived().attributes.get(Attribute::Speed), speed);
+    assert_eq!(creature.derived().defenses.physical, baseline);
+}
+
+#[test]
+fn equipment_recovery_is_presence_based_and_removal_restores_period() {
+    let mut creature = creature();
+    let period = creature.derived().health_recovery_period;
+    let rate = modifier(ModifierOp::HealthRecoveryRate { multiplier: 2 });
+    equipped(
+        &mut creature,
+        vec![
+            (ItemId(91), vec![rate.clone()]),
+            (ItemId(92), vec![rate.clone()]),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        creature.derived().health_recovery_period,
+        period.div_ceil(2).max(1)
+    );
+    equipped(&mut creature, vec![(ItemId(92), vec![rate])]).unwrap();
+    assert_eq!(
+        creature.derived().health_recovery_period,
+        period.div_ceil(2).max(1)
+    );
+    equipped(&mut creature, vec![]).unwrap();
+    assert_eq!(creature.derived().health_recovery_period, period);
+}
+
+#[test]
+fn signed_equipment_reduction_composes_for_every_damage_type_and_floors_at_zero() {
+    let mut creature = creature();
+    let categories = [
+        DamageType::Energy,
+        DamageType::Impact,
+        DamageType::Keen,
+        DamageType::Spirit,
+        DamageType::Vital,
+        DamageType::Psychic,
+    ];
+    let signed = |amount| {
+        categories
+            .iter()
+            .map(|category| {
+                modifier(ModifierOp::SignedReduction {
+                    selector: Selector::Category {
+                        category: *category,
+                    },
+                    amount,
+                })
+            })
+            .collect()
+    };
+    equipped(&mut creature, vec![(ItemId(91), signed(-1))]).unwrap();
+    for category in categories {
+        assert_eq!(
+            creature
+                .derived()
+                .protection
+                .reduction(&Selector::Category { category }),
+            0
+        );
+    }
+    equipped(
+        &mut creature,
+        vec![(ItemId(91), signed(-1)), (ItemId(92), signed(2))],
+    )
+    .unwrap();
+    for category in categories {
+        assert_eq!(
+            creature
+                .derived()
+                .protection
+                .reduction(&Selector::Category { category }),
+            1
+        );
+        let damage =
+            DamageSpec::new(vec![DamageComponent::fixed(category, None, 3)], None).unwrap();
+        assert_eq!(
+            damage
+                .resolve(
+                    &mut 1,
+                    Edge::default(),
+                    &creature.derived().protection,
+                    &mut ()
+                )
+                .total,
+            2
+        );
+    }
+    equipped(&mut creature, vec![]).unwrap();
+    for category in categories {
+        assert_eq!(
+            creature
+                .derived()
+                .protection
+                .reduction(&Selector::Category { category }),
+            0
+        );
     }
 }

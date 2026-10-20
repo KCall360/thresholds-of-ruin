@@ -178,7 +178,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             input_stages = [*stages, "rogue.room_gold"]
             if shape == "twenty_six":
                 input_stages.extend(["rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices",
-                                     "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition"])
+                                     "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings"])
             self.assertEqual(result["input_population_scope"], {
                 "species": sorted([*species, *("rogue." + name for name in omitted)]),
                 "stage_ids": input_stages,
@@ -193,7 +193,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             if shape == "twenty_six":
                 self.assertIn("finite magic-potion, magic-scroll and magic-device stages are omitted",
                               result["limitations"][0])
-                self.assertIn("finite equipment and equipment-scroll stages are omitted", result["limitations"][0])
+                self.assertIn("finite equipment, equipment-scroll, ammunition and ring stages are omitted", result["limitations"][0])
             for relative, fingerprint in result["source_package_inputs"].items():
                 raw = (supplied / relative).read_bytes()
                 self.assertEqual(fingerprint, hashlib.sha256(raw).hexdigest())
@@ -222,7 +222,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
 
     def test_twenty_six_rejects_finite_stock_count_choice_boundary_and_order_drift(self):
         for identity in ("rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices",
-                         "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition"):
+                         "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings"):
             def stages(activation):
                 return activation["profiles"]["rogue.low_depth"]["stages"]
             def stage(activation):

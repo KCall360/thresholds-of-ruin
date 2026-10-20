@@ -1119,6 +1119,8 @@ struct EquipmentSpec {
     attack: Option<crate::creature_authoring::Melee>,
     #[serde(with = "mapped")]
     modifiers: Vec<crate::creature_authoring::Modifier>,
+    #[serde(with = "mapped")]
+    potency_modifiers: Vec<crate::creature_authoring::Modifier>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::DiceExpr", deny_unknown_fields)]
@@ -1469,11 +1471,41 @@ enum ItemDiscovery {
 struct ReadableSpec {
     #[serde(with = "mapped")]
     effects: Vec<source::Effect>,
-    #[serde(with = "mapped")]
-    identify: Option<source::ItemClass>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "read_saved_identification_classes"
+    )]
+    identify: Option<Vec<source::ItemClass>>,
     #[serde(with = "mapped")]
     discovery: source::ItemDiscovery,
 }
+fn read_saved_identification_classes<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Vec<source::ItemClass>>, D::Error> {
+    struct Classes(Vec<source::ItemClass>);
+    impl<'de> Deserialize<'de> for Classes {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            #[derive(Deserialize)]
+            struct Token(#[serde(deserialize_with = "read_class")] source::ItemClass);
+            fn read_class<'de, D: serde::Deserializer<'de>>(
+                d: D,
+            ) -> Result<source::ItemClass, D::Error> {
+                let token = String::deserialize(d)?;
+                ItemClass::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(token))
+            }
+            let tokens: Vec<Token> = crate::creature_authoring::bounded_strike_vec::<_, _, 14>(d)?;
+            let classes: Vec<_> = tokens.into_iter().map(|token| token.0).collect();
+            if classes.is_empty() || !classes.windows(2).all(|pair| pair[0] < pair[1]) {
+                return Err(serde::de::Error::custom(
+                    "invalid stored identification class set",
+                ));
+            }
+            Ok(Self(classes))
+        }
+    }
+    Option::<Classes>::deserialize(deserializer).map(|classes| classes.map(|classes| classes.0))
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(
     remote = "source::EquipmentGeneration",
@@ -1482,6 +1514,10 @@ struct ReadableSpec {
     deny_unknown_fields
 )]
 enum EquipmentGeneration {
+    SignedPotency {
+        negative: u32,
+        positive: u32,
+    },
     Authored {
         hit_enchantment: i32,
         damage_enchantment: i32,
@@ -1866,6 +1902,23 @@ enum ModifierScope {
     deny_unknown_fields
 )]
 enum ModifierOp {
+    SignedReduction {
+        #[serde(with = "mapped")]
+        selector: crate::creature_authoring::Selector,
+        amount: i32,
+    },
+    AttributeWithoutDefense {
+        attribute: String,
+        defense: String,
+        value: i64,
+    },
+    SustainAttribute {
+        attribute: String,
+    },
+    ProtectArmor {},
+    HealthRecoveryRate {
+        multiplier: u16,
+    },
     ActionDuration {
         #[serde(with = "mapped")]
         value: crate::creature_authoring::ActionDuration,
@@ -2002,6 +2055,8 @@ enum ModifierStat {
     HealthRecoveryPeriod,
     HealthRecoveryPeriodPercent,
     HealthRecoveryResetPercent,
+    AttackDamageRollBonus,
+    NutritionRateThirtieths,
     ResourceMax { resource: String },
     Ability { ability: String, stat: String },
     AbilityTag { tag: String, stat: String },
@@ -3850,7 +3905,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 20;
+const RULES_INPUT_FORMAT: u32 = 21;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -3950,7 +4005,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 22;
+const CONTENT_PACKAGE_FORMAT: u32 = 23;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4223,14 +4278,14 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (52, 25, "interactions-v47", 20, 5, 22, "tor-arena-run-v5")
+            (53, 26, "interactions-v48", 21, 5, 23, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn projectile_expertise_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 55);
-        assert_eq!(super::RULES_INPUT_FORMAT, 20);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 56);
+        assert_eq!(super::RULES_INPUT_FORMAT, 21);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Expertise ownership, projectile plans and selected weapon profiles advance
         // their owning semantic payloads without changing compiled region inputs
@@ -7653,11 +7708,17 @@ mod armor_record_tests {
     fn stored_armor_has_independent_named_required_current_shapes() {
         let good = json!({"slot":"body_armor", "armor":{
             "physical_reduction":2,"material":"metal","rustproof":false},
-            "attack":null,"modifiers":[],"weapon_profile":null});
+            "attack":null,"modifiers":[],"potency_modifiers":[],"weapon_profile":null});
         let value: Owned<source::EquipmentSpec> = serde_json::from_value(good.clone()).unwrap();
         assert_eq!(serde_json::to_value(Borrowed(&value.0)).unwrap(), good);
         let mut bad = vec![json!(["body_armor", null, null, []])];
-        for field in ["armor", "attack", "modifiers", "weapon_profile"] {
+        for field in [
+            "armor",
+            "attack",
+            "modifiers",
+            "potency_modifiers",
+            "weapon_profile",
+        ] {
             let mut omitted = good.clone();
             omitted.as_object_mut().unwrap().remove(field);
             bad.push(omitted);
@@ -7861,6 +7922,7 @@ mod equipment_generation_stored_tests {
             json!({"kind":"authored","hit_enchantment":0,"damage_enchantment":0})
         );
         for value in [
+            json!({"kind":"signed_potency","negative":1,"positive":2}),
             json!({"kind":"authored","hit_enchantment":0,"damage_enchantment":0}),
             json!({"kind":"authored","hit_enchantment":-2,"damage_enchantment":3}),
             json!({"kind":"weapon","curse_percent":10,"enchant_percent":5,"minimum":1,"maximum":3}),
@@ -8119,7 +8181,7 @@ mod weapon_profile_record_tests {
 
     #[test]
     fn saved_weapon_profiles_are_independent_named_bounded_and_explicitly_nullable() {
-        let good = json!({"slot":"weapon","armor":null,"attack":null,"modifiers":[],
+        let good = json!({"slot":"weapon","armor":null,"attack":null,"modifiers":[],"potency_modifiers":[],
             "weapon_profile":{"expertise":"fixture.knife","launcher":null,
                 "base_traits":[{"kind":"two_handed"},{"kind":"thrown","range":{"short_feet":20,"long_feet":60}}],
                 "expert_traits":{"add":[{"kind":"quickdraw"},{"kind":"offhand"}],"remove":["two_handed"]}}});
@@ -8581,6 +8643,76 @@ mod persistent_condition_stored_tests {
             assert!(
                 serde_json::from_value::<Owned<tor_simulation::rules::ConditionTiming>>(bad)
                     .is_err()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod worn_equipment_schema_tests {
+    use super::*;
+    use crate::creature_authoring::{Modifier, Op, Scope, Selector, Stat};
+    use crate::storage::codec::strict;
+    #[test]
+    fn current_wearable_modifiers_round_trip_the_independent_save_boundary() {
+        for op in [
+            Op::SignedReduction {
+                selector: Selector::Category {
+                    category: source::DamageType::Psychic,
+                },
+                amount: -1,
+            },
+            Op::AttributeWithoutDefense {
+                attribute: "speed".into(),
+                defense: "physical".into(),
+                value: 2,
+            },
+            Op::SustainAttribute {
+                attribute: "strength".into(),
+            },
+            Op::ProtectArmor {},
+            Op::HealthRecoveryRate { multiplier: 2 },
+            Op::Add {
+                stat: Stat::AttackDamageRollBonus,
+                value: 2,
+            },
+            Op::Add {
+                stat: Stat::NutritionRateThirtieths,
+                value: -15,
+            },
+        ] {
+            let modifier = Modifier {
+                scope: Scope::Always,
+                op,
+            };
+            let encoded = serde_json::to_vec(&Borrowed(&modifier)).unwrap();
+            assert_eq!(strict::<Owned<Modifier>>(&encoded).unwrap().0, modifier);
+            let mut extra = serde_json::to_value(Borrowed(&modifier)).unwrap();
+            extra["op"]["secret_ring"] = serde_json::json!(true);
+            assert!(strict::<Owned<Modifier>>(&serde_json::to_vec(&extra).unwrap()).is_err());
+        }
+    }
+    #[test]
+    fn stored_identification_set_is_explicit_sorted_unique_and_not_a_legacy_scalar() {
+        let good =
+            serde_json::json!({"effects":[],"identify":["ring","wand"],"discovery":"on_use"});
+        let decoded =
+            strict::<Owned<source::ReadableSpec>>(&serde_json::to_vec(&good).unwrap()).unwrap();
+        assert_eq!(
+            decoded.0.identify,
+            Some(vec![source::ItemClass::Ring, source::ItemClass::Wand])
+        );
+        for classes in [
+            serde_json::json!("wand"),
+            serde_json::json!([]),
+            serde_json::json!(["wand", "ring"]),
+            serde_json::json!(["wand", "wand"]),
+            serde_json::json!([{"wand":null}]),
+        ] {
+            let mut bad = good.clone();
+            bad["identify"] = classes;
+            assert!(
+                strict::<Owned<source::ReadableSpec>>(&serde_json::to_vec(&bad).unwrap()).is_err()
             );
         }
     }

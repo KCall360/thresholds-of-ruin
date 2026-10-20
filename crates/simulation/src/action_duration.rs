@@ -239,6 +239,7 @@ mod tests {
                         };
                         spec.class = crate::ItemClass::Armor;
                         spec.equipment = Some(crate::EquipmentSpec {
+                            potency_modifiers: Vec::new(),
                             slot: kind,
                             attack: None,
                             modifiers: vec![],

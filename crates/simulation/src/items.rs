@@ -1069,6 +1069,7 @@ mod tests {
                 4 => entry.spec.identity.clear(),
                 5 => {
                     entry.spec.equipment = Some(crate::EquipmentSpec {
+                        potency_modifiers: Vec::new(),
                         weapon_profile: None,
                         armor: None,
                         slot: crate::content_ids::EquipmentSlot::new("shield").unwrap(),
@@ -1233,7 +1234,7 @@ mod tests {
         let mut value = serde_json::to_value(ItemSpec::ordinary("bandage shield".into())).unwrap();
         value["class"] = serde_json::json!("armor");
         value["supply"] = serde_json::json!("bandage");
-        value["equipment"] = serde_json::json!({"slot":"shield", "armor":null, "attack":null, "weapon_profile":null, "modifiers":[]});
+        value["equipment"] = serde_json::json!({"slot":"shield", "armor":null, "attack":null, "weapon_profile":null, "modifiers":[], "potency_modifiers":[]});
         let spec: ItemSpec = serde_json::from_value(value).unwrap();
         assert!(!spec.valid());
         assert!(spec.validate_rules(rules.rules()).is_err());

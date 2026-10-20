@@ -146,7 +146,7 @@ pub fn identification_action(
             || !view
                 .inventory
                 .iter()
-                .any(|candidate| candidate.id == item && candidate.class == pending.class)
+                .any(|candidate| candidate.id == item && pending.classes.contains(&candidate.class))
         {
             return Err("That item is not an available identification choice.".into());
         }
@@ -162,7 +162,7 @@ pub fn identification_prompt(view: &Observation) -> Option<String> {
     let items = view
         .inventory
         .iter()
-        .filter(|item| pending.items.contains(&item.id) && item.class == pending.class)
+        .filter(|item| pending.items.contains(&item.id) && pending.classes.contains(&item.class))
         .map(|item| {
             format!(
                 "{} (#{})",

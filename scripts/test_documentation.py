@@ -2,6 +2,7 @@ import ast
 import io
 import re
 import tokenize
+import tomllib
 import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -18,7 +19,7 @@ MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 # Versioned identifiers that name benchmark workloads or fixtures, not rulesets.
 WORKLOAD_IDENTIFIERS = {
     "rogue-descriptor-v2",
-    "rogue-earned-baseline-v16",
+    "rogue-earned-baseline-v17",
     "tor-arena-run-v5",
     "performance-v1",
     "place-knowledge-v1",
@@ -137,6 +138,20 @@ def current_versions() -> dict[str, str]:
 
 
 class DocumentationTests(unittest.TestCase):
+    def test_bundled_rules_and_live_package_sources_match_current_identities(self):
+        versions = current_versions()
+        bundled = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"))
+        self.assertEqual(bundled["id"], versions["ruleset"],
+                         "Bundled rules document must agree with the server import identity")
+        manifests = sorted((ROOT / "scenarios").rglob("scenario.toml"))
+        manifests.append(ROOT / "crates/client-3d/scenarios/menagerie/scenario.toml")
+        for path in manifests:
+            with self.subTest(package=str(path.relative_to(ROOT))):
+                manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(manifest["format"], int(versions["scenario format"]))
+                rules = tomllib.loads((path.parent / manifest["ruleset"]).read_text(encoding="utf-8"))
+                self.assertEqual(rules["import"], versions["ruleset"])
+
     def test_heading_anchors_ignore_code_and_disambiguate_duplicates(self):
         with TemporaryDirectory() as directory:
             source = Path(directory) / "guide.md"
@@ -389,7 +404,7 @@ class DocumentationTests(unittest.TestCase):
             guide = root / "guide.md"
             with patch.dict(globals(), ROOT=root, current_versions=lambda: versions,
                             current_guides=lambda: [guide]):
-                guide.write_text("tor-arena-search-parameters-v2 tor-rogue-activation-inputs-v2 rogue-earned-baseline-v16",
+                guide.write_text("tor-arena-search-parameters-v2 tor-rogue-activation-inputs-v2 rogue-earned-baseline-v17",
                                  encoding="utf-8")
                 self.test_documents_do_not_mention_other_versions()
                 for stale in ("tor-arena-search-parameters-v1", "tor-rogue-activation-inputs-v1",

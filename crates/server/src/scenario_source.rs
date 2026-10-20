@@ -786,7 +786,7 @@ domain = { kind = "finite", count = 3 }
             [items."magic.scroll"]
             name = "readable tablet"
             class = "tool"
-            readable = { identify = "wand", discovery = "on_use" }
+            readable = { identify = ["wand"], discovery = "on_use" }
             [items."magic.device"]
             name = "charged stone"
             class = "gem"
@@ -797,7 +797,7 @@ domain = { kind = "finite", count = 3 }
             .readable
             .as_ref()
             .unwrap();
-        assert_eq!(readable.identify, Some(ItemClass::Wand));
+        assert_eq!(readable.identify, Some(vec![ItemClass::Wand]));
         assert_eq!(readable.discovery, ItemDiscovery::OnUse);
         let device = resolved.manifest.archetypes["magic.device"]
             .device

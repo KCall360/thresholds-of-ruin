@@ -104,6 +104,7 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
         let mut item = ItemSpec::ordinary(format!("mail {id}"));
         item.class = ItemClass::Armor;
         item.equipment = Some(tor_simulation::EquipmentSpec {
+            potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: Some(tor_simulation::ArmorSpec {
                 physical_reduction: defense as u32,

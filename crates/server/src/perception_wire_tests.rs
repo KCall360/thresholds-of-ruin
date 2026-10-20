@@ -769,7 +769,7 @@ fn magic_choices_resolve_exact_owner_tokens_category_and_carried_incarnation() {
         inventory: vec![],
         identification: Some(s::IdentificationChoiceView {
             choice,
-            class: s::ItemClass::Wand,
+            classes: vec![s::ItemClass::Wand],
             items: vec![item],
         }),
     });

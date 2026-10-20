@@ -368,7 +368,7 @@ class RogueRosterContent(unittest.TestCase):
         stages = profile["stages"]
         self.assertEqual([row["id"] for row in stages],
                          ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions", "rogue.magic_scrolls",
-            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition"])
+            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings"])
         self.assertEqual([row["count"] for row in stages[:4]], [[4, 4], [1, 1], [1, 1], [1, 1]])
         actor = stages[0]
         self.assertEqual(actor["kind"], "actors")

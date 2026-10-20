@@ -84,6 +84,10 @@ impl From<DamageType> for tor_simulation::combat::DamageType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EquipmentGeneration {
+    SignedPotency {
+        negative: u32,
+        positive: u32,
+    },
     Authored {
         #[serde(default)]
         hit_enchantment: i32,
@@ -106,6 +110,9 @@ pub enum EquipmentGeneration {
 impl EquipmentGeneration {
     pub(crate) fn compile(self) -> Result<tor_simulation::EquipmentGeneration, crate::Failure> {
         let value = match self {
+            Self::SignedPotency { negative, positive } => {
+                tor_simulation::EquipmentGeneration::SignedPotency { negative, positive }
+            }
             Self::Authored {
                 hit_enchantment,
                 damage_enchantment,
@@ -443,6 +450,8 @@ pub struct EquipmentSpec {
     pub attack: Option<crate::creature_authoring::Melee>,
     #[serde(default)]
     pub modifiers: Vec<crate::creature_authoring::Modifier>,
+    #[serde(default)]
+    pub potency_modifiers: Vec<crate::creature_authoring::Modifier>,
 }
 impl EquipmentSpec {
     pub(crate) fn compile(
@@ -457,6 +466,16 @@ impl EquipmentSpec {
         rules
             .validate_modifiers(&modifiers)
             .map_err(|error| super::fail(format!("Invalid equipment modifier: {error:?}")))?;
+        let potency_modifiers = self
+            .potency_modifiers
+            .iter()
+            .map(crate::creature_authoring::Modifier::compile)
+            .collect::<Result<Vec<_>, _>>()?;
+        rules
+            .validate_modifiers(&potency_modifiers)
+            .map_err(|error| {
+                super::fail(format!("Invalid equipment potency modifier: {error:?}"))
+            })?;
         let slot = tor_simulation::EquipmentSlot::new(&self.slot)
             .map_err(|_| super::fail(format!("Invalid equipment slot ID {:?}", self.slot)))?;
         if rules.equipment_slot(&slot).is_none() {
@@ -479,6 +498,7 @@ impl EquipmentSpec {
                 .map(|attack| attack.compile(rules))
                 .transpose()?,
             modifiers,
+            potency_modifiers,
         })
     }
 }
@@ -780,13 +800,13 @@ impl ConsumableSpec {
     }
 }
 
-/// Reading either applies bounded immediate effects or requests one class of
+/// Reading either applies bounded immediate effects or requests a class set for
 /// identity selection. Physical class does not grant this capability.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadableSpec {
     pub effects: Vec<Effect>,
-    pub identify: Option<ItemClass>,
+    pub identify: Option<Vec<ItemClass>>,
     pub discovery: ItemDiscovery,
 }
 impl<'de> Deserialize<'de> for ReadableSpec {
@@ -799,7 +819,8 @@ impl<'de> Deserialize<'de> for ReadableSpec {
                 deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, { tor_simulation::limits::CONSUMABLE_EFFECTS }>"
             )]
             effects: Vec<Effect>,
-            identify: Option<ItemClass>,
+            #[serde(default, deserialize_with = "read_identification_classes")]
+            identify: Option<Vec<ItemClass>>,
             #[serde(default)]
             discovery: ItemDiscovery,
         }
@@ -811,6 +832,29 @@ impl<'de> Deserialize<'de> for ReadableSpec {
         })
     }
 }
+fn read_identification_classes<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Vec<ItemClass>>, D::Error> {
+    struct Classes(Vec<ItemClass>);
+    impl<'de> Deserialize<'de> for Classes {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            #[derive(Deserialize)]
+            struct Token(#[serde(deserialize_with = "read_class")] ItemClass);
+            fn read_class<'de, D: serde::Deserializer<'de>>(d: D) -> Result<ItemClass, D::Error> {
+                let token = String::deserialize(d)?;
+                ItemClass::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(token))
+            }
+            let tokens: Vec<Token> = crate::creature_authoring::bounded_strike_vec::<_, _, 14>(d)?;
+            let classes: Vec<_> = tokens.into_iter().map(|token| token.0).collect();
+            if classes.is_empty() || !classes.windows(2).all(|pair| pair[0] < pair[1]) {
+                return Err(serde::de::Error::custom("invalid identification class set"));
+            }
+            Ok(Self(classes))
+        }
+    }
+    Option::<Classes>::deserialize(deserializer).map(|classes| classes.map(|classes| classes.0))
+}
+
 impl ReadableSpec {
     pub(crate) fn compile(
         &self,
@@ -818,7 +862,10 @@ impl ReadableSpec {
     ) -> Result<tor_simulation::ReadableSpec, crate::Failure> {
         let spec = tor_simulation::ReadableSpec {
             effects: compile_item_effects(&self.effects, rules)?,
-            identify: self.identify.map(Into::into),
+            identify: self
+                .identify
+                .as_ref()
+                .map(|classes| classes.iter().copied().map(Into::into).collect()),
             discovery: self.discovery.into(),
         };
         super::require(spec.valid(), "Invalid readable definition")?;
@@ -1311,6 +1358,7 @@ mod tests {
             slot: "tentacle".into(),
             attack: None,
             modifiers: vec![],
+            potency_modifiers: vec![],
         };
         assert!(equipment
             .compile(&rules)
@@ -1529,12 +1577,15 @@ mod tests {
         .unwrap();
         assert!(effects.compile(&rules()).is_ok());
         let identify: ReadableSpec = toml::from_str(
-            r#"identify = "potion"
+            r#"identify = ["potion"]
                discovery = "on_use""#,
         )
         .unwrap();
         let compiled = identify.compile(&rules()).unwrap();
-        assert_eq!(compiled.identify, Some(tor_simulation::ItemClass::Potion));
+        assert_eq!(
+            compiled.identify,
+            Some(vec![tor_simulation::ItemClass::Potion])
+        );
         assert_eq!(compiled.discovery, tor_simulation::ItemDiscovery::OnUse);
         let mut invalid = identify.clone();
         invalid.effects = effects.effects;
@@ -1549,9 +1600,14 @@ mod tests {
         assert!(invalid.compile(&rules()).is_err());
         for value in [
             serde_json::json!([[], "potion", "on_use"]),
-            serde_json::json!({"identify":"potion", "unknown":true}),
+            serde_json::json!({"identify":["potion"], "unknown":true}),
             serde_json::json!({"identify":"secret_class"}),
-            serde_json::json!({"identify":"potion", "discovery":"infer_name"}),
+            serde_json::json!({"identify":"wand"}),
+            serde_json::json!({"identify":[]}),
+            serde_json::json!({"identify":["wand", "ring"]}),
+            serde_json::json!({"identify":["wand", "wand"]}),
+            serde_json::json!({"identify":[{"wand":null}]}),
+            serde_json::json!({"identify":["potion"], "discovery":"infer_name"}),
         ] {
             assert!(serde_json::from_value::<ReadableSpec>(value).is_err());
         }

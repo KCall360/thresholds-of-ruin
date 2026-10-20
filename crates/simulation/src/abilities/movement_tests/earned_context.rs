@@ -427,6 +427,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
     let mut item = crate::ItemSpec::ordinary("clock mail".into());
     item.class = crate::ItemClass::Armor;
     item.equipment = Some(crate::EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
         slot: slot.clone(),
@@ -826,6 +827,7 @@ fn required_nutrition_preserves_pending_earned_context_until_admitted_thaw() {
         Nutrition::Required {
             reserve: 8,
             elapsed: 0,
+            digestion_remainder: 0,
             regeneration_remainder: 0
         }
     );
@@ -862,6 +864,7 @@ fn required_nutrition_preserves_pending_earned_context_until_admitted_thaw() {
         Nutrition::Required {
             reserve: 6,
             elapsed: 0,
+            digestion_remainder: 0,
             regeneration_remainder: 0
         }
     );

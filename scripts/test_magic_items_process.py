@@ -97,7 +97,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertTrue(items(drank, "potion")[0]["identified"])
         text.command("read #" + scroll["id"])
         pending = self.snapshot(probe)
-        self.assertEqual(interactions(pending)["identification"]["class"], "wand")
+        self.assertEqual(interactions(pending)["identification"]["classes"], ["wand"])
         text.command("identify #" + first["id"])
         learned = self.snapshot(probe)
         self.assertIsNone(interactions(learned)["identification"])
@@ -121,7 +121,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
                      "equipment": {"slot": "body_armor", "armor": {"physical_reduction": 2, "material": "metal", "rustproof": False}, "modifiers": []},
                      "equipment_generation": {"kind": "armor", "curse_percent": 100, "enchant_percent": 0, "minimum": 1, "maximum": 1}},
             "armor_identify": {"name": "scroll of identify armor", "identity": "fixture.identify_armor", "class": "scroll", "stackable": True,
-                               "appearance_pool": "armor_pages", "readable": {"identify": "armor", "discovery": "on_use"}},
+                               "appearance_pool": "armor_pages", "readable": {"identify": ["armor"], "discovery": "on_use"}},
             "armor_enchant": {"name": "scroll of enchant armor", "identity": "fixture.enchant_armor", "class": "scroll", "stackable": True,
                               "appearance_pool": "enchant_pages", "readable": {"discovery": "never", "effects": [
                                   {"kind": "alter_equipment", "selection": {"kind": "slot", "slot": "body_armor", "class": "armor", "last": False}, "alteration": "enchant_armor"}]}},
@@ -194,6 +194,105 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
             self.assertIsNone(item["known_equipment"])
         self.assertFalse(restored["state"]["wizard_game"])
 
+    @non_graphical
+    def test_ring_wear_paid_union_choice_curse_and_source_free_restart(self):
+        package = self.package()
+        path = package / "scenario.toml"
+        manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+        # A bounded birth policy forces the negative branch without wizard edits.
+        # Exhaustive -1/+1/+2 distribution belongs to equipment_generation tests.
+        manifest["archetypes"]["ring"] = {
+            "name": "ring of increase damage", "identity": "magic.damage_ring",
+            "class": "ring", "magical": True, "stackable": False,
+            "appearance_pool": "rings",
+            "equipment_generation": {"kind": "signed_potency", "negative": 1, "positive": 0},
+            "equipment": {"slot": "ring", "modifiers": [], "potency_modifiers": [
+                {"scope": "always", "op": {"kind": "add",
+                 "stat": {"kind": "attack_damage_roll_bonus"}, "value": 1}}]},
+        }
+        manifest["appearance_pools"]["rings"] = {"appearances": ["agate ring"]}
+        manifest["archetypes"]["identify"]["readable"]["identify"] = ["ring", "wand"]
+        manifest["characters"][0]["loadout"] = [
+            {"archetype": "ring", "quantity": 1},
+            {"archetype": "ring", "quantity": 1},
+            {"archetype": "ember", "quantity": 1},
+            {"archetype": "identify", "quantity": 2},
+        ]
+        path.write_text(toml_source(manifest), encoding="utf-8")
+        region_path = package / "regions/1.toml"
+        region = tomllib.loads(region_path.read_text(encoding="utf-8"))
+        region["items"] = []
+        region_path.write_text(toml_source(region), encoding="utf-8")
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validated.returncode, 0, validated.stdout + validated.stderr)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        owner, initial = self.client()
+        ring, spare = [item["id"] for item in items(initial, "ring")]
+        wand = items(initial, "wand")[0]["id"]
+        scroll = items(initial, "scroll")[0]["id"]
+
+        def row(frame, item):
+            return next(value for value in interactions(frame)["inventory"] if value["item"] == item)
+
+        def execute(action):
+            result = self.act(owner, action)
+            self.assertIsNone(result["error"])
+            return self.advance(owner, [])
+
+        worn = execute({"type": "equip", "item": ring, "slot": 2})
+        self.assertEqual(row(worn, ring)["equipped_slot"], 2)
+        self.assertTrue(all(not item["identified"] for item in items(worn, "ring")))
+        self.assertTrue(all(item["name"] == "agate ring" for item in items(worn, "ring")))
+        self.assertIsNone(row(worn, ring)["known_cursed"])
+        self.assertIsNone(row(worn, ring)["known_equipment"])
+        pending = self.act(owner, {"type": "read", "item": scroll})
+        self.assertIsNone(pending["error"])
+        choice = interactions(pending)["identification"]
+        self.assertEqual(choice["classes"], ["ring", "wand"])
+        self.assertEqual(set(choice["items"]), {ring, spare, wand})
+        self.assertEqual(items(pending, "scroll")[0]["quantity"], "1")
+        self.assertIsNone(self.request(owner, {"type": "save"})["error"])
+        owner.stop()
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        owner, restored = self.client()
+        self.assertEqual(interactions(restored)["identification"], choice)
+        self.assertEqual(interactions(restored)["inventory"], interactions(pending)["inventory"])
+        spectator, hidden = self.client(SPECTATOR_TOKEN, observe=True)
+        self.assertIsNone(interactions(hidden)["identification"])
+        self.assertTrue(all(value["known_equipment"] is None and value["known_cursed"] is None
+                            for value in interactions(hidden)["inventory"]))
+        learned = self.act(owner, {"type": "identify", "choice": choice["choice"], "item": ring})
+        self.assertIsNone(learned["error"])
+        self.assertEqual(observation(learned)["tick"], observation(restored)["tick"])
+        self.assertIsNone(interactions(learned)["identification"])
+        self.assertTrue(all(item["identified"] for item in items(learned, "ring")))
+        self.assertIsNotNone(row(learned, ring)["known_equipment"])
+        modifiers = row(learned, ring)["known_equipment"]["modifiers"]
+        self.assertEqual(len(modifiers), 1)
+        fields = {field["id"]: field["value"] for field in modifiers[0]["fields"]}
+        self.assertEqual(fields["stat"], {"type": "text", "value": "attack_damage_roll_bonus"})
+        self.assertEqual(fields["value"], {"type": "signed", "value": "-1"})
+        self.assertTrue(row(learned, ring)["known_cursed"])
+        self.assertIsNone(row(learned, spare)["known_equipment"])
+        self.assertIsNone(row(learned, spare)["known_cursed"])
+        self.assertIsNone(charges(learned, wand))
+        # Failure to remove an unknown second ring reveals only that instance's
+        # curse, never its numeric modifier; type knowledge is already shared.
+        second = execute({"type": "equip", "item": spare, "slot": 3})
+        self.assertIsNone(row(second, spare)["known_cursed"])
+        failed = self.act(owner, {"type": "unequip", "item": spare})
+        self.assertEqual(row(failed, spare)["equipped_slot"], 3)
+        self.assertTrue(row(failed, spare)["known_cursed"])
+        self.assertIsNone(row(failed, spare)["known_equipment"])
+        hidden = self.snapshot(spectator)
+        for value in interactions(hidden)["inventory"]:
+            self.assertIsNone(value["known_cursed"])
+            self.assertIsNone(value["known_equipment"])
+        self.assertFalse(failed["state"]["wizard_game"])
+
     def test_native_paid_choice_reopens_and_direction_cancel_keeps_exact_charges(self):
         package = self.package()
         server = self.server("--checkpoint-interval", 1, scenario=package)
@@ -210,7 +309,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(len(opened["item_rows"]), 1)
         self.assertEqual(opened["state"], carried["state"], "opening Read spends no turn")
         choice = self.native_press(window, native, "Return", "enter", wait_for_ready=True)
-        self.assertEqual(choice["identification"]["class"], "wand")
+        self.assertEqual(choice["identification"]["classes"], ["wand"])
         self.assertEqual(len(choice["identification_rows"]), 2)
         self.assertEqual(items(choice, "scroll")[0]["quantity"], "2")
         aborted = self.native_press(window, native, "Escape", "escape", wait_for_ready=True)

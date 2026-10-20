@@ -407,6 +407,7 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
     let mut weapon = tor_simulation::ItemSpec::ordinary("test weapon".into());
     weapon.class = tor_simulation::ItemClass::Weapon;
     weapon.equipment = Some(tor_simulation::EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
         slot: tor_simulation::EquipmentSlot::new("weapon").unwrap(),
@@ -478,7 +479,7 @@ fn anatomy_configuration_cannot_desynchronize_a_creature_build() {
 fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
     let mut game = game();
     let gear: tor_simulation::EquipmentSpec = serde_json::from_value(serde_json::json!({
-        "slot":"weapon", "armor":null, "weapon_profile":null, "modifiers":[],
+        "slot":"weapon", "armor":null, "weapon_profile":null, "modifiers":[], "potency_modifiers":[],
         "attack":{"skill":"light_weaponry", "bonus":100,"damage_enchantment":0,"wind_up":90,"recovery":70,
             "damage":{"primary":{"category":"energy","descriptor":"fire","sides":6},
                 "components":[

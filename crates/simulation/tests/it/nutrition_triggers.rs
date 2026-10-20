@@ -113,7 +113,7 @@ fn game_with_memory(
     edit(&game, |snapshot, pool| {
         snapshot["rules_rng"] = json!(seed);
         let table = snapshot["actors"].as_u64().unwrap() as usize;
-        pool["actors"][table]["2"]["combat"]["creature"]["nutrition"] = json!({"kind":"required","reserve":reserve,"elapsed":elapsed,"regeneration_remainder":0});
+        pool["actors"][table]["2"]["combat"]["creature"]["nutrition"] = json!({"kind":"required","reserve":reserve,"elapsed":elapsed,"digestion_remainder":0,"regeneration_remainder":0});
     })
 }
 fn edit(game: &Game, change: impl FnOnce(&mut Value, &mut Value)) -> Game {
@@ -735,7 +735,7 @@ fn frozen_and_detached_empty_episodes_preserve_phase_without_catchup_draws() {
         assert_eq!(game.next_creature_event_tick(), Some(543));
         assert_eq!(
             record(&game, 2)["nutrition"],
-            json!({"kind":"required","reserve":0,"elapsed":57,"regeneration_remainder":0})
+            json!({"kind":"required","reserve":0,"elapsed":57,"digestion_remainder":0,"regeneration_remainder":0})
         );
         assert_eq!(rng(&game), ZERO_WORD_SEED);
         until(&mut game, 600);

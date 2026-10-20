@@ -665,7 +665,16 @@ impl Canvas {
         }
         if let Some(choice) = app.identification_choice() {
             self.screen(
-                &format!("IDENTIFY: {:?}", choice.class).to_uppercase(),
+                &format!(
+                    "IDENTIFY: {}",
+                    choice
+                        .classes
+                        .iter()
+                        .map(|class| format!("{class:?}"))
+                        .collect::<Vec<_>>()
+                        .join(" / ")
+                )
+                .to_uppercase(),
                 "letter or UP/DOWN + ENTER chooses   ESC aborts the paid choice",
             );
             let rows = app.identification_rows();

@@ -66,7 +66,7 @@ class RogueUtilityPotionsContent(unittest.TestCase):
         self.assertEqual([stage["id"] for stage in stages], ["rogue.eight_species_foes", "rogue.bandages",
             "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions",
             "rogue.magic_scrolls", "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls",
-            "rogue.ammunition"])
+            "rogue.ammunition", "rogue.rings"])
         self.assertEqual(stages[5], {"id": "rogue.magic_potions", "version": 1, "kind": "items",
             "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},
                 "choices": [{"archetype": "rogue." + name, "weight": 1}

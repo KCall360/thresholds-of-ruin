@@ -262,7 +262,7 @@ fn encoded_paid_identify_requires_exact_owner_category_and_carried_target_then_r
     let paid = wire.snapshot(OWNER);
     let pending = choice(&paid);
     assert_eq!(quantity(&paid, scroll), 2);
-    assert_eq!(pending.class, ItemClass::Wand);
+    assert_eq!(pending.classes, vec![ItemClass::Wand]);
     assert_eq!(pending.items, vec![wand]);
     assert!(!pending.choice.0.is_empty());
     assert!(wire
@@ -486,7 +486,7 @@ fn equipment_scenario() -> crate::Scenario {
     let mut manifest = serde_json::to_value(&source.manifest).unwrap();
     manifest["id"] = json!("equipment-magic-service");
     manifest["archetypes"]["mail"] = json!({"name":"ring mail","identity":"fixture.mail","class":"armor","equipment":{"slot":"body_armor","armor":{"physical_reduction":2,"material":"metal","rustproof":false},"modifiers":[]},"equipment_generation":{"kind":"armor","curse_percent":100,"enchant_percent":0,"minimum":1,"maximum":1}});
-    manifest["archetypes"]["armor_identify"] = json!({"name":"scroll of identify armor","identity":"fixture.identify_armor","class":"scroll","stackable":true,"appearance_pool":"armor_pages","readable":{"identify":"armor","discovery":"on_use"}});
+    manifest["archetypes"]["armor_identify"] = json!({"name":"scroll of identify armor","identity":"fixture.identify_armor","class":"scroll","stackable":true,"appearance_pool":"armor_pages","readable":{"identify":["armor"],"discovery":"on_use"}});
     manifest["archetypes"]["armor_enchant"] = json!({"name":"scroll of enchant armor","identity":"fixture.enchant_armor","class":"scroll","stackable":true,"appearance_pool":"enchant_pages","readable":{"discovery":"never","effects":[{"kind":"alter_equipment","selection":{"kind":"slot","slot":"body_armor","class":"armor","last":false},"alteration":"enchant_armor"}]}});
     manifest["appearance_pools"]["armor_pages"] = json!({"appearances":["indigo page"]});
     manifest["appearance_pools"]["enchant_pages"] = json!({"appearances":["silver page"]});

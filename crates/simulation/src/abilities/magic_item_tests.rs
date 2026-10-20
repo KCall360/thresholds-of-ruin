@@ -167,7 +167,7 @@ fn identify_scroll(game: &mut Game, id: u64, class: ItemClass, quantity: u64) ->
     spec.stackable = true;
     spec.readable = Some(ReadableSpec {
         effects: vec![],
-        identify: Some(class),
+        identify: Some(vec![class]),
         discovery: ItemDiscovery::OnUse,
     });
     game.place_item_stack(id, at(1), Some(ActorId(1)), quantity, spec)
@@ -780,7 +780,7 @@ fn identify_consumes_before_choice_and_only_selected_instance_reveals_charges() 
     assert!(!game.items.contains_key(&scroll));
     let choice = game.identification_view(ActorId(1)).unwrap();
     assert_eq!(choice.choice, origin);
-    assert_eq!(choice.class, ItemClass::Tool);
+    assert_eq!(choice.classes, vec![ItemClass::Tool]);
     assert_eq!(choice.items, vec![first, second]);
     assert_eq!(game, roundtrip(&game));
     execute(
@@ -936,12 +936,13 @@ fn magic_capabilities_charge_state_and_choice_have_strict_named_current_shapes()
     assert!(serde_json::from_str::<ChargeRange>(r#"{"minimum":7,"maximum":3}"#).is_err());
     assert!(
         serde_json::from_str::<crate::magic_items::IdentificationChoice>(
-            r#"{"choice":0,"class":"wand"}"#
+            r#"{"choice":0,"classes":["wand"]}"#
         )
         .is_err()
     );
     assert!(
-        serde_json::from_str::<crate::magic_items::IdentificationChoice>(r#"[1,"wand"]"#).is_err()
+        serde_json::from_str::<crate::magic_items::IdentificationChoice>(r#"[1,["wand"]]"#)
+            .is_err()
     );
     for _ in 0..32 {
         let sampled = ChargeRange {
@@ -1326,7 +1327,7 @@ fn identification_choices_and_owned_charge_facts_are_bounded_named_records() {
         #[serde(deserialize_with = "crate::magic_items::read_known_charges")]
         _facts: tor_world::Shared<crate::magic_items::ChargeKnowledge>,
     }
-    let choice = serde_json::json!({"choice":1,"class":"tool"});
+    let choice = serde_json::json!({"choice":1,"classes":["tool"]});
     assert!(
         serde_json::from_value::<crate::magic_items::IdentificationChoice>(choice.clone()).is_ok()
     );
@@ -1337,14 +1338,15 @@ fn identification_choices_and_owned_charge_facts_are_bounded_named_records() {
         .is_ok()
     );
     for raw in [
-        r#"{"choice":0,"class":"tool"}"#,
-        r#"{"choice":18446744073709551615,"class":"tool"}"#,
-        r#"{"class":"tool"}"#,
+        r#"{"choice":0,"classes":["tool"]}"#,
+        r#"{"choice":18446744073709551615,"classes":["tool"]}"#,
+        r#"{"classes":["tool"]}"#,
         r#"{"choice":1}"#,
-        r#"{"choice":1,"class":"tool","extra":0}"#,
-        r#"{"choice":1,"choice":2,"class":"tool"}"#,
-        r#"{"choice":1,"class":"tool","class":"potion"}"#,
-        r#"[1,"tool"]"#,
+        r#"{"choice":1,"classes":["tool"],"extra":0}"#,
+        r#"{"choice":1,"choice":2,"classes":["tool"]}"#,
+        r#"{"choice":1,"classes":["tool"],"classes":["potion"]}"#,
+        r#"{"choice":1,"class":"tool"}"#,
+        r#"[1,["tool"]]"#,
     ] {
         assert!(
             serde_json::from_str::<crate::magic_items::IdentificationChoice>(raw).is_err(),
@@ -1628,6 +1630,7 @@ fn fact_armor(game: &mut Game, id: u64, cursed: bool) -> ItemId {
     let mut spec = ItemSpec::ordinary("test mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(crate::EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         slot: crate::EquipmentSlot::new("body_armor").unwrap(),
         armor: Some(crate::ArmorSpec {
@@ -1808,4 +1811,70 @@ fn equipment_fact_ownership_does_not_follow_transfer_and_hidden_return_does_not_
         Some(true)
     );
     assert_eq!(game, roundtrip(&game));
+}
+#[test]
+fn ray_and_device_capture_attack_bonus_once_per_pool_not_fixed_damage() {
+    use crate::rules::*;
+    let mut game = super::ray_tests::fixture_with(|_, ray, species| {
+        species.modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::AttackDamageRollBonus,
+                value: 2,
+            },
+        });
+        let StrikeSource::Authored { strikes } = &mut ray.strikes else {
+            unreachable!()
+        };
+        let Effect::Damage {
+            damage: DamageExpr::Components { components },
+        } = &mut strikes[0].on_failure[0]
+        else {
+            unreachable!()
+        };
+        components.push(DamageComponentExpr {
+            category: crate::combat::DamageType::Vital,
+            descriptor: None,
+            amount: AmountExpr::Fixed { amount: 3 },
+        });
+    });
+    let ray = game
+        .ability_plan_with_supplies(
+            ActorId(1),
+            &crate::content_ids::AbilityId::new("fixture_ray").unwrap(),
+            AbilityInvocation::directional_ray(StepDirection::East),
+            Default::default(),
+        )
+        .unwrap();
+    let item = device(&mut game, 10, 3);
+    let device_plan = game
+        .plan_work(
+            ActorId(1),
+            Work::Zap {
+                item,
+                direction: StepDirection::East,
+            },
+        )
+        .unwrap();
+    for plan in [&ray, &device_plan] {
+        let [PlannedEffect::Damage { damage }] = plan.as_ray().unwrap().effects.as_slice() else {
+            panic!("damage")
+        };
+        let mut rolled = 0;
+        let mut fixed = 0;
+        for component in damage.components() {
+            match component.amount() {
+                crate::damage::DamageAmount::Rolled(pool) => {
+                    assert_eq!(pool.count(), 6);
+                    assert_eq!(pool.bonus(), 2);
+                    rolled += 1;
+                }
+                crate::damage::DamageAmount::Fixed(amount) => {
+                    assert_eq!(amount, 3);
+                    fixed += 1;
+                }
+            }
+        }
+        assert_eq!((rolled, fixed), (1, 1));
+    }
 }

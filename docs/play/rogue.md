@@ -181,8 +181,9 @@ Poison potions instead roll 1–3 restorable Strength loss and identify when dru
 See-invisible potions cure blindness and reveal invisible creatures through normal
 illuminated sight for 808–892 actor turns. A second dose extends the remaining
 duration. Effective use does not identify this potion. Both can occur in the
-existing one-unit random potion stock; the complete source potion catalog,
-sustain-strength defense and hallucination cures remain unfinished. Extra healing
+existing one-unit random potion stock. Sustain-strength rings prevent new
+restorable Strength loss; the complete source potion catalog and hallucination
+cures remain unfinished. Extra healing
 rolls independent d8s per active HD, cures blindness and identifies on use; its
 one/two-point overflow gain is limited by existing owned-HD headroom. See the
 [exact potion mapping](../reference/items.md#reading-identification-and-charged-devices).

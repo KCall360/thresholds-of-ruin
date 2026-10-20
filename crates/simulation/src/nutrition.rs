@@ -133,6 +133,7 @@ pub enum Nutrition {
     Required {
         reserve: i32,
         elapsed: u64,
+        digestion_remainder: u8,
         regeneration_remainder: u32,
     },
 }
@@ -145,21 +146,34 @@ impl<'de> Deserialize<'de> for Nutrition {
             Required {
                 reserve: i32,
                 elapsed: u64,
+                digestion_remainder: u8,
                 regeneration_remainder: u32,
             },
         }
-        Ok(match crate::bounded::named_map(d)? {
+        let value = match crate::bounded::named_map(d)? {
             Fields::Exempt {} => Self::Exempt,
             Fields::Required {
                 reserve,
                 elapsed,
+                digestion_remainder,
                 regeneration_remainder,
             } => Self::Required {
                 reserve,
                 elapsed,
+                digestion_remainder,
                 regeneration_remainder,
             },
-        })
+        };
+        if matches!(
+            value,
+            Self::Required {
+                digestion_remainder: 30..,
+                ..
+            }
+        ) {
+            return Err(serde::de::Error::custom("invalid digestion fraction"));
+        }
+        Ok(value)
     }
 }
 
@@ -183,6 +197,7 @@ impl Nutrition {
                 Some(Self::Required {
                     reserve: i32::try_from(initial).ok()?,
                     elapsed: 0,
+                    digestion_remainder: 0,
                     regeneration_remainder: 0,
                 })
             }
@@ -197,6 +212,7 @@ impl Nutrition {
                 Self::Required {
                     reserve,
                     elapsed,
+                    digestion_remainder,
                     regeneration_remainder,
                 },
                 NutritionPolicy::Enabled {
@@ -211,7 +227,8 @@ impl Nutrition {
                     && reserve >= starve_at
                     && (dead || reserve > starve_at)
                     && elapsed < unit_ticks
-                    && (!dead || elapsed == 0)
+                    && digestion_remainder < 30
+                    && (!dead || (elapsed == 0 && digestion_remainder == 0))
                     && regeneration_remainder < regeneration_cost.denominator
                     && (!dead || regeneration_remainder == 0)
             }
@@ -260,14 +277,95 @@ impl Nutrition {
         })
     }
 
-    /// Reserve arithmetic is lazy. Only a hunger-band change, empty warning,
-    /// or death needs to wake the existing actor deadline index. At most four
-    /// nutrition boundaries occur between eating actions, independent of ticks
-    /// or reserve magnitude.
-    pub(crate) fn next_change_in(self, policy: NutritionPolicy) -> Option<u64> {
+    /// Rate modifiers are exact thirtieths of the ordinary unit per interval.
+    /// Earned numerator stays in actor state, not in the equipment source, so
+    /// removing or replacing a source cannot discard a partial digestion unit.
+    fn rate(reserve: i32, surcharge: i64) -> u128 {
+        if reserve <= 0 {
+            30
+        } else {
+            i128::from(surcharge).saturating_add(30).max(0) as u128
+        }
+    }
+
+    /// Time-only projection. At most one split occurs at the positive/empty
+    /// boundary, independent of reserve size or elapsed ticks. A change of
+    /// rate takes effect after the tick that first exhausts positive reserve.
+    fn time_projection(
+        self,
+        policy: NutritionPolicy,
+        ticks: u64,
+        surcharge: i64,
+    ) -> (u128, u64, u8) {
         let (
             Self::Required {
-                reserve, elapsed, ..
+                reserve,
+                elapsed,
+                digestion_remainder,
+                ..
+            },
+            NutritionPolicy::Enabled { unit_ticks, .. },
+        ) = (self, policy)
+        else {
+            return (0, 0, 0);
+        };
+        let denominator = u128::from(unit_ticks) * 30;
+        let earned = u128::from(elapsed) * 30 + u128::from(digestion_remainder);
+        let rate = Self::rate(reserve, surcharge);
+        let mut numerator = earned + u128::from(ticks) * rate;
+        if reserve > 0 && rate != 0 {
+            let until_empty = (reserve as u128 * denominator - earned).div_ceil(rate);
+            if until_empty < u128::from(ticks) {
+                numerator = earned + until_empty * rate + (u128::from(ticks) - until_empty) * 30;
+            }
+        }
+        let remainder = numerator % denominator;
+        (
+            numerator / denominator,
+            (remainder / 30) as u64,
+            (remainder % 30) as u8,
+        )
+    }
+
+    pub(crate) fn time_demand(self, policy: NutritionPolicy, ticks: u64, surcharge: i64) -> u128 {
+        self.time_projection(policy, ticks, surcharge).0
+    }
+
+    pub(crate) fn empty_depletion_at_end(
+        self,
+        policy: NutritionPolicy,
+        ticks: u64,
+        surcharge: i64,
+    ) -> bool {
+        let Self::Required { reserve, .. } = self else {
+            return false;
+        };
+        if ticks == 0 {
+            return false;
+        }
+        let units = self.time_demand(policy, ticks, surcharge);
+        units > self.time_demand(policy, ticks - 1, surcharge)
+            && i128::from(reserve) - (units as i128) < 0
+    }
+
+    /// Reserve arithmetic is lazy: only hunger bands, empty warnings, or death
+    /// wake the existing actor deadline index. Stopped digestion has no deadline.
+    #[cfg(test)]
+    pub(crate) fn next_change_in(self, policy: NutritionPolicy) -> Option<u64> {
+        self.next_change_in_at_rate(policy, 0)
+    }
+
+    pub(crate) fn next_change_in_at_rate(
+        self,
+        policy: NutritionPolicy,
+        surcharge: i64,
+    ) -> Option<u64> {
+        let (
+            Self::Required {
+                reserve,
+                elapsed,
+                digestion_remainder,
+                ..
             },
             NutritionPolicy::Enabled {
                 hungry_below,
@@ -286,49 +384,90 @@ impl Nutrition {
             Hunger::Weak => 0,
             Hunger::Empty => i64::from(starve_at),
         };
-        let units = u64::try_from(i64::from(reserve).checked_sub(target)?).ok()?;
-        units
-            .checked_mul(unit_ticks)?
-            .checked_sub(elapsed)
+        let units = u128::try_from(i64::from(reserve).checked_sub(target)?).ok()?;
+        let rate = Self::rate(reserve, surcharge);
+        if rate == 0 {
+            return None;
+        }
+        let earned = u128::from(elapsed) * 30 + u128::from(digestion_remainder);
+        let remaining = units
+            .checked_mul(u128::from(unit_ticks) * 30)?
+            .checked_sub(earned)?;
+        u64::try_from(remaining.div_ceil(rate))
+            .ok()
             .filter(|value| *value > 0)
     }
 
-    /// The first stochastic check follows 0 -> -1, never 1 -> 0. Denied
-    /// intervals are skipped by the creature caller; no owed-roll state exists.
-    pub(crate) fn next_empty_depletion_in(self, policy: NutritionPolicy) -> Option<u64> {
+    /// The first stochastic check follows 0 -> -1, never 1 -> 0. Its empty
+    /// interval runs at baseline even when equipped sources stop digestion.
+    pub(crate) fn next_empty_depletion_in_at_rate(
+        self,
+        policy: NutritionPolicy,
+        surcharge: i64,
+    ) -> Option<u64> {
         let (
             Self::Required {
-                reserve, elapsed, ..
+                reserve,
+                elapsed,
+                digestion_remainder,
+                ..
             },
             NutritionPolicy::Enabled { unit_ticks, .. },
         ) = (self, policy)
         else {
             return None;
         };
-        let units = u64::try_from(i64::from(reserve).max(0) + 1).ok()?;
-        units
-            .checked_mul(unit_ticks)?
-            .checked_sub(elapsed)
-            .filter(|ticks| *ticks > 0)
-    }
-
-    pub(crate) fn at_empty_depletion(self) -> bool {
-        matches!(self, Self::Required { reserve, elapsed: 0, .. } if reserve < 0)
+        let denominator = u128::from(unit_ticks) * 30;
+        let earned = u128::from(elapsed) * 30 + u128::from(digestion_remainder);
+        let rate = Self::rate(reserve, surcharge);
+        if rate == 0 {
+            return None;
+        }
+        if reserve <= 0 {
+            return u64::try_from((denominator - earned).div_ceil(30)).ok();
+        }
+        let until_empty = (reserve as u128 * denominator - earned).div_ceil(rate);
+        let at_empty = earned + until_empty * rate;
+        if at_empty / denominator > reserve as u128 {
+            return u64::try_from(until_empty).ok();
+        }
+        u64::try_from(until_empty + (denominator - at_empty % denominator).div_ceil(30)).ok()
     }
 
     /// Pure analytical settlement; true means the starvation deadline was met.
-    /// The creature caller splits at policy changes to settle other clocks under
-    /// their old denominator, but no per-point or per-tick loop exists here.
+    #[cfg(test)]
     pub(crate) fn advance_active(&mut self, policy: NutritionPolicy, ticks: u64) -> bool {
         self.advance_with_regeneration(policy, ticks, Regeneration::default())
     }
 
-    /// The first combined crossing is located by the creature's bounded search.
+    #[cfg(test)]
+    pub(crate) fn advance_with_regeneration(
+        &mut self,
+        policy: NutritionPolicy,
+        ticks: u64,
+        gained: Regeneration,
+    ) -> bool {
+        self.advance_with_regeneration_at_rate(policy, ticks, gained, 0)
+    }
+
+    #[cfg(test)]
     pub(crate) fn crosses_change(
         self,
         policy: NutritionPolicy,
         ticks: u64,
         gained: Regeneration,
+    ) -> bool {
+        self.crosses_change_at_rate(policy, ticks, gained, 0)
+    }
+
+    /// The creature caller locates the first combined crossing with a bounded
+    /// monotone search; recovery gains in this pure projection settle at the end.
+    pub(crate) fn crosses_change_at_rate(
+        self,
+        policy: NutritionPolicy,
+        ticks: u64,
+        gained: Regeneration,
+        surcharge: i64,
     ) -> bool {
         let Self::Required { reserve, .. } = self else {
             return false;
@@ -339,32 +478,33 @@ impl Nutrition {
         else {
             return false;
         };
-        // Time-only crossings already have an exact analytical deadline. Full
-        // pools and explicit zero prices need no additional boundary search.
         if regeneration_cost.numerator(gained) == 0 {
             return false;
         }
         let before = self.hunger(policy);
         let mut projected = self;
-        projected.advance_with_regeneration(policy, ticks, gained)
+        projected.advance_with_regeneration_at_rate(policy, ticks, gained, surcharge)
             || (projected.hunger(policy) != before && reserve > 0)
     }
 
-    pub(crate) fn advance_with_regeneration(
+    pub(crate) fn advance_with_regeneration_at_rate(
         &mut self,
         policy: NutritionPolicy,
         ticks: u64,
         gained: Regeneration,
+        surcharge: i64,
     ) -> bool {
+        let (time_units, next_elapsed, next_fraction) =
+            self.time_projection(policy, ticks, surcharge);
         let (
             Self::Required {
                 reserve,
                 elapsed,
+                digestion_remainder,
                 regeneration_remainder,
             },
             NutritionPolicy::Enabled {
                 starve_at,
-                unit_ticks,
                 regeneration_cost,
                 ..
             },
@@ -372,23 +512,23 @@ impl Nutrition {
         else {
             return false;
         };
-        let total = u128::from(*elapsed) + u128::from(ticks);
         let regeneration = u128::from(*regeneration_remainder)
             .checked_add(regeneration_cost.numerator(gained))
             .expect("bounded nutrition remainder and periodic gains fit u128");
-        let units = (total / u128::from(unit_ticks))
+        let units = time_units
             .checked_add(regeneration / u128::from(regeneration_cost.denominator))
             .expect("bounded active-time and regeneration nutrition demand fits u128");
         let until_death = (i64::from(*reserve) - i64::from(starve_at)) as u128;
         if units >= until_death {
             *reserve = starve_at;
             *elapsed = 0;
+            *digestion_remainder = 0;
             *regeneration_remainder = 0;
             true
         } else {
-            // The validated reserve envelope bounds this conversion by 2e6.
             *reserve = (i64::from(*reserve) - units as i64) as i32;
-            *elapsed = (total % u128::from(unit_ticks)) as u64;
+            *elapsed = next_elapsed;
+            *digestion_remainder = next_fraction;
             *regeneration_remainder =
                 u32::try_from(regeneration % u128::from(regeneration_cost.denominator))
                     .expect("regeneration remainder is below its u32 denominator");
@@ -419,11 +559,13 @@ impl Nutrition {
     pub(crate) fn clear_dead_fraction(&mut self) {
         if let Self::Required {
             elapsed,
+            digestion_remainder,
             regeneration_remainder,
             ..
         } = self
         {
             *elapsed = 0;
+            *digestion_remainder = 0;
             *regeneration_remainder = 0;
         }
     }
@@ -548,6 +690,7 @@ mod tests {
             Nutrition::Required {
                 reserve: 991_410,
                 elapsed: 201_863,
+                digestion_remainder: 0,
                 regeneration_remainder: 967_311,
             }
         );
@@ -559,6 +702,7 @@ mod tests {
         let mut value = Nutrition::Required {
             reserve: 0,
             elapsed: 999_999,
+            digestion_remainder: 0,
             regeneration_remainder: 999_999,
         };
         let gained = Regeneration {
@@ -572,6 +716,7 @@ mod tests {
             Nutrition::Required {
                 reserve: -1_000_000,
                 elapsed: 0,
+                digestion_remainder: 0,
                 regeneration_remainder: 0,
             }
         );
@@ -600,6 +745,7 @@ mod tests {
             Nutrition::Required {
                 reserve: -1_000_000,
                 elapsed: 0,
+                digestion_remainder: 0,
                 regeneration_remainder: 0,
             }
         );
@@ -615,6 +761,7 @@ mod tests {
             Nutrition::Required {
                 reserve: -3,
                 elapsed: 0,
+                digestion_remainder: 0,
                 regeneration_remainder: 0
             }
         );
@@ -625,6 +772,7 @@ mod tests {
             let before = Nutrition::Required {
                 reserve,
                 elapsed: 57,
+                digestion_remainder: 0,
                 regeneration_remainder: 0,
             };
             let mut preview = before;
@@ -637,6 +785,7 @@ mod tests {
                 Nutrition::Required {
                     reserve: (reserve.max(0) + 6).min(12),
                     elapsed: 57,
+                    digestion_remainder: 0,
                     regeneration_remainder: 0
                 }
             );
@@ -663,6 +812,245 @@ mod tests {
         }
         for raw in ["[6]", r#"{"nutrition":6,"extra":0}"#, "{}"] {
             assert!(serde_json::from_str::<crate::EdibleSpec>(raw).is_err());
+        }
+    }
+    #[test]
+    fn fractional_rates_match_independent_tick_oracle_across_empty_boundary() {
+        for surcharge in [-60, -30, -15, 0, 6, 10, 30, 60, 200] {
+            for reserve in [-1, 0, 1, 8] {
+                for ticks in [0, 1, 13, 99, 100, 333, 1_500] {
+                    let initial = Nutrition::Required {
+                        reserve,
+                        elapsed: 17,
+                        digestion_remainder: 11,
+                        regeneration_remainder: 0,
+                    };
+                    let mut actual = initial;
+                    actual.advance_with_regeneration_at_rate(
+                        policy(),
+                        ticks,
+                        Regeneration::default(),
+                        surcharge,
+                    );
+                    let mut expected_reserve = reserve;
+                    let mut numerator = 17 * 30 + 11;
+                    for _ in 0..ticks {
+                        numerator += if expected_reserve > 0 {
+                            (30 + surcharge).max(0) as u64
+                        } else {
+                            30
+                        };
+                        expected_reserve -= (numerator / 3_000) as i32;
+                        numerator %= 3_000;
+                        if expected_reserve <= -3 {
+                            expected_reserve = -3;
+                            numerator = 0;
+                            break;
+                        }
+                    }
+                    assert_eq!(
+                        actual,
+                        Nutrition::Required {
+                            reserve: expected_reserve,
+                            elapsed: numerator / 30,
+                            digestion_remainder: (numerator % 30) as u8,
+                            regeneration_remainder: 0,
+                        },
+                        "rate {surcharge}, reserve {reserve}, ticks {ticks}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn source_changes_keep_fraction_and_empty_always_uses_baseline() {
+        let mut value = Nutrition::initial(NutritionRequirement::Required, policy()).unwrap();
+        value.advance_with_regeneration_at_rate(policy(), 1, Regeneration::default(), 10);
+        assert_eq!(
+            value,
+            Nutrition::Required {
+                reserve: 8,
+                elapsed: 1,
+                digestion_remainder: 10,
+                regeneration_remainder: 0
+            }
+        );
+        value.advance_with_regeneration_at_rate(policy(), 99, Regeneration::default(), -30);
+        assert_eq!(
+            value,
+            Nutrition::Required {
+                reserve: 8,
+                elapsed: 1,
+                digestion_remainder: 10,
+                regeneration_remainder: 0
+            }
+        );
+        let restored: Nutrition =
+            serde_json::from_value(serde_json::to_value(value).unwrap()).unwrap();
+        assert_eq!(value, restored);
+        value.advance_with_regeneration_at_rate(policy(), 99, Regeneration::default(), 0);
+        assert_eq!(
+            value,
+            Nutrition::Required {
+                reserve: 7,
+                elapsed: 0,
+                digestion_remainder: 10,
+                regeneration_remainder: 0
+            }
+        );
+        let empty = Nutrition::Required {
+            reserve: 0,
+            elapsed: 0,
+            digestion_remainder: 10,
+            regeneration_remainder: 0,
+        };
+        assert_eq!(
+            empty.next_empty_depletion_in_at_rate(policy(), -30),
+            Some(100)
+        );
+        value = empty;
+        assert!(value.advance_with_regeneration_at_rate(
+            policy(),
+            300,
+            Regeneration::default(),
+            -30
+        ));
+        assert!(value.valid(policy(), true));
+    }
+
+    #[test]
+    fn analytical_deadlines_match_first_tick_that_changes_hunger() {
+        for surcharge in [-30, -15, 6, 10, 30, 60, 200] {
+            for reserve in [-1, 0, 1, 3, 7, 8] {
+                let value = Nutrition::Required {
+                    reserve,
+                    elapsed: 17,
+                    digestion_remainder: 23,
+                    regeneration_remainder: 0,
+                };
+                let deadline = value.next_change_in_at_rate(policy(), surcharge);
+                if surcharge == -30 && reserve > 0 {
+                    assert_eq!(deadline, None);
+                    continue;
+                }
+                let deadline = deadline.unwrap();
+                let mut before = value;
+                assert!(!before.advance_with_regeneration_at_rate(
+                    policy(),
+                    deadline - 1,
+                    Regeneration::default(),
+                    surcharge
+                ));
+                assert_eq!(before.hunger(policy()), value.hunger(policy()));
+                let mut after = value;
+                let dead = after.advance_with_regeneration_at_rate(
+                    policy(),
+                    deadline,
+                    Regeneration::default(),
+                    surcharge,
+                );
+                assert!(dead || after.hunger(policy()) != value.hunger(policy()));
+            }
+        }
+    }
+
+    #[test]
+    fn fractional_empty_deadline_and_endpoint_match_independent_tick_oracle() {
+        let NutritionPolicy::Enabled { unit_ticks, .. } = policy() else {
+            panic!("enabled fixture");
+        };
+        let denominator = u128::from(unit_ticks) * 30;
+        for surcharge in [-60_i64, -30, -15, 0, 6, 10, 60, 6_000] {
+            for reserve in [-1, 0, 1, 8] {
+                for (elapsed, fraction) in [(0, 0), (17, 23), (99, 29)] {
+                    let initial = Nutrition::Required {
+                        reserve,
+                        elapsed,
+                        digestion_remainder: fraction,
+                        regeneration_remainder: 0,
+                    };
+                    let mut remaining = i128::from(reserve);
+                    let mut numerator = u128::from(elapsed) * 30 + u128::from(fraction);
+                    let mut first = None;
+                    // Independent tick-by-tick work ledger: no projection or
+                    // deadline methods participate in expected results.
+                    for tick in 1..=2_000_u64 {
+                        let rate = if remaining <= 0 {
+                            30
+                        } else {
+                            (i128::from(surcharge) + 30).max(0) as u128
+                        };
+                        numerator += rate;
+                        let spent = numerator / denominator;
+                        numerator %= denominator;
+                        remaining -= spent as i128;
+                        let depleted_empty = spent > 0 && remaining < 0;
+                        if depleted_empty && first.is_none() {
+                            first = Some(tick);
+                        }
+                        assert_eq!(
+                            initial.empty_depletion_at_end(policy(), tick, surcharge),
+                            depleted_empty,
+                            "surcharge={surcharge}, reserve={reserve}, elapsed={elapsed}, fraction={fraction}, tick={tick}"
+                        );
+                        // Also witness two ticks after the first depletion so
+                        // an earlier event cannot masquerade as an endpoint.
+                        if first.is_some_and(|first| tick >= first + 2) {
+                            break;
+                        }
+                    }
+                    assert_eq!(
+                        initial.next_empty_depletion_in_at_rate(policy(), surcharge),
+                        first,
+                        "surcharge={surcharge}, reserve={reserve}, elapsed={elapsed}, fraction={fraction}"
+                    );
+                    assert_eq!(first.is_none(), reserve > 0 && surcharge <= -30);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stopped_digestion_keeps_regeneration_charges_and_strict_fraction() {
+        let mut priced = policy();
+        if let NutritionPolicy::Enabled {
+            regeneration_cost, ..
+        } = &mut priced
+        {
+            regeneration_cost.health = 1;
+            regeneration_cost.denominator = 3;
+        }
+        let mut value = Nutrition::initial(NutritionRequirement::Required, priced).unwrap();
+        value.advance_with_regeneration_at_rate(
+            priced,
+            1_000_000,
+            Regeneration {
+                health: 4,
+                ..Regeneration::default()
+            },
+            -30,
+        );
+        assert_eq!(
+            value,
+            Nutrition::Required {
+                reserve: 7,
+                elapsed: 0,
+                digestion_remainder: 0,
+                regeneration_remainder: 1
+            }
+        );
+        let raw = serde_json::to_value(value).unwrap();
+        let mut missing = raw.clone();
+        missing
+            .as_object_mut()
+            .unwrap()
+            .remove("digestion_remainder");
+        assert!(serde_json::from_value::<Nutrition>(missing).is_err());
+        for invalid in [-1, 30, 256] {
+            let mut raw = raw.clone();
+            raw["digestion_remainder"] = serde_json::json!(invalid);
+            assert!(serde_json::from_value::<Nutrition>(raw).is_err());
         }
     }
 }

@@ -3460,7 +3460,7 @@ mod tests {
             }),
             identification: Some(IdentificationChoiceView {
                 choice: IntentionId("private-paid-choice".into()),
-                class: ItemClass::Wand,
+                classes: vec![ItemClass::Wand],
                 items: vec![item],
             }),
             inventory: vec![ItemInteractionView {

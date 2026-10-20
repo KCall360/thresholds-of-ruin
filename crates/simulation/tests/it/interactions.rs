@@ -106,6 +106,7 @@ fn armor(game: &mut Game, actor: ActorId) {
     let mut spec = ItemSpec::ordinary("mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {
             physical_reduction: 3,
@@ -246,6 +247,7 @@ fn duplicate_ring_slots_are_distinct_and_a_slot_must_match_the_item() {
     let mut spec = ItemSpec::ordinary("ring".into());
     spec.class = ItemClass::Ring;
     spec.equipment = Some(EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
         slot: EquipmentSlot::new("ring").unwrap(),
@@ -463,6 +465,7 @@ fn concealed_equipment_discloses_its_slot_but_stats_require_actor_knowledge() {
     spec.concealed = true;
     spec.appearance = "silver ring".into();
     spec.equipment = Some(EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
         slot: EquipmentSlot::new("ring").unwrap(),
@@ -582,6 +585,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     )
     .unwrap();
     weapon.equipment = Some(EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
         slot: EquipmentSlot::new("weapon").unwrap(),
@@ -601,6 +605,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     let mut armor = ItemSpec::ordinary("armor".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {
             physical_reduction: 3,
@@ -801,6 +806,7 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
             ItemClass::Armor
         };
         item.equipment = Some(EquipmentSpec {
+            potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
             slot,
@@ -893,6 +899,7 @@ fn custom_slot_capability_timing_and_checkpoint_use_rules_data() {
     let mut item = ItemSpec::ordinary("grasped tool".into());
     item.class = ItemClass::Tool;
     item.equipment = Some(EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
         slot: slot.clone(),
@@ -979,6 +986,7 @@ fn shared_grip_capacity_limits_authored_and_paid_equips_without_combat() {
                 ItemClass::Weapon
             };
             item.equipment = Some(EquipmentSpec {
+                potency_modifiers: Vec::new(),
                 weapon_profile: None,
                 slot: EquipmentSlot::new(if shield { "shield" } else { "weapon" }).unwrap(),
                 armor: None,

@@ -69,7 +69,7 @@ impl ChargeRange {
 #[serde(deny_unknown_fields)]
 pub struct ReadableSpec {
     pub effects: Vec<crate::rules::Effect>,
-    pub identify: Option<ItemClass>,
+    pub identify: Option<Vec<ItemClass>>,
     pub discovery: ItemDiscovery,
 }
 impl<'de> Deserialize<'de> for ReadableSpec {
@@ -80,13 +80,13 @@ impl<'de> Deserialize<'de> for ReadableSpec {
             #[serde(deserialize_with = "read_readable_effects")]
             effects: Vec<crate::rules::Effect>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
-            identify: Option<ItemClass>,
+            identify: Option<IdentificationClasses>,
             discovery: ItemDiscovery,
         }
         let f: Fields = crate::bounded::named_map(d)?;
         let spec = Self {
             effects: f.effects,
-            identify: f.identify,
+            identify: f.identify.map(|classes| classes.0),
             discovery: f.discovery,
         };
         if !spec.valid() {
@@ -100,10 +100,41 @@ pub(crate) fn read_readable_effects<'de, D: serde::Deserializer<'de>>(
 ) -> Result<Vec<crate::rules::Effect>, D::Error> {
     Ok(crate::bounded::Bounded::<crate::rules::Effect,{crate::limits::CONSUMABLE_EFFECTS}>::deserialize(d)?.0)
 }
+struct IdentificationClasses(Vec<ItemClass>);
+impl<'de> Deserialize<'de> for IdentificationClasses {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Token(#[serde(deserialize_with = "read_identification_class")] ItemClass);
+        fn read_identification_class<'de, D: serde::Deserializer<'de>>(
+            d: D,
+        ) -> Result<ItemClass, D::Error> {
+            let token = String::deserialize(d)?;
+            ItemClass::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(token))
+        }
+        let tokens = crate::bounded::Bounded::<Token, 14>::deserialize(d)?.0;
+        let classes: Vec<_> = tokens.into_iter().map(|token| token.0).collect();
+        if !valid_identification_classes(&classes) {
+            return Err(serde::de::Error::custom("invalid identification class set"));
+        }
+        Ok(Self(classes))
+    }
+}
+fn read_identification_classes<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<ItemClass>, D::Error> {
+    IdentificationClasses::deserialize(d).map(|classes| classes.0)
+}
+pub(crate) fn valid_identification_classes(classes: &[ItemClass]) -> bool {
+    !classes.is_empty() && classes.len() <= 14 && classes.windows(2).all(|pair| pair[0] < pair[1])
+}
 impl ReadableSpec {
     pub fn valid(&self) -> bool {
-        match self.identify {
-            Some(_) => self.effects.is_empty() && self.discovery == ItemDiscovery::OnUse,
+        match &self.identify {
+            Some(classes) => {
+                valid_identification_classes(classes)
+                    && self.effects.is_empty()
+                    && self.discovery == ItemDiscovery::OnUse
+            }
             None => {
                 !self.effects.is_empty()
                     && self.effects.len() <= crate::limits::CONSUMABLE_EFFECTS
@@ -187,7 +218,7 @@ impl crate::ItemSpec {
 #[serde(deny_unknown_fields)]
 pub(crate) struct IdentificationChoice {
     pub choice: IntentionId,
-    pub class: ItemClass,
+    pub classes: Vec<ItemClass>,
 }
 impl<'de> Deserialize<'de> for IdentificationChoice {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -195,22 +226,23 @@ impl<'de> Deserialize<'de> for IdentificationChoice {
         #[serde(deny_unknown_fields)]
         struct Fields {
             choice: IntentionId,
-            class: ItemClass,
+            #[serde(deserialize_with = "read_identification_classes")]
+            classes: Vec<ItemClass>,
         }
         let f: Fields = crate::bounded::named_map(d)?;
-        if f.choice.0 == 0 || f.choice.0 == u64::MAX {
+        if f.choice.0 == 0 || f.choice.0 == u64::MAX || !valid_identification_classes(&f.classes) {
             return Err(serde::de::Error::custom("invalid identification choice"));
         }
         Ok(Self {
             choice: f.choice,
-            class: f.class,
+            classes: f.classes,
         })
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IdentificationChoiceView {
     pub choice: IntentionId,
-    pub class: ItemClass,
+    pub classes: Vec<ItemClass>,
     pub items: Vec<ItemId>,
 }
 /// A remembered balance is a fact from this actor's observation, not live access
@@ -280,14 +312,14 @@ impl Game {
         let pending = self.actors.get(&actor)?.identification.as_ref()?;
         Some(IdentificationChoiceView {
             choice: pending.choice,
-            class: pending.class,
+            classes: pending.classes.clone(),
             items: self
                 .items
                 .at(ItemLocation::Carried(actor))
                 .filter(|id| {
                     self.items
                         .get(id)
-                        .is_some_and(|item| item.spec.class == pending.class)
+                        .is_some_and(|item| pending.classes.contains(&item.spec.class))
                 })
                 .take(MAX_IDENTIFICATION_ITEMS)
                 .collect(),
@@ -314,7 +346,8 @@ impl Game {
                 .identification_view(actor)
                 .is_some_and(|v| v.items.contains(&id))
                 || self.items.get(&id).is_none_or(|i| {
-                    i.location != ItemLocation::Carried(actor) || i.spec.class != pending.class
+                    i.location != ItemLocation::Carried(actor)
+                        || !pending.classes.contains(&i.spec.class)
                 })
             {
                 return Err(GameError::ItemUnavailable);
@@ -394,5 +427,53 @@ impl Game {
                 .known_charges
                 .insert(item, after.expect("device charge state"));
         }
+    }
+}
+
+#[cfg(test)]
+mod identification_format_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn runtime_identification_sets_are_required_bounded_scalar_sorted_and_unique() {
+        let classes = json!(["ring", "wand"]);
+        let readable = json!({"effects": [], "identify": classes, "discovery": "on_use"});
+        let choice = json!({"choice": 1, "classes": classes});
+        assert!(serde_json::from_value::<ReadableSpec>(readable.clone()).is_ok());
+        assert!(serde_json::from_value::<IdentificationChoice>(choice.clone()).is_ok());
+        for invalid in [
+            json!([]),
+            json!(["ring", "ring"]),
+            json!(["wand", "ring"]),
+            json!([{"ring": null}]),
+            json!("ring"),
+            json!(vec!["ring"; 15]),
+        ] {
+            let mut bad_readable = readable.clone();
+            bad_readable["identify"] = invalid.clone();
+            assert!(serde_json::from_value::<ReadableSpec>(bad_readable).is_err());
+            let mut bad_choice = choice.clone();
+            bad_choice["classes"] = invalid;
+            assert!(serde_json::from_value::<IdentificationChoice>(bad_choice).is_err());
+        }
+        let mut missing = readable;
+        missing.as_object_mut().unwrap().remove("identify");
+        assert!(serde_json::from_value::<ReadableSpec>(missing).is_err());
+        let mut missing = choice;
+        missing.as_object_mut().unwrap().remove("classes");
+        assert!(serde_json::from_value::<IdentificationChoice>(missing).is_err());
+    }
+
+    #[test]
+    fn oversized_runtime_identification_sequence_stops_before_decoding_excess_token() {
+        let mut classes = vec![json!("ring"); 14];
+        classes.push(json!({"not": "a class token"}));
+        let error = serde_json::from_str::<IdentificationClasses>(
+            &serde_json::to_string(&classes).unwrap(),
+        )
+        .err()
+        .unwrap();
+        assert!(error.to_string().contains("collection exceeds limit"));
     }
 }

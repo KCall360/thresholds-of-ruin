@@ -437,6 +437,8 @@ fn stat(value: &Stat, rules: &Ruleset) -> Vec<p::DiagnosticField> {
             ),
             content("ability_stat", super::primitive(*stat)),
         ],
+        Stat::AttackDamageRollBonus => vec![text("stat", "attack_damage_roll_bonus")],
+        Stat::NutritionRateThirtieths => vec![text("stat", "nutrition_rate_thirtieths")],
         Stat::Edge => vec![text("stat", "edge")],
         Stat::CheckEdge => vec![text("stat", "check_edge")],
         Stat::IncomingEdge { defense } => {
@@ -458,6 +460,33 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
         },
     )];
     let id = match &value.op {
+        ModifierOp::SignedReduction {
+            selector: value,
+            amount,
+        } => {
+            fields.push(selector(value, rules));
+            fields.push(signed("amount", i64::from(*amount)));
+            "signed_reduction"
+        }
+        ModifierOp::AttributeWithoutDefense {
+            attribute,
+            defense,
+            value,
+        } => {
+            fields.push(content("attribute", super::primitive(*attribute)));
+            fields.push(content("excluded_defense", super::primitive(*defense)));
+            fields.push(signed("value", *value));
+            "attribute_without_defense"
+        }
+        ModifierOp::SustainAttribute { attribute } => {
+            fields.push(content("attribute", super::primitive(*attribute)));
+            "sustain_attribute"
+        }
+        ModifierOp::ProtectArmor {} => "protect_armor",
+        ModifierOp::HealthRecoveryRate { multiplier } => {
+            fields.push(signed("multiplier", i64::from(*multiplier)));
+            "health_recovery_rate"
+        }
         ModifierOp::ActionDuration { value } => {
             fields.push(text(
                 "rate",

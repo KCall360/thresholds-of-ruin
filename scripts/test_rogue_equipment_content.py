@@ -70,7 +70,7 @@ class RogueEquipmentContent(unittest.TestCase):
                 {"kind": "alter_equipment", "selection": selection, "alteration": key}]})
         for category in ("weapon", "armor"):
             self.assertEqual(items["rogue.identify_" + category]["readable"],
-                             {"identify": category, "discovery": "on_use"})
+                             {"identify": [category], "discovery": "on_use"})
         scrolls = [item for item in items.values() if item.get("appearance_pool") == "rogue.scrolls"]
         self.assertEqual(len(scrolls), 10)
         self.assertEqual(len(set(catalog["appearance_pools"]["rogue.scrolls"]["appearances"])), len(scrolls))
@@ -79,7 +79,7 @@ class RogueEquipmentContent(unittest.TestCase):
         stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([stage["id"] for stage in stages], ["rogue.eight_species_foes", "rogue.bandages",
                          "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions",
-                         "rogue.magic_scrolls", "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition"])
+                         "rogue.magic_scrolls", "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings"])
         expected = [
             ["healing", "confusion", "blindness", "poison", "see_invisible", "extra_healing"],
             ["identify_potion", "identify_scroll", "identify_wand", "sleep"],
@@ -100,6 +100,70 @@ class RogueEquipmentContent(unittest.TestCase):
             "id": "rogue.ammunition", "version": 1, "kind": "items", "count": [1, 1],
             "quantity": 6, "bands": [{"depth": {"kind": "open", "minimum": 1},
             "choices": [{"archetype": "rogue.arrow", "weight": 1}]}]})
+
+
+    def test_ten_concealed_rings_have_exact_generation_weights_and_food_rates(self):
+        catalog = source("catalog/items.toml")
+        expected = {
+            "protection": (9, 30), "add_strength": (9, 30), "sustain_strength": (5, 30),
+            "see_invisible": (10, 6), "adornment": (1, 0), "dexterity": (8, 10),
+            "increase_damage": (8, 10), "regeneration": (4, 60),
+            "slow_digestion": (9, -15), "maintain_armor": (5, 30),
+        }
+        rings = {key: value for key, value in catalog["items"].items() if value.get("class") == "ring"}
+        self.assertEqual(set(rings), {"rogue.ring_" + key for key in expected})
+        signed = {"protection", "add_strength", "dexterity", "increase_damage"}
+        for key, (_, rate) in expected.items():
+            item = rings["rogue.ring_" + key]
+            with self.subTest(ring=key):
+                self.assertEqual(item["identity"], "rogue.ring_" + key)
+                self.assertTrue(item["magical"])
+                self.assertFalse(item["stackable"])
+                self.assertEqual(item["appearance_pool"], "rogue.rings")
+                self.assertEqual(item["equipment"]["slot"], "ring")
+                self.assertNotIn("readable", item)
+                self.assertNotIn("on_equip", item)
+                self.assertEqual(item.get("equipment_generation"),
+                                 {"kind": "signed_potency", "negative": 1, "positive": 2}
+                                 if key in signed else None)
+                nutrition = [modifier for modifier in item["equipment"]["modifiers"]
+                             if modifier["op"].get("stat") == {"kind": "nutrition_rate_thirtieths"}]
+                self.assertEqual(nutrition, [{"scope": "always", "op": {"kind": "add",
+                                 "stat": {"kind": "nutrition_rate_thirtieths"}, "value": rate}}]
+                                 if rate else [])
+        appearances = catalog["appearance_pools"]["rogue.rings"]["appearances"]
+        self.assertEqual(len(appearances), 10)
+        self.assertEqual(len(set(appearances)), 10)
+        stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
+        self.assertEqual(stages[11], {"id": "rogue.rings", "version": 1, "kind": "items",
+                         "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},
+                         "choices": [{"archetype": "rogue.ring_" + key, "weight": value[0]}
+                                     for key, value in expected.items()]}]})
+        self.assertEqual(catalog["items"]["rogue.identify_wand"]["readable"],
+                         {"identify": ["ring", "wand"], "discovery": "on_use"})
+
+    def test_ring_mechanics_are_generic_sources_not_defense_or_weapon_special_cases(self):
+        items = source("catalog/items.toml")["items"]
+        expected = {
+            "protection": [{"kind": "signed_reduction", "selector": {"kind": "category", "category": category},
+                            "amount": 1} for category in ("energy", "impact", "keen", "spirit", "vital", "psychic")],
+            "add_strength": [{"kind": "add", "stat": {"kind": "attribute", "attribute": "strength"}, "value": 1}],
+            "dexterity": [{"kind": "attribute_without_defense", "attribute": "speed", "defense": "physical", "value": 1}],
+            "increase_damage": [{"kind": "add", "stat": {"kind": "attack_damage_roll_bonus"}, "value": 1}],
+            "sustain_strength": [{"kind": "sustain_attribute", "attribute": "strength"}],
+            "see_invisible": [{"kind": "perception", "value": {"kind": "see_invisible", "enabled": True}}],
+            "regeneration": [{"kind": "health_recovery_rate", "multiplier": 2}],
+            "maintain_armor": [{"kind": "protect_armor"}], "adornment": [], "slow_digestion": [],
+        }
+        signed = {"protection", "add_strength", "dexterity", "increase_damage"}
+        for key, effects in expected.items():
+            equipment = items["rogue.ring_" + key]["equipment"]
+            with self.subTest(ring=key):
+                modifiers = [modifier for modifier in equipment["modifiers"]
+                             if modifier["op"].get("stat") != {"kind": "nutrition_rate_thirtieths"}]
+                expected_modifiers = [{"scope": "always", "op": effect} for effect in effects]
+                self.assertEqual(equipment["potency_modifiers"], expected_modifiers if key in signed else [])
+                self.assertEqual(modifiers, [] if key in signed else expected_modifiers)
 
 
 

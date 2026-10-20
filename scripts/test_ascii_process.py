@@ -117,7 +117,7 @@ class AsciiProcesses(ProcessTestCase):
         text.command("release")
         self.assertTrue(self.key(ascii_client, "control")["has_control"])
         for _ in range(5):
-            moved = self.key(ascii_client, "right")
+            moved = self.key(ascii_client, "right", wait_for_admission=True)
         self.assertEqual(next(i["position"] for i in moved["state"]["observation"]["ground_items"] if i["item"]["name"] == "stone tablet"), {"x":2,"y":0,"z":0})
         self.assertEqual(moved["state"]["observation"]["tick"], '550')
         self.assertIn("stone tablet", str(moved))

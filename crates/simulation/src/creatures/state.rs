@@ -454,6 +454,11 @@ impl CreatureState {
         self.validate_loss_amount(amount)?;
         let mut losses = self.restorable_losses;
         let prior = *losses.attributes.get(attribute);
+        let amount = if self.derived.sustained_attributes.contains(&attribute) {
+            0
+        } else {
+            amount
+        };
         let applied = amount
             .min(u32::from(self.derived.attributes.get(attribute)))
             .min(u32::from(crate::limits::DERIVED_ATTRIBUTE - prior));
@@ -1600,7 +1605,10 @@ impl CreatureState {
         {
             return None;
         }
-        self.nutrition.next_empty_depletion_in(document.nutrition)
+        self.nutrition.next_empty_depletion_in_at_rate(
+            document.nutrition,
+            self.derived.nutrition_rate_thirtieths,
+        )
     }
 
     /// Earliest observable timer change in active simulation ticks. The loop
@@ -1616,10 +1624,10 @@ impl CreatureState {
             .into_iter()
             .chain(self.conditions.next_expiry_in())
             .chain(self.health_recovery.next_recovery_in(self.health))
-            .chain(
-                self.nutrition
-                    .next_change_in(self.build.ruleset().document().nutrition),
-            )
+            .chain(self.nutrition.next_change_in_at_rate(
+                self.build.ruleset().document().nutrition,
+                self.derived.nutrition_rate_thirtieths,
+            ))
             .chain(self.next_nutrition_trigger_in())
             .chain(self.cooldowns.next_expiry_in())
             .chain(
@@ -1658,26 +1666,34 @@ impl CreatureState {
         let mut empty_time_depletion = false;
         while ticks > 0 && !self.health.dead() {
             let policy = self.build.ruleset().document().nutrition;
+            let nutrition_rate = self.derived.nutrition_rate_thirtieths;
             let mut interval = self
                 .conditions
                 .next_expiry_in()
                 .into_iter()
-                .chain(self.nutrition.next_change_in(policy))
+                .chain(
+                    self.nutrition
+                        .next_change_in_at_rate(policy, nutrition_rate),
+                )
                 .chain(std::iter::once(ticks))
                 .min()
                 .expect("remaining interval");
             let mut gained = self.regeneration_after(interval);
-            if self.nutrition.crosses_change(policy, interval, gained) {
+            if self
+                .nutrition
+                .crosses_change_at_rate(policy, interval, gained, nutrition_rate)
+            {
                 // Monotone exact integer projection finds the earliest crossing.
                 // At most 64 probes per band/expiry, never one per tick or point.
                 let mut low = 1;
                 let mut high = interval;
                 while low < high {
                     let middle = low + (high - low) / 2;
-                    if self.nutrition.crosses_change(
+                    if self.nutrition.crosses_change_at_rate(
                         policy,
                         middle,
                         self.regeneration_after(middle),
+                        nutrition_rate,
                     ) {
                         high = middle;
                     } else {
@@ -1689,18 +1705,15 @@ impl CreatureState {
             }
             if let (
                 crate::nutrition::Nutrition::Required {
-                    elapsed,
                     regeneration_remainder,
                     ..
                 },
                 crate::nutrition::NutritionPolicy::Enabled {
-                    unit_ticks,
-                    regeneration_cost,
-                    ..
+                    regeneration_cost, ..
                 },
             ) = (self.nutrition, policy)
             {
-                let time = (u128::from(elapsed) + u128::from(interval)) / u128::from(unit_ticks);
+                let time = self.nutrition.time_demand(policy, interval, nutrition_rate);
                 let time = u64::try_from(time).unwrap_or_else(|_| {
                     diagnostics_incomplete = true;
                     u64::MAX
@@ -1741,12 +1754,15 @@ impl CreatureState {
             // Keep work earned under the old combined denominator. A condition
             // expiry and hunger change at this tick are one final rephase.
             let mut settled_recovery = self.health_recovery;
-            let mut time_only = self.nutrition;
-            time_only.advance_active(policy, interval);
-            empty_time_depletion = time_only.at_empty_depletion();
-            let starved = self
-                .nutrition
-                .advance_with_regeneration(policy, interval, gained);
+            empty_time_depletion =
+                self.nutrition
+                    .empty_depletion_at_end(policy, interval, nutrition_rate);
+            let starved = self.nutrition.advance_with_regeneration_at_rate(
+                policy,
+                interval,
+                gained,
+                nutrition_rate,
+            );
             if self.conditions.advance_active(interval)
                 && condition_sources(&self.build, &self.extra_sources, &self.conditions)
                     != self.extra_sources

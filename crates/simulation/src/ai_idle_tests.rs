@@ -89,6 +89,7 @@ fn loot_respects_care_and_equipment_overrides_independently() {
     let mut armor = ItemSpec::ordinary("known armor".into());
     armor.class = crate::ItemClass::Armor;
     armor.equipment = Some(crate::EquipmentSpec {
+        potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: Some(crate::ArmorSpec {
             physical_reduction: 2,
@@ -654,4 +655,194 @@ fn stationary_underfoot_pickup_needs_no_previous_navigation_record() {
         crate::diagnostics::work_counts().route_searches - before.route_searches,
         0
     );
+}
+
+fn ring_probe(op: crate::rules::ModifierOp, scaled: bool) -> ItemSpec {
+    let mut item = ItemSpec::ordinary("unfamiliar band".into());
+    item.class = crate::ItemClass::Ring;
+    item.concealed = true;
+    let modifier = crate::rules::Modifier {
+        scope: crate::rules::Scope::Always,
+        op,
+    };
+    item.equipment = Some(crate::EquipmentSpec {
+        slot: crate::EquipmentSlot::new("ring").unwrap(),
+        armor: None,
+        attack: None,
+        weapon_profile: None,
+        modifiers: if scaled {
+            vec![]
+        } else {
+            vec![modifier.clone()]
+        },
+        potency_modifiers: if scaled { vec![modifier] } else { vec![] },
+    });
+    item
+}
+
+#[test]
+fn npc_known_useful_rings_participate_in_loot_and_equipment_but_negative_damage_does_not() {
+    use crate::rules::{ModifierOp, Selector, Stat};
+    for (op, scaled, potency, useful) in [
+        (
+            ModifierOp::Add {
+                stat: Stat::AttackDamageRollBonus,
+                value: 1,
+            },
+            true,
+            2,
+            true,
+        ),
+        (
+            ModifierOp::SignedReduction {
+                selector: Selector::Category {
+                    category: crate::combat::DamageType::Psychic,
+                },
+                amount: 1,
+            },
+            true,
+            1,
+            true,
+        ),
+        (
+            ModifierOp::SustainAttribute {
+                attribute: crate::attributes::Attribute::Strength,
+            },
+            false,
+            0,
+            true,
+        ),
+        (
+            ModifierOp::Add {
+                stat: Stat::AttackDamageRollBonus,
+                value: 1,
+            },
+            true,
+            -1,
+            false,
+        ),
+    ] {
+        let mut game = fixture(AiProfile::general());
+        game.place_item_stack(20, at(1, 2, 1), None, 1, ring_probe(op, scaled))
+            .unwrap();
+        game.items
+            .edit(ItemId(20), |item| item.condition.potency = potency)
+            .unwrap();
+        game.identify_item(ActorId(2), ItemId(20)).unwrap();
+        assert_eq!(
+            game.gear_destination(ActorId(2), ItemId(20)).is_some(),
+            useful
+        );
+        assert_eq!(loot(&game).is_some(), useful);
+        if useful {
+            game.items
+                .edit(ItemId(20), |item| {
+                    item.location = crate::ItemLocation::Carried(ActorId(2))
+                })
+                .unwrap();
+            assert!(matches!(
+                game.choose_ai(ActorId(2)).unwrap().action,
+                Action::Equip {
+                    item: ItemId(20),
+                    ..
+                }
+            ));
+        }
+    }
+}
+
+#[test]
+fn npc_unknown_ring_potency_is_not_a_source_of_choice_information() {
+    use crate::rules::{ModifierOp, Stat};
+    let mut positive = fixture(AiProfile::general());
+    positive
+        .place_item_stack(
+            20,
+            at(1, 2, 1),
+            None,
+            1,
+            ring_probe(
+                ModifierOp::Add {
+                    stat: Stat::AttackDamageRollBonus,
+                    value: 1,
+                },
+                true,
+            ),
+        )
+        .unwrap();
+    let mut negative = positive.clone();
+    positive
+        .items
+        .edit(ItemId(20), |item| item.condition.potency = 2)
+        .unwrap();
+    negative
+        .items
+        .edit(ItemId(20), |item| item.condition.potency = -1)
+        .unwrap();
+    assert!(positive.observe(ActorId(2)) == negative.observe(ActorId(2)));
+    assert_eq!(
+        positive.choose_ai(ActorId(2)).unwrap().action,
+        negative.choose_ai(ActorId(2)).unwrap().action
+    );
+    for game in [&positive, &negative] {
+        assert_eq!(loot(game), None);
+        assert_eq!(game.gear_destination(ActorId(2), ItemId(20)), None);
+    }
+}
+#[test]
+fn npc_slow_digestion_values_effective_required_rate_without_vetoing_combat_upkeep() {
+    use crate::rules::{Modifier, ModifierOp, Scope, Stat};
+    for required in [false, true] {
+        let mut game = hungry_game(required);
+        for id in [20, 21, 22] {
+            let spec = ring_probe(
+                ModifierOp::Add {
+                    stat: Stat::NutritionRateThirtieths,
+                    value: -15,
+                },
+                false,
+            );
+            game.place_item_stack(id, at(1, 2, 1), Some(ActorId(2)), 1, spec)
+                .unwrap();
+            game.identify_item(ActorId(2), ItemId(id)).unwrap();
+        }
+        assert_eq!(
+            game.gear_destination(ActorId(2), ItemId(20)).is_some(),
+            required
+        );
+        if !required {
+            continue;
+        }
+        for id in [20, 21] {
+            let (slot, previous) = game.gear_destination(ActorId(2), ItemId(id)).unwrap();
+            assert!(previous.is_none());
+            game.equip_authored(ActorId(2), ItemId(id), slot).unwrap();
+        }
+        assert_eq!(
+            game.gear_destination(ActorId(2), ItemId(22)),
+            None,
+            "already at zero basal cost"
+        );
+        let mut damage = ring_probe(
+            ModifierOp::Add {
+                stat: Stat::AttackDamageRollBonus,
+                value: 2,
+            },
+            false,
+        );
+        damage.equipment.as_mut().unwrap().modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::NutritionRateThirtieths,
+                value: 30,
+            },
+        });
+        game.place_item_stack(23, at(1, 2, 1), Some(ActorId(2)), 1, damage)
+            .unwrap();
+        game.identify_item(ActorId(2), ItemId(23)).unwrap();
+        assert!(
+            game.gear_destination(ActorId(2), ItemId(23)).is_some(),
+            "useful combat gear may trade additional upkeep"
+        );
+    }
 }

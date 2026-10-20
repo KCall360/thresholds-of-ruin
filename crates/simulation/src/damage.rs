@@ -177,6 +177,24 @@ impl DamageSpec {
         self.primary.clone()
     }
 
+    /// Add once to each already-canonical rolled pool. Fixed damage, pool count,
+    /// ordering and random draws are unchanged. Attack preparation owns capture.
+    pub fn with_roll_bonus(&self, bonus: i32) -> Result<Self, DamageError> {
+        if !(-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(bonus)) {
+            return Err(DamageError::InvalidSpec);
+        }
+        let mut components = self.components.clone();
+        for component in &mut components {
+            if let DamageAmount::Rolled(pool) = component.amount {
+                component.amount = DamageAmount::Rolled(
+                    pool.augmented(0, bonus)
+                        .map_err(|_| DamageError::InvalidSpec)?,
+                );
+            }
+        }
+        Self::new(components, self.primary.clone())
+    }
+
     /// Apply melee modifiers to the declared primary. Power Strike affects the
     /// first Impact component (the primary if Impact), or adds a fixed component.
     /// Combine signed/positive changes before the amount's final zero clamp.
@@ -507,6 +525,7 @@ pub struct Protection {
     immunities: BTreeSet<Selector>,
     reductions: BTreeMap<Selector, u32>,
     talent_reductions: BTreeMap<DamageType, u32>,
+    signed_reductions: BTreeMap<Selector, i64>,
 }
 
 impl Protection {
@@ -514,6 +533,20 @@ impl Protection {
     /// by the same derivation fold's stat, flag and ability accumulators.
     pub fn apply(&mut self, operation: &ModifierOp) -> Result<(), DamageError> {
         match operation {
+            ModifierOp::SignedReduction { selector, amount } => {
+                if !(-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(*amount))
+                {
+                    return Err(DamageError::InvalidProtection);
+                }
+                let value = self
+                    .signed_reductions
+                    .get(selector)
+                    .copied()
+                    .unwrap_or(0)
+                    .checked_add(i64::from(*amount))
+                    .ok_or(DamageError::InvalidProtection)?;
+                self.signed_reductions.insert(selector.clone(), value);
+            }
             ModifierOp::Immunity { selector } => {
                 self.immunities.insert(selector.clone());
             }
@@ -537,7 +570,11 @@ impl Protection {
                 )?;
                 self.talent_reductions.insert(*category, strongest);
             }
-            ModifierOp::Add { .. }
+            ModifierOp::AttributeWithoutDefense { .. }
+            | ModifierOp::SustainAttribute { .. }
+            | ModifierOp::ProtectArmor {}
+            | ModifierOp::HealthRecoveryRate { .. }
+            | ModifierOp::Add { .. }
             | ModifierOp::Set { .. }
             | ModifierOp::Flag { .. }
             | ModifierOp::GrantAbility { .. }
@@ -577,9 +614,27 @@ impl Protection {
             .ok_or(DamageError::InvalidProtection)
     }
 
+    pub(crate) fn valid(&self) -> bool {
+        self.signed_reductions
+            .values()
+            .all(|value| (-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(value))
+            && self
+                .reductions
+                .keys()
+                .chain(self.signed_reductions.keys())
+                .all(|selector| self.raw_reduction(selector) <= i128::from(crate::limits::NUMERIC))
+    }
+
+    fn raw_reduction(&self, selector: &Selector) -> i128 {
+        i128::from(self.reductions.get(selector).copied().unwrap_or(0))
+            + i128::from(self.talent_reduction(selector))
+            + i128::from(self.signed_reductions.get(selector).copied().unwrap_or(0))
+    }
+
     pub fn reduction(&self, selector: &Selector) -> u32 {
-        // Each operation validates the combined total before mutating either bucket.
-        self.reductions.get(selector).copied().unwrap_or(0) + self.talent_reduction(selector)
+        // Signed sources cancel before the zero floor. Validate the final raw
+        // total before narrowing; invalid standalone projections never wrap.
+        self.raw_reduction(selector).clamp(0, i128::from(u32::MAX)) as u32
     }
 }
 
@@ -718,5 +773,129 @@ mod psychic_tests {
         let restored: DamageSpec = serde_json::from_value(encoded).unwrap();
         assert_eq!(restored, damage);
         assert_eq!(category_id(DamageType::Psychic), "psychic");
+    }
+}
+
+#[cfg(test)]
+mod worn_modifier_tests {
+    use super::*;
+
+    #[test]
+    fn signed_reduction_combines_before_floor_and_covers_psychic() {
+        let key = Selector::Category {
+            category: DamageType::Psychic,
+        };
+        let mut protection = Protection::default();
+        protection
+            .apply(&ModifierOp::SignedReduction {
+                selector: key.clone(),
+                amount: -1,
+            })
+            .unwrap();
+        assert_eq!(protection.reduction(&key), 0);
+        protection
+            .apply(&ModifierOp::Reduction {
+                selector: key.clone(),
+                amount: 2,
+            })
+            .unwrap();
+        assert_eq!(protection.reduction(&key), 1);
+        protection
+            .apply(&ModifierOp::TalentReduction {
+                category: DamageType::Psychic,
+                amount: 3,
+            })
+            .unwrap();
+        protection
+            .apply(&ModifierOp::TalentReduction {
+                category: DamageType::Psychic,
+                amount: 1,
+            })
+            .unwrap();
+        protection
+            .apply(&ModifierOp::SignedReduction {
+                selector: key.clone(),
+                amount: 2,
+            })
+            .unwrap();
+        assert_eq!(protection.reduction(&key), 6);
+        assert!(protection.valid());
+    }
+
+    #[test]
+    fn attack_bonus_applies_once_per_canonical_pool_not_fixed_or_die() {
+        let pool = DicePool::new(1, 6, 0).unwrap();
+        let damage = DamageSpec::new(
+            vec![
+                DamageComponent::rolled(DamageType::Impact, None, pool),
+                DamageComponent::rolled(DamageType::Impact, None, pool),
+                DamageComponent::rolled(DamageType::Energy, None, pool),
+                DamageComponent::fixed(DamageType::Vital, None, 4),
+            ],
+            None,
+        )
+        .unwrap();
+        let modified = damage.with_roll_bonus(2).unwrap();
+        assert_eq!(modified.components().len(), 3);
+        for component in modified.components() {
+            match component.amount() {
+                DamageAmount::Fixed(value) => assert_eq!(value, 4),
+                DamageAmount::Rolled(pool) => {
+                    assert_eq!(pool.bonus(), 2);
+                    assert_eq!(
+                        pool.count(),
+                        if component.key().category == DamageType::Impact {
+                            2
+                        } else {
+                            1
+                        }
+                    );
+                }
+            }
+        }
+        let negative = damage.with_roll_bonus(-10).unwrap();
+        let mut rng = 42;
+        let outcome = negative.resolve(&mut rng, Edge::default(), &Protection::default(), &mut ());
+        assert!(outcome.total >= 4);
+        assert_eq!(damage.with_roll_bonus(0).unwrap(), damage);
+    }
+    #[test]
+    fn signed_reduction_cancellation_is_order_independent_and_final_bound_precedes_cast() {
+        let key = Selector::Category {
+            category: DamageType::Psychic,
+        };
+        for amounts in [
+            [crate::limits::NUMERIC as i32, 1, -1],
+            [-1, 1, crate::limits::NUMERIC as i32],
+        ] {
+            let mut protection = Protection::default();
+            for amount in amounts {
+                protection
+                    .apply(&ModifierOp::SignedReduction {
+                        selector: key.clone(),
+                        amount,
+                    })
+                    .unwrap();
+            }
+            assert!(protection.valid());
+            assert_eq!(protection.reduction(&key), crate::limits::NUMERIC as u32);
+        }
+        let mut excessive = Protection::default();
+        excessive
+            .signed_reductions
+            .insert(key.clone(), i64::from(u32::MAX) + 1);
+        assert!(
+            !excessive.valid(),
+            "raw signed total cannot wrap through u32 before validation"
+        );
+        excessive
+            .signed_reductions
+            .insert(key.clone(), -2 * crate::limits::NUMERIC);
+        assert!(!excessive.valid());
+        assert_eq!(excessive.reduction(&key), 0);
+        for amount in [-crate::limits::NUMERIC - 1, crate::limits::NUMERIC + 1] {
+            excessive.signed_reductions.insert(key.clone(), amount);
+            assert!(!excessive.valid());
+        }
     }
 }

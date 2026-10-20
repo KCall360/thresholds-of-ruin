@@ -187,12 +187,13 @@ impl StateView {
                 || interactions.identification.as_ref().is_some_and(|choice| {
                     choice.choice.0.is_empty()
                         || choice.choice.0.len() > 256
+                        || !crate::wire::valid_identification_classes(&choice.classes)
                         || choice.items.len() > 64
                         || !unique(choice.items.iter().copied())
                         || choice.items.iter().any(|item| {
                             inventory
                                 .get(item)
-                                .is_none_or(|item| item.class != choice.class)
+                                .is_none_or(|item| !choice.classes.contains(&item.class))
                         })
                 })
                 || interactions.inventory.len() > inventory.len()

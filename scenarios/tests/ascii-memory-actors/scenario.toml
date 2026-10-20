@@ -1,5 +1,5 @@
 # Ordinary authored scenario; validate after every edit.
-format = 25
+format = 26
 id = "ascii-memory-actors"
 version = "1.0"
 ruleset = "rules.toml"

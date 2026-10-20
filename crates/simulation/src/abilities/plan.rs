@@ -265,7 +265,7 @@ pub enum Plan {
         #[serde(deserialize_with = "read_item_effects")]
         effects: Vec<PlannedEffect>,
         #[serde(deserialize_with = "crate::bounded::required_option")]
-        identify: Option<crate::ItemClass>,
+        identify: Option<Vec<crate::ItemClass>>,
         discovery: crate::ItemDiscovery,
     },
     Drink {
@@ -1253,6 +1253,27 @@ impl Game {
         natural_source: bool,
         selected: Option<&crate::creatures::SelectedAttack>,
     ) -> Result<Vec<PlannedEffect>, GameError> {
+        let bonus = self
+            .creature(actor)
+            .map_or(0, |creature| creature.derived().attack_damage_roll_bonus);
+        self.compile_effects_with_roll_bonus(
+            actor,
+            effects,
+            modifiers,
+            natural_source,
+            selected,
+            bonus,
+        )
+    }
+    fn compile_effects_with_roll_bonus(
+        &self,
+        actor: ActorId,
+        effects: &[Effect],
+        modifiers: &crate::creatures::AbilityValues,
+        natural_source: bool,
+        selected: Option<&crate::creatures::SelectedAttack>,
+        roll_bonus: i32,
+    ) -> Result<Vec<PlannedEffect>, GameError> {
         if effects.len() > crate::limits::EFFECTS_PER_BRANCH {
             return Err(invalid());
         }
@@ -1333,6 +1354,7 @@ impl Game {
                             .map_err(|_| invalid())?
                         }
                     };
+                    let damage = damage.with_roll_bonus(roll_bonus).map_err(|_| invalid())?;
                     Ok(PlannedEffect::Damage { damage })
                 }
                 Effect::HealPerHitDie {
@@ -1454,8 +1476,14 @@ impl Game {
         {
             return Err(invalid());
         }
-        let effects =
-            self.compile_effects(actor, effects, &crate::creatures::AbilityValues::default())?;
+        let effects = self.compile_effects_with_roll_bonus(
+            actor,
+            effects,
+            &crate::creatures::AbilityValues::default(),
+            false,
+            None,
+            0,
+        )?;
         if !effects_valid(&effects, &self.content.rules) {
             return Err(invalid());
         }
