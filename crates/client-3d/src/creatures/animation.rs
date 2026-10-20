@@ -219,8 +219,11 @@ fn pose(rig: &Rig, a: &mut Anim, fun: f32, dt: f32, supported: bool, moving: boo
     // At rest each creature idles in its own way, fading out as it moves or acts.
     // Fidgets belong to rest. Normal travelling speeds already have a full
     // gait even though speed is normalized against a much faster run.
-    let calm = (1.0 - ease(s * 4.0).max(a.contacts.blend))
-        * f32::from(u8::from(m.is_none() && a.dead.is_none()));
+    let settled = f32::from(u8::from(m.is_none() && a.dead.is_none()));
+    // Idle fidgets fade out as an action begins and back in after it ends,
+    // rather than switching off and on in a single frame mid-gesture.
+    a.rest += (settled - a.rest) * (1.0 - (-dt * 7.0).exp());
+    let calm = (1.0 - ease(s * 4.0).max(a.contacts.blend)) * a.rest;
     if calm > 0.0 && !a.quiet {
         if !rogue::idle(&mut p, rig, a.time + a.seed * 3.7, a.seed, calm) {
             idle(&mut p, rig, a.time + a.seed * 3.7, a.seed, calm);

@@ -1158,6 +1158,8 @@ pub struct Anim {
     /// How far down it still is after being revived: it rises out of its
     /// death pose instead of snapping upright.
     fallen: f32,
+    /// How fully the idle fidgets are in play, easing between actions.
+    rest: f32,
     /// Hold the rest pose without fidgets, for portraits.
     pub quiet: bool,
 }
@@ -1178,6 +1180,7 @@ impl Anim {
             dodge: None,
             dead: None,
             fallen: 0.0,
+            rest: 1.0,
             quiet: false,
         }
     }

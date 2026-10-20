@@ -685,3 +685,90 @@ fn real_speed_interruptions_and_revival_do_not_pop() {
     }
     eprintln!("{}", report.join("\n"));
 }
+
+/// The largest frame-to-frame jump of the hands and head as an action ends
+/// and the idle fidgets take over again, for a creature standing still.
+fn action_exit_pop(model: CreatureModel) -> f32 {
+    use bevy::time::TimeUpdateStrategy;
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
+        .insert_resource(TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(16),
+        ))
+        .init_resource::<Assets<Mesh>>()
+        .add_systems(Update, animate);
+    let mut materials = Assets::<StandardMaterial>::default();
+    let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
+    let look = Look::of(model, 5);
+    let root = app
+        .world_mut()
+        .spawn((
+            Anim::new(5, Vec3::ZERO),
+            Transform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    let mut queue = bevy::ecs::world::CommandQueue::default();
+    let rig = {
+        let world = app.world_mut();
+        let mut meshes = Assets::<Mesh>::default();
+        let rig = spawn(
+            &mut Commands::new(&mut queue, world),
+            &mut library,
+            &mut meshes,
+            root,
+            &look,
+        );
+        queue.apply(world);
+        rig
+    };
+    let watched: Vec<Entity> = [J::HandL, J::HandR, J::Head, J::Neck]
+        .into_iter()
+        .filter_map(|j| rig.joint(j))
+        .collect();
+    app.world_mut().entity_mut(root).insert(rig);
+    let mut worst = 0.0f32;
+    let mut last: Vec<Vec3> = Vec::new();
+    // Each start is timed so the action ends while a fidget is under way.
+    for frame in 0..900 {
+        if frame % 150 == 40 {
+            app.world_mut()
+                .get_mut::<Anim>(root)
+                .unwrap()
+                .act(Move::Focus);
+        }
+        app.update();
+        let now: Vec<Vec3> = watched
+            .iter()
+            .map(|e| {
+                app.world()
+                    .get::<GlobalTransform>(*e)
+                    .unwrap()
+                    .translation()
+            })
+            .collect();
+        if !last.is_empty() && frame % 150 > 100 {
+            let jump = now
+                .iter()
+                .zip(&last)
+                .map(|(a, b)| a.distance(*b))
+                .fold(0.0, f32::max);
+            worst = worst.max(jump);
+        }
+        last = now;
+    }
+    worst
+}
+
+#[test]
+fn ending_an_action_hands_back_to_the_idle_without_a_snap() {
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Mage,
+        CreatureModel::Vampire,
+        CreatureModel::Quagga,
+    ] {
+        let pop = action_exit_pop(model);
+        assert!(pop < 0.12, "{model:?} snaps back to its idle: {pop}");
+    }
+}
