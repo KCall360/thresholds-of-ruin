@@ -936,12 +936,13 @@ fn magic_capabilities_charge_state_and_choice_have_strict_named_current_shapes()
     assert!(serde_json::from_str::<ChargeRange>(r#"{"minimum":7,"maximum":3}"#).is_err());
     assert!(
         serde_json::from_str::<crate::magic_items::IdentificationChoice>(
-            r#"{"choice":0,"class":"wand"}"#
+            r#"{"choice":0,"classes":["wand"]}"#
         )
         .is_err()
     );
     assert!(
-        serde_json::from_str::<crate::magic_items::IdentificationChoice>(r#"[1,"wand"]"#).is_err()
+        serde_json::from_str::<crate::magic_items::IdentificationChoice>(r#"[1,["wand"]]"#)
+            .is_err()
     );
     for _ in 0..32 {
         let sampled = ChargeRange {
@@ -1326,7 +1327,7 @@ fn identification_choices_and_owned_charge_facts_are_bounded_named_records() {
         #[serde(deserialize_with = "crate::magic_items::read_known_charges")]
         _facts: tor_world::Shared<crate::magic_items::ChargeKnowledge>,
     }
-    let choice = serde_json::json!({"choice":1,"class":"tool"});
+    let choice = serde_json::json!({"choice":1,"classes":["tool"]});
     assert!(
         serde_json::from_value::<crate::magic_items::IdentificationChoice>(choice.clone()).is_ok()
     );
@@ -1337,14 +1338,15 @@ fn identification_choices_and_owned_charge_facts_are_bounded_named_records() {
         .is_ok()
     );
     for raw in [
-        r#"{"choice":0,"class":"tool"}"#,
-        r#"{"choice":18446744073709551615,"class":"tool"}"#,
-        r#"{"class":"tool"}"#,
+        r#"{"choice":0,"classes":["tool"]}"#,
+        r#"{"choice":18446744073709551615,"classes":["tool"]}"#,
+        r#"{"classes":["tool"]}"#,
         r#"{"choice":1}"#,
-        r#"{"choice":1,"class":"tool","extra":0}"#,
-        r#"{"choice":1,"choice":2,"class":"tool"}"#,
-        r#"{"choice":1,"class":"tool","class":"potion"}"#,
-        r#"[1,"tool"]"#,
+        r#"{"choice":1,"classes":["tool"],"extra":0}"#,
+        r#"{"choice":1,"choice":2,"classes":["tool"]}"#,
+        r#"{"choice":1,"classes":["tool"],"classes":["potion"]}"#,
+        r#"{"choice":1,"class":"tool"}"#,
+        r#"[1,["tool"]]"#,
     ] {
         assert!(
             serde_json::from_str::<crate::magic_items::IdentificationChoice>(raw).is_err(),

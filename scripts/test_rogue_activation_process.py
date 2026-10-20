@@ -449,7 +449,7 @@ class RogueMagicReceiptTests(unittest.TestCase):
 
     def test_all_three_stages_return_every_placed_identity_for_cross_stage_duplicate_checks(self):
         self.assertEqual(assert_magic_item_receipts(self, self.receipts(), require_placed=True),
-                         [("item", 100), ("item", 101), ("item", 102), ("item", 103)])
+                         [("item", 100), ("item", 101), ("item", 102)])
 
     def test_every_reviewed_subtype_is_eligible_only_in_its_magic_stage(self):
         for index, choices in enumerate((
@@ -461,7 +461,7 @@ class RogueMagicReceiptTests(unittest.TestCase):
                     receipts = self.receipts()
                     receipts[index]["result"]["attempts"][0]["content"] = choice
                     self.assertEqual(len(assert_magic_item_receipts(self, receipts)), 3)
-                    receipts[(index + 1) % 4]["result"]["attempts"][0]["content"] = choice
+                    receipts[(index + 1) % 3]["result"]["attempts"][0]["content"] = choice
                     with self.assertRaises(AssertionError):
                         assert_magic_item_receipts(self, receipts)
 
