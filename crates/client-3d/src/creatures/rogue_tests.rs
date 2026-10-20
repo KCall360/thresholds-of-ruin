@@ -1069,6 +1069,39 @@ fn every_dressable_humanoid_wears_every_outfit() {
                 if model == CreatureModel::Medusa {
                     assert!(!rig.segments.is_empty(), "{wardrobe:?} keeps her serpents");
                 }
+                // What the outfit puts on the head decides whether hair shows:
+                // a helm hides it, and a sentinel out of her helm shows hers.
+                let fall = rig.drapes.iter().any(|(_, kind)| *kind == Drape::Hair);
+                assert_eq!(
+                    fall,
+                    geometry::loose_fall(&dressed),
+                    "{model:?} {wardrobe:?} hair"
+                );
+                if wardrobe == Wardrobe::Knight {
+                    assert!(!fall, "{model:?} wears her hair under the helm");
+                }
+                // Pointed ears fold inside a helm rather than poking through.
+                if wardrobe == Wardrobe::Knight {
+                    let tip = geometry::rogue::ear_tip(&dressed, Vec3::new(0.24, 0.2, -0.08));
+                    assert!(
+                        tip.x <= geometry::rogue::EAR_UNDER_COVER,
+                        "{model:?} ears under the helm"
+                    );
+                }
+                // Hair and what is worn in it (wreaths, topknots) go under
+                // a helm, and show again out of it.
+                assert_eq!(
+                    geometry::rogue::hair_shows(&dressed),
+                    match wardrobe {
+                        Wardrobe::Knight => false,
+                        Wardrobe::Commoner | Wardrobe::Courtier => true,
+                        _ => geometry::rogue::hair_shows(&dressed),
+                    },
+                    "{model:?} {wardrobe:?} hair"
+                );
+                if model == CreatureModel::Sentinel && woman && wardrobe == Wardrobe::Courtier {
+                    assert!(fall, "out of her helm, a sentinel lets her hair down");
+                }
                 for (_, mesh) in meshes.iter() {
                     if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(ps)) =
                         mesh.attribute(Mesh::ATTRIBUTE_POSITION)

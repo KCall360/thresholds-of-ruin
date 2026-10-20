@@ -1,9 +1,9 @@
 use super::anatomy::{storybook_part, BootShape, HumanoidBody, LimbShape};
 use super::animation::ease;
-use super::outfit::{Arms, Feet, Legs, Outer, Outfit};
+use super::outfit::{Arms, Feet, Headwear, Legs, Outer, Outfit};
 use super::*;
 
-mod rogue;
+pub(super) mod rogue;
 
 #[cfg(test)]
 mod art_contract_tests {
@@ -1348,13 +1348,10 @@ fn hair_style(l: &Look) -> u8 {
     }
 }
 
-/// Whether a person's head is hooded rather than showing hair.
+/// Whether a person's head is covered by a hood or helm rather than
+/// showing hair.
 fn hooded(l: &Look) -> bool {
-    let hood_down = matches!(l.style, Style::Caster | Style::Scout) && l.v.pattern >= 2;
-    matches!(
-        l.style,
-        Style::Caster | Style::Scout | Style::Sentinel | Style::Wraith
-    ) && !hood_down
+    matches!(Outfit::worn(l).head, Headwear::Hood { .. } | Headwear::Helm)
 }
 
 /// Whether a person shows hair at all: not under a hood, and not a kind
@@ -4096,7 +4093,6 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                         * Affine3A::from_translation(Vec3::Y * -0.08),
                 );
                 human_face(p, &l, !matches!(style, Style::Hobgoblin | Style::Troll));
-                let hood_down = matches!(style, Style::Caster | Style::Scout) && l.v.pattern >= 2;
                 if shows_hair(&l) {
                     hair(p, &l, !loose_fall(&l));
                 }
@@ -4109,9 +4105,9 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 {
                     beard(p, hair_color(&l));
                 }
-                match style {
-                    Style::Hero => {}
-                    Style::Sentinel => {
+                // What the outfit puts on the head.
+                match outfit.head {
+                    Headwear::Helm => {
                         tube(
                             &mut p.metal,
                             &[
@@ -4183,12 +4179,7 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                             );
                         }
                     }
-                    Style::Caster | Style::Scout if hood_down => {
-                        let hood = if style == Style::Caster {
-                            l.cloth
-                        } else {
-                            Vec3::new(0.3, 0.42, 0.22)
-                        };
+                    Headwear::HoodDown(hood) => {
                         {
                             use crate::sdf::{Sculpt, Shape::*};
                             let mut cowl = Sculpt::default();
@@ -4222,12 +4213,10 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                             );
                         }
                     }
-                    Style::Caster | Style::Scout | Style::Wraith => {
-                        let hood = match style {
-                            Style::Caster => l.cloth,
-                            Style::Wraith => l.cloth * 0.85,
-                            _ => Vec3::new(0.3, 0.42, 0.22),
-                        };
+                    Headwear::Hood {
+                        color: hood,
+                        pointed,
+                    } => {
                         // A deep hood: the shell rounds over the head, a thick
                         // rolled rim frames the face, and the cloth drapes down
                         // the back of the neck onto the shoulders.
@@ -4296,7 +4285,6 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                             }
                         }
                         // Some hoods end in a long soft point that flops back.
-                        let pointed = style == Style::Scout || l.aura == Some(Accent::Ember);
                         if pointed {
                             tube(
                                 &mut p.matte,
@@ -4311,6 +4299,10 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                             );
                         }
                     }
+                    Headwear::Bare => {}
+                }
+                match style {
+                    Style::Hero => {}
                     Style::Hobgoblin => {
                         for side in [-1.0f32, 1.0] {
                             p.matte.prism(

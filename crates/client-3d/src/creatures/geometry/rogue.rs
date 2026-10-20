@@ -96,6 +96,20 @@ fn tatters(
     }
 }
 
+/// Where a pointed ear's tip reaches, folded back inside a hood or helm
+/// when one covers the head so it never pokes through.
+pub(in crate::creatures) fn ear_tip(l: &Look, tip: Vec3) -> Vec3 {
+    if super::hooded(l) {
+        Vec3::new(tip.x.min(EAR_UNDER_COVER), tip.y, tip.z)
+    } else {
+        tip
+    }
+}
+
+/// How far a covered ear reaches to the side: inside the narrowest hood or
+/// helm shell (about 0.128 across at the brim).
+pub(in crate::creatures) const EAR_UNDER_COVER: f32 = 0.112;
+
 /// A pointed ear from the side of the head, flat and swept back.
 fn pointed_ear(p: &mut Parts, side: f32, tip: Vec3, width: f32, color: Vec3) {
     let root = Vec3::new(side * 0.093, 0.15, -0.005);
@@ -189,6 +203,12 @@ fn topknot(p: &mut Parts, l: &Look, wild: bool) {
             c * (0.92 + 0.1 * k as f32),
         );
     }
+}
+
+/// Whether hair, and what is worn in it (a nymph's wreath, a topknot),
+/// shows: a hood or helm covers them all.
+pub(in crate::creatures) fn hair_shows(l: &Look) -> bool {
+    !super::hooded(l)
 }
 
 /// A wreath of leaves around the crown of the head.
@@ -359,14 +379,28 @@ pub(super) fn head_details(p: &mut Parts, l: &Look) {
     match l.style {
         Style::Orc => {
             for side in [-1.0f32, 1.0] {
-                pointed_ear(p, side, Vec3::new(0.17, 0.215, -0.06), 0.026, l.skin);
+                pointed_ear(
+                    p,
+                    side,
+                    ear_tip(l, Vec3::new(0.17, 0.215, -0.06)),
+                    0.026,
+                    l.skin,
+                );
                 tusk(p, side, if fem { 0.035 } else { 0.05 }, 0.011);
             }
-            topknot(p, l, fem);
+            if hair_shows(l) {
+                topknot(p, l, fem);
+            }
         }
         Style::Troll => {
             for side in [-1.0f32, 1.0] {
-                pointed_ear(p, side, Vec3::new(0.24, 0.2, -0.08), 0.03, l.skin);
+                pointed_ear(
+                    p,
+                    side,
+                    ear_tip(l, Vec3::new(0.24, 0.2, -0.08)),
+                    0.03,
+                    l.skin,
+                );
                 tusk(p, side, 0.04, 0.012);
             }
             // A big ruddy nose.
@@ -377,11 +411,19 @@ pub(super) fn head_details(p: &mut Parts, l: &Look) {
                 0.0,
                 Vec3::new(0.82, 0.36, 0.28),
             );
-            topknot(p, l, true);
+            if hair_shows(l) {
+                topknot(p, l, true);
+            }
         }
         Style::Leprechaun => {
             for side in [-1.0f32, 1.0] {
-                pointed_ear(p, side, Vec3::new(0.16, 0.235, -0.04), 0.022, l.skin);
+                pointed_ear(
+                    p,
+                    side,
+                    ear_tip(l, Vec3::new(0.16, 0.235, -0.04)),
+                    0.022,
+                    l.skin,
+                );
                 // Rosy cheeks.
                 p.matte.blob(
                     Vec3::new(side * 0.06, 0.125, 0.085),
@@ -394,9 +436,17 @@ pub(super) fn head_details(p: &mut Parts, l: &Look) {
         }
         Style::Nymph => {
             for side in [-1.0f32, 1.0] {
-                pointed_ear(p, side, Vec3::new(0.15, 0.24, -0.05), 0.02, l.skin);
+                pointed_ear(
+                    p,
+                    side,
+                    ear_tip(l, Vec3::new(0.15, 0.24, -0.05)),
+                    0.02,
+                    l.skin,
+                );
             }
-            leaf_crown(p, l.cloth, 0.1, 0.27);
+            if hair_shows(l) {
+                leaf_crown(p, l.cloth, 0.1, 0.27);
+            }
             if fem {
                 for side in [-1.0f32, 1.0] {
                     p.metal.blob(
@@ -411,7 +461,13 @@ pub(super) fn head_details(p: &mut Parts, l: &Look) {
         }
         Style::Medusa => {
             for side in [-1.0f32, 1.0] {
-                pointed_ear(p, side, Vec3::new(0.14, 0.21, -0.04), 0.02, l.skin);
+                pointed_ear(
+                    p,
+                    side,
+                    ear_tip(l, Vec3::new(0.14, 0.21, -0.04)),
+                    0.02,
+                    l.skin,
+                );
                 // Scales over the temples and down the cheeks.
                 for k in 0..6 {
                     let y = 0.2 - k as f32 * 0.018;
