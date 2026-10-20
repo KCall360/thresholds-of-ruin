@@ -164,6 +164,7 @@ fn cell(x: i32, y: i32, z: i32, key: &str) -> CellView {
     CellView {
         lit: true,
         asset: None,
+        trap: None,
         door: None,
         material: "stone".into(),
         key: key.into(),
@@ -1712,4 +1713,55 @@ fn anonymous_ability_feedback_survives_validated_snapshot_codec_and_delta() {
         assert_ne!(malformed, encoded);
         assert!(decode_response(&malformed).is_err());
     }
+}
+
+#[test]
+fn trap_presence_family_and_reach_are_exact_delta_fields_without_hidden_operands() {
+    for invalid in [
+        serde_json::json!({"rust":null}),
+        serde_json::json!(["rust"]),
+        serde_json::json!(0),
+    ] {
+        assert!(serde_json::from_value::<TrapFamily>(invalid).is_err());
+    }
+
+    let base = room(5, 5, 1);
+    let mut discovered = base.clone();
+    discovered.revision += 1;
+    let target = TrapTarget::from_digest([61; 32]);
+    discovered.observation.visible_cells[0].trap = Some(TrapView {
+        id: target,
+        family: None,
+        reachable: false,
+    });
+    let delta = round_trip(&base, &discovered);
+    assert_eq!(delta.cells.changed.len(), 1);
+    let mut examined = discovered.clone();
+    examined.revision += 1;
+    let trap = examined.observation.visible_cells[0].trap.as_mut().unwrap();
+    trap.family = Some(TrapFamily::SleepingGas);
+    trap.reachable = true;
+    assert_eq!(round_trip(&discovered, &examined).cells.changed.len(), 1);
+    let wire =
+        serde_json::to_value(examined.observation.visible_cells[0].trap.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        wire.as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>(),
+        ["family", "id", "reachable"]
+    );
+    assert!(target.to_string().parse::<DoorTarget>().is_err());
+    assert!(target.to_string().parse::<ItemTarget>().is_err());
+    assert!(serde_json::from_value::<TrapView>(serde_json::json!([target, null, true])).is_err());
+    let mut missing = wire.clone();
+    missing.as_object_mut().unwrap().remove("family");
+    assert!(serde_json::from_value::<TrapView>(missing).is_err());
+    let mut hidden = wire;
+    hidden["dc"] = serde_json::json!(15);
+    assert!(serde_json::from_value::<TrapView>(hidden).is_err());
+    let mut cell = serde_json::to_value(&base.observation.visible_cells[0]).unwrap();
+    cell.as_object_mut().unwrap().remove("trap");
+    assert!(serde_json::from_value::<CellView>(cell).is_err());
 }

@@ -551,6 +551,15 @@ impl App {
             Direction::NorthWest => (-1, -1),
             Direction::Up | Direction::Down => return false,
         };
+        // Hazard disclosure wins over item/creature glyph precedence. Running
+        // must not step onto a known trap merely because an item covers it.
+        if o.visible_cells.iter().any(|cell| {
+            cell.trap.is_some()
+                && (cell.position.x, cell.position.y) == (o.position.x + dx, o.position.y + dy)
+                && cell.position.z == o.position.z
+        }) {
+            return false;
+        }
         crate::render::map_tiles(state, &self.palette)
             .into_iter()
             .any(|t| {
@@ -2464,6 +2473,20 @@ impl App {
                     self.look_cursor = None;
                     self.status.clear();
                     if let Some(state) = &self.state {
+                        let examination = state
+                            .state()
+                            .observation
+                            .visible_cells
+                            .iter()
+                            .filter(|cell| {
+                                (cell.position.x, cell.position.y) == (cursor.x, cursor.y)
+                            })
+                            .filter_map(|cell| cell.trap.as_ref())
+                            .find(|trap| trap.reachable && trap.family.is_none())
+                            .map(|trap| trap.id);
+                        if let Some(trap) = examination {
+                            return self.act(Action::ExamineTrap { trap });
+                        }
                         let text = crate::describe(state, &self.palette, cursor.x, cursor.y);
                         self.messages.push(text);
                     }
@@ -3489,7 +3512,20 @@ pub fn describe(
 ) -> String {
     let o = &state.state().observation;
     if (x, y) == (o.position.x, o.position.y) {
-        return "That's you.".into();
+        return o
+            .visible_cells
+            .iter()
+            .filter(|cell| cell.position == o.position)
+            .find_map(|cell| cell.trap.as_ref())
+            .map_or_else(
+                || "That's you.".into(),
+                |trap| {
+                    format!(
+                        "That's you. A {} lies underfoot.",
+                        trap.family.map_or("trap", TrapFamily::name)
+                    )
+                },
+            );
     }
     if let Some(actor) = crate::map::CreatureColumns::new(o).actor(x, y) {
         let phrase = if actor.name.trim().is_empty() {
@@ -3553,6 +3589,24 @@ pub fn describe(
                 Some((name, quantity)) => item_phrase(name, quantity),
                 None => "an object".into(),
             }
+        }
+        crate::map::Kind::Trap => {
+            let current = o
+                .visible_cells
+                .iter()
+                .filter(|cell| (cell.position.x, cell.position.y) == (x, y))
+                .find_map(|cell| cell.trap.as_ref().map(|trap| trap.family));
+            let remembered = state
+                .map_memory()
+                .filter(|cell| (cell.position.x, cell.position.y) == (x, y))
+                .find_map(|cell| cell.trap.as_ref().map(|trap| trap.family));
+            format!(
+                "a {}",
+                current
+                    .or(remembered)
+                    .flatten()
+                    .map_or("trap", TrapFamily::name)
+            )
         }
         crate::map::Kind::Wall => "a wall".into(),
         crate::map::Kind::LowWall => "a low wall".into(),

@@ -183,6 +183,7 @@ pub enum Perception {
     Sight { enabled: bool },
     ObjectGuise { appearance: Option<GuiseAppearance> },
     AmbushFromGuise { enabled: bool },
+    PeriodicSearch { interval: u64 },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

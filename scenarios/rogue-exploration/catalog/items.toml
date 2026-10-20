@@ -471,7 +471,7 @@ class = "ring"
 stackable = false
 appearance_pool = "rogue.rings"
 equipment_generation = { kind = "signed_potency", negative = 1, positive = 2 }
-equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }], potency_modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "attribute", attribute = "strength" }, value = 1 } }] }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }], potency_modifiers = [{ scope = "always", op = { kind = "attribute_without_defense", attribute = "strength", defense = "physical", value = 1 } }] }
 
 [items."rogue.ring_sustain_strength"]
 asset = "item.ring"
@@ -555,6 +555,16 @@ stackable = false
 appearance_pool = "rogue.rings"
 equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }, { scope = "always", op = { kind = "protect_armor" } }], potency_modifiers = [] }
 
+[items."rogue.ring_searching"]
+asset = "item.ring"
+name = "ring of searching"
+identity = "rogue.ring_searching"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 10 } }, { scope = "always", op = { kind = "perception", value = { kind = "periodic_search", interval = 100 } } }], potency_modifiers = [] }
+
 [appearance_pools."rogue.rings"]
 asset = "item.ring"
-appearances = ["agate ring", "bronze ring", "coral ring", "diamond ring", "emerald ring", "ivory ring", "jade ring", "opal ring", "ruby ring", "sapphire ring"]
+appearances = ["agate ring", "bronze ring", "coral ring", "diamond ring", "emerald ring", "ivory ring", "jade ring", "opal ring", "ruby ring", "sapphire ring", "topaz ring"]

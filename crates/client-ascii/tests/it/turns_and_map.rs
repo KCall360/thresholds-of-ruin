@@ -23,7 +23,7 @@ fn snapshot() -> Snapshot {
             for (z, wall) in [(-1, true), (0, false), (1, false), (2, true)] {
                 cells.push(serde_json::json!({
                     "key":format!("{x}:{y}:{z}"),"position":{"x":x,"y":y,"z":z},"wall":wall,
-                    "stairs_up":false,"stairs_down":x == -3 && y == 0 && z == 0,"lit":true,"place_hint":false
+                    "trap":null,"stairs_up":false,"stairs_down":x == -3 && y == 0 && z == 0,"lit":true,"place_hint":false
                 }));
             }
         }
@@ -639,7 +639,7 @@ fn the_single_map_merges_heights_and_never_draws_the_player_as_a_creature() {
     let cell = |x: i32, z: i32, wall: bool| {
         serde_json::from_value::<CellView>(serde_json::json!({
             "key":format!("extra:{x}:{z}"),"position":{"x":x,"y":-1,"z":z},"wall":wall,
-            "stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
+            "trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
         }))
         .unwrap()
     };

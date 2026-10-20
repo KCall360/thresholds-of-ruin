@@ -376,7 +376,7 @@ fn state() -> StateView {
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
             "wall":false,"material":"stone","lit":true,"place_hint":x==1 || x==6,
-            "stairs_up":false,"stairs_down":false
+            "trap":null,"stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
             {"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
@@ -3377,6 +3377,7 @@ fn a_cold_hydrated_doorway_is_descriptive_and_current_sight_wins() {
         place_hint: door_cell.place_hint,
         stairs_up: false,
         stairs_down: false,
+        trap: None,
         door: Some(MapDoorAppearance {
             name: "oak door".into(),
             description: "Last seen open.".into(),
@@ -3455,6 +3456,8 @@ fn a_cold_hydrated_doorway_is_descriptive_and_current_sight_wins() {
         .observation
         .visible_cells
         .push(CellView {
+            trap: None,
+
             door: None,
             ..door_cell.clone()
         });
@@ -4234,4 +4237,49 @@ async fn projectile_text_cancel_wrong_preview_and_changed_inventory_never_commit
             1
         );
     }
+}
+
+#[tokio::test]
+async fn examine_discovered_adjacent_trap_is_one_zero_time_action_and_known_family_is_readonly() {
+    let target = TrapTarget::from_digest([61; 32]);
+    let mut initial = state();
+    initial.observation.visible_cells[1].trap = Some(TrapView {
+        id: target,
+        family: None,
+        reachable: true,
+    });
+    let mut link = Scripted::new(initial, move |request, now| {
+        assert!(is_act(request, &Action::ExamineTrap { trap: target }));
+        let mut after = now.clone();
+        after.observation.visible_cells[1]
+            .trap
+            .as_mut()
+            .unwrap()
+            .family = Some(TrapFamily::Rust);
+        vec![Frame::View(after, None), Frame::Ack]
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "examine trap").await;
+    assert!(text.contains("rust trap"), "{text}");
+    assert_eq!(link.sent.len(), 1);
+    assert_eq!(link.client.state().observation.tick, 0);
+    let text = play(&mut link, &mut engine, "examine trap").await;
+    assert!(text.contains("not disarmed"), "{text}");
+    assert_eq!(link.sent.len(), 1, "known examination is presentation only");
+}
+
+#[tokio::test]
+async fn examining_distant_trap_does_not_approach_or_query_a_hidden_family() {
+    let mut initial = state();
+    initial.observation.visible_cells[5].trap = Some(TrapView {
+        id: TrapTarget::from_digest([62; 32]),
+        family: None,
+        reachable: false,
+    });
+    let mut link = Scripted::new(initial, |_, _| panic!("distant examination must not send"));
+    let mut engine = Engine::default();
+    assert!(play(&mut link, &mut engine, "examine trap")
+        .await
+        .contains("within reach"));
+    assert!(link.sent.is_empty());
 }

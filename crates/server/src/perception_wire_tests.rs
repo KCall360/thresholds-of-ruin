@@ -1196,3 +1196,79 @@ fn projectile_delivery_preserves_exact_owned_operands_without_hidden_profile_aut
         unavailable
     );
 }
+
+#[test]
+fn trap_projection_and_examination_use_only_actor_scoped_disclosed_presence() {
+    let (mut observation, scene, scope) = fixture();
+    let location = observation.visible_cells[0].location;
+    observation.visible_cells[0].trap = Some(s::TrapView {
+        id: 73,
+        family: None,
+        reachable: true,
+    });
+    let action = request(json!({"type":"examine_trap", "trap":scope.trap(73)}));
+    assert_eq!(
+        decode_action(&action, &scope, &observation).unwrap(),
+        a::Action::ExamineTrap { trap: 73 }
+    );
+    let wire = projected(observation.clone(), scene.clone(), &scope);
+    let trap = wire["visible_cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|cell| cell.get("trap").filter(|trap| !trap.is_null()))
+        .unwrap();
+    assert_eq!(trap["family"], Value::Null);
+    assert_eq!(trap["id"], scope.trap(73).to_string());
+    assert_eq!(trap.as_object().unwrap().len(), 3);
+    let other = TargetScope::new(uuid::Uuid::from_u128(7), s::ActorId(2));
+    assert!(decode_action(
+        &request(json!({"type":"examine_trap", "trap":other.trap(73)})),
+        &scope,
+        &observation
+    )
+    .is_err());
+    observation
+        .visible_cells
+        .iter_mut()
+        .filter(|cell| cell.location == location)
+        .for_each(|cell| cell.trap = None);
+    assert!(decode_action(&action, &scope, &observation).is_err());
+    let text = projected(observation, scene, &scope).to_string();
+    assert!(!text.contains(&scope.trap(73).to_string()));
+}
+
+#[test]
+fn concealed_closure_projection_uses_disclosed_wall_not_raw_scene_and_has_no_door_capability() {
+    let (mut observation, mut scene, scope) = fixture();
+    let location = observation.visible_cells[0].location;
+    let frame = observation.visible_cells[0].frame;
+    let offset = scene
+        .iter()
+        .find(|cell| cell.location == location && cell.rotation == frame)
+        .unwrap()
+        .offset;
+    let cell = &mut observation.visible_cells[0];
+    cell.wall = true;
+    cell.material = "stone";
+    cell.door = None;
+    cell.door_secret = false;
+    cell.door_reachable = false;
+    cell.door_approaches.clear();
+    for cell in scene.iter_mut().filter(|cell| cell.location == location) {
+        cell.wall = false; // Shared scene geometry is not observer-specific disclosure.
+    }
+    let action = request(json!({"type":"set_door", "door":scope.door(79), "open":true}));
+    assert!(decode_action(&action, &scope, &observation).is_err());
+    let wire = projected(observation, scene, &scope);
+    assert!(!wire.to_string().contains(&scope.door(79).to_string()));
+    let wall = wire["visible_cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|cell| cell["position"] == json!({"x":offset.x,"y":offset.y,"z":offset.z}))
+        .unwrap();
+    assert_eq!(wall["wall"], true);
+    assert_eq!(wall["material"], "stone");
+    assert!(wall.get("door").is_none_or(Value::is_null));
+}

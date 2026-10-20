@@ -615,5 +615,65 @@ class SequenceRiderFixtureContracts(unittest.TestCase):
                 self.assertTrue(all(len(row["riders"]) == 1 for row in strikes))
 
 
+class DiscoveryRecordingContracts(unittest.TestCase):
+    def samples(self):
+        trap = {"id": "t_" + "01" * 32, "family": None, "reachable": True}
+        door = {"id": "d_" + "02" * 32, "open": False}
+        presence = {"type": "snapshot", "request_id": "exact-presence", "snapshot": {
+            "state": {"observation": {"visible_cells": [{"trap": trap}, {"door": door}]}}}}
+        family = copy.deepcopy(presence)
+        family["snapshot"]["state"]["observation"]["visible_cells"][0]["trap"]["family"] = "rust"
+        opened = copy.deepcopy(family)
+        cells = opened["snapshot"]["state"]["observation"]["visible_cells"]
+        cells[1]["door"]["open"] = True
+        cells.append({"trap": {**trap, "id": "t_" + "03" * 32}})
+        return {"presence": presence, "family": family, "opened": opened,
+                "restored": copy.deepcopy(opened)}
+
+    def case(self, samples, failure=None):
+        case, trace = recording_case(failure)
+        original = type(case).runTest
+
+        def record(subject):
+            subject.discovery_samples = copy.deepcopy(samples)
+            original(subject)
+
+        type(case).runTest = record
+        return case, trace
+
+    def test_discovery_factory_reuses_non_graphical_source_free_checkpoint_acceptance(self):
+        case = record_wire_samples.discovery_recording_case()
+        self.assertEqual(case.id(), "test_discovery_process.DiscoveryProcesses."
+                         "test_text_examination_and_secret_open_survive_source_free_checkpoint")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_discovery_adapter_retains_exact_artifacts_only_after_cleanup(self):
+        source = self.samples()
+        case, trace = self.case(source)
+        samples = {}
+        with patch("record_wire_samples.discovery_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_discovery(samples)
+        self.assertEqual(samples, {"zz.discovery_" + name: value for name, value in source.items()})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.discovery_presence"], case.discovery_samples["presence"])
+
+    def test_incomplete_or_failed_discovery_capture_cannot_publish_partial_samples(self):
+        for failure in ("cleanup", "class_cleanup", "family", "missing", "restore"):
+            with self.subTest(failure=failure):
+                source = self.samples()
+                if failure == "family":
+                    source["presence"]["snapshot"]["state"]["observation"]["visible_cells"][0]["trap"]["family"] = "rust"
+                elif failure == "missing":
+                    del source["opened"]
+                elif failure == "restore":
+                    source["restored"]["snapshot"]["state"]["observation"]["visible_cells"].pop()
+                case, _ = self.case(source, failure)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.discovery_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_discovery(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
 if __name__ == "__main__":
     unittest.main()

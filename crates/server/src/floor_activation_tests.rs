@@ -38,7 +38,9 @@ mod deep_atomicity;
 mod retrieval;
 
 fn fixture_with_activation(activation: bool) -> Scenario {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+    // This activation-only witness deliberately uses the retained feature-free
+    // geometry package, not the evolving production discovery/trap recipe.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/rogue-geometry");
     let template = crate::scenario_package::resolve_source(&root).unwrap();
     let mut source = serde_json::to_value(&template.manifest).unwrap();
     source["id"] = json!("floor-activation");

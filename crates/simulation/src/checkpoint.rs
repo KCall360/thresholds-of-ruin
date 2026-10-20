@@ -809,7 +809,7 @@ impl Game {
         {
             return Err(PersistError::ExploredMap);
         }
-        if !game.world.checkpoint_valid(game.next_door_id) {
+        if !game.world.checkpoint_valid(game.next_door_id) || !game.loaded_traps_valid() {
             return Err(PersistError::World);
         }
         if !game.loaded_holds_valid() {
@@ -928,6 +928,16 @@ impl Game {
                                 || self.detached_actor(entry.source)
                         })
                 })
+            && actor.discovery.valid()
+            && actor
+                .discovery
+                .features()
+                .all(|feature| self.knows_concealed_feature(feature))
+            && actor.search_clock.valid_for(actor)
+            && actor
+                .trap_contacts
+                .ids()
+                .all(|trap| self.knows_concealed_feature(tor_world::ConcealedFeatureId::Trap(trap)))
             && self.magic_knowledge_valid(id)
             && id.0 < self.next_actor_id
             && actor.recognized_abilities.len() <= crate::limits::CATALOG_ENTRIES
@@ -3217,6 +3227,7 @@ mod explored_map_tests {
             place_hint: true,
             stairs_up: true,
             stairs_down: false,
+            trap: None,
             door: Some(MapDoorAppearance {
                 name: "old gate".into(),
                 description: "last seen closed".into(),
@@ -4092,9 +4103,10 @@ mod explored_map_tests {
             true,
             false,
             null,
+            null,
             []
         ]));
-        for field in ["asset", "door", "ground_items"] {
+        for field in ["asset", "door", "trap", "ground_items"] {
             let mut bad = good.clone();
             bad.as_object_mut().unwrap().remove(field);
             reject(bad);

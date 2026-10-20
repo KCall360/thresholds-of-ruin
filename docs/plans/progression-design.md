@@ -395,7 +395,11 @@ Optional specializations gated by skill rank 1, 2 and 3 at HD 1, 11 and 21.
 | Wayfarer (Survival) | U03 Steady Recovery: Health recovery period −25% while no hostile is sensed | U07 Hardy Recovery: quiet reset after damage is halved | U11 Expedition Cache: anchored supply cache |
 | Recall a Pattern (Lore) | U04 Recall a Pattern: learn one cued property | U08 Test a Sample: consume to learn a property | U12 Evidence Ledger: two cues reveal a property |
 
-Every knowledge attempt is locked per subject, permanent rank and evidence set.
+Property-interpretation attempts are locked per subject, permanent rank and evidence
+set. Physical Perception discovery is different: passive first-observation attempts
+persist per actor and exact feature, including failures, while paid Search remains
+repeatable at its ordinary time and hunger cost. Neither viewing nor reloading
+grants another passive attempt; rank changes do not reset physical receipts.
 Crafting needs a reachable disclosed workbench; recipes never profit-cycle.
 
 ### Culminations at HD 30

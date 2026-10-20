@@ -3,6 +3,7 @@ import copy
 import json
 import shutil
 import sqlite3
+import time
 import unittest
 
 from checkpoint_payload import decode_checkpoint_payload
@@ -433,18 +434,37 @@ class NutritionAsciiProcesses(ProcessTestCase):
         package = prepare_rolled(self)
         self.server(scenario=package, seed=FIRST_MEAL_SEED)
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
-        initial = self.ascii_frame(ascii_client, lambda frame: frame["state"] is not None and not frame["busy"])
+        initial = self.ascii_frame(ascii_client, lambda frame: frame["state"] is not None
+                                   and not frame["busy"] and frame["can_admit_intention"])
+        def finished_meal(frame, previous_reserve):
+            view = observation(frame)
+            return (nutrition(frame)["reserve"] > previous_reserve and view["ready"]
+                    and not frame["busy"] and not view["combat"]["preparation_active"]
+                    and not any(status["phase"] in ("queued", "started")
+                                for status in frame.get("intentions", []))
+                    and frame["can_admit_intention"])
+
         for _ in range(3):
             picker = self.key(ascii_client, "eat")
             self.assertEqual(picker["state"], initial["state"])
             closed = self.key(ascii_client, "escape")
             self.assertEqual(closed["state"], initial["state"])
         self.key(ascii_client, "eat")
-        first = self.key(ascii_client, "enter")
+        deadline = time.monotonic() + 20
+        first = self.key(ascii_client, "enter", wait_for_admission=True)
+        reserve = nutrition(initial)["reserve"]
+        if not finished_meal(first, reserve):
+            first = self.ascii_frame(ascii_client, lambda frame: finished_meal(frame, reserve),
+                                     seconds=max(0, deadline - time.monotonic()))
         self.assertEqual(nutrition(first)["reserve"], 1108)
         self.assertTrue(first["window_open"])
         self.key(ascii_client, "eat")
-        final = self.key(ascii_client, "enter")
+        deadline = time.monotonic() + 20
+        final = self.key(ascii_client, "enter", wait_for_admission=True)
+        reserve = nutrition(first)["reserve"]
+        if not finished_meal(final, reserve):
+            final = self.ascii_frame(ascii_client, lambda frame: finished_meal(frame, reserve),
+                                     seconds=max(0, deadline - time.monotonic()))
         self.assertGreaterEqual(nutrition(final)["reserve"], 2208)
         self.assertLessEqual(nutrition(final)["reserve"], 2607)
         self.assertFalse(any(item["name"] == "fixture meal" for item in observation(final)["inventory"]))

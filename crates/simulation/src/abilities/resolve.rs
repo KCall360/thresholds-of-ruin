@@ -358,7 +358,9 @@ pub enum ResolvedEffect {
         resource: Resource,
         amount: u32,
     },
-    SearchAdjacentGuises,
+    SearchAdjacentGuises {
+        total: i64,
+    },
     ObservePublicPlan {
         observation: Shared<PublicPlanObservation>,
     },
@@ -394,7 +396,7 @@ impl ResolvedEffect {
     pub(crate) fn recipient(&self) -> EffectRecipient {
         match self {
             Self::AlterEquipment { .. }
-            | Self::SearchAdjacentGuises
+            | Self::SearchAdjacentGuises { .. }
             | Self::ObservePublicPlan { .. }
             | Self::ApplyQualifiedConditionToSource { .. } => EffectRecipient::Source,
             _ => EffectRecipient::Target,
@@ -418,7 +420,7 @@ impl ResolvedEffect {
             | Self::LoseMaximumHealth { amount }
             | Self::RestoreMaximumHealth { amount }
             | Self::Restore { amount, .. } => *amount > 0,
-            Self::SearchAdjacentGuises
+            Self::SearchAdjacentGuises { .. }
             | Self::HealAndImproveHitDice { .. }
             | Self::ApplyLinkedHold { .. }
             | Self::ApplyCondition { .. }
@@ -441,7 +443,7 @@ impl ResolvedEffect {
         }
         let applied = match self {
             Self::Theft { .. } => return Ok(None),
-            Self::SearchAdjacentGuises
+            Self::SearchAdjacentGuises { .. }
             | Self::ApplyLinkedHold { .. }
             | Self::CorrodeArmor { .. }
             | Self::AlterEquipment { .. } => self.clone(),
@@ -1230,7 +1232,9 @@ pub(super) fn resolve_batch<'a>(
                 resource: *resource,
                 amount: amount.roll(rng),
             },
-            PlannedEffect::SearchAdjacentGuises => ResolvedEffect::SearchAdjacentGuises,
+            PlannedEffect::SearchAdjacentGuises { check } => ResolvedEffect::SearchAdjacentGuises {
+                total: check.roll(rng, false),
+            },
             PlannedEffect::ObservePublicPlan => ResolvedEffect::ObservePublicPlan {
                 observation: snapshot
                     .context
@@ -1382,7 +1386,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 resource: Resource,
                 amount: u32,
             },
-            SearchAdjacentGuises {},
+            SearchAdjacentGuises {
+                total: i64,
+            },
             ObservePublicPlan {
                 observation: Shared<PublicPlanObservation>,
             },
@@ -1430,7 +1436,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::ApplyPersistentCondition { id } => Self::ApplyPersistentCondition { id },
             Fields::RemoveCondition { id } => Self::RemoveCondition { id },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
-            Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
+            Fields::SearchAdjacentGuises { total } => Self::SearchAdjacentGuises { total },
             Fields::ObservePublicPlan { observation } => Self::ObservePublicPlan { observation },
             Fields::ApplyQualifiedConditionToSource {
                 id,
@@ -1443,6 +1449,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             },
         };
         let valid_amount = match effect {
+            Self::SearchAdjacentGuises { total } => {
+                total.unsigned_abs() <= crate::limits::NUMERIC as u64 + 18
+            }
             Self::Theft { quantity, .. } => quantity > 0,
             Self::CorrodeArmor { amount, .. } => {
                 (1..=crate::limits::NUMERIC as u32).contains(&amount)

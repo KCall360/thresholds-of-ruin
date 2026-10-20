@@ -33,6 +33,11 @@ pub(crate) struct ActorRecord {
     known_charges: Shared<crate::magic_items::ChargeKnowledge>,
     #[serde(deserialize_with = "crate::equipment_knowledge::read_known_equipment")]
     known_equipment: Shared<crate::equipment_knowledge::EquipmentKnowledge>,
+    #[serde(deserialize_with = "crate::discovery::read_discovery")]
+    discovery: Shared<crate::discovery::DiscoveryKnowledge>,
+    search_clock: crate::search_clock::SearchClock,
+    #[serde(deserialize_with = "crate::traps::read_contacts")]
+    trap_contacts: Shared<crate::traps::TrapContacts>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     identification: Option<crate::magic_items::IdentificationChoice>,
     #[serde(deserialize_with = "crate::public_plan::read_recognized_abilities")]
@@ -67,6 +72,11 @@ impl<'de> Deserialize<'de> for ActorRecord {
             known_charges: Shared<crate::magic_items::ChargeKnowledge>,
             #[serde(deserialize_with = "crate::equipment_knowledge::read_known_equipment")]
             known_equipment: Shared<crate::equipment_knowledge::EquipmentKnowledge>,
+            #[serde(deserialize_with = "crate::discovery::read_discovery")]
+            discovery: Shared<crate::discovery::DiscoveryKnowledge>,
+            search_clock: crate::search_clock::SearchClock,
+            #[serde(deserialize_with = "crate::traps::read_contacts")]
+            trap_contacts: Shared<crate::traps::TrapContacts>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             identification: Option<crate::magic_items::IdentificationChoice>,
             #[serde(deserialize_with = "crate::public_plan::read_recognized_abilities")]
@@ -96,6 +106,9 @@ impl<'de> Deserialize<'de> for ActorRecord {
             knowledge: fields.knowledge,
             known_charges: fields.known_charges,
             known_equipment: fields.known_equipment,
+            discovery: fields.discovery,
+            search_clock: fields.search_clock,
+            trap_contacts: fields.trap_contacts,
             identification: fields.identification,
             recognized_abilities: fields.recognized_abilities,
             public_plan: fields.public_plan,
@@ -133,6 +146,9 @@ impl ActorRecord {
             knowledge: actor.knowledge.clone(),
             known_charges: actor.known_charges.clone(),
             known_equipment: actor.known_equipment.clone(),
+            discovery: actor.discovery.clone(),
+            search_clock: actor.search_clock.clone(),
+            trap_contacts: actor.trap_contacts.clone(),
             identification: actor.identification.clone(),
             recognized_abilities: actor.recognized_abilities.clone(),
             public_plan: actor.public_plan.clone(),
@@ -155,7 +171,7 @@ impl ActorRecord {
                     .ok_or(crate::checkpoint::PersistError::Equipment { actor, item: *id })
             })
             .collect::<Result<Vec<_>, crate::checkpoint::PersistError>>()?;
-        Ok(Actor {
+        let state = Actor {
             guise: self.guise.clone(),
             holds: self.holds.clone(),
             behavior: self.behavior.clone(),
@@ -182,11 +198,18 @@ impl ActorRecord {
             knowledge: self.knowledge.clone(),
             known_charges: self.known_charges.clone(),
             known_equipment: self.known_equipment.clone(),
+            discovery: self.discovery.clone(),
+            search_clock: self.search_clock.clone(),
+            trap_contacts: self.trap_contacts.clone(),
             identification: self.identification.clone(),
             recognized_abilities: self.recognized_abilities.clone(),
             public_plan: self.public_plan.clone(),
             asset: self.asset.clone(),
-        })
+        };
+        if !state.search_clock.valid_for(&state) {
+            return Err(crate::checkpoint::PersistError::ActorState { actor });
+        }
+        Ok(state)
     }
 }
 #[cfg(test)]
@@ -240,6 +263,9 @@ mod public_plan_record_tests {
             "knowledge",
             "known_charges",
             "known_equipment",
+            "discovery",
+            "search_clock",
+            "trap_contacts",
             "identification",
             "recognized_abilities",
             "public_plan",
@@ -273,6 +299,9 @@ mod public_plan_record_tests {
         for key in [
             "known_charges",
             "known_equipment",
+            "discovery",
+            "search_clock",
+            "trap_contacts",
             "identification",
             "recognized_abilities",
             "public_plan",

@@ -1039,9 +1039,9 @@ class NativeKeyPresses(unittest.TestCase):
     def test_progress_during_release_returns_the_latest_real_presented_frame(self):
         harness = ProcessTestCase()
         started = {"type": "frame", "input_done": "down", "native_input_sequence": 4,
-                   "busy": False, "intentions": [{"phase": "started"}]}
+                   "busy": False, "can_admit_intention": False, "intentions": [{"phase": "started"}]}
         ready = {"type": "frame", "input_done": None, "native_input_sequence": None,
-                 "busy": False, "intentions": [], "state": {"observation": {"ready": True}}}
+                 "busy": False, "can_admit_intention": False, "intentions": [], "state": {"observation": {"ready": True}}}
         def presentation(client, predicate, seconds):
             self.assertTrue(predicate(started), "default UI completion still accepts started work")
             return started
@@ -1077,6 +1077,146 @@ class NativeKeyPresses(unittest.TestCase):
             result = harness.native_press(object(), lambda name, down: None, "Down", "down",
                                           wait_for_ready=True)
         self.assertIs(result, ready)
+
+    def test_native_admission_wait_releases_key_before_late_permission(self):
+        harness, window = ProcessTestCase(), object()
+        events = []
+        acknowledged = {"type": "frame", "input_done": "enter", "native_input_sequence": 12,
+                        "busy": False, "intentions": [], "can_admit_intention": False}
+        permitted = {**acknowledged, "input_done": None, "native_input_sequence": None,
+                     "can_admit_intention": True}
+
+        def native(name, down):
+            events.append(("key", down))
+
+        def presentation(client, predicate, seconds):
+            self.assertIs(client, window)
+            if events == [("key", True)]:
+                self.assertTrue(predicate(acknowledged), "permission must not hold the native key down")
+                events.append(("effect",))
+                return acknowledged
+            self.assertEqual(events, [("key", True), ("effect",), ("key", False), ("released",)])
+            for stale in [{**permitted, "can_admit_intention": False},
+                          {key: value for key, value in permitted.items() if key != "can_admit_intention"},
+                          {**permitted, "can_admit_intention": "true"},
+                          {**permitted, "busy": True}]:
+                self.assertFalse(predicate(stale), stale)
+            self.assertTrue(predicate(permitted))
+            events.append(("permitted",))
+            return permitted
+
+        def release(client, predicate, seconds):
+            self.assertEqual(events[-1], ("key", False))
+            record = {"type": "native_release", "sequence": 12}
+            self.assertTrue(predicate(record))
+            events.append(("released",))
+            return record
+
+        with patch("process_harness.time.monotonic", side_effect=[10, 10, 12, 15]), \
+                patch.object(harness, "ascii_frame", side_effect=presentation) as presented, \
+                patch.object(harness, "frame", side_effect=release) as released:
+            result = harness.native_press(window, native, "Return", "enter", seconds=8,
+                                          wait_for_admission=True)
+        self.assertIs(result, permitted, "acknowledged effect/release is not permission for the next input")
+        self.assertEqual([call.kwargs["seconds"] for call in presented.call_args_list], [8, 3])
+        self.assertEqual(released.call_args.kwargs["seconds"], 6)
+        self.assertEqual(events[-1], ("permitted",))
+
+    def test_native_admission_wait_reuses_permission_already_present_at_release(self):
+        for before_release in [False, True]:
+            with self.subTest(before_release=before_release):
+                harness = ProcessTestCase()
+                acknowledged = {"type": "frame", "input_done": "enter", "native_input_sequence": 13,
+                                "busy": False, "intentions": [],
+                                "can_admit_intention": not before_release}
+                permitted = {**acknowledged, "input_done": None, "native_input_sequence": None,
+                             "can_admit_intention": True}
+
+                def presentation(client, predicate, seconds):
+                    self.assertTrue(predicate(acknowledged))
+                    return acknowledged
+
+                def release(client, predicate, seconds):
+                    if before_release:
+                        self.assertFalse(predicate(permitted))
+                    record = {"type": "native_release", "sequence": 13}
+                    self.assertTrue(predicate(record))
+                    return record
+
+                with patch.object(harness, "ascii_frame", side_effect=presentation) as presented, \
+                        patch.object(harness, "frame", side_effect=release):
+                    result = harness.native_press(object(), lambda name, down: None, "Return", "enter",
+                                                  wait_for_admission=True)
+                self.assertIs(result, permitted if before_release else acknowledged)
+                self.assertEqual(presented.call_count, 1, "do not wait for a duplicate permission frame")
+
+    def test_native_admission_wait_rechecks_latest_frame_and_requested_completion(self):
+        acknowledged = {"type": "frame", "input_done": "enter", "native_input_sequence": 14,
+                        "busy": False, "intentions": [], "can_admit_intention": True,
+                        "state": {"observation": {"ready": True, "combat": {
+                            "dead": False, "preparation_active": False}}}}
+        permitted = {**acknowledged, "input_done": None, "native_input_sequence": None}
+        # Permission may be revoked, or allow admission during Started work.
+        # Neither may satisfy a caller that requires completed work AND permission.
+        for pending in [{**permitted, "can_admit_intention": False},
+                        {**permitted, "intentions": [{"phase": "started"}]},
+                        {**permitted, "state": {"observation": {"ready": False, "combat": {
+                            "dead": False, "preparation_active": False}}}}]:
+            with self.subTest(pending=pending):
+                harness = ProcessTestCase()
+                presentations = []
+
+                def presentation(client, predicate, seconds):
+                    presentations.append(True)
+                    if len(presentations) == 1:
+                        self.assertTrue(predicate(acknowledged))
+                        return acknowledged
+                    self.assertFalse(predicate(pending), "stale permission is not completed work")
+                    self.assertTrue(predicate(permitted))
+                    return permitted
+
+                def release(client, predicate, seconds):
+                    self.assertFalse(predicate(pending))
+                    record = {"type": "native_release", "sequence": 14}
+                    self.assertTrue(predicate(record))
+                    return record
+
+                with patch.object(harness, "ascii_frame", side_effect=presentation), \
+                        patch.object(harness, "frame", side_effect=release):
+                    result = harness.native_press(object(), lambda name, down: None, "Return", "enter",
+                                                  wait_for_ready=True, wait_for_admission=True)
+                self.assertIs(result, permitted)
+                self.assertEqual(len(presentations), 2)
+
+    def test_native_admission_failure_occurs_after_release_without_a_second_key_event(self):
+        harness = ProcessTestCase()
+        acknowledged = {"type": "frame", "input_done": "enter", "native_input_sequence": 15,
+                        "busy": False, "intentions": [], "can_admit_intention": False}
+        error = AssertionError("admission deadline")
+        events, presentations = [], []
+
+        def presentation(client, predicate, seconds):
+            presentations.append(True)
+            if len(presentations) == 1:
+                self.assertTrue(predicate(acknowledged))
+                return acknowledged
+            self.assertFalse(predicate(acknowledged))
+            self.assertEqual(events, [True, False], "the key is already released before admission waiting")
+            raise error
+
+        def release(client, predicate, seconds):
+            record = {"type": "native_release", "sequence": 15}
+            self.assertTrue(predicate(record))
+            return record
+
+        with patch.object(harness, "ascii_frame", side_effect=presentation), \
+                patch.object(harness, "frame", side_effect=release) as released, \
+                self.assertRaises(AssertionError) as caught:
+            harness.native_press(object(), lambda name, down: events.append(down), "Return", "enter",
+                                 wait_for_admission=True)
+        self.assertIs(caught.exception, error)
+        self.assertEqual(events, [True, False])
+        self.assertEqual(released.call_count, 1)
 
     def test_failed_release_after_success_is_reported_without_another_wait(self):
         harness = ProcessTestCase()

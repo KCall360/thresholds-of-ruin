@@ -584,7 +584,7 @@ mod tests {
                         "wall": ch == '#',
                         "material": "stone",
                         "lit":true,"place_hint": false,
-                        "stairs_up": false,
+                        "trap":null,"stairs_up": false,
                         "stairs_down": false,
                         "door": door.then(|| serde_json::json!({
                             "id":tor_protocol::DoorTarget::from_digest([9; 32]), "name": "oak door", "description": "",

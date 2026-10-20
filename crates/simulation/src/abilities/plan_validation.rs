@@ -376,7 +376,9 @@ impl AbilityPlan {
                                     .selects_token(condition)
                             })
                     }
-                    ConditionLifecycle::NextCheckAgainst => token.holder == *opponent,
+                    ConditionLifecycle::NextCheckAgainst => {
+                        first.accepts_incoming_token(*phase) && token.holder == *opponent
+                    }
                     ConditionLifecycle::Timed => false,
                 })
                 .is_some_and(|(phase, _)| *phase == claim.site.check)

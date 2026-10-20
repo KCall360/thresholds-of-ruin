@@ -6,13 +6,13 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **56**, save format **53**, scenario format **26**, ruleset
-**`interactions-v48`**, scenario validator **`tor-scenario-38`**. Unsupported
+**Current formats:** protocol **57**, save format **54**, scenario format **27**, ruleset
+**`interactions-v49`**, scenario validator **`tor-scenario-39`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **21**, ContentPackage **23** and
-RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
+The independent compiled inputs use RulesInput **22**, ContentPackage **24** and
+RegionInput **6**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
 formats remain unchanged. Current payloads require explicit nullable rider
@@ -32,7 +32,7 @@ actor-owned equipment facts (redacted from spectator snapshots and live updates)
 frozen equipped-item alterations, signed weapon
 damage enchantment and explicit Psychic damage, and owned-HD Health improvements with immutable
 acquisition witnesses and bounded dormant drain records. Prior payload identities
-remain rejection-only. RegionInput and physical framing remain unchanged.
+remain rejection-only. Physical framing remains unchanged.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
 saved game. Returning to an explored neighborhood or opening a fresh client
@@ -117,11 +117,20 @@ their success and no-op outcomes do not automatically identify the scroll type.
 Generic stack transfers require matching exact per-unit condition and charge
 state; equipment and devices remain nonstackable.
 
-The ten-ring slice adds shared signed potency, all-category damage reduction,
-attack-roll bonuses, source-aware Speed defense exclusion, sustained attributes,
+The eleven-ring catalog adds shared signed potency, all-category damage reduction,
+attack-roll bonuses, source-aware Strength/Speed defense exclusion, sustained attributes,
 worn corrosion protection, nonstacking Health recovery acceleration and exact
-fractional digestion. Rings remain concealed until identified; a paid choice can
+fractional digestion, plus periodic active searching. Rings remain concealed until identified; a paid choice can
 permit both rings and wands. See [worn magic](reference/items.md#worn-magic-and-the-finite-rogue-ring-catalog).
+
+Physical discovery uses shared Perception: persistent first-observation passive
+attempts, repeatable paid Search and periodic searching-ring scans. Concealed
+entrances are real opaque closures; discovery is observer-specific and opening
+changes the shared world. Independently seeded generation adds those entrances
+and hidden rust/sleeping-gas traps. Genuine ground contact triggers traps without
+disarming them; discovery reveals presence and adjacent examination or perceived
+activation reveals family. Placement, DCs and durations remain provisional
+balance, not calibrated Rogue parity.
 
 ## Implemented scope
 
@@ -132,7 +141,7 @@ permit both rings and wands. See [worn magic](reference/items.md#worn-magic-and-
 | Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, finite supply costs and cooldowns, universal Bind Wounds, ordered strikes and explicit-branch riders, anatomy equipment, timed consumption and explicitly authored nutrition/recovery policies | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
 | Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, self-or-ally targeting, immutable strike plans with live execution validation, atomic cancel-and-step with retained commitment, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
 | World | Region-local 3D geometry, all 24 portal rotations, multi-cell bodies, gravity, source-derived flight/stationary/erratic movement, finite material volumes, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |
-| Perception | Range-16 illuminated eye-based 3D sight, body-local awareness, opaque disclosed targets, stale client memory and durable place knowledge | [Perception](architecture/perception.md), [clients](architecture/clients.md) |
+| Perception | Range-16 illuminated eye-based 3D sight, body-local awareness, authoritative passive/paid/periodic discovery, observer-specific concealed entrance and trap knowledge, opaque disclosed targets, stale client memory and durable place knowledge | [Perception](architecture/perception.md), [clients](architecture/clients.md) |
 | Sessions and storage | Loopback authenticated WebSockets, control transfer and spectators, background journaling, explicit durability barriers, checkpoints, replay and bounded wizard rewind | [Protocol](reference/protocol.md), [persistence](architecture/persistence.md) |
 | Region lifecycle | Lazy authored/generated content, active/frozen/detached regions, deterministic preparation, independent persistence and asset palettes | [Streaming](architecture/streaming.md) |
 | Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |

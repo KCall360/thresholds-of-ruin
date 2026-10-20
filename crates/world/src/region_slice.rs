@@ -23,6 +23,10 @@ pub struct RegionSlice {
     gravity: Option<[i32; 3]>,
     #[serde(with = "crate::checkpoint_map")]
     doors: BTreeMap<Location, Door>,
+    #[serde(with = "crate::checkpoint_map")]
+    secret_doors: BTreeMap<Location, Concealment>,
+    #[serde(with = "crate::checkpoint_map")]
+    traps: BTreeMap<Location, Trap>,
     /// Outgoing links with their crossing rotations.
     #[serde(with = "crate::checkpoint_map")]
     passages: BTreeMap<(Location, Direction), (Passage, u8)>,
@@ -57,10 +61,44 @@ impl RegionSlice {
     pub fn door_ids(&self) -> impl Iterator<Item = u64> + '_ {
         self.doors.values().map(|door| door.id)
     }
+    /// Immutable feature payloads, for content-aware restore validation.
+    pub fn traps(&self) -> impl Iterator<Item = &Trap> {
+        self.traps.values()
+    }
+    pub fn trap_ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.traps.values().map(|trap| trap.id)
+    }
     /// Structural validity, independent of the rest of the world.
     pub fn valid(&self) -> bool {
         let id = self.region.id;
         let inside = |at: &Location| at.region == id && self.region.bounds.contains(at.position);
+        let solid = |at: Location| {
+            self.terrain.get(&at).copied().unwrap_or_else(|| {
+                if self
+                    .chamber
+                    .is_some_and(|interior| !interior.contains(at.position))
+                {
+                    Terrain::Solid(crate::Material::Stone)
+                } else {
+                    Terrain::Empty
+                }
+            }) != Terrain::Empty
+        };
+        let supported = |at: Location| {
+            if self.physical_vertical.contains(&(at, Direction::Down)) {
+                return self
+                    .passages
+                    .get(&(at, Direction::Down))
+                    .is_some_and(|(passage, _)| inside(&passage.to) && solid(passage.to));
+            }
+            at.position.z.checked_sub(1).is_some_and(|z| {
+                let below = Location {
+                    position: Position { z, ..at.position },
+                    ..at
+                };
+                inside(&below) && solid(below)
+            })
+        };
         let (x, y, z) = self.region.bounds.dimensions();
         x > 0
             && self.named_anchors.iter().all(|(name, position)| {
@@ -78,6 +116,20 @@ impl RegionSlice {
             && self.doors.iter().all(|(at, door)| {
                 inside(at) && door.id > 0 && (1..=MAX_DOOR_HEIGHT).contains(&door.height)
             })
+            && self
+                .secret_doors
+                .iter()
+                .all(|(at, concealment)| self.doors.contains_key(at) && concealment.valid())
+            && {
+                let mut ids = BTreeSet::new();
+                self.traps.iter().all(|(at, trap)| {
+                    inside(at)
+                        && !solid(*at)
+                        && supported(*at)
+                        && trap.valid()
+                        && ids.insert(trap.id)
+                })
+            }
             && self
                 .passages
                 .iter()
@@ -299,6 +351,8 @@ impl World {
         // an explicit decision about whether a region slice owns it.
         let World {
             doors,
+            secret_doors,
+            traps,
             regions,
             passages,
             rotations,
@@ -323,6 +377,8 @@ impl World {
             chamber: chambers.get(&id).copied(),
             gravity: region_gravity.get(&id).copied(),
             doors: take_region(doors, id),
+            secret_doors: take_region(secret_doors, id),
+            traps: take_region(traps, id),
             passages: links
                 .into_iter()
                 .map(|(key, passage)| {
@@ -361,6 +417,10 @@ impl World {
         if slice
             .door_ids()
             .any(|door| self.door_location(door).is_some())
+            || slice
+                .traps
+                .values()
+                .any(|trap| self.trap_location(trap.id).is_some())
         {
             return Err(WorldError::InvalidEndpoint);
         }
@@ -372,6 +432,8 @@ impl World {
             chamber,
             gravity,
             doors,
+            secret_doors,
+            traps,
             passages,
             physical_vertical,
             solid_boundaries,
@@ -396,6 +458,12 @@ impl World {
         }
         if !doors.is_empty() {
             self.doors.extend(doors);
+        }
+        if !secret_doors.is_empty() {
+            self.secret_doors.extend(secret_doors);
+        }
+        if !traps.is_empty() {
+            self.traps.extend(traps);
         }
         if !passages.is_empty() {
             for (key, (passage, turns)) in passages {

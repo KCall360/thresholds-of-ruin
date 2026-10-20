@@ -395,6 +395,30 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         ("stats", "") => Ok(Input::Stats),
         ("help" | "?", "") => Ok(Input::Help),
         ("quit" | "q", "") => Ok(Input::Quit),
+        ("examine" | "inspect", noun) => {
+            let mut traps: Vec<_> = state
+                .observation
+                .visible_cells
+                .iter()
+                .filter_map(|cell| cell.trap.as_ref())
+                .filter(|trap| {
+                    noun == "trap"
+                        || noun == trap.family.map_or("trap", TrapFamily::name)
+                        || noun
+                            .strip_prefix('#')
+                            .and_then(|value| value.parse::<TrapTarget>().ok())
+                            == Some(trap.id)
+                })
+                .collect();
+            traps.sort_by_key(|trap| trap.id);
+            traps.dedup_by_key(|trap| trap.id);
+            match traps.as_slice() {
+                [trap] if trap.reachable => action(Action::ExamineTrap { trap: trap.id }),
+                [_] => Err("Come within reach to examine the trap's mechanism.".into()),
+                [] => Err("No matching trap is visible.".into()),
+                _ => Err("Which trap? Use examine #id.".into()),
+            }
+        }
         ("open" | "close", noun) => {
             let mut doors: Vec<_> = state
                 .observation

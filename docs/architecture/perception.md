@@ -16,6 +16,57 @@ presentation. Light propagation, portable lights, sound propagation, transparent
 materials, partial visibility, posture-dependent eyes and continuous stair
 meshes are outside the current model.
 
+## Concealed physical features
+
+Secret entrances are ordinary opaque, colliding doors with concealed exterior
+appearance; their collision and sight blocking never depend on the observer.
+Discovering a closed entrance teaches only that actor where it is. Opening it
+changes shared geometry. An observer who physically sees an already-open secret
+entrance learns its presence without a roll and retains that fact if it closes.
+Rust and sleeping-gas traps similarly separate presence
+from family knowledge: discovery reveals presence, while authorized adjacent
+examination or perceptible activation reveals the family. Discovery does not
+open entrances or disarm traps.
+
+All discovery uses Awareness-governed Perception and the shared 3d6/Edge kernel:
+
+- **First observation:** each actor gets one attempt for each exact concealed
+  feature when its exterior cue first enters genuine illuminated physical eye
+  sight. It uses the feature's authored DC with one additional disadvantage,
+  composed through ordinary Edge cancellation. Both success and failure persist.
+- **Paid Search:** normal 50-tick preparation and 50-tick recovery remain subject
+  to the actor's ordinary haste/slow timing. Preparation captures the actor's
+  Perception bonus and Edge. Completion rolls once and compares that total with
+  every currently eligible feature's live DC. Repeated paid searches are allowed.
+  One-use outgoing next-check modifiers participate through their normal paid
+  reservation lifecycle even when the search finds nothing; hidden candidate
+  count never changes the visible reservation. Incoming next-check-against
+  modifiers do not apply to this targetless check.
+- **Periodic search:** worn searching sources share one actor-active cadence;
+  every 100 eligible ticks the ring runs the same active search for free. It does
+  not consume, reserve, or borrow one-use check tokens. Passive checks likewise
+  exclude those tokens. Ordinary timed, equipment and talent Edge still applies.
+
+Paid and periodic searches preserve the guaranteed revelation of physically
+adjacent object guises. Their empty and failed feedback does not disclose whether
+any concealed candidates existed. A successful Search reveals trap presence,
+not its hidden family.
+
+An abstract stair landing, a radius-only proximity, darkness, an opaque barrier,
+blindness, sleep or other voluntary-action incapacity is not an eligible cue.
+Waking and thawing reconcile at authoritative boundaries. Reentry, reconnect,
+control transfer, rank changes and reload never reset failed passive receipts.
+Observation, previews and rendering neither roll nor mutate knowledge. Checks,
+knowledge and RNG publish transactionally; candidates have stable exact-ID order.
+A branch-local derived witness skips unchanged passive reconciliation and is not
+saved authority. Initial construction explicitly reconciles before publishing its
+first immutable boundary; restoration never grants extra attempts.
+
+DCs, placement probabilities and effect durations are authored provisional balance
+choices, not user-approved numerical tuning. Future property interpretation keeps
+its separate rank/evidence lock policy; it must not make required physical routes
+permanently undiscoverable after a failed roll.
+
 ## Model
 
 All geometry uses **doubled coordinates** relative to the eye. Cell `(x, y, z)`

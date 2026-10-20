@@ -19,7 +19,7 @@ MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 # Versioned identifiers that name benchmark workloads or fixtures, not rulesets.
 WORKLOAD_IDENTIFIERS = {
     "rogue-descriptor-v2",
-    "rogue-earned-baseline-v17",
+    "rogue-earned-baseline-v18",
     "tor-arena-run-v5",
     "performance-v1",
     "place-knowledge-v1",
@@ -404,7 +404,7 @@ class DocumentationTests(unittest.TestCase):
             guide = root / "guide.md"
             with patch.dict(globals(), ROOT=root, current_versions=lambda: versions,
                             current_guides=lambda: [guide]):
-                guide.write_text("tor-arena-search-parameters-v2 tor-rogue-activation-inputs-v2 rogue-earned-baseline-v17",
+                guide.write_text("tor-arena-search-parameters-v2 tor-rogue-activation-inputs-v2 rogue-earned-baseline-v18",
                                  encoding="utf-8")
                 self.test_documents_do_not_mention_other_versions()
                 for stale in ("tor-arena-search-parameters-v1", "tor-rogue-activation-inputs-v1",

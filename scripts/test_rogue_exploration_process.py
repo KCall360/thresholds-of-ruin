@@ -35,8 +35,18 @@ class RogueBundledPolicy(unittest.TestCase):
     def test_geometry_fixture_preserves_the_population_free_workload_explicitly(self):
         actual = tomllib.loads((ROOT / "scenarios/rogue-exploration/scenario.toml").read_text(encoding="utf-8"))
         geometry = tomllib.loads((ROOT / "scenarios/tests/rogue-geometry/scenario.toml").read_text(encoding="utf-8"))
-        for field in ("procedural_worlds", "generation_recipes"):
-            self.assertEqual(geometry[field], actual[field])
+        self.assertEqual(geometry["procedural_worlds"], actual["procedural_worlds"])
+        # This fixture owns feature-free geometry traversal, not concealed
+        # entrances or pressure traps. Keep the unchanged geometry/lighting
+        # recipe without silently adding gameplay obstacles to that workload.
+        features = ("secret_entrances", "hidden_traps")
+        self.assertEqual(geometry["generation_recipes"], {
+            name: {key: value for key, value in recipe.items() if key not in features}
+            for name, recipe in actual["generation_recipes"].items()
+        })
+        for recipe in geometry["generation_recipes"].values():
+            for feature in features:
+                self.assertNotIn(feature, recipe)
         self.assertNotIn("floor_activation", geometry)
         self.assertNotIn("capabilities", geometry)
         self.assertEqual(geometry["characters"], [{"id": 1, "anchor": "dungeon/1/start", "turn_ticks": 100}])

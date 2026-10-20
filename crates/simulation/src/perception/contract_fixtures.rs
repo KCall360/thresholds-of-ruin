@@ -1,5 +1,5 @@
 //! Small source-owned fixtures shared by the perception/lifecycle contracts.
-use super::super::{GuiseAppearance, PerceptionValue};
+use crate::perception::{GuiseAppearance, PerceptionValue};
 use crate::{
     abilities::AbilityInvocation,
     attributes::{ManaBinding, Skill},
@@ -12,17 +12,17 @@ use crate::{
 use std::{collections::BTreeMap, num::NonZeroU64};
 use tor_world::{Extent, Location, Position, Region, RegionId, World};
 
-pub(super) const OWNER: ActorId = ActorId(1);
-pub(super) const SUBJECT: ActorId = ActorId(2);
+pub(crate) const OWNER: ActorId = ActorId(1);
+pub(crate) const SUBJECT: ActorId = ActorId(2);
 
-pub(super) fn at(region: u64, x: i32, y: i32) -> Location {
+pub(crate) fn at(region: u64, x: i32, y: i32) -> Location {
     Location {
         region: RegionId(region),
         position: Position { x, y, z: 0 },
     }
 }
 
-pub(super) fn appearance() -> GuiseAppearance {
+pub(crate) fn appearance() -> GuiseAppearance {
     GuiseAppearance {
         name: "weathered chest".into(),
         description: "A closed wooden chest.".into(),
@@ -31,13 +31,13 @@ pub(super) fn appearance() -> GuiseAppearance {
     }
 }
 
-pub(super) fn guise() -> PerceptionValue {
+pub(crate) fn guise() -> PerceptionValue {
     PerceptionValue::ObjectGuise {
         appearance: Some(appearance()),
     }
 }
 
-pub(super) fn ambush() -> PerceptionValue {
+pub(crate) fn ambush() -> PerceptionValue {
     PerceptionValue::AmbushFromGuise { enabled: true }
 }
 
@@ -76,11 +76,11 @@ fn ability(name: &str, reach: serde_json::Value, effects: Vec<Effect>) -> Abilit
     .unwrap()
 }
 
-pub(super) fn fixture(owner: &[PerceptionValue], subject: &[PerceptionValue]) -> Game {
+pub(crate) fn fixture(owner: &[PerceptionValue], subject: &[PerceptionValue]) -> Game {
     fixture_with(owner, subject, |_, _, _| {})
 }
 
-pub(super) fn fixture_with(
+pub(crate) fn fixture_with(
     owner: &[PerceptionValue],
     subject: &[PerceptionValue],
     edit: impl FnOnce(&mut RulesetDocument, &mut Species, &mut Species),
@@ -183,7 +183,7 @@ pub(super) fn fixture_with(
     game
 }
 
-pub(super) fn spawn(game: &mut Game, species: &str, location: Location) -> ActorId {
+pub(crate) fn spawn(game: &mut Game, species: &str, location: Location) -> ActorId {
     let build = CreatureBuild::new(
         game.content().clone(),
         SpeciesId::new(species).unwrap(),
@@ -209,11 +209,11 @@ pub(super) fn spawn(game: &mut Game, species: &str, location: Location) -> Actor
     actor
 }
 
-pub(super) fn id(name: &str) -> AbilityId {
+pub(crate) fn id(name: &str) -> AbilityId {
     AbilityId::new(name).unwrap()
 }
 
-pub(super) fn action(name: &str, invocation: AbilityInvocation) -> Action {
+pub(crate) fn action(name: &str, invocation: AbilityInvocation) -> Action {
     Action::UseAbility {
         id: id(name),
         invocation,
@@ -221,20 +221,20 @@ pub(super) fn action(name: &str, invocation: AbilityInvocation) -> Action {
     }
 }
 
-pub(super) fn attack(target: ActorId) -> Action {
+pub(crate) fn attack(target: ActorId) -> Action {
     action("basic_melee", AbilityInvocation::actor_target(target))
 }
 
-pub(super) fn contact(target: ActorId) -> Action {
+pub(crate) fn contact(target: ActorId) -> Action {
     action("basic_melee", AbilityInvocation::contact_target(target))
 }
 
-pub(super) fn apply(game: &mut Game, actor: ActorId, name: &str, duration: u64) {
+pub(crate) fn apply(game: &mut Game, actor: ActorId, name: &str, duration: u64) {
     game.apply_condition(actor, &ConditionId::new(name).unwrap(), actor, duration)
         .unwrap();
 }
 
-pub(super) fn start(game: &mut Game, actor: ActorId, action: Action) -> IntentionId {
+pub(crate) fn start(game: &mut Game, actor: ActorId, action: Action) -> IntentionId {
     let intention = game
         .admit_intention(actor, action, IntentionOrigin::Human)
         .unwrap();
@@ -246,7 +246,7 @@ pub(super) fn start(game: &mut Game, actor: ActorId, action: Action) -> Intentio
     intention
 }
 
-pub(super) fn restore(game: &Game) -> Game {
+pub(crate) fn restore(game: &Game) -> Game {
     let mut shared = crate::checkpoint::SharedState::default();
     let snapshot =
         serde_json::from_slice(&serde_json::to_vec(&game.checkpoint(&mut shared)).unwrap())

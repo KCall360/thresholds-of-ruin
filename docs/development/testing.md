@@ -174,7 +174,34 @@ acknowledgement across frames and waits until queued work has executed. Use
 `wait_for_simulation=False` when testing a queue control whose acknowledgement
 must return while work remains queued for a later turn.
 
+Choose the completion signal for the contract being tested:
+
+| Driver intent | Required boundary |
+| --- | --- |
+| UI selection, cursor movement or deliberate early/queue input | Input acknowledgement; retain the default or explicit queue-only policy |
+| Witness that paid work started | Matching lifecycle start; do not silently wait through combat, pause or recovery |
+| Ordinary sequential gameplay | Establish admission before the first input, then require the completed effect and the authoritative admission permission before the next |
+| Finished native paid action followed by another input | `native_press(..., wait_for_ready=True, wait_for_admission=True)` |
+
+Admission alone can be true while paid work is still started; it is not a
+completion signal. `key(..., wait_for_admission=True)` is suitable for immediate
+ordinary transfers, while a paid-action caller also waits for its finished
+state. Native admission waiting occurs after the key's release acknowledgement
+and shares the original deadline. Travel `arrived` similarly needs admission
+before the next gameplay input. Do not apply these waits to intentional
+rejection, spectator, paused, dead or terminal-state witnesses. Review each
+caller's precondition, completion signal and negative-case intent; use scripted
+frames to distinguish acknowledged effects from later permissions without
+sleeps or larger deadlines.
+
 ### Scenario packages, fixtures and wizard commands
+
+Positive gameplay fixtures should use explicit typed constructors/fields when
+available, so required runtime fields become compile-time maintenance work.
+Keep independently authored schema positives and malformed/missing-field raw
+payloads: sharing a production serializer is not an independent schema oracle.
+Validate a positive fixture before changing the one dimension a negative test
+intends to reject; setup failures do not prove that behavioral boundary.
 
 - Use ordinary validated [scenario packages](../reference/scenario-packages.md) for the initial
   setup of unit, integration, and process tests. Test-only packages live in

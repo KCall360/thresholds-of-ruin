@@ -887,6 +887,18 @@ impl Game {
         } else {
             until
         };
+        let until = self
+            .actors
+            .iter()
+            .filter(|(id, _)| !self.actor_frozen(**id))
+            .filter_map(|(_, actor)| {
+                actor
+                    .search_clock
+                    .next_in(actor)
+                    .and_then(|interval| actor.active_since.checked_add(interval))
+            })
+            .min()
+            .map_or(until, |deadline| until.min(deadline));
         if until <= self.tick {
             return Ok(self.tick);
         }
@@ -955,6 +967,9 @@ impl Game {
                 a.motion = motion;
                 a.visited.insert(at.region);
                 drop(a);
+                // A sub-cell lift breaks ground contact even before the actor
+                // crosses a cell boundary. Landing may therefore trigger anew.
+                self.reconcile_trap_contacts(id, None)?;
                 self.reconcile_holds_for_actor(id)?;
                 // Falling into a frozen region freezes the actor there.
                 self.sync_actor_lifecycle(id)?;
@@ -1092,6 +1107,7 @@ impl Game {
         actor.visited.insert(at.region);
         drop(actor);
         self.reconcile_holds_for_actor(id)?;
+        self.reconcile_trap_contacts(id, None)?;
         if self.floor_activation.is_none() || from.region == at.region {
             return Ok(());
         }
@@ -1188,6 +1204,13 @@ impl Game {
                         motion.displacement[axis] = 0;
                         motion.acceleration_remainder[axis] = 0;
                         if let PhysicsEntity::Actor(id) = entity {
+                            {
+                                let mut actor = self.actors.get_mut(&id).expect("integrated actor");
+                                actor.location = at;
+                                actor.orientation = frame;
+                                actor.motion = motion.clone();
+                            }
+                            self.reconcile_trap_contacts(id, Some(normal))?;
                             if damage > 0 {
                                 let mut actor = self.actors.get_mut(&id).expect("integrated actor");
                                 actor.location = at;

@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 53;
+pub(crate) const ARCHIVE_VERSION: u32 = 54;
 #[path = "action_resolution.rs"]
 mod action_resolution;
 #[path = "advancement_query.rs"]
@@ -1971,6 +1971,7 @@ impl Engine {
                 .map_err(|_| invalid_archive())?;
             revisions.insert(ActorId(id.0), 0);
         }
+        game.initialize_discovery().map_err(|_| invalid_archive())?;
         game.refresh_navigation();
         // Initial knowledge is part of the initial immutable boundary, never a
         // side effect of the first client query.
@@ -3205,6 +3206,7 @@ impl Engine {
             | Action::Read { .. }
             | Action::Zap { .. }
             | Action::Identify { .. }
+            | Action::ExamineTrap { .. }
             | Action::SetDoor { .. }
             | Action::Take { .. }
             | Action::TouchApparentObject { .. }
@@ -4997,7 +4999,7 @@ mod earned_growth_identity_tests {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
         assert_eq!(engine.archive.version, ARCHIVE_VERSION);
-        assert_eq!(engine.archive.ruleset, "interactions-v48");
+        assert_eq!(engine.archive.ruleset, "interactions-v49");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {

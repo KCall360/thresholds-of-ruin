@@ -52,13 +52,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v48";
-const VALIDATOR: &str = "tor-scenario-38";
+pub const RULESET: &str = "interactions-v49";
+const VALIDATOR: &str = "tor-scenario-39";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 26;
+pub const FORMAT: u32 = 27;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -449,6 +449,8 @@ pub struct RegionDef {
     #[serde(default)]
     pub doors: Vec<Door>,
     #[serde(default)]
+    pub traps: Vec<Trap>,
+    #[serde(default)]
     pub items: Vec<Item>,
     #[serde(default)]
     pub actors: Vec<Actor>,
@@ -490,12 +492,59 @@ fn one_cell() -> u8 {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Door {
+    #[serde(default)]
+    pub concealment: Option<Concealment>,
     pub id: u64,
     pub at: [i32; 3],
     pub open: bool,
     /// Cells tall; a door must exactly fill its opening.
     #[serde(default = "one_cell")]
     pub height: u8,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Concealment {
+    pub dc: i32,
+}
+impl Concealment {
+    pub(crate) fn compiled(self) -> tor_world::Concealment {
+        tor_world::Concealment { dc: self.dc }
+    }
+    fn valid(self) -> bool {
+        self.compiled().valid()
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TrapKind {
+    Rust { slot: String, amount: u32 },
+    SleepingGas { condition: String, duration: u64 },
+}
+impl TrapKind {
+    pub(crate) fn compiled(&self) -> tor_world::TrapKind {
+        match self {
+            Self::Rust { slot, amount } => tor_world::TrapKind::Rust {
+                slot: slot.clone(),
+                amount: *amount,
+            },
+            Self::SleepingGas {
+                condition,
+                duration,
+            } => tor_world::TrapKind::SleepingGas {
+                condition: condition.clone(),
+                duration: *duration,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Trap {
+    pub id: u64,
+    pub at: [i32; 3],
+    pub dc: i32,
+    pub kind: TrapKind,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -586,6 +635,7 @@ pub struct IndexedRegion {
     pub actors: Vec<IndexedActor>,
     pub items: Vec<IndexedItem>,
     pub doors: Vec<u64>,
+    pub traps: Vec<u64>,
     /// Filled by a generator; its identities aren't known until then.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub generated: bool,
@@ -650,6 +700,7 @@ impl IndexedRegion {
                 })
                 .collect(),
             doors: def.doors.iter().map(|d| d.id).collect(),
+            traps: def.traps.iter().map(|t| t.id).collect(),
             generated: def.generate.is_some(),
         })
     }
@@ -1314,6 +1365,27 @@ impl Package {
                     "Invalid generation recipe identity",
                 )?;
                 crate::generation_recipe::check(recipe)?;
+                for stage in &recipe.stages {
+                    if let crate::generation_recipe::Operation::HiddenTraps { config } =
+                        &stage.operation
+                    {
+                        let rules = self.rules()?;
+                        check_trap_effect(
+                            &rules,
+                            &TrapKind::Rust {
+                                slot: config.rust_slot.clone(),
+                                amount: config.rust_amount,
+                            },
+                        )?;
+                        check_trap_effect(
+                            &rules,
+                            &TrapKind::SleepingGas {
+                                condition: config.sleep_condition.clone(),
+                                duration: config.sleep_duration,
+                            },
+                        )?;
+                    }
+                }
 
                 Ok(())
             })()
@@ -1349,7 +1421,8 @@ impl Package {
                         metadata.generated
                             && metadata.actors.is_empty()
                             && metadata.items.is_empty()
-                            && metadata.doors.is_empty(),
+                            && metadata.doors.is_empty()
+                            && metadata.traps.is_empty(),
                         "Recipe members must be generated and declare no inhabitants",
                     )?;
                     if let Some(expected) = size {
@@ -1394,6 +1467,72 @@ impl Package {
         seed: u64,
     ) -> Result<BTreeMap<u64, RegionDef>, Failure> {
         Ok(self.generated_group(identity, seed)?.regions)
+    }
+
+    fn feature_bases(&self) -> Result<crate::generation_recipe::FeatureBases, Failure> {
+        let next = |maximum: Option<u64>| {
+            maximum
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or_else(|| fail("Authored feature identity overflow"))
+        };
+        Ok(crate::generation_recipe::FeatureBases {
+            doors: next(
+                self.index
+                    .regions
+                    .iter()
+                    .flat_map(|r| r.doors.iter().copied())
+                    .max(),
+            )?,
+            traps: next(
+                self.index
+                    .regions
+                    .iter()
+                    .flat_map(|r| r.traps.iter().copied())
+                    .max(),
+            )?,
+        })
+    }
+    fn generated_feature_ceiling(&self, base: u64) -> Result<u64, Failure> {
+        let has_features = |recipe: &crate::generation_recipe::Recipe| {
+            recipe.stages.iter().any(|stage| {
+                matches!(
+                    stage.operation,
+                    crate::generation_recipe::Operation::SecretEntrances { .. }
+                        | crate::generation_recipe::Operation::HiddenTraps { .. }
+                )
+            })
+        };
+        let explicit = self
+            .manifest
+            .generation_groups
+            .values()
+            .filter(|group| {
+                self.manifest
+                    .generation_recipes
+                    .get(&group.recipe)
+                    .is_some_and(has_features)
+            })
+            .flat_map(|group| group.members.iter().copied());
+        let families = self
+            .manifest
+            .procedural_worlds
+            .values()
+            .filter(|family| {
+                self.manifest
+                    .generation_recipes
+                    .get(&family.recipe)
+                    .is_some_and(has_features)
+            })
+            .filter_map(|family| family.last_region());
+        explicit
+            .chain(families)
+            .max()
+            .unwrap_or(0)
+            .checked_mul(crate::generation_recipe::FEATURE_IDENTITY_STRIDE)
+            .and_then(|n| n.checked_add(base))
+            .filter(|end| *end < u64::MAX)
+            .ok_or_else(|| fail("Generated feature namespace exceeds identity capacity"))
     }
 
     fn generated_group(
@@ -1505,7 +1644,14 @@ impl Package {
                 )?;
             }
         }
-        crate::generation_recipe::materialize(identity, &group, recipe, definitions, seed)
+        crate::generation_recipe::materialize_with_feature_bases(
+            identity,
+            &group,
+            recipe,
+            definitions,
+            seed,
+            self.feature_bases()?,
+        )
     }
 
     pub(crate) fn build_group(
@@ -1573,7 +1719,15 @@ impl Package {
             .members
             .iter()
             .map(|id| {
-                let declaration = self.unbuilt_region(index, *id)?;
+                let mut declaration = self.unbuilt_region(index, *id)?;
+                declaration
+                    .identities
+                    .doors
+                    .extend(shell[id].doors.iter().map(|d| d.id));
+                declaration
+                    .identities
+                    .traps
+                    .extend(shell[id].traps.iter().map(|t| t.id));
                 let record = game
                     .clone()
                     .into_region_record(RegionId(*id))
@@ -2716,6 +2870,7 @@ impl Package {
         let mut region_ids = BTreeSet::new();
         let mut item_ids = BTreeSet::new();
         let mut door_ids = BTreeSet::new();
+        let mut trap_ids = BTreeSet::new();
         let mut starts = BTreeMap::new();
         for r in &self.index.regions {
             require(
@@ -2787,6 +2942,12 @@ impl Package {
                 require(
                     *d > 0 && *d < u64::MAX && door_ids.insert(*d),
                     "Duplicate/invalid door ID",
+                )?;
+            }
+            for t in &r.traps {
+                require(
+                    *t > 0 && *t < u64::MAX && trap_ids.insert(*t),
+                    "Duplicate/invalid trap ID",
                 )?;
             }
         }
@@ -2886,6 +3047,24 @@ impl Package {
     /// combat. The validator checks every region; building one checks it.
     fn check_region(&self, r: &RegionDef) -> Result<(), Failure> {
         self.check_retrieval_region(r)?;
+        for door in &r.doors {
+            require(
+                door.concealment.is_none_or(Concealment::valid),
+                "Invalid secret entrance DC",
+            )?;
+        }
+        if !r.traps.is_empty() {
+            let rules = self.rules()?;
+            for trap in &r.traps {
+                let value = tor_world::Trap {
+                    id: trap.id,
+                    dc: trap.dc,
+                    kind: trap.kind.compiled(),
+                };
+                require(value.valid(), "Invalid trap definition")?;
+                check_trap_effect(&rules, &trap.kind)?;
+            }
+        }
         if let Some(generate) = &r.generate {
             let pools = generate
                 .actors
@@ -3555,6 +3734,11 @@ impl Package {
         // Reserved up to a fixed end, so the ceilings (which every game
         // state records) don't grow with the package.
         let mut ceilings = ceilings;
+        let feature_bases = self.feature_bases()?;
+        ceilings.2 = ceilings
+            .2
+            .max(self.generated_feature_ceiling(feature_bases.doors)?);
+        self.generated_feature_ceiling(feature_bases.traps)?;
         if let Some(last) = regions.iter().filter(|r| r.generated).map(|r| r.id).max() {
             require(
                 last <= MAX_REGIONS as u64,
@@ -3713,6 +3897,12 @@ impl Package {
                     )
                     .filter(|(_, owner)| !index.definitions.omitted_carrier(*owner))
                     .map(|(id, _)| tor_simulation::ItemId(id))
+                    .collect(),
+                traps: r
+                    .traps
+                    .iter()
+                    .copied()
+                    .chain(generated.iter().flat_map(|def| &def.traps).map(|t| t.id))
                     .collect(),
                 doors: r
                     .doors
@@ -4203,6 +4393,23 @@ impl Package {
             }
             game.place_authored_door(d.id, at, d.open, d.height)
                 .map_err(|e| fail(format!("Door {}: {e:?}", d.id)))?;
+            if let Some(concealment) = d.concealment {
+                game.conceal_door(at, concealment.compiled())
+                    .map_err(|e| fail(format!("Secret door {}: {e:?}", d.id)))?;
+            }
+        }
+        for region in regions {
+            for trap in &region.traps {
+                game.place_trap(
+                    loc(region.id, trap.at),
+                    tor_world::Trap {
+                        id: trap.id,
+                        dc: trap.dc,
+                        kind: trap.kind.compiled(),
+                    },
+                )
+                .map_err(|e| fail(format!("Trap {}: {e:?}", trap.id)))?;
+            }
         }
         Ok(())
     }
@@ -4709,8 +4916,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-38");
-        assert_eq!(original.certificate.ruleset, "interactions-v48");
+        assert_eq!(original.certificate.validator, "tor-scenario-39");
+        assert_eq!(original.certificate.ruleset, "interactions-v49");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -5046,10 +5253,27 @@ mod tests {
             serde_json::to_value(&package.manifest.procedural_worlds).unwrap(),
             serde_json::to_value(&geometry.manifest.procedural_worlds).unwrap()
         );
+        let production_recipe = &package.manifest.generation_recipes["exploration"];
+        let geometry_recipe = &geometry.manifest.generation_recipes["exploration"];
+        assert_eq!(production_recipe.version, 3);
+        assert_eq!(geometry_recipe.version, 2);
+        assert_eq!(geometry_recipe.stages.len(), 7);
+        assert_eq!(production_recipe.stages.len(), 9);
         assert_eq!(
-            serde_json::to_value(&package.manifest.generation_recipes).unwrap(),
-            serde_json::to_value(&geometry.manifest.generation_recipes).unwrap()
+            serde_json::to_value(&production_recipe.stages[..7]).unwrap(),
+            serde_json::to_value(&geometry_recipe.stages).unwrap(),
+            "discovery appends stages without changing any existing stream identity or operand"
         );
+        assert_eq!(production_recipe.stages[7].id, "secret_entrances");
+        assert_eq!(production_recipe.stages[8].id, "hidden_traps");
+        assert!(matches!(
+            production_recipe.stages[7].operation,
+            crate::generation_recipe::Operation::SecretEntrances { .. }
+        ));
+        assert!(matches!(
+            production_recipe.stages[8].operation,
+            crate::generation_recipe::Operation::HiddenTraps { .. }
+        ));
         let explicit = read_package(&root.join("tests/explicit-grid-groups")).unwrap();
         assert!(package.index.regions.is_empty());
         assert!(package.manifest.generation_groups.is_empty());
@@ -5066,19 +5290,39 @@ mod tests {
             }
         );
         assert_eq!(
-            serde_json::to_value(&package.manifest.generation_recipes["exploration"]).unwrap(),
+            serde_json::to_value(geometry_recipe).unwrap(),
             serde_json::to_value(&explicit.manifest.generation_recipes["exploration"]).unwrap()
         );
+        let mut entrances = 0;
         for seed in [0, 1, 42] {
             for depth in [26, 27, 101, 1_000_000] {
                 let group = family.group("dungeon", seed, depth).unwrap();
                 let identity = format!("dungeon/{depth}");
+                let mut discovered = package.group_definitions(&identity, seed).unwrap();
+                let baseline = geometry.group_definitions(&identity, seed).unwrap();
+                assert!(baseline
+                    .values()
+                    .all(|region| region.doors.is_empty() && region.traps.is_empty()));
+                let trap_count: usize = discovered.values().map(|region| region.traps.len()).sum();
+                assert!(
+                    (1..=2).contains(&trap_count),
+                    "production discovery must place its finite traps"
+                );
+                for region in discovered.values_mut() {
+                    assert!(region
+                        .doors
+                        .iter()
+                        .all(|door| !door.open && door.height == 2 && door.concealment.is_some()));
+                    entrances += region.doors.len();
+                    // Only the independently asserted additions are projected
+                    // out: walls, anchors, lighting and every other field remain exact.
+                    region.doors.clear();
+                    region.traps.clear();
+                }
                 assert_eq!(
-                    serde_json::to_value(package.group_definitions(&identity, seed).unwrap())
-                        .unwrap(),
-                    serde_json::to_value(geometry.group_definitions(&identity, seed).unwrap())
-                        .unwrap(),
-                    "population content must not reroll geometry at seed {seed}, depth {depth}"
+                    serde_json::to_value(discovered).unwrap(),
+                    serde_json::to_value(baseline).unwrap(),
+                    "population and discovery must not reroll geometry at seed {seed}, depth {depth}"
                 );
                 assert_eq!(group.members.len(), 9);
                 assert!(group
@@ -5087,6 +5331,47 @@ mod tests {
                     .flat_map(|region| family.connections("dungeon", seed, *region))
                     .any(|exit| exit.direction == Direction::Down));
             }
+        }
+        assert!(
+            entrances > 0,
+            "the production seed matrix must exercise actual secret closures"
+        );
+    }
+
+    #[test]
+    fn generated_trap_effects_require_declared_slots_and_sleep_conditions() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+        let template = read_package(&root).unwrap();
+        Package::from_parts(template.manifest.clone(), vec![], &template.rules_source)
+            .unwrap()
+            .check()
+            .expect("valid production discovery fixture");
+        for missing_slot in [true, false] {
+            let mut manifest = template.manifest.clone();
+            let recipe = manifest.generation_recipes.get_mut("exploration").unwrap();
+            let config = recipe
+                .stages
+                .iter_mut()
+                .find_map(|stage| match &mut stage.operation {
+                    crate::generation_recipe::Operation::HiddenTraps { config } => Some(config),
+                    _ => None,
+                })
+                .expect("production fixture must exercise configured hidden traps");
+            if missing_slot {
+                config.rust_slot = "missing_trap_slot".into();
+            } else {
+                config.sleep_condition = "missing_trap_sleep".into();
+            }
+            // Rebuild the authored input and its identity together: rejection
+            // must reach effect validation, not a stale certificate mismatch.
+            let package = Package::from_parts(manifest, vec![], &template.rules_source).unwrap();
+            let error = package.check().unwrap_err();
+            assert!(
+                error.message.contains(
+                    "Trap effect refers to an invalid equipment slot or non-sleep condition"
+                ),
+                "{error:?}"
+            );
         }
     }
 
@@ -6214,7 +6499,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v48"
+        let source = r#"import = "interactions-v49"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]
@@ -7416,4 +7701,14 @@ mod region_lifecycle_tests {
         }
         assert!(detached > 0, "some package has a region to detach");
     }
+}
+
+fn check_trap_effect(
+    rules: &tor_simulation::rules::Ruleset,
+    kind: &TrapKind,
+) -> Result<(), Failure> {
+    require(
+        tor_simulation::trap_kind_valid(rules, &kind.compiled()),
+        "Trap effect refers to an invalid equipment slot or non-sleep condition",
+    )
 }

@@ -27,7 +27,7 @@ fn sample_state() -> StateView {
                     "wall": false,
                     "material": "stone",
                     "lit":true,"place_hint": true,
-                    "stairs_up": false,
+                    "trap":null,"stairs_up": false,
                     "stairs_down": false,
                     "door": null
                 },
@@ -37,7 +37,7 @@ fn sample_state() -> StateView {
                     "wall": false,
                     "material": "stone",
                     "lit":true,"place_hint": false,
-                    "stairs_up": false,
+                    "trap":null,"stairs_up": false,
                     "stairs_down": false,
                     "door": {
                         "id":super::door_target(101),
@@ -54,7 +54,7 @@ fn sample_state() -> StateView {
                     "wall": false,
                     "material": "stone",
                     "lit":true,"place_hint": false,
-                    "stairs_up": false,
+                    "trap":null,"stairs_up": false,
                     "stairs_down": false,
                     "door": {
                         "id":super::door_target(102),

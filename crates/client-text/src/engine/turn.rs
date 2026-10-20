@@ -685,6 +685,12 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
             item: *item,
             quantity: *quantity,
         }),
+        Goal::ExamineTrap { trap } => match scene.get(Key::Trap(*trap)) {
+            Some(referent) if referent.reachable => act(Action::ExamineTrap { trap: *trap }),
+            _ => Step::Finish(End::Refused(
+                "Come within reach to examine the trap's mechanism.".into(),
+            )),
+        },
         Goal::Door { door, open } => match scene.get(Key::Door(*door)) {
             Some(r) if r.open == Some(*open) => Step::Finish(End::Done),
             Some(r) if r.reachable => act(Action::SetDoor {
@@ -750,6 +756,7 @@ fn object(goal: &Goal, scene: &Scene) -> String {
             }
         }
         Goal::UseItem { item, .. } => named(Key::Item(*item)),
+        Goal::ExamineTrap { trap } => named(Key::Trap(*trap)),
         Goal::Door { door, .. } => named(Key::Door(*door)),
         Goal::Attack { target }
         | Goal::UseAbility {
@@ -814,6 +821,7 @@ fn refusal(code: ErrorCode, goal: &Goal) -> String {
             Goal::Take { .. } => "You can't pick that up from here.",
             Goal::Drop { .. } => "You can't drop that here.",
             Goal::UseItem { .. } => "You can't use that item right now.",
+            Goal::ExamineTrap { .. } => "You can't examine that trap right now.",
             Goal::Door { .. } => "You can't reach it from here.",
             Goal::Attack { .. } => "You can't reach it from here.",
             Goal::UseAbility { .. } => "You can't use that ability right now.",

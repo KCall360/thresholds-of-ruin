@@ -19,6 +19,9 @@ pub mod expertise;
 mod lifecycle;
 pub mod linked_hold;
 pub mod projectile_profiles;
+mod search_clock;
+mod traps;
+pub use traps::trap_kind_valid;
 pub mod weapon_profiles;
 pub use linked_hold::HoldId;
 pub mod escape;
@@ -48,6 +51,7 @@ pub mod costs;
 pub mod creatures;
 pub mod damage;
 pub mod dice;
+pub mod discovery;
 pub mod floor_activation;
 pub use floor_activation::CandidateStep;
 pub mod hd;
@@ -98,7 +102,8 @@ mod explored_map;
 mod fixture;
 pub use explored_map::{
     map_work_counts, reset_map_work_counts, MapAppearance, MapCellInput, MapDoorAppearance,
-    MapItemAppearance, MapKnowledgeRoot, MapProjection, MapWindow, MapWorkCounts, ProjectedMapCell,
+    MapItemAppearance, MapKnowledgeRoot, MapProjection, MapTrapAppearance, MapWindow,
+    MapWorkCounts, ProjectedMapCell,
 };
 mod navigation_map;
 mod observation;
@@ -122,7 +127,7 @@ pub use travel::TravelStep;
 
 pub use observation::{
     ActorView, CellView, CorpseAppearance, ExitView, GroundItemView, ItemView, KnownPlace,
-    Observation, SupplyView,
+    Observation, SupplyView, TrapView,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -197,6 +202,9 @@ pub enum Action {
         id: content_ids::AbilityId,
         invocation: crate::abilities::AbilityInvocation,
         supplies: supplies::SupplySelection,
+    },
+    ExamineTrap {
+        trap: u64,
     },
     SetDoor {
         door: u64,
@@ -280,6 +288,9 @@ impl<'de> serde::Deserialize<'de> for Action {
                 invocation: crate::abilities::AbilityInvocation,
                 supplies: supplies::SupplySelection,
             },
+            ExamineTrap {
+                trap: u64,
+            },
             SetDoor {
                 door: u64,
                 open: bool,
@@ -334,6 +345,7 @@ impl<'de> serde::Deserialize<'de> for Action {
                 invocation,
                 supplies,
             },
+            Fields::ExamineTrap { trap } => Self::ExamineTrap { trap },
             Fields::SetDoor { door, open } => Self::SetDoor { door, open },
             Fields::Move(direction) => Self::Move(direction),
             Fields::TouchApparentObject { subject, quantity } => {
@@ -379,6 +391,9 @@ pub enum GameError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    TrapExamined {
+        trap: u64,
+    },
     IdentificationResolved {
         choice: IntentionId,
         item: Option<ItemId>,
@@ -474,6 +489,9 @@ struct Actor {
     knowledge: Shared<BTreeSet<String>>,
     known_charges: Shared<crate::magic_items::ChargeKnowledge>,
     known_equipment: Shared<crate::equipment_knowledge::EquipmentKnowledge>,
+    discovery: Shared<discovery::DiscoveryKnowledge>,
+    search_clock: search_clock::SearchClock,
+    trap_contacts: Shared<traps::TrapContacts>,
     identification: Option<magic_items::IdentificationChoice>,
     recognized_abilities: Shared<BTreeSet<content_ids::AbilityId>>,
     public_plan: Option<Shared<public_plan::PublicPlanObservation>>,
@@ -712,6 +730,27 @@ impl Game {
         };
         result
     }
+    /// Add immutable concealment to an already placed physical door.
+    pub fn conceal_door(
+        &mut self,
+        at: Location,
+        concealment: tor_world::Concealment,
+    ) -> Result<(), GameError> {
+        self.world
+            .conceal_door(at, concealment)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+    /// Place authored physical ground-contact metadata; this is not an activation.
+    pub fn place_trap(&mut self, at: Location, trap: tor_world::Trap) -> Result<(), GameError> {
+        if !trap_kind_valid(self.content.rules(), &trap.kind)
+            || self.knows_concealed_feature(tor_world::ConcealedFeatureId::Trap(trap.id))
+        {
+            return Err(GameError::InvalidLocation);
+        }
+        self.world
+            .place_trap(at, trap)
+            .map_err(|_| GameError::InvalidLocation)
+    }
     fn reach(&self, from: Location, direction: Direction) -> Option<(Location, u8)> {
         if direction.components().is_some() {
             self.world
@@ -800,6 +839,9 @@ impl Game {
                 knowledge: Shared::default(),
                 known_charges: Shared::default(),
                 known_equipment: Shared::default(),
+                discovery: Shared::default(),
+                search_clock: Default::default(),
+                trap_contacts: Shared::default(),
                 identification: None,
                 recognized_abilities: Shared::default(),
                 public_plan: None,
@@ -922,7 +964,7 @@ impl Game {
         }
         // A frozen actor's time stands at its freeze; syncing below shifts it.
         let clock = self.actor_clock(id);
-        let mut outcome = self.actor_outcome(id)?;
+        let mut outcome = self.settled_actor_outcome(id)?;
         outcome.entry_cause = floor_activation::EntryCause::Teleport;
         outcome.discard(clock)?;
         let actor = &mut outcome.state;
@@ -938,7 +980,8 @@ impl Game {
         let prepared = self.prepare_actor_outcome(outcome)?;
         let changes_lifecycle = self.actor_frozen(id)
             != (self.region_state(location.region) == Some(RegionState::Frozen));
-        let requires_candidate = population_entry
+        let requires_candidate = self.world.has_concealed_features()
+            || population_entry
             || changes_lifecycle
             || prepared.emits_events()
             || prepared
@@ -948,7 +991,7 @@ impl Game {
             if !candidate.host_region_continuation {
                 candidate.begin_retrieval_transaction();
             }
-            candidate.publish_actor_outcome(prepared)?;
+            candidate.publish_actor_outcome_after_search(prepared)?;
             candidate.sync_actor_lifecycle(id)
         })
     }
@@ -1208,3 +1251,6 @@ mod test_creatures;
 
 #[cfg(test)]
 mod behavior_tests;
+
+#[cfg(test)]
+mod discovery_time_tests;

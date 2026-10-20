@@ -11,7 +11,7 @@ fn snapshot(cells: &[(&str, i32, i32)], revision: u64) -> Snapshot {
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells.iter().map(|(key,x,y)| serde_json::json!({
                 "key":key,"position":{"x":x,"y":y,"z":0},"wall":false,
-                "stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
+                "trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
             })).collect::<Vec<_>>(),
             "ground_items":[],"inventory":[],"linked_holds":[],"visible_actors":[],"ready":true
         }}
@@ -330,6 +330,7 @@ fn map_cell(position: Position, key: &str) -> RememberedMapCell {
         place_hint: false,
         stairs_up: false,
         stairs_down: false,
+        trap: None,
         door: None,
         ground_items: vec![],
     }
@@ -894,6 +895,7 @@ fn incremental_map_ambiguous_region_survives_later_failure_and_current_sight_win
             place_hint: false,
             stairs_up: false,
             stairs_down: false,
+            trap: None,
             door: None,
         });
     advance(&mut client, next);
@@ -1005,4 +1007,46 @@ fn incremental_map_reserves_reply_headroom_before_requesting_another_page() {
     );
     assert!(client.map_memory().any(|c| c.key == "reserve-0"));
     assert!(client.map_memory().all(|c| c.key != "reserve-1"));
+}
+
+#[test]
+fn trap_memory_keeps_only_last_disclosed_family_and_never_an_action_reference() {
+    let mut initial = snapshot(&[("a", 0, 0), ("trap", 1, 0)], 0);
+    let target = TrapTarget::from_digest([63; 32]);
+    Arc::make_mut(&mut initial.state).observation.visible_cells[1].trap = Some(TrapView {
+        id: target,
+        family: None,
+        reachable: true,
+    });
+    let mut client = ClientState::from_snapshot(initial).unwrap();
+    let mut examined = snapshot(&[("a", 0, 0), ("trap", 1, 0)], 1);
+    Arc::make_mut(&mut examined.state).observation.visible_cells[1].trap = Some(TrapView {
+        id: target,
+        family: Some(TrapFamily::SleepingGas),
+        reachable: true,
+    });
+    advance(&mut client, examined);
+    assert_eq!(client.narration(), ["You recognize a sleeping gas trap."]);
+    advance(&mut client, snapshot(&[("a", 0, 0)], 2));
+    assert!(client
+        .state()
+        .observation
+        .visible_cells
+        .iter()
+        .all(|cell| cell.trap.is_none()));
+    let remembered = client
+        .map_memory()
+        .find(|cell| cell.key == "trap")
+        .unwrap()
+        .appearance();
+    assert_eq!(
+        remembered.trap.as_ref().unwrap().family,
+        Some(TrapFamily::SleepingGas)
+    );
+    let encoded = serde_json::to_value(remembered).unwrap();
+    assert_eq!(
+        encoded["trap"],
+        serde_json::json!({"family":"sleeping_gas"})
+    );
+    assert!(!encoded.to_string().contains(&target.to_string()));
 }

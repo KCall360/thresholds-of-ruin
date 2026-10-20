@@ -666,6 +666,34 @@ enum Operation {
         darkness_roll: u32,
         darkness_start: u32,
     },
+    SecretEntrances {
+        #[serde(with = "mapped")]
+        config: crate::generation_recipe::SecretEntrances,
+    },
+    HiddenTraps {
+        #[serde(with = "mapped")]
+        config: crate::generation_recipe::HiddenTraps,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::generation_recipe::SecretEntrances",
+    deny_unknown_fields
+)]
+struct SecretEntrances {
+    chance_per_mille: u32,
+    maximum: u32,
+    dc: i32,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::generation_recipe::HiddenTraps", deny_unknown_fields)]
+struct HiddenTraps {
+    count: [u32; 2],
+    dc: i32,
+    rust_slot: String,
+    rust_amount: u32,
+    sleep_condition: String,
+    sleep_duration: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1995,6 +2023,9 @@ enum Perception {
     AmbushFromGuise {
         enabled: bool,
     },
+    PeriodicSearch {
+        interval: u64,
+    },
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
@@ -2199,6 +2230,7 @@ struct IndexedRegion {
     #[serde(with = "mapped")]
     items: Vec<source::IndexedItem>,
     doors: Vec<u64>,
+    traps: Vec<u64>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     generated: bool,
 }
@@ -2244,6 +2276,8 @@ struct RegionDef {
     #[serde(with = "mapped")]
     doors: Vec<source::Door>,
     #[serde(with = "mapped")]
+    traps: Vec<source::Trap>,
+    #[serde(with = "mapped")]
     items: Vec<source::Item>,
     #[serde(with = "mapped")]
     actors: Vec<source::Actor>,
@@ -2288,10 +2322,38 @@ struct Portal {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Door", deny_unknown_fields)]
 struct Door {
+    #[serde(with = "mapped")]
+    concealment: Option<source::Concealment>,
     id: u64,
     at: [i32; 3],
     open: bool,
     height: u8,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::Concealment", deny_unknown_fields)]
+struct Concealment {
+    dc: i32,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::TrapKind",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum TrapKind {
+    Rust { slot: String, amount: u32 },
+    SleepingGas { condition: String, duration: u64 },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::Trap", deny_unknown_fields)]
+struct Trap {
+    id: u64,
+    at: [i32; 3],
+    dc: i32,
+    #[serde(with = "mapped")]
+    kind: source::TrapKind,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -3738,6 +3800,13 @@ named_remote!(
     CarriedLoot => source::CarriedLoot,
     CarryChance => source::CarryChance,
     CharacterLoadout => source::CharacterLoadout,
+    RegionDef => source::RegionDef,
+    IndexedRegion => source::IndexedRegion,
+    Door => source::Door,
+    Trap => source::Trap,
+    Concealment => source::Concealment,
+    SecretEntrances => crate::generation_recipe::SecretEntrances,
+    HiddenTraps => crate::generation_recipe::HiddenTraps,
 );
 
 // String-valued condition enums cannot acquire externally tagged object aliases.
@@ -3782,12 +3851,11 @@ remote!(
     AdvancementPolicy => tor_simulation::rules::AdvancementPolicy,
     SupplyDefinition => tor_simulation::rules::SupplyDef,
     SupplyCost => tor_simulation::rules::SupplyCost,
-    RegionDef => source::RegionDef,
     CellLight => source::CellLight,
     Gravity => source::Gravity,
     NamedPlace => source::NamedPlace,
     Portal => source::Portal,
-    Door => source::Door,
+    TrapKind => source::TrapKind,
     Item => source::Item,
     Actor => source::Actor,
     Generate => crate::generator::Generate,
@@ -3846,7 +3914,6 @@ remote!(
     DamageType => source::DamageType,
     Certificate => source::Certificate,
     RegionIndex => source::RegionIndex,
-    IndexedRegion => source::IndexedRegion,
     IndexedActor => source::IndexedActor,
     IndexedItem => source::IndexedItem,
 );
@@ -3905,7 +3972,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 21;
+const RULES_INPUT_FORMAT: u32 = 22;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -3969,7 +4036,7 @@ struct RegionInput {
     #[serde(with = "mapped")]
     region: source::RegionDef,
 }
-const REGION_INPUT_FORMAT: u32 = 5;
+const REGION_INPUT_FORMAT: u32 = 6;
 pub(crate) fn encode_region_input(region: &source::RegionDef) -> Result<String, crate::Failure> {
     #[derive(Serialize)]
     struct Input<'a> {
@@ -4005,7 +4072,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 23;
+const CONTENT_PACKAGE_FORMAT: u32 = 24;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4267,7 +4334,7 @@ mod tests {
     }
 
     #[test]
-    fn equipment_magic_formats_match_independent_payload_boundaries() {
+    fn discovery_formats_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -4278,18 +4345,17 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (53, 26, "interactions-v48", 21, 5, 23, "tor-arena-run-v5")
+            (54, 27, "interactions-v49", 22, 6, 24, "tor-arena-run-v5")
         );
     }
 
     #[test]
-    fn projectile_expertise_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 56);
-        assert_eq!(super::RULES_INPUT_FORMAT, 21);
-        assert_eq!(super::REGION_INPUT_FORMAT, 5);
-        // Expertise ownership, projectile plans and selected weapon profiles advance
-        // their owning semantic payloads without changing compiled region inputs
-        // or physical framing.
+    fn discovery_formats_preserve_physical_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 57);
+        assert_eq!(super::RULES_INPUT_FORMAT, 22);
+        assert_eq!(super::REGION_INPUT_FORMAT, 6);
+        // Discovery advances the semantic rule, region and package payloads;
+        // their independently versioned physical framing remains unchanged.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&base[..6], b"TORB\x06\x00");
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
@@ -4990,7 +5056,9 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = encode_region_input(&package.region_def(1).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 5, |text| decode_region_input(text).is_ok());
+        reject_obsolete_compiled_headers(&input, super::REGION_INPUT_FORMAT, |text| {
+            decode_region_input(text).is_ok()
+        });
     }
 
     #[test]
@@ -5056,13 +5124,139 @@ mod tests {
             .remove("lighting");
         assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
         assert!(decode_region_input(&input.replacen(
-            "\"format\":5",
-            "\"format\":5,\"format\":5",
+            "\"format\":6",
+            "\"format\":6,\"format\":6",
             1
         ))
         .is_err());
-        assert!(decode_region_input(&input.replacen("\"format\":5", "\"format\":0", 1)).is_err());
+        assert!(decode_region_input(&input.replacen("\"format\":6", "\"format\":0", 1)).is_err());
         assert!(decode_region_input("id = 1").is_err());
+    }
+
+    #[test]
+    fn compiled_discovery_fields_round_trip_and_are_required_strictly() {
+        let region: source::RegionDef = serde_json::from_value(serde_json::json!({
+            "id":1,"name":"Hidden features","size":[5,5,2],"chamber":true,
+            "doors":[{"id":1,"at":[3,2,0],"open":false,"height":2,"concealment":{"dc":12}}],
+            "traps":[{"id":1,"at":[2,2,0],"dc":12,"kind":{"kind":"rust","slot":"body_armor","amount":1}},
+                     {"id":2,"at":[1,2,0],"dc":13,"kind":{"kind":"sleeping_gas","condition":"rogue.sleep","duration":200}}]
+        })).unwrap();
+        let encoded = encode_region_input(&region).unwrap();
+        assert_eq!(
+            encode_region_input(&decode_region_input(&encoded).unwrap()).unwrap(),
+            encoded
+        );
+        let value: Value = serde_json::from_str(&encoded).unwrap();
+        for (path, field) in [
+            ("/region", "traps"),
+            ("/region/doors/0", "concealment"),
+            ("/region/traps/0", "dc"),
+            ("/region/traps/0/kind", "slot"),
+            ("/region/traps/1/kind", "condition"),
+        ] {
+            let mut missing = value.clone();
+            missing
+                .pointer_mut(path)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err(),
+                "missing {path}/{field}"
+            );
+        }
+        for path in [
+            "/region/doors/0/concealment",
+            "/region/traps/0",
+            "/region/traps/1/kind",
+        ] {
+            let mut extra = value.clone();
+            extra
+                .pointer_mut(path)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("surprise".into(), Value::Bool(true));
+            assert!(
+                decode_region_input(&serde_json::to_string(&extra).unwrap()).is_err(),
+                "extra {path}"
+            );
+        }
+        for (path, fields) in [
+            (
+                "/region",
+                &[
+                    "lit",
+                    "lighting",
+                    "id",
+                    "name",
+                    "size",
+                    "chamber",
+                    "zone",
+                    "gravity",
+                    "gravity_overrides",
+                    "anchors",
+                    "walls",
+                    "openings",
+                    "places",
+                    "portals",
+                    "doors",
+                    "traps",
+                    "items",
+                    "actors",
+                    "generate",
+                ][..],
+            ),
+            (
+                "/region/doors/0",
+                &["concealment", "id", "at", "open", "height"][..],
+            ),
+            ("/region/doors/0/concealment", &["dc"][..]),
+            ("/region/traps/0", &["id", "at", "dc", "kind"][..]),
+        ] {
+            let mut positional = value.clone();
+            let record = positional.pointer_mut(path).unwrap();
+            *record = Value::Array(fields.iter().map(|field| record[*field].clone()).collect());
+            assert!(
+                decode_region_input(&serde_json::to_string(&positional).unwrap()).is_err(),
+                "positional {path}"
+            );
+        }
+        assert!(
+            serde_json::from_value::<Owned<crate::generation_recipe::SecretEntrances>>(
+                serde_json::json!([250, 2, 12])
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<Owned<crate::generation_recipe::HiddenTraps>>(
+                serde_json::json!([[1, 2], 12, "body_armor", 1, "rogue.sleep", 200])
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<Owned<source::IndexedRegion>>(serde_json::json!([
+                [],
+                1,
+                "regions/1.toml",
+                "hash",
+                "compiled_hash",
+                "Hidden features",
+                [5, 5, 2],
+                true,
+                null,
+                {},
+                [],
+                [],
+                [],
+                [],
+                [1],
+                [1, 2],
+                false
+            ]))
+            .is_err()
+        );
     }
 
     #[test]
@@ -5076,10 +5270,10 @@ mod tests {
         }))
         .unwrap();
         let expected = concat!(
-            "{\"format\":5,\"region\":{\"lit\":true,\"lighting\":[],\"id\":1,",
+            "{\"format\":6,\"region\":{\"lit\":true,\"lighting\":[],\"id\":1,",
             "\"name\":\"Supply room\",\"size\":[4,4,1],\"chamber\":false,\"zone\":null,",
             "\"gravity\":null,\"gravity_overrides\":[],\"anchors\":{},\"walls\":[],",
-            "\"openings\":[],\"places\":[],\"portals\":[],\"doors\":[],\"items\":[{",
+            "\"openings\":[],\"places\":[],\"portals\":[],\"doors\":[],\"traps\":[],\"items\":[{",
             "\"equipped_slot\":null,\"class\":null,\"quantity\":2,\"stackable\":null,",
             "\"properties\":{},\"id\":10,\"at\":[1,1,0],\"archetype\":\"clean_bandage\",",
             "\"name\":null,\"carried_by\":null,\"seed_names\":[]}],\"actors\":[],\"generate\":null}}"
@@ -5100,7 +5294,7 @@ mod tests {
         })).unwrap();
         let encoded = encode_region_input(&region).unwrap();
         let value: Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(value["format"], 5);
+        assert_eq!(value["format"], 6);
         assert_eq!(
             value["region"]["actors"][0]["creature"]["future_growth"],
             serde_json::json!({"kind":"selected","source":{"kind":"racial"}})

@@ -18,6 +18,10 @@ from linked_hold_service_contracts import LinkedHoldServiceContracts as LinkedHo
 from theft_service_contracts import TheftServiceContracts as TheftServiceContracts
 from utility_potions_service_contracts import UtilityPotionsServiceContracts as UtilityPotionsServiceContracts
 from utility_wands_service_contracts import UtilityWandsServiceContracts as UtilityWandsServiceContracts
+from discovery_service_contracts import (
+    DiscoveryServiceContracts as DiscoveryServiceContracts,
+    DiscoveryObserverServiceContracts as DiscoveryObserverServiceContracts,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 

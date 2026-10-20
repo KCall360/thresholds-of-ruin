@@ -210,6 +210,68 @@ impl<'a> Compiler<'a> {
             edge,
         })
     }
+    /// Search is one outgoing check, independent of candidate count. Its token
+    /// claims use the normal primary preparation site but never an incoming role.
+    fn discovery_check(
+        &mut self,
+        index: u16,
+    ) -> Result<crate::discovery::FrozenDiscoveryCheck, GameError> {
+        let rules = self.game.content.rules();
+        let selected: Vec<_> = if index == 0 {
+            self.caster
+                .conditions()
+                .qualifying_tokens_for(
+                    rules,
+                    self.actor,
+                    false,
+                    self.ability
+                        .map(|ability| (self.actor, ability, CheckActor::User)),
+                )
+                .into_iter()
+                .filter(|token| {
+                    rules
+                        .condition(&token.condition)
+                        .is_some_and(|condition| self.outgoing_edge_policy.selects_token(condition))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let site = CheckSite {
+            strike: index,
+            check: CheckPhase::Primary {
+                side: CheckSide::Initiating,
+            },
+        };
+        for token in &selected {
+            if !self.claims.iter().any(|claim| &claim.reservation == token) {
+                self.claims.push(TokenClaim {
+                    reservation: token.clone(),
+                    site,
+                });
+            }
+        }
+        Ok(crate::discovery::FrozenDiscoveryCheck {
+            bonus: self.skill_bonus(
+                &SkillSelector::Named {
+                    skill: crate::attributes::Skill::Perception,
+                },
+                self.actor,
+                CheckActor::User,
+            )? + i64::from(self.modifiers.check_bonus),
+            edge: self
+                .caster
+                .derived()
+                .discovery_edge(
+                    rules,
+                    self.actor,
+                    self.ability,
+                    &selected,
+                    self.outgoing_edge_policy,
+                )
+                .map_err(|_| invalid())?,
+        })
+    }
     fn strike(
         &mut self,
         definition: &StrikeDef,
@@ -270,8 +332,13 @@ impl<'a> Compiler<'a> {
                 )
             }
         };
-        let on_success = capture_primary(&definition.on_success)?;
+        let mut on_success = capture_primary(&definition.on_success)?;
         let on_failure = capture_primary(&definition.on_failure)?;
+        for effect in &mut on_success {
+            if let PlannedEffect::SearchAdjacentGuises { check } = effect {
+                *check = self.discovery_check(index)?;
+            }
+        }
         // Permanent natural melee dice/flat belong only to primary damage.
         // Other operands, including duration, retain their normal frozen scope.
         let rider_modifiers = natural.then(|| AbilityValues {

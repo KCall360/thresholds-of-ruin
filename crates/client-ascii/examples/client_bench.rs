@@ -12,7 +12,7 @@ fn snapshot(count: usize) -> Snapshot {
             "actor":"1","self_target":ActorTarget::from_digest([1; 32]),"tick":"0","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":(0..count).map(|i| serde_json::json!({
                 "key":i.to_string(),"position":{"x":(i%49) as i32-24,"y":((i/49)%25) as i32-12,"z":(i/1225) as i32},
-                "wall":i%7==0,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
+                "wall":i%7==0,"trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
             })).collect::<Vec<_>>(),"ground_items":[],"inventory":[],"visible_actors":[],"ready":true
         }}
     })).unwrap()

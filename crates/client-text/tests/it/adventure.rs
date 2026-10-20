@@ -21,7 +21,7 @@ fn state() -> StateView {
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
             "wall":false,"material":"stone","lit":true,"place_hint":x==1 || x==6,
-            "stairs_up":false,"stairs_down":false
+            "trap":null,"stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
             {"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
@@ -685,6 +685,7 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
         key: key.into(),
         position,
         asset: Some(asset.into()),
+        trap: None,
         door: None,
         ..here.clone()
     };
@@ -1009,7 +1010,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
                     "position": {"x": x, "y": y, "z": z},
                     "wall": solid,
                     "material": "stone",
-                    "lit":true,"place_hint": false, "stairs_up": false, "stairs_down": false,
+                    "lit":true,"place_hint": false, "trap":null,"stairs_up": false, "stairs_down": false,
                     "door": (matches!(ch, '+' | '\'') && z == 0).then(|| serde_json::json!({
                         "id":super::door_target(9), "name": "oak door", "description": "",
                         "open": ch == '\'', "reachable": false, "approaches": []

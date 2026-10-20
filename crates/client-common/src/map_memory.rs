@@ -48,6 +48,9 @@ pub(crate) fn appearance(cell: &CellView, items: &[&GroundItemView]) -> Remember
         place_hint: cell.place_hint,
         stairs_up: cell.stairs_up,
         stairs_down: cell.stairs_down,
+        trap: cell.trap.as_ref().map(|trap| MapTrapAppearance {
+            family: trap.family,
+        }),
         door: cell.door.as_ref().map(|d| MapDoorAppearance {
             name: d.name.clone(),
             description: d.description.clone(),

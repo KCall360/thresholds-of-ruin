@@ -65,6 +65,13 @@ def utility_wands_recording_case():
         "test_persistent_first_contact_utility_state_displays_in_text_and_reopens_without_source")
 
 
+def discovery_recording_case():
+    """Reuse Text examination/opening and source-free checkpoint acceptance."""
+    from test_discovery_process import DiscoveryProcesses
+    return DiscoveryProcesses(
+        "test_text_examination_and_secret_open_survive_source_free_checkpoint")
+
+
 def kind(message):
     """A server message's kind, with an update's body kind."""
     if message["type"] == "update":
@@ -164,6 +171,7 @@ CLIENT = [
                  "supplies": {"kind": "explicit", "items": [
                      {"cost_ordinal": 0, "item": "i_" + "04" * 32}]}},
                 {"type": "set_door", "door": "d_" + "07" * 32, "open": True},
+                {"type": "examine_trap", "trap": "t_" + "0a" * 32},
                 {"type": "move", "direction": "north_east"},
                 {"type": "take", "item": "i_" + "04" * 32, "quantity": "2"},
                 {"type": "drop", "item": "i_" + "04" * 32, "quantity": None},
@@ -232,6 +240,25 @@ class Recorder(ProcessTestCase):
         assert_anonymous_recipient_feedback(self, [anonymous], recipient)
         server_samples["zz.condition_persistent"] = sample
         server_samples["zz.anonymous_utility"] = anonymous
+
+    def record_discovery(self, server_samples):
+        from discovery_package import doors, traps
+        samples = run_recording_case(discovery_recording_case(), "discovery_samples")
+        self.assertEqual(set(samples), {"presence", "family", "opened", "restored"})
+        presence = samples["presence"]["snapshot"]
+        first = next(iter(traps(presence).values()))
+        self.assertEqual(set(first), {"id", "family", "reachable"})
+        self.assertIsNone(first["family"])
+        self.assertTrue(first["id"].startswith("t_"))
+        self.assertFalse(next(iter(doors(presence).values()))["open"])
+        self.assertEqual(traps(samples["family"]["snapshot"])[first["id"]]["family"], "rust")
+        opened = samples["opened"]["snapshot"]
+        self.assertTrue(next(iter(doors(opened).values()))["open"])
+        self.assertEqual(len(traps(opened)), 2)
+        self.assertEqual(samples["restored"]["snapshot"]["state"], opened["state"])
+        for sample in samples.values():
+            self.assertEqual(sample["type"], "snapshot")
+        server_samples.update({"zz.discovery_" + name: sample for name, sample in samples.items()})
 
     def record_public_plan(self, server_samples):
         self.save = self.save.parent / "public-plan-samples.db"
@@ -577,6 +604,7 @@ class Recorder(ProcessTestCase):
         self.record_personal_conditions(server_samples)
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)
+        self.record_discovery(server_samples)
         self.server_samples = server_samples
 
 

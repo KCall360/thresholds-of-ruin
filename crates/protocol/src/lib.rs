@@ -38,7 +38,9 @@ mod integers;
 mod recovery;
 pub use recovery::*;
 mod targets;
-pub use targets::{ActorTarget, AppearanceSeed, DoorTarget, HoldTarget, InvalidTarget, ItemTarget};
+pub use targets::{
+    ActorTarget, AppearanceSeed, DoorTarget, HoldTarget, InvalidTarget, ItemTarget, TrapTarget,
+};
 mod validation;
 mod weapon_preview;
 pub use weapon_preview::*;

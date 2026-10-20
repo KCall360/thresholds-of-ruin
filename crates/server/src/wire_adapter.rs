@@ -133,6 +133,16 @@ pub fn decode_action(
                 supplies,
             }
         }
+        p::Action::ExamineTrap { trap } => {
+            let identity = observation
+                .visible_cells
+                .iter()
+                .filter_map(|cell| cell.trap.as_ref())
+                .find(|candidate| scope.trap(candidate.id) == *trap)
+                .ok_or_else(unavailable)?
+                .id;
+            a::Action::ExamineTrap { trap: identity }
+        }
         p::Action::SetDoor { door, open } => {
             let identity = observation
                 .visible_cells
@@ -437,6 +447,9 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
                 },
             },
             supplies: encode_supplies(supplies, scope),
+        },
+        a::Action::ExamineTrap { trap } => p::Action::ExamineTrap {
+            trap: scope.trap(*trap),
         },
         a::Action::SetDoor { door, open } => p::Action::SetDoor {
             door: scope.door(*door),
@@ -997,7 +1010,8 @@ pub fn disclose_entry(
                 | Event::IntellectExpertiseChosen
                 | Event::Purchased
                 | Event::RespecStarted
-                | Event::IdentificationResolved { .. } => return None,
+                | Event::IdentificationResolved { .. }
+                | Event::TrapExamined { .. } => return None,
                 Event::EscapeStarted { hold } => VisibleEvent::EscapeStarted {
                     hold: scope.hold(*hold),
                 },

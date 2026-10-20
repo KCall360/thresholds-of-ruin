@@ -138,6 +138,7 @@ mod tests {
             key: format!("{at:?}"),
             material: String::new(),
             asset: None,
+            trap: None,
             door: None,
             stairs_up: false,
             stairs_down: false,

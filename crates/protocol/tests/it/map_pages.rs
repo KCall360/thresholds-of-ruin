@@ -37,6 +37,7 @@ fn cell(index: i32) -> RememberedMapCell {
         place_hint: false,
         stairs_up: false,
         stairs_down: false,
+        trap: None,
         door: None,
         ground_items: Vec::new(),
     }
@@ -86,6 +87,9 @@ fn request() -> ClientMessage {
 }
 fn appearance_response() -> Value {
     let mut p = page();
+    p.cells[0].trap = Some(MapTrapAppearance {
+        family: Some(TrapFamily::Rust),
+    });
     p.cells[0].door = Some(MapDoorAppearance {
         name: "Wooden door".into(),
         description: "Last seen closed".into(),
@@ -233,6 +237,7 @@ fn map_appearances_roundtrip_without_live_handles_and_with_canonical_wide_counts
     for path in [
         "/page/cells/0",
         "/page/cells/0/door",
+        "/page/cells/0/trap",
         "/page/cells/0/ground_items/0",
     ] {
         for field in [
@@ -429,11 +434,13 @@ fn map_records_reject_positional_missing_duplicate_and_unknown_fields_recursivel
                 "place_hint",
                 "stairs_up",
                 "stairs_down",
+                "trap",
                 "door",
                 "ground_items",
             ],
         ),
         ("/page/cells/0/position", vec!["x", "y", "z"]),
+        ("/page/cells/0/trap", vec!["family"]),
         (
             "/page/cells/0/door",
             vec!["name", "description", "open", "asset"],
@@ -622,4 +629,33 @@ fn map_continuations_and_nested_appearances_remain_bounded_named_records() {
             "noncanonical {path}"
         );
     }
+}
+
+#[test]
+fn remembered_trap_requires_named_nullable_family_and_never_carries_live_operands() {
+    for family in [None, Some(TrapFamily::Rust), Some(TrapFamily::SleepingGas)] {
+        let value = MapTrapAppearance { family };
+        let json = serde_json::to_value(&value).unwrap();
+        assert_eq!(json.as_object().unwrap().len(), 1);
+        assert_eq!(
+            serde_json::from_value::<MapTrapAppearance>(json).unwrap(),
+            value
+        );
+    }
+    for invalid in [
+        json!({}),
+        json!([null]),
+        json!({"family":"poison"}),
+        json!({"family":{"rust":null}}),
+        json!({"family":null,"id":"t_00"}),
+        json!({"family":null,"dc":12}),
+    ] {
+        assert!(serde_json::from_value::<MapTrapAppearance>(invalid).is_err());
+    }
+    let mut value = appearance_response();
+    value["page"]["cells"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("trap");
+    assert!(decode_response(&value.to_string()).is_err());
 }

@@ -19,8 +19,8 @@ pub const CELL_SIZE_FEET: u32 = 5;
 
 pub use topology::checkpoint as checkpoint_worlds;
 pub use topology::{
-    Direction, Door, Location, NamedAnchor, Passage, Region, RegionId, RegionSlice, World,
-    WorldError, MAX_DOOR_HEIGHT,
+    ConcealedFeatureId, Concealment, Direction, Door, Location, NamedAnchor, Passage, Region,
+    RegionId, RegionSlice, Trap, TrapFamily, TrapKind, World, WorldError, MAX_DOOR_HEIGHT,
 };
 
 /// Integer position in a region's local coordinate system.

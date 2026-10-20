@@ -41,6 +41,8 @@ fn scenario() -> Scenario {
         room_height: [5, 5],
         extra_connections: [0, 0],
         lighting: None,
+        secret_entrances: None,
+        hidden_traps: None,
     }
     .to_recipe()
     .unwrap();

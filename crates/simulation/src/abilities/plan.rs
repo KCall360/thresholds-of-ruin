@@ -156,7 +156,9 @@ pub enum PlannedEffect {
         resource: Resource,
         amount: PlannedAmount,
     },
-    SearchAdjacentGuises,
+    SearchAdjacentGuises {
+        check: crate::discovery::FrozenDiscoveryCheck,
+    },
     ObservePublicPlan,
     ApplyQualifiedConditionToSource {
         id: ConditionId,
@@ -168,7 +170,7 @@ impl PlannedEffect {
     pub(crate) fn recipient(&self) -> crate::rules::EffectRecipient {
         match self {
             Self::AlterEquipment { .. }
-            | Self::SearchAdjacentGuises
+            | Self::SearchAdjacentGuises { .. }
             | Self::ObservePublicPlan
             | Self::ApplyQualifiedConditionToSource { .. } => crate::rules::EffectRecipient::Source,
             _ => crate::rules::EffectRecipient::Target,
@@ -773,7 +775,8 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                     definition.timing != crate::rules::ConditionTiming::UntilRemoved
                 }) && (1..=crate::limits::NUMERIC as u64).contains(duration)
             }
-            PlannedEffect::SearchAdjacentGuises | PlannedEffect::ObservePublicPlan => true,
+            PlannedEffect::SearchAdjacentGuises { check } => check.valid(),
+            PlannedEffect::ObservePublicPlan => true,
             PlannedEffect::ApplyQualifiedConditionToSource {
                 id,
                 duration,
@@ -982,7 +985,7 @@ pub(super) fn effects_match_definition_scoped(
                         && PlannedAmount::compile(expected)
                             .is_ok_and(|expected| &expected == actual)
                 }
-                (Effect::SearchAdjacentGuises, PlannedEffect::SearchAdjacentGuises)
+                (Effect::SearchAdjacentGuises, PlannedEffect::SearchAdjacentGuises { .. })
                 | (Effect::ObservePublicPlan, PlannedEffect::ObservePublicPlan) => true,
                 (
                     Effect::ApplyQualifiedConditionToSource {
@@ -1313,7 +1316,9 @@ impl Game {
                 Effect::PushTargetOneCell { direction } => Ok(PlannedEffect::PushTargetOneCell {
                     direction: *direction,
                 }),
-                Effect::SearchAdjacentGuises => Ok(PlannedEffect::SearchAdjacentGuises),
+                Effect::SearchAdjacentGuises => Ok(PlannedEffect::SearchAdjacentGuises {
+                    check: self.capture_discovery_check(actor)?,
+                }),
                 Effect::ObservePublicPlan => Ok(PlannedEffect::ObservePublicPlan),
                 Effect::ApplyQualifiedConditionToSource {
                     condition,
@@ -1571,7 +1576,9 @@ impl<'de> Deserialize<'de> for PlannedEffect {
                 resource: Resource,
                 amount: PlannedAmount,
             },
-            SearchAdjacentGuises {},
+            SearchAdjacentGuises {
+                check: crate::discovery::FrozenDiscoveryCheck,
+            },
             ObservePublicPlan {},
             ApplyQualifiedConditionToSource {
                 id: ConditionId,
@@ -1630,7 +1637,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             },
             Fields::RemoveCondition { id } => Self::RemoveCondition { id },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
-            Fields::SearchAdjacentGuises {} => Self::SearchAdjacentGuises,
+            Fields::SearchAdjacentGuises { check } => Self::SearchAdjacentGuises { check },
             Fields::ObservePublicPlan {} => Self::ObservePublicPlan,
             Fields::ApplyQualifiedConditionToSource {
                 id,

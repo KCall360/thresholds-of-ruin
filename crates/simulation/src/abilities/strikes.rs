@@ -261,6 +261,15 @@ impl FrozenStrike {
     pub(super) fn check_role(&self, phase: CheckPhase) -> Option<CheckActor> {
         match phase {
             CheckPhase::Primary { side } => {
+                if self.check.is_none()
+                    && side == CheckSide::Initiating
+                    && matches!(
+                        self.on_success.as_slice(),
+                        [PlannedEffect::SearchAdjacentGuises { .. }]
+                    )
+                {
+                    return Some(CheckActor::User);
+                }
                 let check = self.check.as_ref()?;
                 match side {
                     CheckSide::Initiating => Some(check.actor),
@@ -281,6 +290,14 @@ impl FrozenStrike {
                 .check
                 .as_ref()
                 .map(|check| check.actor),
+        }
+    }
+    /// A synthetic targetless Search has an outgoing site for reservations,
+    /// but self-target bookkeeping never grants an incoming token participant.
+    pub(super) fn accepts_incoming_token(&self, phase: CheckPhase) -> bool {
+        match phase {
+            CheckPhase::Primary { .. } => self.check.is_some() && self.check_role(phase).is_some(),
+            CheckPhase::Rider { .. } => self.check_role(phase).is_some(),
         }
     }
     pub(super) fn check_participants(

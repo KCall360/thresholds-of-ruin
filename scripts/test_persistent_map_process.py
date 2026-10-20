@@ -19,6 +19,7 @@ def remembered_appearance(cell):
         "place_hint": cell["place_hint"],
         "stairs_up": cell["stairs_up"],
         "stairs_down": cell["stairs_down"],
+        "trap": None if cell["trap"] is None else {"family": cell["trap"]["family"]},
         "ground_items": [
             {field: entry["item"][field] for field in (
                 "class", "quantity", "appearance", "identified", "description", "name", "asset")}
@@ -141,9 +142,10 @@ class PersistentMapProcesses(ProcessTestCase):
             for cell in page["cells"]:
                 self.assertIn(cell["key"], disclosed, "hydration must not reveal unseen geometry")
                 self.assertEqual(set(cell), {"key", "position", "wall", "material", "asset",
-                                             "place_hint", "stairs_up", "stairs_down", "door",
+                                             "place_hint", "stairs_up", "stairs_down", "trap", "door",
                                              "ground_items"})
                 self.assertEqual(cell["position"]["x"], edge)
+                self.assertIsNone(cell["trap"])
                 self.assertIsNone(cell["door"])
                 self.assertEqual(cell["ground_items"], [])
             windows.append(page["window"])

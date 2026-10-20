@@ -28,7 +28,7 @@ impl Domain {
         match self {
             Domain::Any => match r.kind {
                 Kind::Thing | Kind::Figure => 0,
-                Kind::Door | Kind::Feature => 1,
+                Kind::Trap | Kind::Door | Kind::Feature => 1,
                 Kind::Surface | Kind::Me => 2,
             },
             Domain::Ground => match (thing, r.carried) {

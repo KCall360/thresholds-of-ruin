@@ -90,7 +90,9 @@ impl Messages {
             match &line.topic {
                 Topic::Own(Event::Moved { .. }) => self.here(view),
                 Topic::Own(Event::Waited) => {}
-                Topic::Own(_) | Topic::Door | Topic::Motion => self.push(&line.text),
+                Topic::Own(_) | Topic::Door | Topic::Discovery | Topic::Motion => {
+                    self.push(&line.text)
+                }
                 Topic::Finished => self.finish(&line.text),
                 Topic::Noticed(actor) => {
                     let returning = self

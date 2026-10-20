@@ -786,7 +786,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
                 });
             }
             Beat::SequenceStatus(text) => teller.say(text.trim_end_matches('.')),
-            Beat::PublicPlan(text) => teller.say(text),
+            Beat::Discovery(text) | Beat::PublicPlan(text) => teller.say(text),
             Beat::ExecutionRefused(text) => teller.say(text),
             Beat::Condition(name) => teller.say(format!("you are affected by {name}")),
             Beat::Interrupted => teller.say("your attack is interrupted"),

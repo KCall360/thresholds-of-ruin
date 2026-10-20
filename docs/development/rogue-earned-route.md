@@ -18,13 +18,14 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v17` retains exact package inputs and its
+`scripts/fixtures/rogue-earned-baseline-v18` retains exact package inputs and its
 current bundled-rule dependency hash. Its source-only transition advances the
 previous scenario format and bundled rules import to the current identities.
 All other authored package bytes, including anatomy, items, player kits and
-population stages, are unchanged; no utility-magic or ring loot is imported. Frozen
-v6–v16 inputs and their source/transition receipts remain immutable research
-evidence. Shared wearable, utility-magic, persistent-condition and action-duration rules
+population stages, are unchanged; no utility-magic or ring loot, discovery stages, traps or secret closures are
+imported. Frozen v6–v17 inputs and their source/transition receipts remain immutable research
+evidence. Shared discovery, wearable, utility-magic, persistent-condition and
+action-duration rules
 make this a new experiment input, with no claim of identical outcomes or a
 requalified pilot. The source
 receipt alone does not establish compiler validation, regenerated certificates
@@ -335,7 +336,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v17"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v18"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```

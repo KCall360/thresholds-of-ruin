@@ -1075,12 +1075,15 @@ class ProcessTestCase(unittest.TestCase):
             wait_for_admission=wait_for_admission))
 
     def native_press(self, process, native, name, reported, *, seconds=20,
-                     wait_for_simulation=True, wait_for_ready=False):
+                     wait_for_simulation=True, wait_for_ready=False, wait_for_admission=False):
         """Present a genuine OS press, then acknowledge its native release.
 
-        Both waits share one deadline. Return the latest real presented frame,
+        All waits share one deadline. Return the latest real presented frame,
         including progress seen during release; callers that stop at started
         must not miss a terminal/readiness frame consumed by that second wait.
+        An explicit admission barrier runs after release, within that same
+        deadline. Permission is not completion: callers needing both also set
+        wait_for_ready=True. Defaults retain started/queue-control witnesses.
         """
         deadline = time.monotonic() + seconds
         sequence = None
@@ -1114,6 +1117,13 @@ class ProcessTestCase(unittest.TestCase):
             return record.get("type") == "native_release" and record.get("sequence") == sequence
 
         self.frame(process, released, seconds=max(0, deadline - time.monotonic()))
+        if wait_for_admission:
+            def permitted(frame):
+                return complete(frame) and frame.get("can_admit_intention") is True
+
+            if not permitted(completed):
+                completed = self.ascii_frame(process, permitted,
+                                             seconds=max(0, deadline - time.monotonic()))
         return completed
 
     def _native_window(self, client):

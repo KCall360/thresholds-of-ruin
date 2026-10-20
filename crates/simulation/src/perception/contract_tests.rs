@@ -7,9 +7,7 @@ use crate::{
 };
 use tor_world::Direction;
 
-#[path = "contract_fixtures.rs"]
-mod fixtures;
-use fixtures::*;
+use crate::perception::contract_fixtures::*;
 
 fn invisible() -> PerceptionValue {
     PerceptionValue::Invisible { enabled: true }
@@ -518,7 +516,13 @@ fn search_pays_one_hundred_ticks_and_reveals_only_physical_adjacent_guises() {
         .unwrap();
     assert_eq!((plan.preparation(), plan.recovery()), (50, 50));
     assert!(plan.as_ability().unwrap().strikes[0].check.is_none());
-    let rng = game.rules_rng;
+    let mut rng = game.rules_rng;
+    let crate::abilities::PlannedEffect::SearchAdjacentGuises { check } =
+        plan.as_ability().unwrap().strikes[0].on_success[0]
+    else {
+        panic!("search effect")
+    };
+    check.roll(&mut rng, false);
     start(
         &mut game,
         OWNER,
@@ -530,7 +534,7 @@ fn search_pays_one_hundred_ticks_and_reveals_only_physical_adjacent_guises() {
     assert_eq!(game.actors[&OWNER].ready_at, 100);
     assert_eq!(
         game.rules_rng, rng,
-        "a guaranteed search rolls no discovery check"
+        "one paid discovery check also preserves guaranteed adjacent guise revelation"
     );
     for actor in [SUBJECT, diagonal] {
         assert!(game.actors[&actor].guise.appearance().is_none());

@@ -27,6 +27,7 @@ pub enum Who {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Beat {
+    Discovery(String),
     Condition(String),
     /// One step of the character's own movement.
     Stepped(Direction),
@@ -219,6 +220,11 @@ impl Chronicler {
             tor_client_common::narration::completed_items(b, a)
                 .into_iter()
                 .map(Beat::ItemFinished),
+        );
+        beats.extend(
+            tor_client_common::narration::discovery_changes(b, a)
+                .into_iter()
+                .map(Beat::Discovery),
         );
         if a.tick != b.tick {
             if let Some(motion) = &a.motion {
@@ -416,7 +422,7 @@ mod tests {
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":"5","position":{"x":0,"y":0,"z":0},"ready":true,
             "places":[],"visible_cells":[{"key":"here","position":{"x":0,"y":0,"z":0},
                 "wall":false,"material":"stone","lit":true,"place_hint":false,
-                "stairs_up":false,"stairs_down":false,
+                "trap":null,"stairs_up":false,"stairs_down":false,
                 "door":{"id":tor_protocol::DoorTarget::from_digest([7; 32]),"name":"Oak Door","description":"","open":false,
                     "reachable":true,"approaches":[]}}],
             "ground_items":[],"inventory":[],

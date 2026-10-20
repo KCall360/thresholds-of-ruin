@@ -205,7 +205,7 @@ visible-actor rows or the combat summaries of other actors.
 The protocol requires a backend-resolved observer-relative scene. Positions
 are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
 opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, `place_hint`, and
-required boolean `lit`, plus nullable `door` facts. `lit` is current server
+required boolean `lit`, plus nullable `door` and required nullable `trap` facts. `lit` is current server
 illumination: a cell disclosed through local body awareness can be dark. It
 does not add cells to the scene or confer sight targeting. Remembered values
 remain last-disclosed information until a fresh observation replaces them.
@@ -239,8 +239,8 @@ canonical transport strings are not a save-schema alias.
 
 ## Entity target references
 
-Disclosed actors, items and doors use opaque typed references: `a_`, `i_` or
-`d_` followed by exactly 64 lowercase hexadecimal digits. Numeric IDs, uppercase
+Disclosed actors, items, doors and traps use opaque typed references: `a_`, `i_`,
+`d_` or `t_` followed by exactly 64 lowercase hexadecimal digits. Numeric IDs, uppercase
 hexadecimal, extra whitespace and references of another entity kind are rejected.
 Clients copy the reference from the current observation into an action; they
 cannot derive it from an authored ID or infer allocation order from it.
@@ -271,9 +271,22 @@ item names and arbitrary authored properties do not identify its source. Other
 item classes and unidentified items cannot disclose corpse metadata. Full views
 and deltas carry the same appearance facts.
 
+A discovered trap discloses exactly `id`, required nullable `family` (`rust` or
+`sleeping_gas`), and `reachable`. The record never includes a discovery DC,
+effect operands, hidden-feature counts or undiscovered neighbors. Presence and
+family are separate actor-owned knowledge. Remembered cells retain only an
+optional `{family}` appearance, never a trap action reference.
+
+`{"type":"examine_trap","trap":"<t_ token>"}` is a normal admitted action.
+Execution requires a discovered physically adjacent trap and no pending work;
+it learns the family without advancing time. Snapshots, map hydration and client
+lookups never mutate knowledge. Unknown closed secret entrances disclose wall
+appearance and no door reference or approaches. Discovered entrances use the
+existing door action; opening changes shared physical geometry.
+
 References grant no authority. After authority and original receipt lookup,
 a fresh action resolves only against the cached observer disclosure: attack and ability use
-uses visible actors or self, doors use visible cells, take uses ground items,
+uses visible actors or self, doors and trap examination use visible cells, take uses ground items,
 and drop uses inventory. The simulation still checks the admitted target when
 executing the queued action. Unavailable references produce the same generic
 rejection without revealing hidden entities.
@@ -290,7 +303,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":56,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":57,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and

@@ -126,6 +126,9 @@ pub(crate) enum Action {
     Eat {
         item: u64,
     },
+    ExamineTrap {
+        trap: u64,
+    },
     SetDoor {
         door: u64,
         open: bool,
@@ -420,6 +423,7 @@ impl From<&crate::actions::Action> for Action {
                 invocation: (*invocation).into(),
                 supplies: SupplySelection::from(supplies),
             },
+            Backend::ExamineTrap { trap } => Self::ExamineTrap { trap: *trap },
             Backend::SetDoor { door, open } => Self::SetDoor {
                 door: *door,
                 open: *open,
@@ -488,6 +492,7 @@ impl From<Action> for crate::actions::Action {
                 invocation: invocation.into(),
                 supplies: supplies.into(),
             },
+            Action::ExamineTrap { trap } => Self::ExamineTrap { trap },
             Action::SetDoor { door, open } => Self::SetDoor { door, open },
             Action::Move { direction } => Self::Move {
                 direction: direction.into(),

@@ -85,6 +85,9 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
         place_hint: cell.place_hint,
         stairs_up: cell.stairs_up,
         stairs_down: cell.stairs_down,
+        trap: cell.trap.as_ref().map(|trap| MapTrapAppearance {
+            family: trap.family,
+        }),
         door: None,
         ground_items: vec![],
     };
@@ -308,11 +311,16 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
                 "place_hint",
                 "stairs_up",
                 "stairs_down",
+                "trap",
                 "door",
                 "ground_items"
             ])
         );
-        assert!(appearance.door.is_none() && appearance.ground_items.is_empty());
+        assert!(
+            appearance.trap.is_none()
+                && appearance.door.is_none()
+                && appearance.ground_items.is_empty()
+        );
     }
     assert_eq!(model.state(), &live);
     assert_eq!(model.readiness(), &readiness);
