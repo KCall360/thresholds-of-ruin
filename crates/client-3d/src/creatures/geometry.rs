@@ -208,11 +208,25 @@ impl Kit<'_, '_, '_> {
         part: &str,
         build: impl FnOnce(&mut Parts),
     ) {
+        self.drape_scaled(parent, at, kind, part, Vec3::ONE, build);
+    }
+
+    /// A drape carrying the Storybook proportion of the part it hangs from,
+    /// as if it were still built into that part.
+    fn drape_scaled(
+        &mut self,
+        parent: Entity,
+        at: Transform,
+        kind: Drape,
+        part: &str,
+        proportion: Vec3,
+        build: impl FnOnce(&mut Parts),
+    ) {
         let model = self.part(part, build);
         let e = self.commands.spawn((at, Visibility::default())).id();
         self.commands
             .entity(e)
-            .with_children(|p| model.attach_scaled(p, Vec3::ONE));
+            .with_children(|p| model.attach_scaled(p, proportion));
         self.commands.entity(parent).add_child(e);
         self.rig.drapes.push((e, kind));
     }
@@ -1520,6 +1534,43 @@ pub(super) fn jerkin_peplum(style: Style) -> Option<f32> {
 /// neckline: a V widening from the upper chest up to the collarbones.
 pub(super) fn decollete(at: Vec3, normal: Vec3, shoulders: f32) -> bool {
     normal.z > 0.0 && at.y > 0.4 && at.x.abs() < 0.045 * shoulders + (at.y - 0.4) * 0.95
+}
+
+/// A tunic skirt's waist and hem radii (across, front to back), before the
+/// hips' Storybook proportion is applied. Its elliptical section always
+/// contains the widest section of both thighs beneath it, diagonals included,
+/// so fuller hips or heavier builds never push a thigh through the cloth.
+pub(super) fn skirt_radii(body: HumanoidBody, flare: f32, trousered: bool) -> (Vec2, Vec2) {
+    use super::anatomy::{HIP_SCALE, LIMB_SCALE};
+    let b = body.build;
+    let thigh = body.thigh;
+    let ease = if trousered { TROUSER_EASE * b } else { 0.0 };
+    // The thigh's fullest section in the hips' space, as worn.
+    let center = Vec2::new(body.leg_root(1.0).x, LIMB_SCALE.z * thigh.belly_center.z);
+    let section = Vec2::new(
+        LIMB_SCALE.x * thigh.radius_top.max(thigh.belly.x),
+        LIMB_SCALE.z * thigh.radius_top.max(thigh.belly.z),
+    ) + Vec2::splat(ease);
+    let proportion = Vec2::new(HIP_SCALE.x, HIP_SCALE.z);
+    let clear = |radii: Vec2, margin: f32| {
+        let worn = radii * proportion;
+        let across = worn.x.max(center.x + section.x + margin * 2.0);
+        // The shallowest depth whose ellipse still holds every point of the
+        // thigh's section, grown by the margin.
+        let depth = (0..32).fold(worn.y, |depth, k| {
+            let a = k as f32 / 32.0 * TAU;
+            let point = center + Vec2::new(a.cos(), a.sin()) * (section + Vec2::splat(margin));
+            let room = (1.0 - (point.x / across).powi(2)).max(0.05);
+            depth.max(point.y.abs() / room.sqrt())
+        });
+        Vec2::new(across, depth) / proportion
+    };
+    let top = clear(Vec2::new(0.18 * b * body.hips_width, 0.135 * b), 0.008);
+    let bottom = clear(
+        Vec2::new(flare * b * body.hips_width, flare * 0.74 * b),
+        0.02,
+    );
+    (top, bottom)
 }
 
 /// Whether her boots have heels: the kinds whose women wear them on their
@@ -2930,13 +2981,15 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         } else {
             0.208 + skirt_len * 0.045
         };
-        let top = Vec2::new(0.18 * b * hips_w, 0.135 * b);
-        let bottom = Vec2::new(flare * b * hips_w, flare * 0.74 * b);
-        kit.drape(
+        let (top, bottom) = skirt_radii(body, flare, trousered);
+        // The skirt keeps the hips' Storybook proportion it had when it was
+        // built into the pelvis; without it the cloth is a tenth narrower.
+        kit.drape_scaled(
             hips,
             Transform::IDENTITY,
             Drape::Skirt(skirt_len),
             "skirt",
+            storybook_part(Plan::Biped, J::Hips),
             |p| {
                 draped_cloth(
                     &mut p.matte,
