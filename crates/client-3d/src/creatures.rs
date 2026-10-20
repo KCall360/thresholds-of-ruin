@@ -44,6 +44,9 @@ pub struct Look {
     v: Variant,
     /// The clothes and armour it was dressed in, if not its kind's own.
     outfit: Option<outfit::Outfit>,
+    /// Its cache identity before it was dressed: the body every outfit is
+    /// cut for.
+    body_key: Option<String>,
 }
 
 /// How one individual differs from others of its kind: for people, sex,
@@ -260,6 +263,7 @@ impl Look {
             return self;
         }
         self.outfit = Some(outfit::Outfit::from_wardrobe(wardrobe, &self));
+        self.body_key = Some(self.key.clone());
         self.key = format!("{}:{wardrobe:?}", self.key);
         self
     }
@@ -464,6 +468,7 @@ impl Look {
             stride: 1.0,
             v: Variant::default(),
             outfit: None,
+            body_key: None,
         };
         let teal = Vec3::new(0.045, 0.6, 0.55);
         if model == CreatureModel::Placeholder {
