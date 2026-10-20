@@ -462,3 +462,27 @@ fn art_contract_the_neck_rises_from_the_shoulders_without_a_ring() {
         }
     }
 }
+
+#[test]
+fn art_contract_heads_sit_close_on_the_shoulders() {
+    // As on the concept sheets, the head sits on a short neck just above
+    // the shoulder line, never raised on a stalk.
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Nymph,
+        CreatureModel::Medusa,
+        CreatureModel::Orc,
+        CreatureModel::Leprechaun,
+    ] {
+        for woman in [false, true] {
+            for build in 0..3 {
+                let body = HumanoidBody::resolve(&appearance(model, woman, build));
+                let rise = body.head.y - body.shoulder(1.0).y;
+                assert!(
+                    (0.0..=0.04).contains(&rise),
+                    "{model:?} woman {woman} build {build}: the head rises {rise:.3} over the shoulders"
+                );
+            }
+        }
+    }
+}

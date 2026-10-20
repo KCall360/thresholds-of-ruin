@@ -2939,7 +2939,7 @@ pub(super) fn neck_profile(build: f32, slim: f32) -> [(Vec3, Vec2); 4] {
 /// the storybook head.
 pub(super) fn neck_slim(woman: bool) -> f32 {
     if woman {
-        0.85
+        0.9
     } else {
         1.0
     }
@@ -3135,7 +3135,7 @@ pub(super) fn torso_shape(
         // a wider stub whose flat top would show as a ledge round it.
         Capsule(
             Vec3::new(0.0, 0.505, -0.008),
-            Vec3::new(0.0, 0.6, -0.008),
+            Vec3::new(0.0, super::anatomy::NECK_SEAT, -0.008),
             0.059 * b * neck_slim(fem) - 0.002 + grow,
             0.05 * b * neck_slim(fem) - 0.004 + grow,
         ),
@@ -3191,9 +3191,10 @@ pub(super) fn torso_shape(
             );
         }
     }
-    if trim_neck {
+    if trim_neck && material.is_some() {
         // The tunic ends at its fitted opening rather than climbing
-        // inside the moving skin neck as a second thick cylinder.
+        // inside the moving skin neck as a second thick cylinder. Bare
+        // skin is not trimmed: the neck rises from it unbroken.
         body.carve(Beyond(Vec3::Y, 0.552), 0.004);
     }
     body
