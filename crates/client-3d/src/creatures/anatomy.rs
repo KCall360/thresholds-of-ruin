@@ -144,7 +144,7 @@ impl HumanoidBody {
             _ => 1.0,
         } * [0.94, 1.0, 1.07][look.v.build as usize];
         let (shoulders, waist, hips_width): (f32, f32, f32) = if look.v.woman {
-            (0.9, 0.79, 1.18)
+            (0.9, 0.75, 1.22)
         } else {
             (1.04, 0.94, 1.0)
         };

@@ -1511,6 +1511,12 @@ impl Default for Builder {
 }
 
 impl Builder {
+    /// Whether nothing has been built yet.
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.positions.is_empty()
+    }
+
     /// Take over another builder's finished triangles.
     pub(crate) fn absorb(&mut self, other: Builder) {
         self.positions.extend(other.positions);

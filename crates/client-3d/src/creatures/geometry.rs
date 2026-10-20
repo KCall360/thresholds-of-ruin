@@ -9,6 +9,39 @@ mod art_contract_tests {
     use super::*;
 
     #[test]
+    fn art_contract_glowing_eyes_keep_their_lids_and_light_only_the_iris() {
+        let mut glowing = Parts::default();
+        soft_eyes(
+            &mut glowing,
+            Vec3::ZERO,
+            0.04,
+            0.0158,
+            Vec3::splat(0.3),
+            SKIN,
+            true,
+            Some(Accent::Danger),
+        );
+        assert_eq!(glowing.accent, Some(Accent::Danger));
+        assert!(!glowing.glow.is_empty(), "the iris glows");
+        assert!(
+            !glowing.matte.is_empty(),
+            "lids, lashes and the white stay solid"
+        );
+        let mut plain = Parts::default();
+        soft_eyes(
+            &mut plain,
+            Vec3::ZERO,
+            0.04,
+            0.0145,
+            Vec3::splat(0.3),
+            SKIN,
+            false,
+            None,
+        );
+        assert!(plain.glow.is_empty() && plain.accent.is_none());
+    }
+
+    #[test]
     fn art_contract_structured_front_is_continuous_and_keeps_a_fitted_waist() {
         for build in 0..3 {
             let look = Look::with_choice(
@@ -347,7 +380,8 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
     // cheekbones and a brow over carved eye sockets, a nose that grows out of
     // the face with its wings, lips with a fitted mouth line, a chin, ears.
     use crate::sdf::{Sculpt, Shape::*};
-    let n = if fem { 0.85 } else { 1.0 };
+    // Her nose is finer and narrower, as drawn on the sheets.
+    let n = if fem { 0.76 } else { 1.0 };
     let gaunt = matches!(
         l.style,
         Style::Zombie | Style::Vampire | Style::Phantom | Style::Wraith
@@ -556,15 +590,19 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
             0.01,
         );
     }
+    // Women's lips are full and rose-coloured, their cheeks warmly flushed;
+    // the undead keep a cold, dark mouth either way.
     let lips = if gaunt {
-        (face * 0.6).lerp(Vec3::new(0.35, 0.2, 0.28), 0.12)
+        (face * 0.6).lerp(Vec3::new(0.42, 0.18, 0.3), if fem { 0.3 } else { 0.12 })
+    } else if fem {
+        (face * 0.78).lerp(Vec3::new(0.78, 0.3, 0.36), 0.5)
     } else {
-        (face * 0.8).lerp(Vec3::new(0.72, 0.36, 0.36), if fem { 0.3 } else { 0.15 })
+        (face * 0.8).lerp(Vec3::new(0.72, 0.36, 0.36), 0.15)
     };
     let flush = if gaunt {
         face * 0.96
     } else {
-        face.lerp(Vec3::new(0.85, 0.45, 0.42), if fem { 0.14 } else { 0.05 })
+        face.lerp(Vec3::new(0.88, 0.45, 0.44), if fem { 0.2 } else { 0.05 })
     };
     head.mesh(
         &mut p.matte,
@@ -641,18 +679,18 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
         Vec3::new(0.25, 0.45, 0.25),
         Vec3::new(0.25, 0.4, 0.62),
     ][((l.v.pattern + l.v.skin) % 5) as usize];
-    match l.eyes {
-        Some(_) => eyes(p, l.eyes, Vec3::new(0.0, 0.16, 0.088), 0.038, 0.015),
-        None => soft_eyes(
-            p,
-            Vec3::new(0.0, 0.16, 0.088),
-            0.038,
-            0.0145,
-            iris,
-            face,
-            fem,
-        ),
-    }
+    // Her eyes are a little larger, as on the concept sheets. Eyes that glow
+    // keep their lids and lashes, the light held in the iris.
+    soft_eyes(
+        p,
+        Vec3::new(0.0, 0.16, 0.088),
+        0.038,
+        if fem { 0.0158 } else { 0.0145 },
+        iris,
+        face,
+        fem,
+        l.eyes,
+    );
     // Arched brows, heavier on men, drawn down at the centre in a scowl.
     let brow_scowl = match l.style {
         Style::Hobgoblin | Style::Sentinel | Style::Orc | Style::Troll => 0.009,
@@ -661,7 +699,12 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
         _ => -0.002,
     };
     let brow = hair_color(l) * 0.85;
-    let (bw, bt) = if fem { (0.0055, 0.004) } else { (0.009, 0.006) };
+    // Hers are fine and high-arched, as on the concept sheets.
+    let (bw, bt) = if fem {
+        (0.0036, 0.0026)
+    } else {
+        (0.009, 0.006)
+    };
     for side in [-1.0f32, 1.0] {
         tube(
             &mut p.matte,
@@ -669,7 +712,7 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
                 Vec3::new(side * 0.018, 0.187 - brow_scowl, 0.101),
                 Vec3::new(
                     side * 0.042,
-                    0.197 + if fem { 0.003 } else { 0.0 } - brow_scowl * 0.3,
+                    0.197 + if fem { 0.007 } else { 0.0 } - brow_scowl * 0.3,
                     0.099,
                 ),
                 Vec3::new(side * 0.066, 0.189 + brow_scowl * 0.3, 0.09),
@@ -757,22 +800,43 @@ fn soft_eyes(
     iris: Vec3,
     face: Vec3,
     lashes: bool,
+    glow: Option<Accent>,
 ) {
+    if glow.is_some() {
+        p.accent = glow;
+    }
+    // Hers are open wider beneath a lighter lid, with a larger iris.
+    let (open, iris_size, lid) = if lashes {
+        (0.82, 0.8, 1.02)
+    } else {
+        (0.68, 0.7, 0.7)
+    };
     for side in [-1.0f32, 1.0] {
         let at = center + Vec3::X * side * spread;
+        // A glowing eye sits in a shadowed white so the light reads.
+        let white = if glow.is_some() {
+            face * 0.3
+        } else {
+            Vec3::new(0.82, 0.81, 0.76)
+        };
         p.matte.blob(
             at,
-            Vec3::new(size * 1.35, size * 0.68, size * 0.65),
+            Vec3::new(size * 1.35, size * open, size * 0.65),
             0,
             0.0,
-            Vec3::new(0.79, 0.78, 0.72),
+            white,
         );
-        p.matte.blob(
+        let iris_builder = if glow.is_some() {
+            &mut p.glow
+        } else {
+            &mut p.matte
+        };
+        iris_builder.blob(
             at + Vec3::new(0.0, -size * 0.05, size * 0.5),
-            Vec3::new(size * 0.7, size * 0.65, size * 0.3),
+            Vec3::new(size * iris_size, size * (iris_size - 0.05), size * 0.3),
             0,
             0.0,
-            iris,
+            if glow.is_some() { Vec3::ONE } else { iris },
         );
         p.matte.blob(
             at + Vec3::new(0.0, -size * 0.05, size * 0.68),
@@ -783,18 +847,33 @@ fn soft_eyes(
         );
         p.matte.blob(
             at + Vec3::new(size * 0.3, size * 0.3, size * 0.85),
-            Vec3::splat(size * 0.12),
+            Vec3::splat(size * if lashes { 0.15 } else { 0.12 }),
             0,
             0.0,
             Vec3::splat(1.6),
         );
-        // The upper lid rests over the top of the eye.
+        if lashes {
+            p.matte.blob(
+                at + Vec3::new(-size * 0.25, -size * 0.28, size * 0.82),
+                Vec3::splat(size * 0.06),
+                0,
+                0.0,
+                Vec3::splat(1.3),
+            );
+        }
+        // The upper lid rests over the top of the eye; hers carries a
+        // little colour, like the shadowed lids on the sheets.
+        let lid_color = if lashes {
+            face.lerp(Vec3::new(0.55, 0.36, 0.42), 0.18)
+        } else {
+            face * 0.98
+        };
         p.matte.blob(
-            at + Vec3::new(0.0, size * 0.7, size * 0.1),
+            at + Vec3::new(0.0, size * lid, size * 0.1),
             Vec3::new(size * 1.45, size * 0.36, size * 0.7),
             1,
             0.0,
-            face * 0.98,
+            lid_color,
         );
         // The upper lid's dark edge gives every eye definition.
         tube(
@@ -808,15 +887,46 @@ fn soft_eyes(
             DARK * 2.0,
         );
         if lashes {
+            // A full upper lash line sweeping out into a winged flick, with
+            // separate lashes at the outer corner and a soft lower line.
             tube(
                 &mut p.matte,
                 &[
-                    at + Vec3::new(-side * size * 1.3, size * 0.5, size * 0.72),
-                    at + Vec3::new(0.0, size * 0.7, size * 0.95),
-                    at + Vec3::new(side * size * 1.6, size * 0.75, size * 0.55),
+                    at + Vec3::new(-side * size * 1.3, size * 0.55, size * 0.72),
+                    at + Vec3::new(0.0, size * 0.82, size * 0.96),
+                    at + Vec3::new(side * size * 1.45, size * 0.66, size * 0.6),
+                    at + Vec3::new(side * size * 1.95, size * 1.0, size * 0.45),
                 ],
-                &[(0.0025, 0.0025), (0.003, 0.003), (0.0015, 0.0015)],
+                &[
+                    (0.0026, 0.0026),
+                    (0.0036, 0.0036),
+                    (0.003, 0.003),
+                    (0.0008, 0.0008),
+                ],
                 DARK,
+            );
+            for k in 0..3 {
+                let along = 0.35 + 0.3 * k as f32;
+                let root = at + Vec3::new(side * size * along * 1.3, size * 0.78, size * 0.9);
+                p.matte.prism(
+                    root,
+                    root + Vec3::new(side * size * 0.45, size * 0.55, size * 0.25),
+                    0.0013,
+                    0.0,
+                    3,
+                    DARK,
+                    0.0,
+                );
+            }
+            tube(
+                &mut p.matte,
+                &[
+                    at + Vec3::new(-side * size * 0.6, -size * 0.62, size * 0.68),
+                    at + Vec3::new(side * size * 0.7, -size * 0.58, size * 0.66),
+                    at + Vec3::new(side * size * 1.3, -size * 0.3, size * 0.58),
+                ],
+                &[(0.0012, 0.0012), (0.0016, 0.0016), (0.0008, 0.0008)],
+                face * 0.55,
             );
         }
     }

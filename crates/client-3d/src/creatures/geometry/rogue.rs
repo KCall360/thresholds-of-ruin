@@ -416,12 +416,13 @@ pub(super) fn head_details(p: &mut Parts, l: &Look) {
                 for k in 0..6 {
                     let y = 0.2 - k as f32 * 0.018;
                     let x = side * (0.075 + 0.006 * (k % 2) as f32);
+                    // Flat scales lying in the skin, not raised bumps.
                     p.matte.blob(
-                        Vec3::new(x, y, 0.06 - k as f32 * 0.004),
-                        Vec3::new(0.008, 0.006, 0.004),
+                        Vec3::new(x, y, 0.052 - k as f32 * 0.004),
+                        Vec3::new(0.007, 0.005, 0.0015),
                         0,
                         0.0,
-                        l.skin * 0.72,
+                        l.skin * 0.82,
                     );
                 }
                 if fem {
