@@ -133,6 +133,10 @@ pub fn animate(
         anim.dodge = anim.dodge.map(|t| t + dt).filter(|t| *t < 0.45);
         if let Some(d) = anim.dead.as_mut() {
             *d = (*d + dt / 1.1).min(1.0);
+            anim.fallen = *d;
+        } else {
+            // A revived creature gets up over most of a second.
+            anim.fallen = (anim.fallen - dt / 0.8).max(0.0);
         }
         let moving = step > dt * 0.04 * rig.scale.max(0.2);
         let pose = pose(&rig, &mut anim, fun, dt, supported, moving);
@@ -254,7 +258,7 @@ fn pose(rig: &Rig, a: &mut Anim, fun: f32, dt: f32, supported: bool, moving: boo
     let side = if a.seed > 5.0 { 1.0 } else { -1.0 };
     p.o(J::Lift, Vec3::new(side * 0.28 * dodge, 0.0, -0.05 * dodge));
     p.r(J::Lift, Quat::from_rotation_z(-side * 0.25 * dodge));
-    if let Some(d) = a.dead {
+    if let Some(d) = a.dead.or((a.fallen > 0.0).then_some(a.fallen)) {
         death_pose(&mut p, rig, ease(d), a.seed);
     }
     p
@@ -2384,7 +2388,7 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
         .action
         .filter(|_| a.dead.is_none())
         .map_or((None, 0.0), |(m, t)| (Some(m), t));
-    let d = a.dead.map_or(0.0, ease);
+    let d = ease(a.dead.unwrap_or(a.fallen));
     let alive = 1.0 - d;
     let calm = (1.0 - ease(a.speed * 4.0))
         * f32::from(u8::from(m.is_none() && a.dead.is_none() && !a.quiet));

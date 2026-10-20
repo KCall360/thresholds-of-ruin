@@ -1155,6 +1155,9 @@ pub struct Anim {
     dodge: Option<f32>,
     /// Death progress, 0 to 1. A corpse holds 1.
     pub dead: Option<f32>,
+    /// How far down it still is after being revived: it rises out of its
+    /// death pose instead of snapping upright.
+    fallen: f32,
     /// Hold the rest pose without fidgets, for portraits.
     pub quiet: bool,
 }
@@ -1174,6 +1177,7 @@ impl Anim {
             hurt: None,
             dodge: None,
             dead: None,
+            fallen: 0.0,
             quiet: false,
         }
     }

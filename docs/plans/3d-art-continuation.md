@@ -161,8 +161,10 @@ dragging through their stance (a horse's stride on shorter legs), now fixed by
 scaling each beast's stride to its leg length. The same measurement covers a
 steady turn and a stop-and-restart for people, birds, equines and beasts:
 planted feet yield at most about 2 mm a frame on tight turns, as the solver
-intends, and settle without skating. Action interruptions and revival still
-need watching at real speed.
+intends, and settle without skating. A third measurement follows a walk cut
+by an action, a death and a revival: interruptions move no faster than the
+action's own lunge, and revival, which used to snap a body upright in one
+frame, now rises out of the death pose over most of a second.
 
 ### 5. Measure cost, then expand equipment integration separately
 

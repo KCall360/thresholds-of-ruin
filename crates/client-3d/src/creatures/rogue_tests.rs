@@ -555,3 +555,127 @@ fn real_speed_turns_and_stops_keep_planted_feet_from_sliding() {
         )
     );
 }
+
+/// The largest frame-to-frame jump of any foot or the head while a creature
+/// walks, is interrupted by an action, falls dead and is revived.
+fn largest_pop(model: CreatureModel) -> (f32, f32) {
+    use bevy::time::TimeUpdateStrategy;
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
+        .insert_resource(TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(16),
+        ))
+        .init_resource::<Assets<Mesh>>()
+        .add_systems(Update, animate);
+    let mut materials = Assets::<StandardMaterial>::default();
+    let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
+    let look = Look::of(model, 33);
+    let root = app
+        .world_mut()
+        .spawn((
+            Anim::new(33, Vec3::ZERO),
+            Transform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    let mut queue = bevy::ecs::world::CommandQueue::default();
+    let rig = {
+        let world = app.world_mut();
+        let mut meshes = Assets::<Mesh>::default();
+        let rig = spawn(
+            &mut Commands::new(&mut queue, world),
+            &mut library,
+            &mut meshes,
+            root,
+            &look,
+        );
+        queue.apply(world);
+        rig
+    };
+    let watched: Vec<Entity> = [
+        J::FootL,
+        J::FootR,
+        J::HoofFL,
+        J::HoofFR,
+        J::HoofBL,
+        J::HoofBR,
+        J::Head,
+    ]
+    .into_iter()
+    .filter_map(|j| rig.joint(j))
+    .collect();
+    app.world_mut().entity_mut(root).insert(rig);
+    let (mut interrupt, mut revive) = (0.0f32, 0.0f32);
+    let mut last: Vec<Vec3> = Vec::new();
+    for frame in 0..320 {
+        let travel = frame.min(100) as f32 * 0.03;
+        app.world_mut()
+            .get_mut::<Transform>(root)
+            .unwrap()
+            .translation = Vec3::Z * travel;
+        {
+            let mut anim = app.world_mut().get_mut::<Anim>(root).unwrap();
+            match frame {
+                80 => anim.act(Move::Strike),
+                160 => anim.dead = Some(0.0),
+                260 => anim.dead = None,
+                _ => {}
+            }
+        }
+        app.update();
+        let now: Vec<Vec3> = watched
+            .iter()
+            .map(|e| {
+                app.world()
+                    .get::<GlobalTransform>(*e)
+                    .unwrap()
+                    .translation()
+            })
+            .collect();
+        if !last.is_empty() {
+            let jump = now
+                .iter()
+                .zip(&last)
+                .map(|(a, b)| a.distance(*b))
+                .fold(0.0, f32::max);
+            if (80..140).contains(&frame) {
+                interrupt = interrupt.max(jump);
+            } else if (260..320).contains(&frame) {
+                revive = revive.max(jump);
+            }
+        }
+        last = now;
+    }
+    (interrupt, revive)
+}
+
+#[test]
+fn real_speed_interruptions_and_revival_do_not_pop() {
+    let mut report = Vec::new();
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Zombie,
+        CreatureModel::Troll,
+        CreatureModel::Emu,
+        CreatureModel::Quagga,
+        CreatureModel::Centaur,
+        CreatureModel::Griffin,
+        CreatureModel::Dragon,
+        CreatureModel::Aquator,
+        CreatureModel::Bat,
+        CreatureModel::Flytrap,
+    ] {
+        let (interrupt, revive) = largest_pop(model);
+        report.push(format!(
+            "{model:?} interrupt {interrupt:.3} revive {revive:.3}"
+        ));
+        // An action cut into the walk moves no faster than its own lunge.
+        assert!(
+            interrupt < 0.4,
+            "{model:?} pops when interrupted: {interrupt}"
+        );
+        // Revival rises out of the death pose rather than snapping upright.
+        assert!(revive < 0.2, "{model:?} pops when revived: {revive}");
+    }
+    eprintln!("{}", report.join("\n"));
+}
