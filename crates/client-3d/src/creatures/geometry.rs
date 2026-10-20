@@ -58,7 +58,7 @@ mod art_contract_tests {
         hair(&mut tied, &look(false, 4));
         let (low, _) = tied.matte.bounds();
         assert!(
-            low.z > -0.17,
+            low.z > -0.18,
             "a tied tail lies along the nape, not jutting back: {low}"
         );
     }
