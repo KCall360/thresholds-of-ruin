@@ -1003,6 +1003,36 @@ loot goals use only the actor's own senses and known routes/items. Gold pursuit
 has its own explicit policy: self-preservation and retaliation retain priority,
 then known reachable Gold takes precedence over ordinary idle behavior. It uses
 ordinary currency stacks, never unseen stock or an inferred purse.
+Equipment- and loot-enabled actors can acquire an identified launcher and matching
+ammunition from their inventory or currently disclosed safe loot within three known
+route steps. Pair lookahead examines at most 128 inventory rows, 128 ground rows
+and 16 launchers; an inventory beyond the bound declines ranged acquisition rather
+than undercounting stock. Compatible ammunition has a provisional six-shot reserve,
+counted across carried stacks. Known shot costs must fit the loadout's resource
+maxima; collection may wait for ordinary resource recovery. Equipped launchers
+precede carried ones and ground candidates, with stable item-ID ties; the policy does not collect spare launchers.
+
+An owned hostile Launch ability with strictly higher authored AI priority than the
+basic melee ability permits a melee-for-range equipment trade-off. Equal priorities
+retain the conservative policy: adding range must preserve the existing melee score.
+Expertise supplies only ordinary capability and costs, never a tactical preference.
+Every prospective draw checks real anatomy and current capacity after removal;
+health, protection, recovery and other capabilities remain protected. A loaded
+preferred launcher is retained rather than immediately replaced by a stronger
+melee weapon. Once carried ammunition is depleted, ordinary safe gear improvement
+can restore melee, including releasing an empty secondary launcher when it blocks
+a strictly better carried primary weapon. Neither this heuristic nor item ownership
+grants free equipment, expertise or ammunition. Gearing and collection retain the existing safe Search-only
+precedence; combat continues to use authored priorities, disclosed alignment and
+range, normal resource checks, and remembered pursuit, without kiting.
+
+Pair selection reads identified structural families, not hidden projectile numbers.
+Equipment comparisons use remembered instance facts or ordinary defaults on both
+sides. Candidate projections reuse one private workspace; they never compile a
+projectile against an opponent to choose loot. Unknown curses are learned only by
+ordinary execution. The six-shot limit and structural first-choice heuristic are
+provisional TOR policy, not a claim of optimal combat or calibrated balance.
+
 These reusable mechanisms do not activate the full Rogue roster or establish
 numerical balance. Owner-disposition inspection is a separate presentation pass.
 

@@ -8,6 +8,7 @@ import unittest
 from arena_matrix import toml_source
 from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
 from process_harness import creature_package
+from rogue_roster_package import roster_package
 
 
 class AiInteractionProcesses(ProcessTestCase):
@@ -32,9 +33,62 @@ class AiInteractionProcesses(ProcessTestCase):
 
     def idle_item_observation(self, frame):
         view = frame["state"]["observation"]
-        self.assertEqual(view["visible_actors"], [],
+        others = [row for row in view["visible_actors"] if row["id"] != view["self_target"]]
+        self.assertEqual(others, [],
                          "idle item fixture must keep the hostile player completely unseen")
         return view
+
+    def test_authored_hobgoblin_acquires_secondary_bow_and_bounded_reserve(self):
+        package = roster_package(self, "hobgoblin", autonomous=True)
+        path = package / "regions/1.toml"
+        region = tomllib.loads(path.read_text(encoding="utf-8"))
+        # Only encounter geometry and disclosed ground loot change. The actual
+        # production recipe, expertise, abilities and priorities stay intact.
+        region["size"] = [10, 5, 2]
+        region["anchors"]["start"] = [8, 2, 0]
+        region["walls"] = [[5, y, z] for y in range(5) for z in range(2)]
+        region["items"] = [
+            {"id": 1001, "at": [2, 2, 0], "archetype": "rogue.shortbow"},
+            {"id": 1002, "at": [2, 2, 0], "archetype": "rogue.arrow", "quantity": 20},
+        ]
+        path.write_text(toml_source(region), encoding="utf-8", newline="\n")
+        self.validate_item_package(package)
+        server = self.server("--checkpoint-interval", 1, scenario=package, wizard=True, seed=42)
+        observer, initial = self.client(WIZARD_TOKEN, observe=True, actor=3)
+        self.idle_item_observation(initial)
+        player, _ = self.client()
+
+        def stock(view):
+            bows = [item for item in view["inventory"] if item["name"] == "shortbow"]
+            arrows = sum(u64(item["quantity"]) for item in view["inventory"]
+                         if item["name"] == "arrow")
+            slots = {item["item"]: item["equipped_slot"]
+                     for item in view["interactions"]["inventory"]}
+            return len(bows), slots.get(bows[0]["id"]) if bows else None, arrows
+
+        for _ in range(24):
+            self.assertIsNone(self.act(player, {"type": "wait"}).get("error"))
+            view = self.idle_item_observation(self.request(observer, {"type": "snapshot"}))
+            if stock(view) == (1, 10, 6):
+                break
+        # Six is the current bounded-reserve tuning, not a universal ammunition
+        # rule. Secondary placement preserves the authored natural melee attack.
+        self.assertEqual(stock(view), (1, 10, 6))
+        for _ in range(4):
+            self.assertIsNone(self.act(player, {"type": "wait"}).get("error"))
+        view = self.idle_item_observation(self.request(observer, {"type": "snapshot"}))
+        self.assertEqual(stock(view), (1, 10, 6), "no collection or equip oscillation")
+        self.assertEqual([row["item"]["quantity"] for row in view["ground_items"]
+                          if row["item"]["name"] == "arrow"], ["14"])
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        observer.stop()
+        player.stop()
+        server.stop()
+        self.server(scenario=package, wizard=True, seed=None)
+        restored, reopened = self.client(WIZARD_TOKEN, observe=True, actor=3)
+        self.assertEqual(stock(self.idle_item_observation(reopened)), (1, 10, 6))
+        self.assertEqual(stock(self.idle_item_observation(
+            self.request(restored, {"type": "snapshot"}))), (1, 10, 6))
 
     def test_creature_ai_chooses_a_weapon_using_a_purchased_rank(self):
         package = creature_package(self, "weapon-training", abilities=("fixture_stamina_strike",))

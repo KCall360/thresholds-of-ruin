@@ -3256,3 +3256,564 @@ fn detached_launcher_source_rejects_a_forged_surviving_ammunition_payload() {
     });
     assert_detached_source_rejected(&game, &mut damaged);
 }
+
+fn ranged_loot_choice(game: &Game) -> Option<crate::Action> {
+    let actor = ActorId(1);
+    let view = game.observe(actor).unwrap();
+    game.choose_nearby_loot(
+        actor,
+        &view,
+        &crate::ai::AiProfile::general(),
+        &[],
+        &mut |_| None,
+    )
+}
+
+#[test]
+fn ranged_loot_collects_only_six_known_compatible_shots_across_stacks() {
+    let (mut game, _, _, _, ammo) = projectile_launch_fixture();
+    let actor = ActorId(1);
+    let at = game.actors[&actor].location;
+    let payload = (*game.items[&ammo].spec).clone();
+    let ground = game
+        .spawn_item_stack(at, None, 20, payload.clone())
+        .unwrap();
+    assert_eq!(
+        ranged_loot_choice(&game),
+        Some(crate::Action::Take {
+            item: ground,
+            quantity: Some(4),
+        })
+    );
+    game.spawn_item_stack(at, Some(actor), 4, payload).unwrap();
+    assert_eq!(ranged_loot_choice(&game), None);
+}
+
+#[test]
+fn ranged_loot_unknown_payload_values_and_incompatible_families_do_not_steer_pickup() {
+    let (mut game, _, _, launcher, ammo) = projectile_launch_fixture();
+    let at = game.actors[&ActorId(1)].location;
+    let mut payload = (*game.items[&ammo].spec).clone();
+    payload.projectile.as_mut().unwrap().family =
+        crate::content_ids::LauncherFamilyId::new("wrong.family").unwrap();
+    game.spawn_item_stack(at, None, 20, payload).unwrap();
+    assert_eq!(ranged_loot_choice(&game), None);
+    let ground = game
+        .spawn_item_stack(at, None, 20, (*game.items[&ammo].spec).clone())
+        .unwrap();
+    let expected = ranged_loot_choice(&game);
+    assert_eq!(
+        expected,
+        Some(crate::Action::Take {
+            item: ground,
+            quantity: Some(4)
+        })
+    );
+    game.items
+        .edit(ground, |item| {
+            item.condition.hit_enchantment = -100;
+            item.condition.damage_enchantment = 100;
+            item.condition.cursed = true;
+        })
+        .unwrap();
+    assert_eq!(ranged_loot_choice(&game), expected);
+    game.items
+        .edit(launcher, |item| {
+            item.condition.hit_enchantment = -100;
+            item.condition.damage_enchantment = 100;
+            item.condition.cursed = true;
+        })
+        .unwrap();
+    assert_eq!(ranged_loot_choice(&game), expected);
+}
+
+fn clear_ranged_fixture_equipment(game: &mut Game) {
+    let mut owner = game.actors.get_mut(&ActorId(1)).unwrap();
+    owner.equipment.clear();
+    owner
+        .combat
+        .as_mut()
+        .unwrap()
+        .project_equipment_immediately_in_context(vec![], None)
+        .unwrap();
+}
+
+#[test]
+fn ranged_loot_bootstraps_a_disclosed_pair_without_free_equipment() {
+    let (mut game, _, _, launcher, ammo) =
+        projectile_launch_fixture_with(|def| def.ai.priority = 100);
+    let actor = ActorId(1);
+    let at = game.actors[&actor].location;
+    clear_ranged_fixture_equipment(&mut game);
+    for id in [launcher, ammo] {
+        game.items
+            .edit(id, |item| item.location = crate::ItemLocation::Ground(at))
+            .unwrap();
+    }
+    let before = game.clone();
+    assert_eq!(
+        ranged_loot_choice(&game),
+        Some(crate::Action::Take {
+            item: launcher,
+            quantity: Some(1)
+        })
+    );
+    assert_eq!(game, before, "preview neither equips nor collects the pair");
+    game.items
+        .edit(launcher, |item| {
+            item.location = crate::ItemLocation::Carried(actor)
+        })
+        .unwrap();
+    assert_eq!(
+        game.choose_gear(actor, &game.observe(actor).unwrap()),
+        None,
+        "empty launcher waits for payload"
+    );
+    assert_eq!(
+        ranged_loot_choice(&game),
+        Some(crate::Action::Take {
+            item: ammo,
+            quantity: Some(2)
+        })
+    );
+    game.items
+        .edit(ammo, |item| {
+            item.location = crate::ItemLocation::Carried(actor)
+        })
+        .unwrap();
+    assert_eq!(
+        game.choose_gear(actor, &game.observe(actor).unwrap()),
+        Some(crate::Action::Equip {
+            item: launcher,
+            slot: EquipmentSlotId(0),
+        })
+    );
+    game.equip_authored(actor, launcher, EquipmentSlotId(0))
+        .unwrap();
+    assert_eq!(game.choose_gear(actor, &game.observe(actor).unwrap()), None);
+    assert_eq!(ranged_loot_choice(&game), None);
+}
+
+#[test]
+fn ranged_loot_respects_idle_equipment_knowledge_and_inventory_bounds() {
+    let (mut game, _, _, _, ammo) = projectile_launch_fixture();
+    let actor = ActorId(1);
+    let at = game.actors[&actor].location;
+    let mut payload = (*game.items[&ammo].spec).clone();
+    payload.concealed = true;
+    payload.identity = "unknown projectile".into();
+    payload.appearance = "unfamiliar shaft".into();
+    let ground = game.spawn_item_stack(at, None, 20, payload).unwrap();
+    assert_eq!(ranged_loot_choice(&game), None);
+    game.identify_item(actor, ground).unwrap();
+    assert_eq!(
+        ranged_loot_choice(&game),
+        Some(crate::Action::Take {
+            item: ground,
+            quantity: Some(4)
+        })
+    );
+    let view = game.observe(actor).unwrap();
+    let mut profile = crate::ai::AiProfile::general();
+    profile.equipment = false;
+    assert_eq!(
+        game.choose_nearby_loot(actor, &view, &profile, &[], &mut |_| None),
+        None
+    );
+    profile.equipment = true;
+    profile.idle = crate::behavior::IdleBehavior::Wait;
+    assert!(game
+        .choose_nearby_loot(actor, &view, &profile, &[], &mut |_| None)
+        .is_some());
+    for _ in 0..128 {
+        game.spawn_item_stack(
+            at,
+            Some(actor),
+            1,
+            crate::ItemSpec::ordinary("clutter".into()),
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        ranged_loot_choice(&game),
+        None,
+        "a bounded scan must not undercount the reserve"
+    );
+}
+
+fn ranged_trade_fixture(priority: i16) -> (Game, ItemId, ItemId, ItemId) {
+    let (mut game, _, _, launcher, ammo) =
+        projectile_launch_fixture_with(|def| def.ai.priority = priority);
+    clear_ranged_fixture_equipment(&mut game);
+    let mut spec = (*game.items[&launcher].spec).clone();
+    let gear = spec.equipment.as_mut().unwrap();
+    gear.weapon_profile.as_mut().unwrap().base_traits = vec![WeaponTrait::TwoHanded];
+    let component = crate::damage::DamageComponent::fixed(crate::combat::DamageType::Keen, None, 1);
+    let primary = component.key();
+    gear.attack = Some(
+        crate::attacks::MeleeAttack::new(
+            crate::attributes::Skill::HeavyWeaponry,
+            0,
+            10,
+            20,
+            crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap(),
+        )
+        .unwrap(),
+    );
+    game.items
+        .edit(launcher, |item| item.spec = tor_world::Shared::new(spec))
+        .unwrap();
+    let melee = equip(&mut game, 0, false);
+    (game, launcher, ammo, melee)
+}
+
+#[test]
+fn ranged_gear_uses_authored_priority_not_expertise_and_stops_replacement_oscillation() {
+    let actor = ActorId(1);
+    let (mut conservative, _, _, _) = ranged_trade_fixture(0);
+    assert_eq!(
+        conservative.choose_gear(actor, &conservative.observe(actor).unwrap()),
+        None
+    );
+    trained(&mut conservative);
+    assert_eq!(
+        conservative.choose_gear(actor, &conservative.observe(actor).unwrap()),
+        None,
+        "expertise grants capability, not ranged preference"
+    );
+    let (mut game, launcher, ammo, melee) = ranged_trade_fixture(100);
+    assert_eq!(
+        game.choose_gear(actor, &game.observe(actor).unwrap()),
+        Some(crate::Action::Unequip { item: melee })
+    );
+    clear_ranged_fixture_equipment(&mut game);
+    assert_eq!(
+        game.choose_gear(actor, &game.observe(actor).unwrap()),
+        Some(crate::Action::Equip {
+            item: launcher,
+            slot: EquipmentSlotId(0),
+        })
+    );
+    game.equip_authored(actor, launcher, EquipmentSlotId(0))
+        .unwrap();
+    assert_eq!(
+        game.choose_gear(actor, &game.observe(actor).unwrap()),
+        None,
+        "a preferred loaded launcher must not immediately be replaced by melee"
+    );
+    let at = game.actors[&actor].location;
+    game.items
+        .edit(ammo, |item| item.location = crate::ItemLocation::Ground(at))
+        .unwrap();
+    assert_eq!(
+        game.choose_gear(actor, &game.observe(actor).unwrap()),
+        Some(crate::Action::Unequip { item: launcher }),
+        "depleted carried reserve permits safe return to better melee"
+    );
+}
+
+#[test]
+fn ranged_gear_unknown_conditions_do_not_change_choice_and_known_curse_blocks_removal() {
+    let actor = ActorId(1);
+    let (mut game, launcher, ammo, melee) = ranged_trade_fixture(100);
+    let expected = game.choose_gear(actor, &game.observe(actor).unwrap());
+    assert_eq!(expected, Some(crate::Action::Unequip { item: melee }));
+    for id in [launcher, ammo, melee] {
+        game.items
+            .edit(id, |item| {
+                item.condition.hit_enchantment = 100;
+                item.condition.damage_enchantment = -100;
+                item.condition.cursed = true;
+            })
+            .unwrap();
+    }
+    assert_eq!(
+        game.choose_gear(actor, &game.observe(actor).unwrap()),
+        expected
+    );
+    game.actors
+        .get_mut(&actor)
+        .unwrap()
+        .known_equipment
+        .learn_curse(melee, true)
+        .unwrap();
+    assert_eq!(game.choose_gear(actor, &game.observe(actor).unwrap()), None);
+}
+
+#[test]
+fn ranged_gear_pair_scan_reuses_one_workspace_and_never_compiles_projectiles() {
+    let (mut game, _, _, launcher, _) = projectile_launch_fixture_with(|def| def.ai.priority = 100);
+    let actor = ActorId(1);
+    let at = game.actors[&actor].location;
+    clear_ranged_fixture_equipment(&mut game);
+    let mut spec = (*game.items[&launcher].spec).clone();
+    spec.equipment.as_mut().unwrap().modifiers.push(Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Add {
+            stat: Stat::Defense {
+                defense: DefenseKind::Physical,
+            },
+            value: -1,
+        },
+    });
+    game.items
+        .edit(launcher, |item| {
+            item.spec = tor_world::Shared::new(spec.clone())
+        })
+        .unwrap();
+    for _ in 0..31 {
+        game.spawn_item_stack(at, Some(actor), 1, spec.clone())
+            .unwrap();
+    }
+    let view = game.observe(actor).unwrap();
+    let before = crate::diagnostics::work_counts();
+    assert_eq!(
+        game.choose_ranged_gear(actor, &view),
+        None,
+        "ranged preference cannot buy lower defense"
+    );
+    let after = crate::diagnostics::work_counts();
+    assert_eq!(after.game_clones - before.game_clones, 1);
+    assert_eq!(after.ability_plans - before.ability_plans, 0);
+    assert!(
+        after.dynamic_creature_folds - before.dynamic_creature_folds <= 16 * (1 + 2 * 2),
+        "sixteen candidates, one baseline and at most two two-phase weapon socket projections each"
+    );
+}
+
+#[test]
+fn ranged_gear_conservative_two_grip_secondary_preserves_natural_melee() {
+    let (mut game, launcher, _, melee) = ranged_trade_fixture(0);
+    let actor = ActorId(1);
+    clear_ranged_fixture_equipment(&mut game);
+    let at = game.actors[&actor].location;
+    // Keep the existing melee weapon away from this unarmed fixture. Its
+    // two-grip body and ordinary Focus pool are the production humanoid shape.
+    game.items
+        .edit(melee, |item| {
+            item.location = crate::ItemLocation::Ground(at)
+        })
+        .unwrap();
+    let mut spec = (*game.items[&launcher].spec).clone();
+    spec.equipment.as_mut().unwrap().attack = Some(
+        crate::attacks::MeleeAttack::fixed(
+            crate::attributes::Skill::HeavyWeaponry,
+            -20,
+            10,
+            20,
+            crate::combat::DamageType::Keen,
+            None,
+            1,
+        )
+        .unwrap(),
+    );
+    game.items
+        .edit(launcher, |item| item.spec = tor_world::Shared::new(spec))
+        .unwrap();
+    let before = game.selected_melee_attack(actor).unwrap().clone();
+    assert_eq!(
+        game.choose_gear(actor, &game.observe(actor).unwrap()),
+        Some(crate::Action::Equip {
+            item: launcher,
+            slot: EquipmentSlotId(10),
+        })
+    );
+    game.equip_authored(actor, launcher, EquipmentSlotId(10))
+        .unwrap();
+    assert_eq!(game.selected_melee_attack(actor), Some(&before));
+    assert!(game.ranged_loadout_has_budget(actor, launcher, EquipmentSlotId(10)));
+}
+
+#[test]
+fn ranged_gear_depleted_secondary_releases_grip_for_a_better_carried_melee() {
+    let (mut game, launcher, ammo, melee) = ranged_trade_fixture(0);
+    let actor = ActorId(1);
+    clear_ranged_fixture_equipment(&mut game);
+    game.equip_authored(actor, launcher, EquipmentSlotId(10))
+        .unwrap();
+    let at = game.actors[&actor].location;
+    game.items
+        .edit(ammo, |item| item.location = crate::ItemLocation::Ground(at))
+        .unwrap();
+    // The carried melee alternative is strengthened explicitly in its known
+    // archetype, not through an undisclosed instance enchantment.
+    let mut spec = (*game.items[&melee].spec).clone();
+    let attack = game.selected_melee_attack(actor).unwrap();
+    spec.equipment.as_mut().unwrap().attack = Some(
+        crate::attacks::MeleeAttack::new(
+            attack.skill(),
+            20,
+            1,
+            1,
+            attack.damage_with_modifiers(0, 100, 0).unwrap(),
+        )
+        .unwrap(),
+    );
+    game.items
+        .edit(melee, |item| item.spec = tor_world::Shared::new(spec))
+        .unwrap();
+    assert_eq!(
+        game.choose_gear(actor, &game.observe(actor).unwrap()),
+        Some(crate::Action::Unequip { item: launcher })
+    );
+}
+
+fn settle_ranged_ai_turn(game: &mut Game, actor: ActorId) {
+    for _ in 0..32 {
+        if game.next_actor() == Some(actor) && game.preparation(actor).is_none() {
+            return;
+        }
+        game.act(game.next_actor().unwrap(), crate::Action::Wait)
+            .unwrap();
+    }
+    panic!("bounded fixture did not reach the next ready AI turn");
+}
+
+#[test]
+fn ranged_ai_acquires_equips_reopens_and_fires_through_ordinary_intentions() {
+    let (mut game, ability, _, launcher, ammo) =
+        projectile_launch_fixture_with(|def| def.ai.priority = 100);
+    let actor = ActorId(1);
+    let at = game.actors[&actor].location;
+    clear_ranged_fixture_equipment(&mut game);
+    for id in [launcher, ammo] {
+        game.items
+            .edit(id, |item| item.location = crate::ItemLocation::Ground(at))
+            .unwrap();
+    }
+    game.configure_ai(
+        actor,
+        crate::ai::AiProfile {
+            idle: crate::behavior::IdleBehavior::Wait,
+            ..crate::ai::AiProfile::general()
+        },
+    )
+    .unwrap();
+    game.refresh_navigation();
+    for item in [launcher, ammo] {
+        settle_ranged_ai_turn(&mut game, actor);
+        let expected = crate::Action::Take {
+            item,
+            quantity: Some(if item == launcher { 1 } else { 2 }),
+        };
+        assert_eq!(game.next_ai_action(), Some((actor, expected.clone())));
+        game.admit_ai_intention(actor).unwrap();
+        let execution = game.execute_next_intention().unwrap();
+        assert_eq!(execution.action, Some(expected));
+        execution.outcome.unwrap();
+    }
+    settle_ranged_ai_turn(&mut game, actor);
+    assert_eq!(
+        game.next_ai_action(),
+        Some((
+            actor,
+            crate::Action::Equip {
+                item: launcher,
+                slot: EquipmentSlotId(0)
+            }
+        ))
+    );
+    game.admit_ai_intention(actor).unwrap();
+    game.execute_next_intention().unwrap().outcome.unwrap();
+    assert_eq!(
+        game.equipment(actor).unwrap()[&EquipmentSlotId(0)],
+        launcher
+    );
+    let mut shared = crate::checkpoint::SharedState::default();
+    let checkpoint =
+        serde_json::from_value(serde_json::to_value(game.checkpoint(&mut shared)).unwrap())
+            .unwrap();
+    let shared = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
+    let mut restored =
+        Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap();
+    assert_eq!(restored.preparation(actor), game.preparation(actor));
+    settle_ranged_ai_turn(&mut restored, actor);
+    assert_eq!(
+        restored.equipment(actor).unwrap()[&EquipmentSlotId(0)],
+        launcher
+    );
+    let target = tor_world::Location {
+        position: tor_world::Position { x: 4, y: 1, z: 0 },
+        ..at
+    };
+    restored.teleport(ActorId(2), target).unwrap();
+    restored.actors.get_mut(&actor).unwrap().behavior.engagement =
+        Some(crate::behavior::Engagement {
+            reference: crate::perception::ActorReferenceKind::Creature,
+            target: ActorId(2),
+            location: target,
+            last_seen: restored.tick,
+        });
+    restored.refresh_navigation();
+    let expected = crate::Action::UseAbility {
+        id: ability,
+        invocation: AbilityInvocation::directional_projectile(
+            StepDirection::East,
+            ProjectileDeliverySelection::Launch {
+                launcher: EquippedProjectileWeapon {
+                    item: launcher,
+                    socket: EquipmentSlotId(0),
+                },
+                ammunition: ammo,
+            },
+        ),
+        supplies: Default::default(),
+    };
+    assert_eq!(restored.next_ai_action(), Some((actor, expected.clone())));
+    restored.admit_ai_intention(actor).unwrap();
+    let execution = restored.execute_next_intention().unwrap();
+    assert_eq!(execution.action, Some(expected));
+    execution.outcome.unwrap();
+    settle_ranged_ai_turn(&mut restored, actor);
+    assert_eq!(
+        restored
+            .observe(actor)
+            .unwrap()
+            .inventory
+            .iter()
+            .find(|item| item.id == ammo)
+            .unwrap()
+            .quantity,
+        1,
+        "one actual release consumes one carried unit after restoring the acquired equipment"
+    );
+}
+
+#[test]
+fn ranged_loot_requires_fundable_maxima_and_retains_existing_capacity_deficits() {
+    let (mut impossible, _, _, _, ammo) = projectile_launch_fixture_with(|def| {
+        def.cost = Some(Cost {
+            resource: Resource::Focus,
+            start: 21,
+            resolution: 0,
+        });
+    });
+    let actor = ActorId(1);
+    let at = impossible.actors[&actor].location;
+    impossible
+        .spawn_item_stack(at, None, 6, (*impossible.items[&ammo].spec).clone())
+        .unwrap();
+    assert_eq!(ranged_loot_choice(&impossible), None);
+    let (mut game, _, _, _, ammo) = projectile_launch_fixture();
+    trained(&mut game);
+    equip(&mut game, 10, true);
+    let mut build = game.creature(actor).unwrap().build().clone();
+    build.remove_latest().unwrap();
+    game.rebuild_creature(actor, build).unwrap();
+    assert!(!game
+        .creature(actor)
+        .unwrap()
+        .derived()
+        .equipment_capacity_deficits
+        .is_empty());
+    let at = game.actors[&actor].location;
+    game.spawn_item_stack(at, None, 6, (*game.items[&ammo].spec).clone())
+        .unwrap();
+    let before = game.clone();
+    assert_eq!(game.choose_gear(actor, &game.observe(actor).unwrap()), None);
+    assert_eq!(ranged_loot_choice(&game), None);
+    assert_eq!(
+        game, before,
+        "current deficits neither drop existing gear nor admit new draws"
+    );
+}

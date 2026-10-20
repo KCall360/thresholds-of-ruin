@@ -379,7 +379,11 @@ controlled. Source-owned interaction semantics license provocation only
 from a committed strike and ordinary disclosed evidence. Non-hostile grants
 reject current modifier-induced harm, and frozen admission checks captured effects
 against source-owned intent. Idle actions use only the actor's senses and known
-routes/items, with bounded useful equipment and supply collection. Explicit Wait
+routes/items, with bounded useful equipment and supply collection. Known launcher
+and ammunition pairs support a six-shot reserve and ordinary capacity-checked draws. Explicit
+Launch ability priority can prefer ranged gear; equal priorities preserve melee,
+and expertise never implies that preference. Stock NPC builds and loadouts remain
+unchanged. Explicit Wait
 blocks all idle movement, including loot detours, while permitting independently
 enabled useful underfoot actions; acquisition, pursuit and combat stay separate.
 The bundled packages author provisional species distinctions, including Wait-idle

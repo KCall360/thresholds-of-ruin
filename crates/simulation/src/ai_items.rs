@@ -66,6 +66,7 @@ impl Game {
         if view.ground_items.is_empty() {
             return None;
         }
+        let ranged = self.ranged_loot_quantities(actor, view, profile, route);
         let has_healing = view
             .inventory
             .iter()
@@ -89,6 +90,9 @@ impl Game {
         view.ground_items
             .iter()
             .filter_map(|item| {
+                if let Some(quantity) = ranged.get(&item.id) {
+                    return Some((item, (*quantity).min(item.quantity)));
+                }
                 let useful_gear =
                     profile.equipment && self.gear_destination(actor, item.id).is_some();
                 let healing = profile.care && !has_healing && self.known_healing(actor, item.id);
@@ -319,8 +323,16 @@ impl Game {
     /// a private snapshot; the chosen ordinary action still owns admission.
     fn gear_projection(&self, actor: ActorId, item: ItemId, slot: EquipmentSlotId) -> Option<Game> {
         let mut equipment = self.actors.get(&actor)?.equipment.clone();
+        equipment.remove(&slot);
+        let mut candidate = self.clone();
+        candidate.project_known_loadout_in_place(self, actor, equipment.clone())?;
+        candidate.items.edit(item, |item| {
+            item.location = crate::ItemLocation::Carried(actor)
+        })?;
+        candidate.capture_equip_allocation(actor, item, slot).ok()?;
         equipment.insert(slot, item);
-        self.known_loadout_projection(actor, equipment)
+        candidate.project_known_loadout_in_place(self, actor, equipment)?;
+        Some(candidate)
     }
 
     /// Baseline and candidates use the same remembered facts or ordinary
@@ -331,33 +343,125 @@ impl Game {
         equipment: std::collections::BTreeMap<EquipmentSlotId, ItemId>,
     ) -> Option<Game> {
         let mut candidate = self.clone();
+        candidate.project_known_loadout_in_place(self, actor, equipment)?;
+        Some(candidate)
+    }
+
+    /// Reuse one private workspace across a bounded candidate scan. Restore the
+    /// original actor before each fold so resource/Health clamping from a rejected
+    /// candidate cannot affect the next comparison. Item values always come from
+    /// the original actor's remembered facts, never earlier hypothetical state.
+    fn project_known_loadout_in_place(
+        &mut self,
+        source: &Game,
+        actor: ActorId,
+        equipment: std::collections::BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Option<()> {
+        *self.actors.get_mut(&actor)? = source.actors.get(&actor)?.clone();
         for id in equipment.values() {
-            let condition = self.gear_condition_estimate(actor, *id)?;
-            candidate
-                .items
-                .edit(*id, |item| item.condition = condition)?;
+            let condition = source.gear_condition_estimate(actor, *id)?;
+            self.items.edit(*id, |item| {
+                item.condition = condition;
+                item.location = crate::ItemLocation::Carried(actor);
+            })?;
         }
         let sources = equipment
             .iter()
             .map(|(socket, id)| {
-                candidate
-                    .items
+                self.items
                     .get(id)?
-                    .equipment_source(*id, *socket, &candidate.content.rules)
+                    .equipment_source(*id, *socket, &self.content.rules)
             })
             .collect::<Option<Vec<_>>>()?;
-        let context = candidate.equipment_recovery_context(actor, &sources).ok()?;
-        let mut owner = candidate.actors.get_mut(&actor)?;
-        let combat = owner.combat.as_mut()?;
-        let result = combat
+        let context = self.equipment_recovery_context(actor, &sources).ok()?;
+        let mut owner = self.actors.get_mut(&actor)?;
+        let result = owner
+            .combat
+            .as_mut()?
             .project_equipment_immediately_in_context(sources, context)
             .ok()?;
         if result.died {
             return None;
         }
         owner.equipment = equipment;
-        drop(owner);
-        Some(candidate)
+        Some(())
+    }
+
+    /// Structural admission and remembered scoring share one reusable workspace
+    /// across all launchers and sockets. The caller bounds the candidate list.
+    pub(crate) fn ranged_gear_destination(
+        &self,
+        workspace: &mut Option<Game>,
+        actor: ActorId,
+        item: ItemId,
+        prefer_ranged: bool,
+    ) -> Option<(EquipmentSlotId, Option<ItemId>)> {
+        let gear = self.known_gear(actor, item)?;
+        let owner = self.actors.get(&actor)?;
+        let projected = workspace.get_or_insert_with(|| self.clone());
+        projected.project_known_loadout_in_place(self, actor, owner.equipment.clone())?;
+        let before = gear_score(projected, actor)?;
+        let mut sockets: Vec<_> = owner.anatomy.slots.iter().enumerate().collect();
+        sockets.sort_by_key(|(index, _)| {
+            (
+                owner
+                    .equipment
+                    .contains_key(&EquipmentSlotId(*index as u16)),
+                *index,
+            )
+        });
+        for (index, kind) in sockets {
+            if *kind != gear.slot {
+                continue;
+            }
+            let slot = EquipmentSlotId(index as u16);
+            let previous = owner.equipment.get(&slot).copied();
+            if previous.is_some_and(|id| {
+                self.known_gear(actor, id).is_none()
+                    || owner.known_equipment.curse(id) == Some(true)
+            }) {
+                continue;
+            }
+            let mut equipment = owner.equipment.clone();
+            equipment.remove(&slot);
+            if projected
+                .project_known_loadout_in_place(self, actor, equipment.clone())
+                .is_none()
+            {
+                continue;
+            }
+            projected.items.edit(item, |item| {
+                item.location = crate::ItemLocation::Carried(actor)
+            })?;
+            if projected
+                .capture_equip_allocation(actor, item, slot)
+                .is_err()
+            {
+                continue;
+            }
+            equipment.insert(slot, item);
+            if projected
+                .project_known_loadout_in_place(self, actor, equipment)
+                .is_none()
+            {
+                continue;
+            }
+            if !projected.ranged_loadout_has_budget(actor, item, slot) {
+                continue;
+            }
+            let Some(mut after) = gear_score(projected, actor) else {
+                continue;
+            };
+            if prefer_ranged {
+                // Explicitly higher Launch priority permits only the attack
+                // trade-off, never a loss of health, protection or recovery.
+                after.attack = before.attack.clone();
+            }
+            if after == before || after.dominates(&before) {
+                return Some((slot, previous));
+            }
+        }
+        None
     }
 
     fn gear_upgrade(&self, actor: ActorId, item: ItemId, slot: EquipmentSlotId) -> bool {
@@ -377,12 +481,97 @@ impl Game {
         after.dominates(&before)
     }
 
+    /// Recover a free primary grip when a depleted secondary launcher blocks a
+    /// strictly better carried melee option. No candidate changes the real game;
+    /// one workspace and at most sixteen candidate folds bound the fallback.
+    fn choose_depleted_launcher_recovery(
+        &self,
+        actor: ActorId,
+        view: &Observation,
+    ) -> Option<Action> {
+        if view.inventory.len() > 128 {
+            return None;
+        }
+        let owner = self.actors.get(&actor)?;
+        let primary = owner.anatomy.primary_attack_socket.socket()?;
+        if owner.equipment.contains_key(&primary) {
+            return None;
+        }
+        let empty = owner.equipment.iter().find_map(|(_, item)| {
+            let family = self.known_launcher_family(actor, *item)?;
+            if owner.known_equipment.curse(*item) == Some(true)
+                || view
+                    .inventory
+                    .iter()
+                    .filter(|row| row.identified)
+                    .any(|row| self.known_payload_family(actor, row.id) == Some(&family))
+            {
+                return None;
+            }
+            Some(*item)
+        })?;
+        let mut workspace = self.clone();
+        workspace.project_known_loadout_in_place(self, actor, owner.equipment.clone())?;
+        let before = gear_score(&workspace, actor)?;
+        let mut equipment = owner.equipment.clone();
+        equipment.retain(|_, item| *item != empty);
+        let mut candidates = 0;
+        for row in view
+            .inventory
+            .iter()
+            .filter(|row| row.identified && row.id != empty)
+        {
+            if owner.equipment.values().any(|item| *item == row.id) {
+                continue;
+            }
+            let Some(gear) = self.known_gear(actor, row.id) else {
+                continue;
+            };
+            if gear.attack.is_none()
+                || owner.anatomy.slots.get(usize::from(primary.0)) != Some(&gear.slot)
+            {
+                continue;
+            }
+            candidates += 1;
+            if candidates > 16 {
+                break;
+            }
+            workspace.project_known_loadout_in_place(self, actor, equipment.clone())?;
+            if workspace
+                .capture_equip_allocation(actor, row.id, primary)
+                .is_err()
+            {
+                continue;
+            }
+            let mut equipped = equipment.clone();
+            equipped.insert(primary, row.id);
+            if workspace
+                .project_known_loadout_in_place(self, actor, equipped)
+                .is_none()
+            {
+                continue;
+            }
+            if gear_score(&workspace, actor).is_some_and(|after| after.dominates(&before)) {
+                return Some(Action::Unequip { item: empty });
+            }
+        }
+        None
+    }
+
     pub(crate) fn choose_gear(&self, actor: ActorId, view: &Observation) -> Option<Action> {
+        if let Some(action) = self.choose_ranged_gear(actor, view) {
+            return Some(action);
+        }
+        if let Some(action) = self.choose_depleted_launcher_recovery(actor, view) {
+            return Some(action);
+        }
+        let retained = self.retained_ranged_weapon(actor, view);
         let choices: Vec<_> = view
             .inventory
             .iter()
             .filter_map(|item| {
                 self.gear_destination(actor, item.id)
+                    .filter(|(_, previous)| previous.is_none() || *previous != retained)
                     .map(|destination| (item.id, destination))
             })
             .collect();
@@ -426,7 +615,7 @@ struct GearScore {
     protection: std::collections::BTreeMap<crate::rules::Selector, (bool, u32)>,
     attack: AttackScore,
 }
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct AttackScore {
     bonus: i64,
     prepare: u64,
