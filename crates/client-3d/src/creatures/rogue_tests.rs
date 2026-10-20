@@ -851,3 +851,21 @@ fn walking_women_sway_their_hips_and_men_do_not() {
     assert!(hers > 0.1, "her hips sway as she walks: {hers}");
     assert!(his < hers * 0.6, "his stay squarer: {his} against {hers}");
 }
+
+#[test]
+fn women_of_the_heeled_kinds_wear_heels_and_others_do_not() {
+    for (style, heeled) in [
+        (Style::Vampire, true),
+        (Style::Medusa, true),
+        (Style::Leprechaun, true),
+        (Style::Hero, false),
+        (Style::Nymph, false),
+        (Style::Troll, false),
+    ] {
+        assert_eq!(geometry::heeled_boots(style, true), heeled, "{style:?}");
+        assert!(
+            !geometry::heeled_boots(style, false),
+            "{style:?} men stay flat-footed"
+        );
+    }
+}
