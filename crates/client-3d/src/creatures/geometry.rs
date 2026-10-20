@@ -604,9 +604,17 @@ fn braid(p: &mut Parts, top: Vec3, color: Vec3) {
 /// A face of moderate, modelled features: skull and jaw, cheekbones, a nose
 /// with a bridge and wings, lidded eyes, brows, lips and ears. Women's faces
 /// are softer in the jaw, with finer brows, lashes and fuller lips.
-fn human_face(p: &mut Parts, l: &Look, nose: bool) {
+/// A sculpted human head and the mouth it carries.
+pub(super) struct FaceShape {
+    pub form: crate::sdf::Sculpt,
+    pub mouth_width: f32,
+    /// How far the mouth corners lift, and how far one side does.
+    pub smile: f32,
+    pub smirk: f32,
+}
+
+pub(super) fn face_shape(l: &Look, nose: bool) -> FaceShape {
     let fem = l.v.woman;
-    let face = l.skin;
     // The head is sculpted as one surface: cranium and jaw blended,
     // cheekbones and a brow over carved eye sockets, a nose that grows out of
     // the face with its wings, lips with a fitted mouth line, a chin, ears.
@@ -618,6 +626,10 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
         Style::Zombie | Style::Vampire | Style::Phantom | Style::Wraith
     );
     let brute = matches!(l.style, Style::Hobgoblin | Style::Orc | Style::Troll);
+    // A living woman's face is soft and rounded, as on the concept sheets:
+    // full lower cheeks, a small chin and full lips. The undead keep their
+    // hollows and the brutes their heavy planes.
+    let soft = fem && !gaunt && !brute;
     let mut jaw = if fem {
         Vec3::new(0.069, 0.066, 0.075)
     } else {
@@ -648,8 +660,15 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
         Ellipsoid(
             // Taller support joins the lower lip to the jaw without changing
             // the chin's forward plane, width, or lower extent.
-            Vec3::new(0.0, 0.065, 0.068),
-            Vec3::new(0.037, 0.031, 0.027) * if fem { 0.9 } else { 1.0 },
+            Vec3::new(0.0, 0.065, if soft { 0.07 } else { 0.068 }),
+            Vec3::new(0.037, 0.031, 0.027)
+                * if soft {
+                    Vec3::new(0.8, 0.88, 0.95)
+                } else if fem {
+                    Vec3::splat(0.9)
+                } else {
+                    Vec3::ONE
+                },
         ),
         0.024,
     )
@@ -683,6 +702,19 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
             ),
             0.01,
         );
+    }
+    if soft {
+        // Full, soft lower cheeks round the face from the cheekbones to the
+        // mouth and jaw, instead of a flat front meeting flat sides.
+        for side in [-1.0f32, 1.0] {
+            head.add(
+                Ellipsoid(
+                    Vec3::new(side * 0.047, 0.1, 0.06),
+                    Vec3::new(0.031, 0.032, 0.031),
+                ),
+                0.03,
+            );
+        }
     }
     // The brow, heavier on men.
     head.add(
@@ -738,21 +770,41 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
     } else {
         0.03
     };
-    let full = if fem { 1.25 } else { 1.0 };
+    let full = if soft {
+        1.5
+    } else if fem {
+        1.25
+    } else {
+        1.0
+    };
+    let pout = if soft { 0.0045 } else { 0.0 };
     head.add(
         Ellipsoid(
-            Vec3::new(0.0, 0.098, 0.093),
-            Vec3::new(mouth_width, 0.0065 * full, 0.007),
+            Vec3::new(0.0, 0.098, 0.093 + pout * 0.5),
+            Vec3::new(mouth_width, 0.0065 * full, 0.007 + pout),
         ),
         0.01,
     )
     .add(
         Ellipsoid(
-            Vec3::new(0.0, 0.086, 0.091),
-            Vec3::new(mouth_width * 0.92, 0.007 * full, 0.007),
+            Vec3::new(0.0, 0.086, 0.091 + pout),
+            Vec3::new(mouth_width * 0.92, 0.007 * full, 0.007 + pout),
         ),
         0.01,
     );
+    if soft {
+        // The cupid's bow: the upper lip's two peaks either side of the
+        // philtrum.
+        for side in [-1.0f32, 1.0] {
+            head.add(
+                Ellipsoid(
+                    Vec3::new(side * 0.008, 0.1025, 0.095),
+                    Vec3::new(0.009, 0.004, 0.005),
+                ),
+                0.004,
+            );
+        }
+    }
     // Each kind wears its own expression: adventurers half-smile, soldiers
     // and hobgoblins scowl, vampires smirk to one side, the dead hang slack.
     let (smile, _scowl, smirk) = match l.style {
@@ -767,21 +819,22 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
         Style::Zombie => (-0.006, -0.006, 0.0),
         _ => (0.0, 0.0, 0.0),
     };
-    let mouth_height = |x: f32| {
-        let span = (x.abs() / mouth_width).min(1.0);
-        0.091 + (0.001 + smile) * span.powi(2) + smirk * (x / mouth_width).clamp(0.0, 1.0)
-    };
     // The expression follows the continuous lip surface. Its narrow seam is
     // explicit fitted geometry below, independent of the face mesh grid.
     if smile > 0.0 {
         // Cheeks lift with the smile.
         for side in [-1.0f32, 1.0] {
+            // On a soft face the lift melts into the full cheek around it.
             head.add(
                 Ellipsoid(
                     Vec3::new(side * 0.036, 0.104, 0.082),
-                    Vec3::new(0.012, 0.009, 0.009),
+                    if soft {
+                        Vec3::new(0.009, 0.007, 0.007)
+                    } else {
+                        Vec3::new(0.012, 0.009, 0.009)
+                    },
                 ),
-                0.014,
+                if soft { 0.02 } else { 0.014 },
             );
         }
     }
@@ -792,9 +845,15 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
         head.carve(
             Beyond(
                 Vec3::new(side * 0.8, 0.0, 0.6),
-                if brute { 0.113 } else { 0.106 },
+                if brute {
+                    0.113
+                } else if soft {
+                    0.116
+                } else {
+                    0.106
+                },
             ),
-            0.01,
+            if soft { 0.028 } else { 0.01 },
         );
         if gaunt {
             // A shallow, tall hollow below the cheekbone reads as a lean
@@ -821,6 +880,31 @@ fn human_face(p: &mut Parts, l: &Look, nose: bool) {
             0.01,
         );
     }
+    FaceShape {
+        form: head,
+        mouth_width,
+        smile,
+        smirk,
+    }
+}
+
+fn human_face(p: &mut Parts, l: &Look, nose: bool) {
+    let fem = l.v.woman;
+    let face = l.skin;
+    let gaunt = matches!(
+        l.style,
+        Style::Zombie | Style::Vampire | Style::Phantom | Style::Wraith
+    );
+    let FaceShape {
+        form: head,
+        mouth_width,
+        smile,
+        smirk,
+    } = face_shape(l, nose);
+    let mouth_height = |x: f32| {
+        let span = (x.abs() / mouth_width).min(1.0);
+        0.091 + (0.001 + smile) * span.powi(2) + smirk * (x / mouth_width).clamp(0.0, 1.0)
+    };
     // Women's lips are full and rose-coloured, their cheeks warmly flushed;
     // the undead keep a cold, dark mouth either way.
     let lips = if gaunt {

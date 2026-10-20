@@ -349,3 +349,44 @@ fn art_contract_plate_lames_cover_every_wearer() {
         }
     }
 }
+
+#[test]
+fn art_contract_womens_faces_are_soft_with_full_lips() {
+    // As on the concept sheets, her lower face is softly rounded and her
+    // lips stand fuller than a man's. The undead keep
+    // their gaunt hollows and are not held to it.
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Nymph,
+        CreatureModel::Medusa,
+        CreatureModel::Leprechaun,
+    ] {
+        for build in 0..3 {
+            let her = geometry::face_shape(&appearance(model, true, build), true);
+            let him = geometry::face_shape(&appearance(model, false, build), true);
+            // Across the lower face her cheeks round away gently from the
+            // mouth, rather than turning a flat front into flat sides.
+            let depth = |x: f32, y: f32| her.form.onto(Vec3::new(x, y, 0.3), Vec3::NEG_Z).z;
+            for y in [0.09f32, 0.1] {
+                let fall = depth(0.03, y) - depth(0.06, y);
+                assert!(
+                    fall < 0.02,
+                    "{model:?} build {build}: her face falls {fall:.4} across the cheek at {y}"
+                );
+            }
+            let lips = |shape: &geometry::FaceShape| {
+                // The lips' height, front to back: how far they stand over
+                // the plane below them.
+                let lip = shape.form.onto(Vec3::new(0.0, 0.087, 0.3), Vec3::NEG_Z).z;
+                let below = shape.form.onto(Vec3::new(0.0, 0.074, 0.3), Vec3::NEG_Z).z;
+                lip - below
+            };
+            assert!(
+                lips(&her) > lips(&him) + 0.002,
+                "{model:?} build {build}: her lips {:.4} against his {:.4}",
+                lips(&her),
+                lips(&him)
+            );
+        }
+    }
+}
