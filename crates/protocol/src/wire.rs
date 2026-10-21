@@ -5,7 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 58;
+pub const PROTOCOL_VERSION: u32 = 59;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -1398,6 +1398,11 @@ pub enum Event {
     /// The actor deliberately left through its terminal objective endpoint.
     Escaped {
         item: ItemTarget,
+    },
+    Crumbled {
+        item: ItemTarget,
+        #[serde(with = "crate::integers::unsigned")]
+        quantity: u64,
     },
     Taken {
         item: ItemTarget,

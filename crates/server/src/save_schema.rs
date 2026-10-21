@@ -1241,6 +1241,24 @@ mod tests {
     }
 
     #[test]
+    fn saved_crumbled_pickup_keeps_internal_identity_and_no_result_transfer() {
+        let saved = serde_json::json!({"type":"crumbled", "item":7, "quantity":2});
+        let restored: crate::journal::Event =
+            crate::storage::codec::strict(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), saved);
+        for invalid in [
+            serde_json::json!({"type":"crumbled", "item":"7", "quantity":2}),
+            serde_json::json!({"type":"crumbled", "item":7}),
+            serde_json::json!({"type":"crumbled", "item":7, "quantity":2, "result":8}),
+        ] {
+            assert!(crate::storage::codec::strict::<crate::journal::Event>(
+                &serde_json::to_vec(&invalid).unwrap()
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
     fn saved_ability_started_reference_is_required_and_save_owned() {
         for reference in ["creature", "contact"] {
             let saved = serde_json::json!({"type":"ability_started", "reference":reference,

@@ -1072,9 +1072,18 @@ fn population_checkpoint_pool_preserves_complete_nutrition_recipes() {
     ];
     let encoded = serde_json::to_value((snapshots, shared)).unwrap();
     assert_eq!(encoded[1]["floor_activations"].as_array().unwrap().len(), 2);
-    assert_eq!(encoded[0][0]["floor_activation"], json!(0));
-    assert_eq!(encoded[0][1]["floor_activation"], json!(1));
-    assert_eq!(encoded[0][2]["floor_activation"], json!(0));
+    assert_eq!(
+        encoded[0][0]["floor_activation"],
+        json!({"state":0,"wandering":null})
+    );
+    assert_eq!(
+        encoded[0][1]["floor_activation"],
+        json!({"state":1,"wandering":null})
+    );
+    assert_eq!(
+        encoded[0][2]["floor_activation"],
+        json!({"state":0,"wandering":null})
+    );
     let recipe = "/plan/profiles/birth/stages/0/population/bands/0/choices/0/actor/nutrition";
     assert_eq!(
         encoded[1]["floor_activations"][0].pointer(recipe).unwrap(),

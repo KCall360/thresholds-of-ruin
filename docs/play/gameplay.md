@@ -67,8 +67,9 @@ input boundary taking priority over autonomous actors at the same tick. AI uses
 its own perception and actor-owned remembered targets. Species defaults choose
 passive or mean acquisition, waiting or exploring while idle, useful tool use,
 and an actor-active memory interval. Named profiles override only their supplied
-settings. Mean acquisition tries a two-in-three wake chance once per committed
-eligible decision. Passive creatures react to an attributed committed hostile
+settings. Mean acquisition uses committed sensory events: ordinary visible
+approaches alert directly, while continual Stealth opposes Perception once per
+new encounter or movement cue. Observation and planning never reroll a cue. Passive creatures react to an attributed committed hostile
 strike, including a miss or harmless contact. A visible body and a disclosed event
 caster are both required; unseen preparations reveal nothing. Faction hostility
 remains directed scenario data; one actor's private grudge cannot change another's

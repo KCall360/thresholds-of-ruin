@@ -483,7 +483,9 @@ impl ResolvedEffect {
     /// reach this point only after the shared kernel observed a state change.
     pub(crate) fn changed(&self) -> bool {
         match self {
-            Self::AlterEquipment { alteration } => !alteration.plan.targets.is_empty(),
+            Self::AlterEquipment { alteration } => {
+                !alteration.plan.targets.is_empty() || !alteration.plan.carried_targets.is_empty()
+            }
             Self::Theft { quantity, .. } => *quantity > 0,
             Self::Translate { result, .. } | Self::Relocate { result, .. } => result.changed(),
             Self::ArrestDescent => false,

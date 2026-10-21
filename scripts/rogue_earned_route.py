@@ -17,10 +17,11 @@ from dataclasses import dataclass
 
 from scalar_wire import u64
 from rogue_test_support import (
-    DisclosedFloorGraph, cardinal_melee_candidate, disclosed_step_action, ground_sight_candidate,
+    DisclosedFloorGraph, disclosed_body_cells, disclosed_melee_candidate, disclosed_step_action,
+    ground_sight_candidate,
 )
 
-POLICY_REVISION = 6
+POLICY_REVISION = 7
 CHECKPOINT_DEPTHS = (1, 5, 8, 11, 17, 26, 27)
 CHARACTERS = {1: ("Warrior", "warrior", "rattling_blow"),
               2: ("Mage", "mage", "spark_lance_cold")}
@@ -353,7 +354,15 @@ class Controller:
         floor = self.floors[self.depth]
         cells = {_position(row): row for row in view["visible_cells"]
                  if row["position"]["z"] == 0 and not row["wall"]}
-        occupied = {_position(row) for row in view["visible_actors"] if row["id"] != view["self_target"]}
+        body = disclosed_body_cells(view)
+        # Translate only disclosed own-body offsets. A hovering actor blocks a
+        # tall body's head, but an actor on a separate height is not projected
+        # onto this floor. Known wall cells constrain the same exact 3D volume.
+        obstacles = {_position(row) for row in view["visible_actors"]
+                     if row["id"] != view["self_target"]}
+        obstacles.update(_position(row) for row in view["visible_cells"] if row["wall"])
+        occupied = {anchor for anchor in cells if any(
+            tuple(a + b for a, b in zip(anchor, own)) in obstacles for own in body)}
         blocked = {cells[p]["key"] for p in occupied if p in cells}
         blocked.update(row["key"] for row in view["visible_cells"] if row["wall"])
         foes = _foes(view)
@@ -374,7 +383,10 @@ class Controller:
             for target in foes:
                 if counts[_actor_key(target)] > 1:
                     return self._decision({"type": "wait"}, "ambiguous_actor")
-                if cardinal_melee_candidate(target):
+                target_cells = [row for row in view["visible_actors"] if row["id"] == target["id"]]
+                # Representative sorting still chooses the same actor. Its
+                # other disclosed body cells may independently witness reach.
+                if any(disclosed_melee_candidate(view, row) for row in target_cells):
                     known = _available(view, "rattling_blow") if self.character == 1 else None
                     if known is not None and known["reach"]["kind"] != "melee":
                         known = None
@@ -386,12 +398,11 @@ class Controller:
                     if (known is not None and known["reach"]["kind"] == "sight"
                             and ground_sight_candidate(target, known["reach"]["range"])):
                         return self._decision(_use(known, target["id"]), "combat")
-                x, y, z = _position(target)
-                if z != 0:
-                    continue
-                neighbors = {cells[(x + dx, y + dy, 0)]["key"]
-                    for dx, dy, _ in DisclosedFloorGraph.directions
-                    if (x + dx, y + dy, 0) in cells and (x + dx, y + dy, 0) not in occupied}
+                target_positions = {_position(row) for row in target_cells}
+                neighbors = {cell["key"] for anchor, cell in cells.items()
+                    if anchor not in occupied and any(
+                        sum(abs(a + b - t) for a, b, t in zip(anchor, own, target_cell)) == 1
+                        for own in body for target_cell in target_positions)}
                 route = floor.route(here["key"], neighbors, blocked)
                 if route:
                     return self._step_decision(view, route[0][1], "combat_approach")

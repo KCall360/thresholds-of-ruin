@@ -102,12 +102,41 @@ impl<'de> Deserialize<'de> for EquippedWitness {
         })
     }
 }
+/// Remove Curse also reaches carried scare-scroll stacks. Their immutable
+/// definition and homogeneous condition identify every unit in the frozen stack.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarriedCurseWitness {
+    pub(crate) item: ItemId,
+    pub(crate) condition: crate::armor::ItemCondition,
+}
+impl<'de> Deserialize<'de> for CarriedCurseWitness {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            item: ItemId,
+            condition: crate::armor::ItemCondition,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        if fields.item.0 == 0 || fields.item.0 == u64::MAX || !fields.condition.valid() {
+            return Err(serde::de::Error::custom("invalid carried curse witness"));
+        }
+        Ok(Self {
+            item: fields.item,
+            condition: fields.condition,
+        })
+    }
+}
+const MAX_CARRIED_CURSE_TARGETS: usize = 4096;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlannedEquipmentAlteration {
     pub selection: EquippedSelection,
     pub alteration: EquipmentAlteration,
     pub(crate) targets: Vec<EquippedWitness>,
+    pub(crate) carried_targets: Vec<CarriedCurseWitness>,
 }
 impl<'de> Deserialize<'de> for PlannedEquipmentAlteration {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -117,12 +146,15 @@ impl<'de> Deserialize<'de> for PlannedEquipmentAlteration {
             selection: EquippedSelection,
             alteration: EquipmentAlteration,
             targets: crate::bounded::Bounded<EquippedWitness, { crate::limits::EQUIPMENT_SOCKETS }>,
+            carried_targets:
+                crate::bounded::Bounded<CarriedCurseWitness, MAX_CARRIED_CURSE_TARGETS>,
         }
         let f: Fields = crate::bounded::named_map(d)?;
         let value = Self {
             selection: f.selection,
             alteration: f.alteration,
             targets: f.targets.0,
+            carried_targets: f.carried_targets.0,
         };
         if !value.valid_shape() {
             return Err(serde::de::Error::custom("invalid equipment alteration"));
@@ -133,6 +165,20 @@ impl<'de> Deserialize<'de> for PlannedEquipmentAlteration {
 impl PlannedEquipmentAlteration {
     pub(crate) fn valid_shape(&self) -> bool {
         self.selection.accepts(self.alteration)
+            && self.carried_targets.len() <= MAX_CARRIED_CURSE_TARGETS
+            && (self.carried_targets.is_empty()
+                || (self.alteration == EquipmentAlteration::RemoveCurse
+                    && matches!(self.selection, EquippedSelection::All)))
+            && self
+                .carried_targets
+                .windows(2)
+                .all(|pair| pair[0].item < pair[1].item)
+            && self.carried_targets.iter().all(|w| {
+                w.item.0 > 0
+                    && w.item.0 < u64::MAX
+                    && w.condition.valid()
+                    && !self.targets.iter().any(|equipped| equipped.item == w.item)
+            })
             && self.targets.len() <= crate::limits::EQUIPMENT_SOCKETS
             && (matches!(self.selection, EquippedSelection::All) || self.targets.len() <= 1)
             && self.targets.windows(2).all(|w| w[0].socket < w[1].socket)
@@ -242,11 +288,36 @@ impl Game {
                 targets.truncate(1);
             }
         }
-        Ok(PlannedEquipmentAlteration {
+        let carried_targets: Vec<_> = if alteration == EquipmentAlteration::RemoveCurse
+            && matches!(selection, EquippedSelection::All)
+        {
+            self.items
+                .at(ItemLocation::Carried(actor))
+                .filter_map(|id| {
+                    let item = &self.items[&id];
+                    item.spec
+                        .ground_scare
+                        .as_ref()
+                        .map(|_| CarriedCurseWitness {
+                            item: id,
+                            condition: item.condition,
+                        })
+                })
+                .take(MAX_CARRIED_CURSE_TARGETS + 1)
+                .collect()
+        } else {
+            vec![]
+        };
+        let plan = PlannedEquipmentAlteration {
             selection: selection.clone(),
             alteration,
             targets,
-        })
+            carried_targets,
+        };
+        if !plan.valid_shape() {
+            return Err(invalid());
+        }
+        Ok(plan)
     }
     /// Validate all original witnesses before any effect mutates candidate state.
     pub(crate) fn validate_equipment_alterations(
@@ -263,7 +334,8 @@ impl Game {
                 // A populated frozen selection must still be exactly the authored
                 // selection, including first/last socket and capability. Empty plans
                 // deliberately remain no-ops even if a slot was filled meanwhile.
-                if !alteration.plan.targets.is_empty()
+                if (!alteration.plan.targets.is_empty()
+                    || !alteration.plan.carried_targets.is_empty())
                     && self.compile_equipment_alteration(
                         actor,
                         &alteration.plan.selection,
@@ -271,6 +343,16 @@ impl Game {
                     )? != alteration.plan
                 {
                     return Err(GameError::ItemUnavailable);
+                }
+                for target in &alteration.plan.carried_targets {
+                    if self.items.get(&target.item).is_none_or(|item| {
+                        item.location != ItemLocation::Carried(actor)
+                            || item.spec.ground_scare.is_none()
+                            || item.condition != target.condition
+                            || !item.condition_valid()
+                    }) {
+                        return Err(GameError::ItemUnavailable);
+                    }
                 }
                 for target in &alteration.plan.targets {
                     if owner.equipment.get(&target.socket) != Some(&target.item)
@@ -326,6 +408,29 @@ impl Game {
             if !candidate.condition_valid() {
                 return Err(invalid());
             }
+            changed |= before != after;
+            outcome
+                .state
+                .known_equipment
+                .observe_change(target.item, before, after);
+            self.items
+                .edit(target.item, |item| item.condition = after)
+                .ok_or(GameError::ItemUnavailable)?;
+        }
+        for target in &alteration.plan.carried_targets {
+            let item = self
+                .items
+                .get(&target.item)
+                .ok_or(GameError::ItemUnavailable)?;
+            if item.location != ItemLocation::Carried(outcome.id)
+                || item.spec.ground_scare.is_none()
+                || item.condition != target.condition
+                || alteration.plan.alteration != EquipmentAlteration::RemoveCurse
+            {
+                return Err(GameError::ItemUnavailable);
+            }
+            let before = item.condition;
+            let after = before.uncurse();
             changed |= before != after;
             outcome
                 .state

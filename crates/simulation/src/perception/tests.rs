@@ -136,3 +136,69 @@ fn ordinary_later_ambush_grant_can_arm_only_the_unbroken_initial_guise() {
     state.reconcile(&source, false);
     assert!(!state.ambush_available());
 }
+
+#[test]
+fn continual_stealth_and_aggravation_are_nonstacking_and_skill_specific() {
+    let stealth = modifier(PerceptionValue::ContinualStealth { edge: 1 });
+    let aggravation = modifier(PerceptionValue::Aggravation {
+        interval: 500,
+        chance_denominator: 3,
+        stealth_disadvantage: 1,
+    });
+    let sources = [stealth.clone(), stealth, aggravation.clone(), aggravation];
+    let folded = PerceptionCapabilities::from_modifiers(sources.iter()).unwrap();
+    assert_eq!(folded.continual_stealth, Some(1));
+    assert_eq!(
+        folded.aggravation,
+        Some(AggravationPolicy {
+            interval: 500,
+            chance_denominator: 3,
+            stealth_disadvantage: 1,
+        })
+    );
+    assert!(!folded.invisible);
+    assert_eq!(folded.search_interval, None);
+    let reversed = sources.iter().rev();
+    assert_eq!(
+        PerceptionCapabilities::from_modifiers(reversed).unwrap(),
+        folded
+    );
+}
+
+#[test]
+fn awareness_modifiers_reject_zero_cadence_and_missing_fields() {
+    for value in [
+        serde_json::json!({"kind":"aggravation", "interval":0,"chance_denominator":3,"stealth_disadvantage":1}),
+        serde_json::json!({"kind":"aggravation", "interval":500,"chance_denominator":0,"stealth_disadvantage":1}),
+        serde_json::json!({"kind":"aggravation", "interval":500,"chance_denominator":3}),
+        serde_json::json!({"kind":"continual_stealth"}),
+    ] {
+        assert!(serde_json::from_value::<PerceptionValue>(value).is_err());
+    }
+}
+
+#[test]
+fn worn_stealth_edges_are_qualified_for_every_shared_skill_capture() {
+    let sources = [modifier(PerceptionValue::Aggravation {
+        interval: 500,
+        chance_denominator: 3,
+        stealth_disadvantage: 1,
+    })];
+    let folded = PerceptionCapabilities::from_modifiers(sources.iter()).unwrap();
+    for skill in crate::attributes::Skill::ALL {
+        assert_eq!(
+            folded.skill_edge(skill),
+            if skill == crate::attributes::Skill::Stealth {
+                -1
+            } else {
+                0
+            }
+        );
+    }
+    let sources = [
+        sources[0].clone(),
+        modifier(PerceptionValue::ContinualStealth { edge: 1 }),
+    ];
+    let folded = PerceptionCapabilities::from_modifiers(sources.iter()).unwrap();
+    assert_eq!(folded.skill_edge(crate::attributes::Skill::Stealth), 0);
+}

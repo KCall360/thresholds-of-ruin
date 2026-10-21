@@ -188,6 +188,76 @@ class EarnedRouteControllerTests(unittest.TestCase):
             if quantity == 2:
                 self.assertEqual(decision.action["supplies"], {"kind": "carried"})
 
+    def test_elevated_contact_uses_disclosed_own_body_after_controller_reload(self):
+        current = state(cells=[cell("home"), cell("south", 0, 1)],
+                        foes=[foe("actor:kestrel", 0, 1, 1)],
+                        abilities=[ability("rattling_blow")])
+        current["observation"]["visible_actors"].append(foe("actor:self", 0, 0, 1))
+        current["observation"]["tick"] = "12350"
+        controller, decision = self.choose(current)
+        self.assertEqual(decision.phase, "combat")
+        self.assertEqual(decision.action["id"], "rattling_blow")
+        _, restored = self.choose(current, controller=Controller.load(controller.dump()))
+        self.assertEqual(restored, decision)
+        self.assertEqual(controller.commands, 0)
+        permuted = copy.deepcopy(current)
+        permuted["observation"]["visible_actors"].reverse()
+        for row in permuted["observation"]["visible_actors"]:
+            if row["id"] == "actor:kestrel":
+                row["id"] = "actor:opaque-replacement"
+        permuted["observation"]["combat"]["actors"][0]["actor"] = "actor:opaque-replacement"
+        _, renamed = self.choose(permuted)
+        self.assertEqual(renamed.phase, "combat")
+        self.assertEqual(renamed.action["id"], "rattling_blow")
+
+    def test_same_actor_nearest_occurrence_does_not_hide_disclosed_face_contact(self):
+        rows = [foe("actor:tall", 0, 0, 2), foe("actor:tall", 1, 0, 0)]
+        for visible in (rows, list(reversed(rows))):
+            current = state(foes=visible, abilities=[ability("rattling_blow")])
+            _, decision = self.choose(current)
+            self.assertEqual(decision.phase, "combat")
+            self.assertEqual(decision.action["id"], "rattling_blow")
+
+    def test_disclosed_tall_body_blocks_elevated_occupied_step_not_separate_height(self):
+        for height, blocked in [(1, True), (2, False)]:
+            with self.subTest(height=height):
+                current = state(cells=[cell("home"), cell("south", 0, 1)])
+                # A visible non-hostile is still a physical obstacle; no combat
+                # decision hides the occupancy contract in this caller witness.
+                current["observation"]["visible_actors"] = [
+                    foe("actor:self", 0, 0, 1), foe("actor:other", 0, 1, height)]
+                controller, decision = self.choose(current)
+                if blocked:
+                    self.assertIsNone(decision.action)
+                    self.assertEqual(decision.outcome, "censored_route_exhausted")
+                else:
+                    self.assertEqual(decision.action, {"type": "move", "direction": "south"})
+                _, restored = self.choose(current, controller=Controller.load(controller.dump()))
+                self.assertEqual(restored, decision)
+
+    def test_body_aware_approach_uses_disclosed_ground_not_elevated_projection(self):
+        current = state(cells=[cell("home"), cell("south", 0, 1), cell("far", 0, 2)],
+                        foes=[foe("actor:foe", 0, 2, 1)])
+        current["observation"]["visible_actors"].append(foe("actor:self", 0, 0, 1))
+        _, decision = self.choose(current)
+        self.assertEqual(decision.phase, "combat_approach")
+        self.assertEqual(decision.action, {"type": "move", "direction": "south"})
+        current["observation"]["visible_cells"][1]["wall"] = True
+        _, blocked = self.choose(current)
+        self.assertIsNone(blocked.action)
+
+    def test_translated_upper_body_respects_disclosed_wall_but_not_separate_height(self):
+        for height, blocked in [(1, True), (2, False)]:
+            with self.subTest(height=height):
+                current = state(cells=[cell("home"), cell("south", 0, 1),
+                                       cell("upper-wall", 0, 1, z=height, wall=True)])
+                current["observation"]["visible_actors"] = [foe("actor:self", 0, 0, 1)]
+                _, decision = self.choose(current)
+                if blocked:
+                    self.assertIsNone(decision.action)
+                else:
+                    self.assertEqual(decision.action, {"type": "move", "direction": "south"})
+
     def test_diagonal_or_vertical_foe_never_uses_cardinal_melee(self):
         for position in [(1, 1, 0), (1, 0, 1)]:
             _, decision = self.choose(state(foes=[foe("actor:f", *position)],

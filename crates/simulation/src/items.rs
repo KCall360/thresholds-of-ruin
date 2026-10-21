@@ -7,6 +7,10 @@ use tor_world::Location;
 #[path = "item_stack_tests.rs"]
 mod stack_tests;
 
+#[cfg(test)]
+#[path = "scare_item_tests.rs"]
+mod scare_tests;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemClass {
@@ -46,6 +50,8 @@ pub(crate) struct PreparedTransfer {
     destination: ItemLocation,
     quantity: u64,
     expected_next_item_id: u64,
+    condition_after: crate::armor::ItemCondition,
+    crumble: bool,
 }
 
 impl PreparedTransfer {
@@ -53,7 +59,12 @@ impl PreparedTransfer {
         self.result
     }
     pub(crate) fn outcome(&self, taking: bool) -> OutcomeKind {
-        if taking {
+        if self.crumble {
+            OutcomeKind::Crumbled {
+                item: self.source,
+                quantity: self.quantity,
+            }
+        } else if taking {
             OutcomeKind::Taken {
                 item: self.source,
                 result: self.result,
@@ -111,6 +122,8 @@ pub struct ItemSpec {
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub readable: Option<crate::ReadableSpec>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub ground_scare: Option<crate::control_scrolls::ScareSpec>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
     pub device: Option<crate::DeviceSpec>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub edible: Option<crate::EdibleSpec>,
@@ -147,6 +160,8 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
             #[serde(deserialize_with = "crate::bounded::required_option")]
             readable: Option<crate::ReadableSpec>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
+            ground_scare: Option<crate::control_scrolls::ScareSpec>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
             device: Option<crate::DeviceSpec>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             edible: Option<crate::EdibleSpec>,
@@ -172,6 +187,7 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
             equipment_generation: fields.equipment_generation,
             consumable: fields.consumable,
             readable: fields.readable,
+            ground_scare: fields.ground_scare,
             device: fields.device,
             edible: fields.edible,
             supply: fields.supply,
@@ -205,6 +221,7 @@ impl Clone for ItemSpec {
             equipment_generation: self.equipment_generation,
             consumable: self.consumable.clone(),
             readable: self.readable.clone(),
+            ground_scare: self.ground_scare.clone(),
             device: self.device.clone(),
             edible: self.edible.clone(),
             supply: self.supply.clone(),
@@ -224,7 +241,7 @@ impl Clone for ItemSpec {
 impl ItemSpec {
     /// Authored capability, never observer knowledge, controls instance provenance.
     pub(crate) fn has_instance_condition(&self) -> bool {
-        self.equipment.is_some() || self.projectile.is_some()
+        self.equipment.is_some() || self.projectile.is_some() || self.ground_scare.is_some()
     }
 
     pub fn ordinary(name: String) -> Self {
@@ -236,6 +253,7 @@ impl ItemSpec {
             equipment_generation: None,
             consumable: None,
             readable: None,
+            ground_scare: None,
             device: None,
             edible: None,
             supply: None,
@@ -304,6 +322,15 @@ impl ItemSpec {
                     .iter()
                     .map(crate::rules::Effect::recipient),
             )?;
+        }
+        if self
+            .ground_scare
+            .as_ref()
+            .is_some_and(|spec| !spec.valid(rules))
+        {
+            return Err(crate::rules::RulesetError::Bound {
+                field: "ground_scare".into(),
+            });
         }
         if let Some(readable) = &self.readable {
             readable.validate_rules(rules)?;
@@ -397,7 +424,35 @@ impl Game {
         destination: ItemLocation,
         knowledge_owner: Option<ActorId>,
     ) -> Result<PreparedTransfer, GameError> {
+        let condition = self
+            .items
+            .get(&source)
+            .ok_or(GameError::ItemUnavailable)?
+            .condition;
+        self.prepare_stack_transfer_with_condition(
+            source,
+            merge,
+            quantity,
+            destination,
+            knowledge_owner,
+            condition,
+        )
+    }
+    fn prepare_stack_transfer_with_condition(
+        &self,
+        source: ItemId,
+        merge: Option<ItemId>,
+        quantity: u64,
+        destination: ItemLocation,
+        knowledge_owner: Option<ActorId>,
+        condition_after: crate::armor::ItemCondition,
+    ) -> Result<PreparedTransfer, GameError> {
         let item = self.items.get(&source).ok_or(GameError::ItemUnavailable)?;
+        let mut transferred = item.clone();
+        transferred.condition = condition_after;
+        if transferred.condition != item.condition && !transferred.condition_valid() {
+            return Err(GameError::ItemUnavailable);
+        }
         if quantity == 0 || quantity > item.quantity {
             return Err(GameError::InvalidQuantity);
         }
@@ -411,7 +466,9 @@ impl Game {
                 .items
                 .get(&id)
                 .filter(|existing| {
-                    id != source && existing.location == destination && existing.stacks_with(item)
+                    id != source
+                        && existing.location == destination
+                        && existing.stacks_with(&transferred)
                 })
                 .ok_or(GameError::ItemUnavailable)?;
             if self.merge_destination_available(id) {
@@ -450,6 +507,8 @@ impl Game {
             destination,
             quantity,
             expected_next_item_id: self.next_item_id,
+            condition_after,
+            crumble: false,
         })
     }
     pub(crate) fn apply_prepared_transfer(
@@ -465,16 +524,57 @@ impl Game {
         {
             return Err(GameError::ItemUnavailable);
         }
-        self.apply_transfer_with_merge(
+        if plan.crumble {
+            if plan.expected_source.spec.ground_scare.is_none()
+                || !plan.expected_source.condition.cursed
+                || !matches!(plan.expected_source.location, ItemLocation::Ground(_))
+                || !matches!(plan.destination, ItemLocation::Carried(_))
+                || plan.quantity == 0
+                || plan
+                    .expected_source
+                    .free_quantity(None)
+                    .is_none_or(|free| free < plan.quantity)
+            {
+                return Err(GameError::ItemUnavailable);
+            }
+            let remainder = plan
+                .expected_source
+                .quantity
+                .checked_sub(plan.quantity)
+                .ok_or(GameError::InvalidQuantity)?;
+            if remainder == 0 {
+                self.items.remove(&plan.source);
+            } else {
+                self.items
+                    .edit(plan.source, |item| item.quantity = remainder)
+                    .ok_or(GameError::ItemUnavailable)?;
+            }
+            return Ok(());
+        }
+        self.apply_transfer_with_condition(
             plan.source,
             plan.result,
             plan.merge,
             plan.quantity,
             plan.destination,
+            plan.condition_after,
         )?;
         if let Some((owner, facts)) = &plan.inherited {
             if let Some(mut owner) = self.actors.get_mut(owner) {
                 owner.known_equipment.remember_inherited(facts.clone());
+            }
+        }
+        if plan.condition_after != plan.expected_source.condition {
+            if let ItemLocation::Carried(owner) = plan.destination {
+                self.actors
+                    .get_mut(&owner)
+                    .ok_or(GameError::UnknownActor)?
+                    .known_equipment
+                    .observe_change(
+                        plan.result,
+                        plan.expected_source.condition,
+                        plan.condition_after,
+                    );
             }
         }
         Ok(())
@@ -725,13 +825,33 @@ impl Game {
         {
             return Err(GameError::ItemUnavailable);
         }
+        let scare_pickup = taking && source.spec.ground_scare.is_some();
+        if scare_pickup && source.condition.cursed {
+            return Ok(PreparedTransfer {
+                source: item,
+                expected_source: source.clone(),
+                result: item,
+                merge: None,
+                expected_destination: None,
+                inherited: None,
+                destination: to,
+                quantity,
+                expected_next_item_id: self.next_item_id,
+                condition_after: source.condition,
+                crumble: true,
+            });
+        }
+        let mut transferred = source.clone();
+        if scare_pickup {
+            transferred.condition.cursed = true;
+        }
         let destination = if source.spec.stackable {
             self.items
                 .at(to)
                 .map(|id| (id, &self.items[&id]))
                 .find(|(_id, i)| {
                     crate::diagnostics::stack_candidate();
-                    i.stacks_with(source)
+                    i.stacks_with(&transferred)
                         && self.merge_destination_available(*_id)
                         && (taking
                             || (i.motion.same_kinematics(&self.actors[&actor].motion)
@@ -744,12 +864,13 @@ impl Game {
         } else {
             None
         };
-        self.prepare_stack_transfer(
+        self.prepare_stack_transfer_with_condition(
             item,
             destination.map(|(id, _)| id),
             quantity,
             to,
             Some(actor),
+            transferred.condition,
         )
     }
 
@@ -765,6 +886,7 @@ impl Game {
         self.apply_transfer_with_merge(source, result, merge, quantity, location)
     }
 
+    #[cfg(test)]
     fn apply_transfer_with_merge(
         &mut self,
         source: ItemId,
@@ -773,7 +895,28 @@ impl Game {
         quantity: u64,
         location: ItemLocation,
     ) -> Result<(), GameError> {
+        let condition = self
+            .items
+            .get(&source)
+            .ok_or(GameError::ItemUnavailable)?
+            .condition;
+        self.apply_transfer_with_condition(source, result, merge, quantity, location, condition)
+    }
+    fn apply_transfer_with_condition(
+        &mut self,
+        source: ItemId,
+        result: ItemId,
+        merge: Option<ItemId>,
+        quantity: u64,
+        location: ItemLocation,
+        condition: crate::armor::ItemCondition,
+    ) -> Result<(), GameError> {
         let item = self.items.get(&source).ok_or(GameError::ItemUnavailable)?;
+        let mut transferred = item.clone();
+        transferred.condition = condition;
+        if transferred.condition != item.condition && !transferred.condition_valid() {
+            return Err(GameError::ItemUnavailable);
+        }
         if quantity == 0
             || quantity > item.quantity
             || (source == result && quantity != item.quantity)
@@ -788,7 +931,7 @@ impl Game {
                 let destination = self.items.get(&id).ok_or(GameError::ItemUnavailable)?;
                 if id == source
                     || destination.location != location
-                    || !item.stacks_with(destination)
+                    || !transferred.stacks_with(destination)
                     || !self.merge_destination_available(id)
                     || (item.spec.has_instance_condition() && result == id)
                     || (!item.spec.has_instance_condition() && result != id)
@@ -841,15 +984,11 @@ impl Game {
                     item.motion = motion;
                     item.orientation = orientation;
                     item.location = location;
+                    item.condition = condition;
                 })
                 .ok_or(GameError::ItemUnavailable)?;
             return Ok(());
         }
-        let condition = self
-            .items
-            .get(&source)
-            .ok_or(GameError::ItemUnavailable)?
-            .condition;
         let charges = self
             .items
             .get(&source)

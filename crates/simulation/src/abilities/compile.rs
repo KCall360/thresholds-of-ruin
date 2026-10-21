@@ -66,6 +66,16 @@ impl<'a> Compiler<'a> {
         }
         .bonus(creature.derived().attributes, creature.derived().skills))
     }
+    fn skill_edge(&self, selector: &SkillSelector, subject: ActorId) -> Result<i64, GameError> {
+        Ok(match selector {
+            SkillSelector::Named { skill } => self
+                .subject(subject)?
+                .derived()
+                .perception
+                .skill_edge(*skill),
+            SkillSelector::NaturalAttack | SkillSelector::SelectedWeapon => 0,
+        })
+    }
     fn check_edge(
         &mut self,
         site: CheckSite,
@@ -151,7 +161,7 @@ impl<'a> Compiler<'a> {
             },
             definition.actor == CheckActor::Target || owner == Some(phase),
             self.outgoing_edge_policy.for_role(definition.actor),
-        )?;
+        )? + self.skill_edge(&definition.skill, subject)?;
         let threshold = match &definition.against {
             Against::Defense { defense } => {
                 let defenses = self.subject(opposing)?.derived().defenses;
@@ -197,7 +207,7 @@ impl<'a> Compiler<'a> {
                         },
                         definition.actor == CheckActor::User || owner == Some(opposing_phase),
                         self.outgoing_edge_policy.for_role(opposing_role),
-                    )?,
+                    )? + self.skill_edge(skill, opposing)?,
                 }
             }
         };

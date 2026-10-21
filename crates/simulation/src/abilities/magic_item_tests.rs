@@ -166,6 +166,7 @@ fn identify_scroll(game: &mut Game, id: u64, class: ItemClass, quantity: u64) ->
     spec.concealed = true;
     spec.stackable = true;
     spec.readable = Some(ReadableSpec {
+        control: None,
         descriptors: vec![],
         effects: vec![],
         identify: Some(vec![class]),
@@ -716,6 +717,7 @@ fn paid_self_teleport_reads_exact_unit_and_only_successful_displacement_is_disco
         spec.concealed = true;
         spec.stackable = true;
         spec.readable = Some(ReadableSpec {
+            control: None,
             descriptors: vec![],
             effects: vec![crate::rules::Effect::TeleportRandom],
             identify: None,
@@ -793,6 +795,7 @@ fn random_teleport_callers_preserve_rng_consumed_by_ordinary_destination_contact
         game.world.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
         let mut spec = ItemSpec::ordinary("escape page".into());
         spec.readable = Some(ReadableSpec {
+            control: None,
             descriptors: vec![],
             effects: vec![crate::rules::Effect::TeleportRandom],
             identify: None,
@@ -2189,6 +2192,7 @@ fn read_self_sleep_while_blind_consumes_exactly_and_restores_without_protection(
         spec.concealed = true;
         spec.stackable = true;
         spec.readable = Some(ReadableSpec {
+            control: None,
             descriptors: vec![],
             effects: vec![Effect::ApplyConditionForTurns {
                 condition: sleep.clone(),

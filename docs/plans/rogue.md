@@ -261,12 +261,14 @@ see invisible, adornment, dexterity, increase damage, regeneration, slow digesti
 and maintain armor through shared wearable modifiers, plus searching through the
 shared active discovery resolver and teleportation through exact-source active clocks. Protection reduces all six
 damage types; Strength and dexterity rings exclude only their own Physical Defense
-contribution; attack bonuses apply to canonical rolled attack pools. Health
-regeneration benefits do not stack, while per-ring nutrition costs do. Signed
+contribution; attack damage-roll bonuses apply to canonical rolled attack pools.
+Health regeneration benefits do not stack, while per-ring nutrition costs do. Signed
 potency and curse knowledge stay instance-private; one paid identification choice
 can permit both rings and wands. The finite ring stage follows ammunition; independent
 secret-entrance and trap stages extend generation without changing geometry or
-stair streams. Aggravation and stealth rings remain outside this batch. See
+stair streams. Stealth and Aggravation complete the fourteen identities through
+event-owned opposed awareness and periodic snapshot-location pulses. Manual
+Sneak is explicitly deferred. See
 [worn magic contracts](../reference/items.md#worn-magic-and-the-finite-rogue-ring-catalog).
 These mechanics do not establish calibrated food pressure or complete Rogue parity.
 
@@ -483,7 +485,8 @@ levitation, whose completed dose can arrest descent but grants no vertical fligh
 Runtime and current-format qualification must cover these shared boundaries. Existing hobgoblins
 roam using personal visible surroundings and visit counts, including reachable
 door opening; NPC stair traversal remains disabled. This is separate from the
-unfinished seeded wandering population while floors are active. Other species'
+seeded wandering population while floors are active; its cap, cadence and
+placement rules are described in the [player guide](../play/rogue.md#living-dungeon-pressure-and-awareness). Other species'
 richer idle interests remain future work. Current species-owned useful-item and
 Gold-interest policies remain independent of the shared profile's flee override;
 carrying birth stock alone never grants a tactic.
@@ -527,12 +530,12 @@ binaries and differential traces.
 
 ## Decisions still needed
 
-Generation-extension/scripting need; search/discovery rules; remaining creature,
-CR/XP and survival balance; capacity and richer item details;
-ranged collision/effect order; hallucination shift policy; per-item edge cases;
+Generation-extension/scripting need; creature CR/XP and survival balance;
+capacity and richer item details; hallucination shift policy; per-item edge cases;
 depth distributions and starting-gear tuning; presentation/scoring.
 Implemented recipe schema, floor dimensions, stair resolution and basic rule
-imports are no longer undecided prerequisites. Every increment follows the
+imports, shared search/discovery and ranged collision/effect ordering are no
+longer undecided prerequisites. Every increment follows the
 [testing policy](../development/testing.md) and updates its current references.
 
 

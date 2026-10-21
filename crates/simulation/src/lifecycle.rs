@@ -293,6 +293,14 @@ impl Game {
             if state.alive() {
                 state.periodic_relocations.advance(elapsed)?;
             }
+            if state.awareness.next_in(state).is_some() {
+                let denominator = state
+                    .perception()
+                    .aggravation
+                    .expect("active aggravation")
+                    .chance_denominator;
+                state.awareness.advance(elapsed, denominator)?;
+            }
             if state.search_clock.next_in(state).is_some() {
                 let creature = state
                     .combat
@@ -399,6 +407,9 @@ impl Game {
     pub(crate) fn finish_effect_publication(&mut self) -> Result<(), GameError> {
         self.reconcile_recovery_contexts()?;
         self.reconcile_passive_discovery()?;
+        self.reconcile_awareness()?;
+        self.reconcile_control_contacts()?;
+        self.settle_aggravation()?;
         self.settle_periodic_searches()?;
         self.settle_periodic_relocations()?;
         self.seal_participant_events()
@@ -413,6 +424,7 @@ impl Game {
         requires_candidate: bool,
     ) -> Result<(), GameError> {
         let requires_candidate = requires_candidate
+            || prepared.outcome.state.awareness.pending()
             || prepared.outcome.state.search_clock.pending()
             || prepared.outcome.state.periodic_relocations.pending()
             || prepared.emits_events()
@@ -430,6 +442,9 @@ impl Game {
         &mut self,
         mut prepared: PreparedActorOutcome,
     ) -> Result<(), GameError> {
+        if let Some(denominator) = prepared.outcome.state.awareness.take_pending() {
+            self.run_aggravation_trial(prepared.outcome.id, denominator)?;
+        }
         if let Some(check) = prepared.outcome.state.search_clock.take_pending() {
             let id = prepared.outcome.id;
             self.run_active_discovery(id, &check)?;
@@ -912,6 +927,46 @@ impl Game {
         Ok(receipt)
     }
 
+    /// A paid primary whose frozen target is no longer reachable still owns an
+    /// offensive event, but never fabricates a target application or check.
+    pub(crate) fn publish_unavailable_primary(
+        &mut self,
+        outcome: Outcome,
+        strike: u16,
+        origin: crate::event_history::EventOrigin,
+    ) -> Result<PublishedResolution, GameError> {
+        if !outcome.valid()
+            || outcome.result != crate::abilities::OutcomeStatus::Miss
+            || outcome.check.is_some()
+            || outcome.resistance.is_some()
+            || outcome.target_rider_participated
+            || !outcome.effects.is_empty()
+            || outcome.participation
+                != crate::abilities::AttemptedParticipation::blocked(
+                    None,
+                    crate::abilities::UnselectedReason::UnavailableTarget,
+                )
+        {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        }
+        let role = self.publication_role(&outcome, ResolutionPublication::Primary { strike })?;
+        let receipt = PublishedResolution {
+            created_hold: None,
+            event: self.event_log.len(),
+            role,
+        };
+        self.push_event(
+            CombatEvent::Resolved {
+                outcome,
+                strike: Some(strike),
+                source_disclosure: crate::combat::SourceAbilityDisclosure::Public,
+            },
+            Some(origin),
+        )?;
+        self.published_resolution(receipt)?;
+        Ok(receipt)
+    }
+
     /// The private publication receipt is the causal selector. Validate the
     /// exact final primary outcome, including rider participation, before any
     /// consumer uses its event index; ordinals alone are not event identities.
@@ -1167,6 +1222,21 @@ impl Game {
             .state
             .search_clock
             .rephase(outcome.state.perception().search_interval);
+        outcome.state.control.reconcile_conditions(
+            outcome
+                .state
+                .combat
+                .as_ref()
+                .map(|combat| combat.creature().conditions()),
+        );
+        outcome.state.awareness.reconcile_alert(
+            outcome.state.behavior_policy().map(|p| p.memory_ticks),
+            self.actor_clock(outcome.id),
+        )?;
+        outcome
+            .state
+            .awareness
+            .rephase(outcome.state.perception().aggravation);
         self.reconcile_relocation_sources(&mut outcome)?;
         Ok(PreparedActorOutcome {
             outcome,

@@ -852,6 +852,7 @@ impl ConsumableSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadableSpec {
+    pub control: Option<tor_simulation::control_scrolls::ControlSpec>,
     pub descriptors: Vec<String>,
     pub effects: Vec<Effect>,
     pub identify: Option<Vec<ItemClass>>,
@@ -862,6 +863,7 @@ impl<'de> Deserialize<'de> for ReadableSpec {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            control: Option<tor_simulation::control_scrolls::ControlSpec>,
             #[serde(
                 default,
                 deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, { tor_simulation::limits::DESCRIPTORS_PER_EFFECT }>"
@@ -879,6 +881,7 @@ impl<'de> Deserialize<'de> for ReadableSpec {
         }
         let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self {
+            control: fields.control,
             descriptors: fields.descriptors,
             effects: fields.effects,
             identify: fields.identify,
@@ -915,6 +918,7 @@ impl ReadableSpec {
         rules: &tor_simulation::rules::Ruleset,
     ) -> Result<tor_simulation::ReadableSpec, crate::Failure> {
         let spec = tor_simulation::ReadableSpec {
+            control: self.control.clone(),
             descriptors: compile_payload_descriptors(&self.descriptors, rules)?,
             effects: compile_item_effects(&self.effects, rules)?,
             identify: self

@@ -1,4 +1,4 @@
-# Bounded ordinary earned-route qualification, revision 6
+# Bounded ordinary earned-route qualification, revision 7
 
 Status: experimental tooling with explicit acceptance gates. A run is complete
 only when its ordinary, committed-flow, replay and source-identity checks pass. This is a fixed experimental controller, not a recommended
@@ -18,13 +18,13 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v19` retains exact package inputs and its
+`scripts/fixtures/rogue-earned-baseline-v20` retains exact package inputs and its
 current bundled-rule dependency hash. Its source-only transition advances the
 previous scenario format and bundled rules import to the current identities.
 All other authored package bytes, including anatomy, items, player kits and
-population stages, are unchanged; no utility-magic or ring loot, discovery stages, traps or secret closures are
-imported. Frozen v6–v18 inputs and their source/transition receipts remain immutable research
-evidence. Shared hazards, levitation, discovery, wearable, utility-magic, persistent-condition and
+population stages, are unchanged; no wandering policy, control scrolls, utility-magic or ring loot, discovery stages, traps or secret closures are
+imported. Frozen v6–v19 inputs and their source/transition receipts remain immutable research
+evidence. Shared living-dungeon, awareness, hazards, levitation, discovery, wearable, utility-magic, persistent-condition and
 action-duration rules
 make this a new experiment input, with no claim of identical outcomes or a
 requalified pilot. The source
@@ -37,7 +37,7 @@ Validate comparators only in campaign copies: generated `index.json`,
 New campaigns have distinct source fingerprints and cannot resume an earlier
 pilot with changed inputs. This is experimental input, not a historical save reader.
 The arm name remains unchanged when the bundled package
-selects twenty-four species: it always names this historical comparator, never the
+selects twenty-six species: it always names this historical comparator, never the
 current production manifest. Its independent gameplay fixture is unchanged and lacks the
 complete Vampire catalog/rule closure needed as an eight-species generator source.
 The retained pilot candidate is a separately frozen eight-species E/S/H/I/Z/Q/U/V
@@ -48,10 +48,13 @@ explicit source snapshots and never silently copies newly activated production
 into the old baseline arm. No weights, dispositions, kits, skills, supplies or
 nutrition values are adjusted by measurement.
 
-Earlier reports, controller dumps and frozen cohorts remain unchanged. Revision 6
-retains the current canonical wide-scalar wire representation and live compiler
-input fingerprint, and opens a disclosed closed entrance before attempting its
-planned cardinal step. This revision creates a new campaign; it does not import
+Earlier reports, controller dumps and frozen cohorts remain unchanged. Revision 7
+retains revision 6’s canonical wide-scalar wire representation, live compiler
+input fingerprint and disclosed-door opening policy. It uses disclosed own-body
+cells for face-contact melee and translated-body occupancy, including elevated
+visible creatures. It neither projects actors across floors nor infers hidden
+body cells. Command budgets, target tie order and the conservative Mage sight
+policy are unchanged. This revision creates a new campaign; it does not import
 or migrate old controller memory. A saved game retains its embedded package, so
 continuing an old E/S save is not evidence for the new Vampire arm.
 
@@ -135,12 +138,14 @@ Decision priority:
    defines a cleared floor. If all these choices are unavailable, end
    `censored_route_exhausted` with the last disclosed graph and observation.
 
-Combat: choose the nearest visible foe by Manhattan ground distance, then the public-fact tie order above. Warrior uses Rattling Blow on a cardinal ground neighbor if the disclosed
-ability is affordable, supplied and off cooldown; otherwise Basic Melee there.
-Mage uses Cold Lance only outside cardinal melee when its disclosed sight range
+Combat: choose the nearest visible foe by Manhattan ground distance, then the public-fact tie order above. Warrior uses Rattling Blow when a disclosed target body cell is face-adjacent to a disclosed own-body cell and the ability is affordable, supplied and off cooldown; otherwise Basic Melee there. Multiple occurrences of one target contribute contact witnesses without changing inter-target ordering or using opaque IDs as tie breakers.
+Mage uses Cold Lance only outside disclosed melee contact when its disclosed sight range
 admits the conservative ground witness and the ability is affordable/off cooldown;
-inside cardinal melee use Basic Melee. Otherwise approach a reachable unoccupied
-cardinal neighbor of the target using the disclosed graph. No hidden resistance
+inside disclosed melee contact use Basic Melee. Otherwise approach a reachable
+anchor that gives disclosed face contact using the ground graph. Translate only
+known own-body offsets: a visible actor cell or known wall blocks an anchor only
+when the translated body intersects it in all three coordinates. Separate-height
+cells are not flattened onto the ground, and hidden body geometry is not inferred. No hidden resistance
 lookup or spell change is allowed. If the preferred target has no legal disclosed
 approach, try other visible targets in the same order. If no visible target has a legal disclosed approach, take one fixed
 west/east/north/south breadth-first step toward a reachable unvisited disclosed
@@ -343,7 +348,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v19"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v20"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```
@@ -537,3 +542,41 @@ The source-owned schema is in
 `retained-raw-logs.json` pins compressed and exact decompressed bytes. Lightweight
 report/source bundles do not include the separately retained large raw logs,
 sidecars or saves unless those files are explicitly bundled with them.
+
+## Revision-7 current living-dungeon acceptance
+
+A separately labeled seed-42 Warrior acceptance used the current full production
+package, not the fixed E/S comparator or reduced eighteen-species diagnostic
+candidate. It earned its second class HD after **469 commands**, at tick **46420**,
+with **100 earned and spent XP**, two recorded Warrior HD and **20/20 Health**.
+The run retained 34 transport segments and exact source-free state, public-history,
+receipt and creature restoration. A second execution from the exact initial save
+reached the same milestone and matched the reviewed normalized execution surfaces;
+its distinct raw envelopes remain retained. Its isolated launch-source copy was
+deleted before reopening, without modifying the canonical source or earlier run.
+
+The original failed attempts remain separate evidence: one exposed duplicated
+immutable floor plans at the checkpoint storage bound, and one exposed the route
+controller's omission of disclosed elevated body contact. The storage fix retains
+the existing size limit and history policy. The revision-7 controller uses public
+body geometry without retrying refused actions or changing seed or command bounds.
+
+This is a fixed current-package functional acceptance pair, not qualification of
+the eight-slot experiment, numerical balance, deep progression or a complete game.
+The reduced diagnostic candidate explicitly omits wandering and cannot supply that
+coverage. Later changes confined to diagnostic generation, its tests and prose are
+recorded separately from this pair's immutable input fingerprints; runtime, package,
+controller, route-adapter and executable identities must match to reuse its evidence.
+
+The older basic-melee-only full-floor walkthrough has a different contract:
+exactly four initial foes, finite stock accounting, complete traversal, descent,
+revisit and persistence. With current wandering enabled, its retained seed-42 run
+died at tick 10963 after a wandering hobgoblin joined an initial kestrel; that is
+not a passing current-production survival result. This owner now uses an explicitly
+labeled fixed-initial-population diagnostic copy. It first checks the complete
+reviewed production activation policy, then removes only its wandering policy;
+independent tests and source hashes preserve all other content, stock, rules,
+Health, seed, command bounds and combat choices. The original production package
+is unchanged. This diagnostic cannot establish wandering survival or full-floor
+clearance under continuing arrivals; the current-package acceptance pair and
+separate population process contracts supply their own, narrower evidence.

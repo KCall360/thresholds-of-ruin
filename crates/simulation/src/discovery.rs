@@ -303,7 +303,8 @@ impl FrozenDiscoveryCheck {
                     crate::rules::OutgoingEdgePolicy::Ordinary,
                 )
                 .map_err(GameError::Build)?
-                + extra_edge,
+                + extra_edge
+                + derived.perception.skill_edge(skill),
         };
         if !value.valid() {
             return Err(GameError::Rule(
@@ -641,6 +642,17 @@ impl Game {
         *self = candidate;
         Ok(())
     }
+    /// Defer encounter receipts while a host constructs an authored game.
+    /// Only an empty, fresh game may enter this mode. Complete construction
+    /// (including starting equipment) with `initialize_discovery` before use.
+    pub fn defer_initial_awareness(&mut self) -> Result<(), GameError> {
+        if self.tick != 0 || !self.actors.is_empty() || self.lifecycle.discovery_started {
+            return Err(GameError::InvalidLocation);
+        }
+        self.lifecycle.initial_awareness_deferred = true;
+        Ok(())
+    }
+
     /// Initial scenario publication owns its first observation attempts. Hosts
     /// call once after complete construction, never during a query or restoration.
     pub fn initialize_discovery(&mut self) -> Result<(), GameError> {
@@ -649,7 +661,10 @@ impl Game {
         }
         let mut candidate = self.clone();
         candidate.lifecycle.discovery_started = true;
+        candidate.lifecycle.initial_awareness_deferred = false;
         candidate.reconcile_passive_discovery()?;
+        candidate.reconcile_awareness()?;
+        candidate.reconcile_control_contacts()?;
         *self = candidate;
         Ok(())
     }

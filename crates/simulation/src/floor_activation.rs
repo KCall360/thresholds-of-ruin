@@ -10,10 +10,14 @@ use tor_world::{Location, RegionId, Shared};
 
 #[path = "spawn_carried_loot.rs"]
 mod carried_loot;
+#[path = "wandering_population.rs"]
+mod wandering_population;
 use carried_loot::{read_pools, BirthStockContext};
 pub use carried_loot::{
     CarriedLoot, CarriedLootDecision, CarryChance, PreparedCarriedItemPool, MAX_CARRIED_ITEM_POOLS,
 };
+pub use wandering_population::WanderingPolicy;
+pub(crate) use wandering_population::WanderingPopulation;
 
 pub const MAX_PROFILES: usize = 32;
 pub const MAX_STAGES: usize = 32;
@@ -349,6 +353,8 @@ pub enum PopulationEntity {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ActivationState {
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub(crate) wandering: Option<wandering_population::WanderingPopulation>,
     plan: Shared<PopulationPlan>,
     #[serde(deserialize_with = "read_scopes")]
     scopes: Shared<BTreeMap<String, Shared<PreparedScope>>>,
@@ -558,6 +564,8 @@ impl<'de> Deserialize<'de> for ActivationState {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            wandering: Option<wandering_population::WanderingPopulation>,
             plan: Shared<PopulationPlan>,
             #[serde(deserialize_with = "read_scopes")]
             scopes: Shared<BTreeMap<String, Shared<PreparedScope>>>,
@@ -571,6 +579,7 @@ impl<'de> Deserialize<'de> for ActivationState {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            wandering: fields.wandering,
             plan: fields.plan,
             scopes: fields.scopes,
             members: fields.members,
@@ -1167,6 +1176,7 @@ impl Game {
             return Err(invalid());
         }
         self.floor_activation = Some(ActivationState {
+            wandering: None,
             plan: Shared::new(plan),
             scopes: Shared::default(),
             members: Shared::default(),
@@ -1823,6 +1833,7 @@ impl Game {
         state
             .floors
             .insert(scope.scope.clone(), Shared::new(record));
+        self.reconcile_wandering_activity()?;
         for actor in newborn {
             let scene = self.scene(actor)?;
             self.refresh_navigation_scene(actor, &scene);
@@ -2264,6 +2275,7 @@ impl Game {
             || state.floors.len() != state.order.len()
             || state.floors.len() > MAX_SCOPES
             || state.decision_count > MAX_RETAINED_DECISIONS
+            || !self.wandering_state_valid()
         {
             return false;
         }
@@ -2631,7 +2643,14 @@ mod tests {
         falling_entry_from(game())
     }
 
-    fn falling_entry_from(mut game: Game) -> (Game, ActorId, ActorId, ItemId, MemoryRecords) {
+    fn falling_entry_from(game: Game) -> (Game, ActorId, ActorId, ItemId, MemoryRecords) {
+        falling_entry_from_with_wandering(game, false)
+    }
+
+    fn falling_entry_from_with_wandering(
+        mut game: Game,
+        wandering: bool,
+    ) -> (Game, ActorId, ActorId, ItemId, MemoryRecords) {
         let protagonist = game
             .spawn_actor(at(1, 8, 1), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -2691,6 +2710,20 @@ mod tests {
             },
         ]))
         .unwrap();
+        if wandering {
+            game.configure_wandering_population(WanderingPolicy {
+                stage_id: "newborn".into(),
+                excluded_wandering_content: BTreeSet::new(),
+                initial_delay: [7000, 7000],
+                retry_ticks: 400,
+                chance: CarryChance {
+                    numerator: 1,
+                    denominator: 6,
+                },
+                living_cap: 8,
+            })
+            .unwrap();
+        }
         game.register_activation_scope(scope(1, vec![at(1, 4, 1)]))
             .unwrap();
         game.register_activation_scope(scope(2, vec![at(2, 3, 1), at(2, 4, 1)]))
@@ -2710,6 +2743,25 @@ mod tests {
             "destination must really be frozen before motion"
         );
         (game, driver, mover, old_item, records)
+    }
+
+    #[test]
+    fn first_physical_floor_entry_does_not_erase_existing_wandering_clock_fraction() {
+        let (mut game, driver, _, _, _) = falling_entry_from_with_wandering(game(), true);
+        assert_eq!(game.next_wandering_event_tick(), Some(7000));
+        assert!(matches!(
+            game.act_for_host(driver, Action::Wait).unwrap(),
+            CandidateStep::AwaitingRegions(_)
+        ));
+        assert_eq!(
+            game.tick, 32,
+            "fixture reaches a physical entry before any wandering deadline"
+        );
+        assert_eq!(
+            game.next_wandering_event_tick(),
+            Some(7000),
+            "entry-time reconciliation preserves the old floor's elapsed tick"
+        );
     }
 
     #[test]

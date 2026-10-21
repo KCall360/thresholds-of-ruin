@@ -975,6 +975,7 @@ impl Game {
                     .and_then(|i| i.spec.readable.as_ref())
                     .ok_or(GameError::ItemUnavailable)?;
                 crate::abilities::Plan::Read {
+                    control: readable.control.clone(),
                     actor,
                     item,
                     preparation,
@@ -1499,7 +1500,7 @@ impl Game {
                     })
                     && p.plan.actor() == actor
                     && match p.plan.work() {
-                        Work::Read {item}=>self.items.get(&item).and_then(|i|i.spec.readable.as_ref()).is_some_and(|s|matches!(&p.plan,crate::abilities::Plan::Read {effects,identify,discovery,descriptors,..} if *descriptors==s.descriptors&&*identify==s.identify&&*discovery==s.discovery&&crate::abilities::item_effects_match_definition(&s.effects,effects))),
+                        Work::Read {item}=>self.items.get(&item).and_then(|i|i.spec.readable.as_ref()).is_some_and(|s|matches!(&p.plan,crate::abilities::Plan::Read {control,effects,identify,discovery,descriptors,..} if *control==s.control&&*descriptors==s.descriptors&&*identify==s.identify&&*discovery==s.discovery&&crate::abilities::item_effects_match_definition(&s.effects,effects))),
                         Work::Zap {item,..}=>self.items.get(&item).is_some_and(|i|matches!(&p.plan,crate::abilities::Plan::Zap {charges,ray,discovery,..} if i.charges==Some(*charges)&&i.spec.device.as_ref().is_some_and(|d|d.ability==ray.ability && d.discovery == *discovery))),
                         Work::Eat { item } => self
                             .items

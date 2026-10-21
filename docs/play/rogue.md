@@ -371,6 +371,48 @@ build, inventory, floor decisions and ordinary actor/item state. Death remains t
 persistent. See [generation](../reference/generation.md) and
 [persistence](../architecture/persistence.md).
 
+## Living-dungeon pressure and awareness
+
+An active floor has one wandering clock, even when its rooms cross region
+boundaries. Its provisional delay is 6,700–7,300 active ticks, followed by one
+1-in-6 trial every 400 active ticks. A winning trial starts another long delay,
+including when the floor is full or no legal placement exists; no backlog of
+monsters accumulates. At most eight **living wandering-born** monsters occupy a
+floor. Initial inhabitants and Create Monster births do not count, and deaths
+free wandering slots. Wandering excludes the source's I/L/N/F/X/D species,
+places outside your current room and sight, grants ordinary kill XP, and creates
+no carried birth loot. Its first location lead is a finite snapshot, not tracking.
+Leaving an inactive floor freezes the clock; saving/restarting does not reroll it
+or charge wall-clock time.
+On a partly resident floor, an unknown placement candidate costs one bounded
+missed trial; wandering does not preload remote rooms or favor resident cells.
+A legal adjacent Create Monster placement does not require remote rooms loaded.
+Living wanderers in detached rooms still count toward the floor cap.
+
+The Stealth ring attempts stealth continually: **3d6 + Speed + Stealth** opposed
+by **3d6 + Awareness + Perception**, with Perception winning ties. Its authored
+one advantage is provisional tuning. Committed approach, adjacency and battle
+cues own attempts; observing, planning, reconnecting and restoring do not reroll
+an unchanged encounter. Automatic awareness neither borrows nor spends next-check
+preparation tokens; persistent opponent-scoped modifiers still apply. Stealth
+gates wake and AI acquisition, not physical visibility: this is not invisibility.
+After sensory contact breaks, a renewed encounter may be contested.
+An attack reveals its source to actual observers; listeners receive only a
+snapshot of the source or impact location they heard. No manual Sneak command or stance is implemented.
+
+Aggravation has a provisional 1-in-3 pulse trial every 500 wearer-active ticks.
+A pulse gives eligible floor monsters the wearer's location **at that instant**,
+not an identity or a continually updated target. It adds exactly one disadvantage
+to Stealth, not attacks, Lore, Perception or Search. Duplicate Stealth/Aggravation
+rings do not stack these capabilities; one advantage and one disadvantage cancel
+without stopping pulses. Accrued pulse progress survives unequip/re-equip and
+restart. Neither sound nor aggravation cancels magical sleep, identifies a hidden
+actor, or activates an intact stationary Xeroc. Ordinary alerts expire under the
+listener's authored memory, currently 1,000 active ticks.
+
+These cadence/duration values are authored balance defaults, not a claim of
+classic-Rogue timing or a calibrated safe survival curve.
+
 ## Find the Amulet and return
 
 On your first entry to depth 26 or deeper, the Amulet of Yendor appears on a
@@ -476,7 +518,7 @@ Normal levitation does not rise uncontrollably to the ceiling.
 All starting stats, equipment bonuses, foe timing, quantities, XP policy and the
 depth-selected population are provisional TOR tuning. A successful seeded
 walkthrough is behavioral coverage, not evidence of balanced Warrior/Mage runs.
-Wandering populations, calibrated food pressure and complete run balancing remain
+Calibrated food pressure and complete run balancing remain
 in the [Rogue plan](../plans/rogue.md).
 
 Shared engine support and playable content have different acceptance boundaries.
@@ -693,5 +735,34 @@ The [idle policy matrix](#species-idle-policy) and 1,000-tick memory bound are
 provisional. CH1 explicitly declares hostile contact, independent of its AI
 priority; its strike and rider come from the shared natural attack pipeline.
 Tool use follows species defaults with only explicitly supplied profile overrides.
-The full 26-species roster, scaling beyond current build/storage capacity and
-broad integrated acceptance remain open.
+The full 26-species roster is implemented. Scaling beyond current build/storage
+capacity and broad integrated acceptance remain open.
+
+
+## Monster-control scrolls
+
+Use **Read** for Aggravate monster, Create monster, Hold monster and Monster
+confusion. A read costs its ordinary action and consumes a scroll even when
+placement or targeting has no effect. Aggravation alerts creatures to a location
+snapshot; it does not reveal an invisible wearer. Creation can exceed the wandering
+monster cap. Hold checks Lore against nearby engaged foes' Spiritual Defense and
+ends when they are attacked, hit or miss. Monster confusion arms your next
+successful natural, melee or projectile hit; a miss does not waste the charge,
+and repeated reads do not accumulate charges. Confused foes use the same movement
+rules as a confused PC, not random targeting or changed allegiance.
+
+Stand on a dropped **Scare monster** scroll to make approaching hostile AI
+creatures flee briefly, without a resistance roll. Mind-affecting immunity still
+applies, and cornered creatures can defend themselves. Standing in range does not
+keep refreshing the fear. The scroll's recorded location is the threat; its
+occupant is not continuously tracked. Reading this scroll merely wastes it.
+
+The first pickup of non-cursed Scare units makes them cursed. Picking up cursed
+units crumbles them instead of collecting them. Stacks preserve this curse through
+splitting, dropping and saves; remove-curse can clear carried Scare units.
+
+Confusion's 2,000 active ticks and Hold/Scare's 1,000 active ticks are provisional
+balance choices. All eight new living-dungeon actual-process contracts have
+passed, including source-free recovery. Complete required verification and final
+cross-platform CI remain pending; these focused results do not establish balance
+or complete-run qualification.

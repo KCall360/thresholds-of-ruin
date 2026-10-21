@@ -760,3 +760,100 @@ fn encoded_equipment_curse_identify_enchant_retry_and_reopen_preserve_exact_fact
         expected
     );
 }
+
+fn control_scroll_scenario() -> crate::Scenario {
+    let mut scenario = scenario(false);
+    let source = scenario.package.as_ref().unwrap();
+    let mut manifest = serde_json::to_value(&source.manifest).unwrap();
+    manifest["id"] = json!("control-scroll-service");
+    let modes = [
+        (
+            "confuse",
+            json!({"kind":"arm_confusion","condition":"fixture.control","duration":2000}),
+        ),
+        (
+            "hold",
+            json!({"kind":"hold_nearby","condition":"fixture.control","duration":1000,"radius":2}),
+        ),
+        ("aggravate", json!({"kind":"aggravate"})),
+        ("nothing", json!({"kind":"nothing"})),
+    ];
+    for (id, control) in modes {
+        manifest["archetypes"][id] = json!({"name":id,"identity":format!("fixture.{id}"),"class":"scroll","stackable":true,"readable":{"control":control,"discovery":"never"}});
+    }
+    manifest["characters"][0]["loadout"] = json!([
+        {"archetype":"confuse","quantity":2},
+        {"archetype":"hold","quantity":2},
+        {"archetype":"aggravate","quantity":2},
+        {"archetype":"nothing","quantity":2}
+    ]);
+    let mut regions = source.region_defs().unwrap();
+    let mut region = serde_json::to_value(&regions[0]).unwrap();
+    region["items"] = json!([]);
+    regions[0] = serde_json::from_value(region).unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/magic-items");
+    let mut rules = std::fs::read_to_string(root.join("rules.toml")).unwrap();
+    rules.push_str(r#"
+[[overrides]]
+op = "add"
+path = ["conditions", "fixture.control"]
+value = { id = "fixture.control", family = "fixture.control", lifecycle = "timed", name = "Control", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = ["mind_affecting"], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }
+"#);
+    let rules = resolve_rules_source(&rules, "rules.toml").unwrap().source;
+    scenario.package = Some(Arc::new(
+        Package::from_parts(serde_json::from_value(manifest).unwrap(), regions, &rules).unwrap(),
+    ));
+    scenario
+}
+
+#[test]
+fn encoded_control_reads_pay_once_and_restore_armed_charge_from_stored_package() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("control.db");
+    let mut wire = Wire::new(Engine::open(&path, control_scroll_scenario()).unwrap());
+    for name in ["hold", "aggravate", "nothing", "confuse"] {
+        let initial = wire.snapshot(OWNER);
+        let item = initial
+            .state
+            .observation
+            .inventory
+            .iter()
+            .find(|item| item.name == name)
+            .unwrap()
+            .id;
+        let request = wire.request(OWNER, Action::Read { item });
+        let id = format!("read-{name}");
+        let admitted = ack(wire.send(OWNER, &id, request.clone()));
+        let resolved = wire.finish(OWNER, &id, &request);
+        assert_eq!(admitted.entry_id(), resolved.entry_id());
+        assert_eq!(quantity(&wire.snapshot(OWNER), item), 1);
+        let before = wire.checkpoint();
+        assert_eq!(ack(wire.send(OWNER, &id, request)), resolved);
+        assert_eq!(
+            wire.checkpoint(),
+            before,
+            "retry must not consume or arm twice"
+        );
+    }
+    // Checkpoint comparison observes the durable armed charge as well as inventory;
+    // this is not merely a display assertion or a source-path reload.
+    wire.service.engine.flush().unwrap();
+    let expected = wire.checkpoint();
+    fn has_armed_charge(value: &Value) -> bool {
+        match value {
+            Value::Object(fields) => {
+                fields
+                    .get("control")
+                    .and_then(|control| control.get("confusion"))
+                    == Some(&json!({"condition":"fixture.control","duration":2000}))
+                    || fields.values().any(has_armed_charge)
+            }
+            Value::Array(values) => values.iter().any(has_armed_charge),
+            _ => false,
+        }
+    }
+    assert!(has_armed_charge(&expected));
+    drop(wire);
+    let reopened = Wire::new(Engine::open(&path, crate::Scenario::two_room(999)).unwrap());
+    assert_eq!(reopened.checkpoint(), expected);
+}

@@ -1,4 +1,8 @@
 fn checkpoint_population_game() -> Game {
+    checkpoint_population_game_with_wandering(false)
+}
+
+fn checkpoint_population_game_with_wandering(wandering: bool) -> Game {
     let mut game = game();
     let protagonist = game
         .spawn_actor(at(1, 1, 1), NonZeroU64::new(100).unwrap())
@@ -35,6 +39,20 @@ fn checkpoint_population_game() -> Game {
     };
     game.configure_population(plan(vec![item_stage(1), witness]))
         .unwrap();
+    if wandering {
+        game.configure_wandering_population(WanderingPolicy {
+            stage_id: "witness".into(),
+            excluded_wandering_content: BTreeSet::new(),
+            initial_delay: [6700, 7300],
+            retry_ticks: 400,
+            chance: CarryChance {
+                numerator: 1,
+                denominator: 6,
+            },
+            living_cap: 8,
+        })
+        .unwrap();
+    }
     game.register_activation_scope(scope(1, vec![at(1, 2, 1), at(1, 3, 1)]))
         .unwrap();
     game.register_activation_scope(scope(2, vec![at(2, 2, 1)]))
@@ -56,8 +74,14 @@ fn checkpoint_population_pool_reuses_decoded_storage_and_isolates_mutation() {
     let first = game.checkpoint(&mut shared);
     let second = game.checkpoint(&mut shared);
     let encoded = serde_json::to_value((vec![first, second], shared)).unwrap();
-    assert_eq!(encoded[0][0]["floor_activation"], serde_json::json!(0));
-    assert_eq!(encoded[0][1]["floor_activation"], serde_json::json!(0));
+    assert_eq!(
+        encoded[0][0]["floor_activation"],
+        serde_json::json!({"state":0,"wandering":null})
+    );
+    assert_eq!(
+        encoded[0][1]["floor_activation"],
+        serde_json::json!({"state":0,"wandering":null})
+    );
     assert_eq!(encoded[1]["floor_activations"].as_array().unwrap().len(), 1);
 
     let (snapshots, shared): (Vec<Snapshot>, SharedState) =
@@ -135,7 +159,7 @@ fn checkpoint_population_pool_rejects_invalid_references_and_unknown_fields() {
     let mut context = RestoreContext::new(&shared, game.content.clone());
     for index in [1, usize::MAX] {
         let mut invalid = snapshot.clone();
-        invalid["floor_activation"] = serde_json::json!(index);
+        invalid["floor_activation"]["state"] = serde_json::json!(index);
         assert_eq!(
             context.restore(serde_json::from_value(invalid).unwrap()),
             Err(PersistError::MissingShared {
@@ -254,7 +278,7 @@ fn checkpoint_population_plan_cache_never_trusts_another_pool_or_context() {
         game
     );
     let mut another = snapshot.clone();
-    another["floor_activation"] = serde_json::json!(1);
+    another["floor_activation"]["state"] = serde_json::json!(1);
     for _ in 0..2 {
         assert_eq!(
             context.restore(serde_json::from_value(another.clone()).unwrap()),
@@ -307,4 +331,97 @@ fn checkpoint_population_cached_plan_still_checks_selected_character() {
         Err(PersistError::Population),
     );
     assert_eq!(context.population_plan_validation_count(), 1);
+}
+
+#[test]
+fn wandering_clocks_keep_every_boundary_without_repeating_population_inputs() {
+    use crate::checkpoint::{RestoreContext, SharedState, Snapshot};
+    let mut game = checkpoint_population_game_with_wandering(true);
+    let mut shared = SharedState::default();
+    let mut states = Vec::new();
+    let mut snapshots = Vec::new();
+    for _ in 0..64 {
+        // Capture ordinary scheduler boundaries, not a raw physics tick with
+        // an actor still ready in the past (which is not a saveable state).
+        let previous_tick = game.tick();
+        while game.tick() == previous_tick {
+            game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
+        }
+        states.push(game.clone());
+        snapshots.push(game.checkpoint(&mut shared));
+    }
+    let encoded = serde_json::to_value((&snapshots, &shared)).unwrap();
+    assert_eq!(encoded[1]["floor_activations"].as_array().unwrap().len(), 1);
+    assert!(encoded[1]["floor_activations"][0]["wandering"].is_null());
+    let clocks: BTreeSet<_> = encoded[0]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|snapshot| {
+            assert_eq!(snapshot["floor_activation"]["state"], serde_json::json!(0));
+            assert_eq!(
+                snapshot["floor_activation"]["wandering"]["births"],
+                serde_json::json!({})
+            );
+            serde_json::to_string(&snapshot["floor_activation"]["wandering"]["clocks"]).unwrap()
+        })
+        .collect();
+    assert_eq!(clocks.len(), 64, "every changing clock is retained");
+    let bytes = serde_json::to_vec(&(snapshots, shared)).unwrap();
+    let (snapshots, shared): (Vec<Snapshot>, SharedState) = serde_json::from_slice(&bytes).unwrap();
+    let mut context = RestoreContext::new(&shared, game.content.clone());
+    for (snapshot, expected) in snapshots.into_iter().zip(states) {
+        assert_eq!(context.restore(snapshot).unwrap(), expected);
+    }
+    assert_eq!(context.population_plan_validation_count(), 1);
+}
+
+#[test]
+fn wandering_snapshot_shape_and_boundary_validation_remain_strict_after_pool_hit() {
+    use crate::checkpoint::{PersistError, RestoreContext, SharedState, Snapshot};
+    let game = checkpoint_population_game_with_wandering(true);
+    let mut shared = SharedState::default();
+    let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
+    let pooled = serde_json::to_value(&shared).unwrap();
+    let mut context = RestoreContext::new(&shared, game.content.clone());
+    assert_eq!(
+        context
+            .restore(serde_json::from_value(snapshot.clone()).unwrap())
+            .unwrap(),
+        game
+    );
+    for replacement in [
+        serde_json::json!(0),
+        serde_json::json!([0, null]),
+        serde_json::json!({"state":0}),
+        serde_json::json!({"state":0,"wandering":null,"extra":0}),
+    ] {
+        let mut invalid = snapshot.clone();
+        invalid["floor_activation"] = replacement;
+        assert!(serde_json::from_value::<Snapshot>(invalid).is_err());
+    }
+    let scope = snapshot["floor_activation"]["wandering"]["clocks"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap()
+        .clone();
+    for (field, value) in [
+        ("remaining", serde_json::json!(0)),
+        ("settled_at", serde_json::json!(game.tick() + 1)),
+        ("active", serde_json::json!(false)),
+    ] {
+        let mut invalid = snapshot.clone();
+        invalid["floor_activation"]["wandering"]["clocks"][&scope][field] = value;
+        let invalid: Snapshot = serde_json::from_value(invalid).unwrap();
+        assert_eq!(context.restore(invalid), Err(PersistError::Population));
+    }
+    let mut invalid = pooled;
+    invalid["floor_activations"][0]["wandering"] =
+        snapshot["floor_activation"]["wandering"].clone();
+    assert!(
+        serde_json::from_value::<SharedState>(invalid).is_err(),
+        "pool must never carry a second clock authority"
+    );
 }

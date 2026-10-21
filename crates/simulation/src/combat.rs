@@ -481,6 +481,8 @@ impl Game {
                     && self.token_reservations_valid(*id, allow_detached)
                     && actor.combat.as_ref().is_none_or(|c| c.valid())
                     && self.behavior_valid(*id, actor)
+                    && self.awareness_valid(*id, actor)
+                    && self.control_valid(*id, actor)
             })
             && self.combat.ai.iter().all(|(id, ai)| {
                 self.health(*id).is_some()
@@ -644,6 +646,7 @@ impl Game {
             .insert(selected, candidate.actor_input_eligibility(selected));
         candidate.combat.characters = characters;
         candidate.combat.hostility = hostility;
+        candidate.lifecycle.awareness_contexts = Default::default();
         candidate.reconcile_recovery_contexts()?;
         candidate.check_run_policy()?;
         candidate.finish_effect_publication()?;

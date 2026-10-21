@@ -264,6 +264,8 @@ pub enum Plan {
         preparation: u64,
     },
     Read {
+        #[serde(deserialize_with = "crate::bounded::required_option")]
+        control: Option<crate::control_scrolls::ControlSpec>,
         #[serde(deserialize_with = "super::strikes::read_descriptors")]
         descriptors: Vec<crate::content_ids::DescriptorId>,
         actor: ActorId,
@@ -639,6 +641,7 @@ impl Plan {
                 }
                 Self::Unequip { item, .. } => valid_item(*item),
                 Self::Read {
+                    control,
                     item,
                     descriptors,
                     effects,
@@ -654,13 +657,19 @@ impl Plan {
                             )
                             .is_ok()
                         && effects_valid(effects, rules)
+                        && control.as_ref().is_none_or(|control| {
+                            control.valid(rules)
+                                && effects.is_empty()
+                                && descriptors.is_empty()
+                                && identify.is_none()
+                        })
                         && match identify {
                             Some(_) => {
                                 effects.is_empty()
                                     && descriptors.is_empty()
                                     && *discovery == crate::ItemDiscovery::OnUse
                             }
-                            None => !effects.is_empty(),
+                            None => control.is_some() || !effects.is_empty(),
                         }
                 }
                 Self::Drink {

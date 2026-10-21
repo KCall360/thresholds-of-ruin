@@ -1,4 +1,4 @@
-import = "interactions-v50"
+import = "interactions-v51"
 
 # Equipment expertise is an ordinary HD-point or earned Intellect choice.
 # No preset, species, NPC or default talent receives a free expertise grant.
@@ -315,3 +315,15 @@ value = { id = "rogue.wand_teleport_to", name = "Wand of Teleport To", interacti
 op = "add"
 path = ["conditions", "rogue.bear_trap"]
 value = { id = "rogue.bear_trap", family = "rogue.bear_trap", lifecycle = "timed", name = "Bear-trapped", modifiers = [], stacking = { kind = "extend" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = ["ordinary_movement", "movement_abilities"], preparation = "preserve" }
+
+# Hold and Scare have independent actor-active condition timers. Flee's source
+# location is stored separately and does not identify or track its occupant.
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.held"]
+value = { id = "rogue.held", family = "rogue.held", lifecycle = "timed", name = "Held", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = ["mind_affecting"], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = ["voluntary_actions"], preparation = "pause" }
+
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.scared"]
+value = { id = "rogue.scared", family = "rogue.scared", lifecycle = "timed", name = "Scared", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = ["mind_affecting"], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }

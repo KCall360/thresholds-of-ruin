@@ -124,6 +124,12 @@ class CompleteRecordingContracts(unittest.TestCase):
                          "test_unique_identity_revisits_source_free_restore_and_text_surface_escape")
         self.assertFalse(is_graphical_test(case))
 
+    def test_scare_factory_reuses_existing_non_graphical_paid_pickup_case(self):
+        case = record_wire_samples.scare_pickup_recording_case()
+        self.assertEqual(case.id(), "test_living_dungeon_process.LivingDungeonProcesses."
+                         "test_paid_scare_pickup_curse_crumble_remove_curse_and_restart")
+        self.assertFalse(is_graphical_test(case))
+
     def test_terminal_escape_assertion_requires_immediate_exact_identity_success(self):
         case = record_wire_samples.amulet_recording_case()
         before = {"state": {"wizard_game": False, "observation": {

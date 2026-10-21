@@ -24,14 +24,30 @@ def nutrition(frame):
     return observation(frame)["combat"]["own_stats"]["nutrition"]
 
 
+
+def authoritative_floor_activation(reference, shared):
+    """Reconstruct the strict boundary clock overlay without discarding state."""
+    if reference is None:
+        return None
+    if set(reference) != {"state", "wandering"}:
+        raise ValueError("invalid floor activation checkpoint reference")
+    base = copy.deepcopy(shared["floor_activations"][reference["state"]])
+    if base["wandering"] is not None:
+        raise ValueError("pooled floor activation must have canonical null wandering")
+    base["wandering"] = copy.deepcopy(reference["wandering"])
+    return base
+
+
 def authoritative_game(checkpoint):
     """Expand current pooled values, preserving every authoritative game field."""
     game = copy.deepcopy(checkpoint["game"])
     shared = checkpoint["shared"]
     for field, pool in (("actors", "actors"), ("items", "items"),
-                        ("lifecycle", "lifecycles"), ("floor_activation", "floor_activations")):
+                        ("lifecycle", "lifecycles")):
         if field in game:
             game[field] = copy.deepcopy(shared[pool][game[field]])
+    if "floor_activation" in game:
+        game["floor_activation"] = authoritative_floor_activation(game["floor_activation"], shared)
     world = shared["worlds"]["instances"][game["world"]]
     game["world"] = copy.deepcopy(shared["worlds"]["geometry"][world["geometry"]])
     game["world"]["doors"] = copy.deepcopy(world["doors"])
@@ -44,6 +60,32 @@ def authoritative_game(checkpoint):
         copy.deepcopy(shared["intentions"]["entries"][index])
         for index in game["intentions"]["entries"]]
     return game
+
+
+
+class FloorActivationCheckpointHelperTests(unittest.TestCase):
+    def test_boundary_clock_drift_is_visible_without_changing_pooled_receipts(self):
+        base = {"wandering": None, "plan": {"protagonist": 1},
+                "scopes": {"floor/1": {"depth": 1}}, "members": {"1": "floor/1"},
+                "floors": {"floor/1": {"decisions": []}}, "order": ["floor/1"],
+                "decision_count": 0}
+        shared = {"floor_activations": [copy.deepcopy(base)]}
+        boundary = {"state": 0, "wandering": {"policy": {"living_cap": 8},
+                    "clocks": {"floor/1": {"remaining": 6000, "settled_at": 1000,
+                                             "active": True}}, "births": {}}}
+        expected = copy.deepcopy(base)
+        expected["wandering"] = copy.deepcopy(boundary["wandering"])
+        before = authoritative_floor_activation(boundary, shared)
+        self.assertEqual(before, expected)
+        later = copy.deepcopy(boundary)
+        later["wandering"]["clocks"]["floor/1"]["remaining"] = 5900
+        later["wandering"]["clocks"]["floor/1"]["settled_at"] = 1100
+        self.assertNotEqual(authoritative_floor_activation(later, shared), before)
+        self.assertEqual(shared["floor_activations"][0], base)
+        self.assertEqual(before, expected)
+        self.assertIsNone(authoritative_floor_activation(None, shared))
+        with self.assertRaises(ValueError):
+            authoritative_floor_activation({"state": 0}, shared)
 
 
 class NutritionProcesses(ProcessTestCase):

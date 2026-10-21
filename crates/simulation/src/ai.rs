@@ -243,6 +243,16 @@ impl Game {
 
 impl Game {
     pub fn configure_ai(&mut self, actor: ActorId, profile: AiProfile) -> Result<(), GameError> {
+        let mut candidate = self.clone();
+        candidate.configure_ai_in_transaction(actor, profile)?;
+        *self = candidate;
+        Ok(())
+    }
+    fn configure_ai_in_transaction(
+        &mut self,
+        actor: ActorId,
+        profile: AiProfile,
+    ) -> Result<(), GameError> {
         if !profile.valid() {
             return Err(GameError::Rule(
                 crate::abilities::RuleError::InvalidDefinition,
@@ -263,7 +273,7 @@ impl Game {
                 },
             );
         }
-        Ok(())
+        self.reconcile_awareness()
     }
 
     pub fn is_ai(&self, actor: ActorId) -> bool {
@@ -317,7 +327,9 @@ impl Game {
             .visible_actors
             .iter()
             .filter(|other| {
-                other.id != id && self.perceived_hostile(id, other.id, other.disclosure)
+                other.id != id
+                    && self.awareness_allows_target(id, other.id)
+                    && self.perceived_hostile(id, other.id, other.disclosure)
             })
             .min_by_key(|other| {
                 (
@@ -326,11 +338,12 @@ impl Game {
                 )
             });
         // Retained work resumes its frozen operands; it does not acquire a new
-        // enemy, refresh memory or draw another wake chance.
+        // enemy, refresh memory or reroll a sensory cue.
         if retained.is_none() && self.condition_allows_voluntary_input(id) {
             if let Some(engagement) = behavior.engagement.as_mut() {
                 if let Some(visible) = view.visible_actors.iter().find(|other| {
                     other.id == engagement.target
+                        && self.awareness_allows_target(id, other.id)
                         && other.disclosure.reference() == Some(engagement.reference)
                 }) {
                     engagement.location = visible.location;
@@ -344,7 +357,7 @@ impl Game {
                 && policy.disposition == crate::behavior::Disposition::Mean
             {
                 if let Some(visible) = candidate {
-                    if behavior.wakes() {
+                    {
                         behavior.engagement = Some(crate::behavior::Engagement {
                             target: visible.id,
                             reference: visible.disclosure.reference().expect("disclosed foe"),
@@ -357,15 +370,23 @@ impl Game {
         }
         let target = behavior.engagement.and_then(|entry| {
             view.visible_actors.iter().find(|other| {
-                other.id == entry.target && other.disclosure.reference() == Some(entry.reference)
+                other.id == entry.target
+                    && self.awareness_allows_target(id, other.id)
+                    && other.disclosure.reference() == Some(entry.reference)
             })
         });
-        let threat = behavior
-            .engagement
-            .map(|entry| entry.location)
-            .or_else(|| retained.and(candidate).map(|other| other.location));
+        let forced_flee = self.forced_flee_location(id);
+        let alert = actor.awareness.alert_at(self.actor_clock(id));
+        let threat = forced_flee
+            .or_else(|| {
+                behavior
+                    .engagement
+                    .map(|entry| entry.location)
+                    .or_else(|| retained.and(candidate).map(|other| other.location))
+            })
+            .or(alert);
         let (hp, max) = self.health(id)?;
-        let frightened = low_health(hp, max, ai.profile.flee_percent);
+        let frightened = forced_flee.is_some() || low_health(hp, max, ai.profile.flee_percent);
         ai.state = TRANSITIONS
             .iter()
             .find(|(low, known, _)| *low == frightened && *known == threat.is_some())
@@ -512,7 +533,9 @@ impl Game {
             // disclosed target can prompt a paid technique.
             if ai.state != State::Flee
                 && view.visible_actors.iter().any(|actor| {
-                    actor.id == target && actor.disclosure.reference() == Some(reference)
+                    actor.id == target
+                        && self.awareness_allows_target(id, target)
+                        && actor.disclosure.reference() == Some(reference)
                 })
             {
                 if let Some(ability) =
@@ -521,7 +544,13 @@ impl Game {
                     return Some(ability.decision(ai, behavior));
                 }
             }
-            if ai.state == State::Flee {
+            if ai.state == State::Flee
+                && view.visible_actors.iter().any(|actor| {
+                    actor.id == target
+                        && self.awareness_allows_target(id, target)
+                        && actor.disclosure.reference() == Some(reference)
+                })
+            {
                 if let Some(ability) =
                     self.choose_ai_ability(id, target, &snapshot.sight, view, true)
                 {
@@ -541,6 +570,21 @@ impl Game {
                 behavior.engagement = None;
                 ai.state = State::Search;
             }
+        }
+        // An anonymous cue licenses investigation only, never a target attack.
+        if ai.state != State::Flee && behavior.engagement.is_none() {
+            if let Some(at) = alert.filter(|at| *at != view.location) {
+                if let Some(step) = route(at).and_then(|r| r.first().copied()) {
+                    if self.actor_translation(id, step.direction).is_some() {
+                        return Some(AiDecision::action(
+                            Action::Move(step.direction),
+                            ai,
+                            behavior,
+                        ));
+                    }
+                }
+            }
+            ai.state = State::Search;
         }
         if ai.state == State::Search && !self.exposed_to_visible_hostile(id, view.location, view) {
             if let Some(action) = ai

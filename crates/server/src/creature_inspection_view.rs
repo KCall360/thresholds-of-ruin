@@ -523,6 +523,26 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
                 PerceptionValue::ReadiedTouchAmbush { enabled } => {
                     ("readied_touch_ambush", *enabled)
                 }
+                PerceptionValue::ContinualStealth { edge } => {
+                    fields.push(unsigned("edge", u64::from(*edge)));
+                    ("continual_stealth", true)
+                }
+                PerceptionValue::Aggravation {
+                    interval,
+                    chance_denominator,
+                    stealth_disadvantage,
+                } => {
+                    fields.push(unsigned("interval", *interval));
+                    fields.push(unsigned(
+                        "chance_denominator",
+                        u64::from(*chance_denominator),
+                    ));
+                    fields.push(unsigned(
+                        "stealth_disadvantage",
+                        u64::from(*stealth_disadvantage),
+                    ));
+                    ("aggravation", true)
+                }
                 PerceptionValue::PeriodicSearch { interval } => {
                     fields.push(unsigned("interval", *interval));
                     ("periodic_search", true)

@@ -205,5 +205,17 @@ def reviewed_twenty_six_activation():
                 ("protection", 9), ("add_strength", 9), ("sustain_strength", 5),
                 ("see_invisible", 10), ("adornment", 1), ("dexterity", 8),
                 ("increase_damage", 8), ("regeneration", 4), ("slow_digestion", 9),
-                ("maintain_armor", 5), ("searching", 5), ("teleportation", 5))]}]})
+                ("maintain_armor", 5), ("searching", 5), ("teleportation", 5),
+                ("stealth", 7), ("aggravation", 10))]}]})
+    activation["profiles"]["rogue.low_depth"]["stages"].append({
+        "id": "rogue.control_scrolls", "version": 1, "kind": "items", "count": [1, 1], "quantity": 1,
+        "bands": [{"depth": {"kind": "open", "minimum": 1}, "choices": [
+            {"archetype": "rogue." + name, "weight": 1} for name in (
+                "aggravate_monster", "create_monster", "hold_monster", "monster_confusion", "scare_monster")]}]})
+    activation["wandering"] = {
+        "stage_id": "rogue.eight_species_foes",
+        "excluded_wandering_content": ["rogue.dragon", "rogue.ice_monster", "rogue.leprechaun",
+                                       "rogue.nymph", "rogue.venus_flytrap", "rogue.xeroc"],
+        "initial_delay": [6700, 7300], "retry_ticks": 400,
+        "chance": {"numerator": 1, "denominator": 6}, "living_cap": 8}
     return activation

@@ -1557,6 +1557,7 @@ fn phase5_container_checkpoint_rejects_positional_item_spec() {
             "equipment_generation",
             "consumable",
             "readable",
+            "ground_scare",
             "device",
             "edible",
             "supply",

@@ -317,6 +317,9 @@ impl Game {
         candidate.sync_actor_lifecycle(id)?;
         let outcome = candidate.finish_action(prepared)?;
         candidate.reconcile_passive_discovery()?;
+        candidate.reconcile_awareness()?;
+        candidate.reconcile_control_contacts()?;
+        candidate.settle_aggravation()?;
         candidate.settle_periodic_searches()?;
         candidate.seal_participant_events()?;
         *self = candidate;
@@ -856,7 +859,7 @@ impl Game {
         // Capture the actor outcome afterward so inherited memory is retained.
         if matches!(
             kind,
-            OutcomeKind::Taken { .. } | OutcomeKind::Dropped { .. }
+            OutcomeKind::Taken { .. } | OutcomeKind::Dropped { .. } | OutcomeKind::Crumbled { .. }
         ) {
             self.apply_prepared_transfer(
                 prepared
@@ -928,7 +931,9 @@ impl Game {
             }
             OutcomeKind::Moved { .. } => {}
             OutcomeKind::Escaped { item } => self.commit_terminal_escape(id, item)?,
-            OutcomeKind::Taken { .. } | OutcomeKind::Dropped { .. } => {}
+            OutcomeKind::Taken { .. }
+            | OutcomeKind::Dropped { .. }
+            | OutcomeKind::Crumbled { .. } => {}
             OutcomeKind::Waited => {}
         }
         for subject in &prepared.touches {

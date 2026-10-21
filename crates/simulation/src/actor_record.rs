@@ -17,6 +17,8 @@ pub(crate) struct ActorRecord {
     readied_ambush: crate::readied_ambush::ReadiedRecord,
     holds: crate::linked_hold::HoldBook,
     behavior: crate::behavior::Behavior,
+    awareness: crate::awareness::Awareness,
+    control: crate::control_scrolls::ControlState,
     active_since: u64,
     anatomy: Shared<AnatomySpec>,
     equipment: BTreeMap<EquipmentSlotId, ItemId>,
@@ -59,6 +61,8 @@ impl<'de> Deserialize<'de> for ActorRecord {
             readied_ambush: crate::readied_ambush::ReadiedRecord,
             holds: crate::linked_hold::HoldBook,
             behavior: crate::behavior::Behavior,
+            awareness: crate::awareness::Awareness,
+            control: crate::control_scrolls::ControlState,
             active_since: u64,
             anatomy: Shared<AnatomySpec>,
             equipment: BTreeMap<EquipmentSlotId, ItemId>,
@@ -98,6 +102,8 @@ impl<'de> Deserialize<'de> for ActorRecord {
             readied_ambush: fields.readied_ambush,
             holds: fields.holds,
             behavior: fields.behavior,
+            awareness: fields.awareness,
+            control: fields.control,
             active_since: fields.active_since,
             anatomy: fields.anatomy,
             equipment: fields.equipment,
@@ -138,6 +144,8 @@ impl ActorRecord {
             readied_ambush: crate::readied_ambush::ReadiedRecord::capture(&actor.readied_ambush),
             holds: actor.holds.clone(),
             behavior: actor.behavior.clone(),
+            awareness: actor.awareness.clone(),
+            control: actor.control.clone(),
             active_since: actor.active_since,
             anatomy: actor.anatomy.clone(),
             equipment: actor.equipment.clone(),
@@ -191,6 +199,8 @@ impl ActorRecord {
                 .map_err(|_| crate::checkpoint::PersistError::ActorState { actor })?,
             holds: self.holds.clone(),
             behavior: self.behavior.clone(),
+            awareness: self.awareness.clone(),
+            control: self.control.clone(),
             active_since: self.active_since,
             anatomy: self.anatomy.clone(),
             equipment: self.equipment.clone(),
@@ -225,6 +235,7 @@ impl ActorRecord {
             asset: self.asset.clone(),
         };
         if !state.readied_ambush.valid_for(&state)
+            || !state.awareness.valid_for(&state)
             || !state.search_clock.valid_for(&state)
             || !state.periodic_relocations.valid_for(&state, items)
             || !state.spatial_condition_anchors.valid_for(&state)
@@ -287,6 +298,8 @@ mod public_plan_record_tests {
             "known_charges",
             "known_equipment",
             "discovery",
+            "awareness",
+            "control",
             "search_clock",
             "periodic_relocations",
             "trap_contacts",
@@ -326,6 +339,8 @@ mod public_plan_record_tests {
             "known_charges",
             "known_equipment",
             "discovery",
+            "awareness",
+            "control",
             "search_clock",
             "periodic_relocations",
             "trap_contacts",

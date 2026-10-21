@@ -55,6 +55,8 @@ impl Game {
             RangeClassification::Unavailable => return Err(invalid()),
         };
         crate::diagnostics::strike_resolution();
+        self.release_control_hold(target)?;
+        let awareness = self.capture_attack_awareness(projectile.actor, target)?;
         let conditional = self.projectile_collision_candidates(projectile, target)?;
         let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
         let rules = &self.content.rules;
@@ -145,7 +147,7 @@ impl Game {
             origin,
         )?;
         self.seal_participant_events()?;
-        self.provoke_from_strike(&result.outcome, receipt)?;
+        self.provoke_from_strike(&result.outcome, receipt, awareness)?;
         Ok(result.outcome)
     }
 }

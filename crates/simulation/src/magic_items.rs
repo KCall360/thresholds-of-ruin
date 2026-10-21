@@ -68,6 +68,7 @@ impl ChargeRange {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadableSpec {
+    pub control: Option<crate::control_scrolls::ControlSpec>,
     pub descriptors: Vec<crate::content_ids::DescriptorId>,
     pub effects: Vec<crate::rules::Effect>,
     pub identify: Option<Vec<ItemClass>>,
@@ -78,6 +79,8 @@ impl<'de> Deserialize<'de> for ReadableSpec {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            control: Option<crate::control_scrolls::ControlSpec>,
             #[serde(deserialize_with = "read_payload_descriptors")]
             descriptors: Vec<crate::content_ids::DescriptorId>,
             #[serde(deserialize_with = "read_readable_effects")]
@@ -88,6 +91,7 @@ impl<'de> Deserialize<'de> for ReadableSpec {
         }
         let f: Fields = crate::bounded::named_map(d)?;
         let spec = Self {
+            control: f.control,
             descriptors: f.descriptors,
             effects: f.effects,
             identify: f.identify.map(|classes| classes.0),
@@ -152,6 +156,12 @@ pub(crate) fn valid_identification_classes(classes: &[ItemClass]) -> bool {
 }
 impl ReadableSpec {
     pub fn valid(&self) -> bool {
+        if let Some(control) = &self.control {
+            return control.valid_shape()
+                && self.identify.is_none()
+                && self.effects.is_empty()
+                && self.descriptors.is_empty();
+        }
         if !valid_payload_descriptor_shape(&self.descriptors) {
             return false;
         }
@@ -178,7 +188,12 @@ impl ReadableSpec {
         &self,
         rules: &crate::rules::Ruleset,
     ) -> Result<(), crate::rules::RulesetError> {
-        if !self.valid() {
+        if !self.valid()
+            || self
+                .control
+                .as_ref()
+                .is_some_and(|control| !control.valid(rules))
+        {
             return Err(crate::rules::RulesetError::Bound {
                 field: "readable".into(),
             });
@@ -234,12 +249,16 @@ impl DeviceSpec {
 }
 impl crate::ItemSpec {
     pub(crate) fn magic_shape_valid(&self) -> bool {
-        let exclusive = usize::from(self.has_instance_condition())
+        let exclusive = usize::from(self.equipment.is_some() || self.projectile.is_some())
             + usize::from(self.consumable.is_some())
             + usize::from(self.edible.is_some())
             + usize::from(self.readable.is_some())
             + usize::from(self.device.is_some());
         exclusive <= 1
+            && self
+                .ground_scare
+                .as_ref()
+                .is_none_or(|spec| spec.valid_shape() && self.class == ItemClass::Scroll)
             && self
                 .readable
                 .as_ref()
@@ -474,8 +493,7 @@ mod identification_format_tests {
     #[test]
     fn runtime_identification_sets_are_required_bounded_scalar_sorted_and_unique() {
         let classes = json!(["ring", "wand"]);
-        let readable =
-            json!({"effects": [], "descriptors": [], "identify": classes, "discovery": "on_use"});
+        let readable = json!({"control": null, "effects": [], "descriptors": [], "identify": classes, "discovery": "on_use"});
         let choice = json!({"choice": 1, "classes": classes});
         assert!(serde_json::from_value::<ReadableSpec>(readable.clone()).is_ok());
         assert!(serde_json::from_value::<IdentificationChoice>(choice.clone()).is_ok());

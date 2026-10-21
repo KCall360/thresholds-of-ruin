@@ -88,7 +88,7 @@ pub struct Snapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     scenario_policy: Option<crate::floor_activation::ScenarioPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    floor_activation: Option<usize>,
+    floor_activation: Option<PopulationSnapshot>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     unique_retrieval: Option<RetrievalSnapshot>,
 }
@@ -97,6 +97,32 @@ fn read_events<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Vec<crate::combat::CombatEvent>, D::Error> {
     Ok(crate::bounded::Bounded::<crate::combat::CombatEvent, { crate::limits::EVENTS_PER_BATCH }>::deserialize(d)?.0)
+}
+
+/// Frequently changing active-floor clocks must not duplicate the large prepared
+/// population plan and floor receipts at every retained rewind boundary.
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+struct PopulationSnapshot {
+    state: usize,
+    wandering: Option<crate::floor_activation::WanderingPopulation>,
+}
+
+impl<'de> Deserialize<'de> for PopulationSnapshot {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            state: usize,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            wandering: Option<crate::floor_activation::WanderingPopulation>,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            state: fields.state,
+            wandering: fields.wandering,
+        })
+    }
 }
 
 /// Mutable objective evidence stays small; neither visits nor policy changes
@@ -161,11 +187,27 @@ pub struct SharedState {
     lifecycles: Vec<Lifecycle>,
     /// Complete equal population inputs and receipts are encoded once, rather
     /// than repeating the same prepared floor cells at every ordinary boundary.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "read_population_bases"
+    )]
     floor_activations: Vec<crate::floor_activation::ActivationState>,
     #[serde(deserialize_with = "read_retrieval_policies")]
     retrieval_policies: Vec<Shared<crate::unique_retrieval::UniqueRetrievalPolicy>>,
 }
+fn read_population_bases<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<crate::floor_activation::ActivationState>, D::Error> {
+    let states = Vec::<crate::floor_activation::ActivationState>::deserialize(d)?;
+    if states.iter().any(|state| state.wandering.is_some()) {
+        return Err(serde::de::Error::custom(
+            "population clocks belong to each snapshot, not its shared base",
+        ));
+    }
+    Ok(states)
+}
+
 fn read_retrieval_policies<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Vec<Shared<crate::unique_retrieval::UniqueRetrievalPolicy>>, D::Error> {
@@ -334,19 +376,23 @@ impl<'a> RestoreContext<'a> {
 
     fn floor_activation(
         &self,
-        index: usize,
+        snapshot: PopulationSnapshot,
     ) -> Result<crate::floor_activation::ActivationState, PersistError> {
+        let index = snapshot.state;
         // ActivationState's immutable fields already use Shared ownership.
         // Cloning the decoded pool value preserves those allocations across
         // restored games without caching boundary-dependent validation.
-        self.shared
-            .floor_activations
-            .get(index)
-            .cloned()
-            .ok_or(PersistError::MissingShared {
+        let mut state = self.shared.floor_activations.get(index).cloned().ok_or(
+            PersistError::MissingShared {
                 table: "floor_activations",
                 index,
-            })
+            },
+        )?;
+        if state.wandering.is_some() {
+            return Err(PersistError::Population);
+        }
+        state.wandering = snapshot.wandering;
+        Ok(state)
     }
 
     fn world(&mut self, index: usize) -> Option<Shared<World>> {
@@ -597,14 +643,17 @@ impl Game {
             scenario_policy: (self.scenario_policy != Default::default())
                 .then(|| self.scenario_policy.clone()),
             floor_activation: self.floor_activation.as_ref().map(|state| {
+                let mut base = state.clone();
+                let wandering = base.wandering.take();
                 let states = &mut shared.floor_activations;
-                states
+                let state = states
                     .iter()
-                    .position(|pooled| pooled == state)
+                    .position(|pooled| pooled == &base)
                     .unwrap_or_else(|| {
-                        states.push(state.clone());
+                        states.push(base);
                         states.len() - 1
-                    })
+                    });
+                PopulationSnapshot { state, wandering }
             }),
             unique_retrieval: self.unique_retrieval.as_ref().map(|state| {
                 let policies = &mut shared.retrieval_policies;
@@ -650,6 +699,7 @@ impl Game {
         context: &mut RestoreContext<'_>,
     ) -> Result<Self, PersistError> {
         let items = context.items(snapshot.items)?;
+        let population_base = snapshot.floor_activation.as_ref().map(|state| state.state);
         let mut game = Self {
             content: context.content.clone(),
             combat: snapshot.combat,
@@ -737,7 +787,7 @@ impl Game {
         if !game.retrieval_state_valid() {
             return Err(PersistError::Retrieval);
         }
-        if !context.activation_state_valid(&game, snapshot.floor_activation) {
+        if !context.activation_state_valid(&game, population_base) {
             return Err(PersistError::Population);
         }
         if !game.intentions_valid() {
@@ -945,6 +995,8 @@ impl Game {
                 .discovery
                 .guise_subjects()
                 .all(|subject| self.actors.contains_key(&subject) || self.detached_actor(subject))
+            && self.awareness_valid(id, actor)
+            && self.control_valid(id, actor)
             && actor.search_clock.valid_for(actor)
             && self.spatial_condition_anchors_valid(actor)
             && actor

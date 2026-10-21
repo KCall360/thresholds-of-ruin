@@ -1,4 +1,4 @@
-format = 28
+format = 29
 id = "rogue-exploration"
 version = "1.0"
 ruleset = "rules.toml"
@@ -99,6 +99,17 @@ exit_anchor = "dungeon/1/up"
 version = 1
 protagonist = "selected_character"
 families = { dungeon = "rogue.low_depth" }
+
+# Source-shaped cadence; active-tick tuning and eight-live cap are TOR adaptations.
+# A winning trial rearms the long delay even if capacity or placement blocks it.
+[floor_activation.wandering]
+stage_id = "rogue.eight_species_foes"
+excluded_wandering_content = ["rogue.dragon", "rogue.ice_monster", "rogue.leprechaun", "rogue.nymph", "rogue.venus_flytrap", "rogue.xeroc"]
+initial_delay = [6700, 7300]
+retry_ticks = 400
+chance = { numerator = 1, denominator = 6 }
+living_cap = 8
+
 
 # All twenty-six species; historical stage/pool IDs preserve deterministic stream ownership.
 # Equal ration/bandage stock is provisional TOR tuning, not original loot equivalence.
@@ -260,7 +271,16 @@ id = "rogue.rings"
 version = 1
 kind = "items"
 count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.ring_protection", weight = 9 }, { archetype = "rogue.ring_add_strength", weight = 9 }, { archetype = "rogue.ring_sustain_strength", weight = 5 }, { archetype = "rogue.ring_see_invisible", weight = 10 }, { archetype = "rogue.ring_adornment", weight = 1 }, { archetype = "rogue.ring_dexterity", weight = 8 }, { archetype = "rogue.ring_increase_damage", weight = 8 }, { archetype = "rogue.ring_regeneration", weight = 4 }, { archetype = "rogue.ring_slow_digestion", weight = 9 }, { archetype = "rogue.ring_maintain_armor", weight = 5 }, { archetype = "rogue.ring_searching", weight = 5 }, { archetype = "rogue.ring_teleportation", weight = 5 }] }]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.ring_protection", weight = 9 }, { archetype = "rogue.ring_add_strength", weight = 9 }, { archetype = "rogue.ring_sustain_strength", weight = 5 }, { archetype = "rogue.ring_see_invisible", weight = 10 }, { archetype = "rogue.ring_adornment", weight = 1 }, { archetype = "rogue.ring_dexterity", weight = 8 }, { archetype = "rogue.ring_increase_damage", weight = 8 }, { archetype = "rogue.ring_regeneration", weight = 4 }, { archetype = "rogue.ring_slow_digestion", weight = 9 }, { archetype = "rogue.ring_maintain_armor", weight = 5 }, { archetype = "rogue.ring_searching", weight = 5 }, { archetype = "rogue.ring_teleportation", weight = 5 }, { archetype = "rogue.ring_stealth", weight = 7 }, { archetype = "rogue.ring_aggravation", weight = 10 }] }]
+quantity = 1
+
+# One finite control-scroll attempt per floor; equal weights are provisional.
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.control_scrolls"
+version = 1
+kind = "items"
+count = [1, 1]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.aggravate_monster", weight = 1 }, { archetype = "rogue.create_monster", weight = 1 }, { archetype = "rogue.hold_monster", weight = 1 }, { archetype = "rogue.monster_confusion", weight = 1 }, { archetype = "rogue.scare_monster", weight = 1 }] }]
 quantity = 1
 
 # Structure-only forecast, independent of depth, spawn rolls and hidden contents.

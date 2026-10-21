@@ -15,9 +15,15 @@ MAGIC_ITEM_STAGE_IDS = tuple(identity for identity, _ in MAGIC_ITEM_STAGES)
 
 def assert_magic_item_receipts(test, stages, *, require_placed=False):
     """Require exactly one finite attempt per stage and return placed item IDs."""
-    test.assertEqual([stage["id"] for stage in stages], list(MAGIC_ITEM_STAGE_IDS))
+    return _assert_finite_item_receipts(test, stages, MAGIC_ITEM_STAGES, require_placed=require_placed)
+
+
+def _assert_finite_item_receipts(test, stages, expected, *, require_placed=False, quantities=None):
+    """Exact finite-stage schema; callers supply independent reviewed policy."""
+    quantities = {} if quantities is None else quantities
+    test.assertEqual([stage["id"] for stage in stages], [identity for identity, _ in expected])
     identities = []
-    for stage, (identity, choices) in zip(stages, MAGIC_ITEM_STAGES, strict=True):
+    for stage, (identity, choices) in zip(stages, expected, strict=True):
         test.assertEqual(set(stage), {"id", "version", "result"})
         test.assertIs(type(stage["version"]), int)
         test.assertEqual((stage["id"], stage["version"]), (identity, 1))
@@ -32,7 +38,7 @@ def assert_magic_item_receipts(test, stages, *, require_placed=False):
         if attempt["kind"] == "skipped":
             test.assertEqual(attempt, {"kind": "skipped", "content": attempt["content"],
                                        "reason": "no_eligible_cell"})
-            test.assertFalse(require_placed, "The seed must place each finite magic-stock stage")
+            test.assertFalse(require_placed, "The seed must place each finite stock stage")
             continue
         test.assertEqual(set(attempt), {"kind", "content", "location", "entity"})
         test.assertEqual(attempt["kind"], "placed")
@@ -51,7 +57,7 @@ def assert_magic_item_receipts(test, stages, *, require_placed=False):
         test.assertGreater(entity["id"], 0)
         test.assertLess(entity["id"], 1 << 64)
         test.assertIs(type(entity["quantity"]), int)
-        test.assertEqual(entity["quantity"], 1)
+        test.assertEqual(entity["quantity"], quantities.get(identity, 1))
         identities.append(("item", entity["id"]))
     test.assertEqual(len(identities), len(set(identities)))
     return identities
@@ -66,7 +72,7 @@ EQUIPMENT_ITEM_STAGES = (
     ("rogue.equipment_scrolls", ("rogue.enchant_armor", "rogue.protect_armor", "rogue.enchant_weapon",
                                  "rogue.remove_curse", "rogue.identify_weapon", "rogue.identify_armor")),
     ("rogue.ammunition", ("rogue.arrow",)),
-    ("rogue.rings", ('rogue.ring_protection', 'rogue.ring_add_strength', 'rogue.ring_sustain_strength', 'rogue.ring_see_invisible', 'rogue.ring_adornment', 'rogue.ring_dexterity', 'rogue.ring_increase_damage', 'rogue.ring_regeneration', 'rogue.ring_slow_digestion', 'rogue.ring_maintain_armor', 'rogue.ring_searching', 'rogue.ring_teleportation')),
+    ("rogue.rings", ('rogue.ring_protection', 'rogue.ring_add_strength', 'rogue.ring_sustain_strength', 'rogue.ring_see_invisible', 'rogue.ring_adornment', 'rogue.ring_dexterity', 'rogue.ring_increase_damage', 'rogue.ring_regeneration', 'rogue.ring_slow_digestion', 'rogue.ring_maintain_armor', 'rogue.ring_searching', 'rogue.ring_teleportation', 'rogue.ring_stealth', 'rogue.ring_aggravation')),
 )
 EQUIPMENT_ITEM_STAGE_IDS = tuple(identity for identity, _ in EQUIPMENT_ITEM_STAGES)
 
@@ -81,43 +87,17 @@ def assert_finite_item_identity(test, item, content):
 
 def assert_equipment_item_receipts(test, stages, *, require_placed=False):
     """Require finite equipment/ammunition/ring attempts and return placed item IDs."""
-    test.assertEqual([stage["id"] for stage in stages], list(EQUIPMENT_ITEM_STAGE_IDS))
-    identities = []
-    for stage, (identity, choices) in zip(stages, EQUIPMENT_ITEM_STAGES, strict=True):
-        test.assertEqual(set(stage), {"id", "version", "result"})
-        test.assertIs(type(stage["version"]), int)
-        test.assertEqual((stage["id"], stage["version"]), (identity, 1))
-        result = stage["result"]
-        test.assertEqual(set(result), {"kind", "requested", "attempts"})
-        test.assertEqual(result["kind"], "evaluated")
-        test.assertIs(type(result["requested"]), int)
-        test.assertEqual(result["requested"], 1)
-        test.assertEqual(len(result["attempts"]), 1)
-        attempt = result["attempts"][0]
-        test.assertIn(attempt["content"], choices)
-        if attempt["kind"] == "skipped":
-            test.assertEqual(attempt, {"kind": "skipped", "content": attempt["content"],
-                                       "reason": "no_eligible_cell"})
-            test.assertFalse(require_placed, "The seed must place each finite equipment-stock stage")
-            continue
-        test.assertEqual(set(attempt), {"kind", "content", "location", "entity"})
-        test.assertEqual(attempt["kind"], "placed")
-        location = attempt["location"]
-        test.assertEqual(set(location), {"region", "position"})
-        test.assertIs(type(location["region"]), int)
-        test.assertGreater(location["region"], 0)
-        test.assertLess(location["region"], 1 << 64)
-        test.assertEqual(set(location["position"]), {"x", "y", "z"})
-        for coordinate in location["position"].values():
-            test.assertIs(type(coordinate), int)
-        entity = attempt["entity"]
-        test.assertEqual(set(entity), {"kind", "id", "quantity"})
-        test.assertEqual(entity["kind"], "item")
-        test.assertIs(type(entity["id"]), int)
-        test.assertGreater(entity["id"], 0)
-        test.assertLess(entity["id"], 1 << 64)
-        test.assertIs(type(entity["quantity"]), int)
-        test.assertEqual(entity["quantity"], 6 if identity == "rogue.ammunition" else 1)
-        identities.append(("item", entity["id"]))
-    test.assertEqual(len(identities), len(set(identities)))
-    return identities
+    return _assert_finite_item_receipts(test, stages, EQUIPMENT_ITEM_STAGES,
+        require_placed=require_placed, quantities={"rogue.ammunition": 6})
+
+
+CONTROL_ITEM_STAGES = (
+    ("rogue.control_scrolls", ("rogue.aggravate_monster", "rogue.create_monster",
+                             "rogue.hold_monster", "rogue.monster_confusion", "rogue.scare_monster")),
+)
+CONTROL_ITEM_STAGE_IDS = tuple(identity for identity, _ in CONTROL_ITEM_STAGES)
+
+
+def assert_control_item_receipts(test, stages, *, require_placed=False):
+    """Require the one finite control-scroll attempt and return its owned ID."""
+    return _assert_finite_item_receipts(test, stages, CONTROL_ITEM_STAGES, require_placed=require_placed)

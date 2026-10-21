@@ -16,7 +16,7 @@ from process_harness import ProcessTestCase, ROOT, hit_die_counts, inspect_save
 from process_work_budget import ProcessWorkBudget
 from rogue_activation_candidate import conditional_bands, create_candidate, population_shape
 from rogue_magic_receipts import (MAGIC_ITEM_STAGE_IDS, assert_magic_item_receipts,
-    EQUIPMENT_ITEM_STAGE_IDS, assert_equipment_item_receipts, assert_finite_item_identity)
+    EQUIPMENT_ITEM_STAGE_IDS, CONTROL_ITEM_STAGE_IDS, assert_equipment_item_receipts, assert_control_item_receipts, assert_finite_item_identity)
 from rogue_test_support import assert_room_gold_receipt
 from status_condition_package import actor_creature, checkpoint
 
@@ -91,7 +91,11 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         inventory = create_candidate(output, self.bin / ("tor-scenario" + self.suffix),
             source_package=ROOT / "scenarios/rogue-exploration", source_provenance=provenance,
             start_depth=depth)
-        self.assertEqual(inventory["format"], "tor-rogue-activation-inputs-v2")
+        self.assertEqual(inventory["format"], "tor-rogue-activation-inputs-v3")
+        self.assertEqual(inventory["population_transformation"], {
+            "format": "tor-rogue-fixed-eighteen-transform-v1",
+            "target_population_shape": "canonical_eighteen_species",
+            "omitted_activation_fields": ["wandering"], "wandering_evidence": "not_exercised"})
         self.assertEqual(inventory["source_provenance"], provenance)
         source_manifest = tomllib.loads((ROOT / "scenarios/rogue-exploration/scenario.toml").read_text(encoding="utf-8"))
         self.assertEqual(inventory["source_population_shape"], population_shape(source_manifest))
@@ -138,13 +142,14 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         expected_stages = ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations",
                            "rogue.restore_strength"]
         if production_policy:
-            expected_stages.extend(["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS])
+            expected_stages.extend(["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS, *CONTROL_ITEM_STAGE_IDS])
         self.assertEqual([stage["id"] for stage in receipt["decisions"]], expected_stages)
         identities = []
         if production_policy:
             identities.extend(assert_room_gold_receipt(self, receipt["decisions"][4], depth))
             identities.extend(assert_magic_item_receipts(self, receipt["decisions"][5:8]))
-            identities.extend(assert_equipment_item_receipts(self, receipt["decisions"][8:]))
+            identities.extend(assert_equipment_item_receipts(self, receipt["decisions"][8:12]))
+            identities.extend(assert_control_item_receipts(self, receipt["decisions"][12:]))
         for supply, (content, quantity) in zip(receipt["decisions"][1:4], (
                 ("rogue.clean_bandage", 2), ("rogue.ration", 1), ("rogue.restore_strength", 1)),
                 strict=True):
@@ -381,7 +386,8 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         stages = activation["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([row["id"] for row in stages],
                          ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations",
-                          "rogue.restore_strength", "rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS])
+                          "rogue.restore_strength", "rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS,
+                          "rogue.control_scrolls"])
         self.assertEqual(stages[0]["count"], [4, 4])
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         self.assertEqual(stages[0]["ai"], "rogue_hostile")
@@ -447,7 +453,11 @@ class RogueActivationSourceTests(unittest.TestCase):
         self.assertEqual(shape, "reviewed_twenty_six_species_input")
 
         def candidate(output, compiler, **kwargs):
-            return {"format": "tor-rogue-activation-inputs-v2",
+            return {"format": "tor-rogue-activation-inputs-v3",
+                    "population_transformation": {
+                        "format": "tor-rogue-fixed-eighteen-transform-v1",
+                        "target_population_shape": "canonical_eighteen_species",
+                        "omitted_activation_fields": ["wandering"], "wandering_evidence": "not_exercised"},
                     "source_provenance": kwargs["source_provenance"],
                     "source_population_shape": shape,
                     "artifact_purpose": "diagnostic_population_package", "production_mutated": False}

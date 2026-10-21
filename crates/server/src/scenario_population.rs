@@ -77,6 +77,8 @@ pub enum Protagonist {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FloorActivation {
+    #[serde(default)]
+    pub wandering: Option<runtime::WanderingPolicy>,
     pub version: u32,
     pub protagonist: Protagonist,
     #[serde(default)]
@@ -418,6 +420,32 @@ impl Package {
             return Ok(());
         };
         require(plan.version == 1, "Unsupported floor activation version")?;
+        if let Some(policy) = &plan.wandering {
+            require(policy.valid(), "Invalid wandering population policy")?;
+            let mut content = BTreeSet::new();
+            for profile in plan.profiles.values() {
+                let stage = profile
+                    .stages
+                    .iter()
+                    .find(|stage| stage.header().0 == policy.stage_id)
+                    .ok_or_else(|| fail("Unknown wandering actor stage"))?;
+                let PopulationStage::Actors { bands, .. } = stage else {
+                    return Err(fail("Wandering population requires an actor stage"));
+                };
+                content.extend(
+                    bands.iter().flat_map(|band| {
+                        band.choices.iter().map(|choice| choice.archetype.as_str())
+                    }),
+                );
+            }
+            require(
+                policy
+                    .excluded_wandering_content
+                    .iter()
+                    .all(|id| content.contains(id.as_str())),
+                "Unknown wandering exclusion",
+            )?;
+        }
         let protagonist = match &plan.protagonist {
             Protagonist::Actor(actor) => *actor,
             Protagonist::Selected(selector) => {
@@ -828,6 +856,15 @@ impl Package {
         if let Some(plan) = self.population_plan(index)? {
             game.configure_population(plan)
                 .map_err(|error| fail(format!("Floor activation: {error:?}")))?;
+            if let Some(policy) = self
+                .manifest
+                .floor_activation
+                .as_ref()
+                .and_then(|plan| plan.wandering.as_ref())
+            {
+                game.configure_wandering_population(policy.clone())
+                    .map_err(|error| fail(format!("Wandering population: {error:?}")))?;
+            }
         }
         if let Some(policy) = self.retrieval_policy(index)? {
             game.configure_unique_retrieval(policy)
@@ -1005,6 +1042,13 @@ pub(crate) struct PopulationConfiguration<'a> {
 impl PopulationConfiguration<'_> {
     pub(crate) fn valid_game(&self, game: &Game) -> bool {
         if game.seed() != self.seed
+            || game.wandering_policy()
+                != self
+                    .package
+                    .manifest
+                    .floor_activation
+                    .as_ref()
+                    .and_then(|plan| plan.wandering.as_ref())
             || !game.population_configuration_matches(
                 self.plan.as_ref(),
                 &self.capabilities,
@@ -1179,10 +1223,63 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn wandering_authoring_binds_actor_stage_and_rejects_unknown_exclusions() {
+        let good = changed(&carried_fixture(), |source| {
+            source["floor_activation"]["wandering"] = json!({
+                "stage_id":"inhabitants", "excluded_wandering_content":[],
+                "initial_delay":[6700,7300], "retry_ticks":400,
+                "chance":{"numerator":1,"denominator":6}, "living_cap":8
+            });
+        })
+        .unwrap();
+        // from_parts assembles source; semantic references are checked separately.
+        good.check().unwrap();
+        assert_eq!(
+            good.manifest
+                .floor_activation
+                .as_ref()
+                .unwrap()
+                .wandering
+                .as_ref()
+                .unwrap()
+                .living_cap,
+            8
+        );
+        assert!(
+            changed(&good, |source| source["floor_activation"]["wandering"]
+                ["stage_id"] = json!("missing"))
+            .and_then(|package| package.check())
+            .is_err()
+        );
+        assert!(
+            changed(&good, |source| source["floor_activation"]["wandering"]
+                ["excluded_wandering_content"] =
+                json!(["missing"]))
+            .and_then(|package| package.check())
+            .is_err()
+        );
+        assert!(
+            changed(&good, |source| source["floor_activation"]["wandering"]
+                ["retry_ticks"] = json!(0))
+            .and_then(|package| package.check())
+            .is_err()
+        );
+        assert!(
+            changed(&good, |source| source["floor_activation"]["wandering"]
+                ["chance"]["denominator"] = json!(0))
+            .and_then(|package| package.check())
+            .is_err()
+        );
+    }
+
     fn repeated_population_package() -> Package {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
         let mut package = read_package(&root).unwrap();
         let activation = package.manifest.floor_activation.as_mut().unwrap();
+        // The fixture narrows the catalog to one recipe to test memoization;
+        // live population cadence and its excluded-species set are unrelated.
+        activation.wandering = None;
         let (name, mut profile) = activation
             .profiles
             .iter()

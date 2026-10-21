@@ -34,7 +34,8 @@ pub(crate) fn capture_hazard_skill_check(
     let derived = creature.derived();
     let edge = derived
         .hazard_check_edge(rules, actor, &tokens)
-        .map_err(|_| GameError::Rule(RuleError::InvalidDefinition))?;
+        .map_err(|_| GameError::Rule(RuleError::InvalidDefinition))?
+        + derived.perception.skill_edge(skill);
     let bonus = SkillCheck {
         skill,
         binding: derived.binding(),
