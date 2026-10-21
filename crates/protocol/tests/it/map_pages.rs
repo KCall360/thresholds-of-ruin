@@ -633,7 +633,17 @@ fn map_continuations_and_nested_appearances_remain_bounded_named_records() {
 
 #[test]
 fn remembered_trap_requires_named_nullable_family_and_never_carries_live_operands() {
-    for family in [None, Some(TrapFamily::Rust), Some(TrapFamily::SleepingGas)] {
+    for family in [
+        None,
+        Some(TrapFamily::Rust),
+        Some(TrapFamily::SleepingGas),
+        Some(TrapFamily::TrapDoor),
+        Some(TrapFamily::Arrow),
+        Some(TrapFamily::BearTrap),
+        Some(TrapFamily::Teleport),
+        Some(TrapFamily::PoisonDart),
+        Some(TrapFamily::Mysterious),
+    ] {
         let value = MapTrapAppearance { family };
         let json = serde_json::to_value(&value).unwrap();
         assert_eq!(json.as_object().unwrap().len(), 1);

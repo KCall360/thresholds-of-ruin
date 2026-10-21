@@ -68,6 +68,7 @@ impl ChargeRange {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadableSpec {
+    pub descriptors: Vec<crate::content_ids::DescriptorId>,
     pub effects: Vec<crate::rules::Effect>,
     pub identify: Option<Vec<ItemClass>>,
     pub discovery: ItemDiscovery,
@@ -77,6 +78,8 @@ impl<'de> Deserialize<'de> for ReadableSpec {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(deserialize_with = "read_payload_descriptors")]
+            descriptors: Vec<crate::content_ids::DescriptorId>,
             #[serde(deserialize_with = "read_readable_effects")]
             effects: Vec<crate::rules::Effect>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -85,6 +88,7 @@ impl<'de> Deserialize<'de> for ReadableSpec {
         }
         let f: Fields = crate::bounded::named_map(d)?;
         let spec = Self {
+            descriptors: f.descriptors,
             effects: f.effects,
             identify: f.identify.map(|classes| classes.0),
             discovery: f.discovery,
@@ -94,6 +98,25 @@ impl<'de> Deserialize<'de> for ReadableSpec {
         }
         Ok(spec)
     }
+}
+pub(crate) fn read_payload_descriptors<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<crate::content_ids::DescriptorId>, D::Error> {
+    Ok(crate::bounded::Bounded::<
+        crate::content_ids::DescriptorId,
+        { crate::limits::DESCRIPTORS_PER_EFFECT },
+    >::deserialize(d)?
+    .0)
+}
+pub(crate) fn valid_payload_descriptor_shape(
+    descriptors: &[crate::content_ids::DescriptorId],
+) -> bool {
+    descriptors.len() <= crate::limits::DESCRIPTORS_PER_EFFECT
+        && descriptors
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            == descriptors.len()
 }
 pub(crate) fn read_readable_effects<'de, D: serde::Deserializer<'de>>(
     d: D,
@@ -129,16 +152,25 @@ pub(crate) fn valid_identification_classes(classes: &[ItemClass]) -> bool {
 }
 impl ReadableSpec {
     pub fn valid(&self) -> bool {
+        if !valid_payload_descriptor_shape(&self.descriptors) {
+            return false;
+        }
         match &self.identify {
             Some(classes) => {
                 valid_identification_classes(classes)
+                    && self.descriptors.is_empty()
                     && self.effects.is_empty()
                     && self.discovery == ItemDiscovery::OnUse
             }
             None => {
                 !self.effects.is_empty()
                     && self.effects.len() <= crate::limits::CONSUMABLE_EFFECTS
-                    && self.effects.iter().all(|e| e.valid_shape() && !e.spatial())
+                    && self.effects.iter().all(|e| {
+                        e.valid_shape()
+                            && (!e.spatial()
+                                || (self.effects.len() == 1
+                                    && matches!(e, crate::rules::Effect::TeleportRandom)))
+                    })
             }
         }
     }
@@ -151,6 +183,10 @@ impl ReadableSpec {
                 field: "readable".into(),
             });
         }
+        rules.validate_payload_recipients(
+            &self.descriptors,
+            self.effects.iter().map(crate::rules::Effect::recipient),
+        )?;
         rules.validate_effects(&self.effects)
     }
 }
@@ -438,7 +474,8 @@ mod identification_format_tests {
     #[test]
     fn runtime_identification_sets_are_required_bounded_scalar_sorted_and_unique() {
         let classes = json!(["ring", "wand"]);
-        let readable = json!({"effects": [], "identify": classes, "discovery": "on_use"});
+        let readable =
+            json!({"effects": [], "descriptors": [], "identify": classes, "discovery": "on_use"});
         let choice = json!({"choice": 1, "classes": classes});
         assert!(serde_json::from_value::<ReadableSpec>(readable.clone()).is_ok());
         assert!(serde_json::from_value::<IdentificationChoice>(choice.clone()).is_ok());

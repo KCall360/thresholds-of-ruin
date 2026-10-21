@@ -9,6 +9,29 @@ struct BatchExecutionFacts<'a> {
 }
 
 impl Game {
+    /// Consume exactly the available outgoing sources captured by a performed
+    /// resistance check, never recompute selection after primary publication.
+    pub(super) fn consume_resistance_tokens(
+        &mut self,
+        tokens: &[crate::conditions::TokenReservation],
+    ) -> Result<(), GameError> {
+        let mut holders = std::collections::BTreeMap::<crate::ActorId, Vec<_>>::new();
+        for token in tokens {
+            holders.entry(token.holder).or_default().push(token.clone());
+        }
+        for (holder, selected) in holders {
+            let mut outcome = self.actor_outcome(holder)?;
+            let combat = outcome
+                .state
+                .combat
+                .as_mut()
+                .ok_or(GameError::UnknownActor)?;
+            combat.reserve_tokens(&selected, holder)?;
+            combat.consume_tokens(&selected, holder);
+            self.apply_outcome(outcome)?;
+        }
+        Ok(())
+    }
     pub(crate) fn plan_actor_available(&self, plan: &Plan) -> bool {
         (match plan {
             Plan::Projectile(plan) => plan.source.available(self, plan.actor),
@@ -133,6 +156,7 @@ impl Game {
         );
         if !reachable {
             let outcome = Outcome {
+                resistance: None,
                 actor: ability.actor,
                 target: ability.target,
                 ability: Some(ability.ability.clone()),
@@ -310,7 +334,9 @@ impl Game {
             ResolutionPlan::ProjectileEncounter {
                 projectile, target, ..
             } => (projectile.actor, target),
-            ResolutionPlan::Effects { actor, target, .. } => (actor, target),
+            ResolutionPlan::Effects { actor, target, .. }
+            | ResolutionPlan::Exposure { actor, target, .. } => (actor, target),
+            ResolutionPlan::Environment { target, .. } => (target, target),
         };
         let mut disclosure_origin =
             self.reuse_event_origin(actor, target, facts.disclosure_origin.as_ref());
@@ -349,6 +375,8 @@ impl Game {
             resolve::resolve_batch(plan, &snapshot, &mut rng, &mut (), budget)
         }?;
         result.outcome.intention = intention;
+        self.rules_rng = rng;
+        self.consume_resistance_tokens(&result.resistance_tokens)?;
         let receipt = if let Some(theft) = result.deferred_theft.take() {
             let transfer = self.transfer_theft(actor, target, &theft.selection, &mut rng)?;
             if let Some(transfer) = transfer {
@@ -365,6 +393,7 @@ impl Game {
                     relocation,
                 });
                 result.outcome.result = result.outcome.canonical_result();
+                self.rules_rng = rng;
                 let receipt = self.apply_resolved_theft(
                     result.outcome.clone(),
                     site,
@@ -375,6 +404,7 @@ impl Game {
                 self.append_event_suffix(consequences.0, consequences.1)?;
                 receipt
             } else {
+                self.rules_rng = rng;
                 self.apply_resolved_with_disclosure(
                     result.outcome.clone(),
                     site,
@@ -390,7 +420,6 @@ impl Game {
                 disclosure_origin,
             )?
         };
-        self.rules_rng = rng;
         Ok((result, receipt))
     }
     #[allow(clippy::too_many_arguments)]
@@ -440,6 +469,7 @@ impl Game {
             check: &check,
         };
         let snapshot = Snapshot::capture(&creature)
+            .with_claimed_check_tokens(&selected)
             .with_context(self.resolution_context(plan, ray.actor, target)?);
         let mut rng = self.rules_rng;
         let mut result = if let Some(observer) = self
@@ -452,6 +482,8 @@ impl Game {
             resolve::resolve_batch(plan, &snapshot, &mut rng, &mut (), budget)
         }?;
         result.outcome.intention = intention;
+        // Publish resolution draws before ordinary contacts can consume more.
+        self.rules_rng = rng;
         // Whole-payload immunity does not perform a check and cannot spend a
         // recipient's next-check token or increase this ray's repeat count.
         if result.outcome.check.is_some() && !selected.is_empty() {
@@ -465,6 +497,7 @@ impl Game {
             combat.consume_tokens(&selected, ray.actor);
             self.apply_outcome(holder)?;
         }
+        self.consume_resistance_tokens(&result.resistance_tokens)?;
         let origin = self
             .capture_event_origin(ray.actor, target)
             .with_ability_disclosure(disclosure);
@@ -474,7 +507,6 @@ impl Game {
             activity,
             origin,
         )?;
-        self.rules_rng = rng;
         self.seal_participant_events()?;
         self.provoke_from_strike(&result.outcome, receipt)?;
         Ok(result.outcome)
@@ -488,6 +520,7 @@ impl Game {
         Ok(ResolutionContext {
             hold_damage: None,
             spatial: None,
+            relocation: self.relocation_resolution_input(plan, target)?,
             target_recovery_context: if plan
                 .contextual_conditions(EffectRecipient::Target, &self.content.rules)
             {
@@ -525,6 +558,34 @@ impl Game {
             },
         })
     }
+    fn relocation_resolution_input(
+        &self,
+        plan: ResolutionPlan<'_>,
+        target: crate::ActorId,
+    ) -> Result<Option<RelocationInput>, GameError> {
+        let Some(effect @ (PlannedEffect::TeleportRandom | PlannedEffect::TeleportToRayOrigin)) =
+            plan.spatial_effect()
+        else {
+            return Ok(None);
+        };
+        let from = Placement::capture(self, target).ok_or(GameError::UnknownActor)?;
+        let destinations = match effect {
+            PlannedEffect::TeleportRandom => self.random_relocation_candidates(target)?,
+            PlannedEffect::TeleportToRayOrigin => match plan {
+                ResolutionPlan::RayEncounter { ray, .. } => self
+                    .ray_relocation_destination(target, ray.origin, ray.direction)?
+                    .into_iter()
+                    .collect(),
+                _ => return Err(GameError::Rule(RuleError::InvalidPlan)),
+            },
+            _ => unreachable!(),
+        };
+        Ok(Some(RelocationInput {
+            from,
+            destinations,
+            mode: MovementMode::Forced,
+        }))
+    }
     pub(crate) fn spatial_resolution_input(
         &self,
         plan: ResolutionPlan<'_>,
@@ -536,7 +597,9 @@ impl Game {
             | ResolutionPlan::Rider { ability, .. } => Some(ability),
             ResolutionPlan::RayEncounter { .. }
             | ResolutionPlan::ProjectileEncounter { .. }
-            | ResolutionPlan::Effects { .. } => None,
+            | ResolutionPlan::Effects { .. }
+            | ResolutionPlan::Exposure { .. }
+            | ResolutionPlan::Environment { .. } => None,
         };
         let spatial = ability.and_then(|ability| match plan.spatial_effect()? {
             PlannedEffect::StepSelfOneCell => self.step_input(ability),
@@ -546,6 +609,125 @@ impl Game {
             _ => None,
         });
         spatial
+    }
+    /// One environmental check uses authored accuracy and the live recipient's
+    /// ordinary Physical defense/protection, without a fabricated ability or caster.
+    pub(crate) fn resolve_environmental_attack_in_transaction(
+        &mut self,
+        target: crate::ActorId,
+        bonus: i32,
+        effects: &[crate::rules::Effect],
+        descriptors: &[crate::content_ids::DescriptorId],
+    ) -> Result<bool, GameError> {
+        if i64::from(bonus).unsigned_abs() > crate::limits::NUMERIC as u64 {
+            return Err(GameError::Rule(RuleError::InvalidDefinition));
+        }
+        self.content
+            .rules()
+            .validate_effects(effects)
+            .and_then(|_| {
+                self.content
+                    .rules()
+                    .validate_payload_descriptors(descriptors)
+            })
+            .map_err(|_| GameError::Rule(RuleError::InvalidDefinition))?;
+        self.settle_actor_time(target)?;
+        let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
+        if creature.health().dead() {
+            return Ok(false);
+        }
+        let selected = creature
+            .conditions()
+            .qualifying_tokens(self.content.rules(), target, true);
+        let edge = creature
+            .derived()
+            .environmental_incoming_edge(
+                self.content.rules(),
+                target,
+                crate::rules::DefenseKind::Physical,
+                &selected,
+            )
+            .map_err(|_| GameError::Rule(RuleError::InvalidDefinition))?;
+        let check = PlannedCheck {
+            actor: crate::rules::CheckActor::User,
+            target_participates: true,
+            bonus: i64::from(bonus),
+            threshold: CheckThreshold::Fixed {
+                value: i64::from(creature.derived().defenses.physical),
+            },
+            edge,
+        };
+        let effects = self.effect_plan(target, effects)?;
+        let plan = ResolutionPlan::Environment {
+            target,
+            check: &check,
+            effects: &effects,
+            descriptors,
+        };
+        let snapshot = Snapshot::capture(&creature)
+            .with_context(self.resolution_context(plan, target, target)?);
+        let mut rng = self.rules_rng;
+        let resolved = resolve::resolve_receipt(plan, &snapshot, &mut rng, &mut (), true)?;
+        let outcome = resolved.outcome;
+        let hit = outcome.check.is_some_and(|check| check.success);
+        self.rules_rng = rng;
+        if outcome.check.is_some() {
+            // Actual environmental attack participation breaks a disguise on
+            // hit or miss, without inventing a caster or an ability identity.
+            self.reveal_guise(target)?;
+        }
+        if outcome.check.is_some() && !selected.is_empty() {
+            let mut holder = self.actor_outcome(target)?;
+            let combat = holder
+                .state
+                .combat
+                .as_mut()
+                .ok_or(GameError::UnknownActor)?;
+            combat.reserve_tokens(&selected, target)?;
+            combat.consume_tokens(&selected, target);
+            self.apply_outcome(holder)?;
+        }
+        self.consume_resistance_tokens(&resolved.resistance_tokens)?;
+        self.apply_outcome(outcome)?;
+        Ok(hit)
+    }
+    /// No fabricated delivery attack: the payload has already reached this actor.
+    pub(crate) fn apply_exposure_in_transaction(
+        &mut self,
+        actor: crate::ActorId,
+        effects: &[crate::rules::Effect],
+        descriptors: &[crate::content_ids::DescriptorId],
+    ) -> Result<bool, GameError> {
+        if effects.is_empty() {
+            return Err(GameError::Rule(RuleError::InvalidDefinition));
+        }
+        self.content
+            .rules()
+            .validate_effects(effects)
+            .and_then(|_| {
+                self.content
+                    .rules()
+                    .validate_payload_descriptors(descriptors)
+            })
+            .map_err(|_| GameError::Rule(RuleError::InvalidDefinition))?;
+        self.settle_actor_time(actor)?;
+        let effects = self.effect_plan(actor, effects)?;
+        let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
+        let plan = ResolutionPlan::Exposure {
+            actor,
+            target: actor,
+            effects: &effects,
+            descriptors,
+        };
+        let snapshot =
+            Snapshot::capture(&creature).with_context(self.resolution_context(plan, actor, actor)?);
+        let mut rng = self.rules_rng;
+        let resolved = resolve::resolve_receipt(plan, &snapshot, &mut rng, &mut (), true)?;
+        let applied = resolved.outcome.result == OutcomeStatus::Applied;
+        self.rules_rng = rng;
+        self.consume_resistance_tokens(&resolved.resistance_tokens)?;
+        self.apply_outcome(resolved.outcome)?;
+        Ok(applied)
     }
     /// The caller has validated and spent the exact finite source in this same
     /// transaction. The frozen effects do not depend on that deleted item.
@@ -571,11 +753,13 @@ impl Game {
         let resolution = plan
             .resolution()
             .ok_or(GameError::Rule(RuleError::InvalidPlan))?;
-        let snapshot = Snapshot::capture(&target).with_context(self.resolution_context(
-            resolution,
-            plan.actor(),
-            plan.target(),
-        )?);
+        let mut context = self.resolution_context(resolution, plan.actor(), plan.target())?;
+        if matches!(plan, Plan::Read { .. }) {
+            if let Some(input) = context.relocation.as_mut() {
+                input.mode = MovementMode::Voluntary;
+            }
+        }
+        let snapshot = Snapshot::capture(&target).with_context(context);
         let mut rng = self.rules_rng;
         let mut ignored = ();
         let next: &mut dyn crate::resolution_diagnostics::ResolutionObserver = self
@@ -593,7 +777,16 @@ impl Game {
             offered: 0,
             wasted: 0,
         };
-        let mut outcome = resolve(resolution, &snapshot, &mut rng, &mut observer)?;
+        let resolved = resolve::resolve_receipt(
+            resolution,
+            &snapshot,
+            &mut rng,
+            &mut observer,
+            plan.on_success()
+                .iter()
+                .any(|effect| matches!(effect, PlannedEffect::ArrestDescent)),
+        )?;
+        let mut outcome = resolved.outcome;
         let flow = crate::survival_diagnostics::SurvivalFlows {
             incomplete: observer.incomplete,
             nourishment_offered: observer.offered,
@@ -601,9 +794,10 @@ impl Game {
             ..Default::default()
         };
         outcome.intention = intention;
+        self.rules_rng = rng;
+        self.consume_resistance_tokens(&resolved.resistance_tokens)?;
         self.apply_outcome(outcome.clone())?;
         self.record_survival(plan.target(), &flow);
-        self.rules_rng = rng;
         Ok(outcome)
     }
 }

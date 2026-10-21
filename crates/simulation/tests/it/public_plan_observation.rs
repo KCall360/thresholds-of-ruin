@@ -418,7 +418,7 @@ fn public_plan_outcome_wrapper_requires_named_bounded_fields_from_bytes() {
     use tor_simulation::abilities::Outcome;
     let resolved = r#"{"kind":"observe_public_plan","observation":{"observed_at":0,"subject_name":"foe","state":{"kind":"no_public_plan"}}}"#;
     let outcome = format!(
-        r#"{{"actor":1,"target":2,"ability":null,"intention":null,"result":"applied","check":null,"target_rider_participated":false,"participation":{{"check":"none","payload":{{"kind":"source"}}}},"effects":[{resolved}]}}"#
+        r#"{{"actor":1,"target":2,"ability":null,"intention":null,"result":"applied","check":null,"resistance":null,"target_rider_participated":false,"participation":{{"check":"none","payload":{{"kind":"source"}}}},"effects":[{resolved}]}}"#
     );
     serde_json::from_slice::<Outcome>(outcome.as_bytes()).unwrap();
     rejects_effect_bytes::<Outcome>(&format!(r#"[1,2,null,null,"applied",null,[{resolved}]]"#));
@@ -701,6 +701,7 @@ fn public_plan_review_item_source_matrix_rejects_ineligible_qualified_effects() 
         let mut item = tor_simulation::ItemSpec::ordinary("qualification vial".into());
         item.class = tor_simulation::ItemClass::Potion;
         item.consumable = Some(tor_simulation::ConsumableSpec {
+            descriptors: vec![],
             discovery: tor_simulation::ItemDiscovery::SelfEffect,
             effects: vec![effect],
         });

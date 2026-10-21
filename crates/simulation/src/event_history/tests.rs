@@ -35,6 +35,8 @@ fn fixture() -> Game {
         scope: Scope::Always,
         op: ModifierOp::Perception {
             value: PerceptionValue::ObjectGuise {
+                skill: crate::attributes::Skill::Stealth,
+                edge: 0,
                 appearance: Some(crate::perception::GuiseAppearance {
                     name: "closed chest".into(),
                     description: "An ordinary chest.".into(),
@@ -107,6 +109,7 @@ fn template(game: &mut Game, actor: ActorId, name: Option<&str>) {
 }
 fn damage(actor: ActorId, target: ActorId, amount: u32) -> Outcome {
     Outcome {
+        resistance: None,
         actor,
         target,
         ability: Some(AbilityId::new("basic_melee").unwrap()),

@@ -49,7 +49,38 @@ def carried_stock(frame, supply):
                if (row.get("known_supply") or {}).get("id") == supply)
 
 
-def walkthrough_route(at, floor, known_cells, targets, visited):
+class WalkthroughRations:
+    """One ordinary meal across all phases; the other ration funds the respec."""
+    def __init__(self):
+        self.eaten = 0
+
+    def nourish(self, test, player, current, *, prefer_half=False):
+        view = observation(current)
+        nutrition = view["combat"]["own_stats"]["nutrition"]
+        due = (nutrition["hunger"] in ("hungry", "weak", "empty")
+               or (prefer_half and self.eaten == 0
+                   and nutrition["reserve"] <= nutrition["maximum"] // 2))
+        if not due:
+            return current
+        test.assertEqual(self.eaten, 0, "The walkthrough exceeded its one-ration meal budget")
+        before = carried_stock(current, "ration")
+        test.assertGreater(before, 1, "The walkthrough must preserve the respec ration")
+        edible = {row["item"] for row in view["interactions"]["inventory"] if row["edible"]}
+        meals = [item for item in view["inventory"] if item["id"] in edible
+                 and (item.get("known_supply") or {}).get("id") == "ration"]
+        test.assertEqual(len(meals), 1, "Expected one disclosed carried ration stack")
+        key = underfoot(current["state"])["key"]
+        result = test.settled_action(player, {"type": "eat", "item": meals[0]["id"]})
+        test.assertEqual(carried_stock(result, "ration"), before - 1)
+        test.assertGreater(observation(result)["combat"]["own_stats"]["nutrition"]["reserve"],
+                           nutrition["reserve"])
+        test.assertGreater(int(observation(result)["tick"]), int(view["tick"]))
+        test.assertEqual(underfoot(result["state"])["key"], key)
+        self.eaten += 1
+        return result
+
+
+def walkthrough_route(at, floor, known_cells, targets, visited, *, search_first=False):
     """Choose this fixture's next ordinary step from disclosed geometry only."""
     # Reuse the existing disclosed BFS, but do not walk every already visible
     # room tile before approaching a place that can reveal more of the floor.
@@ -61,7 +92,64 @@ def walkthrough_route(at, floor, known_cells, targets, visited):
     frontiers = {(x, y) for x, y in floor if any(
         (x + dx, y + dy) not in known_cells
         for dx, dy, _ in DisclosedFloorGraph.directions)}
-    return disclosed_exploration_route(at, floor, frontiers, visited)
+    return disclosed_exploration_route(at, floor, frontiers, floor if search_first else visited)
+
+
+def observe_walkthrough_boundaries(view, boundaries):
+    """Remember only adjacent opaque edges actually present in public frames."""
+    visible = {(cell["position"]["x"], cell["position"]["y"]): cell
+               for cell in view["visible_cells"] if cell["position"]["z"] == 0}
+    for (x, y), cell in visible.items():
+        if cell["wall"]:
+            continue
+        edges = boundaries.setdefault(cell["key"], {})
+        for dx, dy, direction in DisclosedFloorGraph.directions:
+            neighbor = visible.get((x + dx, y + dy))
+            if neighbor is not None:
+                if neighbor["wall"]:
+                    edges[direction] = neighbor["key"]
+                else:
+                    edges.pop(direction, None)
+
+
+def walkthrough_search_targets(graph, searched, boundaries, scanned_boundaries):
+    """Prefer a paid check covering an unscanned, publicly observed opaque edge."""
+    remaining = graph.edges.keys() - searched
+    preferred = {key for key in remaining
+                 if set(boundaries.get(key, {}).values()) - scanned_boundaries}
+    return preferred or remaining
+
+
+class WalkthroughSearch:
+    """A single public paid-search budget across exploration phases/reconnects."""
+    def __init__(self):
+        self.searched = set()
+        self.boundaries = {}
+        self.scanned_boundaries = set()
+
+    def observe(self, view):
+        observe_walkthrough_boundaries(view, self.boundaries)
+
+    def step(self, test, player, current, graph):
+        return test.walkthrough_search_step(
+            player, current, graph, self.searched,
+            boundaries=self.boundaries, scanned_boundaries=self.scanned_boundaries)
+
+
+def assert_walkthrough_history_anchor(test, frame, saved, *, require_visible_endpoint=False):
+    """Tie disclosed history to the exact durable endpoint without revealing it."""
+    test.assertEqual(saved["anchor"]["branch"], frame["branch"])
+    test.assertEqual(saved["anchor"]["tick"], int(observation(frame)["tick"]))
+    test.assertTrue(frame["history"])
+    public_ids = [entry["id"] for entry in frame["history"]]
+    public_set = set(public_ids)
+    durable_ids = [record["entry"]["id"] for record in saved["records"]]
+    test.assertEqual(saved["anchor"]["entry_id"], durable_ids[-1])
+    # Living but undisclosed actors can append later durable entries. Their
+    # history is not the player's public endpoint or a navigation oracle.
+    test.assertEqual([identity for identity in durable_ids if identity in public_set], public_ids)
+    if require_visible_endpoint:
+        test.assertEqual(saved["anchor"]["entry_id"], public_ids[-1])
 
 
 def seal_walkthrough_transport(budget, client, manifest_path, *, closed_processes=()):
@@ -201,9 +289,261 @@ class WalkthroughRouteTests(unittest.TestCase):
         self.assertEqual(walkthrough_route((0, 0), floor, known, set(), {(0, 0)}),
                          [((-1, 0), "west")])
 
+    def test_search_can_precede_redundant_visible_room_interior_without_changing_default(self):
+        floor, known = self.corridor()
+        known.add((4, 0))
+        self.assertIsNotNone(walkthrough_route((0, 0), floor, known, set(), {(0, 0)}))
+        self.assertIsNone(walkthrough_route((0, 0), floor, known, set(), {(0, 0)}, search_first=True))
+
+    def test_search_prefers_new_public_boundary_coverage_without_excluding_other_cells(self):
+        graph = SimpleNamespace(edges={key: {} for key in ("room", "wall", "same-wall", "done")})
+        boundaries = {"wall": {"north": "opaque-one"}, "same-wall": {"east": "opaque-one"},
+                      "done": {"west": "opaque-two"}}
+        self.assertEqual(walkthrough_search_targets(graph, {"done"}, boundaries, set()),
+                         {"wall", "same-wall"})
+        self.assertEqual(walkthrough_search_targets(graph, {"done", "wall"}, boundaries, {"opaque-one"}),
+                         {"room", "same-wall"})
+
+    def test_boundary_memory_uses_visible_adjacent_walls_and_clears_revealed_openings(self):
+        def cell(key, x, y, wall=False, z=0):
+            return {"key": key, "position": {"x": x, "y": y, "z": z}, "wall": wall}
+
+        boundaries = {}
+        observe_walkthrough_boundaries({"visible_cells": [cell("room", 0, 0)]}, boundaries)
+        self.assertEqual(boundaries, {"room": {}})
+        observe_walkthrough_boundaries({"visible_cells": [cell("room", 0, 0),
+            cell("edge", 1, 0, True), cell("remote", 3, 0, True),
+            cell("above", 0, 1, True, z=1)]}, boundaries)
+        self.assertEqual(boundaries, {"room": {"east": "edge"}})
+        observe_walkthrough_boundaries({"visible_cells": [cell("room", 0, 0)]}, boundaries)
+        self.assertEqual(boundaries, {"room": {"east": "edge"}})
+        observe_walkthrough_boundaries({"visible_cells": [cell("room", 0, 0),
+            cell("edge", 1, 0)]}, boundaries)
+        self.assertEqual(boundaries, {"room": {}, "edge": {}})
+
+
+class WalkthroughMovementPolicyTests(unittest.TestCase):
+    def frame(self, key="here", remaining="0", tick=0, *, hostile=False):
+        return {"state": {"observation": {"tick": str(tick),
+            "visible_cells": [{"key": key, "position": {"x": 0, "y": 0, "z": 0},
+                               "wall": False, "stairs_down": False}],
+            "inventory": [], "ground_items": [], "visible_actors": [],
+            "combat": {"dead": False, "actors": [{"actor": "new-foe", "hostile": hostile}],
+                       "own_stats": {"nutrition": {"reserve": 100, "maximum": 100, "hunger": "sated"},
+                                     "conditions": [{"condition": {"id": "rogue.bear_trap"},
+                                                     "phase": "active", "remaining_ticks": remaining}]}}}}}
+
+    def graph(self):
+        return SimpleNamespace(edges={"here": {}, "destination": {}}, observe=lambda _: None,
+                               route_through=lambda *_: [("destination", "east")])
+
+    def test_one_paid_wait_returns_fresh_state_without_replaying_the_move(self):
+        driver = RoguePlayableProcesses()
+        # An ordinary move remains the valid baseline at this actual caller.
+        ordinary, destination = self.frame(), self.frame("destination", tick=100)
+        with patch.object(driver, "settled_action", return_value=destination) as action:
+            self.assertEqual(driver.disclosed_step(None, ordinary, "east"), (destination, True))
+        action.assert_called_once_with(None, {"type": "move", "direction": "east"}, survive=True)
+        current, refreshed = self.frame(remaining="200"), self.frame(remaining="100", tick=100)
+        with patch.object(driver, "settled_action", return_value=refreshed) as action:
+            self.assertEqual(driver.disclosed_step(None, current, "east"), (refreshed, False))
+        action.assert_called_once_with(None, {"type": "wait"}, survive=True)
+
+    def test_revisit_waits_until_expiry_and_still_visits_the_required_key(self):
+        driver = RoguePlayableProcesses()
+        current = self.frame(remaining="200")
+        after = [self.frame(remaining="100", tick=100), self.frame(tick=200),
+                 self.frame("destination", tick=300)]
+        with patch.object(driver, "settled_action", side_effect=after) as action:
+            result, eaten = driver.revisit_cleared_floor(
+                None, current, {}, {"destination"}, {"here"}, self.graph())
+        self.assertEqual((result, eaten), (after[-1], 0))
+        self.assertEqual([call.args[1] for call in action.call_args_list],
+                         [{"type": "wait"}, {"type": "wait"}, {"type": "move", "direction": "east"}])
+
+    def test_revisit_reobserves_new_hostility_before_any_cached_step(self):
+        driver = RoguePlayableProcesses()
+        with patch.object(driver, "settled_action", return_value=self.frame(tick=100, hostile=True)) as action:
+            with self.assertRaisesRegex(AssertionError, "gained a hostile"):
+                driver.revisit_cleared_floor(None, self.frame(remaining="100"), {},
+                                             {"destination"}, {"here"}, self.graph())
+        action.assert_called_once_with(None, {"type": "wait"}, survive=True)
+
+    def test_unending_restraint_exhausts_the_same_paid_action_bound(self):
+        driver = RoguePlayableProcesses()
+        current = self.frame(remaining="100")
+        with patch.object(driver, "settled_action", return_value=current) as action:
+            with self.assertRaisesRegex(AssertionError, "2500 paid movement-action bound"):
+                driver.revisit_cleared_floor(None, current, {}, {"destination"}, {"here"}, self.graph())
+        self.assertEqual(action.call_count, 2500)
+        self.assertTrue(all(call.args[1] == {"type": "wait"} for call in action.call_args_list))
+
+    def test_revisit_uses_checkpoint_replacement_client_and_current_frame(self):
+        driver = RoguePlayableProcesses()
+        original, replacement = object(), object()
+        current = self.frame()
+        refreshed = self.frame(remaining="100", tick=100)
+        released, arrived = self.frame(tick=200), self.frame("destination", tick=300)
+        calls = []
+
+        def checkpoint(client, frame):
+            calls.append((client, frame))
+            return (replacement, refreshed) if len(calls) == 1 else (client, frame)
+
+        with patch.object(driver, "settled_action", side_effect=[released, arrived]) as action:
+            result, eaten = driver.revisit_cleared_floor(
+                original, current, {}, {"destination"}, {"here"}, self.graph(),
+                checkpoint=checkpoint)
+        self.assertEqual((result, eaten), (arrived, 0))
+        self.assertEqual(calls, [(original, current), (replacement, released)])
+        self.assertEqual([call.args for call in action.call_args_list],
+                         [(replacement, {"type": "wait"}),
+                          (replacement, {"type": "move", "direction": "east"})])
+
+    def test_exhausted_route_pays_search_then_opens_and_replans_a_new_door(self):
+        from copy import deepcopy
+        driver, searched, graph = RoguePlayableProcesses(), set(), DisclosedFloorGraph()
+        current = self.frame()
+        current["state"]["observation"]["self_target"] = "player"
+        graph.observe(current["state"])
+        found = deepcopy(current)
+        found["state"]["observation"]["tick"] = "100"
+        found["state"]["observation"]["visible_cells"].append({
+            "key": "gate", "position": {"x": 1, "y": 0, "z": 0}, "wall": False,
+            "stairs_down": False, "door": {"id": "new-door", "open": False, "reachable": True}})
+        opened = deepcopy(found)
+        opened["state"]["observation"]["tick"] = "200"
+        opened["state"]["observation"]["visible_cells"][1]["door"]["open"] = True
+        arrived = self.frame("gate", tick=300)
+        with patch.object(driver, "settled_action", side_effect=[found, opened, arrived]) as action, \
+                patch.object(driver, "request") as query:
+            current, moved = driver.walkthrough_search_step(None, current, graph, searched)
+            self.assertEqual((current, moved, searched), (found, None, {"here"}))
+            graph.observe(current["state"])
+            current, moved = driver.walkthrough_search_step(None, current, graph, searched)
+            self.assertEqual((current, moved), (opened, None))
+            current, moved = driver.walkthrough_search_step(None, current, graph, searched)
+            self.assertEqual((current, moved), (arrived, "east"))
+            query.assert_not_called()
+        self.assertEqual([call.args[1] for call in action.call_args_list], [
+            {"type": "use_ability", "id": "rogue.search", "invocation": {
+                "aim": {"kind": "actor_target", "target": "player"}, "weapon": {"kind": "default"}},
+             "supplies": {"kind": "carried"}},
+            {"type": "set_door", "door": "new-door", "open": True},
+            {"type": "move", "direction": "east"}])
+
+    def test_failed_search_has_one_paid_attempt_per_cell_even_after_client_replacement(self):
+        driver, searched, graph = RoguePlayableProcesses(), set(), DisclosedFloorGraph()
+        current, unchanged = self.frame(), self.frame(tick=100)
+        current["state"]["observation"]["self_target"] = "player"
+        graph.observe(current["state"])
+        with patch.object(driver, "settled_action", return_value=unchanged) as action:
+            self.assertEqual(driver.walkthrough_search_step(object(), current, graph, searched),
+                             (unchanged, None))
+            with self.assertRaisesRegex(AssertionError, "paid Search sweep exhausted"):
+                driver.walkthrough_search_step(object(), unchanged, graph, searched)
+        self.assertEqual(action.call_count, 1)
+
+    def test_stair_approach_reuses_paid_search_then_opens_and_replans_after_reconnect(self):
+        from copy import deepcopy
+        driver, search, graph = RoguePlayableProcesses(), WalkthroughSearch(), DisclosedFloorGraph()
+        original, replacement = object(), object()
+        current = self.frame()
+        current["state"]["observation"]["self_target"] = "player"
+        found = deepcopy(current)
+        found["state"]["observation"]["tick"] = "100"
+        found["state"]["observation"]["visible_cells"].append({
+            "key": "gate", "position": {"x": 1, "y": 0, "z": 0}, "wall": False,
+            "stairs_down": True, "door": {"id": "stair-door", "open": False, "reachable": True}})
+        opened = deepcopy(found)
+        opened["state"]["observation"]["tick"] = "200"
+        opened["state"]["observation"]["visible_cells"][1]["door"]["open"] = True
+        arrived = self.frame("gate", tick=300)
+        arrived["state"]["observation"]["visible_cells"][0]["stairs_down"] = True
+
+        def checkpoint(player, frame):
+            return (replacement if search.searched else player), frame
+
+        with patch.object(driver, "settled_action", side_effect=[found, opened, arrived]) as action:
+            self.assertEqual(driver.walk_to_stairs(
+                original, current, graph, checkpoint=checkpoint, search=search), arrived)
+        self.assertEqual(search.searched, {"here"})
+        self.assertEqual([call.args[0] for call in action.call_args_list],
+                         [original, replacement, replacement])
+        self.assertEqual([call.args[1]["type"] for call in action.call_args_list],
+                         ["use_ability", "set_door", "move"])
+
+    def test_stair_phase_cannot_reset_a_search_already_paid_during_clearing(self):
+        driver, search, graph = RoguePlayableProcesses(), WalkthroughSearch(), DisclosedFloorGraph()
+        current, unchanged = self.frame(), self.frame(tick=100)
+        current["state"]["observation"]["self_target"] = "player"
+        graph.observe(current["state"])
+        search.observe(observation(current))
+        with patch.object(driver, "settled_action", return_value=unchanged) as action:
+            self.assertEqual(search.step(driver, object(), current, graph), (unchanged, None))
+            with self.assertRaisesRegex(AssertionError, "paid Search sweep exhausted"):
+                driver.walk_to_stairs(object(), unchanged, graph, search=search)
+        self.assertEqual(action.call_count, 1)
+
+    def test_one_publicly_needed_meal_spans_walkthrough_phases_and_preserves_respec_stock(self):
+        from copy import deepcopy
+        driver, meals = RoguePlayableProcesses(), WalkthroughRations()
+        current = self.frame()
+        view = current["state"]["observation"]
+        view["inventory"] = [{"id": "food", "quantity": "2", "known_supply": {"id": "ration"}}]
+        view["interactions"] = {"inventory": [{"item": "food", "edible": True}]}
+        with patch.object(driver, "settled_action") as action:
+            self.assertIs(meals.nourish(driver, None, current), current)
+            action.assert_not_called()
+        hungry = deepcopy(current)
+        hungry["state"]["observation"]["combat"]["own_stats"]["nutrition"].update(
+            reserve=20, hunger="hungry")
+        fed = deepcopy(current)
+        fed["state"]["observation"]["inventory"][0]["quantity"] = "1"
+        fed["state"]["observation"]["tick"] = "100"
+        with patch.object(driver, "settled_action", return_value=fed) as action:
+            self.assertIs(meals.nourish(driver, object(), hungry), fed)
+            self.assertEqual(meals.eaten, 1)
+            # The same budget object crosses controller/transport phases.
+            with self.assertRaisesRegex(AssertionError, "one-ration meal budget"):
+                meals.nourish(driver, object(), hungry)
+        self.assertEqual(action.call_count, 1)
+        self.assertEqual(action.call_args.args[1], {"type": "eat", "item": "food"})
+        self.assertEqual(carried_stock(fed, "ration") + meals.eaten, 2)
+        last = deepcopy(hungry)
+        last["state"]["observation"]["inventory"][0]["quantity"] = "1"
+        with patch.object(driver, "settled_action") as action:
+            with self.assertRaisesRegex(AssertionError, "preserve the respec ration"):
+                WalkthroughRations().nourish(driver, None, last)
+            action.assert_not_called()
+
 
 class WalkthroughTransportTests(unittest.TestCase):
     """Pure local file fixtures; never launch a process or compile a package."""
+    def test_active_floor_anchor_accepts_hidden_tail_but_keeps_visible_subsequence(self):
+        from copy import deepcopy
+        frame = {"branch": "same", "state": {"observation": {"tick": "300"}},
+                 "history": [{"id": "visible-one"}, {"id": "visible-two"}]}
+        saved = {"anchor": {"branch": "same", "tick": 300, "entry_id": "visible-two"},
+                 "records": [{"entry": {"id": key}} for key in
+                             ["earlier", "visible-one", "hidden-middle", "visible-two"]]}
+        assert_walkthrough_history_anchor(self, frame, saved, require_visible_endpoint=True)
+        hidden_tail = deepcopy(saved)
+        hidden_tail["records"].append({"entry": {"id": "hidden-later"}})
+        hidden_tail["anchor"]["entry_id"] = "hidden-later"
+        assert_walkthrough_history_anchor(self, frame, hidden_tail)
+        with self.assertRaises(AssertionError):
+            assert_walkthrough_history_anchor(self, frame, hidden_tail, require_visible_endpoint=True)
+        for history in ([{"id": "missing"}], list(reversed(frame["history"])),
+                        [frame["history"][0]] * 2):
+            with self.subTest(history=history), self.assertRaises(AssertionError):
+                assert_walkthrough_history_anchor(self, {**frame, "history": history}, hidden_tail)
+        for anchor in ({"branch": "other"}, {"tick": 301}, {"entry_id": "missing"}):
+            malformed = deepcopy(hidden_tail)
+            malformed["anchor"].update(anchor)
+            with self.subTest(anchor=anchor), self.assertRaises(AssertionError):
+                assert_walkthrough_history_anchor(self, frame, malformed)
+
     def test_playable_opening_returns_without_submitting_the_old_move(self):
         from copy import deepcopy
         driver = RoguePlayableProcesses()
@@ -475,17 +815,78 @@ class RogueChecks:
         return settle_rogue_action(self, player, frame, survive=survive)
 
     def disclosed_step(self, player, current, direction, *, survive=True):
-        """Do one paid opening or one move, never replay a move after opening."""
-        action = disclosed_step_action(observation(current), direction)
+        """Do one paid wait, opening or move, then return the fresh observation."""
+        action = disclosed_step_action(observation(current), direction, wait_for_restraint=True)
         origin = underfoot(current["state"])["key"]
         result = self.settled_action(player, action, survive=survive)
         moved = action["type"] == "move"
         if not moved and not observation(result)["combat"]["dead"]:
             self.assertEqual(underfoot(result["state"])["key"], origin,
-                             "Opening a disclosed entrance must not move the actor")
+                             "A paid restraint wait or opening must not move the actor")
         return result, moved
 
-    def clear_first_floor(self, player):
+    def walkthrough_search_step(self, player, current, floor_graph, searched, *,
+                                boundaries=None, scanned_boundaries=None):
+        """An exhausted public route gets at most one paid Search per reached cell."""
+        here = underfoot(current["state"])["key"]
+        remaining = floor_graph.edges.keys() - searched
+        targets = (remaining if boundaries is None else walkthrough_search_targets(
+            floor_graph, searched, boundaries, scanned_boundaries))
+        route = floor_graph.route_to_any(here, targets)
+        if route is None and targets != remaining:
+            route = floor_graph.route_to_any(here, remaining)
+        self.assertIsNotNone(route, "The disclosed-floor paid Search sweep exhausted its cells")
+        if not route:
+            searched.add(here)
+            if boundaries is not None:
+                scanned_boundaries.update(boundaries.get(here, {}).values())
+            view = observation(current)
+            result = self.settled_action(player, {
+                "type": "use_ability", "id": "rogue.search", "invocation": {
+                    "aim": {"kind": "actor_target", "target": view["self_target"]},
+                    "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}})
+            self.assertGreater(int(observation(result)["tick"]), int(view["tick"]))
+            self.assertEqual(underfoot(result["state"])["key"], here)
+            return result, None
+        key, direction = route[0]
+        result, moved = self.disclosed_step(player, current, direction)
+        if moved:
+            self.assertEqual(underfoot(result["state"])["key"], key)
+        return result, direction if moved else None
+
+    def checkpoint_walkthrough_transport(self, player, server, budget, label, *, closed_processes=(),
+                                         require_visible_endpoint=False):
+        """Losslessly seal stopped transport, then verify exact saved authority.
+
+        This runs only between settled driver actions. Saved evidence is an
+        equality oracle here, never an input to navigation or combat decisions.
+        """
+        before = self.request(player, {"type": "snapshot"})
+        self.flush_save()
+        saved = read_authoritative_evidence(self.save, 1)
+        assert_walkthrough_history_anchor(self, before, saved,
+                                         require_visible_endpoint=require_visible_endpoint)
+        (self.directory / f"{label}-authority.json").write_text(
+            json.dumps(saved, sort_keys=True) + "\n", encoding="utf-8")
+        server.stop(save=False)
+        player.stop()
+        seal_walkthrough_transport(budget, player, self.directory / f"{label}-seal.json",
+                                   closed_processes=(server, *closed_processes))
+        server = self.server("--checkpoint-interval", 1, seed=None)
+        player, reopened = self.client(omit_memory=True)
+        for field in ("state", "history", "branch"):
+            self.assertEqual(reopened[field], before[field])
+        # Sequence is attachment-local; simulation tick spans reconnects.
+        self.assertEqual(reopened["cursor"]["tick"], before["cursor"]["tick"])
+        (self.directory / f"{label}-cursors.json").write_text(
+            json.dumps({"before": before["cursor"], "reopened": reopened["cursor"]}) + "\n",
+            encoding="utf-8")
+        self.flush_save()
+        self.assertEqual(read_authoritative_evidence(self.save, 1), saved,
+                         "Transport rollover changed exact durable authority")
+        return server, player, reopened
+
+    def clear_first_floor(self, player, *, checkpoint=None, meals=None, search=None):
         """Choose the first talent, then fight and collect through ordinary play."""
         growth = self.overview(player)
         self.assertEqual(growth["points"], {"earned": "1", "spent": "0", "unspent": "1"})
@@ -496,6 +897,7 @@ class RogueChecks:
         self.assertIn("rattling_blow", abilities(current))
         at, visited, floor, stock_cells = (0, 0), set(), set(), set()
         known_cells = set()
+        search = search if search is not None else WalkthroughSearch()
         seen_foes = {}
         defeated = {}
         collected = Counter()
@@ -505,9 +907,12 @@ class RogueChecks:
         # The bound is the same disclosed-cell exploration budget as the floor
         # harness. It is a failure deadline, never an ignored adverse seed.
         for _ in range(2500):
+            if checkpoint is not None:
+                player, current = checkpoint(player, current)
             view = observation(current)
             visited.add(at)
             floor_graph.observe(current["state"])
+            search.observe(view)
             cleared_cells.add(underfoot(current["state"])["key"])
             hostile = {row["actor"] for row in view["combat"]["actors"] if row["hostile"]}
             foes = [row for row in view["visible_actors"] if row["id"] in hostile]
@@ -572,6 +977,11 @@ class RogueChecks:
                 position = reachable["position"]
                 stock_cells.discard((at[0] + position["x"], at[1] + position["y"]))
                 continue
+            if meals is not None:
+                fed = meals.nourish(self, player, current)
+                if fed is not current:
+                    current = fed
+                    continue
             # This positive seed must actually defeat four disclosed foes. XP
             # depends on the rolled production roster and is never a route oracle.
             if len(defeated) == 4 and collected == {"bandage": 2, "ration": 1}:
@@ -580,8 +990,17 @@ class RogueChecks:
             for foe in foes:
                 position = foe["position"]
                 targets.add((at[0] + position["x"], at[1] + position["y"]))
-            route = walkthrough_route(at, floor, known_cells, targets, visited)
-            self.assertIsNotNone(route, "No disclosed route to remaining foes, supplies or unexplored cells")
+            route = walkthrough_route(at, floor, known_cells, targets, visited, search_first=True)
+            if route is None:
+                # A failed passive check is not proof the reachable floor is
+                # empty. Search only from disclosed cells, once per reached key;
+                # failed checks and all travel still spend this same action bound.
+                current, direction = search.step(self, player, current, floor_graph)
+                if direction is not None:
+                    dx, dy, _ = next(row for row in DisclosedFloorGraph.directions
+                                     if row[2] == direction)
+                    at = (at[0] + dx, at[1] + dy)
+                continue
             target, direction = route[0]
             before = underfoot(current["state"])["key"]
             current, moved = self.disclosed_step(player, current, direction)
@@ -602,13 +1021,18 @@ class RogueChecks:
             flush=True)
         return current, growth, seen_foes, collected_cells, cleared_cells, floor_graph
 
-    def walk_to_stairs(self, player, current, floor_graph=None):
+    def walk_to_stairs(self, player, current, floor_graph=None, *, checkpoint=None, meals=None,
+                       search=None):
         """Head for disclosed stairs, defending without a full-floor loot tour."""
         floor_graph = floor_graph or DisclosedFloorGraph()
         visited = set()
         for _ in range(2500):
+            if checkpoint is not None:
+                player, current = checkpoint(player, current)
             view = observation(current)
             floor_graph.observe(current["state"])
+            if search is not None:
+                search.observe(view)
             here = underfoot(current["state"])
             visited.add(here["key"])
             if here["stairs_down"]:
@@ -620,9 +1044,17 @@ class RogueChecks:
                 current = self.settled_action(player, {"type": "use_ability", "id": "basic_melee",
                     "invocation": {"aim": {"kind": "actor_target", "target": nearby["id"]}, "weapon": {"kind": "default"}}})
                 continue
+            if meals is not None:
+                fed = meals.nourish(self, player, current)
+                if fed is not current:
+                    current = fed
+                    continue
             route = floor_graph.route_to_any(here["key"], floor_graph.stairs_down)
             if route is None:
                 route = floor_graph.route_to_any(here["key"], floor_graph.edges.keys() - visited)
+            if route is None and search is not None:
+                current, _ = search.step(self, player, current, floor_graph)
+                continue
             self.assertTrue(route, "No disclosed route to stairs or an unexplored approach")
             key, direction = route[0]
             current, moved = self.disclosed_step(player, current, direction)
@@ -632,10 +1064,12 @@ class RogueChecks:
                              "Disclosed stair-approach step did not reach its observed key")
         self.fail("The ordinary stair approach exceeded its 2500-action bound")
 
-    def revisit_cleared_floor(self, player, current, seen_foes, collected_cells, cleared_cells, floor_graph):
+    def revisit_cleared_floor(self, player, current, seen_foes, collected_cells, cleared_cells, floor_graph,
+                              *, checkpoint=None, meals=None):
         """Revisit every recorded combat-walkthrough and collected-supply key."""
         initial_rations = carried_stock(current, "ration")
-        eaten = 0
+        meals = meals if meals is not None else WalkthroughRations()
+        initial_eaten = meals.eaten
         required = collected_cells | cleared_cells
         here = underfoot(current["state"])["key"]
         floor_graph.observe(current["state"])
@@ -646,33 +1080,9 @@ class RogueChecks:
         self.assertLessEqual(len(route), min(2500, 2 * (len(floor_graph.edges) - 1)),
                              "The required-key revisit exceeded its disclosed-tree bound")
         visited_keys = set()
-        for step in [None, *route]:
-            if step is not None:
-                view = observation(current)
-                nutrition = view["combat"]["own_stats"]["nutrition"]
-                if ((eaten == 0 and nutrition["reserve"] <= nutrition["maximum"] // 2)
-                        or nutrition["hunger"] in ("hungry", "weak", "empty")):
-                    # Exercise one real meal during the recorded-cell audit,
-                    # even when disclosed-frontier routing avoids hunger.
-                    # Reserve the second ration for the later paid respec.
-                    self.assertEqual(eaten, 0, "The revisit exceeded its one-ration meal budget")
-                    before = carried_stock(current, "ration")
-                    self.assertGreater(before, 1, "The revisit must preserve the respec ration")
-                    edible = {row["item"] for row in view["interactions"]["inventory"] if row["edible"]}
-                    meals = [item for item in view["inventory"] if item["id"] in edible
-                             and (item.get("known_supply") or {}).get("id") == "ration"]
-                    self.assertEqual(len(meals), 1, "Expected one disclosed carried ration stack")
-                    meal_key = underfoot(current["state"])["key"]
-                    current = self.settled_action(player, {"type": "eat", "item": meals[0]["id"]})
-                    eaten += 1
-                    self.assertEqual(carried_stock(current, "ration"), before - 1)
-                    self.assertGreater(observation(current)["combat"]["own_stats"]["nutrition"]["reserve"],
-                                       nutrition["reserve"])
-                    self.assertEqual(underfoot(current["state"])["key"], meal_key)
-                key, direction = step
-                current = self.settled_action(player, {"type": "move", "direction": direction})
-                self.assertEqual(underfoot(current["state"])["key"], key,
-                                 "The revisit did not reach its recorded disclosed key")
+        movement_actions = 0
+
+        def audit_view():
             view = observation(current)
             visited_keys.add(underfoot(current["state"])["key"])
             self.assertFalse(set(seen_foes).intersection(row["id"] for row in view["visible_actors"]),
@@ -681,12 +1091,34 @@ class RogueChecks:
                              "The cleared first floor gained a hostile")
             self.assertFalse(any(row["item"].get("known_supply") for row in view["ground_items"]),
                              "Collected first-floor supply stock reappeared")
+
+        for step in [None, *route]:
+            if step is not None:
+                current = meals.nourish(self, player, current, prefer_half=True)
+                audit_view()  # A paid meal can disclose a changed situation.
+                key, direction = step
+                while True:
+                    if checkpoint is not None:
+                        player, current = checkpoint(player, current)
+                    self.assertLess(movement_actions, 2500,
+                                    "The revisit exceeded its 2500 paid movement-action bound")
+                    movement_actions += 1
+                    current, moved = self.disclosed_step(player, current, direction)
+                    # A wait/open is a full paid action, not permission to replay
+                    # the cached move. Check the fresh disclosure before choosing
+                    # again; a changed condition or hostile must not be ignored.
+                    audit_view()
+                    if moved:
+                        break
+                self.assertEqual(underfoot(current["state"])["key"], key,
+                                 "The revisit did not reach its recorded disclosed key")
+            audit_view()
         self.assertTrue(collected_cells.issubset(visited_keys),
                         "The revisit did not reach every collected supply cell")
         self.assertTrue(cleared_cells.issubset(visited_keys),
                         "The revisit did not retrace every combat-walkthrough cell")
-        self.assertEqual(carried_stock(current, "ration") + eaten, initial_rations)
-        return current, eaten
+        self.assertEqual(carried_stock(current, "ration") + meals.eaten, initial_rations + initial_eaten)
+        return current, meals.eaten
 
     def assert_rogue_population(self, receipt, scope, cause):
         self.assertEqual(receipt["scope"], scope)
@@ -887,14 +1319,31 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                    capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(validated.returncode, 0, validated.stderr)
-        server = self.server("--checkpoint-interval", 64, scenario=package, seed=42)
+        # Current checkpoints let transport-only rollovers verify the entire
+        # durable endpoint. The later interval=0 journal-tail witness is separate.
+        server = self.server("--checkpoint-interval", 1, scenario=package, seed=42)
         closed_transports = []
         # This long driver builds its route from current disclosed observations.
         # Avoid reprinting accumulated map memory on every diagnostic frame.
         player, initial = self.client(omit_memory=True)
+        meals = WalkthroughRations()
+        search = WalkthroughSearch()
+        next_transport_checkpoint, transport_checkpoints = 128, 0
+
+        def checkpoint_transport(client, current):
+            nonlocal player, server, next_transport_checkpoint, transport_checkpoints
+            if budget.requests < next_transport_checkpoint:
+                return client, current
+            transport_checkpoints += 1
+            server, player, current = self.checkpoint_walkthrough_transport(
+                client, server, budget, f"transport-chunk-{transport_checkpoints:03}")
+            next_transport_checkpoint = budget.requests + 128
+            return player, current
+
         initial_rations = carried_stock(initial, "ration")
         self.assertEqual(initial_rations, 1)
-        current, growth, seen_foes, collected_cells, cleared_cells, floor_graph = self.clear_first_floor(player)
+        current, growth, seen_foes, collected_cells, cleared_cells, floor_graph = self.clear_first_floor(
+            player, checkpoint=checkpoint_transport, meals=meals, search=search)
         self.assertEqual(len(seen_foes), 4)
         self.assertTrue(set(seen_foes.values()).issubset(first_floor_foes().values()))
         completed_earned_xp = growth["growth"]["earned_xp"]
@@ -909,8 +1358,8 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual(self.overview(player)["points"], {"earned": "2", "spent": "2", "unspent": "0"})
         current = self.request(player, {"type": "snapshot"})
         self.assertEqual(carried_stock(current, "bandage"), 5)
-        self.assertEqual(carried_stock(current, "ration"), 2)
-        collected_rations = carried_stock(current, "ration") - initial_rations
+        self.assertEqual(carried_stock(current, "ration") + meals.eaten, 2)
+        collected_rations = carried_stock(current, "ration") + meals.eaten - initial_rations
         self.assertEqual(collected_rations, 1)
         self.assertFalse(current["state"]["wizard_game"])
 
@@ -918,7 +1367,8 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         initial_receipts = self.private_receipts()
         self.assertEqual([entry["scope"] for entry in initial_receipts], ["dungeon/1"])
         self.assert_rogue_population(initial_receipts[0], "dungeon/1", "initial")
-        departure = self.walk_to_stairs(player, current, floor_graph)
+        departure = self.walk_to_stairs(
+            player, current, floor_graph, checkpoint=checkpoint_transport, meals=meals, search=search)
         self.assertTrue(underfoot(departure["state"])["stairs_down"])
         departure_key = underfoot(departure["state"])["key"]
         self.assertEqual(self.private_receipts(), initial_receipts,
@@ -969,43 +1419,18 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         returned = self.settled_action(player, {"type": "move", "direction": "up"})
         self.assertEqual(underfoot(returned["state"])["key"], departure_key)
         self.assertEqual(carried_stock(returned, "bandage"), 5)
-        self.assertEqual(carried_stock(returned, "ration"), 2)
+        self.assertEqual(carried_stock(returned, "ration") + meals.eaten, 2)
         self.assertEqual(self.overview(player)["growth"]["earned_xp"], completed_earned_xp)
         self.assertEqual(self.private_receipts(), entered_receipts,
                          "A revisit appended or changed a durable floor-entry receipt")
-        # This fixed logical boundary preserves every emitted frame losslessly.
-        # It reduces retained storage, not diagnostic work or the cumulative
-        # request/tick allowance. Stop authority before controller disconnect.
-        returned = self.request(player, {"type": "snapshot"})
-        self.flush_save()
-        saved = read_authoritative_evidence(self.save, 1)
-        self.assertEqual(saved["anchor"]["branch"], returned["branch"])
-        self.assertTrue(returned["history"])
-        self.assertEqual(saved["anchor"]["entry_id"], returned["history"][-1]["id"])
-        self.assertEqual(saved["anchor"]["tick"], int(observation(returned)["tick"]))
-        self.assertEqual(saved["receipts"], entered_receipts)
-        (self.directory / "walkthrough-authority.json").write_text(
-            json.dumps(saved, sort_keys=True) + "\n", encoding="utf-8")
-        server.stop(save=False)
-        player.stop()
-        seal_walkthrough_transport(budget, player, self.directory / "transport-seal.json",
-                                   closed_processes=(server, *closed_transports))
-        server = self.server("--checkpoint-interval", 1, seed=None)
-        player, reopened = self.client(omit_memory=True)
-        for field in ("state", "history", "branch"):
-            self.assertEqual(reopened[field], returned[field])
-        # StreamCursor.sequence is attachment-local, unlike saved authority.
-        # Keep both exact values; only its simulation tick spans reconnects.
-        self.assertEqual(reopened["cursor"]["tick"], returned["cursor"]["tick"])
-        (self.directory / "transport-cursors.json").write_text(
-            json.dumps({"before": returned["cursor"], "reopened": reopened["cursor"]}) + "\n",
-            encoding="utf-8")
-        self.flush_save()
-        self.assertEqual(read_authoritative_evidence(self.save, 1), saved,
-                         "Transport rollover changed exact durable authority")
-        returned = reopened
+        # Keep the original source-free round-trip seal as an explicit witness.
+        server, player, returned = self.checkpoint_walkthrough_transport(
+            player, server, budget, "transport-round-trip", closed_processes=closed_transports,
+            require_visible_endpoint=True)
+        next_transport_checkpoint = budget.requests + 128
         returned, eaten_rations = self.revisit_cleared_floor(
-            player, returned, seen_foes, collected_cells, cleared_cells, floor_graph)
+            player, returned, seen_foes, collected_cells, cleared_cells, floor_graph,
+            checkpoint=checkpoint_transport, meals=meals)
         self.assertEqual(eaten_rations, 1)
         self.assertEqual(carried_stock(returned, "bandage"), 5)
         self.assertEqual(carried_stock(returned, "ration"), initial_rations + collected_rations - eaten_rations)

@@ -2935,6 +2935,7 @@ fn qualified_role_game(
 }
 fn grant_qualified_readied(game: &mut crate::Game, holder: crate::ActorId, foe: crate::ActorId) {
     game.apply(super::Outcome {
+        resistance: None,
         actor: holder,
         target: foe,
         ability: None,
@@ -3752,6 +3753,7 @@ fn fatal_opening_strike_growth_preserves_paid_frozen_tail_and_recovery() {
         .resources()
         .balance(Resource::Stamina);
     game.apply(super::Outcome {
+        resistance: None,
         actor: ActorId(2),
         target: ActorId(2),
         ability: None,
@@ -3943,6 +3945,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
         .resources()
         .balance(Resource::Stamina);
     game.apply(super::Outcome {
+        resistance: None,
         actor: ActorId(2),
         target: ActorId(2),
         ability: None,

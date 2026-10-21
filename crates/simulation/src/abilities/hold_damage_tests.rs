@@ -498,6 +498,7 @@ fn budget_descriptors(document: &mut RulesetDocument) -> Vec<crate::content_ids:
         .map(|index| {
             let id = crate::content_ids::DescriptorId::new(format!("hold_budget_{index}")).unwrap();
             document.descriptors.push(NamedDescriptor {
+                resistance: None,
                 id: id.clone(),
                 name: format!("Hold budget {index}"),
             });

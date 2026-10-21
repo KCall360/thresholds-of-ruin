@@ -62,6 +62,44 @@ pub struct HiddenTraps {
     pub rust_amount: u32,
     pub sleep_condition: String,
     pub sleep_duration: u64,
+    #[serde(default)]
+    pub sleep_exposure: Option<String>,
+    #[serde(default)]
+    pub hazards: Option<HazardTraps>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HazardTraps {
+    pub bear_condition: String,
+    pub bear_duration: u64,
+    pub arrow_ammunition: String,
+    pub attack_bonus: i32,
+    pub poison_exposure: String,
+    pub avoidance_dc: i32,
+}
+impl HazardTraps {
+    fn valid(&self) -> bool {
+        tor_world::Concealment {
+            dc: self.avoidance_dc,
+        }
+        .valid()
+            && tor_world::TrapKind::BearTrap {
+                condition: self.bear_condition.clone(),
+                duration: self.bear_duration,
+            }
+            .valid()
+            && tor_world::TrapKind::Arrow {
+                attack_bonus: self.attack_bonus,
+                ammunition: self.arrow_ammunition.clone(),
+            }
+            .valid()
+            && tor_world::TrapKind::PoisonDart {
+                attack_bonus: self.attack_bonus,
+                exposure: self.poison_exposure.clone(),
+            }
+            .valid()
+    }
 }
 
 impl GridRoomsPreset {
@@ -247,6 +285,7 @@ pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
                 extra_order = 3;
                 config.count[0] <= config.count[1]
                     && config.count[1] <= 64
+                    && config.hazards.as_ref().is_none_or(HazardTraps::valid)
                     && tor_world::Concealment { dc: config.dc }.valid()
                     && tor_world::TrapKind::Rust {
                         slot: config.rust_slot.clone(),
@@ -256,6 +295,7 @@ pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
                     && tor_world::TrapKind::SleepingGas {
                         condition: config.sleep_condition.clone(),
                         duration: config.sleep_duration,
+                        exposure: config.sleep_exposure.clone(),
                     }
                     .valid()
             }
@@ -806,6 +846,7 @@ mod tests {
                 grid: [1, 1],
                 size,
                 recipe: "rooms".into(),
+                gravity: None,
                 zone: None,
             };
             for seed in [0, 1, 42] {
@@ -1231,6 +1272,8 @@ mod tests {
                     rust_amount: 1,
                     sleep_condition: "rogue.sleep".into(),
                     sleep_duration: 200,
+                    sleep_exposure: None,
+                    hazards: None,
                 },
             },
         };
@@ -1304,6 +1347,8 @@ mod tests {
                 rust_amount: 1,
                 sleep_condition: "rogue.sleep".into(),
                 sleep_duration: 200,
+                sleep_exposure: None,
+                hazards: None,
             }),
         }
         .to_recipe()
@@ -1407,6 +1452,92 @@ mod tests {
         recipe.stages[1].id = "slots".into();
         group.members[8] = group.members[0];
         assert!(materialize("floor-1", &group, &recipe, defs, 42).is_err());
+    }
+    #[test]
+    fn physical_trapdoor_endpoints_are_order_independent_clear_and_absent_at_terminal_depth() {
+        use crate::procedural_world::{Domain, FamilyKind, WorldFamily};
+        let family = WorldFamily {
+            kind: FamilyKind::GridChain,
+            version: 1,
+            base_region: 1,
+            domain: Domain::Finite { count: 2 },
+            grid: [2, 1],
+            size: [10, 8, 2],
+            recipe: "hazards".into(),
+            zone: None,
+            gravity: Some([0, 0, -1]),
+        };
+        let recipe = GridRoomsPreset {
+            version: 1,
+            room_width: [4, 6],
+            room_height: [3, 4],
+            extra_connections: [0, 0],
+            lighting: None,
+            secret_entrances: None,
+            hidden_traps: Some(HiddenTraps {
+                count: [2, 2],
+                dc: 12,
+                rust_slot: "body_armor".into(),
+                rust_amount: 1,
+                sleep_condition: "sleep".into(),
+                sleep_duration: 200,
+                sleep_exposure: None,
+                hazards: Some(HazardTraps {
+                    bear_condition: "bear".into(),
+                    bear_duration: 300,
+                    arrow_ammunition: "arrow".into(),
+                    attack_bonus: 0,
+                    poison_exposure: "poison".into(),
+                    avoidance_dc: 12,
+                }),
+            }),
+        }
+        .to_recipe()
+        .unwrap();
+        let mut doors = 0;
+        for seed in 0..32 {
+            let build = |depth| {
+                let group = family.group("grid", seed, depth).unwrap();
+                let definitions = group
+                    .members
+                    .iter()
+                    .map(|id| family.describe("grid", seed, *id).unwrap().unwrap())
+                    .collect();
+                materialize(&format!("grid/{depth}"), &group, &recipe, definitions, seed).unwrap()
+            };
+            // Build destinations first: there is no previous-depth mutable lookup.
+            let lower = build(2);
+            let upper = build(1);
+            assert_eq!(
+                serde_json::to_value(&upper).unwrap(),
+                serde_json::to_value(build(1)).unwrap()
+            );
+            assert!(lower
+                .values()
+                .all(|region| region.trapdoor_destination.is_none()
+                    && region.traps.iter().all(|trap| !matches!(
+                        trap.kind,
+                        crate::scenario_package::TrapKind::TrapDoor { .. }
+                    ))));
+            for source in upper.values() {
+                for trap in &source.traps {
+                    if let crate::scenario_package::TrapKind::TrapDoor { destination, open } =
+                        &trap.kind
+                    {
+                        doors += 1;
+                        assert!(!open);
+                        assert_eq!(destination.region.0, source.id + family.slots());
+                        let target = &lower[&destination.region.0];
+                        let landing = target.anchors[&destination.name];
+                        assert_eq!(landing[2], target.size[2] - 1);
+                        assert!((0..target.size[2])
+                            .all(|z| !target.walls.contains(&[landing[0], landing[1], z])));
+                        assert!(!target.traps.iter().any(|trap| trap.at[..2] == landing[..2]));
+                    }
+                }
+            }
+        }
+        assert!(doors > 0, "witness actual generated trapdoors");
     }
 }
 

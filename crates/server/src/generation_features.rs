@@ -1,4 +1,5 @@
-//! Independent, bounded feature stages. They never mutate geometry or its streams.
+//! Independent bounded feature stages. Physical trapdoor landing anchors are
+//! selected from existing room clearance, without rerolling carving streams.
 use super::*;
 
 /// A region owns one full maximum-sized slot's worth of feature identities.
@@ -160,6 +161,57 @@ pub(super) fn place_concealed_features(
                 }
             }
             Operation::HiddenTraps { config } => {
+                let mut landing_cells = BTreeSet::new();
+                if config.hazards.is_some() {
+                    // Each source region owns an ordinal namespace on the next
+                    // depth's same slot. Generate all possible target anchors
+                    // independently of whether the predecessor was ever built.
+                    for (slot, room) in rooms.iter().enumerate() {
+                        let region = run.group.members[slot];
+                        let offset = (
+                            (slot % columns) as i32 * size[0],
+                            (slot / columns) as i32 * size[1],
+                        );
+                        let mut available: Vec<_> = room
+                            .iter()
+                            .copied()
+                            .filter(|&(x, y)| !reserved.contains(&(x + offset.0, y + offset.1)))
+                            .collect();
+                        available.sort();
+                        let mut landing_rng = stream(
+                            run.seed,
+                            run.identity,
+                            run.group,
+                            run.recipe,
+                            stage,
+                            &format!("landing/{region}"),
+                        )?;
+                        for i in (1..available.len()).rev() {
+                            let j = landing_rng.range(0, i as i32) as usize;
+                            available.swap(i, j);
+                        }
+                        if available.len() < config.count[1] as usize {
+                            return Err(fail("Trapdoor landing capacity exceeds room clearance"));
+                        }
+                        for (ordinal, (x, y)) in available
+                            .into_iter()
+                            .take(config.count[1] as usize)
+                            .enumerate()
+                        {
+                            let name = format!("trapdoor_landing_{ordinal}");
+                            if definitions
+                                .get_mut(&region)
+                                .expect("member")
+                                .anchors
+                                .insert(name, [x, y, size[2] - 1])
+                                .is_some()
+                            {
+                                return Err(fail("Duplicate trapdoor landing anchor"));
+                            }
+                            landing_cells.insert((x + offset.0, y + offset.1));
+                        }
+                    }
+                }
                 // Room interiors are disjoint from entrance mouths, so adding or
                 // retuning secret entrances cannot reroll trap placement.
                 let mut candidates: Vec<_> = rooms
@@ -172,7 +224,7 @@ pub(super) fn place_concealed_features(
                         );
                         room.iter().map(move |&(x, y)| (x + offset.0, y + offset.1))
                     })
-                    .filter(|at| !reserved.contains(at))
+                    .filter(|at| !reserved.contains(at) && !landing_cells.contains(at))
                     .collect();
                 candidates.sort();
                 candidates.dedup();
@@ -200,6 +252,7 @@ pub(super) fn place_concealed_features(
                     let (region, at) = to_local(candidate);
                     let ordinal = ordinals.entry(region).or_default();
                     let id = identity(bases.traps, region, *ordinal)?;
+                    let trap_ordinal = *ordinal;
                     *ordinal += 1;
                     let mut family = stream(
                         run.seed,
@@ -209,22 +262,59 @@ pub(super) fn place_concealed_features(
                         stage,
                         &format!("family/{region}/{}/{}", at[0], at[1]),
                     )?;
-                    let kind = if family.next() & 1 == 0 {
-                        crate::scenario_package::TrapKind::Rust {
+                    use crate::scenario_package::TrapKind;
+                    let mut kinds = vec![
+                        TrapKind::Rust {
                             slot: config.rust_slot.clone(),
                             amount: config.rust_amount,
-                        }
-                    } else {
-                        crate::scenario_package::TrapKind::SleepingGas {
+                        },
+                        TrapKind::SleepingGas {
                             condition: config.sleep_condition.clone(),
                             duration: config.sleep_duration,
+                            exposure: config.sleep_exposure.clone(),
+                        },
+                    ];
+                    let kind = if let Some(hazards) = &config.hazards {
+                        kinds.extend([
+                            TrapKind::Arrow {
+                                attack_bonus: hazards.attack_bonus,
+                                ammunition: hazards.arrow_ammunition.clone(),
+                            },
+                            TrapKind::BearTrap {
+                                condition: hazards.bear_condition.clone(),
+                                duration: hazards.bear_duration,
+                            },
+                            TrapKind::Teleport {},
+                            TrapKind::PoisonDart {
+                                attack_bonus: hazards.attack_bonus,
+                                exposure: hazards.poison_exposure.clone(),
+                            },
+                            TrapKind::Mysterious {},
+                        ]);
+                        if let Some(destination) = definitions[&region].trapdoor_destination {
+                            kinds.push(TrapKind::TrapDoor {
+                                destination: tor_world::NamedAnchor {
+                                    region: tor_world::RegionId(destination),
+                                    name: format!("trapdoor_landing_{trap_ordinal}"),
+                                },
+                                open: false,
+                            });
                         }
+                        kinds.remove(family.range(0, kinds.len() as i32 - 1) as usize)
+                    } else {
+                        // Existing two-family authored recipes retain their exact
+                        // stream and identity behavior until they opt into hazards.
+                        kinds.remove((family.next() & 1) as usize)
                     };
                     definitions.get_mut(&region).expect("member").traps.push(
                         crate::scenario_package::Trap {
                             id,
                             at,
                             dc: config.dc,
+                            avoidance_dc: config
+                                .hazards
+                                .as_ref()
+                                .map(|hazards| hazards.avoidance_dc),
                             kind,
                         },
                     );

@@ -359,8 +359,16 @@ impl Game {
                     && selected == reference.item
                     && item.location == ItemLocation::Carried(plan.actor())
                     && match plan {
-                        Plan::Drink { .. } => item.spec.consumable.is_some(),
-                        Plan::Read { .. } => item.spec.readable.is_some(),
+                        Plan::Drink { descriptors, .. } => item
+                            .spec
+                            .consumable
+                            .as_ref()
+                            .is_some_and(|spec| &spec.descriptors == descriptors),
+                        Plan::Read { descriptors, .. } => item
+                            .spec
+                            .readable
+                            .as_ref()
+                            .is_some_and(|spec| &spec.descriptors == descriptors),
                         Plan::Zap {
                             charges,
                             ray,

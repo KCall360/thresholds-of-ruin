@@ -229,10 +229,11 @@ fn ordered_strike_content_counts_descriptors_across_strikes_and_riders() {
     let mut row = strike(0);
     row["descriptors"] = json!(names);
     let mut value = document_with(vec![row; 16]);
-    value["descriptors"]
-        .as_array_mut()
-        .unwrap()
-        .extend(names.iter().map(|name| json!({"id": name, "name": name})));
+    value["descriptors"].as_array_mut().unwrap().extend(
+        names
+            .iter()
+            .map(|name| json!({"id": name, "name": name, "resistance": null})),
+    );
     assert!(
         decode(value.clone()).is_ok(),
         "256 total descriptors are valid"
@@ -298,6 +299,7 @@ fn ordered_strike_content_descriptor_lookup_uses_pinned_index_and_counts_only_re
     let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
     for ordinal in (0..128).rev() {
         document.descriptors.push(NamedDescriptor {
+            resistance: None,
             id: DescriptorId::new(format!("inspection_descriptor_{ordinal}")).unwrap(),
             name: format!("Descriptor {ordinal}"),
         });

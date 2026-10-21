@@ -404,7 +404,7 @@ impl RegionRecordData {
         if self
             .world
             .traps()
-            .any(|trap| !crate::trap_kind_valid(content.rules(), &trap.kind))
+            .any(|trap| !crate::traps::trap_content_valid(&content, &trap.kind))
         {
             return Err(crate::checkpoint::PersistError::World);
         }
@@ -413,7 +413,7 @@ impl RegionRecordData {
                 crate::checkpoint::PersistError::ItemDefinition { item: *id, error }
             })?;
         }
-        Ok(RegionRecord {
+        let record = RegionRecord {
             world: self.world,
             actors: self
                 .actors
@@ -431,7 +431,20 @@ impl RegionRecordData {
             items: self.items,
             displaced: self.displaced,
             impacts: self.impacts,
-        })
+        };
+        for (id, item) in &record.items {
+            let equipped = match item.location {
+                ItemLocation::Carried(owner) => record
+                    .actors
+                    .get(&owner)
+                    .is_some_and(|actor| actor.equipment.values().any(|owned| owned == id)),
+                ItemLocation::Ground(_) => false,
+            };
+            if !crate::periodic_relocation::item_clock_valid(item, equipped) {
+                return Err(crate::checkpoint::PersistError::ItemState { item: *id });
+            }
+        }
+        Ok(record)
     }
 }
 impl Serialize for RegionRecord {
@@ -467,6 +480,7 @@ impl RegionRecord {
                     && a.body.valid()
                     && a.motion.valid()
                     && a.holds.valid_shape()
+                    && a.periodic_relocations.valid_for(a, &self.items)
             })
             && self.stamps.keys().eq(self.actors.keys())
             && self.actors.iter().all(|(id, actor)| {
@@ -494,8 +508,16 @@ impl RegionRecord {
                     && (trusted_maps || maps.as_mut().is_some_and(|maps| maps.structure(map)))
             })
             && self.displaced.iter().all(|id| self.actors.contains_key(id))
-            && self.items.values().all(|item| {
+            && self.items.iter().all(|(id, item)| {
+                let equipped = match item.location {
+                    ItemLocation::Carried(owner) => self
+                        .actors
+                        .get(&owner)
+                        .is_some_and(|actor| actor.equipment.values().any(|owned| owned == id)),
+                    ItemLocation::Ground(_) => false,
+                };
                 item.holds_valid()
+                    && crate::periodic_relocation::item_clock_valid(item, equipped)
                     && item.motion.active_fall.is_none()
                     && match item.location {
                         ItemLocation::Ground(at) => at.region == region,
@@ -1191,7 +1213,9 @@ impl Game {
         let ordinary = self.settle_pins(proposed, cache, can_prepare, true);
         let mut t = self.settle_dependencies(ordinary, cache, can_prepare);
         let ordinary_active = t.active.clone();
+        let ordinary_loaded = t.loaded.clone();
         self.relocation_loaded_closure(&ordinary_active, &mut t.loaded);
+        self.trap_loaded_closure(&ordinary_loaded, &mut t.loaded);
         if let Some(source) = self.retrieval_source_region() {
             t.loaded.insert(source);
         }
@@ -1662,7 +1686,7 @@ impl Game {
                 || record
                     .world
                     .traps()
-                    .any(|trap| !crate::trap_kind_valid(next.content.rules(), &trap.kind))
+                    .any(|trap| !crate::traps::trap_content_valid(&next.content, &trap.kind))
                 || record.stamps.values().any(|stamp| *stamp != 0)
                 || record.identities() != definition.identities
             {
@@ -1951,7 +1975,10 @@ impl Game {
     }
 
     fn actor_state_valid_body(&self, actor: &Actor, occupied: &mut BTreeSet<Location>) -> bool {
-        actor.orientation < 24 && actor.body.valid() && self.body_has_room(actor, occupied)
+        actor.orientation < 24
+            && actor.body.valid()
+            && self.spatial_condition_anchors_valid(actor)
+            && self.body_has_room(actor, occupied)
     }
 
     fn attach_record(
@@ -2075,7 +2102,7 @@ impl Game {
                 || record
                     .world
                     .traps()
-                    .any(|trap| !crate::trap_kind_valid(self.content.rules(), &trap.kind))
+                    .any(|trap| !crate::traps::trap_content_valid(&self.content, &trap.kind))
                 || !record
                     .explored_maps
                     .values()
@@ -3016,6 +3043,7 @@ mod tests {
                     tor_world::Trap {
                         id: trap,
                         dc: 12,
+                        avoidance_dc: None,
                         kind: tor_world::TrapKind::Rust {
                             slot: "body_armor".into(),
                             amount: 1,

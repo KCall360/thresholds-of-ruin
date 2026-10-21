@@ -262,6 +262,7 @@ mod tests {
         Item {
             condition: crate::armor::ItemCondition::default(),
             charges: None,
+            relocation_elapsed: None,
             corpse: None,
             holds: vec![],
             location,

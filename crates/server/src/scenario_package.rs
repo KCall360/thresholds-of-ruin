@@ -39,9 +39,9 @@ pub use authoring::{
     ConsumableSpec, CurrencyKind, DamageComponentExpr, DamageExpr, DamageType, DeviceSpec,
     DiceExpr, Effect, EquipmentAlteration, EquipmentGeneration, EquipmentSlot, EquipmentSpec,
     EquippedSelection, HealingOverflow, HitRecovery, HoldPolicy, ItemClass, ItemDiscovery,
-    LauncherProfile, PrimaryAttackSocket, ProjectileSpec, PushDirection, ReadableSpec,
-    RelocationGate, RelocationPolicy, TheftSelection, WeaponProfileSpec, WeaponRangeBands,
-    WeaponTrait, WeaponTraitChanges, WeaponTraitKind,
+    LauncherProfile, PeriodicRelocation, PrimaryAttackSocket, ProjectileSpec, PushDirection,
+    ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection, WeaponProfileSpec,
+    WeaponRangeBands, WeaponTrait, WeaponTraitChanges, WeaponTraitKind,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -52,13 +52,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v49";
-const VALIDATOR: &str = "tor-scenario-39";
+pub const RULESET: &str = "interactions-v50";
+const VALIDATOR: &str = "tor-scenario-40";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 27;
+pub const FORMAT: u32 = 28;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -450,6 +450,10 @@ pub struct RegionDef {
     pub doors: Vec<Door>,
     #[serde(default)]
     pub traps: Vec<Trap>,
+    /// Structural next-depth owner used only by the hidden-trap generation stage.
+    /// This is not a traversable link until a generated physical lid opens.
+    #[serde(default)]
+    pub trapdoor_destination: Option<u64>,
     #[serde(default)]
     pub items: Vec<Item>,
     #[serde(default)]
@@ -517,20 +521,74 @@ impl Concealment {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TrapKind {
-    Rust { slot: String, amount: u32 },
-    SleepingGas { condition: String, duration: u64 },
+    TrapDoor {
+        destination: tor_world::NamedAnchor,
+        open: bool,
+    },
+    Arrow {
+        attack_bonus: i32,
+        ammunition: String,
+    },
+    BearTrap {
+        condition: String,
+        duration: u64,
+    },
+    Teleport {},
+    PoisonDart {
+        attack_bonus: i32,
+        exposure: String,
+    },
+    Mysterious {},
+    Rust {
+        slot: String,
+        amount: u32,
+    },
+    SleepingGas {
+        exposure: Option<String>,
+        condition: String,
+        duration: u64,
+    },
 }
 impl TrapKind {
     pub(crate) fn compiled(&self) -> tor_world::TrapKind {
         match self {
+            Self::TrapDoor { destination, open } => tor_world::TrapKind::TrapDoor {
+                destination: destination.clone(),
+                open: *open,
+            },
+            Self::Arrow {
+                attack_bonus,
+                ammunition,
+            } => tor_world::TrapKind::Arrow {
+                attack_bonus: *attack_bonus,
+                ammunition: ammunition.clone(),
+            },
+            Self::BearTrap {
+                condition,
+                duration,
+            } => tor_world::TrapKind::BearTrap {
+                condition: condition.clone(),
+                duration: *duration,
+            },
+            Self::Teleport {} => tor_world::TrapKind::Teleport {},
+            Self::PoisonDart {
+                attack_bonus,
+                exposure,
+            } => tor_world::TrapKind::PoisonDart {
+                attack_bonus: *attack_bonus,
+                exposure: exposure.clone(),
+            },
+            Self::Mysterious {} => tor_world::TrapKind::Mysterious {},
             Self::Rust { slot, amount } => tor_world::TrapKind::Rust {
                 slot: slot.clone(),
                 amount: *amount,
             },
             Self::SleepingGas {
+                exposure,
                 condition,
                 duration,
             } => tor_world::TrapKind::SleepingGas {
+                exposure: exposure.clone(),
                 condition: condition.clone(),
                 duration: *duration,
             },
@@ -541,6 +599,7 @@ impl TrapKind {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Trap {
+    pub avoidance_dc: Option<i32>,
     pub id: u64,
     pub at: [i32; 3],
     pub dc: i32,
@@ -1347,14 +1406,16 @@ impl Package {
     }
 
     pub(crate) fn content(&self) -> Result<Arc<tor_simulation::creatures::Content>, Failure> {
-        Ok(self
-            .manifest
-            .creatures
-            .compile_with_context(self.rules()?, |kind, id, failure| {
-                source::catalog_context(&self.source_provenance, kind, id, failure)
-            })?
-            .content()
-            .clone())
+        Ok(compiler::compile_trap_ammunition(
+            &self.manifest,
+            self.manifest
+                .creatures
+                .compile_with_context(self.rules()?, |kind, id, failure| {
+                    source::catalog_context(&self.source_provenance, kind, id, failure)
+                })?,
+        )?
+        .content()
+        .clone())
     }
 
     fn check_generation_groups(&self) -> Result<(), Failure> {
@@ -1382,8 +1443,26 @@ impl Package {
                             &TrapKind::SleepingGas {
                                 condition: config.sleep_condition.clone(),
                                 duration: config.sleep_duration,
+                                exposure: config.sleep_exposure.clone(),
                             },
                         )?;
+                        if let Some(hazards) = &config.hazards {
+                            check_trap_effect(
+                                &rules,
+                                &TrapKind::BearTrap {
+                                    condition: hazards.bear_condition.clone(),
+                                    duration: hazards.bear_duration,
+                                },
+                            )?;
+                            self.check_trap_ammunition(&hazards.arrow_ammunition)?;
+                            check_trap_effect(
+                                &rules,
+                                &TrapKind::PoisonDart {
+                                    attack_bonus: hazards.attack_bonus,
+                                    exposure: hazards.poison_exposure.clone(),
+                                },
+                            )?;
+                        }
                     }
                 }
 
@@ -3045,6 +3124,75 @@ impl Package {
 
     /// What only a region's own file can show: its actors' controllers and
     /// combat. The validator checks every region; building one checks it.
+    fn check_trap_ammunition(&self, key: &str) -> Result<(), Failure> {
+        require(
+            self.manifest.archetypes.get(key).is_some_and(|item| {
+                item.stackable
+                    && item.projectile.is_some()
+                    && !item.magical
+                    && item.appearance_pool.is_none()
+                    && item.equipment_generation.is_none()
+            }),
+            "Arrow trap ammunition must name an ordinary stackable projectile archetype",
+        )
+    }
+    fn check_trapdoor_destination(
+        &self,
+        source: &RegionDef,
+        destination: &tor_world::NamedAnchor,
+    ) -> Result<(), Failure> {
+        require(
+            destination.region.0 != source.id,
+            "Trapdoor destination must be a different physical region",
+        )?;
+        if let Some((_, family)) = self.procedural_family(destination.region.0) {
+            let ordinal = destination
+                .name
+                .strip_prefix("trapdoor_landing_")
+                .and_then(|value| value.parse::<u32>().ok());
+            let capacity = self
+                .manifest
+                .generation_recipes
+                .get(&family.recipe)
+                .and_then(|recipe| {
+                    recipe
+                        .stages
+                        .iter()
+                        .find_map(|stage| match &stage.operation {
+                            crate::generation_recipe::Operation::HiddenTraps { config }
+                                if config.hazards.is_some() =>
+                            {
+                                Some(config.count[1])
+                            }
+                            _ => None,
+                        })
+                });
+            return require(
+                ordinal
+                    .zip(capacity)
+                    .is_some_and(|(ordinal, capacity)| ordinal < capacity)
+                    && family.size[2] >= 2
+                    && family
+                        .address(destination.region.0)
+                        .is_some_and(|(depth, _)| depth <= family.max_depth()),
+                "Unknown generated trapdoor ceiling endpoint",
+            );
+        }
+        let target = self.region_def(destination.region.0)?;
+        let position = target
+            .anchors
+            .get(&destination.name)
+            .ok_or_else(|| fail("Unknown trapdoor destination anchor"))?;
+        require(
+            target.chamber
+                && target.size[2] >= 2
+                && position[2] == target.size[2] - 1
+                && (0..target.size[0]).contains(&position[0])
+                && (0..target.size[1]).contains(&position[1]),
+            "Trapdoor destination must be a supported chamber ceiling endpoint",
+        )?;
+        require((0..target.size[2]).all(|z| !target.walls.contains(&[position[0], position[1], z])) && !target.openings.contains(&[position[0], position[1], -1]), "Trapdoor destination column must have clear upright-body clearance and real floor support")
+    }
     fn check_region(&self, r: &RegionDef) -> Result<(), Failure> {
         self.check_retrieval_region(r)?;
         for door in &r.doors {
@@ -3059,10 +3207,22 @@ impl Package {
                 let value = tor_world::Trap {
                     id: trap.id,
                     dc: trap.dc,
+                    avoidance_dc: trap.avoidance_dc,
                     kind: trap.kind.compiled(),
                 };
                 require(value.valid(), "Invalid trap definition")?;
                 check_trap_effect(&rules, &trap.kind)?;
+                match &trap.kind {
+                    TrapKind::Arrow { ammunition, .. } => self.check_trap_ammunition(ammunition)?,
+                    TrapKind::TrapDoor { destination, open } => {
+                        require(
+                            !open && trap.at[2] == 0 && r.chamber,
+                            "Authored trapdoors start closed on a chamber floor",
+                        )?;
+                        self.check_trapdoor_destination(r, destination)?;
+                    }
+                    _ => {}
+                }
             }
         }
         if let Some(generate) = &r.generate {
@@ -4028,6 +4188,14 @@ impl Package {
         } else {
             BTreeSet::new()
         };
+        // Trapdoor ceiling endpoints are structural coordinates too. Publish the
+        // same complete immutable directory regardless of whether a stair uses it.
+        names.extend(
+            anchors
+                .iter()
+                .filter(|(_, at)| at.region.0 == region)
+                .filter_map(|(name, _)| name.split_once('/').map(|(_, name)| name.to_owned())),
+        );
         let exits = index.stair_exits(region);
         for exit in exits.iter().filter(|exit| deferred(exit)) {
             let (_, name) = exit
@@ -4405,6 +4573,7 @@ impl Package {
                     tor_world::Trap {
                         id: trap.id,
                         dc: trap.dc,
+                        avoidance_dc: trap.avoidance_dc,
                         kind: trap.kind.compiled(),
                     },
                 )
@@ -4916,8 +5085,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-39");
-        assert_eq!(original.certificate.ruleset, "interactions-v49");
+        assert_eq!(original.certificate.validator, "tor-scenario-40");
+        assert_eq!(original.certificate.ruleset, "interactions-v50");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -4968,6 +5137,7 @@ mod tests {
                 grid: [2, 2],
                 size: [26, 7, 2],
                 recipe: "exploration".into(),
+                gravity: None,
                 zone: None,
             },
         );
@@ -5094,6 +5264,7 @@ mod tests {
                 {"archetype":"rogue.poison","weight":1},
                 {"archetype":"rogue.see_invisible","weight":1},
                 {"archetype":"rogue.extra_healing","weight":1},
+                {"archetype":"rogue.levitation","weight":1},
             ])
         );
         assert_eq!(ids[6], "rogue.magic_scrolls");
@@ -5213,29 +5384,33 @@ mod tests {
             "rogue.wand_invisibility",
             "rogue.wand_haste",
             "rogue.wand_slow",
+            "rogue.wand_teleport_away",
+            "rogue.wand_teleport_to",
         ] {
             package.manifest.archetypes.get_mut(id).unwrap().class = ItemClass::Tool;
         }
-        assert!(package.appearance_mapping(42).is_ok());
-        package
+        package.appearance_mapping(42).unwrap();
+        let mut stackable = package.clone();
+        stackable
             .manifest
             .archetypes
             .get_mut("rogue.wand_fire")
             .unwrap()
             .stackable = true;
-        assert!(package.appearance_mapping(42).is_err());
-        let device = package
+        assert!(stackable.appearance_mapping(42).is_err());
+        let mut mixed = package.clone();
+        let device = mixed
             .manifest
             .archetypes
             .get_mut("rogue.wand_fire")
             .unwrap();
-        device.stackable = false;
         device.readable = Some(ReadableSpec {
+            descriptors: vec![],
             effects: vec![],
             identify: Some(vec![ItemClass::Wand]),
             discovery: ItemDiscovery::OnUse,
         });
-        assert!(package.appearance_mapping(42).is_err());
+        assert!(mixed.appearance_mapping(42).is_err());
     }
 
     #[test]
@@ -5249,6 +5424,14 @@ mod tests {
             .characters
             .iter()
             .all(|character| character.creature.is_none() && character.loadout.is_empty()));
+        assert_eq!(
+            package.manifest.procedural_worlds["dungeon"].gravity,
+            Some([0, 0, -1])
+        );
+        assert_eq!(
+            geometry.manifest.procedural_worlds["dungeon"].gravity,
+            Some([0, 0, -1])
+        );
         assert_eq!(
             serde_json::to_value(&package.manifest.procedural_worlds).unwrap(),
             serde_json::to_value(&geometry.manifest.procedural_worlds).unwrap()
@@ -5300,6 +5483,9 @@ mod tests {
                 let identity = format!("dungeon/{depth}");
                 let mut discovered = package.group_definitions(&identity, seed).unwrap();
                 let baseline = geometry.group_definitions(&identity, seed).unwrap();
+                for region in baseline.values() {
+                    assert_eq!(region.gravity, Some([0, 0, -1]));
+                }
                 assert!(baseline
                     .values()
                     .all(|region| region.doors.is_empty() && region.traps.is_empty()));
@@ -5314,8 +5500,25 @@ mod tests {
                         .iter()
                         .all(|door| !door.open && door.height == 2 && door.concealment.is_some()));
                     entrances += region.doors.len();
-                    // Only the independently asserted additions are projected
-                    // out: walls, anchors, lighting and every other field remain exact.
+                    // New ceiling anchors are independent physical endpoints, not
+                    // rerolled carving/stairs. Assert their clearance before removing
+                    // only these deliberate additions from the geometry comparison.
+                    let landings: Vec<_> = region
+                        .anchors
+                        .iter()
+                        .filter(|(name, _)| name.starts_with("trapdoor_landing_"))
+                        .collect();
+                    assert_eq!(landings.len(), 2);
+                    for (_, landing) in landings {
+                        assert_eq!(landing[2], region.size[2] - 1);
+                        assert!((0..region.size[2])
+                            .all(|z| !region.walls.contains(&[landing[0], landing[1], z])));
+                        assert!(!region.traps.iter().any(|trap| trap.at[..2] == landing[..2]));
+                    }
+                    region
+                        .anchors
+                        .retain(|name, _| !name.starts_with("trapdoor_landing_"));
+                    assert_eq!(region.gravity, Some([0, 0, -1]));
                     region.doors.clear();
                     region.traps.clear();
                 }
@@ -5336,6 +5539,34 @@ mod tests {
             entrances > 0,
             "the production seed matrix must exercise actual secret closures"
         );
+    }
+
+    #[test]
+    fn rogue_spatial_restraint_uses_valid_protected_condition_lifecycle() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+        let package = read_package(&root).unwrap();
+        let rules = package
+            .rules()
+            .expect("the actual authored rules are a valid baseline");
+        let id = tor_simulation::content_ids::ConditionId::new("rogue.bear_trap").unwrap();
+        let definition = rules.condition(&id).unwrap();
+        assert_eq!(definition.stacking, tor_simulation::rules::Stacking::Extend);
+        assert_eq!(
+            definition.preparation,
+            tor_simulation::rules::ConditionPreparation::Preserve
+        );
+        assert!(!definition
+            .restrictions
+            .contains(&tor_simulation::rules::ConditionRestriction::VoluntaryActions));
+        let mut invalid = rules.document().clone();
+        invalid
+            .conditions
+            .iter_mut()
+            .find(|condition| condition.id == id)
+            .unwrap()
+            .stacking = tor_simulation::rules::Stacking::Refresh;
+        assert!(matches!(tor_simulation::rules::Ruleset::validate(invalid),
+            Err(tor_simulation::rules::RulesetError::Bound { field }) if field == "protected_condition_shape"));
     }
 
     #[test]
@@ -5368,7 +5599,7 @@ mod tests {
             let error = package.check().unwrap_err();
             assert!(
                 error.message.contains(
-                    "Trap effect refers to an invalid equipment slot or non-sleep condition"
+                    "Trap effect refers to an invalid equipment slot, condition, or descriptor"
                 ),
                 "{error:?}"
             );
@@ -6247,6 +6478,7 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
         let mut package = read_package(&path).unwrap();
         let readable = ReadableSpec {
+            descriptors: vec![],
             effects: vec![],
             identify: Some(vec![ItemClass::Potion]),
             discovery: ItemDiscovery::OnUse,
@@ -6297,6 +6529,7 @@ mod tests {
             .get_mut("healing")
             .unwrap()
             .consumable = Some(ConsumableSpec {
+            descriptors: vec![],
             discovery: ItemDiscovery::SelfEffect,
             effects: vec![Effect::Heal {
                 amount: AmountExpr::Fixed { amount: 5 },
@@ -6309,6 +6542,7 @@ mod tests {
             .get_mut("poison")
             .unwrap()
             .consumable = Some(ConsumableSpec {
+            descriptors: vec![],
             discovery: ItemDiscovery::SelfEffect,
             effects: vec![Effect::Damage {
                 damage: DamageExpr::Components {
@@ -6499,7 +6733,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v49"
+        let source = r#"import = "interactions-v50"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]
@@ -6709,12 +6943,61 @@ value = 13
             .insert("careful".into(), AiProfile::general());
         actor.ai = Some("careful".into());
         *regions[0].actors.last_mut().unwrap() = actor;
-        let package = Package::from_parts(manifest, regions, &template.rules_source).unwrap();
+        let package =
+            Package::from_parts(manifest.clone(), regions.clone(), &template.rules_source).unwrap();
         let failure = package.build(42, true).unwrap_err();
         assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
         assert_eq!(
             failure.message,
             "regions/1.toml: region 1, actor 2: Actor body eye must be one of its cells"
+        );
+
+        // A valid non-default body must precede capability acquisition, not
+        // retire the actor's one-lifetime readied preparation during setup.
+        let body = BodySpec {
+            cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
+            mass: 91,
+        };
+        regions[0].actors.last_mut().unwrap().body = Some(body.clone());
+        for value in [
+            crate::creature_authoring::Perception::ObjectGuise {
+                appearance: Some(crate::creature_authoring::GuiseAppearance {
+                    name: "fixture object".into(),
+                    description: String::new(),
+                    class: ItemClass::Tool,
+                    asset: None,
+                }),
+                skill: "stealth".into(),
+                edge: 0,
+            },
+            crate::creature_authoring::Perception::ReadiedTouchAmbush { enabled: true },
+        ] {
+            manifest
+                .creatures
+                .species
+                .get_mut("figure")
+                .unwrap()
+                .modifiers
+                .push(crate::creature_authoring::Modifier {
+                    scope: crate::creature_authoring::Scope::Always,
+                    op: crate::creature_authoring::Op::Perception { value },
+                });
+        }
+        let package = Package::from_parts(manifest, regions, &template.rules_source).unwrap();
+        let game = package.build(42, true).unwrap();
+        let mut shared = tor_simulation::checkpoint::SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        let pool = serde_json::to_value(&snapshot).unwrap()["actors"]
+            .as_u64()
+            .unwrap() as usize;
+        let recorded = serde_json::to_value(&shared).unwrap();
+        let ready = &recorded["actors"][pool]["2"]["readied_ambush"];
+        assert_eq!(ready["state"], "ready");
+        assert_eq!(ready["body"], serde_json::to_value(body).unwrap());
+        assert_eq!(
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap(),
+            game
         );
     }
 
@@ -7709,6 +7992,6 @@ fn check_trap_effect(
 ) -> Result<(), Failure> {
     require(
         tor_simulation::trap_kind_valid(rules, &kind.compiled()),
-        "Trap effect refers to an invalid equipment slot or non-sleep condition",
+        "Trap effect refers to an invalid equipment slot, condition, or descriptor",
     )
 }

@@ -605,6 +605,12 @@ pub(crate) fn trap_family(family: w::TrapFamily) -> p::TrapFamily {
     match family {
         w::TrapFamily::Rust => p::TrapFamily::Rust,
         w::TrapFamily::SleepingGas => p::TrapFamily::SleepingGas,
+        w::TrapFamily::TrapDoor => p::TrapFamily::TrapDoor,
+        w::TrapFamily::Arrow => p::TrapFamily::Arrow,
+        w::TrapFamily::BearTrap => p::TrapFamily::BearTrap,
+        w::TrapFamily::Teleport => p::TrapFamily::Teleport,
+        w::TrapFamily::PoisonDart => p::TrapFamily::PoisonDart,
+        w::TrapFamily::Mysterious => p::TrapFamily::Mysterious,
     }
 }
 

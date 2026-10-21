@@ -119,6 +119,14 @@ pub enum DiagnosticEffect {
         mode: DiagnosticMovementMode,
         result: DiagnosticMovementResult,
     },
+    Relocate {
+        target: ActorId,
+        mode: DiagnosticMovementMode,
+        result: DiagnosticMovementResult,
+    },
+    ArrestDescent {
+        target: ActorId,
+    },
     Damage {
         target: ActorId,
         amount: u32,
@@ -296,7 +304,9 @@ impl CombatDiagnosticRecord {
                 DiagnosticEffect::ConditionRemoved { target, condition } => {
                     *target == self.target && condition.valid()
                 }
-                DiagnosticEffect::Translate { target, .. } => *target == self.target,
+                DiagnosticEffect::Translate { target, .. }
+                | DiagnosticEffect::Relocate { target, .. }
+                | DiagnosticEffect::ArrestDescent { target } => *target == self.target,
                 DiagnosticEffect::LinkedHold { target, holder } => {
                     *target == self.target && *holder == self.actor && target != holder
                 }
@@ -414,6 +424,14 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
                 mode: DiagnosticMovementMode,
                 result: DiagnosticMovementResult,
             },
+            Relocate {
+                target: ActorId,
+                mode: DiagnosticMovementMode,
+                result: DiagnosticMovementResult,
+            },
+            ArrestDescent {
+                target: ActorId,
+            },
             Damage {
                 target: ActorId,
                 amount: u32,
@@ -490,6 +508,16 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
                 mode,
                 result,
             },
+            Fields::Relocate {
+                target,
+                mode,
+                result,
+            } => Self::Relocate {
+                target,
+                mode,
+                result,
+            },
+            Fields::ArrestDescent { target } => Self::ArrestDescent { target },
             Fields::Damage { target, amount } => Self::Damage { target, amount },
             Fields::Heal { target, amount } => Self::Heal { target, amount },
             Fields::HealAndImproveHitDice {

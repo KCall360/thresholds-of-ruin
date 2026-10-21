@@ -166,6 +166,7 @@ fn identify_scroll(game: &mut Game, id: u64, class: ItemClass, quantity: u64) ->
     spec.concealed = true;
     spec.stackable = true;
     spec.readable = Some(ReadableSpec {
+        descriptors: vec![],
         effects: vec![],
         identify: Some(vec![class]),
         discovery: ItemDiscovery::OnUse,
@@ -182,12 +183,707 @@ fn execute(game: &mut Game, action: Action) -> crate::IntentionId {
     done.outcome.unwrap();
     issued
 }
+fn start_owned_item_work(game: &mut Game, plan: Plan) -> crate::IntentionId {
+    // Keep a real competing actor ready so admission starts the paid work but
+    // does not advance its completion; each test then controls its boundary.
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = game.tick;
+    let action = match plan.work() {
+        Work::Read { item } => Action::Read { item },
+        Work::Drink { item } => Action::Drink { item },
+        Work::Zap { item, direction } => Action::Zap { item, direction },
+        _ => panic!("finite item work fixture"),
+    };
+    let intention = execute(game, action);
+    assert_eq!(game.preparation(ActorId(1)).unwrap().plan, plan);
+    assert_eq!(
+        game.preparation(ActorId(1)).unwrap().intention,
+        Some(intention)
+    );
+    intention
+}
 fn roundtrip(game: &Game) -> Game {
     let mut shared = crate::checkpoint::SharedState::default();
     let snapshot = game.checkpoint(&mut shared);
     let shared = serde_json::from_slice(&serde_json::to_vec(&shared).unwrap()).unwrap();
     let snapshot = serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
     Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap()
+}
+
+fn relocation_device_fixture(effect: crate::rules::Effect, hits: bool) -> Game {
+    super::ray_tests::fixture_with(|_, ray, species| {
+        ray.invocation = InvocationKind::DirectionalContactRay;
+        ray.timing.source = crate::rules::TimingSource::Fixed {
+            prepare: 100,
+            recover: 100,
+        };
+        let crate::rules::StrikeSource::Authored { strikes } = &mut ray.strikes else {
+            unreachable!()
+        };
+        strikes[0].check.as_mut().unwrap().against = crate::rules::Against::Opposed {
+            skill: crate::rules::SkillSelector::Named {
+                skill: crate::attributes::Skill::Lore,
+            },
+        };
+        strikes[0].on_failure = vec![effect];
+        species.modifiers.retain(|modifier| {
+            !matches!(&modifier.op,
+            crate::rules::ModifierOp::GrantAbility { ability } if ability == &ray.id)
+        });
+        if hits {
+            species.modifiers.push(crate::rules::Modifier {
+                scope: crate::rules::Scope::Always,
+                op: crate::rules::ModifierOp::Add {
+                    stat: crate::rules::Stat::Attribute {
+                        attribute: crate::attributes::Attribute::Intellect,
+                    },
+                    value: 100,
+                },
+            });
+        }
+    })
+}
+
+fn levitation_drink_fixture() -> (Game, ItemId, crate::content_ids::ConditionId) {
+    let condition = crate::content_ids::ConditionId::new("fixture_hover").unwrap();
+    let mut game = super::ray_tests::fixture_with(|document, _, _| {
+        document.conditions.push(crate::rules::ConditionDef {
+            id: condition.clone(),
+            family: crate::content_ids::ConditionFamilyId::new("fixture_hover").unwrap(),
+            name: "Test hover".into(),
+            lifecycle: crate::rules::ConditionLifecycle::Timed,
+            modifiers: vec![crate::rules::Modifier {
+                scope: crate::rules::Scope::Always,
+                op: crate::rules::ModifierOp::Locomotion {
+                    value: crate::locomotion::LocomotionValue::Levitating { enabled: true },
+                },
+            }],
+            stacking: crate::rules::Stacking::Extend,
+            source_scoped: false,
+            descriptors: vec![],
+            capacity: crate::rules::Eviction::Reject,
+            timing: crate::rules::ConditionTiming::expiring(),
+            restrictions: vec![],
+            preparation: crate::rules::ConditionPreparation::Preserve,
+        });
+    });
+    game.world.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+    let mut spec = ItemSpec::ordinary("unmarked vial".into());
+    spec.identity = "fixture.hover_drink".into();
+    spec.concealed = true;
+    spec.stackable = true;
+    // Match the existing consumable capability schema; no item identity dispatch.
+    spec.class = ItemClass::Potion;
+    spec.consumable = Some(crate::ConsumableSpec {
+        descriptors: vec![],
+        discovery: ItemDiscovery::OnUse,
+        effects: vec![
+            crate::rules::Effect::ApplyConditionForTurns {
+                condition: condition.clone(),
+                duration: crate::rules::AmountExpr::Rolled {
+                    dice: crate::rules::DiceExpr {
+                        count: 1,
+                        sides: 3,
+                        bonus: 28,
+                    },
+                },
+            },
+            crate::rules::Effect::ArrestDescent,
+        ],
+    });
+    let item = game
+        .place_item_stack(50, at(1), Some(ActorId(1)), 2, spec)
+        .unwrap();
+    (game, item, condition)
+}
+
+#[test]
+fn drink_brakes_only_at_completion_and_repeat_dose_still_arrests_imposed_descent() {
+    for existing in [None, Some(10_000)] {
+        let (mut game, item, condition) = levitation_drink_fixture();
+        if let Some(duration) = existing {
+            game.apply_condition(ActorId(1), &condition, ActorId(1), duration)
+                .unwrap();
+        }
+        let plan = game.plan_work(ActorId(1), Work::Drink { item }).unwrap();
+        let PlannedEffect::ApplyConditionForTurns {
+            duration: PlannedAmount::Rolled { dice },
+            turn_ticks,
+            ..
+        } = &plan.on_success()[0]
+        else {
+            panic!("captured rolled source-turn duration")
+        };
+        let mut expected_rng = game.rules_rng;
+        let duration = u64::from(
+            dice.roll(&mut expected_rng, crate::dice::Edge::default())
+                .total,
+        ) * turn_ticks;
+        assert!((29 * turn_ticks..=31 * turn_ticks).contains(&duration));
+        let due = plan.preparation();
+        start_owned_item_work(&mut game, plan);
+        // This isolates paid-item publication, not the separate physics/fall
+        // integration owner. The imposed kinematics must survive preparation.
+        game.actors.get_mut(&ActorId(1)).unwrap().motion.velocity = [17, -11, -23];
+        game.actors
+            .get_mut(&ActorId(1))
+            .unwrap()
+            .motion
+            .displacement = [19, -13, -29];
+        let mut restored = roundtrip(&game);
+        for current in [&mut game, &mut restored] {
+            assert_eq!(current.items[&item].quantity, 2);
+            assert_eq!(current.actors[&ActorId(1)].motion.velocity, [17, -11, -23]);
+            assert!(!current.actors[&ActorId(1)]
+                .knowledge
+                .contains("fixture.hover_drink"));
+            current
+                .with_recovery_transition(true, |candidate| {
+                    candidate.tick = due;
+                    candidate.resolve_preparations()
+                })
+                .unwrap();
+            assert_eq!(current.items[&item].quantity, 1);
+            assert!(current.items[&item].holds.is_empty());
+            assert_eq!(current.actors[&ActorId(1)].motion.velocity, [17, -11, 0]);
+            assert_eq!(
+                current.actors[&ActorId(1)].motion.displacement,
+                [19, -13, 0]
+            );
+            assert!(
+                current
+                    .creature(ActorId(1))
+                    .unwrap()
+                    .derived()
+                    .locomotion
+                    .levitating
+            );
+            assert_eq!(
+                current
+                    .creature(ActorId(1))
+                    .unwrap()
+                    .conditions()
+                    .remaining(&condition, ActorId(1)),
+                Some(existing.map_or(0, |remaining| remaining - due) + duration)
+            );
+            assert!(current.actors[&ActorId(1)]
+                .knowledge
+                .contains("fixture.hover_drink"));
+            assert_eq!(current.rules_rng, expected_rng);
+        }
+        assert_eq!(game, restored);
+    }
+}
+
+#[test]
+fn overflowing_levitation_extension_rolls_back_exact_unit_rng_and_descent_brake() {
+    let (mut game, item, condition) = levitation_drink_fixture();
+    game.apply_condition(
+        ActorId(1),
+        &condition,
+        ActorId(1),
+        crate::limits::NUMERIC as u64,
+    )
+    .unwrap();
+    let plan = game.plan_work(ActorId(1), Work::Drink { item }).unwrap();
+    let due = plan.preparation();
+    start_owned_item_work(&mut game, plan);
+    game.actors.get_mut(&ActorId(1)).unwrap().motion.velocity = [17, -11, -23];
+    let before = game.clone();
+    assert!(game
+        .with_recovery_transition(true, |candidate| {
+            candidate.tick = due;
+            candidate.resolve_preparations()
+        })
+        .is_err());
+    assert_eq!(
+        game, before,
+        "Rejected extension cannot spend, identify, roll, or brake"
+    );
+}
+
+#[test]
+fn teleport_to_uses_frozen_launch_but_live_interceptor_and_restores_paid_preparation() {
+    let mut game = relocation_device_fixture(crate::rules::Effect::TeleportToRayOrigin, true);
+    let item = device_with_discovery(&mut game, 10, 3, ItemDiscovery::Never);
+    let work = Work::Zap {
+        item,
+        direction: StepDirection::East,
+    };
+    let captured = game.plan_work(ActorId(1), work).unwrap();
+    let frozen = captured.as_ray().unwrap().clone();
+    assert_eq!(
+        (frozen.preparation, frozen.recovery),
+        (100, 0),
+        "device use owns item preparation and no recovery, unlike the authored ability timing"
+    );
+    assert!(serde_json::to_value(&captured)
+        .unwrap()
+        .get("target")
+        .is_none());
+    start_owned_item_work(&mut game, captured.clone());
+    game.tick = 40;
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = 40;
+    game.pause_preparation(ActorId(1)).unwrap();
+    assert_eq!(game.preparation(ActorId(1)).unwrap().remaining, 60);
+    let mut restored = roundtrip(&game);
+    for current in [&mut game, &mut restored] {
+        // The old recipient moves away during preparation. A different live
+        // actor now intercepts the ray; no target identity was committed earlier.
+        current.teleport(ActorId(2), at(5)).unwrap();
+        let interceptor = current
+            .spawn_actor(at(3), std::num::NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let build = current.creature(ActorId(2)).unwrap().build().clone();
+        current
+            .configure_creature(
+                interceptor,
+                crate::CreatureIdentity {
+                    name: "live interceptor".into(),
+                    faction: "third".into(),
+                },
+                build,
+            )
+            .unwrap();
+        current.actors.get_mut(&interceptor).unwrap().ready_at = 1000;
+        let intention = current.preparation(ActorId(1)).unwrap().intention;
+        current.start_work(captured.clone(), intention).unwrap();
+        assert_eq!(
+            *current
+                .preparation(ActorId(1))
+                .unwrap()
+                .plan
+                .as_ray()
+                .unwrap(),
+            frozen
+        );
+        current
+            .with_recovery_transition(true, |candidate| {
+                candidate.tick = 100;
+                candidate.resolve_preparations()
+            })
+            .unwrap();
+        assert_eq!(
+            current.actors.get(&interceptor).map(|actor| actor.location),
+            Some(at(2))
+        );
+        assert_eq!(
+            current.actors.get(&ActorId(2)).map(|actor| actor.location),
+            Some(at(5))
+        );
+        assert_eq!(current.items[&item].charges, Some(2));
+        assert!(current.items[&item].holds.is_empty());
+        assert_eq!(current.actors[&ActorId(1)].ready_at, 100);
+        assert!(!current.actors[&ActorId(1)]
+            .knowledge
+            .contains("fixture.elemental_device"));
+        assert!(current.combat_events().iter().any(|event| matches!(event,
+            crate::combat::CombatEvent::Resolved { outcome, .. }
+            if outcome.target == interceptor && outcome.effects.iter().any(|effect|
+                matches!(effect, ResolvedEffect::Relocate { result: MovementResult::Moved { .. }, .. })))));
+    }
+    assert_eq!(game, restored);
+}
+
+#[test]
+fn teleport_to_endpoint_uses_all_frozen_launch_frames_not_casters_current_placement() {
+    for orientation in 0..24 {
+        let mut game = relocation_device_fixture(crate::rules::Effect::TeleportToRayOrigin, true);
+        let item = device_with_discovery(&mut game, 10, 3, ItemDiscovery::Never);
+        *game.world = tor_world::World::new(
+            vec![tor_world::Region {
+                id: RegionId(1),
+                name: "ray frame".into(),
+                bounds: tor_world::Extent::new(9, 9, 9).unwrap(),
+            }],
+            vec![],
+        )
+        .unwrap();
+        let origin = Location {
+            region: RegionId(1),
+            position: Position { x: 4, y: 4, z: 4 },
+        };
+        let (x, y, z) = tor_world::Direction::East.rotated(orientation).delta();
+        let endpoint = Location {
+            position: Position {
+                x: 4 + x,
+                y: 4 + y,
+                z: 4 + z,
+            },
+            ..origin
+        };
+        game.teleport(ActorId(1), origin).unwrap();
+        game.actors.get_mut(&ActorId(1)).unwrap().orientation = orientation;
+        game.teleport(
+            ActorId(2),
+            Location {
+                position: Position {
+                    x: 4 + 2 * x,
+                    y: 4 + 2 * y,
+                    z: 4 + 2 * z,
+                },
+                ..origin
+            },
+        )
+        .unwrap();
+        let recipient_orientation = 23 - orientation;
+        game.actors.get_mut(&ActorId(2)).unwrap().orientation = recipient_orientation;
+        let captured = game
+            .plan_work(
+                ActorId(1),
+                Work::Zap {
+                    item,
+                    direction: StepDirection::East,
+                },
+            )
+            .unwrap();
+        // Exercise the released-ray geometry kernel directly, as the existing
+        // ray owner does. Ordinary relocation of *unfinished* work is tested
+        // separately above; it cannot cause this resolver to refreeze origin.
+        game.teleport(ActorId(1), at(1)).unwrap();
+        game.actors.get_mut(&ActorId(1)).unwrap().orientation = recipient_orientation;
+        game.resolve_ray(captured.as_ray().unwrap(), None).unwrap();
+        assert_eq!(
+            game.actors.get(&ActorId(2)).map(|actor| actor.location),
+            Some(endpoint),
+            "launch frame {orientation}"
+        );
+        assert_eq!(game.actors[&ActorId(2)].orientation, recipient_orientation);
+    }
+}
+
+#[test]
+fn teleport_wand_dodge_or_blocked_live_body_fit_spends_charge_without_identification() {
+    for dodges in [true, false] {
+        let mut game =
+            relocation_device_fixture(crate::rules::Effect::TeleportToRayOrigin, !dodges);
+        let item = device_with_discovery(&mut game, 10, 3, ItemDiscovery::Never);
+        if dodges {
+            game.apply_condition(
+                ActorId(2),
+                &crate::content_ids::ConditionId::new("ray_agile").unwrap(),
+                ActorId(2),
+                1000,
+            )
+            .unwrap();
+        } else {
+            // The beam is clear at foot height. A wall at the destination's
+            // second body cell blocks only the exact teleport placement.
+            game.world
+                .set_wall(
+                    Location {
+                        position: Position {
+                            z: 1,
+                            ..at(3).position
+                        },
+                        ..at(3)
+                    },
+                    false,
+                )
+                .unwrap();
+            game.set_body(
+                ActorId(2),
+                crate::BodySpec {
+                    cells: vec![[0, 0, 0], [0, 0, 1]],
+                    eye: [0, 0, 0],
+                    mass: 80,
+                },
+            )
+            .unwrap();
+        }
+        let plan = game
+            .plan_work(
+                ActorId(1),
+                Work::Zap {
+                    item,
+                    direction: StepDirection::East,
+                },
+            )
+            .unwrap();
+        start_owned_item_work(&mut game, plan);
+        if !dodges {
+            game.world
+                .set_wall(
+                    Location {
+                        position: Position {
+                            z: 1,
+                            ..at(2).position
+                        },
+                        ..at(2)
+                    },
+                    true,
+                )
+                .unwrap();
+        }
+        game.with_recovery_transition(true, |candidate| {
+            candidate.tick = 100;
+            candidate.resolve_preparations()
+        })
+        .unwrap();
+        assert_eq!(
+            game.actors.get(&ActorId(2)).map(|actor| actor.location),
+            Some(at(3))
+        );
+        assert_eq!(game.items[&item].charges, Some(2));
+        assert!(game.items[&item].holds.is_empty());
+        assert!(!game.actors[&ActorId(1)]
+            .knowledge
+            .contains("fixture.elemental_device"));
+        let outcome = game
+            .combat_events()
+            .iter()
+            .find_map(|event| match event {
+                crate::combat::CombatEvent::Resolved { outcome, .. }
+                    if outcome.target == ActorId(2) =>
+                {
+                    Some(outcome)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(outcome.check.unwrap().success, dodges);
+        // A successful recipient dodge selects an empty success branch, not
+        // a failed outgoing attack. Both it and blocked placement are unaffected.
+        assert_eq!(outcome.result, OutcomeStatus::Unaffected);
+        if !dodges {
+            assert_eq!(
+                outcome.effects,
+                [ResolvedEffect::Relocate {
+                    mode: MovementMode::Forced,
+                    result: MovementResult::Blocked
+                }]
+            );
+        }
+    }
+}
+
+#[test]
+fn forced_caster_relocation_retires_uncompleted_zap_without_spending_a_charge() {
+    let mut game = relocation_device_fixture(crate::rules::Effect::TeleportToRayOrigin, true);
+    let item = device_with_discovery(&mut game, 10, 3, ItemDiscovery::Never);
+    let captured = game
+        .plan_work(
+            ActorId(1),
+            Work::Zap {
+                item,
+                direction: StepDirection::East,
+            },
+        )
+        .unwrap();
+    start_owned_item_work(&mut game, captured.clone());
+    assert_eq!(game.items[&item].holds.len(), 1);
+    let origin = Placement::capture(&game, ActorId(1)).unwrap();
+    let destination = game
+        .random_relocation_candidates(ActorId(1))
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+    game.with_recovery_transition(true, |candidate| {
+        candidate.relocate_exact_in_transaction(ActorId(1), destination, false)
+    })
+    .unwrap();
+    assert!(game.preparation(ActorId(1)).is_none());
+    assert!(game.items[&item].holds.is_empty());
+    assert_eq!(game.items[&item].charges, Some(3));
+    assert_eq!(
+        captured.as_ray().unwrap().origin,
+        origin,
+        "Retiring work does not reinterpret the captured launch operands"
+    );
+    game.with_recovery_transition(true, |candidate| {
+        candidate.relocate_exact_in_transaction(ActorId(1), origin, false)
+    })
+    .unwrap();
+    game.tick = 100;
+    game.resolve_preparations().unwrap();
+    assert!(
+        game.preparation(ActorId(1)).is_none(),
+        "Moving back cannot resurrect retired work"
+    );
+    assert_eq!(game.items[&item].charges, Some(3));
+    assert_eq!(
+        game.actors.get(&ActorId(2)).map(|actor| actor.location),
+        Some(at(3))
+    );
+}
+
+#[test]
+fn paid_self_teleport_reads_exact_unit_and_only_successful_displacement_is_discovered() {
+    for blocked in [false, true] {
+        let mut game = fixture();
+        let mut spec = ItemSpec::ordinary("unread escape page".into());
+        spec.identity = "fixture.escape_page".into();
+        spec.concealed = true;
+        spec.stackable = true;
+        spec.readable = Some(ReadableSpec {
+            descriptors: vec![],
+            effects: vec![crate::rules::Effect::TeleportRandom],
+            identify: None,
+            discovery: ItemDiscovery::SelfEffect,
+        });
+        let scroll = game
+            .place_item_stack(10, at(1), Some(ActorId(1)), 2, spec)
+            .unwrap();
+        if blocked {
+            for to in game.random_relocation_candidates(ActorId(1)).unwrap() {
+                if game.world.door(to.location).is_some() {
+                    game.world.set_door(to.location, false);
+                } else {
+                    game.world.set_wall(to.location, true).unwrap();
+                }
+            }
+            assert!(game
+                .random_relocation_candidates(ActorId(1))
+                .unwrap()
+                .is_empty());
+        }
+        let plan = game
+            .plan_work(ActorId(1), Work::Read { item: scroll })
+            .unwrap();
+        let due = plan.preparation();
+        let ready = due + plan.recovery();
+        start_owned_item_work(&mut game, plan);
+        let mut restored = roundtrip(&game);
+        for current in [&mut game, &mut restored] {
+            current
+                .with_recovery_transition(true, |candidate| {
+                    candidate.tick = due;
+                    candidate.resolve_preparations()
+                })
+                .unwrap();
+            assert_eq!(current.items[&scroll].quantity, 1);
+            assert!(current.items[&scroll].holds.is_empty());
+            assert!(current.preparation(ActorId(1)).is_none());
+            assert_eq!(current.actors[&ActorId(1)].ready_at, ready);
+            assert_eq!(
+                current.actors.get(&ActorId(1)).map(|actor| actor.location) == Some(at(1)),
+                blocked
+            );
+            assert_eq!(
+                current.actors[&ActorId(1)]
+                    .knowledge
+                    .contains("fixture.escape_page"),
+                !blocked
+            );
+            assert!(!current.actors[&ActorId(2)]
+                .knowledge
+                .contains("fixture.escape_page"));
+            assert!(!current.combat_events().iter().any(|event| matches!(
+                event,
+                crate::combat::CombatEvent::Interrupted {
+                    actor: ActorId(1),
+                    ..
+                }
+            )));
+        }
+        assert_eq!(game, restored);
+    }
+}
+
+#[test]
+fn random_teleport_callers_preserve_rng_consumed_by_ordinary_destination_contact() {
+    for paid in [false, true] {
+        let mut game = super::ray_tests::fixture_with(|document, _, _| {
+            document.descriptors.push(crate::rules::NamedDescriptor {
+                resistance: None,
+                id: crate::content_ids::DescriptorId::new("poison").unwrap(),
+                name: "Poison".into(),
+            });
+        });
+        game.world.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+        let mut spec = ItemSpec::ordinary("escape page".into());
+        spec.readable = Some(ReadableSpec {
+            descriptors: vec![],
+            effects: vec![crate::rules::Effect::TeleportRandom],
+            identify: None,
+            discovery: ItemDiscovery::SelfEffect,
+        });
+        let scroll = game
+            .place_item_stack(10, at(1), Some(ActorId(1)), 1, spec)
+            .unwrap();
+        let candidates = game.random_relocation_candidates(ActorId(1)).unwrap();
+        assert!(candidates.len() > 1);
+        let setup_rng = game.rules_rng;
+        let mut expected_rng = setup_rng;
+        let index = crate::quantity::QuantityRange::new(1, candidates.len() as u64)
+            .unwrap()
+            .sample(&mut expected_rng)
+            .unwrap()
+            - 1;
+        let destination = candidates[index as usize];
+        let selection_rng = expected_rng;
+        // A guaranteed miss still performs the ordinary three-die attack check.
+        // No poison rider or damage roll is selected, so the expected suffix is exact.
+        crate::dice::roll_check(&mut expected_rng, crate::dice::Edge::default());
+        game.place_trap(
+            destination.location,
+            tor_world::Trap {
+                id: 991,
+                dc: 15,
+                avoidance_dc: None,
+                kind: tor_world::TrapKind::PoisonDart {
+                    attack_bonus: -100,
+                    exposure: "poison".into(),
+                },
+            },
+        )
+        .unwrap();
+        // Isolate nested contact RNG from ordinary passive discovery during
+        // paid admission. Knowing this plate does not avoid it: avoidance is None.
+        for actor in [ActorId(1), ActorId(2)] {
+            game.reveal_feature_family(actor, tor_world::ConcealedFeatureId::Trap(991))
+                .unwrap();
+            assert!(game.feature_known(actor, tor_world::ConcealedFeatureId::Trap(991)));
+        }
+        let plan = game
+            .plan_work(ActorId(1), Work::Read { item: scroll })
+            .unwrap();
+        let due = plan.preparation();
+        if paid {
+            start_owned_item_work(&mut game, plan);
+        }
+        assert_eq!(
+            game.rules_rng, setup_rng,
+            "setup must not draw before relocation"
+        );
+        assert_eq!(
+            game.random_relocation_candidates(ActorId(1)).unwrap(),
+            candidates
+        );
+        let mut restored = roundtrip(&game);
+        for current in [&mut game, &mut restored] {
+            current
+                .with_recovery_transition(true, |candidate| {
+                    if paid {
+                        candidate.tick = due;
+                        candidate.resolve_preparations()
+                    } else {
+                        candidate
+                            .apply_effects_in_transaction(
+                                ActorId(1),
+                                &[crate::rules::Effect::TeleportRandom],
+                            )
+                            .map(|_| ())
+                    }
+                })
+                .unwrap();
+            assert_eq!(
+                current.actors.get(&ActorId(1)).map(|actor| actor.location),
+                Some(destination.location)
+            );
+            assert!(current.actors[&ActorId(1)]
+                .trap_contacts
+                .ids()
+                .any(|id| id == 991));
+            assert_eq!(current.items.contains_key(&scroll), !paid);
+            assert_ne!(expected_rng, selection_rng);
+            assert_eq!(
+                current.rules_rng, expected_rng,
+                "Publishing the parent teleport must not overwrite the nested contact's draws"
+            );
+        }
+        assert_eq!(game, restored);
+    }
 }
 
 // Both games contain both definitions. Only the concealed item's true identity
@@ -1137,6 +1833,8 @@ fn magic_item_regression_hostile_device_reveals_guise_without_ability_grant() {
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::Perception {
                 value: crate::perception::PerceptionValue::ObjectGuise {
+                    skill: crate::attributes::Skill::Stealth,
+                    edge: 0,
                     appearance: Some(crate::perception::GuiseAppearance {
                         name: "wooden box".into(),
                         description: "A closed box.".into(),
@@ -1491,6 +2189,7 @@ fn read_self_sleep_while_blind_consumes_exactly_and_restores_without_protection(
         spec.concealed = true;
         spec.stackable = true;
         spec.readable = Some(ReadableSpec {
+            descriptors: vec![],
             effects: vec![Effect::ApplyConditionForTurns {
                 condition: sleep.clone(),
                 duration: AmountExpr::Fixed { amount: 1 },
@@ -1630,6 +2329,7 @@ fn fact_armor(game: &mut Game, id: u64, cursed: bool) -> ItemId {
     let mut spec = ItemSpec::ordinary("test mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(crate::EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         slot: crate::EquipmentSlot::new("body_armor").unwrap(),

@@ -675,6 +675,7 @@ mod tests {
             id: 1,
             at: [1, 1, 0],
             dc: 12,
+            avoidance_dc: None,
             kind: crate::scenario_package::TrapKind::Rust {
                 slot: "body_armor".into(),
                 amount: 1,

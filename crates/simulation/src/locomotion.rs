@@ -47,6 +47,7 @@ impl<'de> Deserialize<'de> for MovementChance {
 pub enum LocomotionValue {
     Stationary { enabled: bool },
     Flying { enabled: bool },
+    Levitating { enabled: bool },
     Erratic { chance: Option<MovementChance> },
     Confused { chance: Option<MovementChance> },
 }
@@ -61,6 +62,9 @@ impl<'de> Deserialize<'de> for LocomotionValue {
             Flying {
                 enabled: bool,
             },
+            Levitating {
+                enabled: bool,
+            },
             Erratic {
                 #[serde(deserialize_with = "crate::bounded::required_option")]
                 chance: Option<MovementChance>,
@@ -73,6 +77,7 @@ impl<'de> Deserialize<'de> for LocomotionValue {
         Ok(match crate::bounded::named_map(d)? {
             Fields::Stationary { enabled } => Self::Stationary { enabled },
             Fields::Flying { enabled } => Self::Flying { enabled },
+            Fields::Levitating { enabled } => Self::Levitating { enabled },
             Fields::Erratic { chance } => Self::Erratic { chance },
             Fields::Confused { chance } => Self::Confused { chance },
         })
@@ -83,11 +88,19 @@ impl<'de> Deserialize<'de> for LocomotionValue {
 pub struct LocomotionCapabilities {
     pub stationary: bool,
     pub flying: bool,
+    /// Hover without voluntary vertical control or access to ground interactions.
+    pub levitating: bool,
     pub erratic: Option<MovementChance>,
     /// Execution-only redirection of fresh ordinary horizontal movement.
     pub confused: Option<MovementChance>,
 }
 impl LocomotionCapabilities {
+    /// Gravity and ordinary ground contact are suppressed by either capability.
+    /// Vertical navigation must still test `flying`, never this predicate.
+    pub(crate) fn hovers(self) -> bool {
+        self.flying || self.levitating
+    }
+
     /// Grants combine by OR / strongest exact probability. Suppression wins
     /// across all active sources, independent of their ordering.
     pub(crate) fn from_modifiers<'a>(
@@ -95,8 +108,13 @@ impl LocomotionCapabilities {
     ) -> Self {
         use crate::rules::{ModifierOp, Scope};
         let mut result = Self::default();
-        let (mut stationary_off, mut flying_off, mut erratic_off, mut confused_off) =
-            (false, false, false, false);
+        let (
+            mut stationary_off,
+            mut flying_off,
+            mut levitating_off,
+            mut erratic_off,
+            mut confused_off,
+        ) = (false, false, false, false, false);
         for modifier in values.filter(|m| m.scope == Scope::Always) {
             if let ModifierOp::Locomotion { value } = modifier.op {
                 match value {
@@ -107,6 +125,10 @@ impl LocomotionCapabilities {
                     LocomotionValue::Flying { enabled } => {
                         result.flying |= enabled;
                         flying_off |= !enabled;
+                    }
+                    LocomotionValue::Levitating { enabled } => {
+                        result.levitating |= enabled;
+                        levitating_off |= !enabled;
                     }
                     LocomotionValue::Confused { chance: None } => confused_off = true,
                     LocomotionValue::Confused {
@@ -135,6 +157,7 @@ impl LocomotionCapabilities {
         }
         result.stationary &= !stationary_off;
         result.flying &= !flying_off;
+        result.levitating &= !levitating_off;
         if erratic_off {
             result.erratic = None;
         }

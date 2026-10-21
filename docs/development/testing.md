@@ -89,7 +89,14 @@ well as newly added tests. Include existing owners of affected restore fold
 counts, retained build provenance, frozen plan witnesses and complete schema
 field inventories even when their test files were not initially edited. Record
 the selected test IDs and the contracts they cover; a new feature's tests alone
-do not cover those older cross-cutting invariants. Check the CI target order too:
+do not cover those older cross-cutting invariants. Build a small affected-contract
+owner matrix (contract, source/fixture, test ID, required boundary): include
+external scenario consumers such as `crates/client-3d/scenarios/menagerie`, not
+just packages beneath `scenarios/`. Shared actor mechanics need ordinary actors
+without creature stats as well as creatures where valid, and cross-feature cases
+such as movement with traps, conditions and paid-action recovery. Establish the
+supported contract explicitly; do not silently make every actor a creature to
+avoid a failing boundary. Check the CI target order too:
 fail-fast can hide later owning targets. For broad build, restore or schema
 changes, run the directly affected integration target as a whole when its
 runtime is small, instead of repeatedly filtering out older invariants. This
@@ -192,7 +199,12 @@ before the next gameplay input. Do not apply these waits to intentional
 rejection, spectator, paused, dead or terminal-state witnesses. Review each
 caller's precondition, completion signal and negative-case intent; use scripted
 frames to distinguish acknowledged effects from later permissions without
-sleeps or larger deadlines.
+sleeps or larger deadlines. Assert readiness, payment and the actual resulting
+state separately where each is part of the contract; an accepted command, fixed
+tick count or assumed random outcome is not proof of the effect. Legitimate
+conditions may require bounded ordinary waiting or replanning in a driver, but
+preserve combat decisions, action budgets and explicit rejection witnesses.
+Do not turn a negative case into a success path by adding automatic waits.
 
 ### Scenario packages, fixtures and wizard commands
 
@@ -200,8 +212,13 @@ Positive gameplay fixtures should use explicit typed constructors/fields when
 available, so required runtime fields become compile-time maintenance work.
 Keep independently authored schema positives and malformed/missing-field raw
 payloads: sharing a production serializer is not an independent schema oracle.
-Validate a positive fixture before changing the one dimension a negative test
-intends to reject; setup failures do not prove that behavioral boundary.
+Expected values must come from an independently authored typed or literal contract,
+not the production helper, lookup or serializer being tested.
+Validate and exercise a known-valid positive baseline before cloning it and
+changing only the dimension a negative test intends to reject. Assert that the
+mutation fails for the intended reason; an already-invalid baseline or fixture
+load failure does not prove that behavioral boundary. Preserve explicit rejection
+cases when extending helpers or schema fixtures.
 
 - Use ordinary validated [scenario packages](../reference/scenario-packages.md) for the initial
   setup of unit, integration, and process tests. Test-only packages live in
@@ -291,7 +308,10 @@ When you find or fix a bug:
    control when rejection or unchanged state could otherwise pass vacuously.
    A fixture-load, startup or setup-budget failure remains a setup failure, not
    a first-red reproduction of later behavior. Keep the failing output locally
-   as evidence.
+   as evidence. For a critical assertion without an available pre-fix run,
+   demonstrate sensitivity with a bounded, isolated mutation that breaks the
+   intended contract and fails that assertion, then remove it and confirm green.
+   This is assertion-sensitivity evidence, not a claimed historical first-red run.
 2. Fix the bug and confirm the test passes.
 3. Add the test at the lowest layer that reliably reproduces the bug. For a
    user-visible bug, verify the affected acceptance path and extend its process
@@ -483,8 +503,9 @@ The adapter never silently builds a binary or falls back to a Python resolver.
 
 ### Development loop
 
-Before expensive executable linking, run formatting and an affected-target
-compilation/lint preflight, such as `cargo clippy -p tor-server --all-targets --locked -- -D warnings`.
+Before expensive executable linking, run formatting, applicable cheap schema or
+fixture validation, and an affected-target compilation/lint preflight, such as
+`cargo clippy -p tor-server --all-targets --locked -- -D warnings`.
 Use `cargo check` when compilation alone is the useful diagnostic; do not repeat
 already-qualified unchanged preflights merely to run both. A successful check
 neither updates runnable executables nor replaces a behavioral test. A Rust
@@ -609,7 +630,29 @@ when applicable. Otherwise the documented push/full gates remain unchanged, and
 complete exact-head Windows/Linux debug/release CI is required before merge
 outside the prose-only documentation path.
 
+A push-gate exception is not permission to defer predictable failures to CI.
+Unless explicitly waived within that authorization, retain a risk-based pre-push
+floor: formatting and workspace all-target Clippy; applicable schema/content and
+certificate validation across all affected scenario roots; affected older and new
+unit/integration owners; and a small set of real-client and save/recovery flows
+for changed mechanics. Select these through the contract-owner matrix, not only
+the edited test files. Collect the selected failures from each built binary before
+rebuilding, then batch fixes and reuse only still-qualified binaries. This floor
+is a stable pre-push checkpoint, not a demand for every unit test or full native
+suite on each edit. Keep the exact exception visible and report resource-blocked
+or unrun checks explicitly; complete platform/profile and graphical CI remains
+required under the unchanged gates above.
+
 ### Failure diagnostics and timing evidence
+
+Diagnose the failing phase and supported contract before editing expectations.
+Use fixture validation, actor capabilities, authoritative lifecycle/results and
+retained traces to distinguish a production defect from invalid setup or a driver
+that mishandles legitimate gameplay. Fix the responsible owner; documented fixture
+isolation must retain a valid mixed-feature boundary witness. Do not automatically
+weaken an assertion, grant capabilities, remove hazards or increase budgets to
+make CI green. If semantics are unresolved, record the question for the contract
+owner rather than encode a convenient answer in the test.
 
 The verifier invokes `scripts/test_runner.py`, which preserves ordinary unittest
 selection, assertions, failures and exit status. Each Python stage writes
@@ -727,7 +770,10 @@ receipts. A process list from another shell or container may be isolated; absenc
 from `ps` proves neither completion nor failure and does not justify a replacement
 build. If the owned status is unavailable, report it as unknown. Filtered regression
 runs must verify the intended test names and a nonzero matching count; an exit code
-of zero with no selected tests is not verification evidence.
+of zero with no selected tests is not verification evidence. Report wrong-filter
+or zero-test runs, fixture/setup failures, infrastructure failures, blocked and
+unrun checks separately from behavioral failures and passes; none proves the
+intended regression was exercised.
 
 Do not infer validity from a timestamp, a previous green result or a matching
 branch name. Source, tests, fixtures, scenario packages, generated certificates,
@@ -960,6 +1006,11 @@ required on the final commit before merging.
 - The simulation must be reproducible from its seed and journal. Tests compare
   replayed, restarted, and rewound state with the original, and check the same
   seed yields the same results.
+- For probabilistic mechanics, keep a fixed positive and negative outcome sample
+  (for example, hit and miss), with explicit preconditions and exact observable
+  effects. Bounded offline seed discovery is acceptable when justified and its
+  chosen seeds/setup are recorded; normal tests never search or retry until the
+  desired outcome occurs. These witnesses prove outcomes, not probability rates.
 - Test that clients receive only disclosed observations: hidden items,
   identities, geometry, AI memory, and other actors' private commands must never
   appear in protocol messages, history, or error responses.

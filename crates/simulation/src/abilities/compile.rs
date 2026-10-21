@@ -468,6 +468,35 @@ impl Game {
         sight: Option<&[tor_world::SightCell]>,
         supplies: crate::supplies::SupplySelection,
     ) -> Result<Plan, GameError> {
+        self.compile_strike_plan_with_touch(actor, ability, invocation, sight, supplies, false)
+    }
+    pub(crate) fn compile_touch_strike_plan(
+        &self,
+        actor: ActorId,
+        ability: &AbilityId,
+        toucher: ActorId,
+    ) -> Result<Plan, GameError> {
+        if !self.attack_available(actor, toucher) {
+            return Err(GameError::Rule(RuleError::OutOfReach));
+        }
+        self.compile_strike_plan_with_touch(
+            actor,
+            ability,
+            super::AbilityInvocation::contact_target(toucher),
+            None,
+            crate::supplies::SupplySelection::Carried,
+            true,
+        )
+    }
+    fn compile_strike_plan_with_touch(
+        &self,
+        actor: ActorId,
+        ability: &AbilityId,
+        invocation: super::AbilityInvocation,
+        sight: Option<&[tor_world::SightCell]>,
+        supplies: crate::supplies::SupplySelection,
+        physical_touch: bool,
+    ) -> Result<Plan, GameError> {
         crate::diagnostics::ability_plan();
         if let super::AbilityAim::DirectionalRay { direction } = invocation.aim {
             if invocation.weapon != super::WeaponSelection::Default {
@@ -494,7 +523,10 @@ impl Game {
         // The original reference domain is an admission operand, not a hint.
         // Validate it before touching hidden faction, health or private plans.
         let disclosure = self.actor_disclosure(actor, target)?;
-        if target != actor && disclosure.reference() != Some(invocation.reference()) {
+        if !physical_touch
+            && target != actor
+            && disclosure.reference() != Some(invocation.reference())
+        {
             return Err(GameError::Rule(RuleError::OutOfReach));
         }
         let defender = self.creature(target).ok_or(GameError::UnknownActor)?;

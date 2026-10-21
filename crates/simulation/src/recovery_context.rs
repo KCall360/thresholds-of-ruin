@@ -194,7 +194,7 @@ impl Game {
     ) -> Result<R, GameError> {
         if !requires_candidate
             && self.actors.contextual_recovery_owners().next().is_none()
-            && (!self.lifecycle.discovery_started || !self.world.has_concealed_features())
+            && (!self.lifecycle.discovery_started || !self.has_discovery_cues())
         {
             let result = change(self)?;
             self.retire_settled_falls();

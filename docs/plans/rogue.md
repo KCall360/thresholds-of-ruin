@@ -259,14 +259,14 @@ reach are TOR adaptations. See [the bounded item mapping](../reference/items.md#
 The current ring catalog implements protection, add strength, sustain strength,
 see invisible, adornment, dexterity, increase damage, regeneration, slow digestion
 and maintain armor through shared wearable modifiers, plus searching through the
-shared active discovery resolver. Protection reduces all six
+shared active discovery resolver and teleportation through exact-source active clocks. Protection reduces all six
 damage types; Strength and dexterity rings exclude only their own Physical Defense
 contribution; attack bonuses apply to canonical rolled attack pools. Health
 regeneration benefits do not stack, while per-ring nutrition costs do. Signed
 potency and curse knowledge stay instance-private; one paid identification choice
 can permit both rings and wands. The finite ring stage follows ammunition; independent
 secret-entrance and trap stages extend generation without changing geometry or
-stair streams. Aggravation, teleportation and stealth rings remain outside this batch. See
+stair streams. Aggravation and stealth rings remain outside this batch. See
 [worn magic contracts](../reference/items.md#worn-magic-and-the-finite-rogue-ring-catalog).
 These mechanics do not establish calibrated food pressure or complete Rogue parity.
 
@@ -449,8 +449,9 @@ ordinary finite birth stock, passive provocation and their purchased natural
 strike sequences. Troll is selected at depths 13–22 with six racial HD,
 RG1(1), NA1(2), NA2(4), mean acquisition, separate 1d8/1d8/2d6 strikes and 50%
 finite birth stock from the same provisional pool. Rattlesnake is selected at depths 3–12, with two racial HD, VN1(1),
-one unspent point, a 1d6 bite and a separate Physical-checked poison Strength−1
-rider; ordinary restoration removes recorded Strength deficit. Jabberwock enters
+one unspent point and a 1d6 Physical-checked bite. Successful contact delivers a
+separate poison exposure resisted with Athletics against authored DC 12. Failed
+resistance records Strength−1; ordinary restoration removes recorded Strength deficit. Jabberwock enters
 at depth 21 with fifteen aberration racial HD, NA1(2), NA3(8), a heavy 2d12/2d4
 sequence, passive acquisition and 70% finite birth stock. Its purchased shared
 Rending Pair attempts one 1d6 rider after two qualifying hits in that sequence.
@@ -473,9 +474,13 @@ its provisional unscaled preparation/recovery is 100/100, cooldown 2000.
 The full population preserves exact pinned redistribution: depth 31 has
 M/V/G/J weight 9 each and D weight 14; the uniform five-species tail starts at 32.
 Focused A/D mechanism, owned-progression and source-free process checks pass;
-complete cross-platform CI remains required before merging this checkpoint. Complete trapdoor, arrow,
-sleeping gas, bear trap, teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
-must respect destination generation/loading and geometry. Existing hobgoblins
+complete cross-platform CI remains required before merging this checkpoint.
+The hazards/escape implementation extends trapdoor, arrow, sleeping gas, bear trap,
+teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
+use permanent apertures and preloaded destination geometry; authored gravity is
+explicit. Escape adds exact-target and same-floor relocation plus ordinary
+levitation, whose completed dose can arrest descent but grants no vertical flight.
+Runtime and current-format qualification must cover these shared boundaries. Existing hobgoblins
 roam using personal visible surroundings and visit counts, including reachable
 door opening; NPC stair traversal remains disabled. This is separate from the
 unfinished seeded wandering population while floors are active. Other species'

@@ -88,6 +88,7 @@ fn equip_armor(game: &mut Game, actor: ActorId, rustproof: bool) -> ItemId {
     let mut spec = ItemSpec::ordinary("test armor".into());
     spec.class = crate::ItemClass::Armor;
     spec.equipment = Some(crate::EquipmentSpec {
+        periodic_relocation: None,
         slot: crate::EquipmentSlot::new("body_armor").unwrap(),
         armor: Some(crate::ArmorSpec {
             physical_reduction: 5,
@@ -125,7 +126,8 @@ fn searching_cadence_is_one_scan_per_hundred_active_ticks_with_duplicate_sources
     one.advance_physics(100).unwrap();
     two.advance_physics(100).unwrap();
     let mut expected = initial;
-    crate::dice::roll_check(&mut expected, crate::dice::Edge::default());
+    // One active scan owns the shared six-die distance-band sample.
+    crate::dice::roll_check(&mut expected, crate::dice::Edge::from_counts(3, 0));
     assert_eq!(one.rules_rng, expected);
     assert_eq!(two.rules_rng, expected);
     for _ in 0..3 {
@@ -213,6 +215,7 @@ fn rust_contact_triggers_once_then_retriggers_only_after_leaving_and_returning()
         Trap {
             id: 11,
             dc: 99,
+            avoidance_dc: None,
             kind: TrapKind::Rust {
                 slot: "body_armor".into(),
                 amount: 1,
@@ -245,6 +248,7 @@ fn rust_protection_and_flight_do_not_erase_imposed_floor_collision() {
             Trap {
                 id: 11,
                 dc: 99,
+                avoidance_dc: None,
                 kind: TrapKind::Rust {
                     slot: "body_armor".into(),
                     amount: 1,
@@ -276,9 +280,11 @@ fn sleep_trap_uses_ordinary_timed_condition_and_no_query_retrigger() {
         Trap {
             id: 11,
             dc: 99,
+            avoidance_dc: None,
             kind: TrapKind::SleepingGas {
                 condition: "fixture_sleep".into(),
                 duration: 200,
+                exposure: None,
             },
         },
     )
@@ -296,7 +302,8 @@ fn sleep_trap_uses_ordinary_timed_condition_and_no_query_retrigger() {
 fn earned_periodic_scan_settles_before_sleep_source_change_at_its_deadline() {
     let (mut game, actor) = fixture(vec![periodic()]);
     let mut expected = game.rules_rng;
-    crate::dice::roll_check(&mut expected, crate::dice::Edge::default());
+    // One active scan owns the shared six-die distance-band sample.
+    crate::dice::roll_check(&mut expected, crate::dice::Edge::from_counts(3, 0));
     // Deliberately exercise an unswept trusted API boundary, not ordinary time travel.
     game.tick = 100;
     game.apply_effects(
@@ -337,7 +344,8 @@ fn earned_periodic_scan_precedes_nutrition_sleep_at_the_same_deadline() {
         .document()
         .nutrition_condition_trigger
         .sample(&mut expected);
-    crate::dice::roll_check(&mut expected, crate::dice::Edge::default());
+    // One active scan owns the shared six-die distance-band sample.
+    crate::dice::roll_check(&mut expected, crate::dice::Edge::from_counts(3, 0));
     game.advance_physics(100).unwrap();
     assert_eq!(game.rules_rng, expected);
     assert!(!game.condition_allows_voluntary_input(actor));
@@ -363,6 +371,7 @@ fn earned_scan_uses_old_place_before_authorized_relocation() {
         Trap {
             id: 11,
             dc: 0,
+            avoidance_dc: None,
             kind: TrapKind::Rust {
                 slot: "body_armor".into(),
                 amount: 1,
@@ -378,6 +387,7 @@ fn earned_scan_uses_old_place_before_authorized_relocation() {
         Trap {
             id: 12,
             dc: 0,
+            avoidance_dc: None,
             kind: TrapKind::Rust {
                 slot: "body_armor".into(),
                 amount: 1,
@@ -404,6 +414,7 @@ fn active_contact_and_ring_fraction_survive_checkpoint_without_an_extra_pulse() 
         Trap {
             id: 11,
             dc: 100,
+            avoidance_dc: None,
             kind: TrapKind::Rust {
                 slot: "body_armor".into(),
                 amount: 1,
@@ -494,6 +505,7 @@ fn ordinary_movement_triggers_rust_once_per_new_ground_entry() {
         Trap {
             id: 11,
             dc: 100,
+            avoidance_dc: None,
             kind: TrapKind::Rust {
                 slot: "body_armor".into(),
                 amount: 1,
@@ -524,6 +536,7 @@ fn subcell_lift_breaks_contact_and_real_landing_retriggers() {
         Trap {
             id: 11,
             dc: 100,
+            avoidance_dc: None,
             kind: TrapKind::Rust {
                 slot: "body_armor".into(),
                 amount: 1,
@@ -570,7 +583,8 @@ fn standalone_resolved_sleep_settles_earned_search_before_publication() {
     .unwrap();
     game.tick = 100;
     let mut expected = game.rules_rng;
-    crate::dice::roll_check(&mut expected, crate::dice::Edge::default());
+    // One active scan owns the shared six-die distance-band sample.
+    crate::dice::roll_check(&mut expected, crate::dice::Edge::from_counts(3, 0));
     game.apply(outcome).unwrap();
     assert_eq!(game.rules_rng, expected);
     assert!(!game.condition_allows_voluntary_input(actor));
@@ -596,6 +610,7 @@ fn relocation_from_frozen_region_establishes_new_active_ground_contact() {
         Trap {
             id: 11,
             dc: 100,
+            avoidance_dc: None,
             kind: TrapKind::Rust {
                 slot: "body_armor".into(),
                 amount: 1,
@@ -624,6 +639,7 @@ fn real_worn_ring_preserves_fraction_across_unequip_and_re_equip() {
     let mut spec = ItemSpec::ordinary("searching ring fixture".into());
     spec.class = crate::ItemClass::Ring;
     spec.equipment = Some(crate::EquipmentSpec {
+        periodic_relocation: None,
         slot: crate::EquipmentSlot::new("ring").unwrap(),
         armor: None,
         attack: None,
@@ -671,7 +687,8 @@ fn real_worn_ring_preserves_fraction_across_unequip_and_re_equip() {
     assert_eq!(game.rules_rng, rng);
     game.advance_physics(worn_at + 100 - fraction).unwrap();
     let mut expected = rng;
-    crate::dice::roll_check(&mut expected, crate::dice::Edge::default());
+    // One active scan owns the shared six-die distance-band sample.
+    crate::dice::roll_check(&mut expected, crate::dice::Edge::from_counts(3, 0));
     assert_eq!(game.rules_rng, expected);
 }
 

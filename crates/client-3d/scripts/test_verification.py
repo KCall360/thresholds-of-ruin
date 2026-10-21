@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import subprocess
@@ -88,11 +89,63 @@ class IndependentVerification(unittest.TestCase):
         path = ROOT / ".github/workflows/client-3d.yml"
         self.assertTrue(path.is_file(), "3D checks need a separate, path-scoped workflow")
         text = path.read_text(encoding="utf-8")
-        self.assertEqual(text.count('      - "crates/client-3d/**"'), 2)
-        self.assertNotIn('      - "crates/protocol/**"', text)
-        self.assertNotIn('      - "crates/client-common/**"', text)
+        self.assertIn("  workflow_dispatch:", text)
+        self.assertNotIn("paths-ignore:", text)
         self.assertIn("os: [windows-latest, ubuntu-latest]", text)
         self.assertIn("profile: [debug, release]", text)
+        for event in ("pull_request", "push"):
+            section = re.split(r"\n  \S", text.split(f"  {event}:\n", 1)[1], maxsplit=1)[0]
+            # Read the checked-in patterns, preserving order. Limit the matcher
+            # to exact paths and directory/**, the only grammar used here.
+            # GitHub applies the last matching rule per file, then runs when
+            # ANY changed file is included (not when every file is included).
+            patterns = re.findall(r'^      - "([^"\n]+)"$', section, re.MULTILINE)
+            self.assertTrue(patterns, event)
+            def selected(paths, rules=patterns):
+                for path in paths:
+                    included = False
+                    for rule in rules:
+                        negative = rule.startswith("!")
+                        pattern = rule[1:] if negative else rule
+                        directory = pattern.endswith("/**")
+                        literal = pattern[:-3] if directory else pattern
+                        self.assertNotRegex(literal, r"[!*?\[\]]", "extend the matcher for new glob syntax")
+                        matches = path.startswith(literal + "/") if directory else path == literal
+                        if matches:
+                            included = not negative
+                    if included:
+                        return True
+                return False
+
+            scenario = "crates/client-3d/scenarios/menagerie/"
+            excluded = [scenario + name for name in (
+                "scenario.toml", "index.json", "validation.json",
+                "catalog/actors.toml", "regions/1.toml")]
+            excluded += ["crates/client-3d/scenarios/future/nested/source.toml",
+                         "crates/protocol/src/lib.rs", "crates/client-common/src/lib.rs",
+                         "scenarios/rogue/scenario.toml", "docs/status.md"]
+            included = ["crates/client-3d/" + name for name in (
+                "src/main.rs", "model/src/lib.rs", "model/tests/it/input.rs",
+                "assets/models/body.glb", "scripts/test_client_process.py",
+                "Cargo.toml", "Cargo.lock", "scenarios-other/client.asset")]
+            included += [".github/workflows/client-3d.yml"]
+            for changed in excluded:
+                with self.subTest(event=event, excluded=changed):
+                    self.assertFalse(selected([changed]))
+            self.assertFalse(selected(excluded), "scenario/core-only batches must not start 3D")
+            for changed in included:
+                with self.subTest(event=event, included=changed):
+                    self.assertTrue(selected([changed]))
+                    self.assertTrue(selected([*excluded, changed]), "a scenario exclusion cannot veto a client edit")
+                    self.assertTrue(selected([changed, *excluded]), "file ordering cannot change the trigger")
+            # Guard the regression oracle too: negation is ordered, not a
+            # global blacklist, and later positives can re-include a file.
+            positive = "crates/client-3d/**"
+            negative = "!crates/client-3d/scenarios/**"
+            self.assertFalse(selected([scenario + "scenario.toml"], [positive, negative]))
+            self.assertTrue(selected([scenario + "scenario.toml"], [negative, positive]))
+            self.assertTrue(selected([scenario + "scenario.toml"],
+                                     [positive, negative, scenario + "scenario.toml"]))
 
     def test_profile_plan_preserves_real_process_and_renderer_checks(self):
         path = HERE / "verify.py"

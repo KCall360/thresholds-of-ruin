@@ -100,6 +100,7 @@ fn equip_configured(
     );
     let primary = component.key();
     item.equipment = Some(crate::EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         slot: crate::EquipmentSlot::new("weapon").unwrap(),
         armor: None,
@@ -1357,6 +1358,7 @@ fn frozen_equip_compares_only_its_complete_pool_and_rejects_capacity_changes() {
     let mut ring = crate::ItemSpec::ordinary("ring".into());
     ring.class = crate::ItemClass::Ring;
     ring.equipment = Some(crate::EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         slot: ring_slot,
         armor: None,

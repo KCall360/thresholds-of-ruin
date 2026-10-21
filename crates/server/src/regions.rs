@@ -43,11 +43,20 @@ type PreparationLineage = (
     u64,
 );
 
+type TrapLineage = (
+    tor_simulation::ActorId,
+    tor_world::Location,
+    u8,
+    Vec<u64>,
+    Vec<RegionId>,
+);
+
 /// Ephemeral progress evidence for one unpublished host transition.
 #[derive(Default)]
 struct BoundaryProgress {
     preparations: BTreeMap<PreparationLineage, BTreeSet<RegionId>>,
     population_tick: Option<u64>,
+    traps: BTreeMap<TrapLineage, BTreeSet<RegionId>>,
 }
 
 impl BoundaryProgress {
@@ -70,6 +79,29 @@ impl BoundaryProgress {
             return Err(storage_failure());
         }
         self.preparations.insert(lineage, missing);
+        Ok(())
+    }
+
+    fn trap(
+        &mut self,
+        boundary: &tor_simulation::TrapRegionBoundary,
+        missing: BTreeSet<RegionId>,
+    ) -> Result<(), Failure> {
+        let key = (
+            boundary.actor,
+            boundary.location,
+            boundary.orientation,
+            boundary.avoidable_traps.iter().copied().collect(),
+            boundary.members.iter().copied().collect(),
+        );
+        if missing.is_empty()
+            || self.traps.get(&key).is_some_and(|previous| {
+                missing.len() >= previous.len() || !missing.is_subset(previous)
+            })
+        {
+            return Err(storage_failure());
+        }
+        self.traps.insert(key, missing);
         Ok(())
     }
 
@@ -466,6 +498,9 @@ impl Regions {
             }
             if game.population_entry_pending() {
                 progress.population(game.tick())?;
+            }
+            if let Some(boundary) = game.trap_region_boundary().cloned() {
+                progress.trap(&boundary, game.trap_missing_regions(&boundary))?;
             }
             let pending_before = game.region_transition_pending().then(|| game.clone());
             let mut work = self.transition_staged(game, made, extra.clone(), profile)?;

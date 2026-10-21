@@ -16,12 +16,13 @@ mod creature_time;
 pub mod equipment_capacity;
 pub mod equipment_capture;
 pub mod expertise;
+mod hazard_checks;
 mod lifecycle;
 pub mod linked_hold;
 pub mod projectile_profiles;
 mod search_clock;
 mod traps;
-pub use traps::trap_kind_valid;
+pub use traps::{trap_kind_valid, TrapRegionBoundary};
 pub mod weapon_profiles;
 pub use linked_hold::HoldId;
 pub mod escape;
@@ -107,14 +108,18 @@ pub use explored_map::{
 };
 mod navigation_map;
 mod observation;
+mod periodic_relocation;
 mod places;
 pub mod progression;
 pub mod public_plan;
 pub mod quantity;
+mod readied_ambush;
+mod relocation;
 pub mod resolution_diagnostics;
 pub mod resources;
 pub mod survival_diagnostics;
 pub mod theft;
+pub use periodic_relocation::PeriodicRelocation;
 pub use places::{NameOrigin, PlaceName};
 mod streaming;
 pub use streaming::{
@@ -472,6 +477,7 @@ pub struct ActionOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Actor {
     guise: perception::GuiseState,
+    readied_ambush: readied_ambush::ReadiedAmbush,
     holds: linked_hold::HoldBook,
     behavior: behavior::Behavior,
     active_since: u64,
@@ -491,7 +497,9 @@ struct Actor {
     known_equipment: Shared<crate::equipment_knowledge::EquipmentKnowledge>,
     discovery: Shared<discovery::DiscoveryKnowledge>,
     search_clock: search_clock::SearchClock,
+    periodic_relocations: periodic_relocation::RelocationBook,
     trap_contacts: Shared<traps::TrapContacts>,
+    spatial_condition_anchors: traps::SpatialConditionAnchors,
     identification: Option<magic_items::IdentificationChoice>,
     recognized_abilities: Shared<BTreeSet<content_ids::AbilityId>>,
     public_plan: Option<Shared<public_plan::PublicPlanObservation>>,
@@ -513,6 +521,8 @@ struct Item {
     condition: armor::ItemCondition,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     charges: Option<u16>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    relocation_elapsed: Option<u64>,
     motion: MotionState,
     orientation: u8,
     spec: Shared<ItemSpec>,
@@ -531,6 +541,8 @@ impl<'de> serde::Deserialize<'de> for Item {
             condition: armor::ItemCondition,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             charges: Option<u16>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            relocation_elapsed: Option<u64>,
             motion: MotionState,
             orientation: u8,
             spec: Shared<ItemSpec>,
@@ -544,6 +556,7 @@ impl<'de> serde::Deserialize<'de> for Item {
             corpse: fields.corpse,
             condition: fields.condition,
             charges: fields.charges,
+            relocation_elapsed: fields.relocation_elapsed,
             motion: fields.motion,
             orientation: fields.orientation,
             spec: fields.spec,
@@ -592,6 +605,8 @@ pub struct Game {
     /// client event or a serialized event queue.
     population_entry_boundary: Option<u64>,
     preparation_region_boundary: Option<theft::PreparationRegionBoundary>,
+    trap_region_boundary: Option<traps::TrapRegionBoundary>,
+    trap_resolution: Option<traps::TrapResolution>,
     host_region_continuation: bool,
 }
 impl Clone for Game {
@@ -626,6 +641,8 @@ impl Clone for Game {
             unique_retrieval: self.unique_retrieval.clone(),
             population_entry_boundary: self.population_entry_boundary,
             preparation_region_boundary: self.preparation_region_boundary.clone(),
+            trap_region_boundary: self.trap_region_boundary.clone(),
+            trap_resolution: self.trap_resolution.clone(),
             host_region_continuation: self.host_region_continuation,
         }
     }
@@ -742,7 +759,7 @@ impl Game {
     }
     /// Place authored physical ground-contact metadata; this is not an activation.
     pub fn place_trap(&mut self, at: Location, trap: tor_world::Trap) -> Result<(), GameError> {
-        if !trap_kind_valid(self.content.rules(), &trap.kind)
+        if !traps::trap_content_valid(&self.content, &trap.kind)
             || self.knows_concealed_feature(tor_world::ConcealedFeatureId::Trap(trap.id))
         {
             return Err(GameError::InvalidLocation);
@@ -796,6 +813,8 @@ impl Game {
             unique_retrieval: None,
             population_entry_boundary: None,
             preparation_region_boundary: None,
+            trap_region_boundary: None,
+            trap_resolution: None,
             host_region_continuation: false,
         }
     }
@@ -822,6 +841,7 @@ impl Game {
             id,
             Actor {
                 guise: perception::GuiseState::default(),
+                readied_ambush: readied_ambush::ReadiedAmbush::default(),
                 holds: linked_hold::HoldBook::default(),
                 behavior: behavior::Behavior::new(self.seed, id),
                 active_since: self.tick,
@@ -841,7 +861,9 @@ impl Game {
                 known_equipment: Shared::default(),
                 discovery: Shared::default(),
                 search_clock: Default::default(),
+                periodic_relocations: Default::default(),
                 trap_contacts: Shared::default(),
+                spatial_condition_anchors: Default::default(),
                 identification: None,
                 recognized_abilities: Shared::default(),
                 public_plan: None,
@@ -868,6 +890,7 @@ impl Game {
             Item {
                 condition: crate::armor::ItemCondition::default(),
                 charges: None,
+                relocation_elapsed: None,
                 corpse: None,
                 holds: vec![],
                 motion: MotionState::default(),
@@ -980,7 +1003,7 @@ impl Game {
         let prepared = self.prepare_actor_outcome(outcome)?;
         let changes_lifecycle = self.actor_frozen(id)
             != (self.region_state(location.region) == Some(RegionState::Frozen));
-        let requires_candidate = self.world.has_concealed_features()
+        let requires_candidate = self.has_discovery_cues()
             || population_entry
             || changes_lifecycle
             || prepared.emits_events()

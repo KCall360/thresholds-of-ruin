@@ -368,6 +368,7 @@ mod budget_tests {
                     grid: [1, 1],
                     size: [5, 5, 2],
                     recipe: "rooms".into(),
+                    gravity: None,
                     zone: None,
                 },
             )]),

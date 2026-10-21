@@ -472,17 +472,18 @@ fn rogue_rattlesnake_owned_venom_and_canonical_strength_restoration_bind_existin
     assert_eq!(
         signature["strikes"],
         serde_json::json!({"kind":"natural_melee", "additional_riders":[{
-        "trigger":"success", "condition":null, "check":{"skill":{"kind":"natural_attack"},"defense":"physical"},
+        "trigger":"success", "condition":null, "check":null,
         "effects":[{"kind":"lose_attribute","attribute":"strength","amount":{"kind":"fixed","amount":1}}],
         "descriptors":["poison"]}]})
     );
-    // Generic resolver owners prove primary/rider misses and descriptor immunity;
-    // this compiled binding proves R uses that exact existing two-check mechanism.
+    // The primary attack delivers the poison rider; the shared descriptor-owned
+    // Athletics check resists its payload independently of Physical Defense.
+    // Resolver owners prove primary misses, resistance and descriptor immunity.
     let potion = &manifest.archetypes["rogue.restore_strength"];
     let dose = u32::from(tor_simulation::limits::DERIVED_ATTRIBUTE);
     assert_eq!(
         serde_json::to_value(potion.consumable.as_ref().unwrap()).unwrap(),
-        serde_json::json!({"discovery":"self_effect","effects":[{"kind":"restore_attribute","attribute":"strength",
+        serde_json::json!({"descriptors":[],"discovery":"self_effect","effects":[{"kind":"restore_attribute","attribute":"strength",
             "amount":{"kind":"fixed","amount":dose}}]})
     );
     let player = manifest.characters[0].creature.as_ref().unwrap();

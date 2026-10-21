@@ -20,6 +20,45 @@ fn disclosure(game: &Game, observer: ActorId, subject: ActorId) -> ActorDisclosu
         .map_or(ActorDisclosure::Hidden, |row| row.disclosure)
 }
 
+/// Contact contracts start after genuine failed passive contests, not before
+/// scenario publication. Find those outcomes without fabricating knowledge or
+/// changing the authored contest, then measure only the action's RNG ownership.
+fn initialize_unrecognized(game: &mut Game, pairs: &[(ActorId, ActorId)]) {
+    let baseline = game.clone();
+    for seed in 1..10_000 {
+        let mut candidate = baseline.clone();
+        candidate.rules_rng = seed;
+        candidate.initialize_discovery().unwrap();
+        if pairs.iter().all(|(observer, subject)| {
+            !candidate.guise_known(*observer, *subject)
+                && candidate.actors[observer]
+                    .discovery
+                    .guise_subjects()
+                    .any(|id| id == *subject)
+        }) {
+            for (observer, subject) in pairs {
+                assert_eq!(
+                    disclosure(&candidate, *observer, *subject),
+                    ActorDisclosure::ApparentObject
+                );
+            }
+            let rng = candidate.rules_rng;
+            for (observer, _) in pairs {
+                candidate
+                    .reconcile_passive_discovery_for(*observer)
+                    .unwrap();
+            }
+            assert_eq!(
+                candidate.rules_rng, rng,
+                "failed passive receipts must suppress retries"
+            );
+            *game = candidate;
+            return;
+        }
+    }
+    panic!("fixture must permit the required genuine failed passive contests");
+}
+
 #[test]
 fn see_invisible_requires_an_illuminated_eye_witness_even_with_local_contact() {
     let mut game = fixture(
@@ -270,6 +309,7 @@ fn seeing_invisibility_neither_pierces_an_object_guise_nor_removes_invisibility_
         &[PerceptionValue::SeeInvisible { enabled: true }],
         &[invisible(), guise(), ambush()],
     );
+    initialize_unrecognized(&mut game, &[(OWNER, SUBJECT)]);
     assert_eq!(
         disclosure(&game, OWNER, SUBJECT),
         ActorDisclosure::ApparentObject
@@ -289,20 +329,25 @@ fn seeing_invisibility_neither_pierces_an_object_guise_nor_removes_invisibility_
     )
     .unwrap();
     assert!(game.actor_perception(SUBJECT).unwrap().invisible);
-    assert_eq!(disclosure(&game, OWNER, SUBJECT), ActorDisclosure::Creature);
-    assert_eq!(game.actors[&SUBJECT].guise.ambush, AmbushState::Spent);
+    assert_eq!(
+        disclosure(&game, OWNER, SUBJECT),
+        ActorDisclosure::ApparentObject
+    );
+    assert_eq!(game.actors[&SUBJECT].guise.ambush, AmbushState::Available);
 }
 
 #[test]
-fn a_paid_touch_with_implicit_or_single_quantity_reveals_the_guise_globally() {
+fn a_paid_touch_without_readied_policy_keeps_guise_and_grants_no_loot() {
     for quantity in [None, Some(1)] {
         let mut game = fixture(&[], &[guise(), ambush()]);
         let witness = spawn(&mut game, "fixture_perception_owner", at(1, 2, 3));
+        initialize_unrecognized(&mut game, &[(OWNER, SUBJECT), (witness, SUBJECT)]);
         assert_eq!(
             disclosure(&game, witness, SUBJECT),
             ActorDisclosure::ApparentObject
         );
         let rng = game.rules_rng;
+        let items = game.items.clone();
         game.act(
             OWNER,
             Action::TouchApparentObject {
@@ -313,15 +358,22 @@ fn a_paid_touch_with_implicit_or_single_quantity_reveals_the_guise_globally() {
         .unwrap();
         assert_eq!(game.actors[&OWNER].ready_at, 50);
         assert_eq!(game.rules_rng, rng);
+        assert_eq!(
+            game.items, items,
+            "fake object cannot create or transfer loot"
+        );
         for observer in [OWNER, witness] {
             let view = game.observe(observer).unwrap();
-            assert!(view.apparent_objects.is_empty());
             assert!(view
+                .apparent_objects
+                .iter()
+                .any(|object| object.subject == SUBJECT));
+            assert!(!view
                 .visible_actors
                 .iter()
                 .any(|actor| actor.id == SUBJECT && actor.disclosure == ActorDisclosure::Creature));
         }
-        assert_eq!(game.actors[&SUBJECT].guise.ambush, AmbushState::Spent);
+        assert_eq!(game.actors[&SUBJECT].guise.ambush, AmbushState::Available);
     }
 }
 
@@ -348,6 +400,7 @@ fn zero_or_multiple_apparent_objects_are_rejected_without_time_or_reveal() {
 #[test]
 fn ordinary_movement_into_a_guise_pays_for_contact_without_entering_or_attacking() {
     let mut game = fixture(&[], &[guise(), ambush()]);
+    initialize_unrecognized(&mut game, &[(OWNER, SUBJECT)]);
     let health = game.health(SUBJECT);
     let rng = game.rules_rng;
     let outcome = game.act(OWNER, Action::Move(Direction::East)).unwrap();
@@ -356,14 +409,15 @@ fn ordinary_movement_into_a_guise_pays_for_contact_without_entering_or_attacking
     assert_eq!(game.actors[&OWNER].ready_at, 100);
     assert_eq!(game.health(SUBJECT), health);
     assert_eq!(game.rules_rng, rng);
-    assert!(game.actors[&SUBJECT].guise.appearance().is_none());
-    assert_eq!(game.actors[&SUBJECT].guise.ambush, AmbushState::Spent);
+    assert!(game.actors[&SUBJECT].guise.appearance().is_some());
+    assert_eq!(game.actors[&SUBJECT].guise.ambush, AmbushState::Available);
     assert!(game.preparation(OWNER).is_none());
 }
 
 #[test]
 fn queued_movement_contact_retains_its_destination_and_executes_after_restore() {
     let mut game = fixture(&[], &[guise(), ambush()]);
+    initialize_unrecognized(&mut game, &[(OWNER, SUBJECT)]);
     let rng = game.rules_rng;
     let intention = game
         .admit_intention(OWNER, Action::Move(Direction::East), IntentionOrigin::Human)
@@ -385,7 +439,7 @@ fn queued_movement_contact_retains_its_destination_and_executes_after_restore() 
     assert_eq!(restored.actors[&OWNER].location, at(1, 2, 2));
     assert_eq!(restored.actors[&OWNER].ready_at, 100);
     assert_eq!(restored.rules_rng, rng);
-    assert!(restored.actors[&SUBJECT].guise.appearance().is_none());
+    assert!(restored.actors[&SUBJECT].guise.appearance().is_some());
 }
 
 fn configure_guise_ai(game: &mut Game, known_foe: bool) {
@@ -416,7 +470,10 @@ fn intact_guise_ai_stays_stationary_without_an_adjacent_known_foe() {
         (true, true, true, false),
         (true, false, true, true),
     ] {
-        let mut values = vec![guise()];
+        let mut values = vec![
+            guise(),
+            PerceptionValue::ReadiedTouchAmbush { enabled: true },
+        ];
         if has_ambush {
             values.push(ambush());
         }
@@ -447,51 +504,32 @@ fn intact_guise_ai_stays_stationary_without_an_adjacent_known_foe() {
 }
 
 #[test]
-fn adjacent_known_foe_ai_uses_one_owned_basic_ambush_despite_higher_priority_special_melee() {
-    let mut game = fixture(&[], &[guise(), ambush()]);
+fn adjacent_known_foe_does_not_trigger_disguised_ai_or_spend_ambush() {
+    let mut game = fixture(
+        &[],
+        &[
+            guise(),
+            ambush(),
+            PerceptionValue::ReadiedTouchAmbush { enabled: true },
+        ],
+    );
     configure_guise_ai(&mut game, true);
     let before = game.clone();
     let decision = game.choose_ai(SUBJECT).unwrap();
-    assert_eq!(decision.action, attack(OWNER));
-    assert!(decision
-        .plan
-        .as_ref()
-        .unwrap()
-        .as_ability()
-        .unwrap()
-        .ambush
-        .is_some());
-    assert_eq!(
-        game, before,
-        "a preview must not consume the lifetime claim"
-    );
+    assert_eq!(decision.action, Action::Wait);
+    assert!(decision.plan.is_none());
+    assert_eq!(game, before, "preview cannot consume the lifetime claim");
     game.act(OWNER, Action::Wait).unwrap();
     game.actors.get_mut(&OWNER).unwrap().ready_at = 50;
-    let origin = game.admit_ai_intention(SUBJECT).unwrap();
+    game.admit_ai_intention(SUBJECT).unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
-    assert_eq!(
-        game.actors[&SUBJECT].guise.ambush,
-        AmbushState::Reserved { origin }
-    );
-    assert!(game.actors[&SUBJECT].guise.appearance().is_none());
-    let due = {
-        let pending = game.preparation(SUBJECT).unwrap();
-        pending.started + pending.remaining
-    };
-    game.tick = due;
-    game.resolve_preparations().unwrap();
-    assert_eq!(game.actors[&SUBJECT].guise.ambush, AmbushState::Spent);
-    assert!(game
-        .ability_plan(SUBJECT, &id("basic_melee"), OWNER)
-        .unwrap()
-        .as_ability()
-        .unwrap()
-        .ambush
-        .is_none());
+    assert!(game.preparation(SUBJECT).is_none());
+    assert!(game.actors[&SUBJECT].guise.appearance().is_some());
+    assert_eq!(game.actors[&SUBJECT].guise.ambush, AmbushState::Available);
 }
 
 #[test]
-fn search_pays_one_hundred_ticks_and_reveals_only_physical_adjacent_guises() {
+fn search_pays_one_hundred_ticks_and_privately_checks_only_physical_guises() {
     let mut game = fixture(&[], &[guise(), ambush()]);
     let diagonal = spawn(&mut game, "fixture_perception_subject", at(1, 3, 3));
     let distant = spawn(&mut game, "fixture_perception_subject", at(1, 6, 2));
@@ -511,6 +549,10 @@ fn search_pays_one_hundred_ticks_and_reveals_only_physical_adjacent_guises() {
         },
     )
     .unwrap();
+    initialize_unrecognized(
+        &mut game,
+        &[(OWNER, SUBJECT), (OWNER, diagonal), (OWNER, distant)],
+    );
     let plan = game
         .ability_plan(OWNER, &id("fixture_search"), OWNER)
         .unwrap();
@@ -522,7 +564,7 @@ fn search_pays_one_hundred_ticks_and_reveals_only_physical_adjacent_guises() {
     else {
         panic!("search effect")
     };
-    check.roll(&mut rng, false);
+    let sampled = check.sample(&mut rng);
     start(
         &mut game,
         OWNER,
@@ -534,16 +576,21 @@ fn search_pays_one_hundred_ticks_and_reveals_only_physical_adjacent_guises() {
     assert_eq!(game.actors[&OWNER].ready_at, 100);
     assert_eq!(
         game.rules_rng, rng,
-        "one paid discovery check also preserves guaranteed adjacent guise revelation"
+        "one paid discovery sample covers every candidate distance"
     );
-    for actor in [SUBJECT, diagonal] {
-        assert!(game.actors[&actor].guise.appearance().is_none());
-        assert_eq!(game.actors[&actor].guise.ambush, AmbushState::Spent);
-    }
-    for actor in [distant, stair] {
+    for (actor, distance) in [(SUBJECT, 1), (diagonal, 1), (distant, 4)] {
         assert!(game.actors[&actor].guise.appearance().is_some());
         assert!(game.actors[&actor].guise.ambush_available());
+        assert_eq!(
+            game.guise_known(OWNER, actor),
+            sampled.at(distance) >= game.actors[&actor].guise.concealment_total().unwrap()
+        );
     }
+    assert!(
+        !game.guise_known(OWNER, stair),
+        "abstract landing cannot grant eye discovery"
+    );
+    assert!(game.actors[&stair].guise.appearance().is_some());
 }
 
 #[test]
@@ -711,6 +758,8 @@ fn ambush_respects_the_three_die_check_cap_without_spilling_into_damage() {
         )
         .unwrap();
     });
+    // Both sides own identical initial passive work before one loses its guise.
+    ambushed.initialize_discovery().unwrap();
     let health_before = ambushed.health(SUBJECT).unwrap().0;
     let mut ordinary = ambushed.clone();
     ordinary.reveal_guise(OWNER).unwrap();
@@ -939,14 +988,7 @@ fn rewind_restores_the_original_guise_boundary_without_resetting_the_later_bound
     let mut game = fixture(&[], &[guise(), ambush()]);
     let mut shared = crate::checkpoint::SharedState::default();
     let before = game.checkpoint(&mut shared);
-    game.act(
-        OWNER,
-        Action::TouchApparentObject {
-            subject: SUBJECT,
-            quantity: None,
-        },
-    )
-    .unwrap();
+    game.teleport(SUBJECT, at(1, 4, 2)).unwrap();
     let after = game.checkpoint(&mut shared);
     let shared = serde_json::from_slice(&serde_json::to_vec(&shared).unwrap()).unwrap();
     let earlier = Game::restore_checkpoint(before, &shared, game.content().clone()).unwrap();
@@ -1001,7 +1043,7 @@ fn restore_rejects_a_live_guise_or_available_ambush_without_its_authored_source(
     let game = fixture(&[], &[]);
     let result = forged_checkpoint(&game, SUBJECT, |actor| {
         actor["guise"] = serde_json::json!({
-            "entered":true,"appearance":appearance(),"ambush":{"state":"available"}
+            "entered":true,"concealment_total":10,"appearance":appearance(),"ambush":{"state":"available"}
         });
     });
     assert!(
@@ -1014,13 +1056,13 @@ fn restore_rejects_a_live_guise_or_available_ambush_without_its_authored_source(
 fn saved_guise_and_ambush_records_reject_noncanonical_shapes_and_invalid_owners() {
     for invalid in [
         serde_json::json!([true, null, {"state":"spent"}]),
-        serde_json::json!({"entered":true,"ambush":{"state":"spent"}}),
-        serde_json::json!({"entered":false,"appearance":appearance(),"ambush":{"state":"unacquired"}}),
-        serde_json::json!({"entered":true,"appearance":null,"ambush":{"state":"available"}}),
-        serde_json::json!({"entered":true,"appearance":null,"ambush":{"state":"reserved","origin":0}}),
-        serde_json::json!({"entered":true,"appearance":null,"ambush":{"state":"reserved","origin":u64::MAX}}),
-        serde_json::json!({"entered":true,"appearance":null,"ambush":{"state":"spent","origin":1}}),
-        serde_json::json!({"entered":true,"appearance":null,"ambush":{"state":"spent"},"reset":true}),
+        serde_json::json!({"entered":true,"concealment_total":10,"ambush":{"state":"spent"}}),
+        serde_json::json!({"entered":false,"concealment_total":null,"appearance":appearance(),"ambush":{"state":"unacquired"}}),
+        serde_json::json!({"entered":true,"concealment_total":10,"appearance":null,"ambush":{"state":"available"}}),
+        serde_json::json!({"entered":true,"concealment_total":10,"appearance":null,"ambush":{"state":"reserved","origin":0}}),
+        serde_json::json!({"entered":true,"concealment_total":10,"appearance":null,"ambush":{"state":"reserved","origin":u64::MAX}}),
+        serde_json::json!({"entered":true,"concealment_total":10,"appearance":null,"ambush":{"state":"spent","origin":1}}),
+        serde_json::json!({"entered":true,"concealment_total":10,"appearance":null,"ambush":{"state":"spent"},"reset":true}),
     ] {
         assert!(serde_json::from_value::<GuiseState>(invalid).is_err());
     }
@@ -1028,6 +1070,7 @@ fn saved_guise_and_ambush_records_reject_noncanonical_shapes_and_invalid_owners(
         GuiseState::default(),
         GuiseState {
             entered: true,
+            concealment_total: Some(10),
             appearance: None,
             ambush: AmbushState::Reserved {
                 origin: crate::IntentionId(1),
@@ -1074,6 +1117,7 @@ fn item_preparation_keeps_known_threat_reference_domains_separate() {
         let mut potion = crate::ItemSpec::ordinary("ordinary potion".into());
         potion.class = crate::ItemClass::Potion;
         potion.consumable = Some(crate::ConsumableSpec {
+            descriptors: vec![],
             discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![crate::rules::Effect::Heal {
                 amount: crate::rules::AmountExpr::Fixed { amount: 1 },

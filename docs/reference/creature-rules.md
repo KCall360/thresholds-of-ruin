@@ -889,17 +889,29 @@ history, unbounded pin set or deferred-death ledger. Damaging condition content
 and its causal adapter remain future work; the typed condition origin alone
 does not implement poison credit.
 
+## Delivery and exposure defenses
+
+Rogue distinguishes avoiding delivery from resisting a delivered exposure. Rays
+and breath can be dodged with Agility through their ordinary opposed ray check;
+wand magic does not gain an extra Spiritual or Discipline gate merely because it
+is magical. Gaze and fear effects cannot be dodged that way and target Spiritual
+defense. Explicit poison payloads instead use the shared Athletics resistance
+policy after any required physical delivery hits, with immunity checked first.
+This classification belongs to the authored attack/payload, not its display name
+or the condition it may apply. Self-read magical sleep retains its existing
+behavior; it is neither poison nor implicitly granted a Discipline check.
+
 ## Locomotion capabilities
 
 The shared `locomotion` modifier carries one typed value: `stationary` or
-`flying` with an explicit `enabled` boolean, or `erratic` with a required
+`flying` or `levitating` with an explicit `enabled` boolean, or `erratic` with a required
 nullable `chance`. A probability has unsigned 16-bit numerator/denominator,
 nonzero denominator and numerator no greater than denominator. Effective
 capabilities derive from ordinary active sources, never species identity.
 TOML creature/item authoring omits `chance` for suppression because TOML has no
 null; lowering emits the explicit nullable field required by canonical saves.
 
-Positive stationary/flying grants combine by OR. Any explicit false suppresses
+Positive stationary/flying/levitating grants combine by OR. Any explicit false suppresses
 that capability across all sources. Erratic grants choose the greatest exact
 rational probability, normalized to lowest terms; any null suppresses erratic
 movement. Scoped modifiers do not silently change these actor-wide capabilities.
@@ -912,6 +924,23 @@ with ordinary body clearance, portal rotation and scenario stair policy.
 It gives the creature zero effective gravity without erasing drift. Capability
 changes reset only acceleration remainder when the actor publishes; they do not
 teleport, brake or create fall credit. Items never inherit the grant.
+
+Levitation separately grants horizontal hover and suppresses actor gravity, but
+never grants voluntary Up/Down control, ceiling ascent, ground pickup or abstract
+stairs/terminal surface escape. Independent flight can supply vertical control;
+levitation's ground-interaction restrictions still apply. Dropped items retain
+ordinary motion and gravity. Ground trap contact is suppressed except for real
+imposed collision. Losing hover over support establishes contact once; over a
+hole it resumes physical falling without a safe snap or grace period.
+
+The shared `arrest_descent` effect is distinct from the capability: a successful
+levitation drink applies it at paid completion, not preparation start. It removes
+only descending ambient-gravity velocity and obsolete fall attribution, preserving
+tangential velocity. For oblique aggregate gravity, integer projection must remain
+non-descending and bounded. If projecting the subcell fraction would exceed its
+cell-local bound, that fraction is discarded rather than publishing an invented
+cell crossing or impact. Repeated doses can arrest a newly imposed descent. Earlier
+impact/death is not undone, and ordinary flight does not gain braking.
 
 An erratic choice can replace a fresh attack, pursuit, retreat or idle decision,
 after ordinary self-care and without replacing retained paid preparation.

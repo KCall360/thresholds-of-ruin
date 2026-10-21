@@ -1154,8 +1154,9 @@ impl Game {
         Ok(())
     }
     pub(crate) fn can_use_abstract_stairs(&self, id: ActorId) -> bool {
-        self.scenario_policy.capabilities.npc_stair_traversal
-            || self.scenario_policy.selected_character == Some(id)
+        !self.actors[&id].locomotion().levitating
+            && (self.scenario_policy.capabilities.npc_stair_traversal
+                || self.scenario_policy.selected_character == Some(id))
     }
     pub fn configure_population(&mut self, plan: PopulationPlan) -> Result<(), GameError> {
         if self.tick != 0
@@ -1489,7 +1490,9 @@ impl Game {
         self.population_entry_boundary.is_some()
     }
     pub fn region_transition_pending(&self) -> bool {
-        self.population_entry_pending() || self.preparation_region_boundary.is_some()
+        self.population_entry_pending()
+            || self.preparation_region_boundary.is_some()
+            || self.trap_region_boundary.is_some()
     }
     /// The host calls this only after successful no-time-advance horizon
     /// settlement. A subsequent entry may request another boundary; it is still
@@ -1510,11 +1513,19 @@ impl Game {
         if pending.is_some_and(|tick| tick != self.tick) {
             return Err(invalid());
         }
-        if pending.is_some() || preparation.is_some() || !report.frozen.is_empty() {
+        if pending.is_some()
+            || preparation.is_some()
+            || self.trap_region_boundary.is_some()
+            || !report.frozen.is_empty()
+        {
             self.host_region_continuation = true;
-            let result = self
-                .resolve_preparations()
-                .and_then(|()| self.advance_to_next_decision());
+            let result = self.resume_trap_region_boundary().and_then(|_| {
+                if self.trap_region_boundary.is_some() {
+                    return Ok(());
+                }
+                self.resolve_preparations()
+                    .and_then(|()| self.advance_to_next_decision())
+            });
             self.host_region_continuation = false;
             result?;
         }

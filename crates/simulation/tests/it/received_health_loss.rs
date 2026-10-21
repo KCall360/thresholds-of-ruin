@@ -285,6 +285,7 @@ fn round_trip(game: &Game) -> Game {
 }
 fn effect(game: &mut Game, actor: ActorId, target: ActorId, effects: Vec<ResolvedEffect>) {
     game.apply(Outcome {
+        resistance: None,
         actor,
         target,
         ability: None,

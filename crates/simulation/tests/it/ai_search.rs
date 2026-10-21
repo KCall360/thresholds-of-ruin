@@ -36,6 +36,7 @@ fn autonomous_healing_intention_survives_checkpoint_and_consumes_only_on_complet
     potion.concealed = true;
     potion.appearance = "red potion".into();
     potion.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![tor_simulation::rules::Effect::Heal {
             amount: tor_simulation::rules::AmountExpr::Fixed { amount: 10 },
@@ -104,6 +105,7 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
         let mut item = ItemSpec::ordinary(format!("mail {id}"));
         item.class = ItemClass::Armor;
         item.equipment = Some(tor_simulation::EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: Some(tor_simulation::ArmorSpec {
@@ -205,6 +207,7 @@ fn autonomous_loot_checkpoint_preserves_split_stack_and_does_not_collect_spares(
     potion.class = ItemClass::Potion;
     potion.stackable = true;
     potion.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![tor_simulation::rules::Effect::Heal {
             amount: tor_simulation::rules::AmountExpr::Fixed { amount: 10 },

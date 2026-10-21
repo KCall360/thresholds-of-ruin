@@ -667,6 +667,7 @@ mod tests {
         let mut equipment = ItemSpec::ordinary("private mail".into());
         equipment.class = ItemClass::Armor;
         equipment.equipment = Some(EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
@@ -901,6 +902,7 @@ mod tests {
     }
     fn retain_record(game: &mut Game, actor: ActorId, record: PublicPlanObservation) {
         game.apply(crate::abilities::Outcome {
+            resistance: None,
             actor,
             target: actor,
             ability: None,
@@ -991,6 +993,7 @@ mod tests {
             pointer
         );
         let outcome = Outcome {
+            resistance: None,
             actor,
             target: actor,
             ability: None,
@@ -1085,6 +1088,7 @@ mod tests {
         let mut invalid = retained_record(&game, actor);
         invalid.observed_at = game.tick() + 1;
         let result = game.apply(Outcome {
+            resistance: None,
             actor,
             target: actor,
             ability: None,
@@ -1175,6 +1179,7 @@ mod tests {
         );
         let before = game.clone();
         let result = game.apply(Outcome {
+            resistance: None,
             actor,
             target: actor,
             ability: None,
@@ -1291,6 +1296,7 @@ mod tests {
         };
         let (game, actor) = observer();
         let valid = Outcome {
+            resistance: None,
             actor,
             target: actor,
             ability: None,
@@ -1346,6 +1352,7 @@ mod tests {
         };
         let (game, actor) = observer();
         let base = Outcome {
+            resistance: None,
             actor,
             target: actor,
             ability: None,
@@ -1439,6 +1446,7 @@ mod tests {
                 &mut candidate,
                 crate::combat::CombatEvent::Resolved {
                     outcome: Outcome {
+                        resistance: None,
                         actor,
                         target: actor,
                         ability: Some(AbilityId::new("basic_melee").unwrap()),
@@ -1472,6 +1480,7 @@ mod tests {
         use crate::abilities::{AttemptedParticipation, Outcome, OutcomeStatus};
         let (game, actor) = observer();
         let outcome = Outcome {
+            resistance: None,
             actor,
             target: actor,
             ability: Some(AbilityId::new("basic_melee").unwrap()),

@@ -23,34 +23,47 @@ appearance; their collision and sight blocking never depend on the observer.
 Discovering a closed entrance teaches only that actor where it is. Opening it
 changes shared geometry. An observer who physically sees an already-open secret
 entrance learns its presence without a roll and retains that fact if it closes.
-Rust and sleeping-gas traps similarly separate presence
+Ground traps similarly separate presence
 from family knowledge: discovery reveals presence, while authorized adjacent
 examination or perceptible activation reveals the family. Discovery does not
 open entrances or disarm traps.
 
 All discovery uses Awareness-governed Perception and the shared 3d6/Edge kernel:
 
-- **First observation:** each actor gets one attempt for each exact concealed
-  feature when its exterior cue first enters genuine illuminated physical eye
-  sight. It uses the feature's authored DC with one additional disadvantage,
-  composed through ordinary Edge cancellation. Both success and failure persist.
+- **Passive opportunities:** each actor gets one attempt when an exact concealed
+  cue first enters genuine illuminated physical eye sight, and a second when
+  that actor first becomes physically adjacent. An initially adjacent sighting
+  makes one roll and consumes both opportunities. Both failures persist; leaving
+  and returning does not create another attempt.
+- **Distance:** a cue within one square of any occupied body cell adds one
+  advantage, two–three squares are neutral, and four or more add one
+  disadvantage. These are nearest physical projected-cell, diagonal-inclusive
+  bands, not an extension of the Manhattan sight-range cap. Passive checks add
+  one further disadvantage. Thus adjacent passive is neutral before other
+  modifiers; distant passive has two disadvantages. Ordinary cancellation and
+  the shared three-extra-dice cap apply.
 - **Paid Search:** normal 50-tick preparation and 50-tick recovery remain subject
-  to the actor's ordinary haste/slow timing. Preparation captures the actor's
-  Perception bonus and Edge. Completion rolls once and compares that total with
-  every currently eligible feature's live DC. Repeated paid searches are allowed.
-  One-use outgoing next-check modifiers participate through their normal paid
-  reservation lifecycle even when the search finds nothing; hidden candidate
-  count never changes the visible reservation. Incoming next-check-against
-  modifiers do not apply to this targetless check.
+  to ordinary haste/slow timing. Preparation freezes the actor's Perception bonus
+  and Edge; completion uses live physical candidates and distances. One shared
+  six-die sample yields correlated near/middle/far totals by retaining the same
+  kernel's three dice from the appropriate prefix. It is not a new independent
+  roll for every candidate or distance band. Repeated paid searches are allowed.
+  One-use outgoing next-check modifiers participate through one normal paid
+  reservation lifecycle even when nothing is found; hidden candidate count does
+  not change the sample or reservation. Incoming next-check-against modifiers do
+  not apply to this targetless check.
 - **Periodic search:** worn searching sources share one actor-active cadence;
   every 100 eligible ticks the ring runs the same active search for free. It does
-  not consume, reserve, or borrow one-use check tokens. Passive checks likewise
-  exclude those tokens. Ordinary timed, equipment and talent Edge still applies.
+  not consume, reserve, or borrow one-use check tokens. Passive checks and initial
+  disguise formation likewise exclude those tokens. Ordinary timed, equipment
+  and talent Edge still applies.
 
-Paid and periodic searches preserve the guaranteed revelation of physically
-adjacent object guises. Their empty and failed feedback does not disclose whether
-any concealed candidates existed. A successful Search reveals trap presence,
-not its hidden family.
+Physical features retain authored DCs; disguises instead use the stored contest
+described below. Paid and periodic searches do not automatically break adjacent
+guises. Empty and failed feedback does not disclose whether concealed candidates
+existed. A successful Search reveals trap presence, not its hidden family.
+A successful active discovery makes further passive attempts unnecessary; a
+failed active search does not consume either passive opportunity.
 
 An abstract stair landing, a radius-only proximity, darkness, an opaque barrier,
 blindness, sleep or other voluntary-action incapacity is not an eligible cue.
@@ -58,6 +71,16 @@ Waking and thawing reconcile at authoritative boundaries. Reentry, reconnect,
 control transfer, rank changes and reload never reset failed passive receipts.
 Observation, previews and rendering neither roll nor mutate knowledge. Checks,
 knowledge and RNG publish transactionally; candidates have stable exact-ID order.
+
+Build-less exploration actors remain physical trap-contact owners. They retain
+contact identity and activation disclosure, including across restoration, but
+cannot make creature skill checks or receive creature injury, corrosion or
+condition payloads. A triggered arrow has no eligible creature to hit and leaves
+its ordinary ammunition; no defense or damage roll is invented. Trapdoors still
+open shared topology and teleport traps still relocate the body. This eligibility
+boundary belongs to trap dispatch, not the generic creature effect APIs; missing
+actors remain errors rather than harmless recipients.
+
 A branch-local derived witness skips unchanged passive reconciliation and is not
 saved authority. Initial construction explicitly reconciles before publishing its
 first immutable boundary; restoration never grants extra attempts.
@@ -66,6 +89,48 @@ DCs, placement probabilities and effect durations are authored provisional balan
 choices, not user-approved numerical tuning. Future property interpretation keeps
 its separate rank/evidence lock policy; it must not make required physical routes
 permanently undiscoverable after a failed roll.
+
+## Object guise and private recognition
+
+Object Guise is a shared source-authored capability, not a Xeroc name check.
+Its source chooses a skill and check Edge. Rogue authors Stealth (Speed) with
+zero additional Edge; an authored talent benefit can improve the disguise check
+without improving unrelated attacks. On the first legitimate acquisition, the
+simulation rolls once and persists the total with that actor's one-lifetime
+guise. Source loss/regrant, restoration and ordinary observation do not reroll
+it. Perception (Awareness) contests that stored total; ties favor Perception.
+
+An observer's successful discovery changes only that observer's disclosure and
+targeting authority. Other observers still see the apparent object. The
+disguised actor receives no notification, AI engagement, movement or attack
+trigger: it does not know that its disguise was recognized. Failed first-sight
+and first-adjacency receipts use stable actor identity, separately from door and
+trap identities, and survive save, streaming, control changes and reentry.
+
+The separately authored readied-touch-ambush policy makes a predator wait
+motionless while disguised rather than attack merely because a foe is adjacent.
+Touch can release its explicitly granted initial-ready attack; an incoming
+attack breaks the guise and permits ordinary fighting. Recognition alone does
+neither. A guise is not an inventory item and cannot be picked up as loot.
+The one-lifetime readiness stores the source creature, body, launch placement and
+eligible natural/selected BASIC MELEE ability, never an opponent. This policy
+rejects attacks with costs, supplies or cooldowns; touch binds and revalidates
+the live toucher, releases at that tick, and pays ordinary recovery. It does not
+grant a second attack, reset readiness or stack a second ambush advantage.
+Source/body/placement changes and unfinished work invalidate the entitlement;
+restoration does not rearm it. Initial authored readiness is captured only after
+the spawn's body is assembled. These records remain separate from observer
+discovery receipts. Touch without an actual released attack does not globally
+expose the guise. If the initial entitlement was invalidated, a touch may record
+a provocation for ordinary preparation when the actor is capable; it never
+manufactures another initially-ready attack. A still-ready frozen actor cannot
+release its attack or acquire a free queued attack from touch.
+
+Successful recognition invalidates identity/event and sensed-hostile recovery
+witnesses; failed receipts do not. The derived guised-owner index keeps
+guise-only discovery active without scanning all actors on every no-cue
+transition. Physical subject changes invalidate candidate reuse even when the
+observer's eye chart is unchanged. These caches are not saved authority.
 
 ## Model
 
@@ -411,6 +476,9 @@ bounded comparison findings, not a substitute for the reference oracle.
   illumination, transparent dark space and local body awareness.
 - [`simulation/tests/it/sight.rs`](../../crates/simulation/tests/it/sight.rs)
   verifies declared eyes, feet-relative output and sideways bodies.
+- [simulation discovery guise tests](../../crates/simulation/src/discovery_guise_tests.rs)
+  own private recognition, no subject notification, distance-band sample reuse,
+  the two persisted passive opportunities, and strict contest/receipt records.
 - [`test_sight_process.py`](../../scripts/test_sight_process.py) launches real
   headless/text/native ASCII clients at multiple observer heights, with waist
   walls, tall doors, hovering creatures and save/resume. Shared surface and

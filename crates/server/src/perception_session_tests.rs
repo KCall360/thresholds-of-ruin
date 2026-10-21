@@ -53,6 +53,11 @@ fn scenario(xeroc: bool) -> crate::Scenario {
         })).unwrap());
         grants.push(json!({"scope":"always","op":{"kind":"grant_ability","ability":id}}));
     }
+    // Observer-only paid Search probe: does not alter passive checks or P/X builds.
+    grants.push(
+        json!({"scope":"always","op":{"kind":"add","stat":{"kind":"ability",
+        "ability":"rogue.search","stat":"check_bonus"},"value":50}}),
+    );
     manifest["creatures"]["templates"]["fixture_probes"] = json!({"priority":0,"modifiers":grants});
     manifest["id"] = json!("perception-service");
     manifest["characters"].as_array_mut().unwrap().truncate(1);
@@ -121,7 +126,37 @@ struct Wire {
 
 impl Wire {
     fn new(xeroc: bool) -> Self {
-        let mut engine = Engine::memory(scenario(xeroc)).unwrap();
+        Self::new_with_seed(xeroc, 42)
+    }
+
+    /// Select actual failed initial contests for both observers. The production
+    /// creature and skill stats stay intact; no private receipts are injected.
+    fn unrecognized_xeroc() -> Self {
+        (1..=64)
+            .find_map(|seed| {
+                let mut wire = Self::new_with_seed(true, seed);
+                let hidden = [(OWNER, 1, 1), (WITNESS, 1, -1)]
+                    .into_iter()
+                    .all(|(actor, x, y)| {
+                        let snapshot = wire.snapshot(actor);
+                        let view = &snapshot.state.observation;
+                        !view.visible_actors.iter().any(|row| row.name == "xeroc")
+                            && view.ground_items.iter().any(|row| {
+                                row.position.x == x
+                                    && row.position.y == y
+                                    && row.position.z == 0
+                                    && row.item.asset.as_deref() == Some("item.weapon.mace")
+                            })
+                    });
+                hidden.then_some(wire)
+            })
+            .expect("bounded genuine double passive failure with disclosed apparent mace")
+    }
+
+    fn new_with_seed(xeroc: bool, seed: u64) -> Self {
+        let mut source = scenario(xeroc);
+        source.seed = seed;
+        let mut engine = Engine::memory(source).unwrap();
         if xeroc {
             // Trusted fixture setup, before any client connects. Start all
             // bodies in distinct cells. Drop a genuine source-owned loadout
@@ -463,7 +498,7 @@ fn encoded_service_preserves_contact_and_apparent_object_authority() {
         }
     }
 
-    let mut x = Wire::new(true);
+    let mut x = Wire::unrecognized_xeroc();
     let passive = x.snapshot(OWNER);
     // Actor-audience Drop provenance survives setup; private wizard entries
     // have a distinct author and are not disclosed to this player.
@@ -626,3 +661,6 @@ fn encoded_service_preserves_contact_and_apparent_object_authority() {
         "exact retry and quantity conflict are mutation-free"
     );
 }
+
+#[path = "perception_recognition_session_tests.rs"]
+mod recognition_tests;

@@ -916,6 +916,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
     spec.concealed = true;
     spec.appearance = "unmarked ring".into();
     spec.equipment = Some(tor_simulation::EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -974,6 +975,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
 }
 fn runtime_effects(game: &mut Game, effects: Vec<tor_simulation::abilities::ResolvedEffect>) {
     game.apply(tor_simulation::abilities::Outcome {
+        resistance: None,
         actor: ActorId(2),
         target: ActorId(1),
         ability: None,

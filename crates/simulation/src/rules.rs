@@ -220,6 +220,34 @@ pub enum CapacityAttribute {
 pub struct NamedDescriptor {
     pub id: DescriptorId,
     pub name: String,
+    /// Authored omission means no secondary resistance policy.
+    pub resistance: Option<DescriptorResistance>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DescriptorResistance {
+    pub skill: Skill,
+    pub difficulty: i32,
+}
+impl<'de> Deserialize<'de> for DescriptorResistance {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            skill: Skill,
+            difficulty: i32,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        if !(0..=crate::limits::NUMERIC).contains(&i64::from(fields.difficulty)) {
+            return Err(serde::de::Error::custom(
+                "invalid descriptor resistance difficulty",
+            ));
+        }
+        Ok(Self {
+            skill: fields.skill,
+            difficulty: fields.difficulty,
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1020,6 +1048,9 @@ pub enum Effect {
     },
     DrainLatestHitDie,
     RestoreHitDie,
+    TeleportRandom,
+    TeleportToRayOrigin,
+    ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
         direction: crate::abilities::PushDirection,
@@ -1123,6 +1154,9 @@ impl<'de> Deserialize<'de> for Effect {
             },
             DrainLatestHitDie {},
             RestoreHitDie {},
+            TeleportRandom {},
+            TeleportToRayOrigin {},
+            ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
                 direction: crate::abilities::PushDirection,
@@ -1209,6 +1243,9 @@ impl<'de> Deserialize<'de> for Effect {
             },
             Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
+            Fields::TeleportRandom {} => Self::TeleportRandom,
+            Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
+            Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
@@ -1638,6 +1675,57 @@ impl Ruleset {
             .get(id)
             .and_then(|&index| self.document.descriptors.get(index))
     }
+    /// One payload has one optional resistance roll, never an order-dependent
+    /// conjunction of descriptor checks. Immunity is still checked separately.
+    pub fn validate_payload_descriptors(
+        &self,
+        descriptors: &[DescriptorId],
+    ) -> Result<(), RulesetError> {
+        bound(
+            descriptors.len() <= crate::limits::DESCRIPTORS_PER_EFFECT,
+            "descriptors",
+        )?;
+        let mut seen = BTreeSet::new();
+        let mut resisted = 0;
+        for id in descriptors {
+            if !seen.insert(id) {
+                return Err(RulesetError::DuplicateId(id.to_string()));
+            }
+            let definition = self
+                .descriptor(id)
+                .ok_or_else(|| RulesetError::UnknownReference {
+                    category: "descriptor",
+                    id: id.to_string(),
+                })?;
+            resisted += usize::from(definition.resistance.is_some());
+        }
+        bound(resisted <= 1, "multiple_payload_resistances")
+    }
+    pub fn descriptor_resistance(
+        &self,
+        descriptors: &[DescriptorId],
+    ) -> Result<Option<DescriptorResistance>, RulesetError> {
+        self.validate_payload_descriptors(descriptors)?;
+        Ok(descriptors
+            .iter()
+            .find_map(|id| self.descriptor(id).and_then(|d| d.resistance)))
+    }
+    /// Resistance receipts describe the payload target. Source utilities have
+    /// no hostile recipient and cannot borrow the selected target's skill.
+    pub fn validate_payload_recipients(
+        &self,
+        descriptors: &[DescriptorId],
+        recipients: impl IntoIterator<Item = EffectRecipient>,
+    ) -> Result<(), RulesetError> {
+        let policy = self.descriptor_resistance(descriptors)?;
+        bound(
+            policy.is_none()
+                || recipients
+                    .into_iter()
+                    .all(|role| role == EffectRecipient::Target),
+            "resistance_target_payload",
+        )
+    }
     pub fn flag(&self, id: &FlagId) -> Option<&FlagDef> {
         self.indexes
             .flags
@@ -1726,6 +1814,14 @@ impl Ruleset {
             .map(|condition| condition.id.clone())
             .collect();
         let descriptors = catalog!(descriptors);
+        for descriptor in &document.descriptors {
+            bound(
+                descriptor.resistance.is_none_or(|policy| {
+                    (0..=crate::limits::NUMERIC).contains(&i64::from(policy.difficulty))
+                }),
+                "descriptor_resistance",
+            )?;
+        }
         let flags = catalog!(flags);
         let equipment_slots = catalog!(equipment_slots);
         let equipment_slot_definitions = document
@@ -2700,7 +2796,10 @@ impl References<'_> {
                 Effect::SearchAdjacentGuises
                 | Effect::ObservePublicPlan
                 | Effect::DrainLatestHitDie
-                | Effect::RestoreHitDie => {}
+                | Effect::RestoreHitDie
+                | Effect::TeleportRandom
+                | Effect::TeleportToRayOrigin
+                | Effect::ArrestDescent => {}
             }
             if let Effect::ApplyQualifiedConditionToSource {
                 condition,
@@ -2784,9 +2883,15 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
             ModifierOp::Perception {
                 value:
                     crate::perception::PerceptionValue::ObjectGuise {
-                        appearance: Some(appearance),
+                        appearance, edge, ..
                     },
-            } => bound(appearance.valid(), "guise_appearance")?,
+            } => bound(
+                edge.unsigned_abs() <= crate::limits::NUMERIC as u64
+                    && appearance
+                        .as_ref()
+                        .is_none_or(|appearance| appearance.valid()),
+                "guise_appearance",
+            )?,
             ModifierOp::Perception {
                 value: crate::perception::PerceptionValue::PeriodicSearch { interval },
             } => bound(
@@ -3306,7 +3411,10 @@ impl Effect {
             Self::StepSelfOneCell
             | Self::PushTargetOneCell { .. }
             | Self::DrainLatestHitDie
-            | Self::RestoreHitDie => true,
+            | Self::RestoreHitDie
+            | Self::TeleportRandom
+            | Self::TeleportToRayOrigin
+            | Self::ArrestDescent => true,
             Self::HealPerHitDie { sides, bonus, .. } => DicePool::new(1, *sides, *bonus).is_ok(),
             Self::ApplyConditionForTurns { duration, .. } => positive_duration_shape(duration),
             Self::ApplyPersistentCondition { condition, cancels } => {
@@ -3702,8 +3810,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v49\"",
-                "id = \"interactions-v49\"\nunknown = true"
+                "id = \"interactions-v50\"",
+                "id = \"interactions-v50\"\nunknown = true"
             ))
             .is_err()
         );

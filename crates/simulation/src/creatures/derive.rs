@@ -297,6 +297,80 @@ impl DerivedCreature {
     ) -> Result<i64, BuildError> {
         edge_value(&self.sources, rules, source, None, Some(defense))
     }
+    /// Environmental hazards have no opponent. Retain ordinary incoming
+    /// families and talent cancellation, but never activate a VersusSource row.
+    pub(crate) fn environmental_incoming_edge(
+        &self,
+        rules: &Ruleset,
+        recipient: crate::ActorId,
+        defense: DefenseKind,
+        selected: &[crate::conditions::TokenReservation],
+    ) -> Result<i64, BuildError> {
+        let sources = self
+            .sources
+            .iter()
+            .map(|(source, modifiers)| {
+                (
+                    source.clone(),
+                    modifiers
+                        .iter()
+                        .filter(|modifier| modifier.scope != Scope::VersusSource)
+                        .cloned()
+                        .collect(),
+                )
+            })
+            .collect();
+        fold_edges(
+            rules,
+            EdgeUse::Check,
+            [EdgeContext {
+                sources: &sources,
+                role: None,
+                opponent: recipient,
+                ability: None,
+                incoming: Some(Some(defense)),
+                tokens: Some((recipient, selected)),
+                policy: crate::rules::OutgoingEdgePolicy::Ordinary,
+            }],
+        )
+    }
+    /// A unilateral hazard check has no opponent or ability. Filter scoped
+    /// operands before the ordinary family/talent fold, and use only the exact
+    /// available outgoing tokens captured for this attempt.
+    pub(crate) fn hazard_check_edge(
+        &self,
+        rules: &Ruleset,
+        actor: crate::ActorId,
+        selected: &[crate::conditions::TokenReservation],
+    ) -> Result<i64, BuildError> {
+        let sources = self
+            .sources
+            .iter()
+            .map(|(source, modifiers)| {
+                (
+                    source.clone(),
+                    modifiers
+                        .iter()
+                        .filter(|modifier| modifier.scope != Scope::VersusSource)
+                        .cloned()
+                        .collect(),
+                )
+            })
+            .collect();
+        fold_edges(
+            rules,
+            EdgeUse::Check,
+            [EdgeContext {
+                sources: &sources,
+                role: Some(crate::rules::CheckActor::User),
+                opponent: actor,
+                ability: None,
+                incoming: None,
+                tokens: Some((actor, selected)),
+                policy: crate::rules::OutgoingEdgePolicy::Ordinary,
+            }],
+        )
+    }
     /// Reuse the ordinary edge fold's own family operands for all check kinds.
     /// The source is a disclosed actor identity; no opponent statistics are read.
     pub(crate) fn incoming_condition_edges(
@@ -2123,6 +2197,19 @@ fn fold(
     derived.maximum_health = derived
         .maximum_health
         .saturating_sub(u64::from(losses.maximum_health));
+    // A source-only prepared touch reaction currently supports an ordinary,
+    // supply-free natural basic melee attack. Reject unsupported authored
+    // policies while validating the creature, rather than at first contact.
+    if derived.perception.readied_touch_ambush
+        && !derived.abilities.iter().any(|id| {
+            build
+                .ruleset()
+                .ability(id)
+                .is_some_and(crate::readied_ambush::eligible_definition)
+        })
+    {
+        return Err(BuildError::InvalidDefinition);
+    }
     Ok(())
 }
 

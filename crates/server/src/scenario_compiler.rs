@@ -280,6 +280,59 @@ pub(super) struct PreparedDefinitions {
     pub objective_item: Option<u64>,
 }
 
+/// Prepare ordinary recoverable ammunition before any creature build captures
+/// Content. Reuse the exact normal item adapter, without allocating an entity.
+pub(super) fn compile_trap_ammunition(
+    manifest: &Manifest,
+    catalog: CompiledCatalog,
+) -> Result<CompiledCatalog, Failure> {
+    let archetypes = manifest
+        .archetypes
+        .iter()
+        .filter(|(_, author)| {
+            author.projectile.is_some()
+                && author.stackable
+                && !author.magical
+                && author.appearance_pool.is_none()
+                && author.equipment_generation.is_none()
+        })
+        .map(|(name, author)| {
+            PreparedArchetype::new(author, manifest, &catalog)
+                .map(|prepared| (name.clone(), prepared))
+                .map_err(|error| {
+                    error.into_failure(
+                        super::diagnostics::Origin::Archetype {
+                            file: "scenario.toml",
+                            name,
+                            catalog: "archetypes",
+                        },
+                        || None,
+                    )
+                })
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    let definitions = PreparedDefinitions {
+        catalog,
+        factions: BTreeSet::new(),
+        archetypes,
+        ordinary: PreparedArchetype::default(),
+        characters: vec![],
+        ai_profiles: BTreeMap::new(),
+        omitted: BTreeSet::new(),
+        objective_item: None,
+    };
+    let ammunition = definitions
+        .archetypes
+        .keys()
+        .map(|key| {
+            definitions
+                .population_item(key, 1, 0, &BTreeMap::new())
+                .map(|spec| (key.clone(), spec))
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    definitions.catalog.with_trap_ammunition(ammunition)
+}
+
 impl PreparedDefinitions {
     pub fn creature_catalog(&self) -> &CompiledCatalog {
         &self.catalog
@@ -320,6 +373,7 @@ impl PreparedDefinitions {
             .compile_with_context(rules, |kind, id, failure| {
                 super::source::catalog_context(provenance, kind, id, failure)
             })?;
+        let catalog = compile_trap_ammunition(manifest, catalog)?;
         let ai_profiles: BTreeMap<_, _> = manifest
             .ai_profiles
             .iter()

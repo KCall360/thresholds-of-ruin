@@ -82,6 +82,7 @@ fn recovery_translation_game() -> crate::Game {
 fn translation_condition(game: &crate::Game, condition: &str) -> super::super::Outcome {
     use super::super::*;
     Outcome {
+        resistance: None,
         actor: crate::ActorId(1),
         target: crate::ActorId(1),
         ability: None,

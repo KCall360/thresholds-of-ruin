@@ -33,6 +33,8 @@ pub(crate) fn appearance() -> GuiseAppearance {
 
 pub(crate) fn guise() -> PerceptionValue {
     PerceptionValue::ObjectGuise {
+        skill: crate::attributes::Skill::Stealth,
+        edge: 0,
         appearance: Some(appearance()),
     }
 }
@@ -100,7 +102,11 @@ pub(crate) fn fixture_with(
         condition(
             "fixture_suppression",
             vec![
-                PerceptionValue::ObjectGuise { appearance: None },
+                PerceptionValue::ObjectGuise {
+                    skill: crate::attributes::Skill::Stealth,
+                    edge: 0,
+                    appearance: None,
+                },
                 PerceptionValue::AmbushFromGuise { enabled: false },
             ],
         ),

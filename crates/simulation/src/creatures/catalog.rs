@@ -152,8 +152,40 @@ impl ScenarioCatalog {
 pub struct Content {
     pub(crate) rules: Arc<Ruleset>,
     pub(crate) catalog: Arc<ScenarioCatalog>,
+    /// Immutable ordinary projectile definitions, reconstructed from the saved
+    /// scenario catalog. Traps reference keys, never invent item identities.
+    trap_ammunition: Arc<BTreeMap<String, crate::ItemSpec>>,
 }
 impl Content {
+    pub fn trap_ammunition(&self, key: &str) -> Option<&crate::ItemSpec> {
+        self.trap_ammunition.get(key)
+    }
+    pub fn with_trap_ammunition(
+        content: &Arc<Self>,
+        ammunition: BTreeMap<String, crate::ItemSpec>,
+    ) -> Result<Arc<Self>, BuildError> {
+        if ammunition.len() > crate::limits::CATALOG_ENTRIES
+            || ammunition.iter().any(|(key, spec)| {
+                key.is_empty()
+                    || key.len() > 80
+                    || key.chars().any(char::is_control)
+                    || !spec.valid()
+                    || spec.projectile.is_none()
+                    || !spec.stackable
+                    || spec.concealed
+                    || spec.magical
+                    || spec.equipment_generation.is_some()
+                    || spec.validate_rules(&content.rules).is_err()
+            })
+        {
+            return Err(BuildError::InvalidDefinition);
+        }
+        Ok(Arc::new(Self {
+            rules: content.rules.clone(),
+            catalog: content.catalog.clone(),
+            trap_ammunition: Arc::new(ammunition),
+        }))
+    }
     pub fn rules(&self) -> &Arc<Ruleset> {
         &self.rules
     }
@@ -195,6 +227,7 @@ impl Content {
         Ok(Arc::new(Self {
             rules,
             catalog: Arc::new(catalog),
+            trap_ammunition: Arc::new(BTreeMap::new()),
         }))
     }
 }

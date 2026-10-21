@@ -319,6 +319,7 @@ fn token_partner_death_cleans_reservations_without_corrupting_the_other_plan() {
         let victim = if owner_dies { owner } else { holder };
         let damage = game.creature(victim).unwrap().health().maximum();
         game.apply(Outcome {
+            resistance: None,
             actor: if owner_dies { holder } else { owner },
             target: victim,
             ability: None,

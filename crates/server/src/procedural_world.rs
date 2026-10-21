@@ -21,6 +21,7 @@ mod tests {
             grid: [2, 3],
             size: [10, 8, 2],
             recipe: "rooms".into(),
+            gravity: None,
             zone: None,
         }
     }
@@ -98,6 +99,25 @@ mod tests {
     }
 
     #[test]
+    fn authored_gravity_is_bounded_and_does_not_change_structural_coordinates() {
+        let ordinary = family(Domain::Finite { count: 2 });
+        let mut physical = ordinary.clone();
+        physical.gravity = Some([0, 0, -1]);
+        assert!(physical.check().is_ok());
+        let mut with = physical.describe("caves", 42, 100).unwrap().unwrap();
+        assert_eq!(with.gravity, Some([0, 0, -1]));
+        with.gravity = None;
+        assert_eq!(
+            serde_json::to_value(with).unwrap(),
+            serde_json::to_value(ordinary.describe("caves", 42, 100).unwrap().unwrap()).unwrap()
+        );
+        for invalid in [[1, 1, 0], [0, 0, -1025]] {
+            physical.gravity = Some(invalid);
+            assert!(physical.check().is_err());
+        }
+    }
+
+    #[test]
     fn invalid_bounds_and_overflow_are_rejected() {
         for domain in [
             Domain::Finite { count: 0 },
@@ -128,6 +148,8 @@ pub struct WorldFamily {
     pub size: [i32; 3],
     pub recipe: String,
     pub zone: Option<String>,
+    #[serde(default)]
+    pub gravity: Option<[i32; 3]>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -215,6 +237,10 @@ impl WorldFamily {
             || self.size[1] > 32
             || self.size[2] != 2
             || self.recipe.is_empty()
+            || self.gravity.is_some_and(|g| {
+                g.iter().filter(|value| **value != 0).count() > 1
+                    || g.iter().any(|value| !(-1024..=1024).contains(value))
+            })
             || self.max_depth() == 0
             || matches!(self.domain, Domain::Open { max_depth } if max_depth == u32::MAX)
             || matches!(self.domain, Domain::SeededFinite { min, max } if min == 0 || min > max)
@@ -375,7 +401,7 @@ impl WorldFamily {
             size: self.size,
             chamber: true,
             zone: self.zone.clone(),
-            gravity: None,
+            gravity: self.gravity,
             gravity_overrides: vec![],
             anchors,
             walls: vec![],
@@ -384,6 +410,8 @@ impl WorldFamily {
             portals,
             doors: vec![],
             traps: vec![],
+            trapdoor_destination: (depth < self.depth_limit(identity, seed))
+                .then(|| region + self.slots()),
             items: vec![],
             actors: vec![],
             generate: Some(crate::generator::Generate {

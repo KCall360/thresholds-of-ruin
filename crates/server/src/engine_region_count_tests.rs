@@ -21,6 +21,7 @@ fn scenario(max_depth: u32, authored: bool) -> Scenario {
             grid: [3, 3],
             size: [26, 7, 2],
             recipe: "exploration".into(),
+            gravity: None,
             zone: None,
         },
     )]);

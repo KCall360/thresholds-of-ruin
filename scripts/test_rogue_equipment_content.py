@@ -72,7 +72,7 @@ class RogueEquipmentContent(unittest.TestCase):
             self.assertEqual(items["rogue.identify_" + category]["readable"],
                              {"identify": [category], "discovery": "on_use"})
         scrolls = [item for item in items.values() if item.get("appearance_pool") == "rogue.scrolls"]
-        self.assertEqual(len(scrolls), 10)
+        self.assertEqual(len(scrolls), 11)
         self.assertEqual(len(set(catalog["appearance_pools"]["rogue.scrolls"]["appearances"])), len(scrolls))
 
     def test_existing_stages_are_preserved_and_new_stock_is_finite(self):
@@ -81,9 +81,9 @@ class RogueEquipmentContent(unittest.TestCase):
                          "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions",
                          "rogue.magic_scrolls", "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings"])
         expected = [
-            ["healing", "confusion", "blindness", "poison", "see_invisible", "extra_healing"],
-            ["identify_potion", "identify_scroll", "identify_wand", "sleep"],
-            ["wand_fire", "wand_cold", "wand_lightning", "wand_invisibility", "wand_haste", "wand_slow"],
+            ["healing", "confusion", "blindness", "poison", "see_invisible", "extra_healing", "levitation"],
+            ["identify_potion", "identify_scroll", "identify_wand", "sleep", "teleportation"],
+            ["wand_fire", "wand_cold", "wand_lightning", "wand_invisibility", "wand_haste", "wand_slow", "wand_teleport_away", "wand_teleport_to"],
             ["generated_mace", "long_sword", "dagger", "two_handed_sword", "spear", "leather_armor",
              "generated_ring_mail", "studded_leather", "scale_mail", "chain_mail", "splint_mail", "banded_mail", "plate_mail", "shortbow"],
             ["enchant_armor", "protect_armor", "enchant_weapon", "remove_curse", "identify_weapon", "identify_armor"],
@@ -102,13 +102,13 @@ class RogueEquipmentContent(unittest.TestCase):
             "choices": [{"archetype": "rogue.arrow", "weight": 1}]}]})
 
 
-    def test_eleven_concealed_rings_have_exact_generation_weights_and_food_rates(self):
+    def test_twelve_concealed_rings_have_exact_generation_weights_and_food_rates(self):
         catalog = source("catalog/items.toml")
         expected = {
             "protection": (9, 30), "add_strength": (9, 30), "sustain_strength": (5, 30),
             "see_invisible": (10, 6), "adornment": (1, 0), "dexterity": (8, 10),
             "increase_damage": (8, 10), "regeneration": (4, 60),
-            "slow_digestion": (9, -15), "maintain_armor": (5, 30), "searching": (5, 10),
+            "slow_digestion": (9, -15), "maintain_armor": (5, 30), "searching": (5, 10), "teleportation": (5, 0),
         }
         rings = {key: value for key, value in catalog["items"].items() if value.get("class") == "ring"}
         self.assertEqual(set(rings), {"rogue.ring_" + key for key in expected})
@@ -125,15 +125,15 @@ class RogueEquipmentContent(unittest.TestCase):
                 self.assertNotIn("on_equip", item)
                 self.assertEqual(item.get("equipment_generation"),
                                  {"kind": "signed_potency", "negative": 1, "positive": 2}
-                                 if key in signed else None)
+                                 if key in signed else {"kind": "cursed"} if key == "teleportation" else None)
                 nutrition = [modifier for modifier in item["equipment"]["modifiers"]
                              if modifier["op"].get("stat") == {"kind": "nutrition_rate_thirtieths"}]
                 self.assertEqual(nutrition, [{"scope": "always", "op": {"kind": "add",
                                  "stat": {"kind": "nutrition_rate_thirtieths"}, "value": rate}}]
                                  if rate else [])
         appearances = catalog["appearance_pools"]["rogue.rings"]["appearances"]
-        self.assertEqual(len(appearances), 11)
-        self.assertEqual(len(set(appearances)), 11)
+        self.assertEqual(len(appearances), 12)
+        self.assertEqual(len(set(appearances)), 12)
         stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual(stages[11], {"id": "rogue.rings", "version": 1, "kind": "items",
                          "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},

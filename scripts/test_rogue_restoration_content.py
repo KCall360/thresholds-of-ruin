@@ -83,17 +83,18 @@ class RogueRestorationContent(unittest.TestCase):
             "components": [{"category": "keen", "amount": {"kind": "rolled", "dice": {
                 "count": 1, "sides": 6, "bonus": 0}}}]}}])
 
-    def test_vn1_is_owned_natural_contact_then_separately_checked_poison_loss(self):
+    def test_vn1_is_owned_natural_contact_then_shared_athletics_poison_resistance(self):
         overrides = {tuple(row["path"]): row["value"] for row in source("rules.toml")["overrides"]}
         self.assertIn(("abilities", VENOM), overrides, "Approved VN1 signature is missing")
         self.assertEqual(overrides[("flags", "venomous")], {
             "id": "venomous", "name": "Venomous", "modifiers": []})
-        self.assertEqual(overrides[("descriptors", "poison")], {"id": "poison", "name": "Poison"})
+        self.assertEqual(overrides[("descriptors", "poison")], {"id": "poison", "name": "Poison",
+            "resistance": {"skill": "athletics", "difficulty": 12}})
         ability = overrides[("abilities", VENOM)]
         self.assertEqual(ability["interaction"], "hostile_to_target")
         self.assertFalse(ability["basic_attack"])
         self.assertEqual(ability["strikes"], {"kind": "natural_melee", "additional_riders": [{
-            "trigger": "success", "check": {"skill": {"kind": "natural_attack"}, "defense": "physical"},
+            "trigger": "success",
             "effects": [{"kind": "lose_attribute", "attribute": "strength",
                 "amount": {"kind": "fixed", "amount": 1}}], "descriptors": ["poison"]}]})
         talent = overrides[("talents", VENOM)]
@@ -115,7 +116,7 @@ class RogueRestorationContent(unittest.TestCase):
                 "amount": {"kind": "fixed", "amount": int(bound)}}]}})
         self.assertEqual(catalog["appearance_pools"]["rogue.potions"], {
             "asset": "item.potion",
-            "appearances": ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion"]})
+            "appearances": ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion"]})
         for character in source("scenario.toml")["characters"]:
             self.assertNotIn(POTION, character["known_identities"])
             self.assertNotIn(POTION, [row["archetype"] for row in character["loadout"]])

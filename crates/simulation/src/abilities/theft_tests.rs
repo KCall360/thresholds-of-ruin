@@ -166,6 +166,110 @@ fn frozen_theft(plan: &Plan, strike: usize) -> &PlannedTheft {
 }
 
 #[test]
+fn paid_theft_relocation_preserves_destination_trap_rng_after_selection() {
+    let (mut clear, _) = theft_game_with_sources(
+        &[0],
+        QuantityExpr::Fixed { quantity: 1 },
+        true,
+        1,
+        |document, _| {
+            document.descriptors.push(NamedDescriptor {
+                resistance: Some(DescriptorResistance {
+                    skill: crate::attributes::Skill::Athletics,
+                    difficulty: 100,
+                }),
+                id: crate::content_ids::DescriptorId::new("poison").unwrap(),
+                name: "Poison".into(),
+            });
+        },
+        |game| {
+            // Ordinary grounded contact requires a real supporting stone cell,
+            // unlike this module's usual zero-height corridor fixture.
+            let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+            world
+                .add_chamber(tor_world::Region {
+                    id: RegionId(1),
+                    name: "supported theft floor".into(),
+                    bounds: tor_world::Extent::new(5, 3, 2).unwrap(),
+                })
+                .unwrap();
+            *game.world = world;
+            configure_population(game);
+            register_floor(game, 7, &[1], vec![at(1, 1), at(1, 2), at(1, 3), at(1, 4)]);
+            game.activate_initial_floor().unwrap();
+            game.place_item_stack(10, at(1, 2), Some(ActorId(2)), 2, gold("gold"))
+                .unwrap();
+        },
+    );
+    let mut trapped = clear.clone();
+    for x in [3, 4] {
+        trapped
+            .place_trap(
+                at(1, x),
+                tor_world::Trap {
+                    id: x as u64,
+                    dc: 15,
+                    avoidance_dc: None,
+                    kind: tor_world::TrapKind::PoisonDart {
+                        attack_bonus: 100,
+                        exposure: "poison".into(),
+                    },
+                },
+            )
+            .unwrap();
+    }
+    // Isolate contact payload RNG: otherwise passive discovery of the other
+    // untriggered plate legitimately adds separate perception checks.
+    for actor in [ActorId(1), ActorId(2)] {
+        for trap in [3, 4] {
+            trapped
+                .reveal_feature_family(actor, tor_world::ConcealedFeatureId::Trap(trap))
+                .unwrap();
+            assert!(trapped.feature_known(actor, tor_world::ConcealedFeatureId::Trap(trap)));
+        }
+    }
+    for game in [&mut clear, &mut trapped] {
+        game.with_recovery_transition(true, |candidate| {
+            candidate.tick = 10;
+            candidate.resolve_preparations()
+        })
+        .unwrap();
+        assert_eq!(
+            game.items[&ItemId(10)].quantity,
+            1,
+            "The paid transfer still completes exactly once"
+        );
+        assert!([at(1, 3), at(1, 4)].contains(
+            &game
+                .actors
+                .get(&ActorId(1))
+                .map(|actor| actor.location)
+                .unwrap()
+        ));
+    }
+    assert_eq!(
+        clear.actors.get(&ActorId(1)).map(|actor| actor.location),
+        trapped.actors.get(&ActorId(1)).map(|actor| actor.location)
+    );
+    let mut expected_rng = clear.rules_rng;
+    crate::dice::roll_check(&mut expected_rng, crate::dice::Edge::default());
+    let damage = crate::dice::DicePool::new(1, 4, 0)
+        .unwrap()
+        .roll(&mut expected_rng, crate::dice::Edge::default())
+        .total;
+    crate::dice::roll_check(&mut expected_rng, crate::dice::Edge::default());
+    assert_eq!(
+        trapped.health(ActorId(1)).unwrap().0,
+        clear.health(ActorId(1)).unwrap().0 - u64::from(damage)
+    );
+    assert_ne!(clear.rules_rng, expected_rng);
+    assert_eq!(
+        trapped.rules_rng, expected_rng,
+        "The theft caller must keep the destination damage and poison check draws"
+    );
+}
+
+#[test]
 fn late_fragment_overflow_rolls_back_the_public_paid_action_and_rng() {
     let (mut game, intention) =
         theft_game(&[0], QuantityExpr::Fixed { quantity: 4 }, false, |game| {

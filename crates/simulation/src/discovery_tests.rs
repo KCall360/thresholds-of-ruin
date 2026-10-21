@@ -29,6 +29,7 @@ fn trap(
             Trap {
                 id: number,
                 dc,
+                avoidance_dc: None,
                 kind: TrapKind::Rust {
                     slot: "body_armor".into(),
                     amount: 1,
@@ -286,7 +287,7 @@ fn paid_search_always_rolls_once_and_uses_only_outgoing_reserved_tokens() {
     };
     assert_eq!(captured.edge, automatic.edge + 1);
     let mut expected = game.rules_rng;
-    captured.roll(&mut expected, false);
+    captured.sample(&mut expected);
     paid(&mut game);
     assert_eq!(game.rules_rng, expected, "empty Search still rolls once");
     let creature = game.creature(OWNER).unwrap();
@@ -306,7 +307,7 @@ fn one_active_roll_is_shared_by_all_candidates_and_ignores_token_inventory() {
     let second = trap(&mut game, 12, at(1, 5, 2), 0);
     let captured = check(&game);
     let mut expected = game.rules_rng;
-    captured.roll(&mut expected, false);
+    captured.sample(&mut expected);
     game.run_active_discovery(OWNER, &captured).unwrap();
     assert_eq!(game.rules_rng, expected);
     assert!(game.feature_known(OWNER, first) && game.feature_known(OWNER, second));
@@ -320,8 +321,7 @@ fn one_active_roll_is_shared_by_all_candidates_and_ignores_token_inventory() {
 #[test]
 fn discovery_records_and_operands_reject_aliases_duplicates_and_impossible_flags() {
     let feature = serde_json::json!({"kind":"trap","value":11});
-    let valid =
-        serde_json::json!({"feature":feature,"attempted":true,"presence":false,"family":false});
+    let valid = serde_json::json!({"feature":feature,"attempted":true,"adjacent_attempted":false,"presence":false,"family":false});
     let read = |value: serde_json::Value| {
         let text = value.to_string();
         let mut de = serde_json::Deserializer::from_str(&text);
@@ -509,7 +509,7 @@ fn paid_search_freezes_operands_across_pause_checkpoint_and_resume() {
     let mut game = checkpoint(&game);
     assert_eq!(game.preparation(OWNER).unwrap().plan, plan);
     let mut expected = game.rules_rng;
-    frozen.roll(&mut expected, false);
+    frozen.sample(&mut expected);
     game.resume_intention(OWNER, intent).unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     if let Some(pending) = game.preparation(OWNER) {
@@ -690,9 +690,11 @@ fn imposed_floor_contact_sleep_pauses_paid_search_and_preserves_its_reservation(
             Trap {
                 id: 11,
                 dc: 100,
+                avoidance_dc: None,
                 kind: TrapKind::SleepingGas {
                     condition: "fixture_sleep".into(),
                     duration: 100,
+                    exposure: None,
                 },
             },
         )
@@ -752,7 +754,7 @@ fn imposed_floor_contact_sleep_pauses_paid_search_and_preserves_its_reservation(
         panic!("search")
     };
     let mut expected = game.rules_rng;
-    check.roll(&mut expected, false);
+    check.sample(&mut expected);
     game.resume_intention(OWNER, intent).unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     let pending = game.preparation(OWNER).unwrap();
@@ -795,7 +797,10 @@ fn paid_search_obeys_normal_haste_and_slow_preparation_and_recovery() {
         game.resolve_preparations().unwrap();
         assert!(game.preparation(OWNER).is_none());
         assert_eq!(game.actors[&OWNER].ready_at, 2 * half);
-        assert!(game.actors[&SUBJECT].guise.appearance().is_none());
+        assert!(
+            game.actors[&SUBJECT].guise.appearance().is_some(),
+            "Search recognizes privately, never breaks the guise"
+        );
     }
 }
 
@@ -839,7 +844,7 @@ fn periodic_search_during_paid_preparation_never_borrows_or_spends_its_token() {
     let automatic = check(&game);
     assert_eq!(paid.edge, automatic.edge + 1);
     let mut expected = game.rules_rng;
-    automatic.roll(&mut expected, false);
+    automatic.sample(&mut expected);
     assert_eq!(game.advance_physics(100).unwrap(), 100);
     assert_eq!(
         game.rules_rng, expected,
@@ -860,7 +865,7 @@ fn periodic_search_during_paid_preparation_never_borrows_or_spends_its_token() {
         Some(OWNER)
     );
     let mut game = checkpoint(&game);
-    paid.roll(&mut expected, false);
+    paid.sample(&mut expected);
     assert_eq!(game.advance_physics(150).unwrap(), 150);
     game.resolve_preparations().unwrap();
     assert_eq!(
@@ -967,3 +972,6 @@ fn discovery_cache_retains_world_lighting_occlusion_and_waking_dependencies() {
     );
     assert!(game.feature_known(OWNER, feature));
 }
+
+#[path = "discovery_guise_tests.rs"]
+mod guise_tests;

@@ -106,6 +106,7 @@ fn armor(game: &mut Game, actor: ActorId) {
     let mut spec = ItemSpec::ordinary("mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {
@@ -247,6 +248,7 @@ fn duplicate_ring_slots_are_distinct_and_a_slot_must_match_the_item() {
     let mut spec = ItemSpec::ordinary("ring".into());
     spec.class = ItemClass::Ring;
     spec.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -277,6 +279,7 @@ fn drinking_consumes_at_completion_and_identifies_only_observable_effects() {
     spec.appearance = "red vial".into();
     spec.stackable = true;
     spec.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 10 },
@@ -318,6 +321,7 @@ fn consumed_objective_remains_unmet_and_its_checkpoint_is_valid() {
     let mut spec = ItemSpec::ordinary("objective potion".into());
     spec.class = ItemClass::Potion;
     spec.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 1 },
@@ -385,6 +389,7 @@ fn lethal_final_potion_reports_completion_without_anatomy_or_remaining_inventory
     potion.concealed = true;
     potion.appearance = "red potion".into();
     potion.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![super::abilities::damage(100, DamageType::Vital)],
     });
@@ -465,6 +470,7 @@ fn concealed_equipment_discloses_its_slot_but_stats_require_actor_knowledge() {
     spec.concealed = true;
     spec.appearance = "silver ring".into();
     spec.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -585,6 +591,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     )
     .unwrap();
     weapon.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -605,6 +612,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     let mut armor = ItemSpec::ordinary("armor".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {
@@ -669,6 +677,7 @@ fn saved_item_preparation_rejects_missing_ground_and_foreign_items() {
     let mut potion = ItemSpec::ordinary("saved-potion".into());
     potion.class = ItemClass::Potion;
     potion.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 1 },
@@ -682,46 +691,49 @@ fn saved_item_preparation_rejects_missing_ground_and_foreign_items() {
     assert!(game.preparation(actor).is_some());
     let mut shared = SharedState::default();
     let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
-    assert!(Game::restore_checkpoint(
-        serde_json::from_value(snapshot.clone()).unwrap(),
-        &shared,
-        game.content().clone()
-    )
-    .is_ok());
-    fn edit_pending(
+    let encoded = serde_json::to_value(&shared).unwrap();
+    let decoded: SharedState = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(
+        Game::restore_checkpoint(
+            serde_json::from_value(snapshot.clone()).unwrap(),
+            &decoded,
+            game.content().clone()
+        )
+        .unwrap(),
+        game
+    );
+    let actors = snapshot["actors"].as_u64().unwrap() as usize;
+    fn preparation_plan(
         value: &mut serde_json::Value,
-        edit: &mut impl FnMut(&mut serde_json::Value),
-    ) -> usize {
-        match value {
-            serde_json::Value::Object(fields) => {
-                if let Some(pending) = fields
-                    .get_mut("pending")
-                    .filter(|pending| !pending.is_null())
-                {
-                    edit(pending);
-                    1
-                } else {
-                    fields
-                        .values_mut()
-                        .map(|value| edit_pending(value, edit))
-                        .sum()
-                }
-            }
-            serde_json::Value::Array(values) => values
-                .iter_mut()
-                .map(|value| edit_pending(value, edit))
-                .sum(),
-            _ => 0,
-        }
+        actors: usize,
+        actor: ActorId,
+    ) -> Option<&mut serde_json::Value> {
+        value
+            .get_mut("actors")?
+            .get_mut(actors)?
+            .get_mut(actor.0.to_string())?
+            .get_mut("pending")?
+            .get_mut("plan")
     }
+    // Another actor owns an unrelated pending relocation array. It must not
+    // be mistaken for this actor's preparation or become a corruption target.
+    assert!(
+        encoded["actors"][actors][other.0.to_string()]["periodic_relocations"]["pending"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let mut untouched = encoded.clone();
+    assert!(preparation_plan(&mut untouched, actors, other).is_none());
+    assert_eq!(untouched, encoded);
+    assert_eq!(
+        preparation_plan(&mut untouched, actors, actor).unwrap()["item"],
+        20
+    );
     for item in [999, 21, 22] {
-        let mut encoded = serde_json::to_value(&shared).unwrap();
-        assert_eq!(
-            edit_pending(&mut encoded, &mut |pending| pending["plan"]["item"] =
-                serde_json::json!(item)),
-            1
-        );
-        let corrupt = serde_json::from_value(encoded).unwrap();
+        let mut corrupt = encoded.clone();
+        preparation_plan(&mut corrupt, actors, actor).unwrap()["item"] = serde_json::json!(item);
+        let corrupt = serde_json::from_value(corrupt).unwrap();
         assert!(
             Game::restore_checkpoint(
                 serde_json::from_value(snapshot.clone()).unwrap(),
@@ -744,13 +756,9 @@ fn saved_item_preparation_rejects_missing_ground_and_foreign_items() {
             serde_json::json!([{"kind":"heal", "amount":{"kind":"fixed", "amount":2}}]),
         ),
     ] {
-        let mut encoded = serde_json::to_value(&shared).unwrap();
-        assert_eq!(
-            edit_pending(&mut encoded, &mut |pending| pending["plan"][field] =
-                value.clone()),
-            1
-        );
-        let Ok(corrupt) = serde_json::from_value::<SharedState>(encoded) else {
+        let mut corrupt = encoded.clone();
+        preparation_plan(&mut corrupt, actors, actor).unwrap()[field] = value.clone();
+        let Ok(corrupt) = serde_json::from_value::<SharedState>(corrupt) else {
             continue;
         };
         assert!(
@@ -806,6 +814,7 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
             ItemClass::Armor
         };
         item.equipment = Some(EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
@@ -835,6 +844,7 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
     let mut potion = ItemSpec::ordinary("potion".into());
     potion.class = ItemClass::Potion;
     potion.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 1 },
@@ -899,6 +909,7 @@ fn custom_slot_capability_timing_and_checkpoint_use_rules_data() {
     let mut item = ItemSpec::ordinary("grasped tool".into());
     item.class = ItemClass::Tool;
     item.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -986,6 +997,7 @@ fn shared_grip_capacity_limits_authored_and_paid_equips_without_combat() {
                 ItemClass::Weapon
             };
             item.equipment = Some(EquipmentSpec {
+                periodic_relocation: None,
                 potency_modifiers: Vec::new(),
                 weapon_profile: None,
                 slot: EquipmentSlot::new(if shield { "shield" } else { "weapon" }).unwrap(),

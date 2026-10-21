@@ -718,3 +718,291 @@ fn erratic_with_no_disclosed_legal_move_does_not_draw() {
     game.act(actor, Action::Wait).unwrap();
     assert_eq!(game.actors[&actor].behavior.rng, before);
 }
+
+#[test]
+fn levitation_hovers_without_vertical_control_and_suppression_is_independent() {
+    let (mut game, actor) = fixture(&[LocomotionValue::Levitating { enabled: true }]);
+    game.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+    assert!(game.actor_translation(actor, Direction::Up).is_none());
+    assert!(game.actor_translation(actor, Direction::Down).is_none());
+    assert_eq!(
+        game.actor_translation(actor, Direction::East).map(|v| v.0),
+        Some(at(3, 1))
+    );
+    let before = game.clone();
+    assert!(game.act(actor, Action::Move(Direction::Up)).is_err());
+    assert_eq!(
+        game, before,
+        "vertical refusal must not advance clocks or mutate state"
+    );
+    game.act(actor, Action::Move(Direction::East)).unwrap();
+    assert_eq!(game.actors[&actor].location, at(3, 1));
+    assert_eq!(game.actors[&actor].motion.velocity, [0; 3]);
+    assert!(!game.can_use_abstract_stairs(actor));
+    assert_eq!(
+        game.prepare_transfer(actor, crate::ItemId(999), None, true),
+        Err(crate::GameError::ItemUnavailable)
+    );
+    let folded = LocomotionCapabilities::from_modifiers(
+        [
+            modifier(LocomotionValue::Levitating { enabled: true }),
+            modifier(LocomotionValue::Flying { enabled: true }),
+            modifier(LocomotionValue::Flying { enabled: false }),
+        ]
+        .iter(),
+    );
+    assert!(folded.levitating && folded.hovers() && !folded.flying);
+    let folded = LocomotionCapabilities::from_modifiers(
+        [
+            modifier(LocomotionValue::Levitating { enabled: true }),
+            modifier(LocomotionValue::Flying { enabled: true }),
+            modifier(LocomotionValue::Levitating { enabled: false }),
+        ]
+        .iter(),
+    );
+    assert!(folded.flying && folded.hovers() && !folded.levitating);
+}
+
+#[test]
+fn levitation_arrest_preserves_tangential_motion_and_true_flight_does_not_brake() {
+    for rotation in 0..24 {
+        let (mut game, actor) = fixture(&[LocomotionValue::Levitating { enabled: true }]);
+        game.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+        let mut outcome = game.actor_outcome(actor).unwrap();
+        outcome.state.orientation = rotation;
+        let inverse = tor_world::inverse_rotation(rotation);
+        outcome.state.motion.velocity = tor_world::rotate_vector(inverse, [123, -77, -400]);
+        outcome.state.motion.displacement = tor_world::rotate_vector(inverse, [31, -19, -50]);
+        outcome.state.motion.active_fall = Some(crate::physics::ActiveFall {
+            owner: actor,
+            episode: std::num::NonZeroU64::MIN,
+            started_at: game.tick,
+        });
+        game.arrest_descent_in_outcome(&mut outcome).unwrap();
+        assert_eq!(
+            tor_world::rotate_vector(rotation, outcome.state.motion.velocity),
+            [123, -77, 0]
+        );
+        assert_eq!(
+            tor_world::rotate_vector(rotation, outcome.state.motion.displacement),
+            [31, -19, 0]
+        );
+        assert_eq!(outcome.state.motion.active_fall, None);
+    }
+    let (mut game, actor) = fixture(&[LocomotionValue::Flying { enabled: true }]);
+    game.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+    let mut outcome = game.actor_outcome(actor).unwrap();
+    outcome.state.motion.velocity = [123, -77, -400];
+    game.arrest_descent_in_outcome(&mut outcome).unwrap();
+    assert_eq!(outcome.state.motion.velocity, [123, -77, -400]);
+}
+
+#[test]
+fn temporary_hover_does_not_expand_supported_teleport_destination_pool() {
+    let (mut walking, actor) = fixture(&[]);
+    walking.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+    let (mut hovering, other) = fixture(&[LocomotionValue::Levitating { enabled: true }]);
+    hovering.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+    let baseline = walking.random_relocation_candidates(actor).unwrap();
+    assert!(!baseline.is_empty(), "valid supported baseline is required");
+    assert!(baseline.iter().all(|p| p.location.position.z == 0));
+    assert_eq!(
+        hovering.random_relocation_candidates(other).unwrap(),
+        baseline
+    );
+}
+
+#[test]
+fn impact_teleport_keeps_paid_collision_and_authoritative_destination() {
+    let (mut game, actor) = fixture(&[]);
+    for x in 0..8 {
+        for y in 0..5 {
+            game.world
+                .set_wall(
+                    Location {
+                        region: RegionId(1),
+                        position: Position { x, y, z: 0 },
+                    },
+                    true,
+                )
+                .unwrap();
+        }
+    }
+    game.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+    game.teleport(actor, at(2, 2)).unwrap();
+    game.set_actor_velocity(actor, [0, 0, -crate::physics::TERMINAL])
+        .unwrap();
+    game.actors.get_mut(&actor).unwrap().ready_at = 1_000;
+    let mut ordinary = game.clone();
+    game.place_trap(
+        at(2, 1),
+        tor_world::Trap {
+            id: 1,
+            dc: 100,
+            avoidance_dc: None,
+            kind: tor_world::TrapKind::Teleport {},
+        },
+    )
+    .unwrap();
+    let health = game.creature(actor).unwrap().health().current();
+    ordinary.advance_physics(20).unwrap();
+    game.advance_physics(20).unwrap();
+    assert_eq!(
+        ordinary.actors[&actor].location,
+        at(2, 1),
+        "independent collision baseline must land"
+    );
+    assert!(
+        ordinary.creature(actor).unwrap().health().current() < health,
+        "the witnessed collision must cause damage"
+    );
+    assert_eq!(
+        game.creature(actor).unwrap().health(),
+        ordinary.creature(actor).unwrap().health(),
+        "teleport cannot undo the impact which triggered it"
+    );
+    assert_ne!(
+        game.actors[&actor].location,
+        at(2, 1),
+        "integration must not copy its old cursor over teleport"
+    );
+    assert_eq!(game.actors[&actor].location.position.z, 1);
+    assert_eq!(game.actors[&actor].motion.velocity, [0; 3]);
+}
+
+#[test]
+fn exact_ray_relocation_composes_every_portal_frame_and_never_searches_on_block() {
+    use crate::abilities::{Placement, StepDirection};
+    for rotation in 0..24 {
+        let (mut game, actor) = fixture(&[]);
+        *game.world = World::new(
+            (1..=2)
+                .map(|id| Region {
+                    id: RegionId(id),
+                    name: "portal fixture".into(),
+                    bounds: Extent::new(9, 9, 9).unwrap(),
+                })
+                .collect(),
+            vec![],
+        )
+        .unwrap();
+        let origin = Location {
+            region: RegionId(1),
+            position: Position { x: 8, y: 4, z: 4 },
+        };
+        let endpoint = Location {
+            region: RegionId(2),
+            position: Position { x: 4, y: 4, z: 4 },
+        };
+        game.world
+            .connect_portal_area(
+                tor_world::Passage {
+                    from: origin,
+                    direction: Direction::East,
+                    to: endpoint,
+                },
+                rotation,
+                1,
+                1,
+            )
+            .unwrap();
+        game.actors.get_mut(&actor).unwrap().orientation = 5;
+        let captured = Placement {
+            location: origin,
+            orientation: 0,
+        };
+        let expected = Placement {
+            location: endpoint,
+            orientation: tor_world::compose_rotation(5, rotation),
+        };
+        assert_eq!(
+            game.ray_relocation_destination(actor, captured, StepDirection::East)
+                .unwrap(),
+            Some(expected),
+            "rotation={rotation}"
+        );
+        game.world.set_wall(endpoint, true).unwrap();
+        assert_eq!(
+            game.ray_relocation_destination(actor, captured, StepDirection::East)
+                .unwrap(),
+            None,
+            "blocked exact cell must not find a neighbor; rotation={rotation}"
+        );
+    }
+}
+
+#[test]
+fn levitation_pickup_refusal_has_a_valid_ground_item_baseline() {
+    for (values, allowed) in [
+        (vec![], true),
+        (vec![LocomotionValue::Flying { enabled: true }], true),
+        (vec![LocomotionValue::Levitating { enabled: true }], false),
+    ] {
+        let (mut game, actor) = fixture(&values);
+        let item = game
+            .place_item(game.actors[&actor].location, "ordinary item".into())
+            .unwrap();
+        let before = game.clone();
+        let result = game.prepare_transfer(actor, item, None, true);
+        assert_eq!(result.is_ok(), allowed);
+        assert_eq!(game, before, "preparation/refusal must not mutate state");
+        if !allowed {
+            assert_eq!(result, Err(crate::GameError::ItemUnavailable));
+        }
+    }
+}
+
+#[test]
+fn oblique_descent_arrest_keeps_motion_valid_without_translating_the_body() {
+    use crate::physics::{CELL, TERMINAL};
+    for gravity in [[-1, -2, 0], [1, 7, -3], [997, -991, 983]] {
+        for velocity in [[TERMINAL, 0, 0], [0, -TERMINAL, 0], [123, -77, -400]] {
+            let (mut game, actor) = fixture(&[LocomotionValue::Levitating { enabled: true }]);
+            // Each authored cell has cardinal gravity; a body spanning three
+            // different fields has an oblique aggregate in its own frame.
+            game.set_body(
+                actor,
+                crate::BodySpec {
+                    cells: vec![[0, 0, 0], [1, 0, 0], [2, 0, 0]],
+                    eye: [0, 0, 0],
+                    mass: 80,
+                },
+            )
+            .unwrap();
+            for axis in 0..3 {
+                let mut field = [0; 3];
+                field[axis] = gravity[axis];
+                game.set_cell_gravity(at(2 + axis as i32, 1), field)
+                    .unwrap();
+            }
+            let mut outcome = game.actor_outcome(actor).unwrap();
+            outcome.state.motion.velocity = velocity;
+            outcome.state.motion.displacement = [CELL - 1, -(CELL - 1), 0];
+            let location = outcome.state.location;
+            assert!(
+                outcome.state.motion.valid(),
+                "valid independent initial motion"
+            );
+            game.arrest_descent_in_outcome(&mut outcome).unwrap();
+            assert!(
+                outcome.state.motion.valid(),
+                "gravity={gravity:?}, velocity={velocity:?}"
+            );
+            assert_eq!(outcome.state.location, location);
+            for vector in [
+                outcome.state.motion.velocity,
+                outcome.state.motion.displacement,
+            ] {
+                let dot: i128 = vector
+                    .into_iter()
+                    .zip(gravity)
+                    .map(|(v, g)| i128::from(v) * i128::from(g))
+                    .sum();
+                assert!(
+                    dot <= 0,
+                    "no remaining descent: {vector:?} with {gravity:?}"
+                );
+            }
+        }
+    }
+}

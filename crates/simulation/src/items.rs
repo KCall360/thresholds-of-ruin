@@ -297,6 +297,13 @@ impl ItemSpec {
         }
         if let Some(consumable) = &self.consumable {
             rules.validate_effects(&consumable.effects)?;
+            rules.validate_payload_recipients(
+                &consumable.descriptors,
+                consumable
+                    .effects
+                    .iter()
+                    .map(crate::rules::Effect::recipient),
+            )?;
         }
         if let Some(readable) = &self.readable {
             readable.validate_rules(rules)?;
@@ -589,6 +596,11 @@ impl Game {
         let item = self.place_authored_item(id, at, spec.name.clone(), owner)?;
         self.items
             .edit(item, |entry| {
+                entry.relocation_elapsed = spec
+                    .equipment
+                    .as_ref()
+                    .and_then(|gear| gear.periodic_relocation)
+                    .map(|_| 0);
                 entry.spec = tor_world::Shared::new(spec);
                 entry.quantity = quantity;
                 entry.charges = charges;
@@ -680,6 +692,10 @@ impl Game {
         requested: Option<u64>,
         taking: bool,
     ) -> Result<PreparedTransfer, GameError> {
+        // Deny ground reach before inspecting an exact item or its quantity.
+        if taking && self.actors[&actor].locomotion().levitating {
+            return Err(GameError::ItemUnavailable);
+        }
         let at = self.actors[&actor].location;
         if !taking
             && self.actors[&actor]
@@ -839,6 +855,11 @@ impl Game {
             .get(&source)
             .ok_or(GameError::ItemUnavailable)?
             .charges;
+        let relocation_elapsed = self
+            .items
+            .get(&source)
+            .ok_or(GameError::ItemUnavailable)?
+            .relocation_elapsed;
         let spec = self
             .items
             .get(&source)
@@ -874,6 +895,7 @@ impl Game {
                 Item {
                     condition,
                     charges,
+                    relocation_elapsed,
                     corpse: None,
                     holds: vec![],
                     motion,
@@ -1069,6 +1091,7 @@ mod tests {
                 4 => entry.spec.identity.clear(),
                 5 => {
                     entry.spec.equipment = Some(crate::EquipmentSpec {
+                        periodic_relocation: None,
                         potency_modifiers: Vec::new(),
                         weapon_profile: None,
                         armor: None,
@@ -1079,6 +1102,7 @@ mod tests {
                 }
                 6 => {
                     entry.spec.consumable = Some(crate::ConsumableSpec {
+                        descriptors: vec![],
                         discovery: crate::ItemDiscovery::SelfEffect,
                         effects: vec![],
                     })
@@ -1234,7 +1258,7 @@ mod tests {
         let mut value = serde_json::to_value(ItemSpec::ordinary("bandage shield".into())).unwrap();
         value["class"] = serde_json::json!("armor");
         value["supply"] = serde_json::json!("bandage");
-        value["equipment"] = serde_json::json!({"slot":"shield", "armor":null, "attack":null, "weapon_profile":null, "modifiers":[], "potency_modifiers":[]});
+        value["equipment"] = serde_json::json!({"slot":"shield", "periodic_relocation":null, "armor":null, "attack":null, "weapon_profile":null, "modifiers":[], "potency_modifiers":[]});
         let spec: ItemSpec = serde_json::from_value(value).unwrap();
         assert!(!spec.valid());
         assert!(spec.validate_rules(rules.rules()).is_err());

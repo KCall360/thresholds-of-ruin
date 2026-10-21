@@ -5,7 +5,7 @@ there; this check finds packages with no other named loader use. It does not
 prove gameplay coverage or meaningful assertions; those require behavior tests.
 Tests name packages in full (not built from fragments) so users are auditable.
 """
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import ast
 import tempfile
@@ -15,6 +15,11 @@ import json
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def relative_source_label(path, root):
+    """Use one repository-relative spelling in cross-platform diagnostics."""
+    return path.relative_to(root).as_posix()
 
 
 def test_sources():
@@ -131,10 +136,19 @@ def scenario_uses(path):
 class ScenarioReferences(unittest.TestCase):
     def test_certificates_match_repository_lf_source_bytes(self):
         mismatches = []
-        for certificate_path in sorted((ROOT / "scenarios").rglob("validation.json")):
-            package = certificate_path.parent
+        # Inventory live manifests, not existing certificates: absent generated
+        # files must fail too. Historical scripts/fixtures are source-only.
+        roots = [ROOT / "scenarios", *sorted((ROOT / "crates").glob("*/scenarios"))]
+        manifests = sorted(manifest for root in roots for manifest in root.rglob("scenario.toml"))
+        self.assertTrue(manifests, "no live scenario manifests found")
+        for manifest in manifests:
+            package = manifest.parent
+            certificate_path = package / "validation.json"
+            index_path = package / "index.json"
+            for required in (certificate_path, index_path):
+                self.assertTrue(required.is_file(), f"Missing live scenario file: {relative_source_label(required, ROOT)}")
             certificate = json.loads(certificate_path.read_text(encoding="utf-8"))
-            indexed = json.loads((package / "index.json").read_text(encoding="utf-8"))
+            indexed = json.loads(index_path.read_text(encoding="utf-8"))
             expected = dict(certificate["files"])
             expected.update((region["file"], region["hash"]) for region in indexed["regions"])
             for name, digest in expected.items():
@@ -143,7 +157,7 @@ class ScenarioReferences(unittest.TestCase):
                 # receives, even when a local editor accidentally wrote CRLF.
                 checkout = source.replace(b"\r\n", b"\n")
                 if hashlib.sha256(checkout).hexdigest() != digest:
-                    mismatches.append(str((package / name).relative_to(ROOT)))
+                    mismatches.append(relative_source_label(package / name, ROOT))
         self.assertEqual(mismatches, [],
                          "Regenerate certificates from repository LF bytes; local CRLF hashes cannot survive checkout")
 
@@ -160,6 +174,64 @@ class ScenarioReferences(unittest.TestCase):
             self.assertRegex(package.name, r"^[a-z0-9]+(-[a-z0-9]+)*$")
             self.assertNotRegex(package.name, r"-setup$", "name a package for what it sets up")
 
+
+
+class CertificateGuardRegressions(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.packages = []
+        for relative in ("scenarios/tests/example", "crates/client-3d/scenarios/menagerie"):
+            package = self.root / relative
+            package.mkdir(parents=True)
+            # Certificate hashes describe LF checkout bytes, not local CRLF.
+            (package / "scenario.toml").write_bytes(b"manifest\r\n")
+            (package / "region.toml").write_bytes(b"region\r\n")
+            (package / "validation.json").write_text(json.dumps({"files": {
+                "scenario.toml": hashlib.sha256(b"manifest\n").hexdigest(),
+            }}), encoding="utf-8")
+            (package / "index.json").write_text(json.dumps({"regions": [{
+                "file": "region.toml", "hash": hashlib.sha256(b"region\n").hexdigest(),
+            }]}), encoding="utf-8")
+            self.packages.append(package)
+        historical = self.root / "scripts/fixtures/old-source-only"
+        historical.mkdir(parents=True)
+        (historical / "scenario.toml").write_text("historical", encoding="utf-8")
+
+    def check_certificates(self):
+        with patch.dict(globals(), ROOT=self.root):
+            ScenarioReferences("test_certificates_match_repository_lf_source_bytes").test_certificates_match_repository_lf_source_bytes()
+
+    def test_live_roots_accept_lf_hashes_and_exclude_historical_sources(self):
+        self.check_certificates()
+
+    def test_relative_source_labels_are_platform_independent(self):
+        expected = "crates/client-3d/scenarios/menagerie/region.toml"
+        for root in (PurePosixPath("/fixture"), PureWindowsPath("C:/fixture")):
+            with self.subTest(path_type=type(root).__name__):
+                self.assertEqual(relative_source_label(root / expected, root), expected)
+
+    def test_changed_crate_package_source_rejects(self):
+        self.check_certificates()
+        source = self.packages[1] / "region.toml"
+        source.write_bytes(b"changed region\n")
+        with self.assertRaisesRegex(AssertionError, "crates/client-3d/scenarios/menagerie/region.toml"):
+            self.check_certificates()
+
+    def test_missing_live_package_certificate_or_index_rejects(self):
+        self.check_certificates()
+        for package in self.packages:
+            for name in ("validation.json", "index.json"):
+                with self.subTest(package=package.relative_to(self.root), missing=name):
+                    target = package / name
+                    original = target.read_bytes()
+                    target.unlink()
+                    try:
+                        with self.assertRaisesRegex(AssertionError, name):
+                            self.check_certificates()
+                    finally:
+                        target.write_bytes(original)
 
 
 class ReferenceGuardRegressions(unittest.TestCase):

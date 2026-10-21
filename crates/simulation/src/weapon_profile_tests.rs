@@ -511,6 +511,7 @@ fn two_handed_states_require_an_authored_shared_capacity() {
         profile.expert_traits.add = expert;
         let attack = crate::test_creatures::melee(0, 40, crate::combat::DamageType::Keen, 4);
         let equipment = crate::EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             slot: crate::EquipmentSlot::new("weapon").unwrap(),
             armor: None,

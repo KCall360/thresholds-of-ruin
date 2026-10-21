@@ -313,11 +313,10 @@ impl FrozenStrike {
     }
 
     pub(super) fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
-        let descriptors_valid = |values: &[DescriptorId]| {
-            values.len() <= crate::limits::DESCRIPTORS_PER_EFFECT
-                && values
-                    .iter()
-                    .all(|id| rules.document().descriptors.iter().any(|def| &def.id == id))
+        let descriptors_valid = |values: &[DescriptorId], effects: &[PlannedEffect]| {
+            rules
+                .validate_payload_recipients(values, effects.iter().map(PlannedEffect::recipient))
+                .is_ok()
         };
         let tightening = |effects: &[PlannedEffect]| {
             effects
@@ -353,7 +352,8 @@ impl FrozenStrike {
             && self.check.as_ref().is_none_or(check_valid)
             && super::plan::effects_valid(&self.on_success, rules)
             && super::plan::effects_valid(&self.on_failure, rules)
-            && descriptors_valid(&self.descriptors)
+            && descriptors_valid(&self.descriptors, &self.on_success)
+            && descriptors_valid(&self.descriptors, &self.on_failure)
             && self.riders.len() <= crate::limits::RIDERS_PER_STRIKE
             && self.riders.iter().all(|rider| {
                 (self.check.is_some() || rider.trigger == crate::rules::RiderTrigger::Success)
@@ -367,7 +367,7 @@ impl FrozenStrike {
                             && matches!(check.threshold, CheckThreshold::Fixed { .. })
                     })
                     && super::plan::effects_valid(&rider.effects, rules)
-                    && descriptors_valid(&rider.descriptors)
+                    && descriptors_valid(&rider.descriptors, &rider.effects)
             })
     }
 }

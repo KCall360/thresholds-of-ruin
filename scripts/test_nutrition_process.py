@@ -109,6 +109,20 @@ class NutritionProcesses(ProcessTestCase):
                 self.assert_no_meal_operand(child)
 
     def finish_pending_meal(self, player, peer, before):
+        # Resume acknowledges queueing before the active preparation is
+        # published. This fixture's external peer holds that preparation open.
+        def active(frame):
+            return (frame.get("state") is not None
+                    and observation(frame)["combat"]["preparation_active"])
+        resumed = self.request(player, {"type": "snapshot"})
+        self.assertIsNone(resumed["error"])
+        if not active(resumed):
+            self.frame(player, active)
+        # Refresh only after start: admission alone does not make the peer's
+        # older observation current, and revisions are actor-specific.
+        refreshed = self.request(peer, {"type": "snapshot"})
+        self.assertIsNone(refreshed["error"])
+        self.assertTrue(refreshed["readiness"]["admission"])
         self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
         return self.frame(player, lambda frame: frame.get("state") is not None
                           and nutrition(frame)["reserve"] > before
@@ -468,6 +482,73 @@ class NutritionAsciiProcesses(ProcessTestCase):
         self.assertGreaterEqual(nutrition(final)["reserve"], 2208)
         self.assertLessEqual(nutrition(final)["reserve"], 2607)
         self.assertFalse(any(item["name"] == "fixture meal" for item in observation(final)["inventory"]))
+
+
+class PendingMealSynchronizationTests(unittest.TestCase):
+    def exercise(self, *, already_active):
+        from types import SimpleNamespace
+
+        player, peer = object(), object()
+        calls = []
+        started, peer_refreshed = already_active, False
+
+        def frame_value(revision, active, reserve):
+            return {"error": None, "readiness": {"admission": True},
+                    "state": {"revision": str(revision), "observation": {"combat": {
+                        "preparation_active": active,
+                        "own_stats": {"nutrition": {"reserve": reserve}}}}}}
+
+        queued = frame_value(100, False, 8)
+        queued["readiness"]["admission"] = False
+        active = frame_value(101, True, 8)
+        completed = frame_value(102, False, 1108)
+        # Admission is already true on the peer's stale view. Its revisions
+        # are actor-local, deliberately incomparable with the player's values.
+        stale_peer, fresh_peer = frame_value(6, False, 8), frame_value(7, False, 8)
+
+        def request(client, value):
+            nonlocal peer_refreshed
+            self.assertEqual(value, {"type": "snapshot"})
+            if client is player:
+                calls.append("player snapshot")
+                return active if already_active else queued
+            self.assertIs(client, peer)
+            calls.append("peer snapshot")
+            peer_refreshed = started
+            return fresh_peer if started else stale_peer
+
+        def frame(client, predicate):
+            nonlocal started
+            self.assertIs(client, player)
+            if not started:
+                calls.append("player start")
+                self.assertFalse(predicate(queued), "Queued acknowledgement is not active preparation")
+                started = True
+                self.assertTrue(predicate(active))
+                return active
+            calls.append("meal complete")
+            self.assertTrue(predicate(completed), "Already-active snapshots must not await another start")
+            return completed
+
+        def act(client, action):
+            self.assertIs(client, peer)
+            self.assertEqual(action, {"type": "wait"})
+            calls.append("peer wait")
+            return {"error": None if started and peer_refreshed else
+                    "StaleRevision: Refresh the observation before acting"}
+
+        harness = SimpleNamespace(request=request, frame=frame, act=act,
+                                  assertIsNone=self.assertIsNone, assertTrue=self.assertTrue)
+        result = NutritionProcesses.finish_pending_meal(harness, player, peer, 8)
+        self.assertIs(result, completed)
+        self.assertEqual(calls, ["player snapshot", *([] if already_active else ["player start"]),
+                                 "peer snapshot", "peer wait", "meal complete"])
+
+    def test_wait_requires_resumed_start_then_fresh_peer_observation(self):
+        self.exercise(already_active=False)
+
+    def test_already_active_snapshot_does_not_wait_for_a_second_start(self):
+        self.exercise(already_active=True)
 
 
 if __name__ == "__main__":

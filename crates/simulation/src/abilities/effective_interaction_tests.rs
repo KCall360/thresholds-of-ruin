@@ -165,6 +165,7 @@ fn effective_interaction_frozen_plan_rejects_positive_harm_without_current_equip
     let mut weapon = crate::ItemSpec::ordinary("later weapon".into());
     weapon.class = crate::ItemClass::Weapon;
     weapon.equipment = Some(crate::EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -697,6 +698,7 @@ fn growth_invariant_failure_rolls_back_fatal_damage_inventory_and_rng() {
     for _ in 0..2 {
         assert_eq!(
             game.apply(super::Outcome {
+                resistance: None,
                 actor: ActorId(1),
                 target: ActorId(2),
                 ability: None,

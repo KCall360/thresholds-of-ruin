@@ -13,6 +13,7 @@ fn direct_game_receipts_survive_engine_handoff_without_widening() {
             intention: None,
             result: tor_simulation::abilities::OutcomeStatus::Applied,
             check: None,
+            resistance: None,
             participation: tor_simulation::abilities::AttemptedParticipation::target(),
             target_rider_participated: false,
             effects: vec![tor_simulation::abilities::ResolvedEffect::Damage { amount: 1 }],

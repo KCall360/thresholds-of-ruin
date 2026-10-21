@@ -229,6 +229,9 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
         s::rules::Effect::DrainLatestHitDie => ("drain_latest_hit_die", vec![]),
         s::rules::Effect::RestoreHitDie => ("restore_hit_die", vec![]),
         s::rules::Effect::StepSelfOneCell => ("step_self_one_cell", vec![]),
+        s::rules::Effect::TeleportRandom => ("teleport_random", vec![]),
+        s::rules::Effect::TeleportToRayOrigin => ("teleport_to_ray_origin", vec![]),
+        s::rules::Effect::ArrestDescent => ("arrest_descent", vec![]),
         s::rules::Effect::PushTargetOneCell { direction } => (
             "push_target_one_cell",
             vec![text(
@@ -504,13 +507,22 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
                 PerceptionValue::Invisible { enabled } => ("invisible", *enabled),
                 PerceptionValue::SeeInvisible { enabled } => ("see_invisible", *enabled),
                 PerceptionValue::Sight { enabled } => ("sight", *enabled),
-                PerceptionValue::ObjectGuise { appearance } => {
+                PerceptionValue::ObjectGuise {
+                    appearance,
+                    skill,
+                    edge,
+                } => {
                     if let Some(appearance) = appearance {
                         fields.push(text("appearance", &appearance.name));
                     }
+                    fields.push(text("skill", skill.as_str()));
+                    fields.push(signed("edge", *edge));
                     ("object_guise", appearance.is_some())
                 }
                 PerceptionValue::AmbushFromGuise { enabled } => ("ambush_from_guise", *enabled),
+                PerceptionValue::ReadiedTouchAmbush { enabled } => {
+                    ("readied_touch_ambush", *enabled)
+                }
                 PerceptionValue::PeriodicSearch { interval } => {
                     fields.push(unsigned("interval", *interval));
                     ("periodic_search", true)
@@ -523,11 +535,15 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
         ModifierOp::Locomotion { value } => {
             use s::locomotion::LocomotionValue;
             match value {
-                LocomotionValue::Stationary { enabled } | LocomotionValue::Flying { enabled } => {
+                LocomotionValue::Stationary { enabled }
+                | LocomotionValue::Flying { enabled }
+                | LocomotionValue::Levitating { enabled } => {
                     fields.push(text(
                         "capability",
                         if matches!(value, LocomotionValue::Stationary { .. }) {
                             "stationary"
+                        } else if matches!(value, LocomotionValue::Levitating { .. }) {
+                            "levitating"
                         } else {
                             "flying"
                         },

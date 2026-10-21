@@ -493,6 +493,7 @@ fn first_contextual_equipment_source_does_not_round_through_an_inapplicable_rate
     let mut armor = ItemSpec::ordinary("quiet mail".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -750,6 +751,7 @@ fn contextual_recovery_followup_frozen_first_contextual_equipment_rejects_atomic
     let mut armor = ItemSpec::ordinary("quiet mail".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,

@@ -341,12 +341,24 @@ impl crate::Action {
 
 impl crate::rules::Effect {
     pub(crate) fn spatial(&self) -> bool {
-        matches!(self, Self::StepSelfOneCell | Self::PushTargetOneCell { .. })
+        matches!(
+            self,
+            Self::StepSelfOneCell
+                | Self::PushTargetOneCell { .. }
+                | Self::TeleportRandom
+                | Self::TeleportToRayOrigin
+        )
     }
 }
 impl super::PlannedEffect {
     pub(crate) fn spatial(&self) -> bool {
-        matches!(self, Self::StepSelfOneCell | Self::PushTargetOneCell { .. })
+        matches!(
+            self,
+            Self::StepSelfOneCell
+                | Self::PushTargetOneCell { .. }
+                | Self::TeleportRandom
+                | Self::TeleportToRayOrigin
+        )
     }
 }
 impl crate::rules::AbilityDef {
@@ -367,7 +379,7 @@ impl crate::rules::AbilityDef {
                         .iter()
                         .enumerate()
                         .all(|(index, effect)| match effect {
-                            Effect::StepSelfOneCell => false,
+                            Effect::StepSelfOneCell | Effect::TeleportToRayOrigin => false,
                             Effect::PushTargetOneCell { .. } => index == 0,
                             _ => true,
                         })
@@ -403,7 +415,7 @@ impl crate::rules::AbilityDef {
                         .iter()
                         .enumerate()
                         .all(|(index, effect)| match effect {
-                            Effect::StepSelfOneCell => false,
+                            Effect::StepSelfOneCell | Effect::TeleportToRayOrigin => false,
                             Effect::PushTargetOneCell { .. } => {
                                 index == 0 && matches!(self.reach, Reach::Melee)
                             }

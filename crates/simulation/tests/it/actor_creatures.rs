@@ -407,6 +407,7 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
     let mut weapon = tor_simulation::ItemSpec::ordinary("test weapon".into());
     weapon.class = tor_simulation::ItemClass::Weapon;
     weapon.equipment = Some(tor_simulation::EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -495,6 +496,7 @@ fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
     )
     .unwrap();
     let gear = tor_simulation::EquipmentSpec {
+        periodic_relocation: None,
         slot: tor_simulation::EquipmentSlot::new("weapon").unwrap(),
         armor: None,
         attack: Some(

@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EquipmentGeneration {
+    /// Guaranteed ordinary curse, independent of enchantment or item class.
+    Cursed,
     /// Uniform nonzero signed potency; negative outcomes start cursed.
     SignedPotency { negative: u32, positive: u32 },
     Authored {
@@ -30,6 +32,7 @@ impl<'de> Deserialize<'de> for EquipmentGeneration {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Cursed {},
             SignedPotency {
                 negative: u32,
                 positive: u32,
@@ -52,6 +55,7 @@ impl<'de> Deserialize<'de> for EquipmentGeneration {
             },
         }
         let value = match Fields::deserialize(d)? {
+            Fields::Cursed {} => Self::Cursed,
             Fields::SignedPotency { negative, positive } => {
                 Self::SignedPotency { negative, positive }
             }
@@ -97,6 +101,7 @@ impl<'de> Deserialize<'de> for EquipmentGeneration {
 impl EquipmentGeneration {
     pub fn valid(self) -> bool {
         match self {
+            Self::Cursed => true,
             Self::SignedPotency { negative, positive } => {
                 negative <= crate::limits::NUMERIC as u32
                     && positive <= crate::limits::NUMERIC as u32
@@ -147,6 +152,7 @@ impl EquipmentGeneration {
             return false;
         }
         match self {
+            Self::Cursed => equipment.is_some() && projectile.is_none(),
             Self::SignedPotency { negative, positive } => {
                 projectile.is_none()
                     && equipment.is_some_and(|gear| {
@@ -219,6 +225,12 @@ impl EquipmentGeneration {
             ));
         }
         let (curse_percent, enchant_percent, minimum, maximum) = match self {
+            Self::Cursed => {
+                return Ok(ItemCondition {
+                    cursed: true,
+                    ..Default::default()
+                })
+            }
             Self::SignedPotency { negative, positive } => {
                 let mut candidate = *rng;
                 let roll = crate::quantity::QuantityRange::new(
@@ -290,7 +302,7 @@ impl EquipmentGeneration {
                     );
                 }
                 Self::Armor { .. } => condition.armor_enchantment = amount,
-                Self::Authored { .. } | Self::SignedPotency { .. } => {
+                Self::Cursed | Self::Authored { .. } | Self::SignedPotency { .. } => {
                     unreachable!("direct policy returned before sampling")
                 }
             }
@@ -306,6 +318,7 @@ mod tests {
 
     fn armor() -> EquipmentSpec {
         EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
@@ -317,6 +330,28 @@ mod tests {
             attack: None,
             modifiers: vec![],
         }
+    }
+
+    #[test]
+    fn guaranteed_curse_is_generic_and_draws_no_randomness() {
+        let gear = armor();
+        let policy: EquipmentGeneration = serde_json::from_str(r#"{"kind":"cursed"}"#).unwrap();
+        let mut rng = 42;
+        assert_eq!(
+            policy
+                .sample(ItemClass::Armor, Some(&gear), None, &mut rng)
+                .unwrap(),
+            ItemCondition {
+                cursed: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(rng, 42);
+        assert!(!policy.valid_for(ItemClass::Ring, None, None));
+        assert!(
+            serde_json::from_str::<EquipmentGeneration>(r#"{"kind":"cursed","potency":-1}"#)
+                .is_err()
+        );
     }
 
     #[test]
@@ -428,6 +463,7 @@ mod tests {
         );
         let primary = component.key();
         EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             slot: crate::EquipmentSlot::new("weapon").unwrap(),
@@ -572,6 +608,7 @@ mod potency_tests {
 
     fn gear() -> EquipmentSpec {
         EquipmentSpec {
+            periodic_relocation: None,
             slot: crate::EquipmentSlot::new("ring").unwrap(),
             armor: None,
             attack: None,

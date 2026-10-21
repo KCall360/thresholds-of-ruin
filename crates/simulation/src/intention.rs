@@ -967,6 +967,18 @@ impl Game {
                 })
     }
 
+    /// A deterministic reaction receives provenance without creating a second
+    /// user/AI queue entry or replacing the toucher's current intention.
+    pub(crate) fn issue_reaction_intention(&mut self) -> Result<IntentionId, GameError> {
+        let id = IntentionId(self.intentions.next_id);
+        self.intentions.next_id = self
+            .intentions
+            .next_id
+            .checked_add(1)
+            .ok_or(GameError::IdentityExhausted)?;
+        Ok(id)
+    }
+
     pub(crate) fn intention_issued(&self, id: IntentionId) -> bool {
         id.0 != 0 && id.0 < self.intentions.next_id
     }

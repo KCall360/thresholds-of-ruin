@@ -481,6 +481,7 @@ mod tests {
         let mut spec = ItemSpec::ordinary("mail".into());
         spec.class = crate::ItemClass::Armor;
         spec.equipment = Some(EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
@@ -500,6 +501,7 @@ mod tests {
             corpse: None,
             condition: ItemCondition::default(),
             charges: None,
+            relocation_elapsed: None,
             motion: Default::default(),
             orientation: 0,
             spec: tor_world::Shared::new(spec),

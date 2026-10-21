@@ -227,6 +227,7 @@ fn multiple_weapon_sockets_select_only_the_authored_primary() {
             let mut item = ItemSpec::ordinary(format!("weapon {id}"));
             item.class = ItemClass::Weapon;
             item.equipment = Some(tor_simulation::EquipmentSpec {
+                periodic_relocation: None,
                 potency_modifiers: Vec::new(),
                 weapon_profile: None,
                 armor: None,
@@ -273,6 +274,7 @@ fn ordinary_equipment_does_not_require_a_combat_creature() {
     let mut armor = ItemSpec::ordinary("mail".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(tor_simulation::EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {

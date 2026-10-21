@@ -647,13 +647,24 @@ dc = 12
 kind = { kind = "sleeping_gas", condition = "rogue.sleep", duration = 200 }
 ```
 
-The location must be a nonsolid cell supported by a real solid local downward
-face in the same region, not an abstract stair destination or a remote floor across
-a vertical aperture. Horizontal and rotated traversal into the trap remains valid. Trap references are checked against the
+A covered trap location must be a nonsolid cell supported by a real solid local
+downward face. An open `trap_door` instead requires its exact reciprocal physical
+portal to the named lower-floor ceiling aperture; it is never an abstract stair
+or an actor teleport. The destination must be materialized before opening, and
+the permanent open state and portal persist together. Horizontal and rotated traversal into the trap remains valid. Trap references are checked against the
 pinned content during compilation and loaded/detached save restoration. Presence
 and family knowledge belong to each observer; the definition itself never crosses
 the ordinary client boundary. See [feature generation](generation.md#secret-entrances-and-hidden-traps)
 for bounds, independent streams and provisional Rogue defaults.
+
+Additional typed trap payloads are `trap_door` (`destination` named anchor and
+`open`), `arrow` (authored `attack_bonus` and `ammunition` catalog key),
+`bear_trap` (`condition`, `duration`), `teleport`, `poison_dart` (independent
+`attack_bonus` and `poison_bonus`) and `mysterious`. These are shared mechanisms,
+not item/species name switches. Ammunition references resolve to ordinary pinned
+item definitions; missed arrow shots leave recoverable arrows. Traps are reusable.
+Bear conditions own their actor-active duration; a separate spatial anchor only
+releases that condition when the body actually leaves, never when it merely hovers.
 
 Items specify `at`, `name` or an `archetype`, and optional `carried_by`. A carried
 item is authored in the region file where its carrier starts, so building a
@@ -694,7 +705,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v49"
+import = "interactions-v50"
 
 [[overrides]]
 op = "set"

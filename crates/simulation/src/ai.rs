@@ -288,24 +288,24 @@ impl Game {
                 && self.preparation_still_available(preparation, Some(&snapshot.sight))
         });
         let committed = retained.filter(|preparation| preparation.has_prefix());
-        // An intact initial guise is stationary. Its only proactive hostility is
-        // this one owned adjacent known-foe ambush, never general mean aggression.
-        if actor.guise.appearance().is_some() && retained.is_none() {
-            if actor.guise.ambush_available() && self.condition_allows_voluntary_input(id) {
-                if let Some(foe) = view
-                    .visible_actors
-                    .iter()
-                    .filter(|other| {
-                        other.id != id
-                            && self.perceived_hostile(id, other.id, other.disclosure)
-                            && self.melee_reachable_in_scene(id, other.id, &snapshot.sight)
-                    })
-                    .min_by_key(|other| other.id)
-                {
-                    if let Some(plan) =
-                        self.choose_ai_ability(id, foe.id, &snapshot.sight, view, true)
+        // The private fact that another observer recognizes a guise is not
+        // knowledge owned by its wearer. An intact ambush guise waits for actual
+        // touch or incoming hostility; mere adjacency never selects an attack.
+        if actor.perception().readied_touch_ambush
+            && actor.guise.appearance().is_some()
+            && retained.is_none()
+        {
+            if !self.actor_frozen(id) && self.condition_allows_voluntary_input(id) {
+                if let Some(toucher) = actor.readied_ambush.toucher() {
+                    if let Some(ability) = self
+                        .creature(id)
+                        .and_then(|creature| crate::readied_ambush::eligible_ability(&creature))
                     {
-                        return Some(plan.decision(ai, behavior));
+                        if let Ok(plan) = self.compile_touch_strike_plan(id, &ability, toucher) {
+                            if self.ai_plan_resources_available(&plan) {
+                                return Some(AiDecision::ability(plan, ai, behavior));
+                            }
+                        }
                     }
                 }
             }
@@ -1344,6 +1344,7 @@ mod tests {
         spec.concealed = concealed;
         spec.appearance = "silver ring".into();
         spec.equipment = Some(crate::EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
@@ -1394,6 +1395,7 @@ mod tests {
         let mut potion = crate::ItemSpec::ordinary("healing".into());
         potion.class = crate::ItemClass::Potion;
         potion.consumable = Some(crate::ConsumableSpec {
+            descriptors: vec![],
             discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![heal(10)],
         });
@@ -1439,6 +1441,7 @@ mod tests {
         potion.concealed = true;
         potion.appearance = "red potion".into();
         potion.consumable = Some(crate::ConsumableSpec {
+            descriptors: vec![],
             discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![heal(10)],
         });
@@ -1468,6 +1471,7 @@ mod tests {
             let mut potion = crate::ItemSpec::ordinary(format!("healing {id}"));
             potion.class = crate::ItemClass::Potion;
             potion.consumable = Some(crate::ConsumableSpec {
+                descriptors: vec![],
                 discovery: crate::ItemDiscovery::SelfEffect,
                 effects: vec![heal(10)],
             });
@@ -1608,6 +1612,7 @@ mod tests {
             let mut spec = crate::ItemSpec::ordinary(format!("armor-{id}"));
             spec.class = crate::ItemClass::Armor;
             spec.equipment = Some(crate::EquipmentSpec {
+                periodic_relocation: None,
                 potency_modifiers: Vec::new(),
                 weapon_profile: None,
                 slot: slot.clone(),
@@ -1735,6 +1740,7 @@ mod tests {
         potion.concealed = true;
         potion.appearance = "red potion".into();
         potion.consumable = Some(crate::ConsumableSpec {
+            descriptors: vec![],
             discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![heal(10)],
         });
@@ -1760,6 +1766,7 @@ mod tests {
         let mut potion = crate::ItemSpec::ordinary("mixed".into());
         potion.class = crate::ItemClass::Potion;
         potion.consumable = Some(crate::ConsumableSpec {
+            descriptors: vec![],
             discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![
                 heal(10),
@@ -1781,6 +1788,7 @@ mod tests {
         let mut healing = crate::ItemSpec::ordinary("healing".into());
         healing.class = crate::ItemClass::Potion;
         healing.consumable = Some(crate::ConsumableSpec {
+            descriptors: vec![],
             discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![heal(20)],
         });
@@ -2131,6 +2139,7 @@ mod tests {
         let mut item = crate::ItemSpec::ordinary("private armor".into());
         item.class = crate::ItemClass::Armor;
         item.equipment = Some(crate::EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,

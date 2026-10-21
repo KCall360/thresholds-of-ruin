@@ -21,6 +21,7 @@ fn rust() -> Trap {
     Trap {
         id: 1,
         dc: 12,
+        avoidance_dc: None,
         kind: TrapKind::Rust {
             slot: "body_armor".into(),
             amount: 1,
@@ -38,6 +39,7 @@ fn sleeping_gas_requires_finite_actor_active_incapacity() {
     let kind = TrapKind::SleepingGas {
         condition: "fixture_trap_sleep".into(),
         duration: 100,
+        exposure: None,
     };
     for (timing, expected) in [
         (ConditionTiming::UntilRemoved, false),
@@ -60,6 +62,11 @@ fn sleeping_gas_requires_finite_actor_active_incapacity() {
         });
         let rules = Ruleset::validate(document).unwrap();
         assert_eq!(trap_kind_valid(&rules, &kind), expected);
+        let mut missing_exposure = kind.clone();
+        if let TrapKind::SleepingGas { exposure, .. } = &mut missing_exposure {
+            *exposure = Some("missing_exposure".into());
+        }
+        assert!(!trap_kind_valid(&rules, &missing_exposure));
     }
 }
 #[test]
@@ -67,6 +74,10 @@ fn placement_rejects_unknown_effect_reference_without_mutating_world() {
     let (mut game, at) = fixture();
     let before = game.clone();
     for kind in [
+        TrapKind::PoisonDart {
+            attack_bonus: 0,
+            exposure: "missing_exposure".into(),
+        },
         TrapKind::Rust {
             slot: "missing_slot".into(),
             amount: 1,
@@ -74,6 +85,7 @@ fn placement_rejects_unknown_effect_reference_without_mutating_world() {
         TrapKind::SleepingGas {
             condition: "missing_condition".into(),
             duration: 100,
+            exposure: None,
         },
     ] {
         assert!(game.place_trap(at, Trap { kind, ..rust() }).is_err());

@@ -146,6 +146,7 @@ fn fixture_config(
                 let mut spec = ItemSpec::ordinary("mail".into());
                 spec.class = crate::ItemClass::Armor;
                 spec.equipment = Some(EquipmentSpec {
+                    periodic_relocation: None,
                     potency_modifiers: Vec::new(),
                     weapon_profile: None,
                     slot: EquipmentSlot::new("body_armor").unwrap(),
@@ -506,6 +507,7 @@ fn worn_armor_protection_prevents_new_corrosion_without_repair_and_removal_resto
     let mut spec = ItemSpec::ordinary("armor ward".into());
     spec.class = crate::ItemClass::Ring;
     spec.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         slot,

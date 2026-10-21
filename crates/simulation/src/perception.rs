@@ -68,8 +68,13 @@ pub enum PerceptionValue {
     },
     ObjectGuise {
         appearance: Option<GuiseAppearance>,
+        skill: crate::attributes::Skill,
+        edge: i64,
     },
     AmbushFromGuise {
+        enabled: bool,
+    },
+    ReadiedTouchAmbush {
         enabled: bool,
     },
     /// One strongest periodic source; duplicate wearables share the actor clock.
@@ -94,8 +99,13 @@ impl<'de> Deserialize<'de> for PerceptionValue {
             ObjectGuise {
                 #[serde(deserialize_with = "crate::bounded::required_option")]
                 appearance: Option<GuiseAppearance>,
+                skill: crate::attributes::Skill,
+                edge: i64,
             },
             AmbushFromGuise {
+                enabled: bool,
+            },
+            ReadiedTouchAmbush {
                 enabled: bool,
             },
             PeriodicSearch {
@@ -106,11 +116,32 @@ impl<'de> Deserialize<'de> for PerceptionValue {
             Fields::Invisible { enabled } => Self::Invisible { enabled },
             Fields::SeeInvisible { enabled } => Self::SeeInvisible { enabled },
             Fields::Sight { enabled } => Self::Sight { enabled },
-            Fields::ObjectGuise { appearance } => Self::ObjectGuise { appearance },
+            Fields::ObjectGuise {
+                appearance,
+                skill,
+                edge,
+            } => {
+                if edge.unsigned_abs() > crate::limits::NUMERIC as u64 {
+                    return Err(serde::de::Error::custom("invalid guise check edge"));
+                }
+                Self::ObjectGuise {
+                    appearance,
+                    skill,
+                    edge,
+                }
+            }
             Fields::AmbushFromGuise { enabled } => Self::AmbushFromGuise { enabled },
+            Fields::ReadiedTouchAmbush { enabled } => Self::ReadiedTouchAmbush { enabled },
             Fields::PeriodicSearch { interval } => Self::PeriodicSearch { interval },
         })
     }
+}
+
+/// Authored disguise contest operands; ordinary skill ranks supply the bonus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GuiseCheck {
+    pub skill: crate::attributes::Skill,
+    pub edge: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -119,7 +150,9 @@ pub struct PerceptionCapabilities {
     pub see_invisible: bool,
     pub sight: bool,
     pub object_guise: Option<GuiseAppearance>,
+    pub object_guise_check: Option<GuiseCheck>,
     pub ambush_from_guise: bool,
+    pub readied_touch_ambush: bool,
     pub search_interval: Option<u64>,
 }
 impl Default for PerceptionCapabilities {
@@ -129,7 +162,9 @@ impl Default for PerceptionCapabilities {
             see_invisible: false,
             sight: true,
             object_guise: None,
+            object_guise_check: None,
             ambush_from_guise: false,
+            readied_touch_ambush: false,
             search_interval: None,
         }
     }
@@ -142,6 +177,7 @@ impl PerceptionCapabilities {
         let mut result = Self::default();
         let (mut invisible_off, mut detection_off, mut guise_off, mut ambush_off) =
             (false, false, false, false);
+        let mut readied_off = false;
         for modifier in values.filter(|modifier| modifier.scope == Scope::Always) {
             let ModifierOp::Perception { value } = &modifier.op else {
                 continue;
@@ -156,11 +192,29 @@ impl PerceptionCapabilities {
                     detection_off |= !enabled;
                 }
                 PerceptionValue::Sight { enabled } => result.sight &= enabled,
-                PerceptionValue::ObjectGuise { appearance: None } => guise_off = true,
+                PerceptionValue::ObjectGuise {
+                    appearance: None,
+                    edge,
+                    ..
+                } => {
+                    if edge.unsigned_abs() > crate::limits::NUMERIC as u64 {
+                        return Err(crate::creatures::BuildError::InvalidDefinition);
+                    }
+                    guise_off = true;
+                }
                 PerceptionValue::ObjectGuise {
                     appearance: Some(appearance),
+                    skill,
+                    edge,
                 } => {
-                    if !appearance.valid()
+                    if edge.unsigned_abs() > crate::limits::NUMERIC as u64
+                        || result.object_guise_check.is_some_and(|old| {
+                            old != GuiseCheck {
+                                skill: *skill,
+                                edge: *edge,
+                            }
+                        })
+                        || !appearance.valid()
                         || result
                             .object_guise
                             .as_ref()
@@ -169,6 +223,10 @@ impl PerceptionCapabilities {
                         return Err(crate::creatures::BuildError::InvalidDefinition);
                     }
                     result.object_guise = Some(appearance.clone());
+                    result.object_guise_check = Some(GuiseCheck {
+                        skill: *skill,
+                        edge: *edge,
+                    });
                 }
                 PerceptionValue::PeriodicSearch { interval } => {
                     if !(1..=crate::limits::NUMERIC as u64).contains(interval) {
@@ -180,6 +238,10 @@ impl PerceptionCapabilities {
                             .map_or(*interval, |old| old.min(*interval)),
                     );
                 }
+                PerceptionValue::ReadiedTouchAmbush { enabled } => {
+                    result.readied_touch_ambush |= enabled;
+                    readied_off |= !enabled;
+                }
                 PerceptionValue::AmbushFromGuise { enabled } => {
                     result.ambush_from_guise |= enabled;
                     ambush_off |= !enabled;
@@ -189,8 +251,10 @@ impl PerceptionCapabilities {
         result.invisible &= !invisible_off;
         result.see_invisible &= !detection_off;
         result.ambush_from_guise &= !ambush_off;
+        result.readied_touch_ambush &= !readied_off;
         if guise_off {
             result.object_guise = None;
+            result.object_guise_check = None;
         }
         Ok(result)
     }
@@ -311,6 +375,7 @@ impl<'de> Deserialize<'de> for AmbushState {
 #[serde(deny_unknown_fields)]
 pub(crate) struct GuiseState {
     entered: bool,
+    concealment_total: Option<i64>,
     appearance: Option<GuiseAppearance>,
     pub(crate) ambush: AmbushState,
 }
@@ -321,17 +386,24 @@ impl<'de> Deserialize<'de> for GuiseState {
         struct Fields {
             entered: bool,
             #[serde(deserialize_with = "crate::bounded::required_option")]
+            concealment_total: Option<i64>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
             appearance: Option<GuiseAppearance>,
             ambush: AmbushState,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
         let value = Self {
             entered: fields.entered,
+            concealment_total: fields.concealment_total,
             appearance: fields.appearance,
             ambush: fields.ambush,
         };
-        if (!value.entered
-            && (value.appearance.is_some() || value.ambush != AmbushState::Unacquired))
+        if value
+            .concealment_total
+            .is_some_and(|total| total.unsigned_abs() > crate::limits::NUMERIC as u64 + 18)
+            || (value.entered != value.concealment_total.is_some())
+            || (!value.entered
+                && (value.appearance.is_some() || value.ambush != AmbushState::Unacquired))
             || (value.appearance.is_none() && value.ambush == AmbushState::Available)
         {
             return Err(serde::de::Error::custom("inconsistent guise state"));
@@ -340,6 +412,18 @@ impl<'de> Deserialize<'de> for GuiseState {
     }
 }
 impl GuiseState {
+    pub(crate) fn concealment_total(&self) -> Option<i64> {
+        self.concealment_total
+    }
+    pub(crate) fn needs_concealment_roll(&self) -> bool {
+        self.entered && self.concealment_total.is_none()
+    }
+    pub(crate) fn capture_concealment(&mut self, total: i64) {
+        if self.needs_concealment_roll() {
+            self.concealment_total = Some(total);
+        }
+    }
+
     pub(crate) fn appearance(&self) -> Option<&GuiseAppearance> {
         self.appearance.as_ref()
     }
@@ -379,6 +463,10 @@ impl GuiseState {
         alive: bool,
     ) -> bool {
         self.claim_valid(pending)
+            && (self.entered == self.concealment_total.is_some())
+            && self
+                .concealment_total
+                .is_none_or(|total| total.unsigned_abs() <= crate::limits::NUMERIC as u64 + 18)
             && self.appearance.as_ref().is_none_or(|appearance| {
                 alive && capabilities.object_guise.as_ref() == Some(appearance)
             })
@@ -459,6 +547,13 @@ impl Game {
         subject: ActorId,
         quantity: Option<u64>,
     ) -> Result<(), GameError> {
+        if self
+            .actors
+            .get(&observer)
+            .is_some_and(|actor| actor.locomotion().levitating)
+        {
+            return Err(GameError::ItemUnavailable);
+        }
         if quantity.is_some_and(|quantity| quantity != 1) {
             return Err(GameError::InvalidQuantity);
         }
@@ -476,29 +571,6 @@ impl Game {
         let mut outcome = self.actor_outcome(subject)?;
         outcome.state.guise.reveal();
         self.apply_outcome(outcome)
-    }
-    pub(crate) fn reveal_adjacent_guises(&mut self, observer: ActorId) -> Result<(), GameError> {
-        let awareness = self.local_awareness(observer);
-        let cells = awareness
-            .iter()
-            .filter(|cell| cell.physical)
-            .map(|cell| cell.location)
-            .collect();
-        let targets: Vec<_> = self
-            .actors
-            .perceived(&self.world, &cells)
-            .into_iter()
-            .filter(|(subject, _)| {
-                *subject != observer
-                    && self.actors[subject].guise.appearance().is_some()
-                    && self.melee_reachable_in_scene(observer, *subject, &awareness)
-            })
-            .map(|(subject, _)| subject)
-            .collect();
-        for subject in targets {
-            self.reveal_guise(subject)?;
-        }
-        Ok(())
     }
     pub fn actor_perception(&self, id: ActorId) -> Option<PerceptionCapabilities> {
         self.actors.get(&id).map(crate::Actor::perception)
@@ -521,7 +593,7 @@ impl Game {
         let capabilities = owner.perception();
         if !capabilities.sight
             || !target.alive()
-            || target.guise.appearance().is_some()
+            || (target.guise.appearance().is_some() && !self.guise_known(observer, subject))
             || (target.perception().invisible && !capabilities.see_invisible)
         {
             return false;
@@ -668,7 +740,7 @@ impl Game {
             } else {
                 ActorDisclosure::Hidden
             }
-        } else if state.guise.appearance().is_some() {
+        } else if state.guise.appearance().is_some() && !self.guise_known(observer, subject) {
             ActorDisclosure::ApparentObject
         } else {
             ActorDisclosure::Creature

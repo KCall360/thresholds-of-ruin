@@ -41,8 +41,8 @@ pub use plan::{
 };
 pub use resolve::{
     resolve, ApplicationSnapshot, EffectApplicationError, EffectRecipient, HoldDamageExecution,
-    Outcome, OutcomeStatus, ResolutionContext, ResolutionPlan, ResolvedCheck, ResolvedEffect,
-    Snapshot,
+    Outcome, OutcomeStatus, RelocationInput, ResolutionContext, ResolutionPlan, ResolvedCheck,
+    ResolvedEffect, Snapshot,
 };
 pub(crate) use resolve::{resolve_checked, resolve_escape_check, ActorEffectState};
 pub use strikes::{
@@ -116,3 +116,6 @@ mod equipment_magic_tests;
 
 #[cfg(test)]
 mod weapon_selection_tests;
+
+#[cfg(test)]
+mod payload_resistance_tests;
