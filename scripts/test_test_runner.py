@@ -315,5 +315,47 @@ class Sample(unittest.TestCase):
         self.assertEqual(records[-1]['tests_run'], 1)
 
 
+
+
+class CiShardRunnerContract(unittest.TestCase):
+    def execute(self, index, *, failing=False):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / 'scripts'
+            scripts.mkdir()
+            body = "import unittest\nclass Owner(unittest.TestCase):\n    def test_owner(self):\n        %s\n"
+            (scripts / 'test_rogue_earned_route_process.py').write_text(
+                body % ("self.fail('paid owner failed')" if failing else 'pass'), encoding='utf-8')
+            (scripts / 'test_future_process.py').write_text(body % 'pass', encoding='utf-8')
+            timings = root / 'timings.jsonl'
+            command = [sys.executable, str(Path(__file__).with_name('test_runner.py')),
+                       '--ci-python-shard', str(index), 'discover', '-s', 'scripts', '-p', 'test_*process.py', '-v']
+            result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=20,
+                env={**{key: value for key, value in os.environ.items() if key != 'PYTHONPATH'},
+                     'TOR_TEST_PROFILE': 'release', 'TOR_TEST_TIMINGS': str(timings),
+                     'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123'})
+            rows = [json.loads(line) for line in timings.read_text().splitlines()]
+            return result, rows
+
+    def test_actual_discovery_dispatch_runs_exactly_one_owner_per_shard(self):
+        results = [self.execute(index) for index in (1, 2)]
+        self.assertTrue(all(result.returncode == 0 for result, _ in results),
+                        [result.stderr for result, _ in results])
+        full = results[0][1][0]['shard']['full_test_ids']
+        self.assertEqual(results[1][1][0]['shard']['full_test_ids'], full)
+        selected = [name for _, rows in results for name in rows[0]['test_ids']]
+        completed = [row['test_id'] for _, rows in results for row in rows if row['kind'] == 'test']
+        self.assertEqual(sorted(selected), sorted(full))
+        self.assertEqual(sorted(completed), sorted(full))
+        self.assertEqual(len(completed), 2)
+
+    def test_actual_shard_failure_remains_failure_and_has_no_success_footer(self):
+        result, rows = self.execute(1, failing=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(rows[-1]['kind'], 'suite')
+        self.assertFalse(rows[-1]['successful'])
+        self.assertEqual(rows[-1]['failures'], 1)
+
+
 if __name__ == '__main__':
     unittest.main()

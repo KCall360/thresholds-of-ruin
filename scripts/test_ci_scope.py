@@ -20,7 +20,7 @@ def job(name):
     return re.search(r'^  ' + name + r':\n(.*?)(?=^  \w|\Z)', workflow, re.M | re.S)[1]
 
 
-def job_condition(name, scope_result, docs_only, *, cancelled=False):
+def job_condition(name, scope_result, docs_only, *, cancelled=False, event="push", measure=False):
     """Evaluate only the checked-in scope conditions' small expression vocabulary."""
     expression = re.search(r'^    if: (.+)$', job(name), re.M)[1].strip()
     if expression.startswith('${{') and expression.endswith('}}'):
@@ -29,6 +29,8 @@ def job_condition(name, scope_result, docs_only, *, cancelled=False):
     values = {
         'needs.scope.result': repr(scope_result), 'needs.scope.outputs.docs_only': repr(docs_only),
         'always()': 'True', 'cancelled()': repr(cancelled),
+        'github.event_name': repr(event), 'inputs.measure_windows_candidate': repr(measure),
+        "'workflow_dispatch'": "'workflow_dispatch'",
         "'success'": "'success'", "'true'": "'true'",
         '&&': 'and', '==': '==', '!': 'not', '(': '(', ')': ')',
     }
@@ -56,6 +58,17 @@ class WorkflowScopeContract(unittest.TestCase):
                 with self.subTest(job=name, scope=scope, docs_only=mode):
                     self.assertTrue(job_condition(name, scope, mode), 'Live runs still need the full path')
                     self.assertFalse(job_condition(name, scope, mode, cancelled=True))
+
+    def test_unsupported_combined_measurement_never_launches_expensive_jobs(self):
+        for name in ('dependencies', 'profiles'):
+            for scope in ('success', 'failure', 'cancelled', 'skipped', '', 'unknown'):
+                for mode in ('true', 'false', '', 'unknown'):
+                    for event in ('workflow_dispatch', 'push', 'pull_request', 'schedule'):
+                        for requested in (False, True):
+                            with self.subTest(job=name, scope=scope, mode=mode, event=event, requested=requested):
+                                expected = not (event == 'workflow_dispatch' and requested) and not (scope == 'success' and mode == 'true')
+                                self.assertEqual(job_condition(name, scope, mode, event=event, measure=requested), expected)
+                                self.assertFalse(job_condition(name, scope, mode, event=event, measure=requested, cancelled=True))
 
     def test_existing_aggregate_checks_intentional_skip_and_failures(self):
         body = job('check')

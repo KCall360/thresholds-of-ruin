@@ -25,7 +25,9 @@ PREFIX = "/repos/KCall360/thresholds-of-ruin"
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc)
 SOURCE_NAME = f"Qualification source ({SYNTHETIC})"
 MATRIX = [(os, profile, part) for os in ("windows-latest", "ubuntu-latest")
-          for profile in ("debug", "release") for part in ("rust", "python")]
+          for profile in ("debug", "release") for part in ("rust", "python")
+          if (os, profile, part) != ("windows-latest", "release", "python")]
+MATRIX += [("windows-latest", "release", f"python shard {index}") for index in (1, 2)]
 
 
 class ApiFixture:
@@ -117,6 +119,27 @@ class QualificationDecisions(unittest.TestCase):
         self.assertIs(result["candidate"], True, result)
         self.assertEqual(result["source"], {"run_id": 101, "attempt": 1, "checkout_sha": SYNTHETIC,
                                           "tree": TREE, "url": "https://github.com/KCall360/thresholds-of-ruin/actions/runs/101/attempts/1"})
+
+    def test_both_shard_jobs_are_required_and_legacy_eight_cell_success_is_insufficient(self):
+        self.assertEqual(len(qualification.MATRIX), 9)
+        self.assertEqual(len(self.api.jobs()["jobs"]), 16)
+        for index in (1, 2):
+            for outcome in ("missing", "failure", "cancelled", "skipped"):
+                with self.subTest(index=index, outcome=outcome):
+                    self.api = ApiFixture()
+                    jobs = self.api.jobs()["jobs"]
+                    name = f"Rust (windows-latest, release, python shard {index})"
+                    job = next(row for row in jobs if row['name'] == name)
+                    if outcome == 'missing':
+                        jobs.remove(job)
+                    else:
+                        job['conclusion'] = outcome
+                    self.rejects()
+        self.api = ApiFixture()
+        jobs = self.api.jobs()["jobs"]
+        jobs[:] = [row for row in jobs if 'python shard 2' not in row['name']]
+        next(row for row in jobs if 'python shard 1' in row['name'])['name'] = 'Rust (windows-latest, release, python)'
+        self.rejects()
 
     def test_equal_head_is_insufficient_when_tested_merge_tree_differs(self):
         self.api.data[f"{PREFIX}/git/commits/{SYNTHETIC}"]["tree"]["sha"] = "2" * 40
@@ -512,7 +535,7 @@ class ReportingWorkflow(unittest.TestCase):
     def test_report_runs_only_on_main_push_without_changing_required_full_command(self):
         block = self.workflow.split("  source_identity:\n", 1)[-1]
         self.assertIn("        if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n", block)
-        self.assertIn("run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}", self.workflow)
+        self.assertIn("python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}", self.workflow)
 
 
 if __name__ == "__main__":

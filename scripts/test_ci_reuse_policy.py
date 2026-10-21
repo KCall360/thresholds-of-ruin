@@ -156,6 +156,15 @@ class LeafPolicy(unittest.TestCase):
             source = (self.root / path).read_text()
             immutable = {'SPECIES': ('emu', 'quagga')}
             self.assertIn(old, source); self.assertIn(action, source)
+            if path == 'scripts/test_rogue_chill_process.py':
+                # Caller synchronization adds methods and changes execution:
+                # the old reviewed leaf must not acquire reuse eligibility.
+                for label, variant in (("current", source), ("expectation", source.replace(old, new)),
+                                       ("action", source.replace(action, changed))):
+                    with self.subTest(path=path, variant=label):
+                        with self.assertRaisesRegex(ValueError, 'leaf method inventory changed'):
+                            policy.normalize_leaf(variant.encode(), entry, immutable)
+                continue
             expected = policy.normalize_leaf(source.replace(old, new).encode(), entry, immutable)
             self.assertEqual(expected['skeleton'], entry['skeleton'])
             acted = policy.normalize_leaf(source.replace(action, changed).encode(), entry, immutable)
@@ -170,6 +179,13 @@ class LeafPolicy(unittest.TestCase):
                                       '"invocation": {"kind": "actor_target", "target":').replace(
                                           '}, "weapon": {"kind": "default"}}', '}')
                 self.assertNotEqual(old, current)
+                if path == 'scripts/test_rogue_chill_process.py':
+                    # Both forms remain ineligible after the caller-method change;
+                    # an invocation migration cannot bypass the stricter boundary.
+                    for variant in (current, old):
+                        with self.assertRaisesRegex(ValueError, 'leaf method inventory changed'):
+                            policy.normalize_leaf(variant.encode(), entry, {'SPECIES': ('emu', 'quagga')})
+                    continue
                 self.assertEqual(policy.normalize_leaf(current.encode(), entry, {'SPECIES': ('emu', 'quagga')})['skeleton'],
                                  entry['skeleton'])
                 self.assertNotEqual(policy.normalize_leaf(old.encode(), entry, {'SPECIES': ('emu', 'quagga')})['skeleton'],
