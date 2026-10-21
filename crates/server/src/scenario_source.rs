@@ -497,6 +497,67 @@ mod tests {
     }
 
     #[test]
+    fn room_omissions_are_opt_in_strict_authoring_and_lower_to_recipe_four() {
+        let baseline = r#"
+[generation_recipes.caves]
+kind = "grid_rooms"
+version = 1
+room_width = [4, 6]
+room_height = [3, 5]
+extra_connections = [0, 1]
+"#;
+        let mut absent: toml::Value = toml::from_str(baseline).unwrap();
+        normalize_recipes(&mut absent, "world.toml").unwrap();
+        let old = serde_json::to_value(&absent["generation_recipes"]["caves"]).unwrap();
+        assert_eq!(old["version"], 1);
+        assert_eq!(old["stages"].as_array().unwrap().len(), 6);
+        for count in ["[0, 0]", "[0, 3]", "[63, 63]"] {
+            let source = format!("{baseline}room_omissions = {{ count = {count} }}\n");
+            let mut value: toml::Value = toml::from_str(&source).unwrap();
+            normalize_recipes(&mut value, "world.toml").unwrap();
+            let current = serde_json::to_value(&value["generation_recipes"]["caves"]).unwrap();
+            assert_eq!(current["version"], 4);
+            let stages = current["stages"].as_array().unwrap();
+            assert_eq!(stages.len(), 7);
+            assert_eq!(&stages[..6], old["stages"].as_array().unwrap());
+            assert_eq!(
+                stages[6],
+                serde_json::json!({
+                    "id":"room_omissions", "version":1,
+                    "operation":{"kind":"room_omissions", "config":{
+                        "count":serde_json::from_str::<serde_json::Value>(count).unwrap()
+                    }}
+                })
+            );
+        }
+        for policy in [
+            "{}",
+            "{ count = [2, 1] }",
+            "{ count = [0, 64] }",
+            "{ count = [-1, 3] }",
+            "{ count = [true, 3] }",
+            "{ count = [0] }",
+            "{ count = [0, 3, 4] }",
+            "{ count = [0, 3], chance = 1 }",
+            "[[0, 3]]",
+        ] {
+            let mut value: toml::Value =
+                toml::from_str(&format!("{baseline}room_omissions = {policy}\n")).unwrap();
+            let error = normalize_recipes(&mut value, "world.toml").unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("world.toml: generation_recipes.caves"),
+                "{}",
+                error.message
+            );
+        }
+        let duplicate =
+            format!("{baseline}room_omissions = {{ count = [0, 3], count = [0, 3] }}\n");
+        assert!(toml::from_str::<toml::Value>(&duplicate).is_err());
+    }
+
+    #[test]
     fn module_count_and_source_byte_limits_fail_before_outputs() {
         let names: Vec<_> = (0..64).map(|i| format!("module-{i}.toml")).collect();
         let root = source_package(&serde_json::to_string(&names).unwrap());

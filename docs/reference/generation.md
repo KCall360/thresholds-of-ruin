@@ -120,8 +120,8 @@ resolved through its named anchor after that group publishes. Leaving a generate
 group for an authored chamber uses the same traversal and persistence machinery.
 
 Family-domain selection, port-slot selection, room geometry, graph connections,
-corridors, stair-cell selection, optional lighting, secret entrances and hidden traps
-use separated deterministic
+corridors, stair-cell selection, optional room omissions, lighting, secret entrances
+and hidden traps use separated deterministic
 streams. Family/group identity, seed and relevant normalized parameters participate;
 source comments, unrelated catalogs, exploration order and worker timing do not.
 Changing population tables does not reroll terrain or stairs.
@@ -247,10 +247,45 @@ The compiler lowers `grid_rooms` into private stable stage identities. The stric
 low-level fixture representation remains available: recipe version 1 has stone
 fill, grid partition, rooms, connected graph, corridors and stairs; version 2 adds
 lighting. Recipe version 3 appends optional secret entrances and hidden traps after
-any lighting stage. Stage order is fixed by this algorithm, not freely composable. Unique
+any lighting stage. Recipe version 4 requires a room-omission stage immediately
+after the six geometry stages, before optional lighting, secrets and traps. Without
+that opt-in policy, the existing version 1–3 lowering is unchanged. Stage order is
+fixed by this algorithm, not freely composable. Unique
 stage IDs are bounded ASCII alphanumeric/hyphen/underscore names, each stage uses
 version 1, room-range bounds are 3–30, and extra-edge ranges are ordered and at most
 4. See [recipe validation](../../crates/server/src/generation_recipe.rs).
+
+### Optional room omissions
+
+The typed preset can opt into passage-only slots:
+
+```toml
+room_omissions = { count = [0, 3] }
+```
+
+This is an authoring example, **not enabled in the live Rogue package** or an
+approved balance default. The strict policy has only `count`, with ordered bounds
+`0 <= minimum <= maximum <= 63`. The independent deterministic stage samples
+within the declared range and eligible capacity, retaining at least one room.
+A minimum exceeding capacity rejects construction rather than silently reducing
+the minimum or retrying a seed. Actual nonboundary entry/anchor and stair-owner
+slots are protected; structural boundary joins do not protect every slot.
+
+An omitted slot retains its existing corridor network and two-cell body clearance,
+not a room interior. Slot/member identities, protected entry/stair coordinates and
+the connected all-open route graph remain stable. Omitted rooms are absent from
+present-room metadata, so room-only loot and trap placement cannot treat them as
+rooms. This does not add mazes, alcoves or new population/balance policies.
+
+Absent policy and a realized omission count of zero preserve the exact legacy
+geometry and room-only trapdoor landing candidates. With actual omissions, each
+slot instead supplies clear walkable landing candidates, excluding walls and
+closed secret doors. Secret placement can therefore affect landing selection and
+available trap candidates, although the omission and geometry streams remain
+independent. Insufficient endpoint or declared trap-minimum capacity rejects the
+whole prepared group without partial publication. Prepared metadata and saved
+ordinary region records remain the placement and persistence authorities; reopening
+does not reroll a realized floor from live authoring sources.
 
 ### Secret entrances and hidden traps
 
@@ -275,7 +310,7 @@ doorless. A lit room illuminates its closure's exterior surface, not the corrido
 beyond it. Discovery is actor-owned; opening changes the one shared physical world.
 The all-open required-route graph is validated against the unchanged connected
 carving. There is no promise of an always-visible alternate route, and this stage
-does not add mazes or omitted rooms.
+does not itself omit rooms or add mazes; optional omissions are a separate stage.
 
 Traps select room-interior floor cells, avoiding reserved entry/stair anchors.
 They do not overlap secret mouths. Their placements and family draws are

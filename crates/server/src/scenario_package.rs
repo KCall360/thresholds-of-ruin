@@ -53,12 +53,12 @@ use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
 pub const RULESET: &str = "interactions-v51";
-const VALIDATOR: &str = "tor-scenario-41";
+const VALIDATOR: &str = "tor-scenario-42";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 29;
+pub const FORMAT: u32 = 30;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -5100,7 +5100,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-41");
+        assert_eq!(original.certificate.validator, "tor-scenario-42");
         assert_eq!(original.certificate.ruleset, "interactions-v51");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [

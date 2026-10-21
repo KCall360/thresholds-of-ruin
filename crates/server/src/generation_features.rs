@@ -1,5 +1,6 @@
 //! Independent bounded feature stages. Physical trapdoor landing anchors are
-//! selected from existing room clearance, without rerolling carving streams.
+//! selected from room clearance, or actual clear floor when slots are omitted,
+//! without rerolling carving streams.
 use super::*;
 
 /// A region owns one full maximum-sized slot's worth of feature identities.
@@ -172,10 +173,35 @@ pub(super) fn place_concealed_features(
                             (slot % columns) as i32 * size[0],
                             (slot / columns) as i32 * size[1],
                         );
-                        let mut available: Vec<_> = room
-                            .iter()
-                            .copied()
+                        // Omitted slots still own the same destination namespace.
+                        // With no realized omissions retain the legacy candidate set
+                        // and shuffle byte-for-byte (including explicit count zero).
+                        let landing_floor: Vec<_> = if rooms.iter().any(Vec::is_empty) {
+                            open.iter()
+                                .filter_map(|&(x, y)| {
+                                    let local = (x - offset.0, y - offset.1);
+                                    ((0..size[0]).contains(&local.0)
+                                        && (0..size[1]).contains(&local.1))
+                                    .then_some(local)
+                                })
+                                .collect()
+                        } else {
+                            room.clone()
+                        };
+                        let definition = &definitions[&region];
+                        let mut available: Vec<_> = landing_floor
+                            .into_iter()
                             .filter(|&(x, y)| !reserved.contains(&(x + offset.0, y + offset.1)))
+                            .filter(|&(x, y)| {
+                                // Secret mouths may lie on corridor-only floor.
+                                !definition.doors.iter().any(|door| {
+                                    !door.open
+                                        && door.at[0] == x
+                                        && door.at[1] == y
+                                        && door.at[2] < 2
+                                        && door.at[2] + door.height as i32 > 0
+                                }) && !(0..2).any(|z| definition.walls.contains(&[x, y, z]))
+                            })
                             .collect();
                         available.sort();
                         let mut landing_rng = stream(
@@ -191,7 +217,7 @@ pub(super) fn place_concealed_features(
                             available.swap(i, j);
                         }
                         if available.len() < config.count[1] as usize {
-                            return Err(fail("Trapdoor landing capacity exceeds room clearance"));
+                            return Err(fail("Trapdoor landing capacity exceeds clear floor"));
                         }
                         for (ordinal, (x, y)) in available
                             .into_iter()
@@ -212,8 +238,10 @@ pub(super) fn place_concealed_features(
                         }
                     }
                 }
-                // Room interiors are disjoint from entrance mouths, so adding or
-                // retuning secret entrances cannot reroll trap placement.
+                // Ground traps remain in present room interiors. With legacy
+                // room-only landings these are independent of entrance mouths;
+                // omitted-slot landings also exclude closures, so retuning those
+                // may change reserved landings and hence available trap cells.
                 let mut candidates: Vec<_> = rooms
                     .iter()
                     .enumerate()

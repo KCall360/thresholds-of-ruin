@@ -18,12 +18,14 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v20` retains exact package inputs and its
-current bundled-rule dependency hash. Its source-only transition advances the
-previous scenario format and bundled rules import to the current identities.
+`scripts/fixtures/rogue-earned-baseline-v21` retains exact package inputs and its
+current bundled-rule dependency hash. Its latest source-only transition advances
+only the previous scenario header; the bundled rules import and dependency hash
+are unchanged.
 All other authored package bytes, including anatomy, items, player kits and
-population stages, are unchanged; no wandering policy, control scrolls, utility-magic or ring loot, discovery stages, traps or secret closures are
-imported. Frozen v6–v19 inputs and their source/transition receipts remain immutable research
+population stages, are unchanged; no room-omission policy, wandering policy, control
+scrolls, utility-magic or ring loot, discovery stages, traps or secret closures are
+imported. Frozen v6–v20 inputs and their source/transition receipts remain immutable research
 evidence. Shared living-dungeon, awareness, hazards, levitation, discovery, wearable, utility-magic, persistent-condition and
 action-duration rules
 make this a new experiment input, with no claim of identical outcomes or a
@@ -348,7 +350,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v20"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v21"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```
@@ -543,11 +545,12 @@ The source-owned schema is in
 report/source bundles do not include the separately retained large raw logs,
 sidecars or saves unless those files are explicitly bundled with them.
 
-## Revision-7 current living-dungeon acceptance
+## Revision-7 living-dungeon acceptance (before room-omission schema)
 
-A separately labeled seed-42 Warrior acceptance used the current full production
-package, not the fixed E/S comparator or reduced eighteen-species diagnostic
-candidate. It earned its second class HD after **469 commands**, at tick **46420**,
+A separately labeled seed-42 Warrior acceptance used the full living-dungeon
+production package at the retained pre-omission-schema revision, not the fixed E/S
+comparator or reduced eighteen-species diagnostic candidate. It earned its second
+class HD after **469 commands**, at tick **46420**,
 with **100 earned and spent XP**, two recorded Warrior HD and **20/20 Health**.
 The run retained 34 transport segments and exact source-free state, public-history,
 receipt and creature restoration. A second execution from the exact initial save
@@ -561,8 +564,8 @@ controller's omission of disclosed elevated body contact. The storage fix retain
 the existing size limit and history policy. The revision-7 controller uses public
 body geometry without retrying refused actions or changing seed or command bounds.
 
-This is a fixed current-package functional acceptance pair, not qualification of
-the eight-slot experiment, numerical balance, deep progression or a complete game.
+This is a fixed living-dungeon-package functional acceptance pair, not qualification
+of the later room-omission schema, the eight-slot experiment, numerical balance, deep progression or a complete game.
 The reduced diagnostic candidate explicitly omits wandering and cannot supply that
 coverage. Later changes confined to diagnostic generation, its tests and prose are
 recorded separately from this pair's immutable input fingerprints; runtime, package,
