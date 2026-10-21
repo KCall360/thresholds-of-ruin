@@ -80,14 +80,17 @@ def disclosed_corridor_step(frame, visited, destination=None):
 def drain_interval(events, *, wraith, victim, prior_earned, earned, prior_hd, hd):
     """Require the survived160 boundary before W death or another hostile input.
 
-    CombatEventView reports primary contact. Exact actual2→1 row loss separately
-    proves its source-bound Spiritual rider succeeded; the event alone does not.
+    CombatEventView reports the primary outcome, not the Spiritual rider's
+    check. Ring mail can absorb all primary damage (Unaffected) while the rider
+    drains a row, as the canonical W Service contract also requires. Exact
+    actual2→1 paid-row loss separately proves the rider; the event alone cannot.
     """
     if (prior_earned, prior_hd, hd) != (160, 2, 1):
         raise AssertionError("A first survived drain needs prior160/HD2 and actual HD1")
     contacts = [index for index, event in enumerate(events) if event["type"] == "ability"
                 and event["ability"]["id"] == "rogue.energy_drain" and event["caster"] == wraith
-                and event["target"] == victim and event["outcome"] == "applied" and event["strike"] == 0]
+                and event["target"] == victim and event["outcome"] in ("applied", "unaffected")
+                and event["strike"] == 0]
     deaths = [index for index, event in enumerate(events)
               if event["type"] == "died" and event["actor"] == wraith]
     if not contacts:

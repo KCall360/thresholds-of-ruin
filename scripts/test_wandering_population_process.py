@@ -14,9 +14,8 @@ import unittest
 from contextlib import closing
 
 from arena_matrix import toml_source
-from checkpoint_payload import decode_checkpoint_payload
+from checkpoint_payload import authoritative_floor_activation, decode_checkpoint_payload
 from process_harness import ProcessTestCase, ROOT
-from test_nutrition_process import authoritative_floor_activation
 
 
 def observation(frame):

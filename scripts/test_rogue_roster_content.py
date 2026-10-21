@@ -316,23 +316,39 @@ class RogueRosterContent(unittest.TestCase):
 
     def test_wraith_drain_interval_requires_separate_survived160_and_real_contact(self):
         from rogue_wraith_package import drain_interval
-        contact = {"type": "ability", "caster": "w", "target": "p", "ability": {
-            "id": "rogue.energy_drain", "name": "Energy Drain"}, "outcome": "applied", "strike": 0}
+        contacts = [
+            {"type": "ability", "caster": "w", "target": "p", "ability": {
+                "id": "rogue.energy_drain", "name": "Energy Drain"}, "outcome": "applied", "strike": 0},
+            {"type": "ability", "caster": "w", "target": "p", "ability": {
+                "id": "rogue.energy_drain", "name": "Energy Drain"}, "outcome": "unaffected", "strike": 0},
+        ]
         death = {"type": "died", "actor": "w"}
         arguments = {"wraith": "w", "victim": "p", "prior_earned": 160, "prior_hd": 2, "hd": 1}
-        self.assertEqual(drain_interval([contact], earned=160, **arguments), "separate_160_checkpoint")
-        # Positive160 control executes before the former195 acceptance is rejected.
-        with self.assertRaisesRegex(AssertionError, "separate160"):
-            drain_interval([contact, death], earned=195, **arguments)
-        for events in ([], [dict(contact, outcome="miss")], [dict(contact, caster="other")],
-                       [dict(contact, target="other")], [dict(contact, strike=1)],
-                       [dict(contact, ability={"id": "basic_melee", "name": "Melee"})],
-                       [death], [death, contact], [contact, death]):
-            with self.subTest(events=events), self.assertRaises(AssertionError):
-                drain_interval(events, earned=160, **arguments)
-        for key, value in (("prior_earned", 140), ("prior_hd", 1), ("hd", 2)):
-            with self.subTest(field=key), self.assertRaisesRegex(AssertionError, "first survived drain"):
-                drain_interval([contact], earned=160, **dict(arguments, **{key: value}))
+        # Independent positive controls precede every malformed family. The
+        # primary can deal damage or be absorbed; actual row loss proves the
+        # separate Spiritual rider, never either public outcome by itself.
+        for contact in contacts:
+            with self.subTest(primary=contact["outcome"], case="valid survived drain"):
+                self.assertEqual(drain_interval([contact], earned=160, **arguments),
+                                 "separate_160_checkpoint")
+        for contact in contacts:
+            with self.subTest(primary=contact["outcome"]):
+                with self.assertRaisesRegex(AssertionError, "separate160"):
+                    drain_interval([contact, death], earned=195, **arguments)
+                for events in ([], [dict(contact, outcome="miss")],
+                               [dict(contact, outcome="resisted")], [dict(contact, outcome="unknown")],
+                               [dict(contact, caster="other")], [dict(contact, target="other")],
+                               [dict(contact, strike=1)],
+                               [dict(contact, ability={"id": "basic_melee", "name": "Melee"})],
+                               [death], [death, contact], [contact, death]):
+                    with self.subTest(events=events), self.assertRaises(AssertionError):
+                        drain_interval(events, earned=160, **arguments)
+                for earned in (140, 195):
+                    with self.subTest(earned=earned), self.assertRaisesRegex(AssertionError, "separate160"):
+                        drain_interval([contact], earned=earned, **arguments)
+                for key, value in (("prior_earned", 140), ("prior_hd", 1), ("hd", 2)):
+                    with self.subTest(field=key), self.assertRaisesRegex(AssertionError, "first survived drain"):
+                        drain_interval([contact], earned=160, **dict(arguments, **{key: value}))
 
     def test_generated_carrier_fixture_preserves_production_policies_and_recipes(self):
         from rogue_vampire_package import generated_carrier_manifest

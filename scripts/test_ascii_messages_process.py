@@ -2,17 +2,52 @@
 native window: combat reads as messages that stay until the next command, the
 map merges heights into one view, and the NetHack-style screens open on demand."""
 from scalar_wire import u64
+import copy
 import json
 import shutil
 import subprocess
 import time
 import tomllib
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from arena_matrix import toml_source
 from process_harness import (
     ProcessTestCase, ROOT, ascii_input_completion, headless_fight_completion, non_graphical,
 )
+
+
+def headless_combat_boundary(test, intention=None):
+    """Completed combat or permission to resume the same interrupted paid work.
+
+    This fixture policy does not make a paused intention completed. The next
+    bounded input must explicitly resume it, rather than replace its attack.
+    """
+    def stopped(frame):
+        nonlocal intention
+        if frame.get("error") is not None:
+            return True
+        view = (frame.get("state") or {}).get("observation")
+        if view is None:
+            return False
+        pending = frame["intentions"]
+        test.assertLessEqual(len(pending), 1, "Ambiguous combat work")
+        if pending:
+            status = pending[0]
+            test.assertIn(status["phase"], ("queued", "started", "paused"))
+            if intention is None:
+                intention = status["intention"]
+            test.assertEqual(status["intention"], intention, "Combat work changed identity")
+        if headless_fight_completion(frame):
+            return True
+        combat = view["combat"]
+        return (view["ready"] and not combat["preparation_active"]
+                and combat["preparation_remaining"] is not None
+                and len(pending) == 1 and pending[0]["phase"] == "paused"
+                and frame["readiness"]["resume"] == [intention])
+
+    return stopped
 
 
 class AsciiMessageProcesses(ProcessTestCase):
@@ -59,6 +94,7 @@ class AsciiMessageProcesses(ProcessTestCase):
         trace = []
         attack_turns = 0
         death = None
+        paused = None
         deadline = time.monotonic() + 30
 
         for _ in range(32):
@@ -79,10 +115,23 @@ class AsciiMessageProcesses(ProcessTestCase):
                        "invocation": {"aim": {"kind": "actor_target", "target": target["id"]}, "weapon": {"kind": "default"}}}
                       if max(abs(x), abs(y)) == 1 else {"type": "move", "direction": direction})
             start = len(player.transcript)
-            current = self.act(player, action)
+            if paused is None:
+                current = self.act(player, action)
+            else:
+                # Resume is an input in this same 32-input/30-second budget,
+                # not another attack or an unbounded automatic retry.
+                player.write(json.dumps({"type": "resume_intention"}))
+                current = self.frame(player, lambda frame: frame["type"] == "ready",
+                                     seconds=remaining)
             self.assertIsNone(current["error"])
-            if not headless_fight_completion(current):
-                current = self.frame(player, headless_fight_completion, seconds=remaining)
+            stopped = headless_combat_boundary(self, paused)
+            if not stopped(current):
+                remaining = deadline - time.monotonic()
+                self.assertGreater(remaining, 0, trace)
+                current = self.frame(player, stopped, seconds=remaining)
+            self.assertIsNone(current["error"])
+            paused = (current["intentions"][0]["intention"]
+                      if current["intentions"] else None)
             view = current["state"]["observation"]
             self.assertGreater(int(view["tick"]), before_tick, trace)
             trace.append({"direction": direction, "tick": view["tick"],
@@ -202,6 +251,153 @@ class AsciiMessageProcesses(ProcessTestCase):
         self.assertEqual(self.key(window, "escape")["screen"]["message_log"], None)
         self.assertEqual(self.key(window, "escape")["state"], before)
         self.assertEqual(window.child.wait(timeout=10), 0)
+
+
+class HeadlessCombatFixtureContracts(unittest.TestCase):
+    """Run the actual visibility fixture against ordered public publications."""
+
+    def run_fixture(self, mode="complete", order="lifecycle_first"):
+        case = AsciiMessageProcesses("test_combat_fixture_keeps_scout_visible_until_defeated")
+        player = SimpleNamespace(transcript=[])
+        inputs, pending, clock = [], [], [0.0]
+        state = {"resumed": False, "last_tick": 0, "waits": []}
+
+        def frame(tick, *, phase=None, remaining=None, active=False, ready=True,
+                  resume=(), identity="paid-attack", events=(), dead_scout=False, kind="update"):
+            return {"type": kind, "error": None,
+                    "state": {"wizard_game": False, "revision": str(tick), "observation": {
+                        "tick": str(tick), "ready": ready, "self_target": "delver",
+                        "visible_actors": [] if dead_scout else [{
+                            "id": "scout", "name": "ruin scout", "position": {"x": 1, "y": 0, "z": 0}}],
+                        "combat": {"dead": False, "preparation_active": active,
+                                   "preparation_remaining": remaining, "events": list(events)}}},
+                    "intentions": [] if phase is None else [{"intention": identity, "phase": phase}],
+                    "readiness": {"admission": True, "resume": list(resume),
+                                  "cancel": [identity] if phase else [], "revision": str(tick)}}
+
+        hit = {"type": "ability", "caster": "delver", "target": "scout"}
+        death = {"type": "died", "actor": "scout"}
+
+        def publish(value):
+            state["last_tick"] = int(value["state"]["observation"]["tick"])
+            if mode == "elapsed" and value["readiness"]["resume"] == ["paid-attack"]:
+                clock[0] = 20
+            player.transcript.append(json.dumps(value))
+            return value
+
+        def act(_player, action):
+            self.assertIs(_player, player)
+            self.assertEqual(action["type"], "use_ability")
+            self.assertEqual(action["id"], "basic_melee")
+            self.assertEqual(action["invocation"]["aim"]["target"], "scout")
+            self.assertFalse(pending, "A new attack replaced unresolved paid work")
+            inputs.append("attack")
+            if mode == "bound":
+                self.assertEqual(len(inputs), 1, "Paused work must be resumed, not attacked again")
+                return publish(frame(1, phase="paused", remaining="41", resume=("paid-attack",)))
+            if len(inputs) == 1:
+                if mode == "deadline":
+                    clock[0] = 31
+                elif mode == "elapsed":
+                    clock[0] = 5
+                return publish(frame(100, events=(hit,)))
+            self.assertEqual(len(inputs), 2, "Only the original two attacks may be admitted")
+            if mode == "complete":
+                return publish(frame(200, events=(hit, death), dead_scout=True))
+            if mode == "elapsed":
+                clock[0] = 12
+            paused = frame(102, phase="paused", remaining="41", resume=("paid-attack",))
+            if mode == "already_paused":
+                return publish(paused)
+            observation = frame(102, phase="started", remaining="41")
+            lifecycle = frame(102, phase="paused", remaining="41")
+            if mode == "wrong_identity":
+                paused["intentions"][0]["intention"] = "other-paid-work"
+                paused["readiness"]["resume"] = ["other-paid-work"]
+            elif mode == "ambiguous":
+                paused["intentions"].append({"intention": "other-paid-work", "phase": "paused"})
+            elif mode == "wrong_permission":
+                paused["readiness"]["resume"] = ["other-paid-work"]
+            if order == "permission_first":
+                early_permission = copy.deepcopy(observation)
+                early_permission["readiness"]["resume"] = ["paid-attack"]
+                pending.extend((observation, early_permission, paused))
+            else:
+                pending.extend((observation, lifecycle, paused))
+            return publish(frame(101, phase="started", remaining="43", active=True, ready=False))
+
+        def write(line):
+            self.assertEqual(json.loads(line), {"type": "resume_intention"})
+            self.assertFalse(pending, "Resume preceded its ordered permission boundary")
+            latest = json.loads(player.transcript[-1])
+            self.assertEqual(latest["intentions"], [{"intention": "paid-attack", "phase": "paused"}])
+            self.assertEqual(latest["readiness"]["resume"], ["paid-attack"])
+            inputs.append("resume")
+            state["resumed"] = True
+            tick = state["last_tick"]
+            pending.append(frame(tick, phase="queued", remaining="41", kind="ready"))
+            if mode == "bound":
+                pending.append(frame(tick + 1, phase="paused", remaining="40", resume=("paid-attack",)))
+            else:
+                pending.extend((frame(103, phase="started", remaining="40", active=True, ready=False),
+                                frame(200, events=(hit, death), dead_scout=True)))
+
+        def wait(_player, predicate, seconds=15):
+            self.assertIs(_player, player)
+            self.assertGreater(seconds, 0)
+            self.assertLessEqual(seconds, 30 - clock[0], "Whole-fight deadline was reset")
+            state["waits"].append(seconds)
+            while pending:
+                value = publish(pending.pop(0))
+                if predicate(value):
+                    return value
+            case.fail("Paid work needs its explicit authorized Resume, not another passive wait")
+
+        player.write = write
+        case.combat_package = lambda: "unchanged-combat-package"
+        case.server = lambda **kwargs: self.assertEqual(kwargs, {"scenario": "unchanged-combat-package"})
+        case.client = lambda **kwargs: (player, frame(0))
+        case.act, case.frame = act, wait
+        self.inputs, self.publications, self.fixture_state = inputs, player.transcript, state
+        with patch(__name__ + ".time.monotonic", side_effect=lambda: clock[0]):
+            case.test_combat_fixture_keeps_scout_visible_until_defeated()
+
+    def test_already_completed_baseline_needs_two_attacks_and_no_resume(self):
+        self.run_fixture()
+        self.assertEqual(self.inputs, ["attack", "attack"])
+
+    def test_actual_fixture_resumes_only_after_matching_lifecycle_and_permission(self):
+        for order in ("lifecycle_first", "permission_first"):
+            with self.subTest(order=order):
+                self.run_fixture("interrupted", order)
+                self.assertEqual(self.inputs, ["attack", "attack", "resume"])
+
+    def test_already_published_pause_resumes_without_waiting_for_nonexistent_completion(self):
+        self.run_fixture("already_paused")
+        self.assertEqual(self.inputs, ["attack", "attack", "resume"])
+
+    def test_changed_identity_ambiguous_work_and_unrelated_permission_never_resume(self):
+        for mode, message in (("wrong_identity", "changed identity"),
+                              ("ambiguous", "Ambiguous combat work"),
+                              ("wrong_permission", "explicit authorized Resume")):
+            with self.subTest(mode=mode), self.assertRaisesRegex(AssertionError, message):
+                self.run_fixture(mode)
+            self.assertEqual(self.inputs, ["attack", "attack"])
+
+    def test_resumes_are_charged_to_the_original_32_input_ceiling(self):
+        with self.assertRaisesRegex(AssertionError, "unexpectedly None"):
+            self.run_fixture("bound")
+        self.assertEqual(self.inputs, ["attack"] + ["resume"] * 31)
+
+    def test_original_absolute_deadline_cannot_be_restarted(self):
+        with self.assertRaisesRegex(AssertionError, "not greater than 0"):
+            self.run_fixture("deadline")
+        self.assertEqual(self.inputs, ["attack"])
+
+    def test_interruption_and_resume_share_the_remaining_original_deadline(self):
+        self.run_fixture("elapsed")
+        self.assertEqual(self.inputs, ["attack", "attack", "resume"])
+        self.assertEqual(self.fixture_state["waits"], [18, 10, 10])
 
 
 if __name__ == "__main__":

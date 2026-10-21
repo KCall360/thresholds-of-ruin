@@ -580,3 +580,13 @@ Health, seed, command bounds and combat choices. The original production package
 is unchanged. This diagnostic cannot establish wandering survival or full-floor
 clearance under continuing arrivals; the current-package acceptance pair and
 separate population process contracts supply their own, narrower evidence.
+
+The exact-budget paused-tail regression is also a labeled diagnostic, not an
+exploration-policy benchmark. An ordinary authored WORK action pays its start
+cost and reserves its remaining resource and supply payment; a second actor's
+zero-damage LAPSE pauses it. The test waits for public permission to resume, then
+exercises the real route settlement, command-budget, censoring and save paths
+with a one-command budget. No Resume may be written after that budget; a separate
+remaining-budget control admits exactly one Resume. This avoids assuming that a
+particular exploration command number must interrupt paid work. Current-package
+survival and saved-initial replay remain separate acceptance owners.

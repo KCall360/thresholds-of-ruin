@@ -1267,5 +1267,65 @@ class RouteResumeHardeningTests(unittest.TestCase):
                 route.check_time()
 
 
+class PaidTailBudgetCallerTests(unittest.TestCase):
+    """Exercise the actual settlement/censor caller, mocking transport only."""
+    def route(self, root, limit):
+        from collections import Counter
+        from rogue_earned_route import Controller
+        route = RouteExecution.__new__(RouteExecution)
+        route.harness, route.output = self, root
+        route.controller = Controller(1, first_limit=limit)
+        route.controller.consume_command(kind='action', action={'type': 'wait'})
+        route.report = {'outcome': None}
+        route.commands, route.counts, route.phase = [], Counter(), 'paid_tail'
+        route.player, route.check_time = Mock(), Mock()
+        route.current = {'type': 'ready', 'error': None,
+            'state': {'wizard_game': False, 'observation': {'ready': False,
+                'combat': {'terminal': False, 'preparation_remaining': '250',
+                           'preparation_active': False}}},
+            'intentions': [{'intention': 'paid-identity', 'phase': 'paused'}],
+            'readiness': {'resume': ['paid-identity'], 'cancel': ['paid-identity'],
+                          'admission': False}}
+        completed = copy.deepcopy(route.current)
+        completed['state']['observation']['ready'] = True
+        completed['state']['observation']['combat']['preparation_remaining'] = None
+        completed['intentions'] = []
+        completed['readiness'] = {'resume': [], 'cancel': [], 'admission': True}
+        route.frame = Mock(return_value=completed)
+        route.run_steps = lambda **kwargs: route.settle(route.current)
+        route.finish_evidence = Mock()
+        return route, completed
+
+    def test_paid_tail_at_exact_budget_censors_before_any_transport_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            route, _ = self.route(Path(directory), 1)
+            original = copy.deepcopy(route.current)
+            route.run_loop()
+            self.assertEqual(route.report['outcome'], 'censored_action_budget')
+            self.assertEqual(route.report['unsubmitted_budget_command'], {'type': 'resume_intention'})
+            self.assertEqual(route.current, original)
+            self.assertEqual(route.controller.commands, 1)
+            self.assertEqual(route.controller.command_kinds, {'action': 1})
+            self.assertEqual(route.commands, [])
+            self.assertFalse((route.output / 'commands.jsonl').exists())
+            route.player.write.assert_not_called()
+            route.frame.assert_not_called()
+            route.finish_evidence.assert_called_once_with()
+
+    def test_same_disclosed_tail_with_budget_submits_one_actual_resume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            route, completed = self.route(Path(directory), 2)
+            route.run_loop()
+            route.player.write.assert_called_once_with(json.dumps({'type': 'resume_intention'}))
+            self.assertEqual(route.current, completed)
+            self.assertEqual(route.controller.commands, 2)
+            self.assertEqual(route.controller.command_kinds, {'action': 1, 'resume': 1})
+            self.assertNotIn('unsubmitted_budget_command', route.report)
+            self.assertNotEqual(route.report['outcome'], 'censored_action_budget')
+            self.assertEqual([row['kind'] for row in route.commands], ['resume'])
+            self.assertEqual(len((route.output / 'commands.jsonl').read_text().splitlines()), 1)
+            route.finish_evidence.assert_called_once_with()
+
+
 if __name__ == '__main__':
     unittest.main()

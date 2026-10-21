@@ -6,7 +6,7 @@ import sqlite3
 import time
 import unittest
 
-from checkpoint_payload import decode_checkpoint_payload
+from checkpoint_payload import authoritative_floor_activation, decode_checkpoint_payload
 from nutrition_package import ROLLED_MEAL, prepare, prepare_regeneration, prepare_rolled
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, resource
 
@@ -23,19 +23,6 @@ def observation(frame):
 def nutrition(frame):
     return observation(frame)["combat"]["own_stats"]["nutrition"]
 
-
-
-def authoritative_floor_activation(reference, shared):
-    """Reconstruct the strict boundary clock overlay without discarding state."""
-    if reference is None:
-        return None
-    if set(reference) != {"state", "wandering"}:
-        raise ValueError("invalid floor activation checkpoint reference")
-    base = copy.deepcopy(shared["floor_activations"][reference["state"]])
-    if base["wandering"] is not None:
-        raise ValueError("pooled floor activation must have canonical null wandering")
-    base["wandering"] = copy.deepcopy(reference["wandering"])
-    return base
 
 
 def authoritative_game(checkpoint):
