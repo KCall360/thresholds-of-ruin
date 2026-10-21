@@ -423,6 +423,34 @@ class Durations(unittest.TestCase):
         durations = parallel_tests.load_durations()
         self.assertTrue(test_id in durations, "Refresh the measured long-route scheduling hint")
 
+    def test_measured_omission_owner_starts_alone_without_changing_inventory(self):
+        omission = ("test_floor_activation_process.OmittedRoomTopologyProcess."
+                    "test_ordinary_search_traversal_and_source_free_revisit_keep_real_rooms")
+        names = [
+            "test_floor_activation_process.RogueStarterProcess.test_mage_ordinary_initial_kit_survives_source_deleted_restarts",
+            omission,
+            "test_floor_activation_process.RogueStarterProcess.test_warrior_ordinary_initial_kit_survives_source_deleted_restarts",
+            "test_floor_activation_process.FloorActivationProcess.test_source_deleted_new_floor_has_one_entry_receipt_and_revisit_never_redecides",
+        ]
+        # Instantiate the registered owners, but never execute their process bodies.
+        tests = list(parallel_tests.flatten(unittest.defaultTestLoader.loadTestsFromNames(names)))
+        self.assertEqual([test.id() for test in tests], names)
+        durations = parallel_tests.load_durations()
+        fallback = {name: seconds for name, seconds in durations.items() if name != omission}
+        for workers in (1, 2, 4):
+            with self.subTest(workers=workers):
+                old, old_graphical = parallel_tests.plan(tests, fallback, workers=workers)
+                headless, graphical = parallel_tests.plan(tests, durations, workers=workers)
+                self.assertEqual(headless[0].ids, [omission],
+                                 "Register the measured omission owner instead of short-test packing")
+                self.assertGreaterEqual(headless[0].seconds, parallel_tests.BATCH_SECONDS)
+                self.assertEqual(sorted(test_id for batch in headless for test_id in batch.ids),
+                                 sorted(names))
+                self.assertEqual(sorted(test_id for batch in old for test_id in batch.ids),
+                                 sorted(names))
+                self.assertEqual(graphical, old_graphical)
+                self.assertEqual(graphical, [])
+
     def test_invalid_observations_leave_the_destination_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory, "run.jsonl")
