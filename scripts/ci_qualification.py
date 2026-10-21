@@ -24,8 +24,9 @@ SHA = re.compile(r"[0-9a-f]{40}\Z")
 SOURCE_NAME = re.compile(r"Qualification source \(([0-9a-f]{40})\)\Z")
 MATRIX = [(os, profile, part) for os in ("windows-latest", "ubuntu-latest")
           for profile in ("debug", "release") for part in ("rust", "python")
-          if (os, profile, part) != ("windows-latest", "release", "python")]
-MATRIX += [("windows-latest", "release", f"python shard {index}") for index in (1, 2)]
+          if not (os == "windows-latest" and part == "python")]
+MATRIX += [("windows-latest", profile, f"python shard {index}")
+           for profile in ("debug", "release") for index in (1, 2)]
 OTHER_JOBS = {"Repository tooling lint", "Dependencies (advisories)", "Dependencies (bans licenses sources)",
               "Rust (windows-latest)", "Rust (ubuntu-latest)", "Change scope and documentation"}
 REQUIRED_CONTROLS = {".github/workflows/ci.yml", "scripts/verify.py", "scripts/test_runner.py",

@@ -103,7 +103,7 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
-    # Windows release Python is two complete-in-union, isolated owners. Both
+    # Each Windows Python profile is two complete-in-union, isolated owners. Both
     # retain the 40-minute job cap and ordinary per-test deadlines; no extra
     # same-host workers or sampling reduction makes the full inventory fit.
     timeout-minutes: ${{ !matrix.shard && matrix.partition == 'python' && github.event_name == 'workflow_dispatch' && inputs.measure_windows_candidate && matrix.os == 'windows-latest' && 75 || matrix.partition == 'python' && 40 || 60 }}
@@ -115,9 +115,20 @@ jobs:
         partition: [rust, python]
         exclude:
           - os: windows-latest
+            profile: debug
+            partition: python
+          - os: windows-latest
             profile: release
             partition: python
         include:
+          - os: windows-latest
+            profile: debug
+            partition: python
+            shard: 1
+          - os: windows-latest
+            profile: debug
+            partition: python
+            shard: 2
           - os: windows-latest
             profile: release
             partition: python
@@ -295,14 +306,22 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Require both complete Windows debug Python shards
+        if: matrix.os == 'windows-latest' && needs.scope.outputs.docs_only == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-debug-python-shard-1 --dir .local/shard-coverage/debug/1
+          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-debug-python-shard-2 --dir .local/shard-coverage/debug/2
+          python scripts/ci_python_shards.py --profile debug --directory .local/shard-coverage/debug --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
       - name: Require both complete Windows release Python shards
         if: matrix.os == 'windows-latest' && needs.scope.outputs.docs_only == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-release-python-shard-1 --dir .local/shard-coverage/1
-          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-release-python-shard-2 --dir .local/shard-coverage/2
-          python scripts/ci_python_shards.py --directory .local/shard-coverage --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-release-python-shard-1 --dir .local/shard-coverage/release/1
+          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-release-python-shard-2 --dir .local/shard-coverage/release/2
+          python scripts/ci_python_shards.py --directory .local/shard-coverage/release --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
       - name: Require the complete selected CI gate
         env:
           DOCS_ONLY: ${{ needs.scope.outputs.docs_only }}

@@ -921,7 +921,8 @@ class CiWorkflowContract(unittest.TestCase):
         self.assertNotIn("--waive-local-mouse", profiles)
         self.assertNotIn("--waive-local-graphical", profiles)
         self.assertNotIn("continue-on-error", profiles)
-        self.assertIn("        exclude:\n          - os: windows-latest\n            profile: release\n            partition: python\n", profiles)
+        for profile in ("debug", "release"):
+            self.assertIn(f"          - os: windows-latest\n            profile: {profile}\n            partition: python\n", profiles)
         for index in (1, 2):
             self.assertIn(f"            partition: python\n            shard: {index}\n", profiles)
         self.assertIn("${{ matrix.shard && format('--ci-python-shard {0}', matrix.shard) || '--cross-head-proof .local/verify/cross-head.json' }}", profiles)
@@ -1103,6 +1104,47 @@ class WorkflowShellSelection(unittest.TestCase):
 
 
 class CiPythonShardPlanning(unittest.TestCase):
+    def test_full_debug_shards_keep_pure_discovery_and_all_three_stages(self):
+        for index in (1, 2):
+            with self.subTest(index=index), patch.object(verify.subprocess, 'run') as commands, \
+                    patch.object(verify, 'free_memory_gb', return_value=8), \
+                    patch.object(verify.sys, 'platform', 'win32'), \
+                    patch.dict(os.environ, {}, clear=True), redirect_stdout(StringIO()) as output, redirect_stderr(StringIO()):
+                commands.return_value.stdout = json.dumps(metadata())
+                try:
+                    result = verify.main(['full', '--ci-profile', 'debug', '--ci-partition', 'python',
+                                          '--ci-python-shard', str(index), '--dry-run'])
+                except SystemExit as error:
+                    result = error.code
+                self.assertEqual(result, 0, 'Complete debug discovery must support isolated shards')
+                text = output.getvalue()
+                self.assertIn(f'--ci-python-shard {index}', text)
+                self.assertIn('discover -s scripts -p test_*.py -v', text)
+                for stage in ('build-process-debug', 'build-tools', 'python-debug'):
+                    self.assertIn(stage, text)
+
+    def test_actual_debug_shard_stage_supplies_profile_from_cleared_environment(self):
+        class ReachedPythonStage(Exception): pass
+        seen = []
+        def capture(name, command, env, logs, jobs, rerun):
+            seen.append(name)
+            if name == 'python-debug':
+                self.assertEqual(seen, ['build-process-debug', 'build-tools', 'python-debug'])
+                self.assertEqual(env.get('TOR_TEST_PROFILE'), 'debug')
+                self.assertIn('--ci-python-shard', command)
+                self.assertIn('test_*.py', command)
+                raise ReachedPythonStage
+            return {'step': name, 'code': 0, 'seconds': 0, 'log': None, 'note': ''}
+        with tempfile.TemporaryDirectory() as directory, patch.object(verify, 'ROOT', Path(directory)), \
+                patch.object(verify.subprocess, 'run') as commands, \
+                patch.object(verify.sys, 'platform', 'win32'), patch.dict(os.environ, {}, clear=True), \
+                patch.object(verify, 'free_memory_gb', return_value=8), \
+                patch.object(verify, 'running_builds', return_value=[]), \
+                patch.object(verify, 'run_step', side_effect=capture), redirect_stdout(StringIO()):
+            commands.return_value.stdout = json.dumps(metadata())
+            with self.assertRaises(ReachedPythonStage):
+                verify.main(['full', '--ci-profile', 'debug', '--ci-partition', 'python', '--ci-python-shard', '1'])
+
     def test_full_release_discovery_is_only_partitioned_at_runner_boundary(self):
         for index in (1, 2):
             with self.subTest(index=index), patch.object(verify.subprocess, 'run') as commands, \
@@ -1122,7 +1164,7 @@ class CiPythonShardPlanning(unittest.TestCase):
         base = ['full', '--ci-profile', 'release', '--ci-partition', 'python', '--ci-python-shard', '1']
         cases = [base + ['--cross-head-proof', 'prior.json'], base + ['--fail-fast'],
                  base + ['--rerun-failed'], ['push', '--ci-python-shard', '1'],
-                 ['full', '--ci-profile', 'debug', '--ci-partition', 'python', '--ci-python-shard', '1']]
+                 ['full', '--ci-profile', 'debug', '--ci-partition', 'rust', '--ci-python-shard', '1']]
         for args in cases:
             with self.subTest(args=args), patch.object(verify.sys, 'platform', 'win32'), \
                     patch.object(verify.subprocess, 'run') as commands, redirect_stderr(StringIO()):
@@ -1142,8 +1184,8 @@ class CiPythonShardPlanning(unittest.TestCase):
     def test_workflow_has_two_isolated_fresh_shards_and_required_artifact_union(self):
         workflow = (verify.ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
         profiles = CiWorkflowContract().job('profiles')
-        self.assertEqual(profiles.count('            shard: 1\n'), 1)
-        self.assertEqual(profiles.count('            shard: 2\n'), 1)
+        self.assertEqual(profiles.count('            shard: 1\n'), 2)
+        self.assertEqual(profiles.count('            shard: 2\n'), 2)
         self.assertNotIn('--test-workers', profiles)
         for step in ('Adopt independently matched premerge cell when available', 'Prepare bounded prior-head evidence'):
             block = profiles.split('      - name: ' + step + '\n')[1].split('      - name:', 1)[0]
@@ -1151,8 +1193,11 @@ class CiPythonShardPlanning(unittest.TestCase):
         gate = CiWorkflowContract().job('check')
         self.assertIn('Checkout exact source for shard coverage', gate)
         self.assertIn('ref: ${{ github.sha }}', gate)
-        for index in (1, 2):
-            self.assertIn(f'--name verification-windows-latest-release-python-shard-{index}', gate)
+        for profile in ('debug', 'release'):
+            for index in (1, 2):
+                self.assertIn(f'--name verification-windows-latest-{profile}-python-shard-{index} --dir .local/shard-coverage/{profile}/{index}', gate)
+        self.assertIn('--profile debug --directory .local/shard-coverage/debug', gate)
+        self.assertIn('--directory .local/shard-coverage/release', gate)
         self.assertIn('--source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"', gate)
         self.assertIn('actions: read', gate)
         self.assertNotIn('continue-on-error', gate)

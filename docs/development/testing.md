@@ -447,7 +447,7 @@ cannot qualify later application changes or exact-tree full-run reuse.
 
 ### Full CI partitions
 
-CI runs four independent profile jobs on Linux and five on Windows, selected with
+CI runs four independent profile jobs on Linux and six on Windows, selected with
 `full --ci-profile debug|release --ci-partition rust|python`:
 
 | Profile | Partition | Complete coverage |
@@ -457,15 +457,15 @@ CI runs four independent profile jobs on Linux and five on Windows, selected wit
 | Release | Rust | Release workspace Rust tests including doctests, and production Service contracts via `service_contract_ci.py` |
 | Release | Python/native | Every `test_*process.py` suite, including native acceptance |
 
-Windows release Python uses two isolated jobs with `--ci-python-shard 1|2`.
+Each Windows Python profile uses two isolated jobs with `--ci-python-shard 1|2`.
 Whole test modules (including fixture and native owners) belong to one shard;
-the exact union retains every current release test, including newly discovered
-modules. Both jobs build their own release applications, retain two headless
+the exact union retains every current profile test, including newly discovered
+modules. Each job builds its own profile applications, retain two headless
 workers plus the serialized native lane, and keep the 40-minute job deadline.
 The Windows aggregate independently discovers the current full inventory and
-requires both successful, complete, source-bound receipts. Missing, cancelled,
+requires both successful, complete, source- and profile-bound receipts for each profile. Missing, cancelled,
 failed or incomplete shards fail the gate. Shards cannot adopt unsharded prior
-results. The full required job inventory is 16 checks rather than 15.
+results. The full required job inventory is 17 checks.
 
 `--ci-partition` requires both `full` and an explicit `--ci-profile`. Each
 partition selects complete coverage without consulting Git merge history.
@@ -1201,7 +1201,7 @@ the same ordinary fixture. Never hand-edit a prior recording to add the new fiel
 ### Optional Windows candidate measurement
 
 The CI workflow's `measure_windows_candidate` manual-dispatch input is
-currently unavailable: it requests both Windows profiles, but release now has
+currently unavailable: it requests both Windows profiles, but each profile now has
 two independent shard receipts rather than the single complete baseline needed
 by the comparison tool. Leave the input disabled. Enabling it fails explicitly
 in the scope job before profile builds or dependency jobs begin; it does not
