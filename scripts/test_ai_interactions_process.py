@@ -4,10 +4,13 @@ import shutil
 import subprocess
 import tomllib
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import Mock, patch
 
 from arena_matrix import toml_source
 from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
-from process_harness import creature_package
+from process_harness import creature_package, headless_fight_completion
 from rogue_roster_package import roster_package
 
 
@@ -38,6 +41,24 @@ class AiInteractionProcesses(ProcessTestCase):
                          "idle item fixture must keep the hostile player completely unseen")
         return view
 
+    def completed_idle_wait(self, player):
+        """One ordinary Wait, through the player's recovery and permission update."""
+        def completed(frame):
+            self.assertIsNone(frame.get("error"))
+            self.assertNotEqual((frame.get("message") or {}).get("type"), "error")
+            status = ((frame.get("message") or {}).get("update") or {}).get("body", {})
+            phase = (status.get("status") or {}).get("phase")
+            self.assertNotIn(phase, ("failed", "cancelled", "paused", "suspended"))
+            if frame.get("state_omitted", False):
+                return False
+            self.assertFalse(frame["state"]["observation"]["combat"]["dead"])
+            return headless_fight_completion(frame)
+
+        current = self.act(player, {"type": "wait"})
+        if not completed(current):
+            current = self.frame(player, completed)
+        return current
+
     def test_authored_hobgoblin_acquires_secondary_bow_and_bounded_reserve(self):
         package = roster_package(self, "hobgoblin", autonomous=True)
         path = package / "regions/1.toml"
@@ -67,7 +88,7 @@ class AiInteractionProcesses(ProcessTestCase):
             return len(bows), slots.get(bows[0]["id"]) if bows else None, arrows
 
         for _ in range(24):
-            self.assertIsNone(self.act(player, {"type": "wait"}).get("error"))
+            self.completed_idle_wait(player)
             view = self.idle_item_observation(self.request(observer, {"type": "snapshot"}))
             if stock(view) == (1, 10, 6):
                 break
@@ -75,7 +96,7 @@ class AiInteractionProcesses(ProcessTestCase):
         # rule. Secondary placement preserves the authored natural melee attack.
         self.assertEqual(stock(view), (1, 10, 6))
         for _ in range(4):
-            self.assertIsNone(self.act(player, {"type": "wait"}).get("error"))
+            self.completed_idle_wait(player)
         view = self.idle_item_observation(self.request(observer, {"type": "snapshot"}))
         self.assertEqual(stock(view), (1, 10, 6), "no collection or equip oscillation")
         self.assertEqual([row["item"]["quantity"] for row in view["ground_items"]
@@ -120,7 +141,7 @@ class AiInteractionProcesses(ProcessTestCase):
         observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
         chosen = None
         for _ in range(12):
-            self.act(player, {"type": "wait"})
+            self.completed_idle_wait(player)
             view = self.request(observer, {"type": "snapshot"})["state"]["observation"]
             names = {item["id"]: item["name"] for item in view["inventory"]}
             equipped = [item for item in view["interactions"]["inventory"]
@@ -147,7 +168,7 @@ class AiInteractionProcesses(ProcessTestCase):
         self.idle_item_observation(initial)
         player, _ = self.client()
         for _ in range(12):
-            self.act(player, {"type": "wait"})
+            self.completed_idle_wait(player)
             view = self.idle_item_observation(self.request(observer, {"type": "snapshot"}))
             carried = [item for item in view["inventory"] if item["class"] == "potion"]
             if carried:
@@ -171,7 +192,7 @@ class AiInteractionProcesses(ProcessTestCase):
         player, _ = self.client()
         equipped = None
         for _ in range(18):
-            self.act(player, {"type": "wait"})
+            self.completed_idle_wait(player)
             view = self.idle_item_observation(self.request(observer, {"type": "snapshot"}))
             mail = next((item for item in view["inventory"] if item["name"] == "mail"), None)
             if mail:
@@ -196,7 +217,7 @@ class AiInteractionProcesses(ProcessTestCase):
                     items["old ring"]: 1, items["ring"]: 2, items["silver ring"]: None}
         finished = None
         for _ in range(14):
-            self.act(player, {"type": "wait"})
+            self.completed_idle_wait(player)
             view = self.idle_item_observation(self.request(observer, {"type": "snapshot"}))
             actual = equipment(view)
             if all(actual[item] == slot for item, slot in expected.items()):
@@ -262,6 +283,191 @@ class AiInteractionProcesses(ProcessTestCase):
         state = self.request(restored, {"type": "snapshot"})
         self.assertEqual(u64(state["state"]["observation"]["combat"]["hp"]), 25)
         self.assertEqual([item["quantity"] for item in state["state"]["observation"]["inventory"] if item["class"] == "potion"], ["1"])
+
+
+class IdleItemWaitContracts(unittest.TestCase):
+    """Exercise the actual stock driver against ordered player publications."""
+
+    @staticmethod
+    def player_frame(*, ready=True, admission=True):
+        return {"state": {"observation": {"ready": ready,
+                    "combat": {"dead": False, "preparation_active": False}}},
+                "readiness": {"admission": admission, "resume": None, "cancel": None},
+                "intentions": [], "error": None}
+
+    OWNERS = {
+        "hobgoblin": ("test_authored_hobgoblin_acquires_secondary_bow_and_bounded_reserve", 24),
+        "weapon": ("test_creature_ai_chooses_a_weapon_using_a_purchased_rank", 12),
+        "healing": ("test_ai_takes_one_ground_healing_unit_and_keeps_the_remaining_stack", 12),
+        "armor": ("test_ai_walks_to_safe_known_ground_armor_then_replaces_old_gear", 18),
+        "equipment": ("test_ai_replaces_armor_fills_duplicate_ring_and_restores_equipment", 14),
+    }
+
+    def run_stock_driver(self, *, owner="hobgoblin", delayed=None, progress=True, rejected=False):
+        method, bound = self.OWNERS[owner]
+        case = AiInteractionProcesses(method)
+        case.bin, case.suffix = Path("unused-scripted-binaries"), ""
+        observer, player, restored, server = (Mock() for _ in range(4))
+        completed = 0
+        submitted = 0
+        pending = []
+
+        def item_frame():
+            acquired = rejected or (progress and completed >= 2)
+            view = {"self_target": "3", "visible_actors": [], "inventory": [],
+                    "interactions": {"inventory": []}, "ground_items": []}
+            if owner == "hobgoblin":
+                if acquired:
+                    view["inventory"] = [
+                        {"id": "11", "name": "shortbow", "quantity": "1"},
+                        {"id": "12", "name": "arrow", "quantity": "6"}]
+                    view["interactions"]["inventory"] = [{"item": "11", "equipped_slot": 10}]
+                view["ground_items"] = [{"item": {"name": "arrow", "quantity": "14"}}]
+            elif owner == "weapon":
+                view["inventory"] = [{"id": "11", "name": "heavy_blade"}]
+                view["interactions"]["inventory"] = [{"item": "11",
+                    "equipped_slot": 0 if acquired else None, "known_equipment": None}]
+            elif owner == "healing":
+                if acquired:
+                    view["inventory"] = [{"class": "potion", "quantity": "1"}]
+                view["ground_items"] = [{"item": {"class": "potion", "quantity": "2"}}]
+            elif owner == "armor":
+                view["inventory"] = [{"id": "11", "name": "mail"}]
+                view["interactions"]["inventory"] = [{"item": "11",
+                    "equipped_slot": 0 if acquired else None}]
+            else:
+                names = ("old mail", "mail", "old ring", "ring", "silver ring")
+                slots = (None, 0, 1, 2, None) if acquired else (0, None, 1, None, None)
+                view["inventory"] = [{"id": str(i), "name": name} for i, name in enumerate(names)]
+                view["interactions"]["inventory"] = [{"item": str(i),
+                    "equipped_slot": slot, "known_equipment": None} for i, slot in enumerate(slots)]
+            return {"state": {"observation": view}}
+
+        def act(client, action):
+            nonlocal submitted, completed
+            self.assertIs(client, player)
+            self.assertEqual(action, {"type": "wait"})
+            submitted += 1
+            if rejected or pending:
+                return {"error": "StaleRevision: Refresh the observation before acting"}
+            if delayed is None:
+                completed += 1
+                return self.player_frame()
+            pending.extend([self.player_frame(**delayed), self.player_frame()])
+            return self.player_frame(**delayed)
+
+        def frame(client, predicate, *args, **kwargs):
+            nonlocal completed
+            self.assertIs(client, player, "only the player's stream establishes completion")
+            while pending:
+                value = pending.pop(0)
+                last = not pending
+                if last:
+                    completed += 1
+                if predicate(value):
+                    self.assertTrue(last, "an intermediate admission/readiness is not completion")
+                    return value
+            self.fail("driver waited past the ordered completion publication")
+
+        def request(client, value):
+            if client is player:
+                self.assertEqual(value, {"type": "save"})
+                if not rejected:
+                    self.assertEqual(completed, 6 if owner == "hobgoblin" else 2)
+                return {"error": None}
+            self.assertIn(client, (observer, restored))
+            self.assertEqual(value, {"type": "snapshot"})
+            return item_frame()
+
+        case.act = Mock(side_effect=act)
+        case.frame = Mock(side_effect=frame)
+        case.request = Mock(side_effect=request)
+        case.server = Mock(return_value=server)
+        observers = iter((observer, restored))
+        def client(*args, observe=False, **kwargs):
+            current = next(observers) if observe else player
+            return current, item_frame() if observe else self.player_frame()
+        case.client = Mock(side_effect=client)
+        case.validate_item_package = Mock()
+        with TemporaryDirectory() as directory:
+            package = Path(directory)
+            (package / "regions").mkdir()
+            (package / "scenario.toml").write_text('archetypes = { }\n', encoding="utf-8")
+            (package / "regions/1.toml").write_text(
+                'size = [10,5,2]\nitems = [{id=11, carried_by=2}, {id=14}, '
+                '{id=20, carried_by=2}]\n[anchors]\nstart = [8,2,0]\n', encoding="utf-8")
+            case.idle_item_package = Mock(return_value=package)
+            with patch(__name__ + ".roster_package", return_value=package), \
+                 patch(__name__ + ".creature_package", return_value=package), \
+                 patch(__name__ + ".subprocess.run", return_value=Mock(returncode=0, stderr="")):
+                if rejected:
+                    with self.assertRaisesRegex(AssertionError, "StaleRevision"):
+                        getattr(case, method)()
+                elif progress:
+                    getattr(case, method)()
+                else:
+                    with self.assertRaises(AssertionError):
+                        getattr(case, method)()
+        if rejected:
+            self.assertEqual((submitted, completed), (1, 0))
+            case.request.assert_not_called()
+            case.frame.assert_not_called()
+            return
+        expected = (6 if owner == "hobgoblin" else 2) if progress else bound
+        self.assertEqual((submitted, completed), (expected, expected),
+                         "no dropped, replaced or retried Waits; original owner bound stays strict")
+        self.assertEqual(pending, [])
+        self.assertEqual(case.frame.call_count, 0 if delayed is None else expected)
+        if owner != "weapon":
+            self.assertEqual(case.validate_item_package.call_count, 1)
+        if progress and owner in ("hobgoblin", "equipment"):
+            server.stop.assert_called_once()
+
+    def test_adjacent_idle_callers_complete_each_wait_before_observing_items(self):
+        for owner in ("weapon", "healing", "armor", "equipment"):
+            for delayed in (None, {"ready": False, "admission": True},
+                            {"ready": True, "admission": False}):
+                with self.subTest(owner=owner, delayed=delayed):
+                    self.run_stock_driver(owner=owner, delayed=delayed)
+
+    def test_idle_callers_fail_at_their_original_bounds_without_progress(self):
+        for owner in self.OWNERS:
+            with self.subTest(owner=owner):
+                self.run_stock_driver(owner=owner, progress=False,
+                                      delayed={"ready": False, "admission": True})
+
+    def test_idle_callers_do_not_hide_rejected_wait_behind_successful_item_state(self):
+        for owner in self.OWNERS:
+            with self.subTest(owner=owner):
+                self.run_stock_driver(owner=owner, rejected=True)
+
+    def test_wait_errors_and_terminal_work_fail_without_retry(self):
+        case = AiInteractionProcesses(
+            "test_authored_hobgoblin_acquires_secondary_bow_and_bounded_reserve")
+        dead = self.player_frame()
+        dead["state"]["observation"]["combat"]["dead"] = True
+        failed = self.player_frame()
+        failed["message"] = {"update": {"body": {
+            "type": "intention", "status": {"phase": "failed"}}}}
+        wire_error = self.player_frame()
+        wire_error["message"] = {"type": "error", "code": "stale_revision"}
+        for returned in ({"error": "StaleRevision"}, dead, failed, wire_error):
+            with self.subTest(returned=returned):
+                case.act = Mock(return_value=returned)
+                case.frame = Mock()
+                with self.assertRaises(AssertionError):
+                    case.completed_idle_wait("player")
+                case.act.assert_called_once_with("player", {"type": "wait"})
+                case.frame.assert_not_called()
+
+    def test_already_completed_waits_keep_the_original_stock_and_reopen_checks(self):
+        self.run_stock_driver()
+
+    def test_admission_before_recovery_does_not_send_the_next_wait(self):
+        self.run_stock_driver(delayed={"ready": False, "admission": True})
+
+    def test_ready_before_admission_does_not_send_the_next_wait(self):
+        self.run_stock_driver(delayed={"ready": True, "admission": False})
 
 
 if __name__ == "__main__":
