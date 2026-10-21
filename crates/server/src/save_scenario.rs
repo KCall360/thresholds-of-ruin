@@ -688,12 +688,27 @@ struct SecretEntrances {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::generation_recipe::HiddenTraps", deny_unknown_fields)]
 struct HiddenTraps {
+    #[serde(deserialize_with = "required_option")]
+    sleep_exposure: Option<String>,
     count: [u32; 2],
     dc: i32,
     rust_slot: String,
     rust_amount: u32,
     sleep_condition: String,
     sleep_duration: u64,
+    #[serde(with = "mapped")]
+    hazards: Option<crate::generation_recipe::HazardTraps>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::generation_recipe::HazardTraps", deny_unknown_fields)]
+struct HazardTraps {
+    avoidance_dc: i32,
+    bear_condition: String,
+    bear_duration: u64,
+    arrow_ammunition: String,
+    attack_bonus: i32,
+    poison_exposure: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1139,6 +1154,8 @@ struct WeaponProfileSpec {
 #[serde(remote = "source::EquipmentSpec", deny_unknown_fields)]
 struct EquipmentSpec {
     #[serde(with = "mapped")]
+    periodic_relocation: Option<source::PeriodicRelocation>,
+    #[serde(with = "mapped")]
     weapon_profile: Option<source::WeaponProfileSpec>,
     slot: String,
     #[serde(with = "mapped")]
@@ -1149,6 +1166,12 @@ struct EquipmentSpec {
     modifiers: Vec<crate::creature_authoring::Modifier>,
     #[serde(with = "mapped")]
     potency_modifiers: Vec<crate::creature_authoring::Modifier>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::PeriodicRelocation", deny_unknown_fields)]
+struct PeriodicRelocation {
+    interval: u64,
+    chance_denominator: u32,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::DiceExpr", deny_unknown_fields)]
@@ -1273,6 +1296,9 @@ enum Effect {
     DrainLatestHitDie,
     RestoreHitDie,
     StepSelfOneCell,
+    TeleportRandom,
+    TeleportToRayOrigin,
+    ArrestDescent,
     PushTargetOneCell {
         #[serde(with = "PushDirection")]
         direction: source::PushDirection,
@@ -1456,6 +1482,7 @@ mod linked_hold_storage_tests {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::ConsumableSpec", deny_unknown_fields)]
 struct ConsumableSpec {
+    descriptors: Vec<String>,
     #[serde(with = "mapped")]
     discovery: source::ItemDiscovery,
     #[serde(with = "mapped")]
@@ -1497,6 +1524,7 @@ enum ItemDiscovery {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::ReadableSpec", deny_unknown_fields)]
 struct ReadableSpec {
+    descriptors: Vec<String>,
     #[serde(with = "mapped")]
     effects: Vec<source::Effect>,
     #[serde(
@@ -1542,6 +1570,7 @@ fn read_saved_identification_classes<'de, D: serde::Deserializer<'de>>(
     deny_unknown_fields
 )]
 enum EquipmentGeneration {
+    Cursed,
     SignedPotency {
         negative: u32,
         positive: u32,
@@ -2019,8 +2048,13 @@ enum Perception {
     ObjectGuise {
         #[serde(with = "mapped")]
         appearance: Option<crate::creature_authoring::GuiseAppearance>,
+        skill: String,
+        edge: i64,
     },
     AmbushFromGuise {
+        enabled: bool,
+    },
+    ReadiedTouchAmbush {
         enabled: bool,
     },
     PeriodicSearch {
@@ -2052,6 +2086,9 @@ enum Locomotion {
         enabled: bool,
     },
     Flying {
+        enabled: bool,
+    },
+    Levitating {
         enabled: bool,
     },
     Erratic {
@@ -2255,6 +2292,8 @@ struct IndexedItem {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::RegionDef", deny_unknown_fields)]
 struct RegionDef {
+    #[serde(deserialize_with = "required_option")]
+    trapdoor_destination: Option<u64>,
     lit: bool,
     #[serde(with = "mapped")]
     lighting: Vec<source::CellLight>,
@@ -2343,12 +2382,47 @@ struct Concealment {
     deny_unknown_fields
 )]
 enum TrapKind {
-    Rust { slot: String, amount: u32 },
-    SleepingGas { condition: String, duration: u64 },
+    Rust {
+        slot: String,
+        amount: u32,
+    },
+    SleepingGas {
+        #[serde(deserialize_with = "required_option")]
+        exposure: Option<String>,
+        condition: String,
+        duration: u64,
+    },
+    TrapDoor {
+        #[serde(with = "mapped")]
+        destination: tor_world::NamedAnchor,
+        open: bool,
+    },
+    Arrow {
+        attack_bonus: i32,
+        ammunition: String,
+    },
+    BearTrap {
+        condition: String,
+        duration: u64,
+    },
+    Teleport {},
+    PoisonDart {
+        attack_bonus: i32,
+        exposure: String,
+    },
+    Mysterious {},
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_world::NamedAnchor", deny_unknown_fields)]
+struct TrapAnchor {
+    region: tor_world::RegionId,
+    name: String,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Trap", deny_unknown_fields)]
 struct Trap {
+    #[serde(deserialize_with = "required_option")]
+    avoidance_dc: Option<i32>,
     id: u64,
     at: [i32; 3],
     dc: i32,
@@ -2426,6 +2500,8 @@ struct ItemPool {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::procedural_world::WorldFamily", deny_unknown_fields)]
 struct WorldFamily {
+    #[serde(deserialize_with = "required_option")]
+    gravity: Option<[i32; 3]>,
     #[serde(with = "mapped")]
     kind: crate::procedural_world::FamilyKind,
     version: u32,
@@ -2819,6 +2895,23 @@ enum ConditionEviction {
 // The macro only connects an explicit schema to its runtime type. All fields,
 // tags and nested mappings remain visible in the declarations above.
 #[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_simulation::rules::NamedDescriptor", deny_unknown_fields)]
+struct NamedDescriptor {
+    id: tor_simulation::content_ids::DescriptorId,
+    name: String,
+    #[serde(with = "mapped")]
+    resistance: Option<tor_simulation::rules::DescriptorResistance>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::DescriptorResistance",
+    deny_unknown_fields
+)]
+struct DescriptorResistance {
+    skill: tor_simulation::attributes::Skill,
+    difficulty: i32,
+}
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "tor_simulation::rules::RulesetDocument", deny_unknown_fields)]
 struct RulesDocument {
     id: tor_simulation::content_ids::RulesetId,
@@ -2859,6 +2952,10 @@ struct RulesDocument {
         deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
     )]
     conditions: Vec<tor_simulation::rules::ConditionDef>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
+    )]
     descriptors: Vec<tor_simulation::rules::NamedDescriptor>,
     flags: Vec<tor_simulation::rules::FlagDef>,
     resources: Vec<tor_simulation::rules::ResourceDef>,
@@ -3730,6 +3827,9 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    TrapKind => source::TrapKind,
+    NamedDescriptor => tor_simulation::rules::NamedDescriptor,
+    DescriptorResistance => tor_simulation::rules::DescriptorResistance,
     NaturalDamage => crate::creature_authoring::Damage,
     NaturalComponent => crate::creature_authoring::Component,
     NaturalDamageKey => crate::creature_authoring::DamageKey,
@@ -3749,6 +3849,7 @@ named_remote!(
     DeviceSpec => source::DeviceSpec,
     ChargeRange => source::ChargeRange,
     EquipmentGeneration => source::EquipmentGeneration,
+    PeriodicRelocation => source::PeriodicRelocation,
     Purchase => crate::creature_authoring::Purchase,
     EquipmentSpec => source::EquipmentSpec,
     ArmorSpec => source::ArmorSpec,
@@ -3807,6 +3908,8 @@ named_remote!(
     Concealment => source::Concealment,
     SecretEntrances => crate::generation_recipe::SecretEntrances,
     HiddenTraps => crate::generation_recipe::HiddenTraps,
+    HazardTraps => crate::generation_recipe::HazardTraps,
+    TrapAnchor => tor_world::NamedAnchor,
 );
 
 // String-valued condition enums cannot acquire externally tagged object aliases.
@@ -3855,7 +3958,6 @@ remote!(
     Gravity => source::Gravity,
     NamedPlace => source::NamedPlace,
     Portal => source::Portal,
-    TrapKind => source::TrapKind,
     Item => source::Item,
     Actor => source::Actor,
     Generate => crate::generator::Generate,
@@ -3972,7 +4074,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 22;
+const RULES_INPUT_FORMAT: u32 = 23;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -4036,7 +4138,7 @@ struct RegionInput {
     #[serde(with = "mapped")]
     region: source::RegionDef,
 }
-const REGION_INPUT_FORMAT: u32 = 6;
+const REGION_INPUT_FORMAT: u32 = 7;
 pub(crate) fn encode_region_input(region: &source::RegionDef) -> Result<String, crate::Failure> {
     #[derive(Serialize)]
     struct Input<'a> {
@@ -4072,7 +4174,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 24;
+const CONTENT_PACKAGE_FORMAT: u32 = 25;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4345,15 +4447,15 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (54, 27, "interactions-v49", 22, 6, 24, "tor-arena-run-v5")
+            (55, 28, "interactions-v50", 23, 7, 25, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn discovery_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 57);
-        assert_eq!(super::RULES_INPUT_FORMAT, 22);
-        assert_eq!(super::REGION_INPUT_FORMAT, 6);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 58);
+        assert_eq!(super::RULES_INPUT_FORMAT, 23);
+        assert_eq!(super::REGION_INPUT_FORMAT, 7);
         // Discovery advances the semantic rule, region and package payloads;
         // their independently versioned physical framing remains unchanged.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
@@ -4795,6 +4897,7 @@ mod tests {
             ),
         ] {
             let family = WorldFamily {
+                gravity: None,
                 kind: FamilyKind::GridChain,
                 version: 1,
                 base_region: 100,
@@ -5124,12 +5227,12 @@ mod tests {
             .remove("lighting");
         assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
         assert!(decode_region_input(&input.replacen(
-            "\"format\":6",
-            "\"format\":6,\"format\":6",
+            "\"format\":7",
+            "\"format\":7,\"format\":7",
             1
         ))
         .is_err());
-        assert!(decode_region_input(&input.replacen("\"format\":6", "\"format\":0", 1)).is_err());
+        assert!(decode_region_input(&input.replacen("\"format\":7", "\"format\":0", 1)).is_err());
         assert!(decode_region_input("id = 1").is_err());
     }
 
@@ -5187,6 +5290,7 @@ mod tests {
             (
                 "/region",
                 &[
+                    "trapdoor_destination",
                     "lit",
                     "lighting",
                     "id",
@@ -5213,7 +5317,10 @@ mod tests {
                 &["concealment", "id", "at", "open", "height"][..],
             ),
             ("/region/doors/0/concealment", &["dc"][..]),
-            ("/region/traps/0", &["id", "at", "dc", "kind"][..]),
+            (
+                "/region/traps/0",
+                &["avoidance_dc", "id", "at", "dc", "kind"][..],
+            ),
         ] {
             let mut positional = value.clone();
             let record = positional.pointer_mut(path).unwrap();
@@ -5270,7 +5377,7 @@ mod tests {
         }))
         .unwrap();
         let expected = concat!(
-            "{\"format\":6,\"region\":{\"lit\":true,\"lighting\":[],\"id\":1,",
+            "{\"format\":7,\"region\":{\"trapdoor_destination\":null,\"lit\":true,\"lighting\":[],\"id\":1,",
             "\"name\":\"Supply room\",\"size\":[4,4,1],\"chamber\":false,\"zone\":null,",
             "\"gravity\":null,\"gravity_overrides\":[],\"anchors\":{},\"walls\":[],",
             "\"openings\":[],\"places\":[],\"portals\":[],\"doors\":[],\"traps\":[],\"items\":[{",
@@ -5294,7 +5401,7 @@ mod tests {
         })).unwrap();
         let encoded = encode_region_input(&region).unwrap();
         let value: Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(value["format"], 6);
+        assert_eq!(value["format"], 7);
         assert_eq!(
             value["region"]["actors"][0]["creature"]["future_growth"],
             serde_json::json!({"kind":"selected","source":{"kind":"racial"}})
@@ -6208,6 +6315,9 @@ impl Effect {
             DrainLatestHitDie {},
             RestoreHitDie {},
             StepSelfOneCell {},
+            TeleportRandom {},
+            TeleportToRayOrigin {},
+            ArrestDescent {},
             PushTargetOneCell {
                 #[serde(with = "PushDirection")]
                 direction: source::PushDirection,
@@ -6305,6 +6415,9 @@ impl Effect {
             Fields::DrainLatestHitDie {} => source::Effect::DrainLatestHitDie,
             Fields::RestoreHitDie {} => source::Effect::RestoreHitDie,
             Fields::StepSelfOneCell {} => source::Effect::StepSelfOneCell,
+            Fields::TeleportRandom {} => source::Effect::TeleportRandom,
+            Fields::TeleportToRayOrigin {} => source::Effect::TeleportToRayOrigin,
+            Fields::ArrestDescent {} => source::Effect::ArrestDescent,
             Fields::PushTargetOneCell { direction } => {
                 source::Effect::PushTargetOneCell { direction }
             }
@@ -7902,7 +8015,7 @@ mod armor_record_tests {
     fn stored_armor_has_independent_named_required_current_shapes() {
         let good = json!({"slot":"body_armor", "armor":{
             "physical_reduction":2,"material":"metal","rustproof":false},
-            "attack":null,"modifiers":[],"potency_modifiers":[],"weapon_profile":null});
+            "attack":null,"modifiers":[],"potency_modifiers":[],"periodic_relocation":null,"weapon_profile":null});
         let value: Owned<source::EquipmentSpec> = serde_json::from_value(good.clone()).unwrap();
         assert_eq!(serde_json::to_value(Borrowed(&value.0)).unwrap(), good);
         let mut bad = vec![json!(["body_armor", null, null, []])];
@@ -7912,6 +8025,7 @@ mod armor_record_tests {
             "modifiers",
             "potency_modifiers",
             "weapon_profile",
+            "periodic_relocation",
         ] {
             let mut omitted = good.clone();
             omitted.as_object_mut().unwrap().remove(field);
@@ -8375,7 +8489,7 @@ mod weapon_profile_record_tests {
 
     #[test]
     fn saved_weapon_profiles_are_independent_named_bounded_and_explicitly_nullable() {
-        let good = json!({"slot":"weapon","armor":null,"attack":null,"modifiers":[],"potency_modifiers":[],
+        let good = json!({"slot":"weapon","armor":null,"attack":null,"modifiers":[],"potency_modifiers":[],"periodic_relocation":null,
             "weapon_profile":{"expertise":"fixture.knife","launcher":null,
                 "base_traits":[{"kind":"two_handed"},{"kind":"thrown","range":{"short_feet":20,"long_feet":60}}],
                 "expert_traits":{"add":[{"kind":"quickdraw"},{"kind":"offhand"}],"remove":["two_handed"]}}});
@@ -8888,8 +9002,7 @@ mod worn_equipment_schema_tests {
     }
     #[test]
     fn stored_identification_set_is_explicit_sorted_unique_and_not_a_legacy_scalar() {
-        let good =
-            serde_json::json!({"effects":[],"identify":["ring","wand"],"discovery":"on_use"});
+        let good = serde_json::json!({"descriptors":[],"effects":[],"identify":["ring","wand"],"discovery":"on_use"});
         let decoded =
             strict::<Owned<source::ReadableSpec>>(&serde_json::to_vec(&good).unwrap()).unwrap();
         assert_eq!(
@@ -8907,6 +9020,112 @@ mod worn_equipment_schema_tests {
             bad["identify"] = classes;
             assert!(
                 strict::<Owned<source::ReadableSpec>>(&serde_json::to_vec(&bad).unwrap()).is_err()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod hazards_shape_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn current_hazard_payloads_are_named_required_and_not_discovery_dc_aliases() {
+        for good in [
+            json!({"kind":"trap_door","destination":{"region":2,"name":"landing"},"open":false}),
+            json!({"kind":"arrow","attack_bonus":0,"ammunition":"fixture.arrow"}),
+            json!({"kind":"bear_trap","condition":"fixture.bear","duration":300}),
+            json!({"kind":"teleport"}),
+            json!({"kind":"poison_dart","attack_bonus":0,"exposure":"poison"}),
+            json!({"kind":"mysterious"}),
+            json!({"kind":"sleeping_gas","condition":"fixture.sleep","duration":200,"exposure":null}),
+            json!({"kind":"sleeping_gas","condition":"fixture.sleep","duration":200,"exposure":"poison"}),
+        ] {
+            let restored: Owned<source::TrapKind> = serde_json::from_value(good.clone()).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+            for field in good.as_object().unwrap().keys() {
+                let mut bad = good.clone();
+                bad.as_object_mut().unwrap().remove(field);
+                assert!(serde_json::from_value::<Owned<source::TrapKind>>(bad).is_err());
+            }
+            let mut extra = good.clone();
+            extra["dc"] = json!(12);
+            assert!(serde_json::from_value::<Owned<source::TrapKind>>(extra).is_err());
+            let positional =
+                serde_json::Value::Array(good.as_object().unwrap().values().cloned().collect());
+            assert!(serde_json::from_value::<Owned<source::TrapKind>>(positional).is_err());
+        }
+    }
+
+    #[test]
+    fn current_resistance_policy_is_required_nullable_and_named() {
+        for resistance in [json!(null), json!({"skill":"athletics","difficulty":12})] {
+            let good = json!({"id":"poison","name":"Poison","resistance":resistance});
+            let restored: Owned<tor_simulation::rules::NamedDescriptor> =
+                serde_json::from_value(good.clone()).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+            for field in ["id", "name", "resistance"] {
+                let mut bad = good.clone();
+                bad.as_object_mut().unwrap().remove(field);
+                assert!(
+                    serde_json::from_value::<Owned<tor_simulation::rules::NamedDescriptor>>(bad)
+                        .is_err()
+                );
+            }
+        }
+        for bad in [
+            json!({"skill":"athletics"}),
+            json!({"difficulty":12}),
+            json!({"skill":"athletics","difficulty":12,"defense":"physical"}),
+            json!(["athletics", 12]),
+        ] {
+            assert!(
+                serde_json::from_value::<Owned<tor_simulation::rules::NamedDescriptor>>(
+                    json!({"id":"poison","name":"Poison","resistance":bad})
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn current_consumable_descriptors_are_explicit_even_when_empty() {
+        for descriptors in [json!([]), json!(["poison"])] {
+            let good = json!({"descriptors":descriptors,"effects":[],"discovery":"self_effect"});
+            let restored: Owned<source::ConsumableSpec> =
+                serde_json::from_value(good.clone()).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+            for field in ["descriptors", "effects", "discovery"] {
+                let mut bad = good.clone();
+                bad.as_object_mut().unwrap().remove(field);
+                assert!(serde_json::from_value::<Owned<source::ConsumableSpec>>(bad).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn current_guise_check_and_readied_policy_have_no_legacy_fixed_dc() {
+        for good in [
+            json!({"kind":"object_guise","appearance":null,"skill":"stealth","edge":0}),
+            json!({"kind":"readied_touch_ambush","enabled":true}),
+        ] {
+            let restored: Owned<crate::creature_authoring::Perception> =
+                serde_json::from_value(good.clone()).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+            for field in good.as_object().unwrap().keys() {
+                let mut bad = good.clone();
+                bad.as_object_mut().unwrap().remove(field);
+                assert!(
+                    serde_json::from_value::<Owned<crate::creature_authoring::Perception>>(bad)
+                        .is_err()
+                );
+            }
+            let mut extra = good.clone();
+            extra["dc"] = json!(15);
+            assert!(
+                serde_json::from_value::<Owned<crate::creature_authoring::Perception>>(extra)
+                    .is_err()
             );
         }
     }

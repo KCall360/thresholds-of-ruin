@@ -34,6 +34,22 @@ impl Ruleset {
         interaction: Interaction,
         strikes: &[StrikeDef],
     ) -> Result<(), RulesetError> {
+        for strike in strikes {
+            self.validate_payload_recipients(
+                &strike.descriptors,
+                strike
+                    .on_success
+                    .iter()
+                    .chain(&strike.on_failure)
+                    .map(Effect::recipient),
+            )?;
+            for rider in &strike.riders {
+                self.validate_payload_recipients(
+                    &rider.descriptors,
+                    rider.effects.iter().map(Effect::recipient),
+                )?;
+            }
+        }
         self.validate_interaction_effects(
             interaction,
             strikes.iter().flat_map(|strike| {
@@ -136,7 +152,9 @@ impl Ruleset {
                     PlannedEffect::CorrodeArmor { .. }
                     | PlannedEffect::Theft { .. }
                     | PlannedEffect::ApplyLinkedHold { .. }
-                    | PlannedEffect::HoldDamage { .. } => true,
+                    | PlannedEffect::HoldDamage { .. }
+                    | PlannedEffect::TeleportRandom
+                    | PlannedEffect::TeleportToRayOrigin => true,
                     PlannedEffect::Damage { damage } => damage.can_harm(),
                     PlannedEffect::PushTargetOneCell { .. } | PlannedEffect::DrainLatestHitDie => {
                         true
@@ -150,6 +168,7 @@ impl Ruleset {
                     }
                     PlannedEffect::AlterEquipment { .. }
                     | PlannedEffect::StepSelfOneCell
+                    | PlannedEffect::ArrestDescent
                     | PlannedEffect::RestoreHitDie
                     | PlannedEffect::Heal { .. }
                     | PlannedEffect::HealPerHitDie { .. }
@@ -170,6 +189,12 @@ impl Ruleset {
         interaction: Interaction,
         riders: &[RiderDef],
     ) -> Result<(), RulesetError> {
+        for rider in riders {
+            self.validate_payload_recipients(
+                &rider.descriptors,
+                rider.effects.iter().map(Effect::recipient),
+            )?;
+        }
         self.validate_interaction_effects(
             interaction,
             riders.iter().flat_map(|rider| &rider.effects),
@@ -191,7 +216,9 @@ impl Ruleset {
             Effect::CorrodeArmor { .. }
             | Effect::Theft { .. }
             | Effect::ApplyLinkedHold { .. }
-            | Effect::HoldDamage { .. } => true,
+            | Effect::HoldDamage { .. }
+            | Effect::TeleportRandom
+            | Effect::TeleportToRayOrigin => true,
             Effect::Damage {
                 damage: DamageExpr::SelectedWeapon { .. },
             }
@@ -213,6 +240,7 @@ impl Ruleset {
             // Future consequences and source-only benefits do not imply intent.
             Effect::AlterEquipment { .. }
             | Effect::StepSelfOneCell
+            | Effect::ArrestDescent
             | Effect::RestoreHitDie
             | Effect::Heal { .. }
             | Effect::HealPerHitDie { .. }

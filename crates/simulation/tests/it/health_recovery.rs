@@ -98,6 +98,7 @@ fn round_trip(game: &Game) -> Game {
 }
 fn damage(game: &mut Game, source: ActorId, target: ActorId, amounts: &[u32]) {
     game.apply(Outcome {
+        resistance: None,
         actor: source,
         target,
         ability: None,
@@ -714,6 +715,7 @@ fn damage_resets_quiet_before_later_effects_can_change_its_policy() {
                 vec![boost, damage]
             };
             game.apply(Outcome {
+                resistance: None,
                 actor: ActorId(1),
                 target,
                 ability: None,
@@ -750,6 +752,7 @@ fn publication_events_record_actual_damage_and_healing_without_overkill() {
     let target = ActorId(2);
     damage(&mut game, source, target, &[3]);
     game.apply(Outcome {
+        resistance: None,
         actor: source,
         target,
         ability: None,
@@ -808,6 +811,7 @@ fn publication_does_not_report_applied_when_all_effects_are_unchanged() {
         (OutcomeStatus::Miss, vec![], OutcomeStatus::Miss),
     ] {
         game.apply(Outcome {
+            resistance: None,
             actor: ActorId(1),
             target: ActorId(2),
             ability: None,

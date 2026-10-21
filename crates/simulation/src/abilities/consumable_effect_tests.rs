@@ -21,6 +21,226 @@ fn creature() -> crate::creatures::CreatureState {
 }
 
 #[test]
+fn environmental_checks_spend_only_available_incoming_tokens_after_an_actual_check() {
+    let token = ConditionId::new("ray_incoming_token").unwrap();
+    let descriptor = crate::content_ids::DescriptorId::new("fire").unwrap();
+    for reserved in [false, true] {
+        for immune in [false, true] {
+            for hit in [false, true] {
+                let mut game = super::ray_tests::fixture_with(|_, _, species| {
+                    if immune {
+                        species.modifiers.push(crate::rules::Modifier {
+                            scope: crate::rules::Scope::Always,
+                            op: crate::rules::ModifierOp::Immunity {
+                                selector: crate::rules::Selector::Descriptor {
+                                    descriptor: descriptor.clone(),
+                                },
+                            },
+                        });
+                    }
+                });
+                game.apply_condition(ActorId(1), &token, ActorId(2), 100)
+                    .unwrap();
+                if reserved {
+                    // An actual prepared ray owns this incoming token. A trap
+                    // cannot borrow its captured modifier or consume its claim.
+                    let plan = game
+                        .plan_work(
+                            ActorId(1),
+                            crate::Work::UseAbility {
+                                id: crate::content_ids::AbilityId::new("fixture_ray").unwrap(),
+                                invocation: super::AbilityInvocation::directional_ray(
+                                    super::StepDirection::East,
+                                ),
+                                supplies: Default::default(),
+                            },
+                        )
+                        .unwrap();
+                    game.start_work(plan, None).unwrap();
+                    assert!(game
+                        .creature(ActorId(1))
+                        .unwrap()
+                        .conditions()
+                        .qualifying_tokens(game.content.rules(), ActorId(1), true)
+                        .is_empty());
+                }
+                let mut expected_rng = game.rules_rng;
+                if !immune {
+                    crate::dice::roll_check(
+                        &mut expected_rng,
+                        Edge::from_counts(0, u32::from(!reserved)),
+                    );
+                }
+                let applied = game
+                    .with_recovery_transition(true, |candidate| {
+                        candidate.resolve_environmental_attack_in_transaction(
+                            ActorId(1),
+                            if hit { 100 } else { -100 },
+                            &[Effect::Heal {
+                                amount: AmountExpr::Fixed { amount: 1 },
+                            }],
+                            std::slice::from_ref(&descriptor),
+                        )
+                    })
+                    .unwrap();
+                assert_eq!(applied, hit && !immune);
+                assert_eq!(
+                    game.rules_rng, expected_rng,
+                    "Only the selected incoming token contributes to an actual check"
+                );
+                assert_eq!(
+                    game.creature(ActorId(1))
+                        .unwrap()
+                        .conditions()
+                        .has_active(&token),
+                    immune || reserved,
+                    "Misses spend; immunity and another paid owner do not"
+                );
+                if reserved {
+                    assert!(game.preparation(ActorId(1)).is_some());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn relocation_selects_one_live_candidate_and_empty_destination_is_not_a_success() {
+    let from = super::Placement {
+        location: tor_world::Location {
+            region: tor_world::RegionId(1),
+            position: tor_world::Position { x: 0, y: 0, z: 0 },
+        },
+        orientation: 0,
+    };
+    let destinations: Vec<_> = (1..=3)
+        .map(|x| super::Placement {
+            location: tor_world::Location {
+                position: tor_world::Position { x, y: 0, z: 0 },
+                ..from.location
+            },
+            ..from
+        })
+        .collect();
+    let effects = [PlannedEffect::TeleportRandom];
+    let mut expected_rng = 42;
+    let index = (crate::dice::random_word(&mut expected_rng) % destinations.len() as u64) as usize;
+    let context = super::ResolutionContext {
+        relocation: Some(super::resolve::RelocationInput {
+            from,
+            destinations: destinations.clone(),
+            mode: super::MovementMode::Voluntary,
+        }),
+        ..Default::default()
+    };
+    let mut rng = 42;
+    let result = super::resolve(
+        input(&effects),
+        &Snapshot::capture(&creature()).with_context(context),
+        &mut rng,
+        &mut (),
+    )
+    .unwrap();
+    assert_eq!(
+        rng, expected_rng,
+        "Only one destination draw belongs to an applied random effect"
+    );
+    assert_eq!(
+        result.effects,
+        [ResolvedEffect::Relocate {
+            mode: super::MovementMode::Voluntary,
+            result: super::MovementResult::Moved {
+                from,
+                to: destinations[index]
+            },
+        }]
+    );
+    let context = super::ResolutionContext {
+        relocation: Some(super::resolve::RelocationInput {
+            from,
+            destinations: vec![],
+            mode: super::MovementMode::Voluntary,
+        }),
+        ..Default::default()
+    };
+    let mut rng = 42;
+    let result = super::resolve(
+        input(&effects),
+        &Snapshot::capture(&creature()).with_context(context),
+        &mut rng,
+        &mut (),
+    )
+    .unwrap();
+    assert_eq!(rng, 42);
+    assert_eq!(result.result, super::OutcomeStatus::Unaffected);
+    assert_eq!(
+        result.effects,
+        [ResolvedEffect::Relocate {
+            mode: super::MovementMode::Voluntary,
+            result: super::MovementResult::Blocked
+        }]
+    );
+}
+
+#[test]
+fn exact_relocation_never_draws_or_substitutes_a_nearby_destination() {
+    let from = super::Placement {
+        location: tor_world::Location {
+            region: tor_world::RegionId(1),
+            position: tor_world::Position { x: 3, y: 0, z: 0 },
+        },
+        orientation: 5,
+    };
+    let to = super::Placement {
+        location: tor_world::Location {
+            position: tor_world::Position { x: 1, y: 0, z: 0 },
+            ..from.location
+        },
+        orientation: 7,
+    };
+    let effects = [PlannedEffect::TeleportToRayOrigin];
+    let context = super::ResolutionContext {
+        relocation: Some(super::resolve::RelocationInput {
+            from,
+            destinations: vec![to],
+            mode: super::MovementMode::Forced,
+        }),
+        ..Default::default()
+    };
+    let mut rng = 42;
+    let result = super::resolve(
+        input(&effects),
+        &Snapshot::capture(&creature()).with_context(context),
+        &mut rng,
+        &mut (),
+    )
+    .unwrap();
+    assert_eq!(rng, 42);
+    assert_eq!(
+        result.effects,
+        [ResolvedEffect::Relocate {
+            mode: super::MovementMode::Forced,
+            result: super::MovementResult::Moved { from, to }
+        }]
+    );
+    for kind in [
+        "teleport_random",
+        "teleport_to_ray_origin",
+        "arrest_descent",
+    ] {
+        let positive = json!({"kind": kind});
+        let source: Effect = serde_json::from_value(positive.clone()).unwrap();
+        assert!(source.valid_shape());
+        let planned: PlannedEffect = serde_json::from_value(positive.clone()).unwrap();
+        assert!(super::plan::effects_match_definition(&[source], &[planned]));
+        let mut malformed = positive;
+        malformed["target"] = json!("hidden-target");
+        assert!(serde_json::from_value::<Effect>(malformed.clone()).is_err());
+        assert!(serde_json::from_value::<PlannedEffect>(malformed).is_err());
+    }
+}
+
+#[test]
 fn turn_duration_rolls_once_and_frozen_ticks_survive_effect_roundtrip() {
     let dice = DicePool::new(1, 85, 807).unwrap();
     let effects = [PlannedEffect::ApplyConditionForTurns {

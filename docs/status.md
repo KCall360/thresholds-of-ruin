@@ -6,13 +6,13 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **57**, save format **54**, scenario format **27**, ruleset
-**`interactions-v49`**, scenario validator **`tor-scenario-39`**. Unsupported
+**Current formats:** protocol **58**, save format **55**, scenario format **28**, ruleset
+**`interactions-v50`**, scenario validator **`tor-scenario-40`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **22**, ContentPackage **24** and
-RegionInput **6**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
+The independent compiled inputs use RulesInput **23**, ContentPackage **25** and
+RegionInput **7**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
 formats remain unchanged. Current payloads require explicit nullable rider
@@ -117,7 +117,7 @@ their success and no-op outcomes do not automatically identify the scroll type.
 Generic stack transfers require matching exact per-unit condition and charge
 state; equipment and devices remain nonstackable.
 
-The eleven-ring catalog adds shared signed potency, all-category damage reduction,
+The twelve-ring catalog adds shared signed potency, all-category damage reduction,
 attack-roll bonuses, source-aware Strength/Speed defense exclusion, sustained attributes,
 worn corrosion protection, nonstacking Health recovery acceleration and exact
 fractional digestion, plus periodic active searching. Rings remain concealed until identified; a paid choice can
@@ -127,7 +127,9 @@ Physical discovery uses shared Perception: persistent first-observation passive
 attempts, repeatable paid Search and periodic searching-ring scans. Concealed
 entrances are real opaque closures; discovery is observer-specific and opening
 changes the shared world. Independently seeded generation adds those entrances
-and hidden rust/sleeping-gas traps. Genuine ground contact triggers traps without
+and hidden rust, sleeping-gas, arrow, bear, teleport, poison-dart, mysterious and
+physical trapdoor hazards. Levitation adds horizontal hover and completion-time
+fall arrest; teleport scrolls, rings and utility wands share ordinary relocation. Genuine ground contact triggers traps without
 disarming them; discovery reveals presence and adjacent examination or perceived
 activation reveals family. Placement, DCs and durations remain provisional
 balance, not calibrated Rogue parity.
@@ -192,8 +194,9 @@ Centaur is eligible at depths 7–16, Yeti at 11–20; they keep four actual War
 passive provocation and three/two purchased natural strikes. Their 15%/30%
 birth chances share V's provisional equal ration/bandage pool; Y retains cold immunity.
 Rattlesnake is eligible at depths 3–12 with two actual racial HD, owned VN1 on
-HD 1 and one unspent point. Its 1d6 natural bite adds a separately Physical-checked
-poison Strength−1 rider. Ordinary concealed restore-strength potions remove only
+HD 1 and one unspent point. Its 1d6 Physical-checked natural bite delivers a
+separate poison exposure resisted with Athletics against authored DC 12; failed
+resistance records Strength−1. Ordinary concealed restore-strength potions remove only
 recorded Strength loss; one finite placement attempt per floor is provisional.
 Wraith is eligible at depths 14–23 with five actual undead racial rows and zero
 carry chance. Parentless DR2 is paid at HD1; four points remain unspent. Its

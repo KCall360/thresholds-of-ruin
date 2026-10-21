@@ -290,6 +290,9 @@ impl Game {
         let clock = self.actor_clock(id);
         let elapsed = clock.saturating_sub(state.active_since);
         if elapsed > 0 {
+            if state.alive() {
+                state.periodic_relocations.advance(elapsed)?;
+            }
             if state.search_clock.next_in(state).is_some() {
                 let creature = state
                     .combat
@@ -397,6 +400,7 @@ impl Game {
         self.reconcile_recovery_contexts()?;
         self.reconcile_passive_discovery()?;
         self.settle_periodic_searches()?;
+        self.settle_periodic_relocations()?;
         self.seal_participant_events()
     }
 
@@ -410,6 +414,7 @@ impl Game {
     ) -> Result<(), GameError> {
         let requires_candidate = requires_candidate
             || prepared.outcome.state.search_clock.pending()
+            || prepared.outcome.state.periodic_relocations.pending()
             || prepared.emits_events()
             || prepared
                 .creature()
@@ -607,18 +612,31 @@ impl Game {
             orientation: transition.state.orientation,
         };
         let original_placement = placement;
+        // Relocation witnesses are live execution facts, not preparation-time
+        // destinations. Recheck immediately before publication; a blocked exact
+        // endpoint remains a paid failed effect and cannot fall back elsewhere.
+        for effect in &mut outcome.effects {
+            if let ResolvedEffect::Relocate { result, .. } = effect {
+                if let crate::abilities::MovementResult::Moved { from, to } = *result {
+                    if from != placement {
+                        *result = crate::abilities::MovementResult::Stale;
+                    } else if !self.relocation_destination_valid(recipient_id, to) {
+                        *result = crate::abilities::MovementResult::Blocked;
+                    }
+                }
+            }
+        }
         let mut forced = false;
         let mut damaged = false;
         let mut applied_count = 0;
         let mut created_hold = None;
         for index in 0..outcome.effects.len() {
             let effect = &outcome.effects[index];
-            if let ResolvedEffect::SearchAdjacentGuises { total } = effect {
+            if let ResolvedEffect::SearchAdjacentGuises { roll } = effect {
                 if recipient_id != outcome.actor || outcome.actor != outcome.target {
                     return Err(GameError::Rule(RuleError::InvalidPlan));
                 }
-                self.reveal_adjacent_guises(outcome.actor)?;
-                self.apply_discovery_total(outcome.actor, *total)?;
+                self.apply_discovery_roll(outcome.actor, *roll)?;
                 transition.state.discovery = self.actors[&outcome.actor].discovery.clone();
                 outcome.effects[applied_count] = effect.clone();
                 applied_count += 1;
@@ -734,6 +752,19 @@ impl Game {
             if self.survival_diagnostics.is_some() {
                 transition.survival.effect(&applied, nutrition_before);
             }
+            if matches!(applied, ResolvedEffect::ArrestDescent) {
+                self.arrest_descent_in_outcome(&mut transition)?;
+            }
+            if let ResolvedEffect::Relocate { mode, result } = &applied {
+                if result.changed() {
+                    transition.entry_cause = crate::floor_activation::EntryCause::Teleport;
+                    transition.state.motion = crate::MotionState::default();
+                    if *mode == crate::abilities::MovementMode::Forced {
+                        transition
+                            .interrupt(Interruption::Discard, self.actor_clock(recipient_id))?;
+                    }
+                }
+            }
             if matches!(applied, ResolvedEffect::Translate { mode: crate::abilities::MovementMode::Forced, result } if result.changed())
             {
                 forced = true;
@@ -785,7 +816,7 @@ impl Game {
                 damaged = true;
                 transition.interrupt(Interruption::Suspend, self.actor_clock(recipient_id))?;
             }
-            if matches!(&applied, ResolvedEffect::Translate { result, .. } if result.changed())
+            if matches!(&applied, ResolvedEffect::Translate { result, .. } | ResolvedEffect::Relocate { result, .. } if result.changed())
                 || self.hold_capability_lost(recipient_id, &transition.state)
             {
                 // The accepted spatial prefix is authoritative before later
@@ -1136,6 +1167,7 @@ impl Game {
             .state
             .search_clock
             .rephase(outcome.state.perception().search_interval);
+        self.reconcile_relocation_sources(&mut outcome)?;
         Ok(PreparedActorOutcome {
             outcome,
             death,
@@ -1156,8 +1188,17 @@ impl Game {
         let to = outcome.state.location;
         let ground_contact_changed = from != to
             || self.actors[&id].orientation != outcome.state.orientation
-            || self.actors[&id].locomotion().flying != outcome.state.locomotion().flying;
+            || self.actors[&id].locomotion().hovers() != outcome.state.locomotion().hovers();
         let entry_cause = outcome.entry_cause;
+        // Capture private prior knowledge before publishing the destination:
+        // discovery caused by this entry cannot retroactively avoid its trap.
+        let avoidable_traps = if entry_cause == crate::floor_activation::EntryCause::Movement
+            && (from != to || self.actors[&id].orientation != outcome.state.orientation)
+        {
+            self.known_traps_at_placement(id, to, outcome.state.orientation)?
+        } else {
+            std::collections::BTreeSet::new()
+        };
         let disclosure_origin = outcome
             .disclosure_origin
             .take()
@@ -1167,10 +1208,30 @@ impl Game {
             .state
             .guise
             .reconcile(&perception, from != to || !outcome.state.alive());
+        if outcome.state.guise.needs_concealment_roll() {
+            let source = perception
+                .object_guise_check
+                .ok_or(GameError::Rule(RuleError::InvalidDefinition))?;
+            let creature = outcome
+                .state
+                .combat
+                .as_ref()
+                .ok_or(GameError::UnknownActor)?
+                .creature();
+            let check = crate::discovery::FrozenDiscoveryCheck::capture_skill_for(
+                &creature,
+                id,
+                source.skill,
+                source.edge,
+            )?;
+            let total = check.roll(&mut self.rules_rng, false);
+            outcome.state.guise.capture_concealment(total);
+        }
         outcome
             .state
             .guise
             .retire_claim(outcome.state.pending.as_ref());
+        self.reconcile_readied_ambush(&mut outcome)?;
         let previous_items = self.actors[&id]
             .pending
             .as_ref()
@@ -1214,14 +1275,16 @@ impl Game {
             outcome.survival.boundary(&self.actors[&id], &outcome.state);
             self.record_survival(id, &outcome.survival);
         }
-        if self.actors[&id].locomotion().flying != outcome.state.locomotion().flying {
+        if self.actors[&id].locomotion().hovers() != outcome.state.locomotion().hovers() {
             outcome.state.motion.acceleration_remainder = [0; 3];
         }
         if outcome.state.motion.active_fall.is_some() && !self.fall_continues(id, &outcome.state) {
             outcome.state.motion.active_fall = None;
         }
+        self.publish_relocation_sources(&outcome)?;
         self.actors.insert(id, outcome.state);
         self.reconcile_holds_for_actor(id)?;
+        self.reconcile_spatial_condition_anchors(id)?;
         self.suspend_condition_denied_continuation(id);
         // Completion, replacement, discard and death all retire the original
         // reservation. Suspended or resumed plans keep it. Tokens are already
@@ -1296,6 +1359,13 @@ impl Game {
                 self.commit_actor_outcome(owner)?;
             }
         }
+        // Publish the entry that actually happened before a destination trap
+        // can relocate the actor again. Nested entries own their own cause and
+        // must not be followed by a stale outer population/retrieval witness.
+        if self.floor_activation.is_some() && from.region != to.region {
+            self.sync_actor_lifecycle(id)?;
+            self.accepted_region_entry(id, from, to, entry_cause)?;
+        }
         if ground_contact_changed {
             if self.actor_frozen(id) {
                 // Trusted relocation can move a frozen actor. Old contact
@@ -1307,11 +1377,7 @@ impl Game {
                     .trap_contacts = tor_world::Shared::new(crate::traps::TrapContacts::default());
                 self.sync_actor_lifecycle(id)?;
             }
-            self.reconcile_trap_contacts(id, None)?;
-        }
-        if self.floor_activation.is_some() && from.region != to.region {
-            self.sync_actor_lifecycle(id)?;
-            self.accepted_region_entry(id, from, to, entry_cause)?;
+            self.reconcile_trap_contacts_after_entry(id, None, avoidable_traps)?;
         }
         Ok(())
     }
@@ -1346,6 +1412,7 @@ impl Game {
         actor.equipment.clear();
         actor.motion.active_fall = None;
         let body = Item {
+            relocation_elapsed: None,
             condition: crate::armor::ItemCondition::default(),
             charges: None,
             corpse: Some(crate::CorpseAppearance {
@@ -1775,6 +1842,7 @@ mod tests {
 
     fn participation_outcome(ability: bool) -> crate::abilities::Outcome {
         crate::abilities::Outcome {
+            resistance: None,
             actor: ActorId(1),
             target: ActorId(2),
             ability: ability.then(|| AbilityId::new("basic_melee").unwrap()),
@@ -1968,6 +2036,7 @@ mod growth_tests {
     }
     fn fatal(owner: ActorId, target: ActorId) -> Outcome {
         Outcome {
+            resistance: None,
             actor: owner,
             target,
             ability: None,
@@ -2188,6 +2257,7 @@ mod growth_tests {
             }
             assert_eq!(game, before);
             game.apply(Outcome {
+                resistance: None,
                 actor: ActorId(1),
                 target: ActorId(1),
                 ability: None,

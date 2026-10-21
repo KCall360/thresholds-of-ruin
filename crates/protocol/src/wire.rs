@@ -5,7 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 57;
+pub const PROTOCOL_VERSION: u32 = 58;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -1137,6 +1137,12 @@ pub struct CellView {
 pub enum TrapFamily {
     Rust,
     SleepingGas,
+    TrapDoor,
+    Arrow,
+    BearTrap,
+    Teleport,
+    PoisonDart,
+    Mysterious,
 }
 
 impl<'de> Deserialize<'de> for TrapFamily {
@@ -1151,7 +1157,25 @@ impl<'de> Deserialize<'de> for TrapFamily {
                 match value {
                     "rust" => Ok(TrapFamily::Rust),
                     "sleeping_gas" => Ok(TrapFamily::SleepingGas),
-                    _ => Err(E::unknown_variant(value, &["rust", "sleeping_gas"])),
+                    "trap_door" => Ok(TrapFamily::TrapDoor),
+                    "arrow" => Ok(TrapFamily::Arrow),
+                    "bear_trap" => Ok(TrapFamily::BearTrap),
+                    "teleport" => Ok(TrapFamily::Teleport),
+                    "poison_dart" => Ok(TrapFamily::PoisonDart),
+                    "mysterious" => Ok(TrapFamily::Mysterious),
+                    _ => Err(E::unknown_variant(
+                        value,
+                        &[
+                            "rust",
+                            "sleeping_gas",
+                            "trap_door",
+                            "arrow",
+                            "bear_trap",
+                            "teleport",
+                            "poison_dart",
+                            "mysterious",
+                        ],
+                    )),
                 }
             }
         }
@@ -1164,6 +1188,12 @@ impl TrapFamily {
         match self {
             Self::Rust => "rust trap",
             Self::SleepingGas => "sleeping gas trap",
+            Self::TrapDoor => "trapdoor",
+            Self::Arrow => "arrow trap",
+            Self::BearTrap => "bear trap",
+            Self::Teleport => "teleport trap",
+            Self::PoisonDart => "poison dart trap",
+            Self::Mysterious => "mysterious trap",
         }
     }
 }

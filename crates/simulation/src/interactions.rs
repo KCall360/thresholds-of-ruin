@@ -79,6 +79,8 @@ impl AnatomySpec {
 pub struct EquipmentSpec {
     pub slot: EquipmentSlot,
     #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub periodic_relocation: Option<crate::PeriodicRelocation>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
     pub armor: Option<crate::ArmorSpec>,
     pub attack: Option<crate::attacks::MeleeAttack>,
     pub weapon_profile: Option<crate::weapon_profiles::WeaponProfileSpec>,
@@ -93,6 +95,8 @@ impl<'de> Deserialize<'de> for EquipmentSpec {
         struct Fields {
             slot: EquipmentSlot,
             #[serde(deserialize_with = "crate::bounded::required_option")]
+            periodic_relocation: Option<crate::PeriodicRelocation>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
             armor: Option<crate::ArmorSpec>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             attack: Option<crate::attacks::MeleeAttack>,
@@ -106,6 +110,7 @@ impl<'de> Deserialize<'de> for EquipmentSpec {
         let fields: Fields = crate::bounded::named_map(d)?;
         let equipment = Self {
             slot: fields.slot,
+            periodic_relocation: fields.periodic_relocation,
             armor: fields.armor,
             attack: fields.attack,
             weapon_profile: fields.weapon_profile,
@@ -129,6 +134,9 @@ impl EquipmentSpec {
             .len()
             .saturating_add(self.modifiers.len())
             <= crate::limits::MODIFIERS_PER_SOURCE
+            && self
+                .periodic_relocation
+                .is_none_or(crate::PeriodicRelocation::valid)
             && self.scaled_potency_modifiers(1).is_some()
             && self.armor.is_none_or(crate::ArmorSpec::valid)
             && (self.weapon_profile.is_none() || self.attack.is_some())
@@ -203,6 +211,7 @@ impl EquipmentSpec {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsumableSpec {
+    pub descriptors: Vec<crate::content_ids::DescriptorId>,
     pub discovery: crate::ItemDiscovery,
     pub effects: Vec<crate::rules::Effect>,
 }
@@ -211,12 +220,15 @@ impl<'de> Deserialize<'de> for ConsumableSpec {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(deserialize_with = "crate::magic_items::read_payload_descriptors")]
+            descriptors: Vec<crate::content_ids::DescriptorId>,
             discovery: crate::ItemDiscovery,
             #[serde(deserialize_with = "crate::magic_items::read_readable_effects")]
             effects: Vec<crate::rules::Effect>,
         }
         let f: Fields = crate::bounded::named_map(d)?;
         let spec = Self {
+            descriptors: f.descriptors,
             discovery: f.discovery,
             effects: f.effects,
         };
@@ -347,7 +359,8 @@ pub struct ItemInteractionView {
 }
 impl ConsumableSpec {
     pub fn valid(&self) -> bool {
-        !self.effects.is_empty()
+        crate::magic_items::valid_payload_descriptor_shape(&self.descriptors)
+            && !self.effects.is_empty()
             && self.effects.len() <= crate::limits::CONSUMABLE_EFFECTS
             && self
                 .effects
@@ -965,6 +978,7 @@ impl Game {
                     actor,
                     item,
                     preparation,
+                    descriptors: readable.descriptors.clone(),
                     effects: self.effect_plan(actor, &readable.effects)?,
                     identify: readable.identify.clone(),
                     discovery: readable.discovery,
@@ -978,6 +992,13 @@ impl Game {
                     .ok_or(GameError::ItemUnavailable)?
                     .effects;
                 crate::abilities::Plan::Drink {
+                    descriptors: self.items[&item]
+                        .spec
+                        .consumable
+                        .as_ref()
+                        .expect("validated consumable")
+                        .descriptors
+                        .clone(),
                     discovery: self.items[&item]
                         .spec
                         .consumable
@@ -1065,6 +1086,30 @@ impl Game {
         plan: crate::abilities::Plan,
         intention: Option<crate::IntentionId>,
     ) -> Result<(), GameError> {
+        self.start_work_with_credit(plan, intention, false)
+    }
+    pub(crate) fn start_readied_work(
+        &mut self,
+        plan: crate::abilities::Plan,
+        intention: crate::IntentionId,
+    ) -> Result<(), GameError> {
+        let actor = self
+            .actors
+            .get(&plan.actor())
+            .ok_or(GameError::UnknownActor)?;
+        if !actor.readied_ambush.valid_for(actor)
+            || !matches!(&actor.readied_ambush, crate::readied_ambush::ReadiedAmbush::Ready {ability, ..} if plan.ability_id() == Some(ability))
+        {
+            return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
+        }
+        self.start_work_with_credit(plan, Some(intention), true)
+    }
+    fn start_work_with_credit(
+        &mut self,
+        plan: crate::abilities::Plan,
+        intention: Option<crate::IntentionId>,
+        readied_credit: bool,
+    ) -> Result<(), GameError> {
         // Owned/frozen operands are admitted against pinned source semantics,
         // never today's equipment. Reject before time, retirement, or payment.
         if !plan.valid(self.content.rules()) || !self.plan_source_valid(&plan) {
@@ -1144,6 +1189,9 @@ impl Game {
         }
         let mut outcome = self.actor_outcome(actor)?;
         let candidate = &mut outcome.state;
+        if readied_credit {
+            candidate.readied_ambush.retire();
+        }
         if candidate
             .pending
             .as_ref()
@@ -1157,7 +1205,11 @@ impl Game {
             .filter(|p| p.plan.work() == plan.work())
             .map_or(
                 (
-                    plan.preparation(),
+                    if readied_credit {
+                        0
+                    } else {
+                        plan.preparation()
+                    },
                     intention,
                     intention,
                     crate::combat::PreparationProgress::new(&plan),
@@ -1283,8 +1335,8 @@ impl Game {
         let mut rng = self.rules_rng;
         let outcome = crate::abilities::resolve(resolution, &snapshot, &mut rng, &mut ())?;
         let observed = outcome.result == crate::abilities::OutcomeStatus::Applied;
-        self.apply_outcome(outcome)?;
         self.rules_rng = rng;
+        self.apply_outcome(outcome)?;
         Ok(observed)
     }
     pub(crate) fn finish_item_work(
@@ -1447,7 +1499,7 @@ impl Game {
                     })
                     && p.plan.actor() == actor
                     && match p.plan.work() {
-                        Work::Read {item}=>self.items.get(&item).and_then(|i|i.spec.readable.as_ref()).is_some_and(|s|matches!(&p.plan,crate::abilities::Plan::Read {effects,identify,discovery,..} if *identify==s.identify&&*discovery==s.discovery&&crate::abilities::item_effects_match_definition(&s.effects,effects))),
+                        Work::Read {item}=>self.items.get(&item).and_then(|i|i.spec.readable.as_ref()).is_some_and(|s|matches!(&p.plan,crate::abilities::Plan::Read {effects,identify,discovery,descriptors,..} if *descriptors==s.descriptors&&*identify==s.identify&&*discovery==s.discovery&&crate::abilities::item_effects_match_definition(&s.effects,effects))),
                         Work::Zap {item,..}=>self.items.get(&item).is_some_and(|i|matches!(&p.plan,crate::abilities::Plan::Zap {charges,ray,discovery,..} if i.charges==Some(*charges)&&i.spec.device.as_ref().is_some_and(|d|d.ability==ray.ability && d.discovery == *discovery))),
                         Work::Eat { item } => self
                             .items
@@ -1467,7 +1519,7 @@ impl Game {
                                 crate::abilities::item_effects_match_definition(
                                     &consumable.effects,
                                     p.plan.on_success(),
-                                ) && matches!(&p.plan,crate::abilities::Plan::Drink{discovery,..} if *discovery==consumable.discovery)
+                                ) && matches!(&p.plan,crate::abilities::Plan::Drink{discovery,descriptors,..} if *discovery==consumable.discovery && *descriptors==consumable.descriptors)
                             }),
                         _ => true,
                     }
@@ -1492,7 +1544,8 @@ mod equipment_collection_format_tests {
     fn equipment_modifier_vectors_stop_before_decoding_excess_entry() {
         let modifier = json!({"scope":"always", "op":{"kind":"add", "stat":{"kind":"attack_damage_roll_bonus"}, "value":1}});
         for field in ["modifiers", "potency_modifiers"] {
-            let mut equipment = json!({"slot":"ring", "armor":null, "attack":null, "weapon_profile":null, "modifiers":[], "potency_modifiers":[]});
+            let mut equipment = json!({"slot":"ring", "periodic_relocation":null, "armor":null, "attack":null, "weapon_profile":null, "modifiers":[], "potency_modifiers":[]});
+            serde_json::from_value::<EquipmentSpec>(equipment.clone()).unwrap();
             let mut entries = vec![modifier.clone(); crate::limits::MODIFIERS_PER_SOURCE];
             entries.push(json!({"invalid_excess_entry":true}));
             equipment[field] = json!(entries);

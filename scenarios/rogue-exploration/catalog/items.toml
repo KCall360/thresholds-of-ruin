@@ -59,7 +59,7 @@ consumable = { discovery = "self_effect", effects = [{ kind = "restore_attribute
 
 [appearance_pools."rogue.potions"]
 asset = "item.potion"
-appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion"]
+appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion"]
 
 # Ordinary recoverable stacks; neither a purse abstraction nor a supply item.
 [items."rogue.gold"]
@@ -119,8 +119,8 @@ stackable = true
 appearance_pool = "rogue.potions"
 consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.blindness", duration = { kind = "rolled", dice = { count = 1, sides = 85, bonus = 807 } } }] }
 
-# Source poison loses 1-3 Strength and identifies on use. Sustain-strength and
-# hallucination are unsupported; this ordinary loss adds no invented immunity.
+# Delivered poison uses the shared Athletics resistance. Failure loses 1-3
+# Strength; the exact consumed unit identifies on use even when resisted.
 [items."rogue.poison"]
 asset = "item.potion"
 name = "potion of poison"
@@ -129,7 +129,7 @@ magical = true
 class = "potion"
 stackable = true
 appearance_pool = "rogue.potions"
-consumable = { discovery = "on_use", effects = [{ kind = "lose_attribute", attribute = "strength", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 0 } } }] }
+consumable = { discovery = "on_use", descriptors = ["poison"], effects = [{ kind = "lose_attribute", attribute = "strength", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 0 } } }] }
 
 # spread(850) is 808-892 source-base turns. Repeat extends the actor-active
 # condition; curing blindness or revealing an invisible actor does not identify.
@@ -167,7 +167,7 @@ readable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turn
 
 [appearance_pools."rogue.scrolls"]
 asset = "item.scroll"
-appearances = ["scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA", "scroll titled TAL ION", "scroll titled UR SEK", "scroll titled KEL RAN", "scroll titled AN DOR", "scroll titled IV MEM", "scroll titled OS THAL"]
+appearances = ["scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA", "scroll titled TAL ION", "scroll titled UR SEK", "scroll titled KEL RAN", "scroll titled AN DOR", "scroll titled IV MEM", "scroll titled OS THAL", "scroll titled VEL TOR"]
 
 [items."rogue.identify_scroll"]
 asset = "item.scroll"
@@ -253,7 +253,7 @@ device = { ability = "rogue.wand_slow", initial_charges = { minimum = 3, maximum
 
 [appearance_pools."rogue.wands"]
 asset = "item.wand"
-appearances = ["ash wand", "copper wand", "ivory wand", "obsidian wand", "oak wand", "glass wand"]
+appearances = ["ash wand", "copper wand", "ivory wand", "obsidian wand", "oak wand", "glass wand", "willow wand", "iron wand"]
 
 # Finite gear. Rogue source weapon dice and existing birth distributions are
 # preserved; skill/category, uniform 60/40 timing and armor physical DR are
@@ -567,4 +567,59 @@ equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add
 
 [appearance_pools."rogue.rings"]
 asset = "item.ring"
-appearances = ["agate ring", "bronze ring", "coral ring", "diamond ring", "emerald ring", "ivory ring", "jade ring", "opal ring", "ruby ring", "sapphire ring", "topaz ring"]
+appearances = ["agate ring", "bronze ring", "coral ring", "diamond ring", "emerald ring", "ivory ring", "jade ring", "opal ring", "ruby ring", "sapphire ring", "topaz ring", "amethyst ring"]
+
+# Paid completion applies 29-31 base turns once, then arrests gravity-directed
+# descent without granting voluntary vertical flight or touching loose items.
+[items."rogue.levitation"]
+asset = "item.potion"
+name = "potion of levitation"
+identity = "rogue.levitation"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.levitation", duration = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 28 } } }, { kind = "arrest_descent" }] }
+
+[items."rogue.teleportation"]
+asset = "item.scroll"
+name = "scroll of teleportation"
+identity = "rogue.teleportation"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { effects = [{ kind = "teleport_random" }], discovery = "self_effect" }
+
+# Pinned Rogue births this ring cursed. Each exact source earns an independent
+# trial after 100 actor-active ticks; this capability is not a modifier fold.
+[items."rogue.ring_teleportation"]
+asset = "item.ring"
+name = "ring of teleportation"
+identity = "rogue.ring_teleportation"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "cursed" }
+equipment = { slot = "ring", modifiers = [], potency_modifiers = [], periodic_relocation = { interval = 100, chance_denominator = 50 } }
+
+[items."rogue.wand_teleport_away"]
+asset = "item.wand"
+name = "wand of teleport away"
+identity = "rogue.wand_teleport_away"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_teleport_away", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[items."rogue.wand_teleport_to"]
+asset = "item.wand"
+name = "wand of teleport to"
+identity = "rogue.wand_teleport_to"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_teleport_to", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }

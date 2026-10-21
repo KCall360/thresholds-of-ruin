@@ -508,6 +508,10 @@ impl Game {
             self.learn_identity(id, identity)
                 .map_err(PreparedSpawnError::Knowledge)?;
         }
+        if let Some(body) = &definition.body {
+            self.set_body_in_transaction(id, body.clone())
+                .map_err(PreparedSpawnError::Body)?;
+        }
         if let Some(build) = build {
             let identity = definition
                 .identity
@@ -521,10 +525,6 @@ impl Game {
         if let Some(ai) = &definition.ai {
             self.configure_ai(id, ai.clone())
                 .map_err(PreparedSpawnError::Ai)?;
-        }
-        if let Some(body) = &definition.body {
-            self.set_body_in_transaction(id, body.clone())
-                .map_err(PreparedSpawnError::Body)?;
         }
         if let Some(velocity) = definition.velocity {
             self.set_actor_velocity(id, velocity)

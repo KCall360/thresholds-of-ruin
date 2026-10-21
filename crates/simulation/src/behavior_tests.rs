@@ -732,6 +732,7 @@ fn carrying_healing_and_loot_does_not_enable_generic_tactics() {
     let mut potion = crate::ItemSpec::ordinary("known healing".into());
     potion.class = crate::ItemClass::Potion;
     potion.consumable = Some(crate::ConsumableSpec {
+        descriptors: vec![],
         discovery: crate::ItemDiscovery::SelfEffect,
         effects: vec![crate::rules::Effect::Heal {
             amount: crate::rules::AmountExpr::Fixed { amount: 10 },

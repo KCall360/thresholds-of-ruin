@@ -61,6 +61,9 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
         s::rules::Effect::SearchAdjacentGuises
         | s::rules::Effect::ObservePublicPlan
         | s::rules::Effect::StepSelfOneCell
+        | s::rules::Effect::TeleportRandom
+        | s::rules::Effect::TeleportToRayOrigin
+        | s::rules::Effect::ArrestDescent
         | s::rules::Effect::DrainLatestHitDie
         | s::rules::Effect::RestoreHitDie => 0,
         s::rules::Effect::PushTargetOneCell { .. } => 1,

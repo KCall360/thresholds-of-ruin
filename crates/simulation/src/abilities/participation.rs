@@ -178,6 +178,12 @@ impl Outcome {
     }
     pub(crate) fn valid(&self) -> bool {
         self.participation.valid(self)
+            && self.resistance.is_none_or(|check| {
+                check.actor == crate::rules::CheckActor::Target
+                    && !check.opposed
+                    && self.participation.payload == PayloadParticipation::Target
+                    && (!check.success || self.effects.is_empty())
+            })
             && self.result == self.canonical_result()
             && (!self.target_rider_participated
                 || (self.ability.is_some()

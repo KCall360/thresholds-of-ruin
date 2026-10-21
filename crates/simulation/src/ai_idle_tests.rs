@@ -27,6 +27,7 @@ fn potion(name: &str, concealed: bool) -> ItemSpec {
     item.concealed = concealed;
     item.stackable = true;
     item.consumable = Some(crate::ConsumableSpec {
+        descriptors: vec![],
         discovery: crate::ItemDiscovery::SelfEffect,
         effects: vec![crate::rules::Effect::Heal {
             amount: crate::rules::AmountExpr::Fixed { amount: 2 },
@@ -89,6 +90,7 @@ fn loot_respects_care_and_equipment_overrides_independently() {
     let mut armor = ItemSpec::ordinary("known armor".into());
     armor.class = crate::ItemClass::Armor;
     armor.equipment = Some(crate::EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: Some(crate::ArmorSpec {
@@ -666,6 +668,7 @@ fn ring_probe(op: crate::rules::ModifierOp, scaled: bool) -> ItemSpec {
         op,
     };
     item.equipment = Some(crate::EquipmentSpec {
+        periodic_relocation: None,
         slot: crate::EquipmentSlot::new("ring").unwrap(),
         armor: None,
         attack: None,

@@ -1,5 +1,5 @@
 # Ordinary authored scenario; validate after every edit.
-format = 27
+format = 28
 id = "place-hints"
 version = "1.0"
 ruleset = "rules.toml"

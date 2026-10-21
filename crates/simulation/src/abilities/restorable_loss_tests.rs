@@ -355,6 +355,7 @@ fn checked_loss_immunity_skips_its_draw_without_suppressing_the_primary() {
         },
         |rules, species| {
             rules.descriptors.push(NamedDescriptor {
+                resistance: None,
                 id: poison.clone(),
                 name: "Poison probe".into(),
             });
@@ -615,6 +616,7 @@ fn item_game_from(creature: CreatureState, effects: Vec<Effect>) -> (crate::Game
     let mut potion = crate::ItemSpec::ordinary("restorable loss probe".into());
     potion.class = crate::ItemClass::Potion;
     potion.consumable = Some(crate::ConsumableSpec {
+        descriptors: vec![],
         discovery: crate::ItemDiscovery::SelfEffect,
         effects,
     });

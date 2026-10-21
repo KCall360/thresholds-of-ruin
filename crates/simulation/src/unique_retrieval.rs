@@ -470,6 +470,13 @@ impl Game {
         actor: ActorId,
         direction: Direction,
     ) -> Result<ItemId, GameError> {
+        if self
+            .actors
+            .get(&actor)
+            .is_some_and(|actor| actor.locomotion().levitating)
+        {
+            return Err(GameError::Blocked);
+        }
         let state = self.unique_retrieval.as_ref().ok_or(GameError::Blocked)?;
         let at = self
             .actors

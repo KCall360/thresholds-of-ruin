@@ -337,6 +337,7 @@ mod tests {
             actor_after: state.clone(),
             target_after: state,
             outcome: crate::abilities::Outcome {
+                resistance: None,
                 actor: crate::ActorId(1),
                 target: crate::ActorId(2),
                 ability: Some(crate::content_ids::AbilityId::new("basic_melee").unwrap()),

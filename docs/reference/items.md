@@ -356,6 +356,7 @@ PCs and NPCs; identified values are private to the entitled actor.
 | Slow digestion | Reduces ordinary positive-reserve digestion | −15 |
 | Maintain armor | Prevents corrosion while worn; does not repair or permanently protect armor | 30 |
 | Searching | One free active Perception Search per 100 eligible actor-active ticks; multiple sources do not add scans | 10 |
+| Teleportation | Each exact worn source independently attempts same-floor relocation with probability 1/50 every 100 actor-active ticks | 0 |
 
 Protection is separate from the five-category magical armor ward. Signed
 reductions compose with ordinary reduction and the strongest applicable talent
@@ -465,7 +466,9 @@ improvement claims also bind the current build epoch, so a later replacement
 that repeats the same source and seed cannot reuse an old claim. The `scenarios/tests/magic-items` package and bounded process
 witness exercise the ordinary drink/read/identify/zap path and source-free reopen.
 
-Rogue poison rolls `1d3` ordinary restorable Strength loss and identifies on use.
+Rogue poison identifies on use. Its descriptor-owned Athletics resistance can
+negate the exposure; only failed resistance rolls `1d3` ordinary restorable
+Strength loss. Poison immunity prevents both resistance and loss rolls.
 The existing deficit bounds still apply; a restore-strength dose removes the loss.
 See-invisible grants the shared perception capability for `1d85 + 807` source-base
 turns (808–892), converted through the prepared actor's turn ticks. It also removes
@@ -510,8 +513,63 @@ the shared perception capability. Existing linked-hold cleanup remains authorita
 the source's incidental grouped-branch Flytrap release is not copied. Personal
 status displays “until removed”, and saved conditions retain that lifetime.
 The unchanged one-unit device stage now chooses equally among the three elemental
-and three utility wands, with six distinct concealed appearances. These weights
+and five utility wands, with eight distinct concealed appearances. These weights
 remain provisional TOR availability.
+
+## Trap avoidance and exposure resistance
+
+Deliberate movement onto a trap already known privately to that actor can make
+one Agility check against its separate authored avoidance DC. Newly discovering
+the plate during entry is too late; forced movement, falling, standing still and
+queries do not grant attempts. Success preserves contact identity without
+triggering the payload, so remaining on the plate does not repeatedly roll.
+An already-open trapdoor is a physical hole, not an avoidable trigger.
+
+Payload descriptors may author one shared skill resistance policy. This belongs
+to the explicitly tagged payload, not a condition name or an individual damage
+component; a poisoned physical attack authors a separate delivered rider. Rogue poison
+uses Athletics against DC 12, including venom riders, poison potions, poison
+darts and explicitly poison-classified sleeping gas. Immunity prevents the
+exposure without a resistance roll. A delivered exposure rolls once, with exact
+available outgoing check-token ownership; a successful resistance cancels only
+that payload. It does not erase the primary bite/dart hit or physical damage.
+A missed delivery does not roll resistance. Magical sleep is not implicitly
+classified as poison. Avoidance, resistance and concealed-feature discovery DCs
+are independent authored values, even where provisional tuning is 12.
+
+## Levitation and relocation
+
+Levitation potions use ordinary paid Drink and exact-unit consumption. At successful
+completion they grant 29–31 base turns (1d3 + 28), measured using the prepared
+actor's base turn ticks rather than haste-scaled action duration. The sampled
+actor-active duration extends on repeat use and pauses in frozen time. Overflow
+rejects the enclosing transaction without partial consumption. The same completion
+arrests descent; an actor must actually finish drinking before impact for rescue.
+See [locomotion](creature-rules.md#locomotion-capabilities).
+
+Teleport scrolls use paid Read. Random relocation enumerates eligible supported
+cells on the current floor and draws once; temporary hover does not admit holes.
+Standalone authored regions have a 65,536-cell candidate budget; larger unsupported
+candidate domains fail cleanly rather than sampling a biased prefix. A blocked or
+empty destination still consumes the completed scroll/charge, but does not
+manufacture a displacement or identify a scroll from one.
+
+Teleport-away and teleport-to wands use the ordinary six-clear-cell first-contact
+utility ray, the shared device timing of 100 preparation ticks with no additional
+recovery, and 3–7 initial charges. Recipient
+Speed + Agility opposes frozen caster Intellect + Lore; ties dodge, and contact
+ends the ray on hit or dodge. Away uses same-floor random relocation. To uses
+exactly the adjacent endpoint from the **frozen launch placement/direction**,
+with live target body/frame and current geometry/occupancy; there is no nearby
+fallback. Forced caster displacement interrupts unfinished launch work.
+
+The teleport ring is generated cursed. Each exact worn item owns its partial
+100-active-tick interval, including sleep but excluding frozen time. Duplicate
+rings have independent 1/50 trials, in stable item order; both can trigger.
+Detached/re-equipped sources retain their fraction. This is not the nonstacking
+regeneration/searching policy. Successful forced relocation releases spatial
+holds and retires unfinished preparation without refunding already-paid costs.
+Destination contact runs once through ordinary trap/lifecycle authority.
 
 ## Quantity expressions
 

@@ -240,6 +240,9 @@ pub(super) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> b
             | Effect::ApplyConditionForTurns { .. }
             | Effect::ApplyPersistentCondition { .. }
             | Effect::RemoveCondition { .. } => delivery == RayDelivery::FirstContact,
+            Effect::TeleportRandom | Effect::TeleportToRayOrigin => {
+                delivery == RayDelivery::FirstContact && strike.on_failure.len() == 1
+            }
             _ => false,
         })
 }

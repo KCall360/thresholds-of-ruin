@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 fn outcome() -> Value {
     json!({"actor":1,"target":2,"ability":null,"intention":null,
-        "result":"unaffected","check":null,"target_rider_participated":false,"effects":[],
+        "result":"unaffected","check":null,"resistance":null,"target_rider_participated":false,"effects":[],
         "participation":{"check":"none","payload":{"kind":"empty"}}})
 }
 fn read(value: &Value) -> Result<Outcome, serde_json::Error> {

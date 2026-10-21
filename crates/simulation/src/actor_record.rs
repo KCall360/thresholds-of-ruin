@@ -14,6 +14,7 @@ use tor_world::{Location, RegionId, Shared};
 #[serde(deny_unknown_fields)]
 pub(crate) struct ActorRecord {
     guise: crate::perception::GuiseState,
+    readied_ambush: crate::readied_ambush::ReadiedRecord,
     holds: crate::linked_hold::HoldBook,
     behavior: crate::behavior::Behavior,
     active_since: u64,
@@ -36,8 +37,10 @@ pub(crate) struct ActorRecord {
     #[serde(deserialize_with = "crate::discovery::read_discovery")]
     discovery: Shared<crate::discovery::DiscoveryKnowledge>,
     search_clock: crate::search_clock::SearchClock,
+    periodic_relocations: crate::periodic_relocation::RelocationBook,
     #[serde(deserialize_with = "crate::traps::read_contacts")]
     trap_contacts: Shared<crate::traps::TrapContacts>,
+    spatial_condition_anchors: crate::traps::SpatialConditionAnchors,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     identification: Option<crate::magic_items::IdentificationChoice>,
     #[serde(deserialize_with = "crate::public_plan::read_recognized_abilities")]
@@ -53,6 +56,7 @@ impl<'de> Deserialize<'de> for ActorRecord {
         #[serde(deny_unknown_fields)]
         struct Fields {
             guise: crate::perception::GuiseState,
+            readied_ambush: crate::readied_ambush::ReadiedRecord,
             holds: crate::linked_hold::HoldBook,
             behavior: crate::behavior::Behavior,
             active_since: u64,
@@ -75,8 +79,10 @@ impl<'de> Deserialize<'de> for ActorRecord {
             #[serde(deserialize_with = "crate::discovery::read_discovery")]
             discovery: Shared<crate::discovery::DiscoveryKnowledge>,
             search_clock: crate::search_clock::SearchClock,
+            periodic_relocations: crate::periodic_relocation::RelocationBook,
             #[serde(deserialize_with = "crate::traps::read_contacts")]
             trap_contacts: Shared<crate::traps::TrapContacts>,
+            spatial_condition_anchors: crate::traps::SpatialConditionAnchors,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             identification: Option<crate::magic_items::IdentificationChoice>,
             #[serde(deserialize_with = "crate::public_plan::read_recognized_abilities")]
@@ -89,6 +95,7 @@ impl<'de> Deserialize<'de> for ActorRecord {
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             guise: fields.guise,
+            readied_ambush: fields.readied_ambush,
             holds: fields.holds,
             behavior: fields.behavior,
             active_since: fields.active_since,
@@ -108,7 +115,9 @@ impl<'de> Deserialize<'de> for ActorRecord {
             known_equipment: fields.known_equipment,
             discovery: fields.discovery,
             search_clock: fields.search_clock,
+            periodic_relocations: fields.periodic_relocations,
             trap_contacts: fields.trap_contacts,
+            spatial_condition_anchors: fields.spatial_condition_anchors,
             identification: fields.identification,
             recognized_abilities: fields.recognized_abilities,
             public_plan: fields.public_plan,
@@ -126,6 +135,7 @@ impl ActorRecord {
     pub(crate) fn capture(actor: &Actor) -> Self {
         Self {
             guise: actor.guise.clone(),
+            readied_ambush: crate::readied_ambush::ReadiedRecord::capture(&actor.readied_ambush),
             holds: actor.holds.clone(),
             behavior: actor.behavior.clone(),
             active_since: actor.active_since,
@@ -148,7 +158,9 @@ impl ActorRecord {
             known_equipment: actor.known_equipment.clone(),
             discovery: actor.discovery.clone(),
             search_clock: actor.search_clock.clone(),
+            periodic_relocations: actor.periodic_relocations.clone(),
             trap_contacts: actor.trap_contacts.clone(),
+            spatial_condition_anchors: actor.spatial_condition_anchors.clone(),
             identification: actor.identification.clone(),
             recognized_abilities: actor.recognized_abilities.clone(),
             public_plan: actor.public_plan.clone(),
@@ -173,6 +185,10 @@ impl ActorRecord {
             .collect::<Result<Vec<_>, crate::checkpoint::PersistError>>()?;
         let state = Actor {
             guise: self.guise.clone(),
+            readied_ambush: self
+                .readied_ambush
+                .restore(content.clone())
+                .map_err(|_| crate::checkpoint::PersistError::ActorState { actor })?,
             holds: self.holds.clone(),
             behavior: self.behavior.clone(),
             active_since: self.active_since,
@@ -200,13 +216,19 @@ impl ActorRecord {
             known_equipment: self.known_equipment.clone(),
             discovery: self.discovery.clone(),
             search_clock: self.search_clock.clone(),
+            periodic_relocations: self.periodic_relocations.clone(),
             trap_contacts: self.trap_contacts.clone(),
+            spatial_condition_anchors: self.spatial_condition_anchors.clone(),
             identification: self.identification.clone(),
             recognized_abilities: self.recognized_abilities.clone(),
             public_plan: self.public_plan.clone(),
             asset: self.asset.clone(),
         };
-        if !state.search_clock.valid_for(&state) {
+        if !state.readied_ambush.valid_for(&state)
+            || !state.search_clock.valid_for(&state)
+            || !state.periodic_relocations.valid_for(&state, items)
+            || !state.spatial_condition_anchors.valid_for(&state)
+        {
             return Err(crate::checkpoint::PersistError::ActorState { actor });
         }
         Ok(state)
@@ -246,6 +268,7 @@ mod public_plan_record_tests {
         );
         let fields = [
             "guise",
+            "readied_ambush",
             "holds",
             "behavior",
             "active_since",
@@ -265,7 +288,9 @@ mod public_plan_record_tests {
             "known_equipment",
             "discovery",
             "search_clock",
+            "periodic_relocations",
             "trap_contacts",
+            "spatial_condition_anchors",
             "identification",
             "recognized_abilities",
             "public_plan",
@@ -297,11 +322,14 @@ mod public_plan_record_tests {
         );
         assert!(serde_json::from_value::<ActorRecord>(positional).is_err());
         for key in [
+            "readied_ambush",
             "known_charges",
             "known_equipment",
             "discovery",
             "search_clock",
+            "periodic_relocations",
             "trap_contacts",
+            "spatial_condition_anchors",
             "identification",
             "recognized_abilities",
             "public_plan",

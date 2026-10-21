@@ -417,6 +417,9 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 Effect::DrainLatestHitDie => s::rules::Effect::DrainLatestHitDie,
                 Effect::RestoreHitDie => s::rules::Effect::RestoreHitDie,
                 Effect::StepSelfOneCell => s::rules::Effect::StepSelfOneCell,
+                Effect::TeleportRandom => s::rules::Effect::TeleportRandom,
+                Effect::TeleportToRayOrigin => s::rules::Effect::TeleportToRayOrigin,
+                Effect::ArrestDescent => s::rules::Effect::ArrestDescent,
                 Effect::PushTargetOneCell { direction } => s::rules::Effect::PushTargetOneCell {
                     direction: match direction {
                         crate::scenario_package::PushDirection::AwayFromSource => {

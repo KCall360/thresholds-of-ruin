@@ -13,6 +13,7 @@ fn family(base_region: u64, domain: Domain) -> WorldFamily {
         grid: [2, 3],
         size: [26, 7, 2],
         recipe: "exploration".into(),
+        gravity: None,
         zone: None,
     }
 }

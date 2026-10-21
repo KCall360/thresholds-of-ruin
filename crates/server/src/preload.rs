@@ -496,6 +496,7 @@ mod tests {
                 grid,
                 size: [26, 7, 2],
                 recipe: "exploration".into(),
+                gravity: None,
                 zone: None,
             },
         );

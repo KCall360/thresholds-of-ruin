@@ -508,6 +508,7 @@ impl Game {
     pub fn checkpoint(&self, shared: &mut SharedState) -> Snapshot {
         assert!(
             !self.region_transition_pending()
+                && self.trap_resolution.is_none()
                 && !self.host_region_continuation
                 && !self.event_observations_open(),
             "a private host candidate must settle and seal events before checkpoint capture"
@@ -718,6 +719,8 @@ impl Game {
                 .transpose()?,
             population_entry_boundary: None,
             preparation_region_boundary: None,
+            trap_region_boundary: None,
+            trap_resolution: None,
             host_region_continuation: false,
             lifecycle: match snapshot.lifecycle {
                 None => Lifecycle::default(),
@@ -829,6 +832,7 @@ impl Game {
     /// attaching a stored region gives its actors the same.
     pub(crate) fn actor_state_valid(&self, id: ActorId, actor: &Actor) -> bool {
         id.0 != 0
+            && actor.periodic_relocations.valid_for(actor, &self.items)
             && actor
                 .guise
                 .valid_for(&actor.perception(), actor.pending.as_ref(), actor.alive())
@@ -928,12 +932,21 @@ impl Game {
                                 || self.detached_actor(entry.source)
                         })
                 })
+            && actor.readied_ambush.toucher().is_none_or(|toucher| {
+                toucher != id
+                    && (self.actors.contains_key(&toucher) || self.detached_actor(toucher))
+            })
             && actor.discovery.valid()
             && actor
                 .discovery
                 .features()
                 .all(|feature| self.knows_concealed_feature(feature))
+            && actor
+                .discovery
+                .guise_subjects()
+                .all(|subject| self.actors.contains_key(&subject) || self.detached_actor(subject))
             && actor.search_clock.valid_for(actor)
+            && self.spatial_condition_anchors_valid(actor)
             && actor
                 .trap_contacts
                 .ids()
@@ -998,6 +1011,7 @@ impl Game {
     /// its items the same.
     pub(crate) fn item_state_valid(&self, id: ItemId, item: &Item) -> bool {
         if !item.condition_valid()
+            || !self.relocation_item_state_valid(id, item)
             || item.charges.is_some() != item.spec.device.is_some()
             || item
                 .spec
@@ -1316,6 +1330,7 @@ mod tests {
         let mut modifier = crate::ItemSpec::ordinary("armor".into());
         modifier.class = crate::ItemClass::Armor;
         modifier.equipment = Some(crate::EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
@@ -1331,6 +1346,7 @@ mod tests {
         let mut effect = crate::ItemSpec::ordinary("potion".into());
         effect.class = crate::ItemClass::Potion;
         effect.consumable = Some(crate::ConsumableSpec {
+            descriptors: vec![],
             discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![Effect::ApplyCondition {
                 condition: ConditionId::new("missing_condition").unwrap(),
@@ -1340,6 +1356,7 @@ mod tests {
         let mut attack = crate::ItemSpec::ordinary("weapon".into());
         attack.class = crate::ItemClass::Weapon;
         attack.equipment = Some(crate::EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
@@ -1361,6 +1378,7 @@ mod tests {
         let mut slot = crate::ItemSpec::ordinary("unknown slot armor".into());
         slot.class = crate::ItemClass::Armor;
         slot.equipment = Some(crate::EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,

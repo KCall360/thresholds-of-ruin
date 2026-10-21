@@ -564,6 +564,8 @@ fn guised_fixture(values: &[LocomotionValue]) -> (crate::Game, crate::ActorId) {
     fixture_with_perception(
         values,
         &[crate::perception::PerceptionValue::ObjectGuise {
+            skill: crate::attributes::Skill::Stealth,
+            edge: 0,
             appearance: Some(crate::perception::GuiseAppearance {
                 name: "chest".into(),
                 description: "A wooden chest.".into(),
@@ -616,7 +618,6 @@ fn confused_vertical_guise_samples_cannot_bypass_cardinal_or_diagonal_flight_gat
                     },
                     LocomotionValue::Flying { enabled: flying },
                 ]);
-                game.rules_rng = seed;
                 game.actors.get_mut(&actor).unwrap().orientation = frame;
                 let from = game.actors[&actor].location;
                 let target = Location {
@@ -628,6 +629,29 @@ fn confused_vertical_guise_samples_cannot_bypass_cardinal_or_diagonal_flight_gat
                     ..from
                 };
                 let subject = spawn_matching_creature(&mut game, actor, target);
+                // Finish concealment formation and genuine initial perception
+                // before selecting the independently fixed confusion sample.
+                let baseline = game.clone();
+                game = (1..10_000)
+                    .find_map(|perception_seed| {
+                        let mut candidate = baseline.clone();
+                        candidate.rules_rng = perception_seed;
+                        candidate.initialize_discovery().unwrap();
+                        (!candidate.guise_known(actor, subject)
+                            && candidate.actors[&actor]
+                                .discovery
+                                .guise_subjects()
+                                .any(|id| id == subject))
+                        .then_some(candidate)
+                    })
+                    .expect("fixture permits failed first-adjacent perception");
+                let settled_rng = game.rules_rng;
+                game.reconcile_passive_discovery_for(actor).unwrap();
+                assert_eq!(
+                    game.rules_rng, settled_rng,
+                    "failed opportunity is persisted"
+                );
+                game.rules_rng = seed;
                 let health = game.health(subject);
                 assert_eq!(
                     game.movement_guise_contacts(actor, selected).is_some(),
@@ -654,7 +678,10 @@ fn confused_vertical_guise_samples_cannot_bypass_cardinal_or_diagonal_flight_gat
                 assert_eq!(game.actors[&actor].ready_at, 100);
                 assert_eq!(game.rules_rng, after);
                 assert_eq!(game.health(subject), health);
-                assert_eq!(game.actors[&subject].guise.appearance().is_none(), flying);
+                assert!(
+                    game.actors[&subject].guise.appearance().is_some(),
+                    "contact without a readied policy does not break guise"
+                );
             }
         }
     }

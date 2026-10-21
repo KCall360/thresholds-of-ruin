@@ -178,12 +178,29 @@ impl<'de> Deserialize<'de> for ActionDuration {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Perception {
-    Invisible { enabled: bool },
-    SeeInvisible { enabled: bool },
-    Sight { enabled: bool },
-    ObjectGuise { appearance: Option<GuiseAppearance> },
-    AmbushFromGuise { enabled: bool },
-    PeriodicSearch { interval: u64 },
+    Invisible {
+        enabled: bool,
+    },
+    SeeInvisible {
+        enabled: bool,
+    },
+    Sight {
+        enabled: bool,
+    },
+    ObjectGuise {
+        appearance: Option<GuiseAppearance>,
+        skill: String,
+        edge: i64,
+    },
+    AmbushFromGuise {
+        enabled: bool,
+    },
+    ReadiedTouchAmbush {
+        enabled: bool,
+    },
+    PeriodicSearch {
+        interval: u64,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -200,6 +217,7 @@ pub struct GuiseAppearance {
 pub enum Locomotion {
     Stationary { enabled: bool },
     Flying { enabled: bool },
+    Levitating { enabled: bool },
     Erratic { chance: Option<MovementChance> },
     Confused { chance: Option<MovementChance> },
 }
@@ -914,6 +932,14 @@ pub struct Recipe {
     nutrition: s::nutrition::NutritionRequirement,
 }
 impl CompiledCatalog {
+    pub(crate) fn with_trap_ammunition(
+        mut self,
+        ammunition: BTreeMap<String, s::ItemSpec>,
+    ) -> Result<Self, Failure> {
+        self.content = s::creatures::Content::with_trap_ammunition(&self.content, ammunition)
+            .map_err(|error| invalid(format!("Invalid trap ammunition catalog: {error:?}")))?;
+        Ok(self)
+    }
     pub fn content(&self) -> &Arc<s::creatures::Content> {
         &self.content
     }

@@ -117,6 +117,7 @@ impl Game {
             resolve::resolve_batch(plan, &snapshot, &mut rng, &mut (), &mut budget)
         }?;
         result.outcome.intention = intention;
+        self.rules_rng = rng;
         if result.outcome.check.is_some() {
             let mut holders: BTreeMap<ActorId, Vec<TokenReservation>> = BTreeMap::new();
             for token in conditional.into_iter().chain(incoming) {
@@ -134,6 +135,7 @@ impl Game {
                 self.apply_outcome(update)?;
             }
         }
+        self.consume_resistance_tokens(&result.resistance_tokens)?;
         let origin = self.capture_event_origin(projectile.actor, target);
         let mut activity = crate::lifecycle::DamageActivityGuard::default();
         let receipt = self.apply_resolved_with_disclosure(
@@ -142,7 +144,6 @@ impl Game {
             &mut activity,
             origin,
         )?;
-        self.rules_rng = rng;
         self.seal_participant_events()?;
         self.provoke_from_strike(&result.outcome, receipt)?;
         Ok(result.outcome)

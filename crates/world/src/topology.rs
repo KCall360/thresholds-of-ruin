@@ -22,12 +22,40 @@ pub struct Location {
     pub position: Position,
 }
 
-/// A logical stair destination whose coordinates are published with its region.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// A named destination whose coordinates are published with its region.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct NamedAnchor {
     pub region: RegionId,
     pub name: String,
+}
+
+impl<'de> serde::Deserialize<'de> for NamedAnchor {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            region: RegionId,
+            name: String,
+        }
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = NamedAnchor;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a named anchor record")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                map: M,
+            ) -> Result<Self::Value, M::Error> {
+                let Fields { region, name } = serde::Deserialize::deserialize(
+                    serde::de::value::MapAccessDeserializer::new(map),
+                )?;
+                Ok(NamedAnchor { region, name })
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
 }
 
 /// Directions in the current region's coordinate system; z increases upward.
@@ -415,7 +443,7 @@ impl World {
                 self.traps.iter().all(|(at, trap)| {
                     self.contains(*at)
                         && !self.is_wall(*at)
-                        && self.trap_supported(*at)
+                        && self.trap_geometry_valid(*at, trap)
                         && trap.valid()
                         && traps.insert(trap.id)
                 })

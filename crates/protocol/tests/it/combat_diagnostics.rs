@@ -512,3 +512,42 @@ fn persistent_condition_diagnostics_use_required_nullable_duration() {
     missing.as_object_mut().unwrap().remove("duration");
     assert!(serde_json::from_value::<DiagnosticEffect>(missing).is_err());
 }
+
+#[test]
+fn relocation_and_arrest_diagnostics_are_closed_target_authority_without_coordinates() {
+    let mut values = vec![serde_json::json!({"type":"arrest_descent","target":"2"})];
+    for mode in ["voluntary", "forced"] {
+        for result in ["moved", "blocked", "ineligible", "stale", "ambiguous"] {
+            values.push(
+                serde_json::json!({"type":"relocate","target":"2","mode":mode,"result":result}),
+            );
+        }
+    }
+    for value in values {
+        let effect: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&effect).unwrap(), value);
+        let mut view = report();
+        view.records[0].outcome.effects = vec![effect];
+        view.validate().unwrap();
+        let mut wrong_target = view.clone();
+        wrong_target.records[0].target = ActorId(3);
+        assert!(wrong_target.validate().is_err());
+        for field in value.as_object().unwrap().keys() {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<DiagnosticEffect>(missing).is_err());
+        }
+        let mut coordinates = value.clone();
+        coordinates["destination"] = serde_json::json!({"region":1,"position":[1,2,3]});
+        assert!(serde_json::from_value::<DiagnosticEffect>(coordinates).is_err());
+        let positional =
+            serde_json::Value::Array(value.as_object().unwrap().values().cloned().collect());
+        assert!(serde_json::from_value::<DiagnosticEffect>(positional).is_err());
+    }
+    for raw in [
+        r#"{"type":"arrest_descent","target":"2","target":"3"}"#,
+        r#"{"type":"relocate","target":"2","mode":"forced","result":"moved","mode":"voluntary"}"#,
+    ] {
+        assert!(serde_json::from_str::<DiagnosticEffect>(raw).is_err());
+    }
+}

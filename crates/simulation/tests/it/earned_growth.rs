@@ -35,6 +35,7 @@ fn fatal_effect_awards_earned_xp_to_its_owner() {
         .unwrap();
     }
     game.apply(tor_simulation::abilities::Outcome {
+        resistance: None,
         actor: ActorId(1),
         target: ActorId(2),
         ability: None,
@@ -87,6 +88,7 @@ fn three_actor_game() -> Game {
 }
 fn damage(game: &mut Game, source: ActorId, target: ActorId, amount: u32) {
     game.apply(tor_simulation::abilities::Outcome {
+        resistance: None,
         actor: source,
         target,
         ability: None,

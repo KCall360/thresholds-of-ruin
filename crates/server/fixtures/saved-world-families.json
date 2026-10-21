@@ -17,7 +17,8 @@
       2
     ],
     "version": 1,
-    "zone": null
+    "zone": null,
+    "gravity": null
   },
   "open": {
     "base_region": 100,
@@ -37,7 +38,8 @@
       2
     ],
     "version": 1,
-    "zone": null
+    "zone": null,
+    "gravity": null
   },
   "seeded_finite": {
     "base_region": 100,
@@ -58,6 +60,7 @@
       2
     ],
     "version": 1,
-    "zone": null
+    "zone": null,
+    "gravity": null
   }
 }

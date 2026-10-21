@@ -29,7 +29,7 @@ class RogueUtilityPotionsContent(unittest.TestCase):
         self.assertEqual(items["rogue.poison"], {
             "asset": "item.potion", "name": "potion of poison", "identity": "rogue.poison",
             "magical": True, "class": "potion", "stackable": True, "appearance_pool": "rogue.potions",
-            "consumable": {"discovery": "on_use", "effects": [{"kind": "lose_attribute",
+            "consumable": {"discovery": "on_use", "descriptors": ["poison"], "effects": [{"kind": "lose_attribute",
                 "attribute": "strength", "amount": {"kind": "rolled", "dice": {
                     "count": 1, "sides": 3, "bonus": 0}}}]}})
 
@@ -57,7 +57,7 @@ class RogueUtilityPotionsContent(unittest.TestCase):
         potion_ids = {key for key, item in catalog["items"].items()
                       if item.get("appearance_pool") == "rogue.potions"}
         self.assertEqual(potion_ids, {"rogue.restore_strength", "rogue.healing", "rogue.confusion",
-                                     "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing"})
+                                     "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing", "rogue.levitation"})
         appearances = catalog["appearance_pools"]["rogue.potions"]["appearances"]
         self.assertEqual(len(appearances), len(set(appearances)))
         self.assertEqual(len(appearances), len(potion_ids))
@@ -70,7 +70,7 @@ class RogueUtilityPotionsContent(unittest.TestCase):
         self.assertEqual(stages[5], {"id": "rogue.magic_potions", "version": 1, "kind": "items",
             "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},
                 "choices": [{"archetype": "rogue." + name, "weight": 1}
-                            for name in ("healing", "confusion", "blindness", "poison", "see_invisible", "extra_healing")]}]})
+                            for name in ("healing", "confusion", "blindness", "poison", "see_invisible", "extra_healing", "levitation")]}]})
         for character in manifest["characters"]:
             for identity in ("rogue.poison", "rogue.see_invisible", "rogue.extra_healing"):
                 self.assertNotIn(identity, character["known_identities"])

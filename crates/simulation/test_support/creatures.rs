@@ -208,6 +208,7 @@ pub(crate) fn injure(
     amount: u32,
 ) -> Result<(), tor_simulation::GameError> {
     game.apply(tor_simulation::abilities::Outcome {
+        resistance: None,
         actor,
         target: actor,
         ability: None,

@@ -888,6 +888,7 @@ mod tests {
         let mut item = crate::ItemSpec::ordinary("known restorative".into());
         item.class = crate::ItemClass::Potion;
         item.consumable = Some(crate::ConsumableSpec {
+            descriptors: vec![],
             discovery: crate::ItemDiscovery::SelfEffect,
             effects: vec![crate::rules::Effect::Heal {
                 amount: crate::rules::AmountExpr::Fixed { amount: 2 },
@@ -1126,6 +1127,7 @@ mod tests {
         );
         let primary = component.key();
         EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
@@ -1210,6 +1212,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    periodic_relocation: None,
                     potency_modifiers: Vec::new(),
                     weapon_profile: None,
                     armor: None,
@@ -1238,6 +1241,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    periodic_relocation: None,
                     potency_modifiers: Vec::new(),
                     weapon_profile: None,
                     armor: None,
@@ -1277,6 +1281,7 @@ mod tests {
                     at,
                     20,
                     EquipmentSpec {
+                        periodic_relocation: None,
                         potency_modifiers: Vec::new(),
                         weapon_profile: None,
                         armor: None,
@@ -1300,6 +1305,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
+                    periodic_relocation: None,
                     potency_modifiers: Vec::new(),
                     weapon_profile: None,
                     armor: None,

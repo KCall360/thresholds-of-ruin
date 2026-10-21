@@ -161,10 +161,13 @@ are provisional; see
 
 Rattlesnake owns Venomous Bite on its first of two racial HD; the second point
 remains unspent. Its mean acquisition and 1d6 natural bite use the ordinary
-combat rules. Only a successful contact attempts the separate Physical-checked
-poison rider, which records at most one actual Strength loss. Poison immunity
-suppresses that rider alone. Body, attributes and timing initially reuse snake
-values as provisional tuning.
+combat rules. Only a successful contact delivers its separate poison exposure.
+Poison immunity blocks the exposure; otherwise Strength + Athletics against its
+authored DC can resist it. Failed resistance records at most one actual Strength
+loss, without undoing the bite's damage. The same descriptor-owned resistance
+applies to poison from traps, monster attacks and items; the source's display name
+does not decide whether it is poison. Body, attributes and timing initially reuse
+snake values as provisional tuning.
 
 An unidentified potion has a neutral appearance. Pick it up and drink through
 ordinary Drink/Quaff/Q controls. A potion of restore strength removes only recorded
@@ -177,7 +180,8 @@ A dose spends one unit. Positive actual restoration teaches its identity; drinki
 at zero deficit consumes it without learning. Character-owned knowledge persists
 after the last unit and through save/replay. See [item knowledge](../reference/items.md).
 
-Poison potions instead roll 1–3 restorable Strength loss and identify when drunk.
+Poison potions identify when drunk. Poison immunity blocks their exposure;
+otherwise failed Athletics resistance permits 1–3 restorable Strength loss.
 See-invisible potions cure blindness and reveal invisible creatures through normal
 illuminated sight for 808–892 actor turns. A second dose extends the remaining
 duration. Effective use does not identify this potion. Both can occur in the
@@ -408,25 +412,81 @@ Finding a trap reveals its presence, not its mechanism or a safe route across it
 Text **examine trap**, or selecting a discovered adjacent trap with ASCII **;**
 then **Enter**, learns its family without spending time. This explicit action is
 unavailable during pending work; merely viewing the map never examines it.
-Rust traps corrode susceptible worn armor; sleeping gas uses the shared timed
-Sleep effect. Discovery does not disarm either. Actual new ground contact can
-trigger a trap, including a return visit; standing still or loading cannot.
-Genuine flight avoids ground contact, not collision imposed by the world.
+Discovery does not disarm a trap. Deliberately moving onto a trap whose presence
+that actor already knows gives one Speed + Agility check against its separate
+authored avoidance DC (currently 12). Success avoids triggering it for that entry,
+not all future visits. The attempt is part of the paid movement, never a free
+retry; standing, viewing and reloading do not roll again. Another character's
+knowledge does not help, and being pushed, falling or teleporting onto it gives no
+avoidance check. A trap's actual activation can reveal its family to witnesses.
 
-Placement, discovery DCs and effect strengths/durations are provisional authored
-choices, not an approved numerical balance target.
+The eight families use ordinary shared mechanics:
+
+- **Rust** corrodes susceptible worn armor. Nonmetal, rustproof and protected armor
+  retain their ordinary protection; there is no additional resistance roll.
+- **Sleeping gas** is explicitly a poison exposure. Poison immunity blocks it;
+  otherwise Strength + Athletics against the authored DC (currently 12) can resist
+  it. Failed resistance causes 200 actor-active ticks of Sleep. Magical sleep is
+  separate and is not made poison merely because it uses the Sleep condition.
+- **Arrow** and **poison dart** first use ordinary attacks against Physical defense
+  and normal armor. A dart must hit before its separate poison exposure can cause
+  one restorable Strength loss; Athletics and poison immunity apply to that
+  exposure, while sustain Strength still prevents the loss. A missed arrow leaves
+  recoverable ordinary ammunition. Traps remain reusable, so arrow farming is
+  possible.
+- **Bear traps** restrict movement for 300 actor-active ticks, not all actions.
+  Actually leaving the trap, including by teleport, frees the actor; hovering in
+  place does not.
+- **Teleport traps** use the same-floor relocation rules below.
+- **Trapdoors** open permanently only after the destination floor is ready.
+  Actors and loose items then pass through a real aperture under gravity, not
+  teleportation. An occupied landing uses normal collision, never an alternate
+  destination. An already-open hole cannot be defeated with an avoidance check:
+  it requires an actual crossing or hovering capability.
+- **Mysterious traps** have no invented harmful payload.
+
+Flight and levitation avoid ordinary ground contact, not collisions imposed by
+physics. Placement, discovery and avoidance DCs, resistance DCs and effect
+strengths/durations are provisional authored choices, not a balance target.
+
+## Teleportation and levitation
+
+Teleportation scrolls and teleport-away effects choose a valid destination on the
+same floor, using the complete floor rather than a loaded subset. A teleport-to
+wand places its hit recipient in the exact cell beside the captured launch
+position in the captured firing direction; blocked placement never searches nearby. A completed use still
+spends its scroll or wand charge if placement fails. Forced teleport interrupts
+unfinished preparation without refunding already-paid costs.
+
+Teleport wands use directional, non-bouncing rays rather than selecting an unseen
+target. The source uses Lore and each encountered creature can dodge with Agility;
+the ray follows ordinary geometry and interception rules. Each worn teleportation
+ring independently has a 1-in-50 chance every 100 actor-active ticks. Two rings can
+both trigger. Sleeping time counts; frozen or detached time does not catch up.
+
+A potion of levitation grants timed horizontal hovering, not flight's up/down
+control. Repeated doses extend the condition. Ground pickup and stairs are
+unavailable while levitating. A successfully completed drink can arrest an actual
+fall before impact, preserving tangential velocity; it never undoes an impact that
+already happened. Gravity resumes on expiry, so expiring over a hole means falling.
+Normal levitation does not rise uncontrollably to the ceiling.
 
 ## Scope and verification
 
 All starting stats, equipment bonuses, foe timing, quantities, XP policy and the
 depth-selected population are provisional TOR tuning. A successful seeded
-walkthrough is behavioral coverage, not evidence of balanced Warrior/Mage runs. Bow/arrows,
-further trap families, wandering populations, calibrated food pressure and complete
-run balancing remain in the [Rogue plan](../plans/rogue.md).
+walkthrough is behavioral coverage, not evidence of balanced Warrior/Mage runs.
+Wandering populations, calibrated food pressure and complete run balancing remain
+in the [Rogue plan](../plans/rogue.md).
 
 Shared engine support and playable content have different acceptance boundaries.
 The presets, first purchases, ordinary foes and finite care are playable content;
 they do not establish a complete survival loop or useful builds throughout HD 1–6.
+
+Local checks for the hazards/escape additions are targeted. Complete exact-head
+cross-platform CI, including runtime and source-free persistence contracts, remains
+required before merge. Authored definitions and unit witnesses alone do not
+establish a balanced or comprehensively qualified run.
 
 The authored content contracts live in
 [`test_rogue_playable_content.py`](../../scripts/test_rogue_playable_content.py).

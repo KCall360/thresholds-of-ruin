@@ -23,6 +23,8 @@ fn capability_fold_is_order_independent_and_suppression_wins() {
         modifier(PerceptionValue::Invisible { enabled: true }),
         modifier(PerceptionValue::SeeInvisible { enabled: true }),
         modifier(PerceptionValue::ObjectGuise {
+            skill: crate::attributes::Skill::Stealth,
+            edge: 0,
             appearance: Some(guise("chest")),
         }),
         modifier(PerceptionValue::AmbushFromGuise { enabled: true }),
@@ -40,7 +42,11 @@ fn capability_fold_is_order_independent_and_suppression_wins() {
         modifier(PerceptionValue::Invisible { enabled: false }),
         modifier(PerceptionValue::SeeInvisible { enabled: false }),
         modifier(PerceptionValue::Sight { enabled: false }),
-        modifier(PerceptionValue::ObjectGuise { appearance: None }),
+        modifier(PerceptionValue::ObjectGuise {
+            skill: crate::attributes::Skill::Stealth,
+            edge: 0,
+            appearance: None,
+        }),
         modifier(PerceptionValue::AmbushFromGuise { enabled: false }),
     ]);
     let folded = PerceptionCapabilities::from_modifiers(sources.iter()).unwrap();
@@ -52,9 +58,13 @@ fn capability_fold_is_order_independent_and_suppression_wins() {
 fn contradictory_authored_guises_fail_in_either_source_order() {
     let mut sources = [
         modifier(PerceptionValue::ObjectGuise {
+            skill: crate::attributes::Skill::Stealth,
+            edge: 0,
             appearance: Some(guise("chest")),
         }),
         modifier(PerceptionValue::ObjectGuise {
+            skill: crate::attributes::Skill::Stealth,
+            edge: 0,
             appearance: Some(guise("urn")),
         }),
     ];
@@ -74,7 +84,11 @@ fn perception_source_records_reject_positional_extra_and_missing_nullable_fields
     ] {
         assert!(serde_json::from_value::<PerceptionValue>(invalid).is_err());
     }
-    let suppression = PerceptionValue::ObjectGuise { appearance: None };
+    let suppression = PerceptionValue::ObjectGuise {
+        skill: crate::attributes::Skill::Stealth,
+        edge: 0,
+        appearance: None,
+    };
     assert_eq!(
         serde_json::from_value::<PerceptionValue>(serde_json::to_value(&suppression).unwrap())
             .unwrap(),

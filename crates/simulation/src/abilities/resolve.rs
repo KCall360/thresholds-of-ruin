@@ -23,8 +23,17 @@ pub struct ResolutionContext {
     pub observation: Option<Shared<PublicPlanObservation>>,
     pub source: Option<ApplicationSnapshot>,
     pub spatial: Option<super::SpatialInput>,
+    pub relocation: Option<RelocationInput>,
     pub target_recovery_context: Option<crate::health_recovery::RecoveryContext>,
     pub source_recovery_context: Option<crate::health_recovery::RecoveryContext>,
+}
+/// Current whole-body-valid endpoints, never a frozen hidden target or path.
+/// The resolver samples only after delivery selects the relocation payload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RelocationInput {
+    pub from: super::Placement,
+    pub destinations: Vec<super::Placement>,
+    pub mode: super::MovementMode,
 }
 /// The sole dynamic relationship operand. Every attack statistic stays frozen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +58,8 @@ pub(crate) struct ActorEffectState<'a> {
 /// limit failures are hard errors and must reject the enclosing transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EffectApplicationError {
+    InvalidDefinition,
+    RandomnessExhausted,
     Condition(crate::conditions::ConditionError),
     Creature(crate::creatures::CreatureStateError),
 }
@@ -65,6 +76,12 @@ impl From<crate::creatures::CreatureStateError> for EffectApplicationError {
 impl From<EffectApplicationError> for crate::GameError {
     fn from(error: EffectApplicationError) -> Self {
         match error {
+            EffectApplicationError::InvalidDefinition => {
+                Self::Rule(super::RuleError::InvalidDefinition)
+            }
+            EffectApplicationError::RandomnessExhausted => {
+                Self::Rule(super::RuleError::InvalidPlan)
+            }
             EffectApplicationError::Creature(error) => Self::Creature(error),
             EffectApplicationError::Condition(error) => Self::Rule(match error {
                 crate::conditions::ConditionError::Capacity => super::RuleError::ConditionCapacity,
@@ -74,8 +91,8 @@ impl From<EffectApplicationError> for crate::GameError {
     }
 }
 
-/// Borrowed resolver input. Item and environmental effects cannot carry ability
-/// checks, costs, timing, or a fabricated ability identity.
+/// Borrowed resolver input. Environmental checks share the ordinary kernel but
+/// never acquire an ability identity, actor-owned source statistics or costs.
 #[derive(Clone, Copy, Debug)]
 pub enum ResolutionPlan<'a> {
     Ability(&'a AbilityPlan),
@@ -103,6 +120,18 @@ pub enum ResolutionPlan<'a> {
         actor: ActorId,
         target: ActorId,
         effects: &'a [PlannedEffect],
+    },
+    Exposure {
+        actor: ActorId,
+        target: ActorId,
+        effects: &'a [PlannedEffect],
+        descriptors: &'a [DescriptorId],
+    },
+    Environment {
+        target: ActorId,
+        check: &'a PlannedCheck,
+        effects: &'a [PlannedEffect],
+        descriptors: &'a [DescriptorId],
     },
 }
 impl<'a> From<&'a AbilityPlan> for ResolutionPlan<'a> {
@@ -254,6 +283,38 @@ impl<'a> ResolutionPlan<'a> {
                 descriptors: &[],
                 shared_owner: None,
             },
+            Self::Exposure {
+                actor,
+                target,
+                effects,
+                descriptors,
+            } => ResolutionInput {
+                actor,
+                target,
+                ability: None,
+                check: None,
+                on_success: effects,
+                on_failure: &[],
+                descriptors,
+                shared_owner: None,
+            },
+            Self::Environment {
+                target,
+                check,
+                effects,
+                descriptors,
+            } => ResolutionInput {
+                // Existing environmental effects use the recipient as their
+                // publication owner; this does not fabricate a source creature.
+                actor: target,
+                target,
+                ability: None,
+                check: Some(check),
+                on_success: effects,
+                on_failure: &[],
+                descriptors,
+                shared_owner: None,
+            },
         }
     }
 }
@@ -269,12 +330,23 @@ impl PlannedAmount {
 pub struct Snapshot {
     pub(super) creature: crate::creatures::CreatureState,
     context: ResolutionContext,
+    claimed_check_tokens: Vec<crate::conditions::TokenReservation>,
 }
 impl Snapshot {
+    /// Dynamic primary checks reserve these exact sources for this payload;
+    /// secondary resistance cannot reuse them before publication catches up.
+    pub(crate) fn with_claimed_check_tokens(
+        mut self,
+        tokens: &[crate::conditions::TokenReservation],
+    ) -> Self {
+        self.claimed_check_tokens = tokens.to_vec();
+        self
+    }
     pub fn capture(creature: &crate::creatures::CreatureState) -> Self {
         Self {
             creature: creature.clone(),
             context: ResolutionContext::default(),
+            claimed_check_tokens: vec![],
         }
     }
     pub fn with_context(mut self, context: ResolutionContext) -> Self {
@@ -310,6 +382,11 @@ pub enum ResolvedEffect {
         mode: super::MovementMode,
         result: super::MovementResult,
     },
+    Relocate {
+        mode: super::MovementMode,
+        result: super::MovementResult,
+    },
+    ArrestDescent,
     Damage {
         amount: u32,
     },
@@ -359,7 +436,7 @@ pub enum ResolvedEffect {
         amount: u32,
     },
     SearchAdjacentGuises {
-        total: i64,
+        roll: crate::discovery::DiscoveryRoll,
     },
     ObservePublicPlan {
         observation: Shared<PublicPlanObservation>,
@@ -408,7 +485,8 @@ impl ResolvedEffect {
         match self {
             Self::AlterEquipment { alteration } => !alteration.plan.targets.is_empty(),
             Self::Theft { quantity, .. } => *quantity > 0,
-            Self::Translate { result, .. } => result.changed(),
+            Self::Translate { result, .. } | Self::Relocate { result, .. } => result.changed(),
+            Self::ArrestDescent => false,
             Self::CorrodeArmor { amount, .. }
             | Self::Damage { amount }
             | Self::Heal { amount }
@@ -447,6 +525,27 @@ impl ResolvedEffect {
             | Self::ApplyLinkedHold { .. }
             | Self::CorrodeArmor { .. }
             | Self::AlterEquipment { .. } => self.clone(),
+            Self::ArrestDescent => {
+                if !creature.derived().locomotion.levitating {
+                    return Ok(None);
+                }
+                self.clone()
+            }
+            Self::Relocate { mode, result } => {
+                if let super::MovementResult::Moved { from, to } = result {
+                    let Some(placement) = state.placement.as_deref_mut() else {
+                        return Ok(None);
+                    };
+                    if placement != from {
+                        return Ok(Some(Self::Relocate {
+                            mode: *mode,
+                            result: super::MovementResult::Stale,
+                        }));
+                    }
+                    *placement = *to;
+                }
+                self.clone()
+            }
             Self::Translate { mode, result } => {
                 if let super::MovementResult::Moved { from, to } = result {
                     let Some(placement) = state.placement.as_deref_mut() else {
@@ -660,6 +759,8 @@ pub struct Outcome {
     pub result: OutcomeStatus,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub check: Option<ResolvedCheck>,
+    /// Secondary recipient check; success negates the delivered payload only.
+    pub resistance: Option<ResolvedCheck>,
     pub participation: AttemptedParticipation,
     /// Committed target participation from this primary's executed riders only.
     /// Individual payload publication always starts with false.
@@ -865,7 +966,8 @@ fn resolve_planned_check(
     });
     total >= threshold
 }
-pub(super) struct BatchResolution {
+pub(crate) struct BatchResolution {
+    pub resistance_tokens: Vec<crate::conditions::TokenReservation>,
     pub deferred_theft: Option<crate::theft::PlannedTheft>,
     pub outcome: Outcome,
     /// Ordinary abilities may reject individual condition effects. Authoritative
@@ -907,6 +1009,25 @@ pub(crate) fn resolve_checked<'a>(
     Ok(resolved.outcome)
 }
 
+/// Runtime-owned receipt retains exact one-shot sources selected by resistance.
+/// Pure previews may discard this receipt but authoritative callers must consume it.
+pub(crate) fn resolve_receipt<'a>(
+    plan: ResolutionPlan<'a>,
+    snapshot: &Snapshot,
+    rng: &mut u64,
+    observer: &mut impl ResolutionObserver,
+    strict_conditions: bool,
+) -> Result<BatchResolution, EffectApplicationError> {
+    let mut next_rng = *rng;
+    let resolved = resolve_payload(plan, snapshot, &mut next_rng, observer)?;
+    if strict_conditions {
+        if let Some(error) = resolved.condition_error {
+            return Err(error.into());
+        }
+    }
+    *rng = next_rng;
+    Ok(resolved)
+}
 fn resolve_payload<'a>(
     plan: ResolutionPlan<'a>,
     snapshot: &Snapshot,
@@ -920,7 +1041,10 @@ fn resolve_payload<'a>(
         ResolutionPlan::ProjectileEncounter { effect_edge, .. } => {
             StrikeBudget::projectile(effect_edge)
         }
-        ResolutionPlan::Rider { .. } | ResolutionPlan::Effects { .. } => StrikeBudget::effects(),
+        ResolutionPlan::Rider { .. }
+        | ResolutionPlan::Effects { .. }
+        | ResolutionPlan::Exposure { .. }
+        | ResolutionPlan::Environment { .. } => StrikeBudget::effects(),
     };
     resolve_batch(plan, snapshot, rng, observer, &mut budget)
 }
@@ -943,6 +1067,19 @@ pub(super) fn resolve_batch<'a>(
         descriptors,
         mut shared_owner,
     } = plan.input();
+    let rules = snapshot.creature.build().ruleset();
+    rules
+        .validate_payload_recipients(
+            descriptors,
+            on_success
+                .iter()
+                .chain(on_failure)
+                .map(PlannedEffect::recipient),
+        )
+        .map_err(|_| EffectApplicationError::InvalidDefinition)?;
+    let policy = rules
+        .descriptor_resistance(descriptors)
+        .map_err(|_| EffectApplicationError::InvalidDefinition)?;
     if let ResolutionPlan::Rider { ordinal, .. } = plan {
         shared_owner =
             (budget.owner == Some(CheckPhase::Rider { ordinal })).then_some(CheckSide::Initiating);
@@ -954,6 +1091,7 @@ pub(super) fn resolve_batch<'a>(
         intention: None,
         result: OutcomeStatus::Unaffected,
         check: None,
+        resistance: None,
         participation: AttemptedParticipation::empty(),
         target_rider_participated: false,
         effects: vec![],
@@ -984,6 +1122,7 @@ pub(super) fn resolve_batch<'a>(
             fields: &[],
         });
         return Ok(BatchResolution {
+            resistance_tokens: vec![],
             deferred_theft: None,
             outcome,
             condition_error: None,
@@ -1018,11 +1157,63 @@ pub(super) fn resolve_batch<'a>(
             && snapshot.context.observation.is_none())
     {
         return Ok(BatchResolution {
+            resistance_tokens: vec![],
             deferred_theft: None,
             outcome,
             condition_error: None,
             selected_branch: None,
         });
+    }
+    let mut resistance_tokens = vec![];
+    if !effects.is_empty() {
+        if let Some(policy) = policy {
+            let mut captured = crate::hazard_checks::capture_hazard_skill_check(
+                &snapshot.creature,
+                target,
+                policy.skill,
+                policy.difficulty,
+                &snapshot.claimed_check_tokens,
+            )
+            .map_err(|_| EffectApplicationError::InvalidDefinition)?;
+            captured.check.actor = CheckActor::Target;
+            captured.check.target_participates = true;
+            let before = *rng;
+            let resisted = resolve_planned_check(
+                &captured.check,
+                rng,
+                None,
+                &StrikeBudget::effects(),
+                observer,
+            );
+            outcome.resistance = Some(ResolvedCheck {
+                actor: CheckActor::Target,
+                success: resisted,
+                opposed: false,
+            });
+            resistance_tokens = captured.tokens;
+            observer.record(ResolutionStep {
+                id: "payload_resistance",
+                fields: &[
+                    signed("difficulty", i64::from(policy.difficulty)),
+                    boolean("success", resisted),
+                    unsigned("rng_before", before),
+                    unsigned("rng_after", *rng),
+                ],
+            });
+            if resisted {
+                return Ok(BatchResolution {
+                    resistance_tokens,
+                    deferred_theft: None,
+                    outcome,
+                    condition_error: None,
+                    selected_branch: Some(if success {
+                        crate::rules::RiderTrigger::Success
+                    } else {
+                        crate::rules::RiderTrigger::Failure
+                    }),
+                });
+            }
+        }
     }
     let mut application = match recipient {
         EffectRecipient::Target => ApplicationSnapshot {
@@ -1032,6 +1223,7 @@ pub(super) fn resolve_batch<'a>(
         EffectRecipient::Source => {
             let Some(source) = &snapshot.context.source else {
                 return Ok(BatchResolution {
+                    resistance_tokens,
                     deferred_theft: None,
                     outcome,
                     condition_error: None,
@@ -1041,7 +1233,11 @@ pub(super) fn resolve_batch<'a>(
             source.clone()
         }
     };
-    let mut placement = snapshot.context.spatial.map(|input| input.placement);
+    let mut placement = snapshot
+        .context
+        .spatial
+        .map(|input| input.placement)
+        .or_else(|| snapshot.context.relocation.as_ref().map(|input| input.from));
     let mut condition_error = None;
     let mut deferred_theft = None;
     for effect in effects {
@@ -1053,6 +1249,50 @@ pub(super) fn resolve_batch<'a>(
             PlannedEffect::Theft { theft } => {
                 deferred_theft = Some(theft.clone());
                 continue;
+            }
+            PlannedEffect::TeleportRandom | PlannedEffect::TeleportToRayOrigin => {
+                let mode = snapshot
+                    .context
+                    .relocation
+                    .as_ref()
+                    .map_or(super::MovementMode::Forced, |input| input.mode);
+                let to = if let Some(input) = snapshot.context.relocation.as_ref() {
+                    if matches!(effect, PlannedEffect::TeleportRandom)
+                        && !input.destinations.is_empty()
+                    {
+                        // Reuse the bounded unbiased selection used by ring/trap
+                        // relocation; a single possible endpoint consumes no draw.
+                        let index = crate::quantity::QuantityRange {
+                            minimum: 1,
+                            maximum: input.destinations.len() as u64,
+                        }
+                        .sample(rng)
+                        .map_err(|_| EffectApplicationError::RandomnessExhausted)?
+                            - 1;
+                        Some((input.from, input.destinations[index as usize]))
+                    } else if matches!(effect, PlannedEffect::TeleportToRayOrigin) {
+                        match input.destinations.as_slice() {
+                            [only] => Some((input.from, *only)),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let result = to.map_or(super::MovementResult::Blocked, |(from, to)| {
+                    super::MovementResult::Moved { from, to }
+                });
+                ResolvedEffect::Relocate { mode, result }
+            }
+            PlannedEffect::ArrestDescent => {
+                // A rejected extension must not turn a failed paid drink into
+                // an emergency brake. Checked item resolution rejects it atomically.
+                if condition_error.is_some() {
+                    continue;
+                }
+                ResolvedEffect::ArrestDescent
             }
             PlannedEffect::StepSelfOneCell | PlannedEffect::PushTargetOneCell { .. } => {
                 let mode = if matches!(effect, PlannedEffect::StepSelfOneCell) {
@@ -1233,7 +1473,7 @@ pub(super) fn resolve_batch<'a>(
                 amount: amount.roll(rng),
             },
             PlannedEffect::SearchAdjacentGuises { check } => ResolvedEffect::SearchAdjacentGuises {
-                total: check.roll(rng, false),
+                roll: check.sample(rng),
             },
             PlannedEffect::ObservePublicPlan => ResolvedEffect::ObservePublicPlan {
                 observation: snapshot
@@ -1290,7 +1530,11 @@ pub(super) fn resolve_batch<'a>(
                 }
                 continue;
             }
-            Err(error @ EffectApplicationError::Creature(_)) => return Err(error),
+            Err(
+                error @ (EffectApplicationError::Creature(_)
+                | EffectApplicationError::InvalidDefinition
+                | EffectApplicationError::RandomnessExhausted),
+            ) => return Err(error),
         };
         if let (Some(offered), ResolvedEffect::Nourish { amount }) = (nourishment_offered, &effect)
         {
@@ -1302,6 +1546,7 @@ pub(super) fn resolve_batch<'a>(
         outcome.effects.push(effect);
     }
     Ok(BatchResolution {
+        resistance_tokens,
         deferred_theft,
         outcome,
         condition_error,
@@ -1337,6 +1582,11 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 mode: super::MovementMode,
                 result: super::MovementResult,
             },
+            Relocate {
+                mode: super::MovementMode,
+                result: super::MovementResult,
+            },
+            ArrestDescent {},
             Damage {
                 amount: u32,
             },
@@ -1387,7 +1637,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 amount: u32,
             },
             SearchAdjacentGuises {
-                total: i64,
+                roll: crate::discovery::DiscoveryRoll,
             },
             ObservePublicPlan {
                 observation: Shared<PublicPlanObservation>,
@@ -1410,6 +1660,8 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::CorrodeArmor { slot, amount } => Self::CorrodeArmor { slot, amount },
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::Translate { mode, result } => Self::Translate { mode, result },
+            Fields::Relocate { mode, result } => Self::Relocate { mode, result },
+            Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::Damage { amount } => Self::Damage { amount },
             Fields::Heal { amount } => Self::Heal { amount },
             Fields::HealAndImproveHitDice {
@@ -1436,7 +1688,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::ApplyPersistentCondition { id } => Self::ApplyPersistentCondition { id },
             Fields::RemoveCondition { id } => Self::RemoveCondition { id },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
-            Fields::SearchAdjacentGuises { total } => Self::SearchAdjacentGuises { total },
+            Fields::SearchAdjacentGuises { roll } => Self::SearchAdjacentGuises { roll },
             Fields::ObservePublicPlan { observation } => Self::ObservePublicPlan { observation },
             Fields::ApplyQualifiedConditionToSource {
                 id,
@@ -1449,9 +1701,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             },
         };
         let valid_amount = match effect {
-            Self::SearchAdjacentGuises { total } => {
-                total.unsigned_abs() <= crate::limits::NUMERIC as u64 + 18
-            }
+            Self::SearchAdjacentGuises { roll } => roll.valid(),
             Self::Theft { quantity, .. } => quantity > 0,
             Self::CorrodeArmor { amount, .. } => {
                 (1..=crate::limits::NUMERIC as u32).contains(&amount)
@@ -1488,6 +1738,8 @@ impl<'de> Deserialize<'de> for Outcome {
             result: OutcomeStatus,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             check: Option<ResolvedCheck>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            resistance: Option<ResolvedCheck>,
             participation: AttemptedParticipation,
             target_rider_participated: bool,
             effects: crate::bounded::Bounded<ResolvedEffect, { crate::limits::EFFECTS_PER_BRANCH }>,
@@ -1500,6 +1752,7 @@ impl<'de> Deserialize<'de> for Outcome {
             intention: fields.intention,
             result: fields.result,
             check: fields.check,
+            resistance: fields.resistance,
             participation: fields.participation,
             target_rider_participated: fields.target_rider_participated,
             effects: fields.effects.0,

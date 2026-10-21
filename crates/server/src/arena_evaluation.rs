@@ -367,6 +367,7 @@ mod recovery_measurement_tests {
                 intention: None,
                 result: OutcomeStatus::Applied,
                 check: None,
+                resistance: None,
                 participation: tor_simulation::abilities::AttemptedParticipation::target(),
                 target_rider_participated: false,
                 effects: vec![
@@ -438,7 +439,7 @@ mod recovery_measurement_tests {
             };
             let outcome = serde_json::from_value(serde_json::json!({
                 "actor":1,"target":2,"ability":ability,"intention":null,
-                "check":check,"result":result,"target_rider_participated":false,"effects":[],
+                "check":check,"resistance":null,"result":result,"target_rider_participated":false,"effects":[],
                 "participation":{"check":participation,"payload":{"kind":"empty"}}
             }))
             .unwrap();

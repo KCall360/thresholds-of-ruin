@@ -108,6 +108,7 @@ fn natural_melee_source_ignores_equipped_weapon_operands_and_timing() {
     let mut weapon = crate::ItemSpec::ordinary("source selection probe".into());
     weapon.class = crate::ItemClass::Weapon;
     weapon.equipment = Some(crate::EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -411,6 +412,7 @@ fn natural_melee_selected_weapon_checks_keep_user_and_target_sources_separate() 
         let mut weapon = crate::ItemSpec::ordinary("opposed source probe".into());
         weapon.class = crate::ItemClass::Weapon;
         weapon.equipment = Some(crate::EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,

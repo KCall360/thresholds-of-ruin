@@ -826,9 +826,6 @@ impl Game {
     fn apply_action_effect(&mut self, prepared: &PreparedAction) -> Result<(), GameError> {
         let id = prepared.actor;
         let kind = prepared.kind.clone();
-        for subject in &prepared.touches {
-            self.reveal_guise(*subject)?;
-        }
         if let OutcomeKind::Escaped { item } = kind {
             if self.prepare_terminal_escape(id, tor_world::Direction::Up)? != item {
                 return Err(GameError::ItemUnavailable);
@@ -871,6 +868,9 @@ impl Game {
         let new_orientation = prepared.new_orientation;
         let mut outcome = self.actor_outcome(id)?;
         let actor = &mut outcome.state;
+        if !matches!(kind, OutcomeKind::Waited) {
+            actor.readied_ambush.retire();
+        }
         actor.orientation = new_orientation;
         if prepared.ordinary_movement.is_some()
             || !matches!(
@@ -924,12 +924,15 @@ impl Game {
                 self.reconcile_holds_for_actors(affected)?;
             }
             OutcomeKind::ApparentObjectTouched { subject } => {
-                self.reveal_guise(subject)?;
+                self.touch_readied_ambush(subject, id)?;
             }
             OutcomeKind::Moved { .. } => {}
             OutcomeKind::Escaped { item } => self.commit_terminal_escape(id, item)?,
             OutcomeKind::Taken { .. } | OutcomeKind::Dropped { .. } => {}
             OutcomeKind::Waited => {}
+        }
+        for subject in &prepared.touches {
+            self.touch_readied_ambush(*subject, id)?;
         }
         Ok(())
     }

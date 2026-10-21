@@ -871,8 +871,12 @@ impl Game {
         outcome.entry_cause = crate::floor_activation::EntryCause::Teleport;
         // Ordinary publication reconciles holds and contextual recovery without
         // discarding the already-paid sequence or its recovery cursor.
+        // Destination contacts can draw from the same stream. Publish the
+        // completed selection before contact, then return its evolved suffix.
+        self.rules_rng = *rng;
         self.apply_outcome(outcome)?;
         self.sync_actor_lifecycle(actor)?;
+        *rng = self.rules_rng;
         Ok(Some(placement))
     }
 }

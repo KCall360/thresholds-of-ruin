@@ -154,6 +154,7 @@ fn context_growth_game_with_rules(
 }
 fn earned_death(game: &mut Game) {
     game.apply(crate::abilities::Outcome {
+        resistance: None,
         actor: ActorId(2),
         target: ActorId(4),
         ability: None,
@@ -427,6 +428,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
     let mut item = crate::ItemSpec::ordinary("clock mail".into());
     item.class = crate::ItemClass::Armor;
     item.equipment = Some(crate::EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -544,6 +546,7 @@ fn pending_recovery_is_cleared_by_death_without_perceiving_the_frozen_region() {
     let (mut game, _) = pending_owner();
     let scenes = crate::diagnostics::work_counts().scenes;
     game.apply(crate::abilities::Outcome {
+        resistance: None,
         actor: ActorId(1),
         target: ActorId(2),
         ability: None,

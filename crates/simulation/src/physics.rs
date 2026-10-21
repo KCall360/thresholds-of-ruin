@@ -336,6 +336,9 @@ impl Game {
     }
     fn replace_body(&mut self, id: ActorId, body: BodySpec) -> Result<(), GameError> {
         let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        if *actor.body != body {
+            actor.readied_ambush.retire();
+        }
         actor.body = tor_world::Shared::new(body);
         actor.motion.acceleration_remainder = [0; 3];
         actor.motion.active_fall = None;
@@ -472,7 +475,7 @@ impl Game {
             return false;
         }
         let entity = PhysicsEntity::Actor(id);
-        let gravity = self.effective_gravity(entity, at, frame, body);
+        let gravity = self.gravity_sum(at, frame, body);
         (0..3).all(|axis| {
             gravity[axis] == 0 || self.gravity_axis_blocked(entity, at, frame, body, gravity, axis)
         })
@@ -629,7 +632,7 @@ impl Game {
                 .voluntary_reach(id, actor.location, local, locomotion.flying, false)
                 .is_none()
             || (self.body_has_field(actor.location, actor.orientation, &actor.body)
-                && !locomotion.flying
+                && !locomotion.hovers()
                 && !self.supported(id))
         {
             return None;
@@ -681,7 +684,7 @@ impl Game {
                 .then_some((to, frame));
         }
         let physical = self.body_has_field(a.location, a.orientation, &a.body);
-        if physical && !locomotion.flying && !self.supported(id) {
+        if physical && !locomotion.hovers() && !self.supported(id) {
             return None;
         }
         let (x, y, z) = direction.delta();
@@ -733,6 +736,78 @@ impl Game {
             [i64::from(x), i64::from(y), i64::from(z)],
         )
     }
+    /// Completion-time arrest uses ambient gravity, even when the just-applied
+    /// capability already suppresses effective acceleration. True flight never
+    /// calls this hook. Tangential and upward motion survive the dose.
+    pub(crate) fn arrest_descent_in_outcome(
+        &self,
+        outcome: &mut crate::lifecycle::ActorOutcome,
+    ) -> Result<(), GameError> {
+        if !outcome.state.alive() || !outcome.state.locomotion().levitating {
+            return Ok(());
+        }
+        let actor = &mut outcome.state;
+        let gravity = self.gravity_sum(actor.location, actor.orientation, &actor.body);
+        // Project out only descent. Cardinal fields preserve tangential motion
+        // exactly. Truncate the oblique projection toward zero so quantization
+        // cannot increase speed beyond the ordinary terminal norm.
+        let arrest = |vector: &mut [i64; 3]| {
+            let dot: i128 = vector
+                .iter()
+                .zip(gravity)
+                .map(|(v, g)| i128::from(*v) * i128::from(g))
+                .sum();
+            let norm: i128 = gravity.iter().map(|g| i128::from(*g).pow(2)).sum();
+            if dot <= 0 || norm == 0 {
+                return;
+            }
+            for axis in 0..3 {
+                vector[axis] = ((i128::from(vector[axis]) * norm - i128::from(gravity[axis]) * dot)
+                    / norm) as i64;
+            }
+            // Truncation can leave a sub-unit descending component. Remove it
+            // from positive contributors only: every correction decreases both
+            // descent and speed, and at most three components are visited.
+            let mut remainder: i128 = vector
+                .iter()
+                .zip(gravity)
+                .map(|(v, g)| i128::from(*v) * i128::from(g))
+                .sum();
+            let mut axes = [0, 1, 2];
+            axes.sort_by_key(|axis| std::cmp::Reverse(gravity[*axis].unsigned_abs()));
+            for axis in axes {
+                if remainder <= 0 {
+                    break;
+                }
+                if i128::from(vector[axis]) * i128::from(gravity[axis]) <= 0 {
+                    continue;
+                }
+                let magnitude = i128::from(gravity[axis]).abs();
+                let removed =
+                    ((remainder + magnitude - 1) / magnitude).min(i128::from(vector[axis]).abs());
+                vector[axis] -= removed as i64 * vector[axis].signum();
+                remainder -= removed * magnitude;
+            }
+        };
+        arrest(&mut actor.motion.velocity);
+        arrest(&mut actor.motion.displacement);
+        // A fractional accumulator is not a second placement. An oblique
+        // projection can leave its per-axis cell bounds even while shortening
+        // its norm; discard that fraction rather than invent a cross-cell move
+        // (and contact/impact) during dose publication. Velocity remains intact.
+        if actor
+            .motion
+            .displacement
+            .iter()
+            .any(|v| v.unsigned_abs() >= CELL as u64)
+        {
+            actor.motion.displacement = [0; 3];
+        }
+        actor.motion.acceleration_remainder = [0; 3];
+        actor.motion.active_fall = None;
+        Ok(())
+    }
+
     fn gravity_sum(&self, at: Location, frame: u8, body: &BodySpec) -> [i64; 3] {
         let mut sum = [0; 3];
         if let Some(cells) = self.body_cells(at, frame, body) {
@@ -754,7 +829,7 @@ impl Game {
         frame: u8,
         body: &BodySpec,
     ) -> [i64; 3] {
-        if matches!(entity, PhysicsEntity::Actor(id) if self.actors[&id].locomotion().flying) {
+        if matches!(entity, PhysicsEntity::Actor(id) if self.actors[&id].locomotion().hovers()) {
             [0; 3]
         } else {
             self.gravity_sum(at, frame, body)
@@ -829,7 +904,7 @@ impl Game {
         if self.actor_frozen(id) || self.region_frozen(actor.location.region) {
             return true;
         }
-        let gravity = if actor.locomotion().flying {
+        let gravity = if actor.locomotion().hovers() {
             [0; 3]
         } else {
             self.gravity_sum(actor.location, actor.orientation, &actor.body)
@@ -895,6 +970,9 @@ impl Game {
                 actor
                     .search_clock
                     .next_in(actor)
+                    .into_iter()
+                    .chain(actor.periodic_relocations.next_in(actor.alive()))
+                    .min()
                     .and_then(|interval| actor.active_since.checked_add(interval))
             })
             .min()
@@ -971,6 +1049,7 @@ impl Game {
                 // crosses a cell boundary. Landing may therefore trigger anew.
                 self.reconcile_trap_contacts(id, None)?;
                 self.reconcile_holds_for_actor(id)?;
+                self.reconcile_spatial_condition_anchors(id)?;
                 // Falling into a frozen region freezes the actor there.
                 self.sync_actor_lifecycle(id)?;
                 if self.run_outcome().terminal && !self.region_transition_pending() {
@@ -1107,13 +1186,33 @@ impl Game {
         actor.visited.insert(at.region);
         drop(actor);
         self.reconcile_holds_for_actor(id)?;
-        self.reconcile_trap_contacts(id, None)?;
-        if self.floor_activation.is_none() || from.region == at.region {
-            return Ok(());
+        self.reconcile_spatial_condition_anchors(id)?;
+        if self.floor_activation.is_some() && from.region != at.region {
+            self.sync_actor_lifecycle(id)?;
+            self.accepted_region_entry(id, from, at, crate::floor_activation::EntryCause::Physics)?;
         }
-        self.sync_actor_lifecycle(id)?;
-        self.accepted_region_entry(id, from, at, crate::floor_activation::EntryCause::Physics)
+        self.reconcile_trap_contacts(id, None)
     }
+    /// Contact effects may relocate or kill the body. Never overwrite their
+    /// authoritative result with the integrator's pre-contact local cursor.
+    fn contact_motion_override(
+        &self,
+        entity: PhysicsEntity,
+        at: Location,
+        frame: u8,
+        motion: &MotionState,
+    ) -> Option<(Location, u8, MotionState)> {
+        let PhysicsEntity::Actor(id) = entity else {
+            return None;
+        };
+        let actor = &self.actors[&id];
+        (actor.location != at
+            || actor.orientation != frame
+            || !actor.motion.same_kinematics(motion)
+            || !actor.alive())
+        .then(|| (actor.location, actor.orientation, actor.motion.clone()))
+    }
+
     fn integrate(
         &mut self,
         entity: PhysicsEntity,
@@ -1155,6 +1254,11 @@ impl Game {
                     motion.displacement[axis] -= component * CELL;
                 }
                 self.publish_physical_entry(entity, at, frame, &motion)?;
+                if let Some(authoritative) =
+                    self.contact_motion_override(entity, at, frame, &motion)
+                {
+                    return Ok(authoritative);
+                }
             } else {
                 for axis in 0..3 {
                     if delta[axis] == 0 {
@@ -1169,6 +1273,11 @@ impl Game {
                         frame = next_frame;
                         motion.displacement[axis] -= delta[axis] * CELL;
                         self.publish_physical_entry(entity, at, frame, &motion)?;
+                        if let Some(authoritative) =
+                            self.contact_motion_override(entity, at, frame, &motion)
+                        {
+                            return Ok(authoritative);
+                        }
                     } else {
                         let normal = rotate_vector(frame, component.map(|v| -v.signum()));
                         let other_actor = self.body_cells(at, frame, body).and_then(|cells| {
@@ -1210,13 +1319,7 @@ impl Game {
                                 actor.orientation = frame;
                                 actor.motion = motion.clone();
                             }
-                            self.reconcile_trap_contacts(id, Some(normal))?;
                             if damage > 0 {
-                                let mut actor = self.actors.get_mut(&id).expect("integrated actor");
-                                actor.location = at;
-                                actor.orientation = frame;
-                                actor.motion = motion.clone();
-                                drop(actor);
                                 let damage = crate::damage::DamageSpec::new(
                                     vec![crate::damage::DamageComponent::fixed(
                                         crate::combat::DamageType::Impact,
@@ -1257,8 +1360,21 @@ impl Game {
                                     self.apply_damage(id, &damage)?;
                                 }
                                 if !self.alive(id) {
-                                    return Ok((at, frame, MotionState::default()));
+                                    let actor = &self.actors[&id];
+                                    return Ok((
+                                        actor.location,
+                                        actor.orientation,
+                                        MotionState::default(),
+                                    ));
                                 }
+                            }
+                            // The collision has already happened. Settle its
+                            // damage before a trap can relocate the survivor.
+                            self.reconcile_trap_contacts(id, Some(normal))?;
+                            if let Some(authoritative) =
+                                self.contact_motion_override(entity, at, frame, &motion)
+                            {
+                                return Ok(authoritative);
                             }
                         }
                     }

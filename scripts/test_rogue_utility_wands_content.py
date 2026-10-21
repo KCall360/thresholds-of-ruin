@@ -55,7 +55,7 @@ class RogueUtilityWandsContent(unittest.TestCase):
         identities = {identity for identity, item in catalog["items"].items()
                       if item.get("appearance_pool") == "rogue.wands"}
         self.assertEqual(identities, {"rogue.wand_" + kind for kind in
-                                     ("fire", "cold", "lightning", "invisibility", "haste", "slow")})
+                                     ("fire", "cold", "lightning", "invisibility", "haste", "slow", "teleport_away", "teleport_to")})
         appearances = catalog["appearance_pools"]["rogue.wands"]["appearances"]
         self.assertEqual(len(appearances), len(set(appearances)))
         self.assertEqual(len(appearances), len(identities))
@@ -64,7 +64,7 @@ class RogueUtilityWandsContent(unittest.TestCase):
         self.assertEqual(stage, {"id": "rogue.magic_devices", "version": 1, "kind": "items",
             "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},
                 "choices": [{"archetype": "rogue.wand_" + kind, "weight": 1}
-                            for kind in ("fire", "cold", "lightning", "invisibility", "haste", "slow")]}]})
+                            for kind in ("fire", "cold", "lightning", "invisibility", "haste", "slow", "teleport_away", "teleport_to")]}]})
         for character in manifest["characters"]:
             self.assertTrue(identities.isdisjoint(character["known_identities"]))
             self.assertTrue(identities.isdisjoint(row["archetype"] for row in character["loadout"]))

@@ -5,10 +5,10 @@ Receipts establish owned stock; they must not guide ordinary play or navigation.
 """
 
 MAGIC_ITEM_STAGES = (
-    ("rogue.magic_potions", ("rogue.healing", "rogue.confusion", "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing")),
+    ("rogue.magic_potions", ("rogue.healing", "rogue.confusion", "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing", "rogue.levitation")),
     ("rogue.magic_scrolls", ("rogue.identify_potion", "rogue.identify_scroll",
-                             "rogue.identify_wand", "rogue.sleep")),
-    ("rogue.magic_devices", ("rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning", "rogue.wand_invisibility", "rogue.wand_haste", "rogue.wand_slow")),
+                             "rogue.identify_wand", "rogue.sleep", "rogue.teleportation")),
+    ("rogue.magic_devices", ("rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning", "rogue.wand_invisibility", "rogue.wand_haste", "rogue.wand_slow", "rogue.wand_teleport_away", "rogue.wand_teleport_to")),
 )
 MAGIC_ITEM_STAGE_IDS = tuple(identity for identity, _ in MAGIC_ITEM_STAGES)
 
@@ -66,7 +66,7 @@ EQUIPMENT_ITEM_STAGES = (
     ("rogue.equipment_scrolls", ("rogue.enchant_armor", "rogue.protect_armor", "rogue.enchant_weapon",
                                  "rogue.remove_curse", "rogue.identify_weapon", "rogue.identify_armor")),
     ("rogue.ammunition", ("rogue.arrow",)),
-    ("rogue.rings", ('rogue.ring_protection', 'rogue.ring_add_strength', 'rogue.ring_sustain_strength', 'rogue.ring_see_invisible', 'rogue.ring_adornment', 'rogue.ring_dexterity', 'rogue.ring_increase_damage', 'rogue.ring_regeneration', 'rogue.ring_slow_digestion', 'rogue.ring_maintain_armor', 'rogue.ring_searching')),
+    ("rogue.rings", ('rogue.ring_protection', 'rogue.ring_add_strength', 'rogue.ring_sustain_strength', 'rogue.ring_see_invisible', 'rogue.ring_adornment', 'rogue.ring_dexterity', 'rogue.ring_increase_damage', 'rogue.ring_regeneration', 'rogue.ring_slow_digestion', 'rogue.ring_maintain_armor', 'rogue.ring_searching', 'rogue.ring_teleportation')),
 )
 EQUIPMENT_ITEM_STAGE_IDS = tuple(identity for identity, _ in EQUIPMENT_ITEM_STAGES)
 

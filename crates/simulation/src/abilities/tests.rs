@@ -311,6 +311,7 @@ fn public_application_rolls_back_partial_effects_and_failed_death_after_settleme
             intention: None,
             result: OutcomeStatus::Applied,
             check: None,
+            resistance: None,
             participation: crate::abilities::AttemptedParticipation::target(),
             target_rider_participated: false,
             effects: vec![
@@ -1140,6 +1141,7 @@ fn typed_item_plans_round_trip_and_reject_ability_only_fields_at_decode() {
             preparation: 20,
         },
         Plan::Drink {
+            descriptors: vec![],
             discovery: crate::ItemDiscovery::SelfEffect,
             actor,
             item,
@@ -1582,6 +1584,7 @@ fn observation_context(source: &Snapshot) -> ResolutionContext {
     ResolutionContext {
         hold_damage: None,
         spatial: None,
+        relocation: None,
         target_recovery_context: None,
         source_recovery_context: None,
         source: Some(ApplicationSnapshot {

@@ -166,6 +166,39 @@ fn record(
                                 },
                             }
                         }
+                        s::abilities::ResolvedEffect::Relocate { mode, result } => {
+                            p::DiagnosticEffect::Relocate {
+                                target,
+                                mode: match mode {
+                                    s::abilities::MovementMode::Voluntary => {
+                                        p::DiagnosticMovementMode::Voluntary
+                                    }
+                                    s::abilities::MovementMode::Forced => {
+                                        p::DiagnosticMovementMode::Forced
+                                    }
+                                },
+                                result: match result {
+                                    s::abilities::MovementResult::Moved { .. } => {
+                                        p::DiagnosticMovementResult::Moved
+                                    }
+                                    s::abilities::MovementResult::Blocked => {
+                                        p::DiagnosticMovementResult::Blocked
+                                    }
+                                    s::abilities::MovementResult::Ineligible => {
+                                        p::DiagnosticMovementResult::Ineligible
+                                    }
+                                    s::abilities::MovementResult::Stale => {
+                                        p::DiagnosticMovementResult::Stale
+                                    }
+                                    s::abilities::MovementResult::Ambiguous => {
+                                        p::DiagnosticMovementResult::Ambiguous
+                                    }
+                                },
+                            }
+                        }
+                        s::abilities::ResolvedEffect::ArrestDescent => {
+                            p::DiagnosticEffect::ArrestDescent { target }
+                        }
                         s::abilities::ResolvedEffect::Damage { amount } => {
                             p::DiagnosticEffect::Damage {
                                 target,
@@ -424,11 +457,64 @@ mod restorable_loss_diagnostic_tests {
                 intention: None,
                 result: s::abilities::OutcomeStatus::Applied,
                 check: None,
+                resistance: None,
                 participation: s::abilities::AttemptedParticipation::source(),
                 target_rider_participated: false,
                 effects,
             },
             trace: d::ResolutionTrace::default(),
+        }
+    }
+
+    #[test]
+    fn relocation_and_braking_diagnostics_retain_result_but_not_placement_or_resistance() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        let mut source = diagnostic(vec![
+            s::abilities::ResolvedEffect::Relocate {
+                mode: s::abilities::MovementMode::Forced,
+                result: s::abilities::MovementResult::Moved {
+                    from: s::abilities::Placement {
+                        location: tor_world::Location {
+                            region: tor_world::RegionId(1),
+                            position: tor_world::Position { x: 1, y: 1, z: 0 },
+                        },
+                        orientation: 0,
+                    },
+                    to: s::abilities::Placement {
+                        location: tor_world::Location {
+                            region: tor_world::RegionId(987654321),
+                            position: tor_world::Position { x: 9, y: 8, z: 7 },
+                        },
+                        orientation: 3,
+                    },
+                },
+            },
+            s::abilities::ResolvedEffect::ArrestDescent,
+        ]);
+        source.outcome.participation = s::abilities::AttemptedParticipation::target();
+        source.outcome.resistance = Some(s::abilities::ResolvedCheck {
+            actor: s::rules::CheckActor::Target,
+            success: false,
+            opposed: false,
+        });
+        let _: s::abilities::Outcome =
+            serde_json::from_value(serde_json::to_value(&source.outcome).unwrap()).unwrap();
+        let view = record(&source, 1, &rules).unwrap();
+        let value = serde_json::to_value(&view.outcome).unwrap();
+        assert_eq!(
+            value["effects"],
+            serde_json::json!([
+                {"type":"relocate","target":"2","mode":"forced","result":"moved"},
+                {"type":"arrest_descent","target":"2"},
+            ])
+        );
+        let encoded = serde_json::to_string(&view).unwrap();
+        for private in ["987654321", "orientation", "resistance", "difficulty"] {
+            assert!(
+                !encoded.contains(private),
+                "private effect operand leaked {private}"
+            );
         }
     }
 

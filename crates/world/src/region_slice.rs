@@ -125,7 +125,29 @@ impl RegionSlice {
                 self.traps.iter().all(|(at, trap)| {
                     inside(at)
                         && !solid(*at)
-                        && supported(*at)
+                        && match &trap.kind {
+                            TrapKind::TrapDoor {
+                                destination,
+                                open: true,
+                            } => {
+                                self.physical_vertical.contains(&(*at, Direction::Down))
+                                    && self.passages.get(&(*at, Direction::Down)).is_some_and(
+                                        |(passage, rotation)| {
+                                            passage.to.region == destination.region
+                                                && *rotation == 0
+                                        },
+                                    )
+                            }
+                            TrapKind::TrapDoor {
+                                destination,
+                                open: false,
+                            } => {
+                                destination.region != id
+                                    && supported(*at)
+                                    && !self.passages.contains_key(&(*at, Direction::Down))
+                            }
+                            _ => supported(*at),
+                        }
                         && trap.valid()
                         && ids.insert(trap.id)
                 })

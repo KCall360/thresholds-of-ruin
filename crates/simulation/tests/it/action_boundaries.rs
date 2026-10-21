@@ -224,6 +224,7 @@ fn remaining_family(index: usize) -> (Game, ActorId, Action, u64) {
                     timing.unequip_turns
                 };
             spec.equipment = Some(EquipmentSpec {
+                periodic_relocation: None,
                 potency_modifiers: Vec::new(),
                 weapon_profile: None,
                 armor: None,
@@ -244,6 +245,7 @@ fn remaining_family(index: usize) -> (Game, ActorId, Action, u64) {
         3 => {
             spec.class = tor_simulation::ItemClass::Potion;
             spec.consumable = Some(ConsumableSpec {
+                descriptors: vec![],
                 discovery: tor_simulation::ItemDiscovery::SelfEffect,
                 effects: vec![tor_simulation::rules::Effect::Heal {
                     amount: tor_simulation::rules::AmountExpr::Fixed { amount: 1 },

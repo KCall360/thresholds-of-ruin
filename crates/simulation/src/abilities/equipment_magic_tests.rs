@@ -14,6 +14,7 @@ fn armor(game: &mut Game, id: u64, equipped: bool) -> ItemId {
     let mut spec = ItemSpec::ordinary("mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         slot: EquipmentSlot::new("body_armor").unwrap(),
@@ -61,6 +62,7 @@ fn scroll(game: &mut Game, id: u64, effects: Vec<Effect>) -> ItemId {
     spec.name = "equipment scroll".into();
     spec.readable = Some(ReadableSpec {
         effects,
+        descriptors: vec![],
         identify: None,
         discovery: ItemDiscovery::Never,
     });
@@ -373,6 +375,7 @@ fn weapon(game: &mut Game, id: u64) -> ItemId {
     let mut spec = ItemSpec::ordinary("test blade".into());
     spec.class = ItemClass::Weapon;
     spec.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         slot: EquipmentSlot::new("weapon").unwrap(),

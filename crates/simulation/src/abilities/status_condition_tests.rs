@@ -217,6 +217,7 @@ fn host_condition_application_preserves_unpublished_observer_extension() {
     game.host_region_continuation = true;
     game.begin_event_batch().unwrap();
     game.apply(super::Outcome {
+        resistance: None,
         actor: ActorId(1),
         target: ActorId(1),
         ability: Some(crate::content_ids::AbilityId::new("basic_melee").unwrap()),

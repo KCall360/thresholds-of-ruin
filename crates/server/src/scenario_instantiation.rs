@@ -52,19 +52,33 @@ fn configure_inner(
         game.learn_identity(id, identity)
             .map_err(|_| fail("Invalid initial item identity"))?;
     }
-    if let Some(recipe) = definition.recipe {
+    // Preserve recipe/AI/body diagnostic precedence, but install the full body
+    // before creature-owned guise/readied capabilities capture their witness.
+    let prepared = if let Some(recipe) = definition.recipe {
         let seed = crate::creature_authoring::actor_health_seed(game.seed(), id.0);
         let build = recipe.instantiate(seed)?;
+        Some((recipe, build))
+    } else {
+        None
+    };
+    let profile = definition
+        .control
+        .profile()
+        .map_err(|reference| ConfigurationError::MissingAi(reference.name.into()))?;
+    if let Some(body) = definition.body {
+        if !body.cells.contains(&body.eye) {
+            return Err(fail(format!("{name} body eye must be one of its cells")).into());
+        }
+        game.set_body(id, body.into_owned())
+            .map_err(|_| fail(format!("{name} body does not fit")))?;
+    }
+    if let Some((recipe, build)) = prepared {
         game.configure_creature(id, recipe.identity().clone(), build)
             .map_err(|_| fail(format!("Invalid {kind} creature build")))?;
         game.configure_nutrition(id, recipe.nutrition())
             .map_err(|_| fail(format!("Invalid {kind} nutrition")))?;
     }
-    if let Some(profile) = definition
-        .control
-        .profile()
-        .map_err(|reference| ConfigurationError::MissingAi(reference.name.into()))?
-    {
+    if let Some(profile) = profile {
         game.configure_ai(
             id,
             profile.resolve(
@@ -76,13 +90,6 @@ fn configure_inner(
             ),
         )
         .map_err(|_| fail("AI requires an owned creature build"))?;
-    }
-    if let Some(body) = definition.body {
-        if !body.cells.contains(&body.eye) {
-            return Err(fail(format!("{name} body eye must be one of its cells")).into());
-        }
-        game.set_body(id, body.into_owned())
-            .map_err(|_| fail(format!("{name} body does not fit")))?;
     }
     if let Some(velocity) = definition.velocity {
         game.set_actor_velocity(id, velocity)

@@ -239,6 +239,7 @@ mod tests {
                         };
                         spec.class = crate::ItemClass::Armor;
                         spec.equipment = Some(crate::EquipmentSpec {
+                            periodic_relocation: None,
                             potency_modifiers: Vec::new(),
                             slot: kind,
                             attack: None,
@@ -261,6 +262,7 @@ mod tests {
                     2 => {
                         spec.class = crate::ItemClass::Potion;
                         spec.consumable = Some(crate::ConsumableSpec {
+                            descriptors: vec![],
                             discovery: crate::ItemDiscovery::SelfEffect,
                             effects: vec![effect],
                         });
@@ -272,6 +274,7 @@ mod tests {
                     3 => {
                         spec.class = crate::ItemClass::Scroll;
                         spec.readable = Some(crate::ReadableSpec {
+                            descriptors: vec![],
                             effects: vec![effect],
                             identify: None,
                             discovery: crate::ItemDiscovery::SelfEffect,
@@ -637,6 +640,7 @@ mod tests {
                 assert_eq!(after.health_recovery(), creature.health_recovery());
                 // A live rate change cannot rewrite already-paid recovery.
                 game.apply(crate::abilities::Outcome {
+                    resistance: None,
                     actor,
                     target: actor,
                     ability: None,

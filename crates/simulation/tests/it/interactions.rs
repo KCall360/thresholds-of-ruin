@@ -106,6 +106,7 @@ fn armor(game: &mut Game, actor: ActorId) {
     let mut spec = ItemSpec::ordinary("mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {
@@ -247,6 +248,7 @@ fn duplicate_ring_slots_are_distinct_and_a_slot_must_match_the_item() {
     let mut spec = ItemSpec::ordinary("ring".into());
     spec.class = ItemClass::Ring;
     spec.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -277,6 +279,7 @@ fn drinking_consumes_at_completion_and_identifies_only_observable_effects() {
     spec.appearance = "red vial".into();
     spec.stackable = true;
     spec.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 10 },
@@ -318,6 +321,7 @@ fn consumed_objective_remains_unmet_and_its_checkpoint_is_valid() {
     let mut spec = ItemSpec::ordinary("objective potion".into());
     spec.class = ItemClass::Potion;
     spec.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 1 },
@@ -385,6 +389,7 @@ fn lethal_final_potion_reports_completion_without_anatomy_or_remaining_inventory
     potion.concealed = true;
     potion.appearance = "red potion".into();
     potion.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![super::abilities::damage(100, DamageType::Vital)],
     });
@@ -465,6 +470,7 @@ fn concealed_equipment_discloses_its_slot_but_stats_require_actor_knowledge() {
     spec.concealed = true;
     spec.appearance = "silver ring".into();
     spec.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -585,6 +591,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     )
     .unwrap();
     weapon.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -605,6 +612,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     let mut armor = ItemSpec::ordinary("armor".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: Some(tor_simulation::ArmorSpec {
@@ -669,6 +677,7 @@ fn saved_item_preparation_rejects_missing_ground_and_foreign_items() {
     let mut potion = ItemSpec::ordinary("saved-potion".into());
     potion.class = ItemClass::Potion;
     potion.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 1 },
@@ -806,6 +815,7 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
             ItemClass::Armor
         };
         item.equipment = Some(EquipmentSpec {
+            periodic_relocation: None,
             potency_modifiers: Vec::new(),
             weapon_profile: None,
             armor: None,
@@ -835,6 +845,7 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
     let mut potion = ItemSpec::ordinary("potion".into());
     potion.class = ItemClass::Potion;
     potion.consumable = Some(ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![Effect::Heal {
             amount: AmountExpr::Fixed { amount: 1 },
@@ -899,6 +910,7 @@ fn custom_slot_capability_timing_and_checkpoint_use_rules_data() {
     let mut item = ItemSpec::ordinary("grasped tool".into());
     item.class = ItemClass::Tool;
     item.equipment = Some(EquipmentSpec {
+        periodic_relocation: None,
         potency_modifiers: Vec::new(),
         weapon_profile: None,
         armor: None,
@@ -986,6 +998,7 @@ fn shared_grip_capacity_limits_authored_and_paid_equips_without_combat() {
                 ItemClass::Weapon
             };
             item.equipment = Some(EquipmentSpec {
+                periodic_relocation: None,
                 potency_modifiers: Vec::new(),
                 weapon_profile: None,
                 slot: EquipmentSlot::new(if shield { "shield" } else { "weapon" }).unwrap(),

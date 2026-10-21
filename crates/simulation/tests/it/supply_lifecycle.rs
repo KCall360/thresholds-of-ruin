@@ -484,6 +484,7 @@ fn drink_case(quantity_before: u64, lethal: bool, injured: bool) {
     spec.class = tor_simulation::ItemClass::Potion;
     spec.stackable = true;
     spec.consumable = Some(tor_simulation::ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![if lethal {
             super::abilities::damage(
@@ -1103,6 +1104,7 @@ fn held_ground_healing_potion_changes_actual_take_to_wait_without_changing_loot_
     spec.class = tor_simulation::ItemClass::Potion;
     spec.supply = Some(tor_simulation::content_ids::SupplyId::new("bandage").unwrap());
     spec.consumable = Some(tor_simulation::ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![tor_simulation::rules::Effect::Heal {
             amount: tor_simulation::rules::AmountExpr::Fixed { amount: 2 },
@@ -1199,6 +1201,7 @@ fn direct_drink_without_an_issued_intention_rejects_atomically_then_admitted_dri
     let mut spec = tor_simulation::ItemSpec::ordinary("ordinary healing draught".into());
     spec.class = tor_simulation::ItemClass::Potion;
     spec.consumable = Some(tor_simulation::ConsumableSpec {
+        descriptors: vec![],
         discovery: tor_simulation::ItemDiscovery::SelfEffect,
         effects: vec![tor_simulation::rules::Effect::Heal {
             amount: tor_simulation::rules::AmountExpr::Fixed { amount: 1 },

@@ -84,6 +84,7 @@ impl From<DamageType> for tor_simulation::combat::DamageType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EquipmentGeneration {
+    Cursed,
     SignedPotency {
         negative: u32,
         positive: u32,
@@ -110,6 +111,7 @@ pub enum EquipmentGeneration {
 impl EquipmentGeneration {
     pub(crate) fn compile(self) -> Result<tor_simulation::EquipmentGeneration, crate::Failure> {
         let value = match self {
+            Self::Cursed => tor_simulation::EquipmentGeneration::Cursed,
             Self::SignedPotency { negative, positive } => {
                 tor_simulation::EquipmentGeneration::SignedPotency { negative, positive }
             }
@@ -444,6 +446,7 @@ impl WeaponProfileSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EquipmentSpec {
+    pub periodic_relocation: Option<PeriodicRelocation>,
     pub weapon_profile: Option<WeaponProfileSpec>,
     pub slot: EquipmentSlot,
     pub armor: Option<ArmorSpec>,
@@ -452,6 +455,12 @@ pub struct EquipmentSpec {
     pub modifiers: Vec<crate::creature_authoring::Modifier>,
     #[serde(default)]
     pub potency_modifiers: Vec<crate::creature_authoring::Modifier>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PeriodicRelocation {
+    pub interval: u64,
+    pub chance_denominator: u32,
 }
 impl EquipmentSpec {
     pub(crate) fn compile(
@@ -485,6 +494,17 @@ impl EquipmentSpec {
             )));
         }
         Ok(tor_simulation::EquipmentSpec {
+            periodic_relocation: self
+                .periodic_relocation
+                .map(|policy| {
+                    let compiled = tor_simulation::PeriodicRelocation {
+                        interval: policy.interval,
+                        chance_denominator: policy.chance_denominator,
+                    };
+                    super::require(compiled.valid(), "Invalid periodic relocation policy")?;
+                    Ok::<_, crate::engine::Failure>(compiled)
+                })
+                .transpose()?,
             weapon_profile: self
                 .weapon_profile
                 .as_ref()
@@ -630,6 +650,9 @@ pub enum Effect {
     DrainLatestHitDie,
     RestoreHitDie,
     StepSelfOneCell,
+    TeleportRandom,
+    TeleportToRayOrigin,
+    ArrestDescent,
     PushTargetOneCell {
         direction: PushDirection,
     },
@@ -754,6 +777,7 @@ impl From<ItemDiscovery> for tor_simulation::ItemDiscovery {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsumableSpec {
+    pub descriptors: Vec<String>,
     pub effects: Vec<Effect>,
     pub discovery: ItemDiscovery,
 }
@@ -763,6 +787,11 @@ impl<'de> Deserialize<'de> for ConsumableSpec {
         #[serde(deny_unknown_fields)]
         struct Fields {
             #[serde(
+                default,
+                deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, { tor_simulation::limits::DESCRIPTORS_PER_EFFECT }>"
+            )]
+            descriptors: Vec<String>,
+            #[serde(
                 deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, { tor_simulation::limits::CONSUMABLE_EFFECTS }>"
             )]
             effects: Vec<Effect>,
@@ -771,10 +800,27 @@ impl<'de> Deserialize<'de> for ConsumableSpec {
         }
         let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self {
+            descriptors: fields.descriptors,
             effects: fields.effects,
             discovery: fields.discovery,
         })
     }
+}
+fn compile_payload_descriptors(
+    values: &[String],
+    rules: &tor_simulation::rules::Ruleset,
+) -> Result<Vec<tor_simulation::content_ids::DescriptorId>, crate::Failure> {
+    let values = values
+        .iter()
+        .map(|name| {
+            tor_simulation::content_ids::DescriptorId::new(name)
+                .map_err(|_| super::fail(format!("Invalid payload descriptor {name:?}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    rules
+        .validate_payload_descriptors(&values)
+        .map_err(|error| super::fail(format!("Invalid payload descriptors: {error:?}")))?;
+    Ok(values)
 }
 fn compile_item_effects(
     effects: &[Effect],
@@ -794,6 +840,7 @@ impl ConsumableSpec {
         rules: &tor_simulation::rules::Ruleset,
     ) -> Result<tor_simulation::ConsumableSpec, crate::Failure> {
         Ok(tor_simulation::ConsumableSpec {
+            descriptors: compile_payload_descriptors(&self.descriptors, rules)?,
             effects: compile_item_effects(&self.effects, rules)?,
             discovery: self.discovery.into(),
         })
@@ -805,6 +852,7 @@ impl ConsumableSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadableSpec {
+    pub descriptors: Vec<String>,
     pub effects: Vec<Effect>,
     pub identify: Option<Vec<ItemClass>>,
     pub discovery: ItemDiscovery,
@@ -814,6 +862,11 @@ impl<'de> Deserialize<'de> for ReadableSpec {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(
+                default,
+                deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, { tor_simulation::limits::DESCRIPTORS_PER_EFFECT }>"
+            )]
+            descriptors: Vec<String>,
             #[serde(
                 default,
                 deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, { tor_simulation::limits::CONSUMABLE_EFFECTS }>"
@@ -826,6 +879,7 @@ impl<'de> Deserialize<'de> for ReadableSpec {
         }
         let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self {
+            descriptors: fields.descriptors,
             effects: fields.effects,
             identify: fields.identify,
             discovery: fields.discovery,
@@ -861,6 +915,7 @@ impl ReadableSpec {
         rules: &tor_simulation::rules::Ruleset,
     ) -> Result<tor_simulation::ReadableSpec, crate::Failure> {
         let spec = tor_simulation::ReadableSpec {
+            descriptors: compile_payload_descriptors(&self.descriptors, rules)?,
             effects: compile_item_effects(&self.effects, rules)?,
             identify: self
                 .identify
@@ -1078,6 +1133,9 @@ impl<'de> Deserialize<'de> for Effect {
             DrainLatestHitDie {},
             RestoreHitDie {},
             StepSelfOneCell {},
+            TeleportRandom {},
+            TeleportToRayOrigin {},
+            ArrestDescent {},
             PushTargetOneCell {
                 direction: PushDirection,
             },
@@ -1176,6 +1234,9 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
+            Fields::TeleportRandom {} => Self::TeleportRandom,
+            Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
+            Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
@@ -1353,6 +1414,7 @@ mod tests {
         let compiled = anatomy.compile(&rules).unwrap();
         assert_eq!(compiled.slots[0].as_str(), "tentacle");
         let equipment = EquipmentSpec {
+            periodic_relocation: None,
             weapon_profile: None,
             armor: None,
             slot: "tentacle".into(),
@@ -1383,8 +1445,60 @@ mod tests {
     }
 
     #[test]
+    fn item_payload_descriptors_share_bounded_single_resistance_validation() {
+        use tor_simulation::rules::{
+            DescriptorResistance, NamedDescriptor, Ruleset, RulesetDocument,
+        };
+        let mut document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        for name in ["fixture_poison", "fixture_other"] {
+            document.descriptors.push(NamedDescriptor {
+                id: tor_simulation::content_ids::DescriptorId::new(name).unwrap(),
+                name: name.into(),
+                resistance: Some(DescriptorResistance {
+                    skill: tor_simulation::attributes::Skill::Athletics,
+                    difficulty: 12,
+                }),
+            });
+        }
+        let rules = Ruleset::validate(document).unwrap();
+        for values in [
+            vec![],
+            vec!["fixture_poison"],
+            vec!["fire", "fixture_poison"],
+        ] {
+            let descriptors = values.into_iter().map(str::to_owned).collect::<Vec<_>>();
+            assert!(compile_payload_descriptors(&descriptors, &rules).is_ok());
+            let source: ConsumableSpec = serde_json::from_value(serde_json::json!({
+                "effects":[{"kind":"heal","amount":{"kind":"fixed","amount":1}}],
+                "descriptors":descriptors,
+            }))
+            .unwrap();
+            assert_eq!(
+                source.compile(&rules).unwrap().descriptors.len(),
+                descriptors.len()
+            );
+        }
+        for values in [
+            vec!["missing"],
+            vec!["fire", "fire"],
+            vec!["fixture_poison", "fixture_other"],
+        ] {
+            let descriptors = values.into_iter().map(str::to_owned).collect::<Vec<_>>();
+            assert!(compile_payload_descriptors(&descriptors, &rules).is_err());
+        }
+        let omitted: ConsumableSpec =
+            serde_json::from_value(serde_json::json!({"effects":[]})).unwrap();
+        assert!(
+            omitted.descriptors.is_empty(),
+            "source omission differs from strict current saves"
+        );
+    }
+
+    #[test]
     fn generic_item_effects_compile_and_reject_unknown_content_references() {
         let valid = ConsumableSpec {
+            descriptors: vec![],
             discovery: ItemDiscovery::SelfEffect,
             effects: vec![Effect::Heal {
                 amount: AmountExpr::Fixed { amount: 5 },
@@ -1392,6 +1506,7 @@ mod tests {
         };
         assert!(valid.compile(&rules()).is_ok());
         let missing = ConsumableSpec {
+            descriptors: vec![],
             discovery: ItemDiscovery::SelfEffect,
             effects: vec![Effect::ApplyCondition {
                 condition: "missing_condition".into(),
@@ -1400,6 +1515,7 @@ mod tests {
         };
         assert!(missing.compile(&rules()).is_err());
         let missing_descriptor = ConsumableSpec {
+            descriptors: vec![],
             discovery: ItemDiscovery::SelfEffect,
             effects: vec![Effect::Damage {
                 damage: DamageExpr::Components {
@@ -1424,6 +1540,7 @@ mod tests {
             let effect: Effect = serde_json::from_value(value.clone()).unwrap();
             assert_eq!(serde_json::to_value(&effect).unwrap(), value);
             let compiled = ConsumableSpec {
+                descriptors: vec![],
                 effects: vec![effect],
                 discovery: ItemDiscovery::OnUse,
             }
@@ -1449,6 +1566,7 @@ mod tests {
         ] {
             let effect: Effect = serde_json::from_value(value).unwrap();
             assert!(ConsumableSpec {
+                descriptors: vec![],
                 effects: vec![effect],
                 discovery: ItemDiscovery::OnUse
             }
@@ -1550,6 +1668,7 @@ mod tests {
                 }
             );
             let compiled = ConsumableSpec {
+                descriptors: vec![],
                 effects: vec![effect],
                 discovery: ItemDiscovery::OnUse,
             }
@@ -1747,6 +1866,7 @@ mod tests {
                 let authored: Effect =
                     serde_json::from_value(value.clone()).expect("author effect");
                 let compiled = ConsumableSpec {
+                    descriptors: vec![],
                     discovery: ItemDiscovery::SelfEffect,
                     effects: vec![authored],
                 }
@@ -1762,6 +1882,7 @@ mod tests {
                 value["amount"] = serde_json::json!({"kind":"fixed","amount":1_000_001});
                 let invalid: Effect = serde_json::from_value(value).unwrap();
                 assert!(ConsumableSpec {
+                    descriptors: vec![],
                     discovery: ItemDiscovery::SelfEffect,
                     effects: vec![invalid]
                 }
@@ -1774,6 +1895,7 @@ mod tests {
         }))
         .unwrap();
         assert!(ConsumableSpec {
+            descriptors: vec![],
             discovery: ItemDiscovery::SelfEffect,
             effects: vec![invalid]
         }
@@ -2054,6 +2176,7 @@ mod persistent_condition_authoring_tests {
         ] {
             let effect: Effect = serde_json::from_value(value.clone()).unwrap();
             let compiled = ConsumableSpec {
+                descriptors: vec![],
                 discovery: ItemDiscovery::OnUse,
                 effects: vec![effect],
             }
@@ -2068,6 +2191,7 @@ mod persistent_condition_authoring_tests {
         }
         for condition in ["fear", "missing"] {
             let spec = ConsumableSpec {
+                descriptors: vec![],
                 discovery: ItemDiscovery::OnUse,
                 effects: vec![Effect::ApplyPersistentCondition {
                     condition: condition.into(),

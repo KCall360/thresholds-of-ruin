@@ -18,10 +18,13 @@ Unchanged contract owners, deliberately not multiplied here:
 """
 import json
 import shutil
+import sqlite3
+from contextlib import closing
 import subprocess
 import unittest
 
 from arena_matrix import toml_source
+from checkpoint_payload import decode_checkpoint_payload
 from process_harness import ProcessTestCase, ROOT, settle_rogue_action
 from process_work_budget import ProcessBudgetExceeded, ProcessWorkBudget
 from restorable_loss_harness import losses
@@ -76,10 +79,45 @@ def potions(frame):
     return [item for item in observation(frame)["inventory"] if item["class"] == "potion"]
 
 
+def bite_resistance_receipts(test):
+    """Audit settled saved receipts only after ordinary disclosed actions finish.
+
+    Boundary snapshots repeat events. Deduplicate by the real intention identity,
+    and pair a rider with its primary bite, never infer resistance from zero loss.
+    These private facts are assertions, not inputs to the gameplay driver.
+    """
+    with closing(sqlite3.connect(test.save.resolve().as_uri() + "?mode=ro", uri=True)) as database:
+        row = database.execute("SELECT payload FROM checkpoint").fetchone()
+        test.assertIsNotNone(row)
+    saved = json.loads(decode_checkpoint_payload(row[0]))
+    primary, riders = {}, {}
+    for game in [saved["game"], *(boundary["game"] for boundary in saved["boundaries"])]:
+        for event in game["events"]:
+            outcome = event.get("Resolved", {}).get("outcome", {})
+            if outcome.get("actor") != 3 or outcome.get("target") != 1:
+                continue
+            if outcome.get("ability") == BITE:
+                destination = primary
+            elif outcome.get("resistance") is not None:
+                destination = riders
+            else:
+                continue
+            intention = outcome["intention"]
+            test.assertIsNotNone(intention)
+            if intention in destination:
+                test.assertEqual(destination[intention], outcome)
+            destination[intention] = outcome
+    test.assertTrue(riders, "The fixed sample must retain actual poison-resistance receipts")
+    test.assertTrue(riders.keys() <= primary.keys(), "Every poison receipt needs its actual delivery")
+    return [(primary[intention], rider) for intention, rider in sorted(riders.items())]
+
+
 class RogueRestorationProcesses(ProcessTestCase):
-    # First full witness from the bounded initial 0-7 qualification (0-4: no loss).
-    # The permanent regression executes one seed, never a search or retry.
-    seed = 5
+    # The bounded 0-7 requalification after shared Athletics resistance selected
+    # seed 7: one resisted bite, two failed resistances, then ordinary restoration.
+    # Former seed 5 legitimately resists its delivered poison; zero loss cannot
+    # qualify restoration. This permanent regression never searches or retries.
+    seed = 7
 
     def setUp(self):
         super().setUp()
@@ -205,6 +243,31 @@ class RogueRestorationProcesses(ProcessTestCase):
         self.assertTrue(any(event["type"] == "ability" and event["ability"]["id"] == "basic_melee"
             and event["caster"] == observation(initial)["self_target"] and event["target"] == foe_id
             and event["outcome"] == "applied" for event in events))
+        attempts = bite_resistance_receipts(self)
+        self.assertEqual({rider["resistance"]["success"] for _, rider in attempts}, {False, True})
+        retained = 0
+        resisted_damage = 0
+        for primary, rider in attempts:
+            self.assertEqual(primary["check"], {"actor": "user", "success": True, "opposed": False})
+            self.assertIsNone(primary["resistance"])
+            self.assertTrue(primary["target_rider_participated"])
+            self.assertIsNone(rider["check"], "Poison must not add a second Physical resistance check")
+            self.assertIsNone(rider["ability"])
+            self.assertEqual(rider["participation"], {"check": "none", "payload": {"kind": "target"}})
+            resisted = rider["resistance"]["success"]
+            self.assertEqual(rider["resistance"], {"actor": "target", "success": resisted, "opposed": False})
+            if resisted:
+                self.assertEqual(rider["result"], "unaffected")
+                self.assertEqual(rider["effects"], [])
+                resisted_damage += sum(effect["amount"] for effect in primary["effects"]
+                                       if effect["kind"] == "damage")
+            else:
+                self.assertEqual(rider["result"], "applied")
+                self.assertEqual(rider["effects"], [{"kind": "lose_attribute", "attribute": "strength", "amount": 1}])
+                retained += 1
+        self.assertGreater(resisted_damage, 0, "Successful poison resistance must not erase bite damage")
+        self.assertEqual(retained, 2)
+        self.assertEqual(deficit, retained, "Retained loss must equal delivered, unresisted poison payloads")
         self.assertGreater(deficit, 0, "Fixed sample needs actual retained Strength loss")
         self.assertGreater(injury(current), 0, "Fixed sample needs a real surviving injury")
         self.assertGreater(remaining, 200, "Pickup/drink must precede passive Health recovery")

@@ -28,6 +28,7 @@ fn fresh_perception_revision() -> u64 {
 struct PerceptionInputs {
     perception: crate::perception::PerceptionCapabilities,
     guise: crate::perception::GuiseState,
+    recognized_guises: Vec<ActorId>,
     location: Location,
     orientation: u8,
     body: Shared<BodySpec>,
@@ -43,6 +44,7 @@ impl PerceptionInputs {
         Self {
             perception: actor.perception(),
             guise: actor.guise.clone(),
+            recognized_guises: actor.discovery.recognized_guises(),
             location: actor.location,
             orientation: actor.orientation,
             body: actor.body.clone(),
@@ -59,6 +61,7 @@ impl PerceptionInputs {
     fn matches(&self, actor: &Actor) -> bool {
         self.perception == actor.perception()
             && self.guise == actor.guise
+            && self.recognized_guises == actor.discovery.recognized_guises()
             && self.location == actor.location
             && self.orientation == actor.orientation
             && self.body == actor.body
@@ -74,14 +77,15 @@ impl PerceptionInputs {
     }
 }
 
-/// Compact always-on visibility inputs. Knowledge, health amounts and clocks
-/// do not invalidate event-time geometry; life and effective senses do.
+/// Compact always-on visibility inputs. Guise recognition changes identity
+/// authority; other knowledge, failed receipts, health amounts and clocks do not.
 #[derive(PartialEq, Eq)]
 struct VisibilityInputs {
     invisible: bool,
     see_invisible: bool,
     sight: bool,
     guised: bool,
+    recognized_guises: Vec<ActorId>,
     location: Location,
     orientation: u8,
     body: Shared<BodySpec>,
@@ -98,6 +102,7 @@ impl VisibilityInputs {
             see_invisible: perception.is_some_and(|p| p.see_invisible),
             sight: perception.is_none_or(|p| p.sight),
             guised: actor.guise.appearance().is_some(),
+            recognized_guises: actor.discovery.recognized_guises(),
             location: actor.location,
             orientation: actor.orientation,
             body: actor.body.clone(),
@@ -209,6 +214,8 @@ pub(crate) struct ActorStore {
     contextual_recovery: Shared<BTreeSet<ActorId>>,
     active_falls: Shared<BTreeSet<ActorId>>,
     pending_searches: Shared<BTreeSet<ActorId>>,
+    pending_relocations: Shared<BTreeSet<ActorId>>,
+    guised_owners: Shared<BTreeSet<ActorId>>,
     perception_revision: u64,
     visibility_epoch: u64,
     bodies: Mutex<Bodies>,
@@ -225,6 +232,8 @@ impl Clone for ActorStore {
             contextual_recovery: self.contextual_recovery.clone(),
             active_falls: self.active_falls.clone(),
             pending_searches: self.pending_searches.clone(),
+            pending_relocations: self.pending_relocations.clone(),
+            guised_owners: self.guised_owners.clone(),
             perception_revision: self.perception_revision,
             visibility_epoch: self.visibility_epoch,
             bodies: Mutex::new(
@@ -265,8 +274,16 @@ impl ActorStore {
         let mut held_owners = Members::default();
         let mut timer_deadlines = BTreeSet::new();
         let mut pending_searches = BTreeSet::new();
+        let mut pending_relocations = BTreeSet::new();
+        let mut guised_owners = BTreeSet::new();
         for (&id, actor) in &entries {
             add_member(&mut regions, actor.location.region, id);
+            if actor.guise.appearance().is_some() {
+                guised_owners.insert(id);
+            }
+            if actor.periodic_relocations.pending() {
+                pending_relocations.insert(id);
+            }
             if actor.search_clock.pending() {
                 pending_searches.insert(id);
             }
@@ -294,6 +311,8 @@ impl ActorStore {
             contextual_recovery: Shared::new(contextual_recovery),
             active_falls: Shared::new(active_falls),
             pending_searches: Shared::new(pending_searches),
+            pending_relocations: Shared::new(pending_relocations),
+            guised_owners: Shared::new(guised_owners),
             perception_revision: fresh_perception_revision(),
             visibility_epoch: fresh_perception_revision(),
             bodies: Mutex::default(),
@@ -316,6 +335,10 @@ impl ActorStore {
     /// rebuilt from authoritative actor clocks, never serialized or polled by UI.
     pub(crate) fn pending_searches(&self) -> impl Iterator<Item = ActorId> + '_ {
         self.pending_searches.iter().copied()
+    }
+
+    pub(crate) fn pending_relocations(&self) -> impl Iterator<Item = ActorId> + '_ {
+        self.pending_relocations.iter().copied()
     }
 
     /// Lifecycle-derived index state; never changes the actor's raw clock.
@@ -432,8 +455,22 @@ impl ActorStore {
             .collect()
     }
 
+    pub(crate) fn has_guises(&self) -> bool {
+        !self.guised_owners.is_empty()
+    }
+
     pub fn insert(&mut self, id: ActorId, actor: Actor) -> Option<Actor> {
+        update_pending_search(
+            &mut self.guised_owners,
+            id,
+            actor.guise.appearance().is_some(),
+        );
         update_pending_search(&mut self.pending_searches, id, actor.search_clock.pending());
+        update_pending_search(
+            &mut self.pending_relocations,
+            id,
+            actor.periodic_relocations.pending(),
+        );
         if self
             .entries
             .get(&id)
@@ -503,6 +540,8 @@ impl ActorStore {
         self.contextual_recovery.remove(id);
         self.active_falls.remove(id);
         self.pending_searches.remove(id);
+        self.pending_relocations.remove(id);
+        self.guised_owners.remove(id);
         if let Some(interval) = next_timer(&old) {
             self.timer_deadlines.remove(&(interval, *id));
         }
@@ -556,6 +595,8 @@ impl ActorStore {
             contextual_recovery: &mut self.contextual_recovery,
             active_falls: &mut self.active_falls,
             pending_searches: &mut self.pending_searches,
+            pending_relocations: &mut self.pending_relocations,
+            guised_owners: &mut self.guised_owners,
         })
     }
 }
@@ -577,6 +618,8 @@ pub(crate) struct ActorEdit<'a> {
     contextual_recovery: &'a mut Shared<BTreeSet<ActorId>>,
     active_falls: &'a mut Shared<BTreeSet<ActorId>>,
     pending_searches: &'a mut Shared<BTreeSet<ActorId>>,
+    pending_relocations: &'a mut Shared<BTreeSet<ActorId>>,
+    guised_owners: &'a mut Shared<BTreeSet<ActorId>>,
 }
 impl Deref for ActorEdit<'_> {
     type Target = Actor;
@@ -592,9 +635,19 @@ impl DerefMut for ActorEdit<'_> {
 impl Drop for ActorEdit<'_> {
     fn drop(&mut self) {
         update_pending_search(
+            self.guised_owners,
+            self.id,
+            self.actor.guise.appearance().is_some(),
+        );
+        update_pending_search(
             self.pending_searches,
             self.id,
             self.actor.search_clock.pending(),
+        );
+        update_pending_search(
+            self.pending_relocations,
+            self.id,
+            self.actor.periodic_relocations.pending(),
         );
         if self.before_visibility != VisibilityInputs::capture(self.actor) {
             *self.visibility_epoch = fresh_perception_revision();
@@ -677,6 +730,12 @@ fn next_timer(actor: &Actor) -> Option<u64> {
             actor
                 .search_clock
                 .next_in(actor)
+                .and_then(|interval| actor.active_since.checked_add(interval)),
+        )
+        .chain(
+            actor
+                .periodic_relocations
+                .next_in(actor.alive())
                 .and_then(|interval| actor.active_since.checked_add(interval)),
         )
         .chain(

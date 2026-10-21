@@ -365,6 +365,16 @@ impl<'a> Scene<'a> {
                         TrapFamily::SleepingGas => {
                             "A sleeping gas trap. Discovering it has not disarmed it."
                         }
+                        TrapFamily::TrapDoor => "A trapdoor. An opened lid remains open.",
+                        TrapFamily::Arrow => "An arrow trap. Discovering it has not disarmed it.",
+                        TrapFamily::BearTrap => "A bear trap. Discovering it has not disarmed it.",
+                        TrapFamily::Teleport => {
+                            "A teleport trap. Discovering it has not disarmed it."
+                        }
+                        TrapFamily::PoisonDart => {
+                            "A poison dart trap. Discovering it has not disarmed it."
+                        }
+                        TrapFamily::Mysterious => "A mysterious trap. Its effects are uncertain.",
                     })
                     .into(),
                 quantity: 1,

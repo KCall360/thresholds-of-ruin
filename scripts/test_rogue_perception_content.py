@@ -92,8 +92,10 @@ class RoguePerceptionContent(unittest.TestCase):
         mace = source("catalog/items.toml")["items"]["rogue.mace"]
         self.assertFalse(mace.get("magical", False))
         self.assertEqual(guise["modifiers"], [{"scope": "always", "op": {"kind": "perception", "value": {
-            "kind": "object_guise", "appearance": {"name": mace["name"], "description": "",
-                "class": mace["class"], "asset": mace["asset"]}}}}])
+            "kind": "object_guise", "skill": "stealth", "edge": 0, "appearance": {"name": mace["name"], "description": "",
+                "class": mace["class"], "asset": mace["asset"]}}}},
+            {"scope": "always", "op": {"kind": "perception", "value": {
+                "kind": "readied_touch_ambush", "enabled": True}}}])
         self.assertEqual(ambush["modifiers"], [{"scope": "always", "op": {"kind": "perception", "value": {
             "kind": "ambush_from_guise", "enabled": True}}}])
         xeroc = source("catalog/creatures.toml")["creatures"]["species"]["rogue.xeroc"]

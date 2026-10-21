@@ -103,6 +103,9 @@ pub enum PlannedEffect {
     },
     DrainLatestHitDie,
     RestoreHitDie,
+    TeleportRandom,
+    TeleportToRayOrigin,
+    ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
         direction: super::PushDirection,
@@ -261,6 +264,8 @@ pub enum Plan {
         preparation: u64,
     },
     Read {
+        #[serde(deserialize_with = "super::strikes::read_descriptors")]
+        descriptors: Vec<crate::content_ids::DescriptorId>,
         actor: ActorId,
         item: ItemId,
         preparation: u64,
@@ -271,6 +276,8 @@ pub enum Plan {
         discovery: crate::ItemDiscovery,
     },
     Drink {
+        #[serde(deserialize_with = "super::strikes::read_descriptors")]
+        descriptors: Vec<crate::content_ids::DescriptorId>,
         discovery: crate::ItemDiscovery,
         actor: ActorId,
         item: ItemId,
@@ -561,9 +568,24 @@ impl Plan {
     pub fn resolution(&self) -> Option<ResolutionPlan<'_>> {
         match self {
             Self::Ability(plan) => Some(ResolutionPlan::Ability(plan)),
-            Self::Read { actor, effects, .. }
-            | Self::Drink { actor, effects, .. }
-            | Self::Eat { actor, effects, .. } => Some(ResolutionPlan::Effects {
+            Self::Read {
+                actor,
+                effects,
+                descriptors,
+                ..
+            }
+            | Self::Drink {
+                actor,
+                effects,
+                descriptors,
+                ..
+            } => Some(ResolutionPlan::Exposure {
+                actor: *actor,
+                target: *actor,
+                effects,
+                descriptors,
+            }),
+            Self::Eat { actor, effects, .. } => Some(ResolutionPlan::Effects {
                 actor: *actor,
                 target: *actor,
                 effects,
@@ -618,22 +640,43 @@ impl Plan {
                 Self::Unequip { item, .. } => valid_item(*item),
                 Self::Read {
                     item,
+                    descriptors,
                     effects,
                     identify,
                     discovery,
                     ..
                 } => {
                     valid_item(*item)
+                        && rules
+                            .validate_payload_recipients(
+                                descriptors,
+                                effects.iter().map(PlannedEffect::recipient),
+                            )
+                            .is_ok()
                         && effects_valid(effects, rules)
                         && match identify {
                             Some(_) => {
-                                effects.is_empty() && *discovery == crate::ItemDiscovery::OnUse
+                                effects.is_empty()
+                                    && descriptors.is_empty()
+                                    && *discovery == crate::ItemDiscovery::OnUse
                             }
                             None => !effects.is_empty(),
                         }
                 }
-                Self::Drink { item, effects, .. } => {
-                    valid_item(*item) && effects_valid(effects, rules)
+                Self::Drink {
+                    item,
+                    effects,
+                    descriptors,
+                    ..
+                } => {
+                    valid_item(*item)
+                        && effects_valid(effects, rules)
+                        && rules
+                            .validate_payload_recipients(
+                                descriptors,
+                                effects.iter().map(PlannedEffect::recipient),
+                            )
+                            .is_ok()
                 }
                 Self::Eat { item, effects, .. } => {
                     valid_item(*item)
@@ -711,6 +754,13 @@ fn read_hit_die_pools<'de, D: serde::Deserializer<'de>>(
 pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Ruleset) -> bool {
     effects.len() <= crate::limits::EFFECTS_PER_BRANCH
         && (effects.len() == 1
+            || !effects.iter().any(|effect| {
+                matches!(
+                    effect,
+                    PlannedEffect::TeleportRandom | PlannedEffect::TeleportToRayOrigin
+                )
+            }))
+        && (effects.len() == 1
             || !effects
                 .iter()
                 .any(|effect| matches!(effect, PlannedEffect::CorrodeArmor { .. })))
@@ -730,7 +780,10 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             PlannedEffect::StepSelfOneCell
             | PlannedEffect::PushTargetOneCell { .. }
             | PlannedEffect::DrainLatestHitDie
-            | PlannedEffect::RestoreHitDie => true,
+            | PlannedEffect::RestoreHitDie
+            | PlannedEffect::TeleportRandom
+            | PlannedEffect::TeleportToRayOrigin
+            | PlannedEffect::ArrestDescent => true,
             PlannedEffect::ApplyLinkedHold { policy } => {
                 policy.valid() && rules.flag(&policy.sustaining).is_some()
             }
@@ -856,6 +909,9 @@ pub(super) fn effects_match_definition_scoped(
             .zip(actual)
             .enumerate()
             .all(|(index, (expected, actual))| match (expected, actual) {
+                (Effect::TeleportRandom, PlannedEffect::TeleportRandom)
+                | (Effect::TeleportToRayOrigin, PlannedEffect::TeleportToRayOrigin)
+                | (Effect::ArrestDescent, PlannedEffect::ArrestDescent) => true,
                 (
                     Effect::Theft {
                         selection,
@@ -1312,6 +1368,9 @@ impl Game {
                 }),
                 Effect::DrainLatestHitDie => Ok(PlannedEffect::DrainLatestHitDie),
                 Effect::RestoreHitDie => Ok(PlannedEffect::RestoreHitDie),
+                Effect::TeleportRandom => Ok(PlannedEffect::TeleportRandom),
+                Effect::TeleportToRayOrigin => Ok(PlannedEffect::TeleportToRayOrigin),
+                Effect::ArrestDescent => Ok(PlannedEffect::ArrestDescent),
                 Effect::StepSelfOneCell => Ok(PlannedEffect::StepSelfOneCell),
                 Effect::PushTargetOneCell { direction } => Ok(PlannedEffect::PushTargetOneCell {
                     direction: *direction,
@@ -1475,10 +1534,10 @@ impl Game {
         actor: ActorId,
         effects: &[Effect],
     ) -> Result<Vec<PlannedEffect>, GameError> {
-        if effects
-            .iter()
-            .any(|effect| effect.spatial() || matches!(effect, Effect::Theft { .. }))
-        {
+        if effects.iter().any(|effect| {
+            (effect.spatial() && !matches!(effect, Effect::TeleportRandom))
+                || matches!(effect, Effect::Theft { .. } | Effect::TeleportToRayOrigin)
+        }) {
             return Err(invalid());
         }
         let effects = self.compile_effects_with_roll_bonus(
@@ -1522,6 +1581,9 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             },
             DrainLatestHitDie {},
             RestoreHitDie {},
+            TeleportRandom {},
+            TeleportToRayOrigin {},
+            ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
                 direction: super::PushDirection,
@@ -1600,6 +1662,9 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             },
             Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
+            Fields::TeleportRandom {} => Self::TeleportRandom,
+            Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
+            Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
