@@ -1468,6 +1468,7 @@ fn phase5_container_checkpoint_rejects_positional_held_item() {
             "corpse",
             "condition",
             "charges",
+            "relocation_elapsed",
             "motion",
             "orientation",
             "spec",
