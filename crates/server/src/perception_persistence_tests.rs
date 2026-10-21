@@ -69,6 +69,7 @@ fn scenario() -> Scenario {
         room_width: [7, 7],
         room_height: [5, 5],
         extra_connections: [0, 0],
+        room_omissions: None,
         lighting: None,
         secret_entrances: None,
         hidden_traps: None,

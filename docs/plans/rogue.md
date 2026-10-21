@@ -143,8 +143,18 @@ Do not mistake “implemented” for closure of those measurements.
 
 ### Layout, perception and discovery
 
-Add omitted slots, mazes and secrets through reusable stages and
-shared discovery rules. Lighting already exists; extend it without replacing TOR
+Reusable secret/discovery stages exist. Optional strict room omissions have local
+generation, persistence and process qualification as an opt-in authoring capability.
+Omission-free generation remains compatible; the live Rogue package does not enable
+omissions, and live tuning and mazes remain separate work. The seed-42 ordinary
+witness retains Rogue stock and wandering, paid Search, source-deleted reopening,
+paired-stair traversal and receipt-preserving revisits. Its explicitly versioned
+`omission_public_search` v1 test wrapper uses public disclosures while preserving
+Controller revision 7 and the 2,500-iteration navigation-loop cap. This is a topology
+and persistence witness, not general survival or balance qualification; final
+cross-platform CI remains a merge requirement.
+
+Lighting already exists; extend it without replacing TOR
 LOS with whole-room revelation. Typed sight/invisibility, mutual-sight gaze,
 single-use object guise and adjacent timed Search support the authored M/P/X
 cohort. Hallucination and broader secret/discovery systems remain open.

@@ -3,6 +3,7 @@ from scalar_wire import u64
 import json
 import shutil
 import unittest
+from unittest.mock import Mock
 
 from process_harness import (
     ProcessTestCase, ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, ascii_stats_viewport_text, resource, underfoot,
@@ -74,6 +75,10 @@ class StatusConditionHelpers:
                 return current
             if combat(current)["preparation_remaining"] is not None:
                 self.assertTrue(combat(current)["preparation_active"], "finishing requires explicit Resume")
+            # Refresh this socket only after the subject's start is established.
+            refreshed = self.snapshot(peer)
+            self.assertIsNone(refreshed["error"])
+            self.assertTrue(refreshed["readiness"]["admission"])
             self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
         self.fail("The authored work did not finish within its bounded active duration")
 
@@ -590,6 +595,57 @@ class NativeStatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         description = inspect()
         self.assertIn("Protection against Crystal Pause from actor 2: 400 active ticks remaining", description)
         self.assertEqual(checkpoint(self, player), protected)
+
+
+class StatusPeerContextTests(unittest.TestCase):
+    @staticmethod
+    def value(*, pending=False, error=None, ready=True, admission=True):
+        return {"error": error, "state": {"observation": {"ready": ready,
+                "combat": {"preparation_remaining": "100" if pending else None,
+                           "preparation_active": pending, "recovery_remaining": "0"}}},
+                "readiness": {"admission": admission, "revision": "73"}}
+
+    def exercise(self, *, complete=False, peer=None, wait_error=None):
+        owner = StatusConditionProcesses(
+            "test_zero_damage_pause_retains_holds_and_resumes_once_after_source_free_restart")
+        state = {"complete": complete, "fresh": False}
+        calls = []
+        def snapshot(client):
+            calls.append(client + " snapshot")
+            if client == "peer":
+                state["fresh"] = True
+                return peer or self.value()
+            return self.value(pending=not state["complete"])
+        def act(client, action):
+            self.assertEqual((client, action), ("peer", {"type": "wait"}))
+            self.assertTrue(state["fresh"], "finish reused the peer's stale context")
+            calls.append("peer Wait")
+            state["complete"] = True
+            return {"error": wait_error}
+        owner.snapshot = Mock(side_effect=snapshot)
+        owner.act = Mock(side_effect=act)
+        return owner, calls
+
+    def test_already_complete_positive_submits_no_peer_action(self):
+        owner, calls = self.exercise(complete=True)
+        self.assertTrue(observation(owner.finish("subject", "peer"))["ready"])
+        self.assertEqual(calls, ["subject snapshot"])
+        owner.act.assert_not_called()
+
+    def test_active_subject_refreshes_peer_before_one_checked_wait(self):
+        owner, calls = self.exercise()
+        owner.finish("subject", "peer")
+        self.assertEqual(calls, ["subject snapshot", "peer snapshot", "peer Wait", "subject snapshot"])
+        owner.act.assert_called_once_with("peer", {"type": "wait"})
+
+    def test_bad_peer_snapshot_cannot_submit_or_retry_wait(self):
+        for peer in [self.value(error="snapshot rejected"), self.value(admission=False)]:
+            with self.subTest(peer=peer):
+                owner, calls = self.exercise(peer=peer)
+                with self.assertRaises(AssertionError):
+                    owner.finish("subject", "peer")
+                self.assertEqual(calls, ["subject snapshot", "peer snapshot"])
+                owner.act.assert_not_called()
 
 
 if __name__ == "__main__":

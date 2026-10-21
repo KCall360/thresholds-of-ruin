@@ -197,7 +197,7 @@ fn copy_package_preserves_modular_regionless_source_closure() {
     std::fs::write(
         original.join("scenario.toml"),
         r#"
-format = 29
+format = 30
 id = "copy-compact"
 version = "1.0"
 ruleset = "rules/nested/base.toml"

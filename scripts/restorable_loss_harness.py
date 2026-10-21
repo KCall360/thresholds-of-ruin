@@ -25,6 +25,23 @@ class LossHelpers:
                     and int(combat(frame)["recovery_remaining"]) == 0):
                 return frame
             self.assertIsNotNone(peer, "a solo action should finish before its next admission")
+            if combat(frame)["preparation_remaining"] is not None and not combat(frame)["preparation_active"]:
+                self.assertEqual(len(frame["intentions"]), 1)
+                identity = frame["intentions"][0]["intention"]
+                def active(value):
+                    self.assertIsNone(value["error"])
+                    self.assertNotEqual((value.get("message") or {}).get("type"), "error")
+                    self.assertFalse(combat(value)["terminal"])
+                    self.assertEqual(len(value["intentions"]), 1)
+                    pending, = value["intentions"]
+                    self.assertEqual(pending["intention"], identity)
+                    self.assertIn(pending["phase"], ("queued", "started"))
+                    return pending["phase"] == "started" and combat(value)["preparation_active"]
+                if not active(frame):
+                    frame = self.frame(player, active)
+            refreshed = self.snapshot(peer)
+            self.assertIsNone(refreshed["error"])
+            self.assertTrue(refreshed["readiness"]["admission"])
             self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
         self.fail("the authored action did not finish within its bounded preparation")
 

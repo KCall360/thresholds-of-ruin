@@ -1812,7 +1812,26 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
 
     #[test]
     fn room_gold_source_free_package_preserves_activated_and_unentered_scope_metadata() {
-        let package = changed(&fixture(), |value| {
+        room_gold_source_free_metadata(None);
+    }
+
+    #[test]
+    fn omitted_rooms_have_no_gold_receipts_or_metadata_after_source_free_restore() {
+        room_gold_source_free_metadata(Some(3));
+    }
+
+    fn room_gold_source_free_metadata(omissions: Option<u32>) {
+        let baseline = fixture();
+        baseline.check().unwrap();
+        let package = changed(&baseline, |value| {
+            if let Some(count) = omissions {
+                let recipe = &mut value["generation_recipes"]["exploration"];
+                recipe["version"] = json!(4);
+                recipe["stages"].as_array_mut().unwrap().insert(6, json!({
+                    "id":"room_omissions", "version":1,
+                    "operation":{"kind":"room_omissions", "config":{"count":[count,count]}}
+                }));
+            }
             value["archetypes"]["marker"]["stackable"] = json!(true);
             value["floor_activation"]["profiles"]["plain"]["stages"] = json!([{
                 "kind":"room_items","id":"room-gold","version":1,
@@ -1833,6 +1852,18 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
             cold.activation_scopes().collect::<Vec<_>>()
         );
         let generated = package.generated_group("dungeon/2", 42).unwrap();
+        let source_free_future = restored.generated_group("dungeon/2", 42).unwrap();
+        assert_eq!(
+            serde_json::to_value(&generated.regions).unwrap(),
+            serde_json::to_value(&source_free_future.regions).unwrap()
+        );
+        assert_eq!(generated.rooms, source_free_future.rooms);
+        assert_eq!(
+            generated.regions.len(),
+            9,
+            "omissions never remove region identities"
+        );
+        assert_eq!(generated.rooms.len(), 9 - omissions.unwrap_or(0) as usize);
         let definitions: Vec<_> = generated.regions.values().collect();
         let unentered = package
             .activation_scope("dungeon/2", 2, &definitions, &generated.rooms)
@@ -1855,6 +1886,21 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
             assert!(!configuration.valid_scope(&corrupt));
         }
         let record = warm.activations_since(0).unwrap().remove(0);
+        let initial = warm
+            .activation_scopes()
+            .find(|scope| scope.scope == "dungeon/1")
+            .unwrap();
+        assert_eq!(initial.members.len(), 9);
+        assert_eq!(initial.rooms.len(), 9 - omissions.unwrap_or(0) as usize);
+        let runtime::StageResult::RoomsEvaluated { rooms } = &record.decisions[0].result else {
+            panic!("room Gold must decide once for each real room");
+        };
+        assert_eq!(
+            rooms.iter().map(|room| room.room).collect::<Vec<_>>(),
+            initial.rooms.iter().map(|room| room.id).collect::<Vec<_>>()
+        );
+        assert!(initial.rooms.windows(2).all(|pair| pair[0].id < pair[1].id));
+        assert!(initial.rooms.iter().all(|room| !room.cells.is_empty()));
         assert!(configuration.valid_record(&record));
         let mut missing_room = record;
         let runtime::StageResult::RoomsEvaluated { rooms } = &mut missing_room.decisions[0].result

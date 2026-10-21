@@ -184,10 +184,16 @@ def main(argv=None):
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument('--waive-local-graphical', action='append', metavar='MANIFEST')
     parser.add_argument('--workers', type=int, default=1)
+    parser.add_argument('--ci-python-shard', type=int, choices=(1, 2))
     parser.add_argument('--from-file', metavar='IDS')
     local, arguments = parser.parse_known_args(sys.argv[1:] if argv is None else argv)
     if local.workers < 1:
         parser.error('--workers must be at least 1')
+    if local.ci_python_shard is not None and (local.from_file or local.waive_local_graphical
+            or os.environ.get('TOR_TEST_PROFILE') != 'release' or not os.environ.get('TOR_TEST_TIMINGS')):
+        parser.error('--ci-python-shard requires complete release discovery and timing evidence')
+    if local.ci_python_shard is not None and arguments != ['discover', '-s', 'scripts', '-p', 'test_*process.py', '-v']:
+        parser.error('--ci-python-shard requires the original complete release discovery')
     if local.from_file:
         # Parallel workers receive their test names in a file: a long batch
         # would exceed the Windows command-line limit.
@@ -223,6 +229,15 @@ def main(argv=None):
                 super().__init__(sink=record if handle else None, **kwargs)
 
             def run(self, suite):
+                shard = None
+                if local.ci_python_shard is not None:
+                    import ci_python_shards
+                    tests = list(parallel_tests.flatten(suite))
+                    full = [test.id() for test in tests]
+                    selected = set(ci_python_shards.selection(full, local.ci_python_shard))
+                    shard = ci_python_shards.metadata(full, local.ci_python_shard,
+                        os.environ.get('GITHUB_SHA'), os.environ.get('GITHUB_RUN_ID'))
+                    suite = unittest.TestSuite(test for test in tests if test.id() in selected)
                 if handle is not None:
                     try:
                         ids = [test.id() for test in islice(parallel_tests.flatten(suite), 10001)]
@@ -230,7 +245,8 @@ def main(argv=None):
                             ids = None
                     except Exception:
                         ids = None  # Reporting cannot replace the existing runner's result.
-                    record({'kind': 'selection', 'seconds': 0.0, 'test_ids': ids})
+                    record({'kind': 'selection', 'seconds': 0.0, 'test_ids': ids,
+                            **({'shard': shard} if shard is not None else {})})
                 if local.workers > 1:
                     successful = parallel_tests.run(suite, workers=local.workers, stream=self.stream,
                                                     sink=record if handle else None, failfast=self.failfast,

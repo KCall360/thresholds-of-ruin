@@ -202,8 +202,27 @@ class ProceduralWorldProcesses(ProcessTestCase):
         self.assertEqual(underfoot(ascended["state"])["key"], underfoot(first_stair)["key"])
 
     def test_unvisited_generation_and_generated_mutations_survive_source_deletion(self):
+        self.unvisited_generation_and_mutations(False)
+
+    def test_omitted_unvisited_floor_and_mutations_survive_source_deletion(self):
+        self.unvisited_generation_and_mutations(True)
+
+    def unvisited_generation_and_mutations(self, omissions):
         from process_harness import underfoot
         package = self.compact("pinned-future", 'kind = "open"\nmax_depth = 1000000')
+        if omissions:
+            baseline = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                      capture_output=True, text=True, timeout=60)
+            self.assertEqual(baseline.returncode, 0, baseline.stdout + baseline.stderr)
+            import tomllib
+            from arena_matrix import toml_source
+            path = package / "scenario.toml"
+            manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+            recipe = manifest["generation_recipes"]["exploration"]
+            recipe["version"] = 4
+            recipe["stages"].insert(6, {"id": "room_omissions", "version": 1,
+                "operation": {"kind": "room_omissions", "config": {"count": [1, 1]}}})
+            path.write_text(toml_source(manifest), encoding="utf-8")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                 capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -330,3 +330,71 @@ class DisclosedFloorGraph:
                 remaining.discard(key)
                 stack.append((key, iter(children[key])))
         return route
+
+
+def observe_walkthrough_boundaries(view, boundaries):
+    """Remember only adjacent opaque edges actually present in public frames."""
+    visible = {(cell["position"]["x"], cell["position"]["y"]): cell
+               for cell in view["visible_cells"] if cell["position"]["z"] == 0}
+    for (x, y), cell in visible.items():
+        if cell["wall"]:
+            continue
+        edges = boundaries.setdefault(cell["key"], {})
+        for dx, dy, direction in DisclosedFloorGraph.directions:
+            neighbor = visible.get((x + dx, y + dy))
+            if neighbor is not None:
+                if neighbor["wall"]:
+                    edges[direction] = neighbor["key"]
+                else:
+                    edges.pop(direction, None)
+
+
+def walkthrough_search_targets(graph, searched, boundaries, scanned_boundaries):
+    """Prefer a paid check covering an unscanned, publicly observed opaque edge."""
+    remaining = graph.edges.keys() - searched
+    preferred = {key for key in remaining
+                 if set(boundaries.get(key, {}).values()) - scanned_boundaries}
+    return preferred or remaining
+
+
+class DisclosedSearchSweep:
+    """Public-only paid Search coverage retained across transport sessions."""
+    def __init__(self):
+        self.searched = set()
+        self.boundaries = {}
+        self.scanned_boundaries = set()
+
+    def observe(self, view):
+        observe_walkthrough_boundaries(view, self.boundaries)
+
+    def dump(self):
+        return {"searched": sorted(self.searched),
+                "boundaries": {key: dict(sorted(edges.items()))
+                               for key, edges in sorted(self.boundaries.items())},
+                "scanned_boundaries": sorted(self.scanned_boundaries)}
+
+    def record_search(self, state):
+        view = state["observation"]
+        here = next(cell["key"] for cell in view["visible_cells"]
+                    if cell["position"] == {"x": 0, "y": 0, "z": 0})
+        self.searched.add(here)
+        self.scanned_boundaries.update(self.boundaries.get(here, {}).values())
+
+    def choose(self, state, graph):
+        view = state["observation"]
+        here = next(cell["key"] for cell in view["visible_cells"]
+                    if cell["position"] == {"x": 0, "y": 0, "z": 0})
+        remaining = graph.edges.keys() - self.searched
+        targets = walkthrough_search_targets(graph, self.searched, self.boundaries,
+                                             self.scanned_boundaries)
+        route = graph.route_to_any(here, targets)
+        if route is None and targets != remaining:
+            route = graph.route_to_any(here, remaining)
+        if route is None:
+            raise AssertionError("Search sweep exhausted its disclosed reachable cells")
+        if route:
+            return disclosed_step_action(view, route[0][1], wait_for_restraint=True)
+        self.record_search(state)
+        return {"type": "use_ability", "id": "rogue.search", "invocation": {
+            "aim": {"kind": "actor_target", "target": view["self_target"]},
+            "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}}

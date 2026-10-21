@@ -1,5 +1,5 @@
 # Ordinary authored scenario; validate after every edit.
-format = 29
+format = 30
 id = "text-adventure-arrival-hazard"
 version = "1.0"
 ruleset = "rules.toml"

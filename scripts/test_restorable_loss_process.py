@@ -2,6 +2,7 @@
 from scalar_wire import u64
 import shutil
 import unittest
+from unittest.mock import Mock
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN
 from restorable_loss_package import DRAIN_HD, WOUND, ZERO_WORD_SEED, prepare
@@ -198,6 +199,91 @@ class RestorableLossAsciiProcesses(LossHelpers, ProcessTestCase):
         self.assertEqual(losses(final)["maximum_health"], 0)
         self.assertEqual(u64(combat(final)["max_hp"]) - u64(combat(final)["hp"]), 2)
         self.assertTrue(final["window_open"])
+
+
+class LossFinishPeerTests(unittest.TestCase):
+    @staticmethod
+    def value(*, active=False, done=False, recovery=False, identity="original", error=None):
+        return {"error": error, "state": {"observation": {"ready": done,
+                "combat": {"preparation_remaining": None if done or recovery else "100",
+                           "preparation_active": active, "terminal": False,
+                           "recovery_remaining": "100" if recovery else "0"}}},
+                "intentions": [] if done or recovery else [{"intention": identity,
+                    "phase": "started" if active else "queued"}],
+                "readiness": {"admission": True, "revision": "4" if active else "3"}}
+
+    def harness(self, *, active=False, done=False, recovery=False, started=None, peer_error=None):
+        owner = RestorableLossProcesses("test_pending_restoration_consumable_keeps_frozen_effects_and_one_hold_across_restart")
+        state = {"active": active, "fresh": False, "done": done}
+        calls = []
+        def snapshot(client):
+            calls.append(client + " snapshot")
+            if client == "peer":
+                self.assertTrue(state["active"] or recovery, "peer refreshed before original work started")
+                state["fresh"] = True
+                return {"error": peer_error, "state": {"observation": {"ready": True}},
+                        "readiness": {"admission": True, "revision": "73"}}
+            return self.value(active=state["active"], done=state["done"], recovery=recovery and not state["done"])
+        def request(client, action):
+            self.assertEqual(action, {"type": "snapshot"})
+            return snapshot(client)
+        def frame(client, predicate, seconds=15):
+            self.assertEqual((client, seconds), ("player", 15))
+            for current in [self.value(), started or self.value(active=True)]:
+                if predicate(current):
+                    state["active"] = True
+                    calls.append("started")
+                    return current
+            raise RuntimeError("original pending work never started")
+        def act(client, action):
+            self.assertEqual((client, action), ("peer", {"type": "wait"}))
+            self.assertTrue(state["active"] or recovery, "peer Wait raced owner start")
+            self.assertTrue(state["fresh"], "peer Wait reused stale context")
+            state["done"] = True
+            calls.append("peer Wait")
+            return {"error": None}
+        owner.snapshot = Mock(side_effect=snapshot)
+        owner.request = Mock(side_effect=request)
+        owner.frame = Mock(side_effect=frame)
+        owner.act = Mock(side_effect=act)
+        return owner, calls
+
+    def test_already_complete_positive_needs_no_peer_turn(self):
+        owner, calls = self.harness(done=True)
+        owner.finish("player", "peer")
+        self.assertEqual(calls, ["player snapshot"])
+        owner.act.assert_not_called()
+        owner.frame.assert_not_called()
+
+    def test_queued_resume_waits_original_start_then_fresh_peer_and_one_turn(self):
+        owner, calls = self.harness()
+        owner.finish("player", "peer")
+        self.assertEqual(calls, ["player snapshot", "started", "peer snapshot", "peer Wait", "player snapshot"])
+        owner.frame.assert_called_once()
+        owner.act.assert_called_once_with("peer", {"type": "wait"})
+
+    def test_replacement_or_rejected_start_refuses_peer_turn(self):
+        for started in [self.value(active=True, identity="replacement"), self.value(active=True, error="rejected")]:
+            with self.subTest(started=started):
+                owner, _ = self.harness(started=started)
+                with self.assertRaises(AssertionError):
+                    owner.finish("player", "peer")
+                owner.frame.assert_called_once()
+                owner.act.assert_not_called()
+
+    def test_peer_snapshot_error_refuses_turn(self):
+        owner, calls = self.harness(active=True, peer_error="snapshot rejected")
+        with self.assertRaises(AssertionError):
+            owner.finish("player", "peer")
+        self.assertEqual(calls, ["player snapshot", "peer snapshot"])
+        owner.act.assert_not_called()
+
+    def test_recovery_only_progress_does_not_demand_active_preparation(self):
+        owner, calls = self.harness(recovery=True)
+        owner.finish("player", "peer")
+        self.assertEqual(calls, ["player snapshot", "peer snapshot", "peer Wait", "player snapshot"])
+        owner.frame.assert_not_called()
+        owner.act.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **59**, save format **56**, scenario format **29**, ruleset
-**`interactions-v51`**, scenario validator **`tor-scenario-41`**. Unsupported
+**Current formats:** protocol **59**, save format **57**, scenario format **30**, ruleset
+**`interactions-v51`**, scenario validator **`tor-scenario-42`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **24**, ContentPackage **26** and
+The independent compiled inputs use RulesInput **24**, ContentPackage **27** and
 RegionInput **8**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -580,8 +580,10 @@ unchanged scene-build counts alone do not establish per-fragment lookup cost.
 Build on the generated-floor foundation and finite starter content rather than
 recreate them. Its
 ongoing performance acceptance, including persistence tails, is distinct from
-whether floor generation exists. Add omitted rooms, mazes, secrets and traps as
-shared support arrives. Extend shared survival, items, ranged/perception and
+whether floor generation exists. Secrets and traps are implemented. Optional strict
+room omissions are available to authors but are not enabled in the live Rogue
+package; mazes and live omission tuning remain separate work. Extend shared
+survival, items, ranged/perception and
 species behavior; qualify the complete 26-species roster and pressured runs. Work beyond the accepted 256-HD guard, including
 exact-row deep storage and disclosure paging, is deferred rather than a
 prerequisite for functional Rogue.

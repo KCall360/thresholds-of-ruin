@@ -662,6 +662,8 @@ def main(argv=None):
                         help="CI-only profile of full; both profiles remain required")
     parser.add_argument("--ci-partition", choices=CI_PARTITIONS,
                         help="CI-only Rust or Python/native stages; requires full and --ci-profile; all partitions are required")
+    parser.add_argument("--ci-python-shard", type=int, choices=(1, 2),
+                        help="Explicit complete Windows-release Python shard; both are required")
     parser.add_argument("--cross-head-proof", type=Path, help="CI-only optional current-target reuse proof; invalid proof runs full")
     parser.add_argument("--base", default="origin/main", help="Compare against this ref to find changes")
     parser.add_argument("--jobs", type=int, help="CARGO_BUILD_JOBS; chosen from free memory by default")
@@ -684,6 +686,9 @@ def main(argv=None):
         parser.error("--ci-profile requires the full tier")
     if args.ci_partition and (args.tier != "full" or args.ci_profile is None):
         parser.error("--ci-partition requires full and --ci-profile")
+    if args.ci_python_shard is not None and (sys.platform != "win32" or args.tier != "full" or args.ci_profile != "release"
+            or args.ci_partition != "python" or args.cross_head_proof or args.fail_fast or args.rerun_failed):
+        parser.error("--ci-python-shard requires fresh complete Windows release Python verification")
     if args.cross_head_proof and (args.tier != "full" or not args.ci_partition or args.fail_fast or args.rerun_failed):
         parser.error("--cross-head-proof requires an ordinary full CI partition")
     if args.waive_local_mouse and (args.ci_profile or os.environ.get("CI")):
@@ -703,6 +708,8 @@ def main(argv=None):
     label = f"full-ci-{args.ci_profile}" if args.ci_profile else args.tier
     if args.ci_partition:
         label += f"-{args.ci_partition}"
+    if args.ci_python_shard is not None:
+        label += f"-shard-{args.ci_python_shard}"
 
     metadata = json.loads(subprocess.run(
         ["cargo", "metadata", "--format-version", "1", "--no-deps", "--locked"],
@@ -730,6 +737,9 @@ def main(argv=None):
                       and not os.environ.get("DISPLAY") and graphical_manifest is None,
                  ci_profile=args.ci_profile, ci_partition=args.ci_partition,
                  workers=workers, failfast=args.fail_fast)
+    if args.ci_python_shard is not None:
+        steps = [(name, [*command[:2], "--ci-python-shard", str(args.ci_python_shard), *command[2:]], env)
+                 if name == "process-release" else (name, command, env) for name, command, env in steps]
     priority = changed_test_modules(paths)
     if priority:
         steps = [(name, command, {**env, "TOR_TEST_PRIORITY": ",".join(priority)}) for name, command, env in steps]
@@ -835,7 +845,7 @@ def main(argv=None):
     waived = [result["step"] for result in results if result["note"].startswith("WAIVED")]
     not_run = [result["step"] for result in results if result["code"] is None]
     evidence = {"schema_version": 1, "tier": args.tier, "ci_profile": args.ci_profile,
-                "ci_partition": args.ci_partition,
+                "ci_partition": args.ci_partition, "ci_python_shard": args.ci_python_shard,
                 "scope": "ci-partition" if args.ci_profile else "local", "jobs": jobs,
                 "test_workers": workers, "planned_steps": [name for name, _, _ in steps],
                 "receipt_completeness": receipt_completeness(steps, results, logs, jobs),

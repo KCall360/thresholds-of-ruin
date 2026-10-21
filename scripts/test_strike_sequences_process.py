@@ -4,6 +4,7 @@ import json
 import struct
 import threading
 import unittest
+from unittest.mock import Mock
 
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, underfoot
 from strike_sequence_package import sequence_package
@@ -82,6 +83,31 @@ def prefix(frame):
 
 
 class StrikeSequenceProcesses(ProcessTestCase):
+    def sequence_peer_wait(self, target):
+        # The owner's lifecycle does not synchronize this independent socket.
+        current = self.request(target, {"type": "snapshot"})
+        self.assertIsNone(current["error"])
+        self.assertTrue(current["state"]["observation"]["ready"])
+        self.assertTrue(current["readiness"]["admission"])
+        self.assertIsNone(self.act(target, {"type": "wait"})["error"])
+
+    def resume_with_peer_wait(self, player, target, identity):
+        def active(frame):
+            self.assertIsNone(frame["error"])
+            self.assertNotEqual((frame.get("message") or {}).get("type"), "error")
+            self.assertFalse(combat(frame)["terminal"])
+            self.assertEqual(len(frame["intentions"]), 1)
+            pending, = frame["intentions"]
+            self.assertEqual(pending["intention"], identity)
+            self.assertIn(pending["phase"], ("queued", "started"))
+            self.assertTrue(prefix(frame))
+            return pending["phase"] == "started" and combat(frame)["preparation_active"]
+
+        resumed = self.command(player, {"type": "resume_intention"})
+        if not active(resumed):
+            self.frame(player, active)
+        self.sequence_peer_wait(target)
+
     def test_headless_saved_prefix_reconnect_resume_and_spectator_disclosure(self):
         package = sequence_package(self, autonomous=False)
         server = self.server(scenario=package)
@@ -159,7 +185,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         self.assertEqual(retry["cursor"], saved["cursor"])
         self.assertEqual(retry["message"]["context"]["cursor"], saved["cursor"])
         # The other ordinary controlled actor permits the remaining due strikes.
-        self.act(target, {"type": "wait"})
+        self.sequence_peer_wait(target)
         second = self.frame(player, lambda frame: event(frame, 1) is not None)
         self.assertEqual(second["intentions"][0]["phase"], "started")
         self.act(target, {"type": "wait"})
@@ -220,8 +246,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         self.assertEqual(restored["intentions"][0]["intention"], identity)
         observer, watched = self.client(SPECTATOR_TOKEN)
         self.assertEqual(combat(watched)["sequence"], combat(restored)["sequence"])
-        self.assertIsNone(self.command(player, {"type": "resume_intention"})["error"])
-        self.act(target, {"type": "wait"})
+        self.resume_with_peer_wait(player, target, identity)
         self.frame(player, lambda frame: event(frame, 1) is not None)
         self.act(target, {"type": "wait"})
         finished = self.frame(player, lambda frame: combat(frame)["sequence"] is None and not frame["intentions"])
@@ -312,6 +337,123 @@ class NativeStrikeSequenceProcesses(ProcessTestCase):
         authoritative = self.request(observer, {"type": "snapshot"})
         self.assertEqual(u64(combat(authoritative)["hp"]), hp)
         self.assertFalse(authoritative["state"]["wizard_game"])
+
+
+class ResumedSequencePeerTests(unittest.TestCase):
+    @staticmethod
+    def frame(*, active=False, phase="queued", identity="original", revision="3",
+              error=None):
+        return {"error": error, "state": {"observation": {"tick": "150", "ready": False,
+                "combat": {"preparation_active": active, "terminal": False,
+                           "sequence": {"completed": 1}}}},
+                "intentions": [{"intention": identity, "phase": phase}],
+                "readiness": {"revision": revision, "admission": True}}
+
+    def harness(self, *, already_active=False, resumed=None, wait_error=None,
+                peer_error=None, peer_ready=True, peer_admission=True):
+        owner = StrikeSequenceProcesses("test_natural_source_saved_prefix_resumes_only_unpaid_strikes")
+        queued = self.frame()
+        started = self.frame(active=True, phase="started", revision="4")
+        state = {"active": already_active, "fresh": already_active}
+        calls = []
+        accepted = started if already_active else queued
+        owner.command = Mock(return_value=accepted)
+
+        def frame(_player, predicate, seconds=15):
+            self.assertEqual(seconds, 15)
+            for current in [queued, resumed or started]:
+                if predicate(current):
+                    state["active"] = True
+                    calls.append("started")
+                    return current
+            raise RuntimeError("Resumed original intention was never selected")
+
+        def request(peer, value):
+            self.assertEqual((peer, value), ("peer", {"type": "snapshot"}))
+            self.assertTrue(state["active"], "peer refresh happened before owner start")
+            state["fresh"] = True
+            calls.append("peer snapshot")
+            return {"error": peer_error, "state": {"observation": {"tick": "150", "ready": peer_ready}},
+                    "readiness": {"admission": peer_admission, "revision": "73"}}
+
+        def act(peer, action):
+            self.assertEqual((peer, action), ("peer", {"type": "wait"}))
+            self.assertTrue(state["active"], "peer Wait raced ahead of resumed owner start")
+            self.assertTrue(state["fresh"], "peer Wait reused stale observation despite admission")
+            calls.append("peer Wait")
+            return {"error": wait_error}
+
+        owner.frame = Mock(side_effect=frame)
+        owner.request = Mock(side_effect=request)
+        owner.act = Mock(side_effect=act)
+        return owner, calls
+
+    def test_already_started_positive_keeps_exactly_one_resume_and_wait(self):
+        owner, _ = self.harness(already_active=True)
+        owner.resume_with_peer_wait("player", "peer", "original")
+        owner.command.assert_called_once_with("player", {"type": "resume_intention"})
+        owner.act.assert_called_once_with("peer", {"type": "wait"})
+        owner.frame.assert_not_called()
+
+    def test_delayed_start_precedes_fresh_peer_context_and_one_checked_wait(self):
+        owner, calls = self.harness()
+        owner.resume_with_peer_wait("player", "peer", "original")
+        self.assertEqual(calls, ["started", "peer snapshot", "peer Wait"])
+        owner.command.assert_called_once_with("player", {"type": "resume_intention"})
+        owner.act.assert_called_once_with("peer", {"type": "wait"})
+        owner.frame.assert_called_once()
+
+    def test_already_started_saved_prefix_refreshes_peer_without_another_resume(self):
+        owner, calls = self.harness(already_active=True)
+        owner.sequence_peer_wait("peer")
+        self.assertEqual(calls, ["peer snapshot", "peer Wait"])
+        owner.command.assert_not_called()
+        owner.frame.assert_not_called()
+        owner.request.assert_called_once_with("peer", {"type": "snapshot"})
+        owner.act.assert_called_once_with("peer", {"type": "wait"})
+
+    def test_rejected_wait_is_not_ignored_or_retried(self):
+        owner, _ = self.harness(already_active=True, wait_error="StaleRevision")
+        with self.assertRaises(AssertionError):
+            owner.resume_with_peer_wait("player", "peer", "original")
+        owner.command.assert_called_once()
+        owner.act.assert_called_once()
+
+    def test_terminal_and_raw_error_owner_frames_refuse_peer_action(self):
+        terminal = self.frame(active=True, phase="started")
+        terminal["state"]["observation"]["combat"]["terminal"] = True
+        raw_error = self.frame(active=True, phase="started")
+        raw_error["message"] = {"type": "error", "message": "resume rejected"}
+        for resumed in [terminal, raw_error]:
+            with self.subTest(resumed=resumed):
+                owner, _ = self.harness(resumed=resumed)
+                with self.assertRaises(AssertionError):
+                    owner.resume_with_peer_wait("player", "peer", "original")
+                owner.frame.assert_called_once()
+                owner.request.assert_not_called()
+                owner.act.assert_not_called()
+
+    def test_invalid_fresh_peer_snapshot_refuses_wait(self):
+        for values in ({"peer_error": "snapshot rejected"}, {"peer_ready": False},
+                       {"peer_admission": False}):
+            with self.subTest(values=values):
+                owner, _ = self.harness(already_active=True, **values)
+                with self.assertRaises(AssertionError):
+                    owner.resume_with_peer_wait("player", "peer", "original")
+                owner.command.assert_called_once()
+                owner.request.assert_called_once_with("peer", {"type": "snapshot"})
+                owner.act.assert_not_called()
+
+    def test_changed_identity_and_resume_error_refuse_peer_action(self):
+        for resumed in [self.frame(active=True, phase="started", identity="replacement"),
+                        self.frame(active=True, phase="started", error="resume rejected")]:
+            with self.subTest(resumed=resumed):
+                owner, _ = self.harness(resumed=resumed)
+                with self.assertRaises(AssertionError):
+                    owner.resume_with_peer_wait("player", "peer", "original")
+                owner.frame.assert_called_once()
+                owner.request.assert_not_called()
+                owner.act.assert_not_called()
 
 
 if __name__ == "__main__":

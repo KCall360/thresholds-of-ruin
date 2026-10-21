@@ -917,17 +917,20 @@ class CiWorkflowContract(unittest.TestCase):
         self.assertRegex(profiles, r"(?m)^        profile: \[debug, release\]$")
         self.assertRegex(profiles, r"(?m)^        partition: \[rust, python\]$")
         self.assertRegex(profiles, r"(?m)^      fail-fast: false$")
-        self.assertRegex(profiles, r"(?m)^        run: python scripts/verify\.py full --ci-profile \$\{\{ matrix\.profile \}\} --ci-partition \$\{\{ matrix\.partition \}\} --cross-head-proof \.local/verify/cross-head\.json$")
+        self.assertIn("run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}", profiles)
         self.assertNotIn("--waive-local-mouse", profiles)
         self.assertNotIn("--waive-local-graphical", profiles)
         self.assertNotIn("continue-on-error", profiles)
-        self.assertNotRegex(profiles, r"(?m)^        (?:exclude|include):")
+        self.assertIn("        exclude:\n          - os: windows-latest\n            profile: release\n            partition: python\n", profiles)
+        for index in (1, 2):
+            self.assertIn(f"            partition: python\n            shard: {index}\n", profiles)
+        self.assertIn("${{ matrix.shard && format('--ci-python-shard {0}', matrix.shard) || '--cross-head-proof .local/verify/cross-head.json' }}", profiles)
 
     def test_cross_head_probe_is_optional_pr_only_and_final_authority_has_read_token(self):
         profiles = self.job("profiles")
         probe = re.search(r"(?ms)^      - name: Prepare bounded prior-head evidence\n(.*?)(?=^      - |\Z)", profiles)
         self.assertIsNotNone(probe)
-        self.assertIn("if: github.event_name == 'pull_request'", probe[1])
+        self.assertIn("if: ${{ !matrix.shard && github.event_name == 'pull_request' }}", probe[1])
         self.assertIn('if python scripts/ci_head_reuse.py', probe[1])
         self.assertIn('"$status" == 130 || "$status" == 143', probe[1])
         verification = re.search(r"(?ms)^      - name: Verify complete profile partition\n(.*?)(?=^      - |\Z)", profiles)
@@ -938,14 +941,14 @@ class CiWorkflowContract(unittest.TestCase):
 
     def test_every_job_and_artifact_has_platform_profile_and_partition_identity(self):
         profiles = self.job("profiles")
-        self.assertIn("    name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})\n", profiles)
-        self.assertIn("          name: verification-${{ matrix.os }}-${{ matrix.profile }}-${{ matrix.partition }}\n", profiles)
+        self.assertIn("    name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.shard && format('python shard {0}', matrix.shard) || matrix.partition }})\n", profiles)
+        self.assertIn("          name: verification-${{ matrix.os }}-${{ matrix.profile }}-${{ matrix.partition }}${{ matrix.shard && format('-shard-{0}', matrix.shard) || '' }}\n", profiles)
         self.assertIn("      - name: Preserve verification logs\n        if: always()\n", profiles)
         self.assertIn("          path: .local/verify/\n", profiles)
 
     def test_partition_budgets_bound_whole_jobs_without_changing_individual_deadlines(self):
         profiles = self.job("profiles")
-        self.assertIn("\n    timeout-minutes: ${{ matrix.partition == 'python' && github.event_name == 'workflow_dispatch' && inputs.measure_windows_candidate && matrix.os == 'windows-latest' && 75 || matrix.partition == 'python' && 40 || 60 }}\n", profiles)
+        self.assertIn("\n    timeout-minutes: ${{ !matrix.shard && matrix.partition == 'python' && github.event_name == 'workflow_dispatch' && inputs.measure_windows_candidate && matrix.os == 'windows-latest' && 75 || matrix.partition == 'python' && 40 || 60 }}\n", profiles)
         self.assertIn("        timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}\n", profiles)
         self.assertIn("        timeout-minutes: 30\n", profiles)
         self.assertNotIn("TOR_TEST_TIMEOUT", profiles)
@@ -990,7 +993,8 @@ class CiWorkflowContract(unittest.TestCase):
         self.assertIn("          PROFILES_RESULT: ${{ needs.profiles.result }}\n", gate)
         self.assertNotIn("continue-on-error", gate)
         # Execute the actual Ubuntu gate, rather than a copied success predicate.
-        commands = re.findall(r"(?m)^        run: \|\n((?:          [^\n]*\n)+)", gate)
+        required = gate.split("      - name: Require the complete selected CI gate", 1)[1]
+        commands = re.findall(r"(?m)^        run: \|\n((?:          [^\n]*\n)+)", required)
         self.assertEqual(len(commands), 1)
         command = "\n".join(line[10:] for line in commands[0].splitlines())
         for outcome in ("success", "failure", "cancelled", "skipped", ""):
@@ -1095,6 +1099,84 @@ class WorkflowShellSelection(unittest.TestCase):
                 CiWorkflowContract().test_required_platform_names_depend_on_every_profile_even_after_failure()
             self.assertEqual(len(calls), 5)
             self.assertTrue(all(command[0] == str(bash) for command in calls))
+
+
+
+class CiPythonShardPlanning(unittest.TestCase):
+    def test_full_release_discovery_is_only_partitioned_at_runner_boundary(self):
+        for index in (1, 2):
+            with self.subTest(index=index), patch.object(verify.subprocess, 'run') as commands, \
+                    patch.object(verify, 'free_memory_gb', return_value=8), \
+                    patch.object(verify.sys, 'platform', 'win32'), \
+                    patch.dict(os.environ, {}, clear=True), redirect_stdout(StringIO()) as output:
+                commands.return_value.stdout = json.dumps(metadata())
+                self.assertEqual(verify.main(['full', '--ci-profile', 'release', '--ci-partition', 'python',
+                                             '--ci-python-shard', str(index), '--dry-run']), 0)
+                text = output.getvalue()
+                self.assertIn(f'--ci-python-shard {index}', text)
+                self.assertIn('discover -s scripts -p test_*process.py -v', text)
+                self.assertIn('cargo build --workspace --bins --locked --release', text)
+                self.assertIn(f'full-ci-release-python-shard-{index}', text)
+
+    def test_shards_reject_partial_profile_reuse_and_failfast_before_inspection(self):
+        base = ['full', '--ci-profile', 'release', '--ci-partition', 'python', '--ci-python-shard', '1']
+        cases = [base + ['--cross-head-proof', 'prior.json'], base + ['--fail-fast'],
+                 base + ['--rerun-failed'], ['push', '--ci-python-shard', '1'],
+                 ['full', '--ci-profile', 'debug', '--ci-partition', 'python', '--ci-python-shard', '1']]
+        for args in cases:
+            with self.subTest(args=args), patch.object(verify.sys, 'platform', 'win32'), \
+                    patch.object(verify.subprocess, 'run') as commands, redirect_stderr(StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    verify.main(args)
+                self.assertEqual(raised.exception.code, 2)
+                commands.assert_not_called()
+
+    def test_shards_reject_non_windows_before_constructing_xvfb_command(self):
+        with patch.object(verify.sys, 'platform', 'linux'), patch.object(verify.subprocess, 'run') as commands, \
+                redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                verify.main(['full', '--ci-profile', 'release', '--ci-partition', 'python', '--ci-python-shard', '1'])
+            self.assertEqual(raised.exception.code, 2)
+            commands.assert_not_called()
+
+    def test_workflow_has_two_isolated_fresh_shards_and_required_artifact_union(self):
+        workflow = (verify.ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
+        profiles = CiWorkflowContract().job('profiles')
+        self.assertEqual(profiles.count('            shard: 1\n'), 1)
+        self.assertEqual(profiles.count('            shard: 2\n'), 1)
+        self.assertNotIn('--test-workers', profiles)
+        for step in ('Adopt independently matched premerge cell when available', 'Prepare bounded prior-head evidence'):
+            block = profiles.split('      - name: ' + step + '\n')[1].split('      - name:', 1)[0]
+            self.assertIn('!matrix.shard', block)
+        gate = CiWorkflowContract().job('check')
+        self.assertIn('Checkout exact source for shard coverage', gate)
+        self.assertIn('ref: ${{ github.sha }}', gate)
+        for index in (1, 2):
+            self.assertIn(f'--name verification-windows-latest-release-python-shard-{index}', gate)
+        self.assertIn('--source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"', gate)
+        self.assertIn('actions: read', gate)
+        self.assertNotIn('continue-on-error', gate)
+        self.assertIn("if: ${{ !matrix.shard && github.event_name == 'pull_request' }}", workflow)
+
+    def test_combined_manual_measurement_rejects_before_profile_or_dependency_work(self):
+        scope = CiWorkflowContract().job('scope')
+        rejection = scope.split('      - name: Reject unsupported combined Windows candidate measurement\n')[1].split('      - name:', 1)[0]
+        self.assertIn("if: github.event_name == 'workflow_dispatch' && inputs.measure_windows_candidate", rejection)
+        self.assertIn('exit 1', rejection)
+        self.assertIn('release shard receipts are not a complete single baseline', rejection)
+        self.assertLess(scope.index('Reject unsupported'), scope.index('Checkout exact source'))
+        for job in ('profiles', 'dependencies'):
+            condition = CiWorkflowContract().job(job).split('    if: ', 1)[1].splitlines()[0]
+            self.assertEqual(condition, "${{ !cancelled() && !(github.event_name == 'workflow_dispatch' && inputs.measure_windows_candidate) && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}")
+            # In particular scope failure must not trigger the ordinary fallback
+            # when the explicit unsupported request caused that failure.
+            for scope_result in ('success', 'failure', 'cancelled', 'skipped'):
+                for docs_only in ('true', 'false', ''):
+                    def permitted(event, requested):
+                        return not (event == 'workflow_dispatch' and requested) and not (scope_result == 'success' and docs_only == 'true')
+                    self.assertFalse(permitted('workflow_dispatch', True))
+                    self.assertEqual(permitted('push', False), not (scope_result == 'success' and docs_only == 'true'))
+
 
 if __name__ == "__main__":
     unittest.main()

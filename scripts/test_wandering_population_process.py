@@ -12,6 +12,7 @@ import subprocess
 import tomllib
 import unittest
 from contextlib import closing
+from unittest.mock import Mock
 
 from arena_matrix import toml_source
 from checkpoint_payload import authoritative_floor_activation, decode_checkpoint_payload
@@ -96,7 +97,29 @@ class WanderingPopulationProcesses(ProcessTestCase):
 
     def paid(self, client, action):
         before = self.snapshot(client)
-        self.assertIsNone(self.act(client, action)["error"])
+        def complete(frame):
+            # act() acknowledges started work, not necessarily its paid effect.
+            # These passive fixtures must not resume or replace interrupted work.
+            self.assertIsNone(frame["error"])
+            message = frame.get("message") or {}
+            self.assertNotEqual(message.get("type"), "error", message)
+            body = (message.get("update") or {}).get("body") or {}
+            rejected = {"paused", "suspended", "failed", "cancelled"}
+            if body.get("type") == "intention":
+                self.assertNotIn(body["status"]["phase"], rejected, body)
+            self.assertFalse(rejected.intersection(
+                status["phase"] for status in frame["intentions"]), frame["intentions"])
+            view = observation(frame)
+            self.assertFalse(view["combat"]["terminal"], view["combat"])
+            readiness = frame["readiness"]
+            return (view["ready"] and not view["combat"]["preparation_active"]
+                    and view["combat"]["preparation_remaining"] is None
+                    and not frame["intentions"] and readiness["admission"]
+                    and not readiness["resume"] and not readiness["cancel"])
+
+        accepted = self.act(client, action)
+        if not complete(accepted):
+            self.frame(client, complete)
         after = self.snapshot(client)
         self.assertGreater(int(observation(after)["tick"]), int(observation(before)["tick"]))
         self.assertTrue(observation(after)["ready"])
@@ -174,6 +197,120 @@ class WanderingPopulationProcesses(ProcessTestCase):
         self.assertLessEqual(len(self.origins(previous, "created")), 8)
         self.assertEqual(len(self.origins(previous, "wandering")), 8)
         self.assertEqual(observation(after)["inventory"][0]["quantity"], "1")
+
+
+class PaidPopulationCompletionTests(unittest.TestCase):
+    """The real paid caller must not confuse started work with completion."""
+
+    @staticmethod
+    def frame(tick, *, phase=None, remaining=None, admission=True,
+              cancel=(), resume=(), error=None, terminal=False, active=None):
+        return {"type": "update", "error": error,
+                "state": {"wizard_game": False, "observation": {
+                    "tick": str(tick), "ready": remaining is None,
+                    "combat": {"terminal": terminal,
+                               "preparation_remaining": remaining,
+                               "preparation_active": phase == "started" if active is None else active}}},
+                "readiness": {"admission": admission, "cancel": list(cancel),
+                              "resume": list(resume), "revision": "2"},
+                "intentions": ([] if phase is None else [
+                    {"intention": "read-1", "phase": phase}])}
+
+    def harness(self, accepted, updates=()):
+        owner = WanderingPopulationProcesses(
+            "test_scheduler_restart_cap_and_paid_created_births_then_blocked_consumption")
+        before, complete = self.frame(9600), self.frame(9700)
+        settled = [accepted is complete or (accepted["error"] is None
+                   and accepted["state"]["observation"]["tick"] == "9700")]
+        snapshots = [0]
+
+        def snapshot(_client):
+            snapshots[0] += 1
+            if snapshots[0] == 1:
+                return before
+            self.assertTrue(settled[0], "paid caller queried a snapshot before completion")
+            return complete
+
+        def wait(_client, predicate, seconds=15):
+            self.assertEqual(seconds, 15)
+            for candidate in updates:
+                if predicate(candidate):
+                    settled[0] = candidate == complete
+                    return candidate
+            self.fail("completion predicate did not accept the final fixture frame")
+
+        owner.snapshot = Mock(side_effect=snapshot)
+        owner.act = Mock(return_value=accepted)
+        owner.frame = Mock(side_effect=wait)
+        return owner, complete
+
+    def test_already_complete_paid_action_keeps_one_submission(self):
+        accepted = self.frame(9700)
+        owner, complete = self.harness(accepted)
+        action = {"type": "read", "item": "creation-page"}
+        self.assertEqual(owner.paid("client", action), complete)
+        owner.act.assert_called_once_with("client", action)
+        owner.frame.assert_not_called()
+        self.assertEqual(owner.snapshot.call_count, 2)
+
+    def test_started_read_waits_through_resolution_and_permission_before_snapshot(self):
+        started = self.frame(9600, phase="started", remaining="100",
+                             admission=False, cancel=("read-1",))
+        resolved = self.frame(9700, cancel=("read-1",))
+        complete = self.frame(9700)
+        owner, _ = self.harness(started, [started, resolved, complete])
+        action = {"type": "read", "item": "creation-page"}
+        self.assertEqual(owner.paid("client", action), complete)
+        owner.act.assert_called_once_with("client", action)
+        owner.frame.assert_called_once()
+        self.assertEqual(owner.snapshot.call_count, 2)
+
+    def test_permission_before_effect_and_final_lifecycle_needs_no_extra_revision(self):
+        started = self.frame(9600, phase="started", remaining="100", admission=False)
+        early_permission = self.frame(9600, phase="started", remaining="100")
+        effect = self.frame(9700, phase="started", active=False)
+        complete = self.frame(9700)
+        owner, _ = self.harness(started, [early_permission, effect, complete])
+        action = {"type": "read", "item": "creation-page"}
+        self.assertEqual(owner.paid("client", action), complete)
+        owner.act.assert_called_once_with("client", action)
+        owner.frame.assert_called_once()
+        self.assertEqual(owner.snapshot.call_count, 2)
+
+    def test_inactive_failure_and_raw_error_messages_cannot_look_complete(self):
+        started = self.frame(9600, phase="started", remaining="100", admission=False)
+        messages = [{"type": "update", "update": {"body": {
+            "type": "intention", "status": {"intention": "read-1", "phase": phase}}}}
+                    for phase in ("failed", "cancelled")]
+        messages.append({"type": "error", "message": "rejected"})
+        for message in messages:
+            with self.subTest(message=message):
+                stopped = self.frame(9700)
+                stopped["message"] = message
+                owner, _ = self.harness(started, [stopped, self.frame(9700)])
+                with self.assertRaises(AssertionError):
+                    owner.paid("client", {"type": "read", "item": "creation-page"})
+                owner.act.assert_called_once()
+                owner.frame.assert_called_once()
+                self.assertEqual(owner.snapshot.call_count, 1)
+
+    def test_delayed_rejection_death_and_interruption_fail_before_snapshot(self):
+        started = self.frame(9600, phase="started", remaining="100",
+                             admission=False, cancel=("read-1",))
+        stops = [self.frame(9600, error="rejected"),
+                 self.frame(9600, terminal=True),
+                 self.frame(9600, phase="paused", remaining="100", resume=("read-1",)),
+                 self.frame(9600, phase="suspended", remaining="100"),
+                 self.frame(9600, phase="failed"),
+                 self.frame(9600, phase="cancelled")]
+        for stopped in stops:
+            with self.subTest(stopped=stopped):
+                owner, _ = self.harness(started, [stopped, self.frame(9700)])
+                with self.assertRaises(AssertionError):
+                    owner.paid("client", {"type": "read", "item": "creation-page"})
+                owner.act.assert_called_once()
+                owner.frame.assert_called_once()
+                self.assertEqual(owner.snapshot.call_count, 1)
 
 
 if __name__ == "__main__":

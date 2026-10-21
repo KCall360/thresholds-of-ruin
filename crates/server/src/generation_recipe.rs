@@ -34,9 +34,30 @@ pub struct GridRoomsPreset {
     pub room_width: [u32; 2],
     pub room_height: [u32; 2],
     pub extra_connections: [u32; 2],
+    pub room_omissions: Option<RoomOmissions>,
     pub lighting: Option<RoomLighting>,
     pub secret_entrances: Option<SecretEntrances>,
     pub hidden_traps: Option<HiddenTraps>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoomOmissions {
+    pub count: [u32; 2],
+}
+
+impl<'de> Deserialize<'de> for RoomOmissions {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            count: [u32; 2],
+        }
+        let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
+        Ok(Self {
+            count: fields.count,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -127,6 +148,14 @@ impl GridRoomsPreset {
             ("corridors", Operation::Corridors),
             ("stairs", Operation::Stairs),
         ];
+        if let Some(config) = &self.room_omissions {
+            stages.push((
+                "room_omissions",
+                Operation::RoomOmissions {
+                    config: config.clone(),
+                },
+            ));
+        }
         if let Some(lighting) = &self.lighting {
             stages.push((
                 "lighting",
@@ -153,7 +182,9 @@ impl GridRoomsPreset {
             ));
         }
         let recipe = Recipe {
-            version: if self.secret_entrances.is_some() || self.hidden_traps.is_some() {
+            version: if self.room_omissions.is_some() {
+                4
+            } else if self.secret_entrances.is_some() || self.hidden_traps.is_some() {
                 3
             } else if self.lighting.is_some() {
                 2
@@ -204,6 +235,9 @@ pub enum Operation {
     },
     Corridors,
     Stairs,
+    RoomOmissions {
+        config: RoomOmissions,
+    },
     RoomLighting {
         darkness_roll: u32,
         darkness_start: u32,
@@ -242,10 +276,13 @@ pub(crate) fn check_group(group: &GenerationGroup) -> Result<(), Failure> {
 pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
     if !((recipe.version == 1 && recipe.stages.len() == 6)
         || (recipe.version == 2 && recipe.stages.len() == 7)
-        || (recipe.version == 3 && (7..=9).contains(&recipe.stages.len())))
+        || (recipe.version == 3 && (7..=9).contains(&recipe.stages.len()))
+        || (recipe.version == 4
+            && (7..=10).contains(&recipe.stages.len())
+            && matches!(recipe.stages[6].operation, Operation::RoomOmissions { .. })))
     {
         return Err(fail(
-            "Recipe requires ordered geometry, then optional lighting, secret entrances and traps",
+            "Recipe requires ordered geometry, optional omissions, lighting, secret entrances and traps",
         ));
     }
     let mut names = BTreeSet::new();
@@ -267,12 +304,18 @@ pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
             | (Operation::GridPartition, 1)
             | (Operation::Corridors, 4)
             | (Operation::Stairs, 5) => true,
-            (Operation::RoomLighting { darkness_roll, .. }, 6) => {
+            (Operation::RoomOmissions { config }, 6) if recipe.version == 4 => {
+                config.count[0] <= config.count[1]
+                    && config.count[1] < MAX_GRID_SIDE * MAX_GRID_SIDE
+            }
+            (Operation::RoomLighting { darkness_roll, .. }, n)
+                if n == if recipe.version == 4 { 7 } else { 6 } =>
+            {
                 extra_order = 1;
                 (1..=10_000).contains(darkness_roll)
             }
             (Operation::SecretEntrances { config }, n)
-                if n >= 6 && recipe.version == 3 && extra_order < 2 =>
+                if n >= 6 && (3..=4).contains(&recipe.version) && extra_order < 2 =>
             {
                 extra_order = 2;
                 config.chance_per_mille <= 1000
@@ -280,7 +323,7 @@ pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
                     && tor_world::Concealment { dc: config.dc }.valid()
             }
             (Operation::HiddenTraps { config }, n)
-                if n >= 6 && recipe.version == 3 && extra_order < 3 =>
+                if n >= 6 && (3..=4).contains(&recipe.version) && extra_order < 3 =>
             {
                 extra_order = 3;
                 config.count[0] <= config.count[1]
@@ -401,6 +444,61 @@ impl RecipeRun<'_> {
             &self.recipe.stages[stage],
             key,
         )
+    }
+
+    fn present_rooms(&self, definitions: &BTreeMap<u64, RegionDef>) -> Result<Vec<bool>, Failure> {
+        let mut present = vec![true; self.group.members.len()];
+        let Some((index, config)) =
+            self.recipe
+                .stages
+                .iter()
+                .enumerate()
+                .find_map(|(index, stage)| {
+                    if let Operation::RoomOmissions { config } = &stage.operation {
+                        Some((index, config))
+                    } else {
+                        None
+                    }
+                })
+        else {
+            return Ok(present);
+        };
+        let mut eligible: Vec<_> = self
+            .group
+            .members
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, id)| {
+                let def = &definitions[id];
+                let protected = def
+                    .generate
+                    .as_ref()
+                    .is_some_and(|g| !g.stair_anchors.is_empty())
+                    || def.anchors.keys().any(|name| {
+                        !def.generate
+                            .as_ref()
+                            .is_some_and(|g| g.boundary_anchors.contains(name))
+                    });
+                (!protected).then_some(slot)
+            })
+            .collect();
+        // Keep one real room even when no authored endpoint protects a slot.
+        let capacity = eligible.len().min(present.len() - 1) as u32;
+        if config.count[0] > capacity {
+            return Err(fail(
+                "Room omission minimum exceeds unprotected slot capacity",
+            ));
+        }
+        let mut rng = self.rng(index, "selection")?;
+        let count =
+            rng.range(config.count[0] as i32, config.count[1].min(capacity) as i32) as usize;
+        // Bounded partial shuffle, without replacement or rejection sampling.
+        for i in 0..count {
+            let j = rng.range(i as i32, eligible.len() as i32 - 1) as usize;
+            eligible.swap(i, j);
+            present[eligible[i]] = false;
+        }
+        Ok(present)
     }
 
     fn room(&self, def: &RegionDef) -> Result<Room, Failure> {
@@ -573,6 +671,7 @@ pub fn materialize_with_feature_bases(
         seed,
     };
     let mut open = BTreeSet::new();
+    let present = run.present_rooms(&definitions)?;
     let mut centers = Vec::new();
     let mut room_cells = Vec::new();
     for (slot, id) in group.members.iter().enumerate() {
@@ -587,8 +686,12 @@ pub fn materialize_with_feature_bases(
             .iter()
             .map(|&(x, y)| (x + offset.0, y + offset.1))
             .collect();
-        open.extend(cells.iter().copied());
-        room_cells.push(room.cells);
+        if present[slot] {
+            open.extend(cells.iter().copied());
+            room_cells.push(room.cells);
+        } else {
+            room_cells.push(Vec::new());
+        }
         centers.push((room.center.0 + offset.0, room.center.1 + offset.1));
     }
     let mut edges = Vec::new();
@@ -638,11 +741,12 @@ pub fn materialize_with_feature_bases(
         &recipe.stages[4],
         "corridors",
     )?;
+    let mut corridor_cells = BTreeSet::new();
     for (a, b) in connected {
         let (mut x, mut y) = centers[a];
         let (tx, ty) = centers[b];
         let horizontal_first = rng.next() & 1 == 0;
-        open.insert((x, y));
+        corridor_cells.insert((x, y));
         for horizontal in [horizontal_first, !horizontal_first] {
             while if horizontal { x != tx } else { y != ty } {
                 if horizontal {
@@ -650,10 +754,11 @@ pub fn materialize_with_feature_bases(
                 } else {
                     y += (ty - y).signum();
                 }
-                open.insert((x, y));
+                corridor_cells.insert((x, y));
             }
         }
     }
+    open.extend(corridor_cells);
     validate_carving(&open, [width, height, size[2]])?;
     for (slot, id) in group.members.iter().enumerate() {
         let def = definitions.get_mut(id).expect("checked member");
@@ -673,8 +778,8 @@ pub fn materialize_with_feature_bases(
         run.stairs(def, &room_cells[slot])?;
         if let Some(stage) = recipe
             .stages
-            .get(6)
-            .filter(|stage| matches!(stage.operation, Operation::RoomLighting { .. }))
+            .iter()
+            .find(|stage| matches!(stage.operation, Operation::RoomLighting { .. }))
         {
             let mut rng = stream(seed, identity, group, recipe, stage, &format!("room/{id}"))?;
             def.lit = false;
@@ -748,6 +853,7 @@ pub fn materialize_with_feature_bases(
         .members
         .iter()
         .enumerate()
+        .filter(|(slot, _)| present[*slot])
         .map(|(slot, id)| {
             let mut cells: Vec<_> = room_cells[slot]
                 .iter()
@@ -831,6 +937,7 @@ mod tests {
             room_width: [3, 3],
             room_height: [3, 3],
             extra_connections: [0, 0],
+            room_omissions: None,
             lighting: None,
             secret_entrances: None,
             hidden_traps: None,
@@ -938,11 +1045,16 @@ mod tests {
             room_width: [4, 24],
             room_height: [3, 5],
             extra_connections: [0, 2],
+            room_omissions: None,
             lighting: None,
             secret_entrances: None,
             hidden_traps: None,
         };
         let recipe = preset.to_recipe().unwrap();
+        assert_eq!(
+            serde_json::to_value(&recipe).unwrap(),
+            serde_json::to_value(&legacy).unwrap()
+        );
         for seed in [0, 42, u64::MAX] {
             assert_eq!(
                 serde_json::to_value(
@@ -971,6 +1083,489 @@ mod tests {
             assert_eq!(lit[id].anchors, baseline[id].anchors);
             assert!(!lit[id].lighting.is_empty());
         }
+    }
+
+    #[test]
+    fn omissions_preserve_seeded_family_ports_and_future_trapdoor_landing_namespaces() {
+        use crate::procedural_world::{Domain, FamilyKind, WorldFamily};
+        let family = WorldFamily {
+            kind: FamilyKind::GridChain,
+            version: 1,
+            base_region: 1,
+            domain: Domain::Finite { count: 2 },
+            grid: [3, 3],
+            size: [26, 7, 2],
+            recipe: "hazards".into(),
+            zone: None,
+            gravity: Some([0, 0, -1]),
+        };
+        let ordinary = hazard_recipe();
+        let recipe = with_omissions(ordinary.clone(), [3, 3]);
+        let mut trapdoors = 0;
+        for seed in 0..32 {
+            let build = |depth, recipe: &Recipe| {
+                let group = family.group("grid", seed, depth).unwrap();
+                let definitions = group
+                    .members
+                    .iter()
+                    .map(|id| family.describe("grid", seed, *id).unwrap().unwrap())
+                    .collect();
+                super::materialize(&format!("grid/{depth}"), &group, recipe, definitions, seed)
+                    .unwrap()
+            };
+            let lower = build(2, &recipe);
+            let upper = build(1, &recipe);
+            for (depth, generated) in [(1, &upper), (2, &lower)] {
+                assert_eq!(
+                    generated.rooms.len(),
+                    6,
+                    "boundary portal anchors must not protect every slot"
+                );
+                let baseline = build(depth, &ordinary);
+                for (id, region) in &generated.regions {
+                    let described = family.describe("grid", seed, *id).unwrap().unwrap();
+                    for name in &described.generate.as_ref().unwrap().stair_anchors {
+                        assert_eq!(region.anchors[name], baseline.regions[id].anchors[name]);
+                        assert!(generated
+                            .rooms
+                            .iter()
+                            .any(|room| room.cells.iter().any(|cell| cell.region.0 == *id)));
+                    }
+                    assert!(region.anchors.contains_key("trapdoor_landing_0"));
+                    assert!(region.anchors.contains_key("trapdoor_landing_1"));
+                }
+            }
+            for region in upper.regions.values() {
+                for trap in &region.traps {
+                    if let crate::scenario_package::TrapKind::TrapDoor { destination, open } =
+                        &trap.kind
+                    {
+                        trapdoors += 1;
+                        assert!(!open);
+                        assert_eq!(destination.region.0, region.id + family.slots());
+                        let target = &lower.regions[&destination.region.0];
+                        let at = target.anchors[&destination.name];
+                        assert!((0..2).all(|z| !target.walls.contains(&[at[0], at[1], z])));
+                        assert!(!target.doors.iter().any(|door| door.at[..2] == at[..2]));
+                    }
+                }
+            }
+            assert!(lower
+                .regions
+                .values()
+                .all(|region| region.trapdoor_destination.is_none()));
+        }
+        assert!(
+            trapdoors > 0,
+            "exercise an actual source trapdoor, not just unused anchors"
+        );
+    }
+
+    fn hazard_recipe() -> Recipe {
+        GridRoomsPreset {
+            version: 1,
+            room_width: [4, 6],
+            room_height: [3, 4],
+            extra_connections: [0, 0],
+            room_omissions: None,
+            lighting: Some(RoomLighting {
+                darkness_roll: 10,
+                darkness_start: 1,
+            }),
+            secret_entrances: Some(SecretEntrances {
+                chance_per_mille: 1000,
+                maximum: 64,
+                dc: 12,
+            }),
+            hidden_traps: Some(HiddenTraps {
+                count: [2, 2],
+                dc: 12,
+                rust_slot: "body_armor".into(),
+                rust_amount: 1,
+                sleep_condition: "sleep".into(),
+                sleep_duration: 200,
+                sleep_exposure: None,
+                hazards: Some(HazardTraps {
+                    bear_condition: "bear".into(),
+                    bear_duration: 300,
+                    arrow_ammunition: "arrow".into(),
+                    attack_bonus: 0,
+                    poison_exposure: "poison".into(),
+                    avoidance_dc: 12,
+                }),
+            }),
+        }
+        .to_recipe()
+        .unwrap()
+    }
+
+    #[test]
+    fn omitted_slots_keep_clear_distinct_trapdoor_destinations_without_room_features() {
+        let (group, _, definitions) = fixture();
+        let recipe = with_omissions(hazard_recipe(), [3, 3]);
+        for seed in [0, 1, 42, u64::MAX] {
+            let generated =
+                super::materialize("floor", &group, &recipe, definitions.clone(), seed).unwrap();
+            let present: BTreeSet<_> = generated
+                .rooms
+                .iter()
+                .map(|room| u64::from(room.id))
+                .collect();
+            assert_eq!(present.len(), 6);
+            let mut reversed = definitions.clone();
+            reversed.reverse();
+            let repeated = super::materialize("floor", &group, &recipe, reversed, seed).unwrap();
+            assert_eq!(
+                serde_json::to_value(&generated.regions).unwrap(),
+                serde_json::to_value(repeated.regions).unwrap()
+            );
+            assert_eq!(generated.rooms, repeated.rooms);
+            for (id, region) in &generated.regions {
+                let first = region.anchors["trapdoor_landing_0"];
+                let second = region.anchors["trapdoor_landing_1"];
+                assert_ne!(first, second);
+                for at in [first, second] {
+                    assert_eq!(at[2], 1);
+                    for z in 0..2 {
+                        assert!(!region.walls.contains(&[at[0], at[1], z]));
+                    }
+                    assert!(!region.doors.iter().any(|door| door.at[..2] == at[..2]));
+                    assert!(!region.traps.iter().any(|trap| trap.at[..2] == at[..2]));
+                }
+                if !present.contains(id) {
+                    assert!(
+                        region.traps.is_empty(),
+                        "omitted slot is not a room trap candidate"
+                    );
+                    // A nearby room may illuminate a closure surface, but never
+                    // an omitted slot's corridor floor wholesale.
+                    assert!(region.lighting.iter().all(|light| region
+                        .doors
+                        .iter()
+                        .any(|door| door.at[..2] == light.at[..2])));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn zero_omissions_preserve_legacy_feature_endpoints_and_lighting() {
+        let (group, _, definitions) = fixture();
+        let recipe = hazard_recipe();
+        for seed in [0, 42, u64::MAX] {
+            let expected =
+                super::materialize("floor", &group, &recipe, definitions.clone(), seed).unwrap();
+            let actual = super::materialize(
+                "floor",
+                &group,
+                &with_omissions(recipe.clone(), [0, 0]),
+                definitions.clone(),
+                seed,
+            )
+            .unwrap();
+            assert_eq!(
+                serde_json::to_value(expected.regions).unwrap(),
+                serde_json::to_value(actual.regions).unwrap()
+            );
+            assert_eq!(expected.rooms, actual.rooms);
+        }
+    }
+
+    #[test]
+    fn omission_decisions_are_independent_of_lighting_and_feature_streams() {
+        let (group, recipe, definitions) = fixture();
+        let base = with_omissions(recipe, [3, 3]);
+        let mut features = base.clone();
+        features
+            .stages
+            .extend(hazard_recipe().stages.into_iter().skip(6));
+        for seed in [0, 42, u64::MAX] {
+            let expected =
+                super::materialize("floor", &group, &base, definitions.clone(), seed).unwrap();
+            let actual =
+                super::materialize("floor", &group, &features, definitions.clone(), seed).unwrap();
+            assert_eq!(expected.rooms, actual.rooms);
+            for id in &group.members {
+                assert_eq!(expected.regions[id].walls, actual.regions[id].walls);
+            }
+        }
+    }
+
+    #[test]
+    fn insufficient_omitted_slot_landing_clearance_rejects_without_alcoves_or_rerolls() {
+        let (group, _, definitions) = fixture();
+        let mut recipe = with_omissions(hazard_recipe(), [3, 3]);
+        // Every ordinary room has 120 cells; only corridor-only slots lack
+        // the 64 distinct landings. Rejection must not silently grow alcoves.
+        recipe.stages[2].operation = Operation::Rooms {
+            width: [24, 24],
+            height: [5, 5],
+        };
+        let Operation::HiddenTraps { config } = &mut recipe.stages.last_mut().unwrap().operation
+        else {
+            unreachable!()
+        };
+        config.count = [0, 64];
+        check(&recipe).unwrap();
+        let mut ordinary = recipe.clone();
+        ordinary.stages.remove(6);
+        ordinary.version = 3;
+        super::materialize("floor", &group, &ordinary, definitions.clone(), 42).unwrap();
+        let error = super::materialize("floor", &group, &recipe, definitions, 42)
+            .err()
+            .unwrap();
+        assert!(
+            error.message.contains("Trapdoor landing capacity"),
+            "{}",
+            error.message
+        );
+    }
+
+    fn with_omissions(mut recipe: Recipe, count: [u32; 2]) -> Recipe {
+        recipe.version = 4;
+        recipe.stages.insert(
+            6,
+            Stage {
+                id: "room_omissions".into(),
+                version: 1,
+                operation: Operation::RoomOmissions {
+                    config: RoomOmissions { count },
+                },
+            },
+        );
+        check(&recipe).unwrap();
+        recipe
+    }
+
+    #[test]
+    fn zero_omissions_preserve_exact_legacy_geometry_anchors_light_and_rooms() {
+        let (group, recipe, definitions) = fixture();
+        for seed in [0, 1, 42, u64::MAX] {
+            let expected =
+                super::materialize("floor", &group, &recipe, definitions.clone(), seed).unwrap();
+            let actual = super::materialize(
+                "floor",
+                &group,
+                &with_omissions(recipe.clone(), [0, 0]),
+                definitions.clone(),
+                seed,
+            )
+            .unwrap();
+            assert_eq!(
+                serde_json::to_value(expected.regions).unwrap(),
+                serde_json::to_value(actual.regions).unwrap()
+            );
+            assert_eq!(expected.rooms, actual.rooms);
+        }
+    }
+
+    #[test]
+    fn omissions_preserve_real_entry_and_stair_owners_and_noncontiguous_room_ids() {
+        let (group, recipe, mut definitions) = fixture();
+        // Protect actual owners, deliberately not just the first/last slots.
+        for (slot, def) in definitions.iter_mut().enumerate() {
+            if ![1, 4, 8].contains(&slot) {
+                def.generate = Some(toml::from_str("generator='group'\nversion=1\ngroup='floor'\nrooms=[1,1]\nstair_anchors=['up','down']\n").unwrap());
+            }
+        }
+        let legacy = super::materialize("floor", &group, &recipe, definitions.clone(), 42).unwrap();
+        let generated = super::materialize(
+            "floor",
+            &group,
+            &with_omissions(recipe.clone(), [3, 3]),
+            definitions.clone(),
+            42,
+        )
+        .unwrap();
+        assert_eq!(
+            generated.rooms.iter().map(|r| r.id).collect::<Vec<_>>(),
+            [1, 3, 4, 6, 7, 8]
+        );
+        for id in [1, 3, 4, 6, 7, 8] {
+            assert_eq!(generated.regions[&id].anchors, legacy.regions[&id].anchors);
+        }
+        for id in [2, 5, 9] {
+            assert!(generated.regions[&id].walls.len() > legacy.regions[&id].walls.len());
+        }
+        definitions[1].anchors.insert("entry".into(), [13, 3, 0]);
+        let error = super::materialize(
+            "floor",
+            &group,
+            &with_omissions(recipe, [3, 3]),
+            definitions,
+            42,
+        )
+        .err()
+        .unwrap();
+        assert!(error.message.contains("unprotected slot capacity"));
+    }
+
+    #[test]
+    fn omission_capacity_is_bounded_for_singletons_rectangles_and_maximum_grids() {
+        let (_, recipe, _) = fixture();
+        for grid in [[1, 1], [2, 3], [8, 8]] {
+            let count = grid[0] * grid[1];
+            let group = GenerationGroup {
+                depth: 1,
+                recipe: "floor".into(),
+                grid,
+                members: (1..=u64::from(count)).collect(),
+            };
+            let definitions: Vec<RegionDef> = group
+                .members
+                .iter()
+                .map(|id| {
+                    toml::from_str(&format!(
+                        "id={id}\nname='slot'\nsize=[26,7,2]\nchamber=true\n"
+                    ))
+                    .unwrap()
+                })
+                .collect();
+            let generated = super::materialize(
+                "floor",
+                &group,
+                &with_omissions(recipe.clone(), [count - 1, 63]),
+                definitions.clone(),
+                7,
+            )
+            .unwrap();
+            assert_eq!(generated.rooms.len(), 1);
+            assert_eq!(generated.regions.len(), count as usize);
+            if count < 64 {
+                assert!(super::materialize(
+                    "floor",
+                    &group,
+                    &with_omissions(recipe.clone(), [count, count]),
+                    definitions,
+                    7
+                )
+                .is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn omitted_geometry_preserves_two_cell_clearance_at_minimum_and_maximum_slot_sizes() {
+        let group = GenerationGroup {
+            depth: 1,
+            recipe: "floor".into(),
+            grid: [2, 3],
+            members: (1..=6).collect(),
+        };
+        for (size, room_size) in [(5, 3), (32, 3), (32, 30)] {
+            let recipe = GridRoomsPreset {
+                version: 1,
+                room_width: [room_size, room_size],
+                room_height: [room_size, room_size],
+                extra_connections: [0, 0],
+                room_omissions: Some(RoomOmissions { count: [5, 5] }),
+                lighting: None,
+                secret_entrances: None,
+                hidden_traps: None,
+            }
+            .to_recipe()
+            .unwrap();
+            let definitions = group
+                .members
+                .iter()
+                .map(|id| {
+                    toml::from_str(&format!(
+                        "id={id}\nname='slot'\nsize=[{size},{size},2]\nchamber=true\n"
+                    ))
+                    .unwrap()
+                })
+                .collect();
+            let generated = super::materialize("floor", &group, &recipe, definitions, 42).unwrap();
+            assert_eq!(generated.rooms.len(), 1);
+            let mut open = BTreeSet::new();
+            for (slot, id) in group.members.iter().enumerate() {
+                let region = &generated.regions[id];
+                for x in 0..size {
+                    for y in 0..size {
+                        let floor_open = !region.walls.contains(&[x, y, 0]);
+                        assert_eq!(floor_open, !region.walls.contains(&[x, y, 1]));
+                        if floor_open {
+                            open.insert((x + slot as i32 % 2 * size, y + slot as i32 / 2 * size));
+                        }
+                    }
+                }
+            }
+            validate_carving(&open, [size * 2, size * 3, 2]).unwrap();
+        }
+    }
+
+    #[test]
+    fn omission_authoring_and_compiled_stage_reject_invalid_bounds_and_order() {
+        let source = serde_json::json!({"version":1,"room_width":[4,24],"room_height":[3,5],"extra_connections":[0,2],"room_omissions":{"count":[1,3]}});
+        let preset: GridRoomsPreset = serde_json::from_value(source.clone()).unwrap();
+        let valid = preset.to_recipe().unwrap();
+        for count in [[4, 3], [0, 64], [u32::MAX, u32::MAX]] {
+            let mut invalid = source.clone();
+            invalid["room_omissions"]["count"] = serde_json::json!(count);
+            assert!(serde_json::from_value::<GridRoomsPreset>(invalid)
+                .unwrap()
+                .to_recipe()
+                .is_err());
+        }
+        for policy in [
+            serde_json::json!({}),
+            serde_json::json!({"count":[1,3],"extra":0}),
+            serde_json::json!({"count":true}),
+            serde_json::json!({"count":[-1,3]}),
+            serde_json::json!({"count":[1,2,3]}),
+        ] {
+            let mut invalid = source.clone();
+            invalid["room_omissions"] = policy;
+            assert!(serde_json::from_value::<GridRoomsPreset>(invalid).is_err());
+        }
+        for version in [0, 1, 2, 3, 5, u32::MAX] {
+            let mut invalid = valid.clone();
+            invalid.version = version;
+            assert!(check(&invalid).is_err());
+        }
+        let mut duplicate = valid.clone();
+        duplicate.stages.push(valid.stages[6].clone());
+        duplicate.stages.last_mut().unwrap().id = "duplicate".into();
+        assert!(check(&duplicate).is_err());
+        let mut misplaced = valid.clone();
+        misplaced.stages.swap(5, 6);
+        assert!(check(&misplaced).is_err());
+        let mut missing = valid;
+        missing.stages.pop();
+        assert!(check(&missing).is_err());
+    }
+
+    #[test]
+    fn authored_room_omissions_reduce_present_rooms_without_removing_slots() {
+        let source = serde_json::json!({
+            "version": 1,
+            "room_width": [4, 24],
+            "room_height": [3, 5],
+            "extra_connections": [0, 2]
+        });
+        let (group, _, definitions) = fixture();
+        let baseline: GridRoomsPreset = serde_json::from_value(source.clone()).unwrap();
+        let baseline = super::materialize(
+            "floor",
+            &group,
+            &baseline.to_recipe().unwrap(),
+            definitions.clone(),
+            42,
+        )
+        .unwrap();
+        assert_eq!(baseline.rooms.len(), 9);
+        let mut source = source;
+        source["room_omissions"] = serde_json::json!({"count": [3, 3]});
+        let preset: GridRoomsPreset = serde_json::from_value(source).unwrap();
+        let recipe = preset.to_recipe().unwrap();
+        assert_eq!(recipe.version, 4);
+        let generated = super::materialize("floor", &group, &recipe, definitions, 42).unwrap();
+        assert_eq!(generated.rooms.len(), 6);
+        assert_eq!(
+            generated.regions.keys().copied().collect::<Vec<_>>(),
+            group.members
+        );
+        assert!(generated.rooms.iter().all(|room| !room.cells.is_empty()));
     }
 
     #[test]
@@ -1338,6 +1933,7 @@ mod tests {
             room_width: [3, 3],
             room_height: [3, 3],
             extra_connections: [0, 0],
+            room_omissions: None,
             lighting: None,
             secret_entrances: None,
             hidden_traps: Some(HiddenTraps {
@@ -1472,6 +2068,7 @@ mod tests {
             room_width: [4, 6],
             room_height: [3, 4],
             extra_connections: [0, 0],
+            room_omissions: None,
             lighting: None,
             secret_entrances: None,
             hidden_traps: Some(HiddenTraps {

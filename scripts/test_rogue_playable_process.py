@@ -37,7 +37,7 @@ from rogue_magic_receipts import (
 
 from rogue_test_support import (
     DisclosedFloorGraph, assert_room_gold_receipt, disclosed_melee_candidate, disclosed_step_action,
-    first_floor_foes,
+    first_floor_foes, observe_walkthrough_boundaries, walkthrough_search_targets,
 )
 
 
@@ -161,31 +161,6 @@ def walkthrough_route(at, floor, known_cells, targets, visited, *, search_first=
         (x + dx, y + dy) not in known_cells
         for dx, dy, _ in DisclosedFloorGraph.directions)}
     return disclosed_exploration_route(at, floor, frontiers, floor if search_first else visited)
-
-
-def observe_walkthrough_boundaries(view, boundaries):
-    """Remember only adjacent opaque edges actually present in public frames."""
-    visible = {(cell["position"]["x"], cell["position"]["y"]): cell
-               for cell in view["visible_cells"] if cell["position"]["z"] == 0}
-    for (x, y), cell in visible.items():
-        if cell["wall"]:
-            continue
-        edges = boundaries.setdefault(cell["key"], {})
-        for dx, dy, direction in DisclosedFloorGraph.directions:
-            neighbor = visible.get((x + dx, y + dy))
-            if neighbor is not None:
-                if neighbor["wall"]:
-                    edges[direction] = neighbor["key"]
-                else:
-                    edges.pop(direction, None)
-
-
-def walkthrough_search_targets(graph, searched, boundaries, scanned_boundaries):
-    """Prefer a paid check covering an unscanned, publicly observed opaque edge."""
-    remaining = graph.edges.keys() - searched
-    preferred = {key for key in remaining
-                 if set(boundaries.get(key, {}).values()) - scanned_boundaries}
-    return preferred or remaining
 
 
 class WalkthroughSearch:

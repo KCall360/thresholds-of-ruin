@@ -664,6 +664,10 @@ enum Operation {
     },
     Corridors,
     Stairs,
+    RoomOmissions {
+        #[serde(with = "mapped")]
+        config: crate::generation_recipe::RoomOmissions,
+    },
     RoomLighting {
         darkness_roll: u32,
         darkness_start: u32,
@@ -677,6 +681,15 @@ enum Operation {
         config: crate::generation_recipe::HiddenTraps,
     },
 }
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::generation_recipe::RoomOmissions",
+    deny_unknown_fields
+)]
+struct RoomOmissions {
+    count: [u32; 2],
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(
     remote = "crate::generation_recipe::SecretEntrances",
@@ -3970,6 +3983,8 @@ named_remote!(
     Door => source::Door,
     Trap => source::Trap,
     Concealment => source::Concealment,
+    Operation => crate::generation_recipe::Operation,
+    RoomOmissions => crate::generation_recipe::RoomOmissions,
     SecretEntrances => crate::generation_recipe::SecretEntrances,
     HiddenTraps => crate::generation_recipe::HiddenTraps,
     HazardTraps => crate::generation_recipe::HazardTraps,
@@ -4034,7 +4049,6 @@ remote!(
     GenerationGroup => crate::generation_recipe::GenerationGroup,
     Recipe => crate::generation_recipe::Recipe,
     Stage => crate::generation_recipe::Stage,
-    Operation => crate::generation_recipe::Operation,
     Scenario => crate::Scenario,
     ActorSetup => crate::ActorSetup,
     Position => crate::journal::Position,
@@ -4238,7 +4252,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 26;
+const CONTENT_PACKAGE_FORMAT: u32 = 27;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4500,6 +4514,108 @@ mod tests {
     }
 
     #[test]
+    fn stored_generation_operations_reject_positional_outer_aliases() {
+        use super::{Borrowed, Owned};
+        type Operation = crate::generation_recipe::Operation;
+        // Unit, ordinary field-bearing and new nested-config variants all use
+        // the same independent save-owned tagged-map boundary.
+        for (good, positional) in [
+            (r#"{"kind":"stone_fill"}"#, r#"["stone_fill"]"#),
+            (
+                r#"{"kind":"rooms","width":[4,6],"height":[3,5]}"#,
+                r#"["rooms",[4,6],[3,5]]"#,
+            ),
+            (
+                r#"{"kind":"room_omissions","config":{"count":[0,3]}}"#,
+                r#"["room_omissions",{"count":[0,3]}]"#,
+            ),
+        ] {
+            let Owned(operation) =
+                crate::storage::codec::strict::<Owned<Operation>>(good.as_bytes()).unwrap();
+            assert_eq!(
+                serde_json::to_value(Borrowed(&operation)).unwrap(),
+                serde_json::from_str::<serde_json::Value>(good).unwrap()
+            );
+            assert!(serde_json::from_str::<Owned<Operation>>(positional).is_err());
+            assert!(
+                crate::storage::codec::strict::<Owned<Operation>>(positional.as_bytes()).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn stored_room_omissions_require_exact_named_config() {
+        use super::{Borrowed, Owned};
+        type Operation = crate::generation_recipe::Operation;
+        let good = r#"{"kind":"room_omissions","config":{"count":[0,3]}}"#;
+        let Owned(operation) = serde_json::from_str::<Owned<Operation>>(good).unwrap();
+        assert_eq!(
+            serde_json::to_value(Borrowed(&operation)).unwrap(),
+            serde_json::from_str::<serde_json::Value>(good).unwrap()
+        );
+        // Each negative starts from the independently authored accepted shape.
+        for bad in [
+            r#"{"kind":"room_omissions"}"#,
+            r#"{"kind":"room_omissions","config":null}"#,
+            r#"{"kind":"room_omissions","config":{}}"#,
+            r#"{"kind":"room_omissions","config":{"count":[0,3],"surprise":0}}"#,
+            r#"{"kind":"room_omissions","config":{"count":[0,3]},"surprise":0}"#,
+            r#"{"kind":"room_omissions","config":[[0,3]]}"#,
+            r#"["room_omissions",{"count":[0,3]}]"#,
+            r#"{"kind":"room_omissions","config":{"count":[0]}}"#,
+            r#"{"kind":"room_omissions","config":{"count":[0,3,4]}}"#,
+            r#"{"kind":"room_omissions","config":{"count":[false,3]}}"#,
+            r#"{"kind":"room_omissions","config":{"count":[-1,3]}}"#,
+            r#"{"kind":"room_omissions","config":{"count":[0,4294967296]}}"#,
+            r#"{"kind":"room_omissions","config":{"count":[0,3],"count":[0,3]}}"#,
+            r#"{"kind":"room_omissions","config":{"count":[0,3]},"config":{"count":[0,3]}}"#,
+            r#"{"kind":"room_omissions","kind":"room_omissions","config":{"count":[0,3]}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<Owned<Operation>>(bad).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn stored_room_omission_recipe_preserves_bounds_and_stage_identity() {
+        use super::{Borrowed, Owned};
+        use crate::generation_recipe::{check, Recipe};
+        let good = serde_json::json!({"version":4,"stages":[
+            {"id":"stone","version":1,"operation":{"kind":"stone_fill"}},
+            {"id":"slots","version":1,"operation":{"kind":"grid_partition"}},
+            {"id":"rooms","version":1,"operation":{"kind":"rooms","width":[4,6],"height":[3,5]}},
+            {"id":"connections","version":1,"operation":{"kind":"connected_graph","extra":[0,1]}},
+            {"id":"corridors","version":1,"operation":{"kind":"corridors"}},
+            {"id":"stairs","version":1,"operation":{"kind":"stairs"}},
+            {"id":"room_omissions","version":1,"operation":{"kind":"room_omissions","config":{"count":[0,3]}}}
+        ]});
+        let bytes = serde_json::to_vec(&good).unwrap();
+        let Owned(recipe) = crate::storage::codec::strict::<Owned<Recipe>>(&bytes).unwrap();
+        check(&recipe).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&recipe)).unwrap(), good);
+        for (path, value) in [
+            ("/version", serde_json::json!(3)),
+            ("/stages/6/version", serde_json::json!(2)),
+            ("/stages/6/id", serde_json::json!("stairs")),
+            (
+                "/stages/6/operation/config/count",
+                serde_json::json!([3, 2]),
+            ),
+            (
+                "/stages/6/operation/config/count",
+                serde_json::json!([0, 64]),
+            ),
+        ] {
+            let mut invalid = good.clone();
+            *invalid.pointer_mut(path).unwrap() = value;
+            let Owned(recipe) = serde_json::from_value::<Owned<Recipe>>(invalid).unwrap();
+            assert!(check(&recipe).is_err(), "{path}");
+        }
+    }
+
+    #[test]
     fn discovery_formats_match_independent_payload_boundaries() {
         assert_eq!(
             (
@@ -4511,7 +4627,7 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (56, 29, "interactions-v51", 24, 8, 26, "tor-arena-run-v5")
+            (57, 30, "interactions-v51", 24, 8, 27, "tor-arena-run-v5")
         );
     }
 
@@ -5495,6 +5611,56 @@ mod tests {
                 .remove(field);
             assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
         }
+    }
+
+    #[test]
+    fn compiled_room_omission_recipe_roundtrips_without_authoring_sources() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let template = source::read_package(&root).unwrap();
+        let preset: crate::generation_recipe::GridRoomsPreset = serde_json::from_value(
+            serde_json::json!({"version":1,"room_width":[4,6],"room_height":[3,5],
+                "extra_connections":[0,1],"room_omissions":{"count":[0,3]}}),
+        )
+        .unwrap();
+        let mut manifest = template.manifest.clone();
+        manifest
+            .generation_recipes
+            .insert("optional".into(), preset.to_recipe().unwrap());
+        let mut package = source::Package::from_parts(
+            manifest,
+            template.region_defs().unwrap(),
+            &template.rules_source,
+        )
+        .unwrap();
+        package.check().unwrap();
+        let encoded = encode_content_package(&package).unwrap();
+        let restored = decode_content_package(&encoded).unwrap();
+        assert!(restored.directory.is_none());
+        assert_eq!(restored.sources.files_read(), 0);
+        assert_eq!(encode_content_package(&restored).unwrap(), encoded);
+        let value: Value = serde_json::from_slice(&encoded).unwrap();
+        let path = "/package/manifest/generation_recipes/optional/stages/6/operation/config";
+        assert_eq!(
+            value.pointer(path).unwrap(),
+            &serde_json::json!({"count":[0,3]})
+        );
+        package.rules_source = "not authoring TOML".into();
+        package.resolved_rules_source = Some("also not authoring TOML".into());
+        assert_eq!(encode_content_package(&package).unwrap(), encoded);
+        for invalid in [
+            serde_json::json!({}),
+            serde_json::json!([[0, 3]]),
+            serde_json::json!({"count":[0,3],"surprise":true}),
+        ] {
+            let mut bad = value.clone();
+            *bad.pointer_mut(path).unwrap() = invalid;
+            assert!(decode_content_package(&serde_json::to_vec(&bad).unwrap()).is_err());
+        }
+        let text = String::from_utf8(encoded).unwrap();
+        assert!(text.contains("\"count\":[0,3]"));
+        let duplicate = text.replacen("\"count\":[0,3]", "\"count\":[0,3],\"count\":[0,3]", 1);
+        assert!(decode_content_package(duplicate.as_bytes()).is_err());
     }
 
     #[test]

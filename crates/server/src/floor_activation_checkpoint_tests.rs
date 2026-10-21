@@ -202,3 +202,120 @@ fn changing_retrieval_boundaries_keep_large_unchanged_population_pooled() {
     let restored: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
     exact_equal(&restored.restore(engine.archive.clone()).unwrap(), &engine);
 }
+
+#[test]
+fn omitted_group_capacity_failure_preserves_exact_checkpoint_and_region_authority() {
+    let mut engine = Engine::memory(fixture()).unwrap();
+    engine.enable_wizard().unwrap();
+    let original = engine.archive.scenario.package.as_ref().unwrap();
+    let family = &original.manifest.procedural_worlds["dungeon"];
+    let group = family.group("dungeon", engine.game.seed(), 101).unwrap();
+    let unprotected = group
+        .members
+        .iter()
+        .filter(|id| {
+            let definition = family
+                .describe("dungeon", engine.game.seed(), **id)
+                .unwrap()
+                .unwrap();
+            let generation = definition.generate.as_ref().unwrap();
+            generation.stair_anchors.is_empty()
+                && definition
+                    .anchors
+                    .keys()
+                    .all(|name| generation.boundary_anchors.contains(name))
+        })
+        .count();
+    let impossible = unprotected.min(group.members.len() - 1) as u32 + 1;
+    // Validate the unchanged distant group first. Fault injection changes only
+    // its recipe policy, not actor state or the command being rejected.
+    assert_eq!(
+        original
+            .build_group(
+                engine.game.seed(),
+                &original.index(engine.game.seed()).unwrap(),
+                RegionId(group.members[0])
+            )
+            .unwrap()
+            .records
+            .len(),
+        9
+    );
+    let mut source = serde_json::to_value(&original.manifest).unwrap();
+    source["generation_recipes"]["exploration"]["version"] = json!(4);
+    source["generation_recipes"]["exploration"]["stages"]
+        .as_array_mut()
+        .unwrap()
+        .insert(
+            6,
+            json!({"id":"room_omissions", "version":1,
+            "operation":{"kind":"room_omissions", "config":{"count":[impossible,impossible]}}}),
+        );
+    let rejected = Arc::new(
+        Package::from_parts(
+            serde_json::from_value(source).unwrap(),
+            vec![],
+            &original.rules_source,
+        )
+        .unwrap(),
+    );
+    let failure = rejected
+        .build_group(
+            engine.game.seed(),
+            &rejected.index(engine.game.seed()).unwrap(),
+            RegionId(group.members[0]),
+        )
+        .err()
+        .unwrap();
+    assert!(
+        failure.message.contains("unprotected slot capacity"),
+        "{failure:?}"
+    );
+    engine
+        .regions
+        .as_mut()
+        .unwrap()
+        .bind_package_inputs(rejected.clone());
+    engine.archive.scenario.package = Some(rejected);
+    let before = engine.diagnostic_copy();
+    let checkpoint = || {
+        serde_json::to_vec(&Checkpoint::capture(&engine).encode("omission-rollback", 0)).unwrap()
+    };
+    let bytes = checkpoint();
+    let records = engine.regions.as_ref().unwrap().encoded_resident().unwrap();
+    let failure = engine
+        .command(
+            "player",
+            "omission-capacity",
+            ActorId(1),
+            "rejected-group",
+            &engine.branch().clone(),
+            Command::Wizard {
+                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                operation: WizardOperation::Teleport {
+                    actor: ActorId(1),
+                    position: Position {
+                        region: *group.members.first().unwrap(),
+                        x: 1,
+                        y: 1,
+                        z: 0,
+                    },
+                },
+            },
+        )
+        .expect_err("insufficient omission capacity must reject publication");
+    assert!(
+        failure.message.contains("unprotected slot capacity"),
+        "{failure:?}"
+    );
+    exact_equal(&engine, &before);
+    assert_eq!(authority(&engine), authority(&before));
+    assert_eq!(
+        engine.regions.as_ref().unwrap().encoded_resident().unwrap(),
+        records
+    );
+    assert_eq!(
+        serde_json::to_vec(&Checkpoint::capture(&engine).encode("omission-rollback", 0)).unwrap(),
+        bytes
+    );
+}
