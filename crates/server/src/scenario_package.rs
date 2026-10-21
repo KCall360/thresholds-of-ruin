@@ -5424,11 +5424,16 @@ mod tests {
             .characters
             .iter()
             .all(|character| character.creature.is_none() && character.loadout.is_empty()));
-        let mut physical_families = package.manifest.procedural_worlds.clone();
-        assert_eq!(physical_families["dungeon"].gravity, Some([0, 0, -1]));
-        physical_families.get_mut("dungeon").unwrap().gravity = None;
         assert_eq!(
-            serde_json::to_value(physical_families).unwrap(),
+            package.manifest.procedural_worlds["dungeon"].gravity,
+            Some([0, 0, -1])
+        );
+        assert_eq!(
+            geometry.manifest.procedural_worlds["dungeon"].gravity,
+            Some([0, 0, -1])
+        );
+        assert_eq!(
+            serde_json::to_value(&package.manifest.procedural_worlds).unwrap(),
             serde_json::to_value(&geometry.manifest.procedural_worlds).unwrap()
         );
         let production_recipe = &package.manifest.generation_recipes["exploration"];
@@ -5478,6 +5483,9 @@ mod tests {
                 let identity = format!("dungeon/{depth}");
                 let mut discovered = package.group_definitions(&identity, seed).unwrap();
                 let baseline = geometry.group_definitions(&identity, seed).unwrap();
+                for region in baseline.values() {
+                    assert_eq!(region.gravity, Some([0, 0, -1]));
+                }
                 assert!(baseline
                     .values()
                     .all(|region| region.doors.is_empty() && region.traps.is_empty()));
@@ -5511,7 +5519,6 @@ mod tests {
                         .anchors
                         .retain(|name, _| !name.starts_with("trapdoor_landing_"));
                     assert_eq!(region.gravity, Some([0, 0, -1]));
-                    region.gravity = None;
                     region.doors.clear();
                     region.traps.clear();
                 }

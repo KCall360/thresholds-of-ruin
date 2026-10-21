@@ -5,7 +5,7 @@ there; this check finds packages with no other named loader use. It does not
 prove gameplay coverage or meaningful assertions; those require behavior tests.
 Tests name packages in full (not built from fragments) so users are auditable.
 """
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import ast
 import tempfile
@@ -15,6 +15,11 @@ import json
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def relative_source_label(path, root):
+    """Use one repository-relative spelling in cross-platform diagnostics."""
+    return path.relative_to(root).as_posix()
 
 
 def test_sources():
@@ -141,7 +146,7 @@ class ScenarioReferences(unittest.TestCase):
             certificate_path = package / "validation.json"
             index_path = package / "index.json"
             for required in (certificate_path, index_path):
-                self.assertTrue(required.is_file(), f"Missing live scenario file: {required.relative_to(ROOT)}")
+                self.assertTrue(required.is_file(), f"Missing live scenario file: {relative_source_label(required, ROOT)}")
             certificate = json.loads(certificate_path.read_text(encoding="utf-8"))
             indexed = json.loads(index_path.read_text(encoding="utf-8"))
             expected = dict(certificate["files"])
@@ -152,7 +157,7 @@ class ScenarioReferences(unittest.TestCase):
                 # receives, even when a local editor accidentally wrote CRLF.
                 checkout = source.replace(b"\r\n", b"\n")
                 if hashlib.sha256(checkout).hexdigest() != digest:
-                    mismatches.append(str((package / name).relative_to(ROOT)))
+                    mismatches.append(relative_source_label(package / name, ROOT))
         self.assertEqual(mismatches, [],
                          "Regenerate certificates from repository LF bytes; local CRLF hashes cannot survive checkout")
 
@@ -200,6 +205,12 @@ class CertificateGuardRegressions(unittest.TestCase):
 
     def test_live_roots_accept_lf_hashes_and_exclude_historical_sources(self):
         self.check_certificates()
+
+    def test_relative_source_labels_are_platform_independent(self):
+        expected = "crates/client-3d/scenarios/menagerie/region.toml"
+        for root in (PurePosixPath("/fixture"), PureWindowsPath("C:/fixture")):
+            with self.subTest(path_type=type(root).__name__):
+                self.assertEqual(relative_source_label(root / expected, root), expected)
 
     def test_changed_crate_package_source_rejects(self):
         self.check_certificates()

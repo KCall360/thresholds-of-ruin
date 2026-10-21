@@ -4,11 +4,17 @@ on:
   pull_request:
     paths:
       - "crates/client-3d/**"
+      # Scenario-only content/version/certificate edits use core validation.
+      # Keep this exclusion after the client include; mixed client edits run.
+      - "!crates/client-3d/scenarios/**"
       - ".github/workflows/client-3d.yml"
   push:
     branches: [main]
     paths:
       - "crates/client-3d/**"
+      # Scenario-only content/version/certificate edits use core validation.
+      # Keep this exclusion after the client include; mixed client edits run.
+      - "!crates/client-3d/scenarios/**"
       - ".github/workflows/client-3d.yml"
   workflow_dispatch:
 
