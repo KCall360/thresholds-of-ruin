@@ -87,6 +87,15 @@ pub(crate) fn fixture_with(
     subject: &[PerceptionValue],
     edit: impl FnOnce(&mut RulesetDocument, &mut Species, &mut Species),
 ) -> Game {
+    fixture_with_height(owner, subject, 1, edit)
+}
+
+pub(crate) fn fixture_with_height(
+    owner: &[PerceptionValue],
+    subject: &[PerceptionValue],
+    height: i32,
+    edit: impl FnOnce(&mut RulesetDocument, &mut Species, &mut Species),
+) -> Game {
     let mut document = crate::test_creatures::ruleset().document().clone();
     document.conditions.extend([
         condition(
@@ -171,7 +180,7 @@ pub(crate) fn fixture_with(
             .map(|region| Region {
                 id: RegionId(region),
                 name: format!("perception room {region}"),
-                bounds: Extent::new(9, 7, 1).unwrap(),
+                bounds: Extent::new(9, 7, height).unwrap(),
             })
             .collect(),
         vec![],

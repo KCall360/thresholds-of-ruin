@@ -235,6 +235,33 @@ impl Game {
                         if matches!(
                             &resolved.plan,
                             crate::abilities::Plan::Read {
+                                control: Some(_),
+                                ..
+                            }
+                        ) =>
+                    {
+                        let crate::abilities::Plan::Read {
+                            control: Some(control),
+                            discovery,
+                            ..
+                        } = &resolved.plan
+                        else {
+                            unreachable!("control read")
+                        };
+                        let effective = self.resolve_control_read(id, control)?;
+                        self.finish_item_work(
+                            id,
+                            &resolved.plan,
+                            resolved.intention,
+                            *discovery == crate::ItemDiscovery::OnUse
+                                || (effective && *discovery == crate::ItemDiscovery::SelfEffect),
+                            consumed_identity,
+                        )?;
+                    }
+                    Work::Read { .. }
+                        if matches!(
+                            &resolved.plan,
+                            crate::abilities::Plan::Read {
                                 identify: Some(_),
                                 ..
                             }

@@ -77,6 +77,16 @@ pub enum PerceptionValue {
     ReadiedTouchAmbush {
         enabled: bool,
     },
+    /// Continual attempted stealth affects only awareness contests, not sight.
+    ContinualStealth {
+        edge: u32,
+    },
+    /// One wearer-owned pulse stream; duplicate sources do not stack.
+    Aggravation {
+        interval: u64,
+        chance_denominator: u32,
+        stealth_disadvantage: u32,
+    },
     /// One strongest periodic source; duplicate wearables share the actor clock.
     PeriodicSearch {
         interval: u64,
@@ -108,6 +118,14 @@ impl<'de> Deserialize<'de> for PerceptionValue {
             ReadiedTouchAmbush {
                 enabled: bool,
             },
+            ContinualStealth {
+                edge: u32,
+            },
+            Aggravation {
+                interval: u64,
+                chance_denominator: u32,
+                stealth_disadvantage: u32,
+            },
             PeriodicSearch {
                 interval: u64,
             },
@@ -132,8 +150,49 @@ impl<'de> Deserialize<'de> for PerceptionValue {
             }
             Fields::AmbushFromGuise { enabled } => Self::AmbushFromGuise { enabled },
             Fields::ReadiedTouchAmbush { enabled } => Self::ReadiedTouchAmbush { enabled },
+            Fields::ContinualStealth { edge } => {
+                if u64::from(edge) > crate::limits::NUMERIC as u64 {
+                    return Err(serde::de::Error::custom("invalid stealth edge"));
+                }
+                Self::ContinualStealth { edge }
+            }
+            Fields::Aggravation {
+                interval,
+                chance_denominator,
+                stealth_disadvantage,
+            } => {
+                let policy = AggravationPolicy {
+                    interval,
+                    chance_denominator,
+                    stealth_disadvantage,
+                };
+                if !policy.valid() {
+                    return Err(serde::de::Error::custom("invalid aggravation policy"));
+                }
+                Self::Aggravation {
+                    interval,
+                    chance_denominator,
+                    stealth_disadvantage,
+                }
+            }
             Fields::PeriodicSearch { interval } => Self::PeriodicSearch { interval },
         })
+    }
+}
+
+/// Authored cadence and skill-local cost. Ordering chooses one deterministic
+/// strongest source; duplicates never multiply either cadence or disadvantage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AggravationPolicy {
+    pub interval: u64,
+    pub chance_denominator: u32,
+    pub stealth_disadvantage: u32,
+}
+impl AggravationPolicy {
+    pub(crate) fn valid(self) -> bool {
+        (1..=crate::limits::NUMERIC as u64).contains(&self.interval)
+            && (1..=crate::limits::NUMERIC as u64).contains(&u64::from(self.chance_denominator))
+            && u64::from(self.stealth_disadvantage) <= crate::limits::NUMERIC as u64
     }
 }
 
@@ -154,6 +213,8 @@ pub struct PerceptionCapabilities {
     pub ambush_from_guise: bool,
     pub readied_touch_ambush: bool,
     pub search_interval: Option<u64>,
+    pub continual_stealth: Option<u32>,
+    pub aggravation: Option<AggravationPolicy>,
 }
 impl Default for PerceptionCapabilities {
     fn default() -> Self {
@@ -166,10 +227,25 @@ impl Default for PerceptionCapabilities {
             ambush_from_guise: false,
             readied_touch_ambush: false,
             search_interval: None,
+            continual_stealth: None,
+            aggravation: None,
         }
     }
 }
 impl PerceptionCapabilities {
+    /// Skill-qualified worn edges must never leak into attack, Lore or Search
+    /// checks merely because those checks share the same resolution kernel.
+    pub(crate) fn skill_edge(&self, skill: crate::attributes::Skill) -> i64 {
+        if skill != crate::attributes::Skill::Stealth {
+            return 0;
+        }
+        i64::from(self.continual_stealth.unwrap_or(0))
+            - i64::from(
+                self.aggravation
+                    .map_or(0, |policy| policy.stealth_disadvantage),
+            )
+    }
+
     pub(crate) fn from_modifiers<'a>(
         values: impl Iterator<Item = &'a crate::rules::Modifier>,
     ) -> Result<Self, crate::creatures::BuildError> {
@@ -227,6 +303,29 @@ impl PerceptionCapabilities {
                         skill: *skill,
                         edge: *edge,
                     });
+                }
+                PerceptionValue::ContinualStealth { edge } => {
+                    if u64::from(*edge) > crate::limits::NUMERIC as u64 {
+                        return Err(crate::creatures::BuildError::InvalidDefinition);
+                    }
+                    result.continual_stealth =
+                        Some(result.continual_stealth.map_or(*edge, |old| old.max(*edge)));
+                }
+                PerceptionValue::Aggravation {
+                    interval,
+                    chance_denominator,
+                    stealth_disadvantage,
+                } => {
+                    let policy = AggravationPolicy {
+                        interval: *interval,
+                        chance_denominator: *chance_denominator,
+                        stealth_disadvantage: *stealth_disadvantage,
+                    };
+                    if !policy.valid() {
+                        return Err(crate::creatures::BuildError::InvalidDefinition);
+                    }
+                    result.aggravation =
+                        Some(result.aggravation.map_or(policy, |old| old.min(policy)));
                 }
                 PerceptionValue::PeriodicSearch { interval } => {
                     if !(1..=crate::limits::NUMERIC as u64).contains(interval) {

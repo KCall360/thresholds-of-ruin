@@ -33,6 +33,9 @@ pub enum Beat {
     Stepped(Direction),
     /// The character deliberately traversed its terminal objective endpoint.
     Escaped(String),
+    Crumbled {
+        quantity: u64,
+    },
     Took {
         name: String,
         quantity: u64,
@@ -180,6 +183,9 @@ impl Chronicler {
                 Event::Escaped { .. } => beats.push(Beat::Escaped(
                     tor_client_common::narration::action(event, a),
                 )),
+                Event::Crumbled { quantity, .. } => beats.push(Beat::Crumbled {
+                    quantity: *quantity,
+                }),
                 Event::Taken {
                     result, quantity, ..
                 } => beats.push(Beat::Took {

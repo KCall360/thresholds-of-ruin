@@ -559,6 +559,11 @@ pub(crate) struct Lifecycle {
     pub(crate) recovery_contexts: crate::recovery_context::RecoveryContexts,
     #[serde(skip)]
     pub(crate) discovery_contexts: crate::discovery::DiscoveryContexts,
+    #[serde(skip)]
+    pub(crate) awareness_contexts: crate::awareness::AwarenessContexts,
+    /// Construction-only gate; never persisted into a published game.
+    #[serde(skip)]
+    pub(crate) initial_awareness_deferred: bool,
     pub(crate) discovery_started: bool,
     points: BTreeMap<ReferencePointId, ReferencePoint>,
     next_point: u64,
@@ -585,6 +590,8 @@ impl Default for Lifecycle {
             scenes: crate::observation::ActorScenes::default(),
             recovery_contexts: crate::recovery_context::RecoveryContexts::default(),
             discovery_contexts: crate::discovery::DiscoveryContexts::default(),
+            awareness_contexts: Default::default(),
+            initial_awareness_deferred: false,
             discovery_started: false,
             points: BTreeMap::new(),
             next_point: 1,
@@ -880,6 +887,7 @@ impl Game {
                 .ok_or(GameError::InvalidLocation)?;
         }
         actor.behavior = behavior;
+        actor.awareness.shift(delta)?;
         drop(actor);
         self.actors.set_timer_active(id, true);
         self.retire_settled_fall(id);
@@ -1459,6 +1467,7 @@ impl Game {
         if advance {
             next.begin_effect_publication()?;
         }
+        next.settle_wandering_population()?;
         // Deferred host transitions retain the same unpublished event origins.
         // Regions the game doesn't know yet are declared from the store's
         // source, if it has them.
@@ -1538,6 +1547,7 @@ impl Game {
         if !next.item_claims_valid(false) || !next.intentions_valid() {
             return Err(TransitionError::InvalidRecord(RegionId(0)).into());
         }
+        next.reconcile_wandering_activity()?;
         next.reconcile_recovery_contexts()?;
         if !report.built.is_empty() {
             // A character may start where the objective is met, as it would

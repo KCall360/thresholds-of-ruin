@@ -1,10 +1,13 @@
 """Normal Rogue preset, advancement and combat through the real applications.
 
-The production package is used without wizard setup or combat/rules overrides.
+Production presets are used without wizard setup or combat/rules overrides.
+The fixed-four stock/traversal/persistence owner explicitly disables only wandering
+in a validated derived diagnostic package; it is not current living survival.
 Seeded success establishes a content walkthrough, not numerical balance.
 """
 from scalar_wire import u64
 from collections import Counter
+import copy
 from contextlib import closing
 import gzip
 import hashlib
@@ -23,11 +26,13 @@ from process_harness import (
     ProcessTestCase, ProcessTestDirectory, ROOT, SPECTATOR_TOKEN, content_ids, hit_die_counts,
     disclosed_exploration_route, settle_rogue_action, underfoot,
 )
+from arena_matrix import toml_source
 from process_work_budget import ProcessOutputBudget, ProcessWorkBudget
+from rogue_activation_oracle import reviewed_twenty_six_activation
 from rogue_earned_route_process import read_authoritative_evidence
 from rogue_magic_receipts import (
-    EQUIPMENT_ITEM_STAGE_IDS, MAGIC_ITEM_STAGE_IDS,
-    assert_equipment_item_receipts, assert_magic_item_receipts,
+    EQUIPMENT_ITEM_STAGE_IDS, CONTROL_ITEM_STAGE_IDS, MAGIC_ITEM_STAGE_IDS,
+    assert_equipment_item_receipts, assert_control_item_receipts, assert_magic_item_receipts,
 )
 
 from rogue_test_support import (
@@ -47,6 +52,69 @@ def abilities(frame):
 def carried_stock(frame, supply):
     return sum(int(row["quantity"]) for row in observation(frame)["inventory"]
                if (row.get("known_supply") or {}).get("id") == supply)
+
+
+
+def fixed_initial_population_manifest(manifest):
+    """Reviewed current26 source, diagnostic-only fixed initial population."""
+    actual = json.dumps(manifest.get("floor_activation"), sort_keys=True)
+    expected = json.dumps(reviewed_twenty_six_activation(), sort_keys=True)
+    if actual != expected:
+        raise ValueError("Fixed-initial diagnostic requires exact reviewed current26 population")
+    fixture = copy.deepcopy(manifest)
+    del fixture["floor_activation"]["wandering"]
+    return fixture
+
+
+def fixture_source_hashes(package):
+    """Retain exact authored/certificate bytes, excluding generated compiler cache."""
+    return {path.relative_to(package).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(package.rglob("*"))
+            if path.is_file() and ".compiled" not in path.relative_to(package).parts}
+
+
+class FixedInitialPopulationFixtureTests(unittest.TestCase):
+    def production(self):
+        return tomllib.loads((ROOT / "scenarios/rogue-exploration/scenario.toml").read_text(encoding="utf-8"))
+
+    def test_only_wandering_is_disabled_and_original_production_is_unchanged(self):
+        source = self.production()
+        original = copy.deepcopy(source)
+        self.assertEqual(source["floor_activation"]["wandering"]["living_cap"], 8)
+        self.assertEqual(source["floor_activation"]["wandering"]["initial_delay"], [6700, 7300])
+        source_hashes = fixture_source_hashes(ROOT / "scenarios/rogue-exploration")
+        fixture = fixed_initial_population_manifest(source)
+        self.assertEqual(fixture_source_hashes(ROOT / "scenarios/rogue-exploration"), source_hashes)
+        self.assertEqual(tomllib.loads(toml_source(fixture)), fixture)
+        self.assertEqual(source, original)
+        self.assertNotIn("wandering", fixture["floor_activation"])
+        restored = copy.deepcopy(fixture)
+        restored["floor_activation"]["wandering"] = original["floor_activation"]["wandering"]
+        self.assertEqual(restored, original, "No other rule, stock, population or character may change")
+        fixture["characters"][0]["name"] = "changed only in returned fixture"
+        fixture["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]["count"][0] = 0
+        self.assertEqual(source, original, "No mutable alias may escape the transform")
+
+    def test_source_population_drift_is_rejected_before_diagnostic_transform(self):
+        source = self.production()
+        fixed_initial_population_manifest(source)  # validate positive source first
+        for mutation in ("missing_wandering", "cap", "boolean_version", "stock", "actor_count"):
+            changed = copy.deepcopy(source)
+            activation = changed["floor_activation"]
+            if mutation == "missing_wandering":
+                del activation["wandering"]
+            elif mutation == "cap":
+                activation["wandering"]["living_cap"] = 9
+            elif mutation == "boolean_version":
+                activation["version"] = True
+            elif mutation == "stock":
+                activation["profiles"]["rogue.low_depth"]["stages"][-1]["quantity"] = 2
+            else:
+                activation["profiles"]["rogue.low_depth"]["stages"][0]["count"] = [3, 3]
+            before = copy.deepcopy(changed)
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                fixed_initial_population_manifest(changed)
+            self.assertEqual(changed, before)
 
 
 class WalkthroughRations:
@@ -1016,7 +1084,7 @@ class RogueChecks:
         self.assertEqual(set(seen_foes), set(defeated))
         self.assertEqual(int(growth["growth"]["earned_xp"]),
                          sum(row["earned_xp"] for row in defeated.values()))
-        print("Production first-floor earned combat: " + json.dumps({
+        print("Fixed-initial diagnostic earned combat: " + json.dumps({
             "seed": 42, "defeated": list(defeated.values()), "growth": growth["growth"]}, sort_keys=True),
             flush=True)
         return current, growth, seen_foes, collected_cells, cleared_cells, floor_graph
@@ -1142,10 +1210,11 @@ class RogueChecks:
         )
         self.assertEqual([stage["id"] for stage in receipt["decisions"]],
                          [stage for stage, _, _, _ in expected]
-                         + ["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS])
+                         + ["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS, *CONTROL_ITEM_STAGE_IDS])
         entities = assert_room_gold_receipt(self, receipt["decisions"][4], depth)
         entities.extend(assert_magic_item_receipts(self, receipt["decisions"][5:8], require_placed=True))
-        entities.extend(assert_equipment_item_receipts(self, receipt["decisions"][8:], require_placed=True))
+        entities.extend(assert_equipment_item_receipts(self, receipt["decisions"][8:12], require_placed=True))
+        entities.extend(assert_control_item_receipts(self, receipt["decisions"][12:], require_placed=True))
         for stage, (_, choices, kind, count) in zip(receipt["decisions"][:4], expected, strict=True):
             self.assertEqual(stage["version"], 1)
             result = stage["result"]
@@ -1313,12 +1382,40 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         # Process cleanups run first; the report is then retained before the
         # harness preserves a failed directory or removes a successful one.
         self.addCleanup(report_budget)
+        # This owner proves fixed initial-four stock, traversal and persistence,
+        # not living-population survival. Current living acceptance is separate;
+        # the original current-package basic-only death remains retained.
+        source = ROOT / "scenarios/rogue-exploration"
+        source_hashes = fixture_source_hashes(source)
+        production = tomllib.loads((source / "scenario.toml").read_text(encoding="utf-8"))
+        fixture = fixed_initial_population_manifest(production)
         package = self.directory / "population-package"
-        shutil.copytree(ROOT / "scenarios/rogue-exploration", package,
-                        ignore=shutil.ignore_patterns(".compiled"))
+        shutil.copytree(source, package, ignore=shutil.ignore_patterns(".compiled"))
+        self.assertEqual(fixture_source_hashes(package), source_hashes)
+        (package / "scenario.toml").write_text(toml_source(fixture), encoding="utf-8")
+        parsed = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
+        self.assertEqual(parsed, fixture)
+        restored = copy.deepcopy(parsed)
+        restored["floor_activation"]["wandering"] = production["floor_activation"]["wandering"]
+        self.assertEqual(restored, production)
+        changed = {name for name, digest in fixture_source_hashes(package).items()
+                   if source_hashes.get(name) != digest}
+        self.assertEqual(changed, {"scenario.toml"})
+        provenance = {"format": "rogue-fixed-initial-population-diagnostic-v1",
+            "scope": "fixed initial-four stock/traversal/persistence; not current living survival",
+            "source": "scenarios/rogue-exploration", "source_sha256": source_hashes,
+            "fixture_pre_validation_sha256": fixture_source_hashes(package),
+            "only_semantic_change": "floor_activation.wandering omitted",
+            "original_wandering": production["floor_activation"]["wandering"]}
+        (self.directory / "fixed-initial-population-source.json").write_text(
+            json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
         validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                    capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.assertEqual(fixture_source_hashes(source), source_hashes, "Original production bytes changed")
+        provenance["validated_fixture_sha256"] = fixture_source_hashes(package)
+        (self.directory / "fixed-initial-population-source.json").write_text(
+            json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
         # Current checkpoints let transport-only rollovers verify the entire
         # durable endpoint. The later interval=0 journal-tail witness is separate.
         server = self.server("--checkpoint-interval", 1, scenario=package, seed=42)

@@ -569,6 +569,10 @@ pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
             from: position(from),
             to: position(to),
         },
+        s::OutcomeKind::Crumbled { item, quantity } => crate::journal::Event::Crumbled {
+            item: item.0,
+            quantity,
+        },
         s::OutcomeKind::Taken {
             item,
             result,

@@ -364,11 +364,13 @@ impl Game {
                             .consumable
                             .as_ref()
                             .is_some_and(|spec| &spec.descriptors == descriptors),
-                        Plan::Read { descriptors, .. } => item
-                            .spec
-                            .readable
-                            .as_ref()
-                            .is_some_and(|spec| &spec.descriptors == descriptors),
+                        Plan::Read {
+                            control,
+                            descriptors,
+                            ..
+                        } => item.spec.readable.as_ref().is_some_and(|spec| {
+                            &spec.descriptors == descriptors && &spec.control == control
+                        }),
                         Plan::Zap {
                             charges,
                             ray,

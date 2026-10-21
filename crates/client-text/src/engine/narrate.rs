@@ -141,6 +141,7 @@ fn told(beat: &Beat) -> bool {
     !matches!(
         beat,
         Beat::Stepped(_)
+            | Beat::Crumbled { .. }
             | Beat::Took { .. }
             | Beat::Dropped { .. }
             | Beat::SetDoor { .. }
@@ -306,7 +307,15 @@ fn settled(beats: &[Beat]) -> Vec<Beat> {
 }
 
 fn simple_verb(e: &Episode) -> Option<&'static str> {
-    if e.approached || e.end != End::Done || e.beats.iter().any(told) {
+    if e.approached
+        || e.end != End::Done
+        || e.beats.iter().any(told)
+        || e.beats
+            .iter()
+            .any(|beat| matches!(beat, Beat::Crumbled { .. }))
+    {
+        // Destruction is not a simple transfer. Preserve its episode so the
+        // committed result, rather than the requested verb, is narrated.
         return None;
     }
     match e.goal {
@@ -408,6 +417,25 @@ fn episode(teller: &mut Teller, e: &Episode) {
     let (travel, after) = e.beats.split_at(split);
     let noted_on_the_way = travel.iter().any(told);
     match (&e.end, e.approached) {
+        (End::Done, approached)
+            if matches!(e.goal, Goal::Take { .. })
+                && after
+                    .iter()
+                    .any(|beat| matches!(beat, Beat::Crumbled { .. })) =>
+        {
+            // Completed pickup work need not transfer an item. Its committed
+            // causal beat, not the requested goal, owns the result narration.
+            if approached {
+                teller.say(format!("you walk over to {object}"));
+                tell(teller, travel);
+            }
+            for beat in after {
+                if matches!(beat, Beat::Crumbled { .. }) {
+                    own_actions(teller, std::slice::from_ref(beat));
+                }
+            }
+            done_beats(teller, e, after);
+        }
         (End::Done, true) => {
             match &e.goal {
                 Goal::Go { .. } | Goal::Visit { .. } => {
@@ -680,6 +708,15 @@ fn own_actions(teller: &mut Teller, beats: &[Beat]) {
             Beat::Stepped(direction) => {
                 teller.say(format!("you move {}", direction_name(*direction)))
             }
+            Beat::Crumbled { quantity } => {
+                if *quantity == 1 {
+                    teller.say("the item crumbles as you try to pick it up")
+                } else {
+                    teller.say(format!(
+                        "{quantity} items crumble as you try to pick them up"
+                    ))
+                }
+            }
             Beat::Took { name, quantity } => {
                 teller.say(format!("you pick up {}", prose::counted(*quantity, name)))
             }
@@ -835,6 +872,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
             Beat::Control(true) => teller.say("you are in control"),
             Beat::Control(false) => teller.say("you are now only watching"),
             Beat::Stepped(_)
+            | Beat::Crumbled { .. }
             | Beat::Took { .. }
             | Beat::Dropped { .. }
             | Beat::SetDoor { .. }
@@ -880,6 +918,51 @@ mod tests {
         item: tor_protocol::ItemTarget::from_digest([1; 32]),
         quantity: None,
     };
+
+    #[test]
+    fn completed_take_narrates_committed_crumble_instead_of_transfer() {
+        for approached in [false, true] {
+            for quantity in [1, 3] {
+                let text = told(vec![episode(
+                    TOKEN,
+                    "the ward page",
+                    approached,
+                    vec![Beat::Crumbled { quantity }],
+                    End::Done,
+                )]);
+                let result = if quantity == 1 {
+                    "The item crumbles as you try to pick it up."
+                } else {
+                    "3 items crumble as you try to pick them up."
+                };
+                assert_eq!(
+                    text,
+                    if approached {
+                        format!("You walk over to the ward page. {result}")
+                    } else {
+                        result.to_owned()
+                    }
+                );
+                assert!(!text.contains("You pick up"));
+            }
+        }
+    }
+
+    #[test]
+    fn crumble_splits_plain_pickup_coalescing_without_counting_as_a_transfer() {
+        let text = told(vec![
+            episode(TOKEN, "the copper token", false, vec![], End::Done),
+            episode(
+                TOKEN,
+                "the ward page",
+                false,
+                vec![Beat::Crumbled { quantity: 1 }],
+                End::Done,
+            ),
+            episode(TOKEN, "the silver token", false, vec![], End::Done),
+        ]);
+        assert_eq!(text, "You pick up the copper token. The item crumbles as you try to pick it up. You pick up the silver token.");
+    }
 
     #[test]
     fn a_blocked_journey_keeps_its_purpose() {

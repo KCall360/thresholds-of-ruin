@@ -177,12 +177,18 @@ fn authority(engine: &Engine) -> Value {
     json!({"game":game,"shared":shared})
 }
 
-fn activation<'a>(game: &Value, shared: &'a Value) -> &'a Value {
-    let index = game["floor_activation"]
+fn activation(game: &Value, shared: &Value) -> Value {
+    let reference = &game["floor_activation"];
+    let index = reference["state"]
         .as_u64()
         .expect("activation must have an authoritative persisted pool reference");
-    let activation = &shared["floor_activations"][index as usize];
+    let mut activation = shared["floor_activations"][index as usize].clone();
     assert!(activation.is_object());
+    assert!(activation["wandering"].is_null());
+    activation["wandering"] = reference
+        .get("wandering")
+        .expect("the complete boundary clock authority is required")
+        .clone();
     activation
 }
 

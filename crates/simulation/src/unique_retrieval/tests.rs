@@ -440,7 +440,10 @@ fn changing_objective_states_keep_population_and_policy_pool_references_shared()
         1
     );
     for snapshot in encoded[0].as_array().unwrap() {
-        assert_eq!(snapshot["floor_activation"], 0);
+        assert_eq!(
+            snapshot["floor_activation"],
+            serde_json::json!({"state":0,"wandering":null})
+        );
         assert_eq!(snapshot["unique_retrieval"]["policy"], 0);
         assert_eq!(
             snapshot["unique_retrieval"]["entries"]

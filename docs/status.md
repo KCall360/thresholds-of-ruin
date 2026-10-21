@@ -6,13 +6,13 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **58**, save format **55**, scenario format **28**, ruleset
-**`interactions-v50`**, scenario validator **`tor-scenario-40`**. Unsupported
+**Current formats:** protocol **59**, save format **56**, scenario format **29**, ruleset
+**`interactions-v51`**, scenario validator **`tor-scenario-41`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **23**, ContentPackage **25** and
-RegionInput **7**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
+The independent compiled inputs use RulesInput **24**, ContentPackage **26** and
+RegionInput **8**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
 formats remain unchanged. Current payloads require explicit nullable rider
@@ -117,11 +117,21 @@ their success and no-op outcomes do not automatically identify the scroll type.
 Generic stack transfers require matching exact per-unit condition and charge
 state; equipment and devices remain nonstackable.
 
-The twelve-ring catalog adds shared signed potency, all-category damage reduction,
-attack-roll bonuses, source-aware Strength/Speed defense exclusion, sustained attributes,
+The fourteen-ring catalog adds shared signed potency, all-category damage reduction,
+attack damage-roll bonuses, source-aware Strength/Speed defense exclusion,
+sustained attributes,
 worn corrosion protection, nonstacking Health recovery acceleration and exact
-fractional digestion, plus periodic active searching. Rings remain concealed until identified; a paid choice can
+fractional digestion, periodic active searching, continual opposed Stealth and
+periodic/random Aggravation location pulses. Rings remain concealed until identified; a paid choice can
 permit both rings and wands. See [worn magic](reference/items.md#worn-magic-and-the-finite-rogue-ring-catalog).
+
+Living-dungeon pressure uses one persisted active-floor wandering clock, an
+8-living-wanderer cap independent of initial population and Create Monster,
+off-screen/out-of-room placement, and ordinary XP without birth loot. Monster
+control uses paid scroll reads, shared Confused conditions, timed Hold and
+occupied-ground-scroll Flee objectives. Awareness contests belong to committed
+movement/contact/battle events; anonymous location leads never grant target
+identity. Manual Sneak remains deferred. See [living dungeon rules](play/rogue.md#living-dungeon-pressure-and-awareness).
 
 Physical discovery uses shared Perception: persistent first-observation passive
 attempts, repeatable paid Search and periodic searching-ring scans. Concealed
@@ -495,7 +505,7 @@ checks do not replace complete Windows/Linux debug/release CI before merge.
   initial authored talent values still require content calibration.
 - The Rogue starter slice selects 26-species depth-selected population,
   finite starting/floor supplies and Centaur/Yeti/Troll/Medusa/Xeroc/Vampire/Griffin/Jabberwock/Dragon birth stock and finite Leprechaun gold, alongside
-  authored hunger/fainting/starvation and ration eating. Calibrated food pressure, complete item catalog, traps, wandering population,
+  authored hunger/fainting/starvation and ration eating. Calibrated food pressure, the complete item catalog,
   calibrated depth curve and complete run balancing remain unfinished. The Amulet
   relocates on each eligible player entry unless carried; intentional surface Up
   while carrying it is the persistent escape condition.

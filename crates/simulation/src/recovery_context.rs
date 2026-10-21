@@ -195,6 +195,10 @@ impl Game {
         if !requires_candidate
             && self.actors.contextual_recovery_owners().next().is_none()
             && (!self.lifecycle.discovery_started || !self.has_discovery_cues())
+            // Setup geometry/placement is also a causal awareness/control event.
+            // Keep its fallible reconciliation inside a rollback-capable owner.
+            && self.combat.ai.is_empty()
+            && !self.items.values().any(|item| item.spec.ground_scare.is_some())
         {
             let result = change(self)?;
             self.retire_settled_falls();

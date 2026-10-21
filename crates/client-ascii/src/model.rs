@@ -3287,6 +3287,13 @@ pub fn history_text(entry: &HistoryEntry) -> String {
         HistoryContent::Action { event, .. } => match event.as_ref() {
             Event::Moved { direction } => format!("Moved {}.", direction_name(*direction)),
             Event::Escaped { .. } => "Escaped with the objective item.".into(),
+            Event::Crumbled { quantity, .. } => {
+                if *quantity == 1 {
+                    "An item crumbled during pickup.".into()
+                } else {
+                    format!("{quantity} items crumbled during pickup.")
+                }
+            }
             Event::Taken { quantity, .. } => {
                 format!(
                     "Picked up {}.",

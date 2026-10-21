@@ -20,6 +20,7 @@ MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 WORKLOAD_IDENTIFIERS = {
     "rogue-descriptor-v2",
     "rogue-earned-baseline-v19",
+    "rogue-earned-baseline-v20",
     "tor-arena-run-v5",
     "performance-v1",
     "place-knowledge-v1",

@@ -363,6 +363,8 @@ enum Protagonist {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::FloorActivation", deny_unknown_fields)]
 struct FloorActivation {
+    #[serde(deserialize_with = "required_option")]
+    wandering: Option<tor_simulation::floor_activation::WanderingPolicy>,
     version: u32,
     #[serde(with = "mapped")]
     protagonist: source::Protagonist,
@@ -781,6 +783,8 @@ struct Archetype {
     consumable: Option<source::ConsumableSpec>,
     #[serde(with = "mapped")]
     readable: Option<source::ReadableSpec>,
+    #[serde(with = "mapped")]
+    ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
     #[serde(with = "mapped")]
     device: Option<source::DeviceSpec>,
     #[serde(with = "mapped")]
@@ -1521,9 +1525,59 @@ enum ItemDiscovery {
     OnUse,
     Never,
 }
+fn read_control_duration<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    let duration = u64::deserialize(d)?;
+    if !(1..=tor_simulation::limits::NUMERIC as u64).contains(&duration) {
+        return Err(serde::de::Error::custom("invalid stored control duration"));
+    }
+    Ok(duration)
+}
+fn read_control_radius<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u8, D::Error> {
+    let radius = u8::deserialize(d)?;
+    if !(1..=8).contains(&radius) {
+        return Err(serde::de::Error::custom("invalid stored control radius"));
+    }
+    Ok(radius)
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::control_scrolls::ControlSpec",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum ControlSpec {
+    HoldNearby {
+        condition: tor_simulation::content_ids::ConditionId,
+        #[serde(deserialize_with = "read_control_duration")]
+        duration: u64,
+        #[serde(deserialize_with = "read_control_radius")]
+        radius: u8,
+    },
+    ArmConfusion {
+        condition: tor_simulation::content_ids::ConditionId,
+        #[serde(deserialize_with = "read_control_duration")]
+        duration: u64,
+    },
+    Aggravate {},
+    CreateMonster {},
+    Nothing {},
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::control_scrolls::ConditionPayload",
+    deny_unknown_fields
+)]
+struct ConditionPayload {
+    condition: tor_simulation::content_ids::ConditionId,
+    #[serde(deserialize_with = "read_control_duration")]
+    duration: u64,
+}
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::ReadableSpec", deny_unknown_fields)]
 struct ReadableSpec {
+    #[serde(with = "mapped")]
+    control: Option<tor_simulation::control_scrolls::ControlSpec>,
     descriptors: Vec<String>,
     #[serde(with = "mapped")]
     effects: Vec<source::Effect>,
@@ -2056,6 +2110,14 @@ enum Perception {
     },
     ReadiedTouchAmbush {
         enabled: bool,
+    },
+    ContinualStealth {
+        edge: u32,
+    },
+    Aggravation {
+        interval: u64,
+        chance_denominator: u32,
+        stealth_disadvantage: u32,
     },
     PeriodicSearch {
         interval: u64,
@@ -3846,6 +3908,8 @@ named_remote!(
     EquippedSelection => source::EquippedSelection,
     ConsumableSpec => source::ConsumableSpec,
     ReadableSpec => source::ReadableSpec,
+    ControlSpec => tor_simulation::control_scrolls::ControlSpec,
+    ConditionPayload => tor_simulation::control_scrolls::ConditionPayload,
     DeviceSpec => source::DeviceSpec,
     ChargeRange => source::ChargeRange,
     EquipmentGeneration => source::EquipmentGeneration,
@@ -4074,7 +4138,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 23;
+const RULES_INPUT_FORMAT: u32 = 24;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -4138,7 +4202,7 @@ struct RegionInput {
     #[serde(with = "mapped")]
     region: source::RegionDef,
 }
-const REGION_INPUT_FORMAT: u32 = 7;
+const REGION_INPUT_FORMAT: u32 = 8;
 pub(crate) fn encode_region_input(region: &source::RegionDef) -> Result<String, crate::Failure> {
     #[derive(Serialize)]
     struct Input<'a> {
@@ -4174,7 +4238,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 25;
+const CONTENT_PACKAGE_FORMAT: u32 = 26;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4447,17 +4511,17 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (55, 28, "interactions-v50", 23, 7, 25, "tor-arena-run-v5")
+            (56, 29, "interactions-v51", 24, 8, 26, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn discovery_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 58);
-        assert_eq!(super::RULES_INPUT_FORMAT, 23);
-        assert_eq!(super::REGION_INPUT_FORMAT, 7);
-        // Discovery advances the semantic rule, region and package payloads;
-        // their independently versioned physical framing remains unchanged.
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 59);
+        assert_eq!(super::RULES_INPUT_FORMAT, 24);
+        assert_eq!(super::REGION_INPUT_FORMAT, 8);
+        // Semantic rule, region and package payload versions advance independently
+        // of their physical framing, which remains unchanged.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&base[..6], b"TORB\x06\x00");
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
@@ -5226,13 +5290,16 @@ mod tests {
             .unwrap()
             .remove("lighting");
         assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
-        assert!(decode_region_input(&input.replacen(
-            "\"format\":7",
-            "\"format\":7,\"format\":7",
-            1
-        ))
-        .is_err());
-        assert!(decode_region_input(&input.replacen("\"format\":7", "\"format\":0", 1)).is_err());
+        assert_eq!(value["format"], 8);
+        let header = "\"format\":8";
+        for replacement in ["\"format\":0".to_owned(), format!("{header},{header}")] {
+            let invalid = input.replacen(header, &replacement, 1);
+            assert_ne!(
+                invalid, input,
+                "the strict mutation must change the current input"
+            );
+            assert!(decode_region_input(&invalid).is_err());
+        }
         assert!(decode_region_input("id = 1").is_err());
     }
 
@@ -5377,7 +5444,7 @@ mod tests {
         }))
         .unwrap();
         let expected = concat!(
-            "{\"format\":7,\"region\":{\"trapdoor_destination\":null,\"lit\":true,\"lighting\":[],\"id\":1,",
+            "{\"format\":8,\"region\":{\"trapdoor_destination\":null,\"lit\":true,\"lighting\":[],\"id\":1,",
             "\"name\":\"Supply room\",\"size\":[4,4,1],\"chamber\":false,\"zone\":null,",
             "\"gravity\":null,\"gravity_overrides\":[],\"anchors\":{},\"walls\":[],",
             "\"openings\":[],\"places\":[],\"portals\":[],\"doors\":[],\"traps\":[],\"items\":[{",
@@ -5401,7 +5468,7 @@ mod tests {
         })).unwrap();
         let encoded = encode_region_input(&region).unwrap();
         let value: Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(value["format"], 7);
+        assert_eq!(value["format"], 8);
         assert_eq!(
             value["region"]["actors"][0]["creature"]["future_growth"],
             serde_json::json!({"kind":"selected","source":{"kind":"racial"}})
@@ -6985,6 +7052,7 @@ mod population_boundary_tests {
         .unwrap();
         let encoded = serde_json::to_value(Borrowed(&activation)).unwrap();
         assert_eq!(encoded["carried_item_pools"], json!({}));
+        assert_eq!(encoded["wandering"], Value::Null);
         reject_shape(&activation);
         let stage: source::PopulationStage = serde_json::from_value(json!({
             "kind":"actors","id":"inhabitants","version":1,"count":[1,1],
@@ -9002,7 +9070,7 @@ mod worn_equipment_schema_tests {
     }
     #[test]
     fn stored_identification_set_is_explicit_sorted_unique_and_not_a_legacy_scalar() {
-        let good = serde_json::json!({"descriptors":[],"effects":[],"identify":["ring","wand"],"discovery":"on_use"});
+        let good = serde_json::json!({"control":null,"descriptors":[],"effects":[],"identify":["ring","wand"],"discovery":"on_use"});
         let decoded =
             strict::<Owned<source::ReadableSpec>>(&serde_json::to_vec(&good).unwrap()).unwrap();
         assert_eq!(
@@ -9125,6 +9193,101 @@ mod hazards_shape_tests {
             extra["dc"] = json!(15);
             assert!(
                 serde_json::from_value::<Owned<crate::creature_authoring::Perception>>(extra)
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod control_scroll_schema_tests {
+    use super::*;
+    use crate::storage::codec::strict;
+    use serde_json::json;
+    #[test]
+    fn stored_control_modes_and_ground_scare_have_independent_named_bounded_shapes() {
+        for good in [
+            json!({"kind":"hold_nearby","condition":"fixture.held","duration":1000,"radius":2}),
+            json!({"kind":"arm_confusion","condition":"fixture.confused","duration":2000}),
+            json!({"kind":"aggravate"}),
+            json!({"kind":"create_monster"}),
+            json!({"kind":"nothing"}),
+        ] {
+            let decoded: Owned<tor_simulation::control_scrolls::ControlSpec> =
+                strict(&serde_json::to_vec(&good).unwrap()).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&decoded.0)).unwrap(), good);
+            let mut extra = good;
+            extra["unexpected"] = true.into();
+            assert!(
+                strict::<Owned<tor_simulation::control_scrolls::ControlSpec>>(
+                    &serde_json::to_vec(&extra).unwrap()
+                )
+                .is_err()
+            );
+        }
+        for bad in [
+            json!(["arm_confusion", "fixture.confused", 2000]),
+            json!({"kind":"arm_confusion","condition":"fixture.confused","duration":0}),
+            json!({"kind":"arm_confusion","condition":"fixture.confused"}),
+            json!({"kind":"hold_nearby","condition":"fixture.held","duration":1000,"radius":9}),
+        ] {
+            assert!(
+                strict::<Owned<tor_simulation::control_scrolls::ControlSpec>>(
+                    &serde_json::to_vec(&bad).unwrap()
+                )
+                .is_err()
+            );
+        }
+        let good = json!({"condition":"fixture.scared","duration":1000});
+        let decoded: Owned<tor_simulation::control_scrolls::ConditionPayload> =
+            strict(&serde_json::to_vec(&good).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&decoded.0)).unwrap(), good);
+        for bad in [
+            json!(["fixture.scared", 1000]),
+            json!({"condition":"fixture.scared","duration":0}),
+            json!({"condition":"fixture.scared","duration":1000,"check":"lore"}),
+        ] {
+            assert!(
+                strict::<Owned<tor_simulation::control_scrolls::ConditionPayload>>(
+                    &serde_json::to_vec(&bad).unwrap()
+                )
+                .is_err()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod awareness_schema_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn current_awareness_capabilities_are_named_complete_and_round_trip() {
+        for good in [
+            json!({"kind":"continual_stealth","edge":1}),
+            json!({"kind":"aggravation","interval":500,"chance_denominator":3,"stealth_disadvantage":1}),
+        ] {
+            let restored: Owned<crate::creature_authoring::Perception> =
+                serde_json::from_value(good.clone()).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+            for field in good.as_object().unwrap().keys() {
+                let mut missing = good.clone();
+                missing.as_object_mut().unwrap().remove(field);
+                assert!(
+                    serde_json::from_value::<Owned<crate::creature_authoring::Perception>>(missing)
+                        .is_err()
+                );
+            }
+            let mut extra = good.clone();
+            extra["unknown"] = json!(true);
+            assert!(
+                serde_json::from_value::<Owned<crate::creature_authoring::Perception>>(extra)
+                    .is_err()
+            );
+            let positional = json!(good.as_object().unwrap().values().collect::<Vec<_>>());
+            assert!(
+                serde_json::from_value::<Owned<crate::creature_authoring::Perception>>(positional)
                     .is_err()
             );
         }

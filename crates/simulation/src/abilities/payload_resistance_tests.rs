@@ -648,6 +648,7 @@ fn resisted_source_payload_is_rejected_without_breaking_source_utilities() {
         .is_err());
 
     let mut spec = crate::ReadableSpec {
+        control: None,
         descriptors: vec![],
         effects: source.to_vec(),
         identify: None,
@@ -657,6 +658,7 @@ fn resisted_source_payload_is_rejected_without_breaking_source_utilities() {
     spec.descriptors = vec![descriptor()];
     assert!(spec.validate_rules(rules).is_err());
     let mut plan = Plan::Read {
+        control: None,
         actor: ActorId(1),
         item: crate::ItemId(1),
         preparation: 100,

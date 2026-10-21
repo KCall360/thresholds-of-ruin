@@ -81,6 +81,8 @@ impl PerceptionInputs {
 /// authority; other knowledge, failed receipts, health amounts and clocks do not.
 #[derive(PartialEq, Eq)]
 struct VisibilityInputs {
+    faction: Option<String>,
+    continual_stealth: Option<u32>,
     invisible: bool,
     see_invisible: bool,
     sight: bool,
@@ -98,6 +100,8 @@ impl VisibilityInputs {
             .as_ref()
             .map(|combat| &combat.creature().derived().perception);
         Self {
+            faction: actor.combat.as_ref().map(|c| c.identity.faction.clone()),
+            continual_stealth: perception.and_then(|p| p.continual_stealth),
             invisible: perception.is_some_and(|p| p.invisible),
             see_invisible: perception.is_some_and(|p| p.see_invisible),
             sight: perception.is_none_or(|p| p.sight),
@@ -215,6 +219,7 @@ pub(crate) struct ActorStore {
     active_falls: Shared<BTreeSet<ActorId>>,
     pending_searches: Shared<BTreeSet<ActorId>>,
     pending_relocations: Shared<BTreeSet<ActorId>>,
+    pending_aggravation: Shared<BTreeSet<ActorId>>,
     guised_owners: Shared<BTreeSet<ActorId>>,
     perception_revision: u64,
     visibility_epoch: u64,
@@ -233,6 +238,7 @@ impl Clone for ActorStore {
             active_falls: self.active_falls.clone(),
             pending_searches: self.pending_searches.clone(),
             pending_relocations: self.pending_relocations.clone(),
+            pending_aggravation: self.pending_aggravation.clone(),
             guised_owners: self.guised_owners.clone(),
             perception_revision: self.perception_revision,
             visibility_epoch: self.visibility_epoch,
@@ -275,11 +281,15 @@ impl ActorStore {
         let mut timer_deadlines = BTreeSet::new();
         let mut pending_searches = BTreeSet::new();
         let mut pending_relocations = BTreeSet::new();
+        let mut pending_aggravation = BTreeSet::new();
         let mut guised_owners = BTreeSet::new();
         for (&id, actor) in &entries {
             add_member(&mut regions, actor.location.region, id);
             if actor.guise.appearance().is_some() {
                 guised_owners.insert(id);
+            }
+            if actor.awareness.pending() {
+                pending_aggravation.insert(id);
             }
             if actor.periodic_relocations.pending() {
                 pending_relocations.insert(id);
@@ -312,6 +322,7 @@ impl ActorStore {
             active_falls: Shared::new(active_falls),
             pending_searches: Shared::new(pending_searches),
             pending_relocations: Shared::new(pending_relocations),
+            pending_aggravation: Shared::new(pending_aggravation),
             guised_owners: Shared::new(guised_owners),
             perception_revision: fresh_perception_revision(),
             visibility_epoch: fresh_perception_revision(),
@@ -335,6 +346,10 @@ impl ActorStore {
     /// rebuilt from authoritative actor clocks, never serialized or polled by UI.
     pub(crate) fn pending_searches(&self) -> impl Iterator<Item = ActorId> + '_ {
         self.pending_searches.iter().copied()
+    }
+
+    pub(crate) fn pending_aggravation(&self) -> impl Iterator<Item = ActorId> + '_ {
+        self.pending_aggravation.iter().copied()
     }
 
     pub(crate) fn pending_relocations(&self) -> impl Iterator<Item = ActorId> + '_ {
@@ -466,6 +481,7 @@ impl ActorStore {
             actor.guise.appearance().is_some(),
         );
         update_pending_search(&mut self.pending_searches, id, actor.search_clock.pending());
+        update_pending_search(&mut self.pending_aggravation, id, actor.awareness.pending());
         update_pending_search(
             &mut self.pending_relocations,
             id,
@@ -541,6 +557,7 @@ impl ActorStore {
         self.active_falls.remove(id);
         self.pending_searches.remove(id);
         self.pending_relocations.remove(id);
+        self.pending_aggravation.remove(id);
         self.guised_owners.remove(id);
         if let Some(interval) = next_timer(&old) {
             self.timer_deadlines.remove(&(interval, *id));
@@ -596,6 +613,7 @@ impl ActorStore {
             active_falls: &mut self.active_falls,
             pending_searches: &mut self.pending_searches,
             pending_relocations: &mut self.pending_relocations,
+            pending_aggravation: &mut self.pending_aggravation,
             guised_owners: &mut self.guised_owners,
         })
     }
@@ -619,6 +637,7 @@ pub(crate) struct ActorEdit<'a> {
     active_falls: &'a mut Shared<BTreeSet<ActorId>>,
     pending_searches: &'a mut Shared<BTreeSet<ActorId>>,
     pending_relocations: &'a mut Shared<BTreeSet<ActorId>>,
+    pending_aggravation: &'a mut Shared<BTreeSet<ActorId>>,
     guised_owners: &'a mut Shared<BTreeSet<ActorId>>,
 }
 impl Deref for ActorEdit<'_> {
@@ -643,6 +662,11 @@ impl Drop for ActorEdit<'_> {
             self.pending_searches,
             self.id,
             self.actor.search_clock.pending(),
+        );
+        update_pending_search(
+            self.pending_aggravation,
+            self.id,
+            self.actor.awareness.pending(),
         );
         update_pending_search(
             self.pending_relocations,
@@ -726,6 +750,12 @@ fn next_timer(actor: &Actor) -> Option<u64> {
         .and_then(|interval| actor.active_since.checked_add(interval));
     creature
         .into_iter()
+        .chain(
+            actor
+                .awareness
+                .next_in(actor)
+                .and_then(|interval| actor.active_since.checked_add(interval)),
+        )
         .chain(
             actor
                 .search_clock

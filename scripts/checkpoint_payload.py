@@ -1,4 +1,5 @@
 """Bounded decoding of the save-owned TORC checkpoint envelope for diagnostics."""
+import copy
 import zlib
 
 LIMIT = 64 * 1024 * 1024
@@ -30,3 +31,16 @@ def decode_checkpoint_payload(payload):
             or decoder.unused_data or decoder.unconsumed_tail):
         raise ValueError("truncated, trailing or oversized checkpoint stream")
     return decoded
+
+
+def authoritative_floor_activation(reference, shared):
+    """Reconstruct the strict boundary clock overlay without discarding state."""
+    if reference is None:
+        return None
+    if set(reference) != {"state", "wandering"}:
+        raise ValueError("invalid floor activation checkpoint reference")
+    base = copy.deepcopy(shared["floor_activations"][reference["state"]])
+    if base["wandering"] is not None:
+        raise ValueError("pooled floor activation must have canonical null wandering")
+    base["wandering"] = copy.deepcopy(reference["wandering"])
+    return base

@@ -1095,7 +1095,7 @@ class RouteResumeHardeningTests(unittest.TestCase):
             else:
                 self.assertEqual(current, old, name)
 
-    def test_current_baseline_changes_only_required_hazards_formats(self):
+    def test_historical_hazards_baseline_preserves_format_transition(self):
         import hashlib
         import tomllib
         from arena_evaluation import files
@@ -1124,9 +1124,8 @@ class RouteResumeHardeningTests(unittest.TestCase):
         self.assertIn('compiler and route qualification pending', source['reference'])
         self.assertIn('source bytes only', transition['only_transformation'])
         self.assertEqual(transition['current_rules_dependencies'], source['rules_dependencies'])
-        bundled = ROOT / 'crates/simulation/data/default-ruleset.toml'
         self.assertEqual(source['rules_dependencies'],
-                         {'interactions-v50': hashlib.sha256(bundled.read_bytes()).hexdigest()})
+                         {'interactions-v50': '76a33642268cad95f0c10828eea8e5b633ba0f84802c172f308c5e64a51bcf5e'})
         self.assertEqual(transition['retained_fixture_reference'],
                          'c5fc1d2014944878a4283ebae35508e80213ae34:scripts/fixtures/rogue-earned-baseline-v18')
         self.assertEqual(set(source['package_inputs']), set(prior['package_inputs']))
@@ -1143,6 +1142,57 @@ class RouteResumeHardeningTests(unittest.TestCase):
             elif name == 'rules.toml':
                 self.assertEqual(old.count(b'interactions-v49'), 1)
                 self.assertEqual(current, old.replace(b'interactions-v49', b'interactions-v50', 1))
+            else:
+                self.assertEqual(current, old, name)
+
+    def test_current_baseline_changes_only_required_living_dungeon_formats(self):
+        import hashlib
+        import tomllib
+        from arena_evaluation import files
+        from process_harness import ROOT
+        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v20'
+        previous = ROOT / 'scripts/fixtures/rogue-earned-baseline-v19'
+        transition_bytes = (snapshot / 'format-transition.json').read_bytes()
+        transition = json.loads(transition_bytes)
+        source = json.loads((snapshot / 'source.json').read_text())
+        prior = json.loads((previous / 'source.json').read_text())
+        self.assertEqual((transition['previous_snapshot'], transition['current_snapshot']),
+                         (previous.name, snapshot.name))
+        self.assertEqual((transition['previous_scenario_format'], transition['current_scenario_format']),
+                         (28, 29))
+        self.assertEqual((transition['previous_ruleset'], transition['current_ruleset']),
+                         ('interactions-v50', 'interactions-v51'))
+        self.assertEqual(transition['previous_source_sha256'],
+                         hashlib.sha256((previous / 'source.json').read_bytes()).hexdigest())
+        for name in ('package_inputs', 'rules_dependencies', 'reference'):
+            self.assertEqual(transition['previous_' + name], prior[name])
+        self.assertEqual(files(previous / 'package'), prior['package_inputs'])
+        self.assertEqual(files(snapshot / 'package'), source['package_inputs'])
+        self.assertTrue(source['reference'].startswith(prior['reference'] + '; '))
+        self.assertTrue(source['reference'].endswith(
+            'transition-sha256:' + hashlib.sha256(transition_bytes).hexdigest()))
+        self.assertIn('compiler and route qualification pending', source['reference'])
+        self.assertIn('source bytes only', transition['only_transformation'])
+        self.assertEqual(transition['current_rules_dependencies'], source['rules_dependencies'])
+        bundled = ROOT / 'crates/simulation/data/default-ruleset.toml'
+        self.assertEqual(source['rules_dependencies'],
+                         {'interactions-v51': hashlib.sha256(bundled.read_bytes()).hexdigest()})
+        self.assertEqual(transition['retained_fixture_reference'],
+                         '902d4d81f68c4ea66e6bff8d805c7fcc6fe6ebe4:scripts/fixtures/rogue-earned-baseline-v19')
+        self.assertEqual(set(source['package_inputs']), set(prior['package_inputs']))
+        for name in source['package_inputs']:
+            current = (snapshot / 'package' / name).read_bytes()
+            old = (previous / 'package' / name).read_bytes()
+            if name == 'scenario.toml':
+                self.assertEqual(old.count(b'format = 28'), 1)
+                self.assertEqual(current, old.replace(b'format = 28', b'format = 29', 1))
+                current_source, prior_source = map(tomllib.loads, (current.decode(), old.decode()))
+                self.assertEqual(current_source.pop('format'), 29)
+                self.assertEqual(prior_source.pop('format'), 28)
+                self.assertEqual(current_source, prior_source)
+            elif name == 'rules.toml':
+                self.assertEqual(old.count(b'interactions-v50'), 1)
+                self.assertEqual(current, old.replace(b'interactions-v50', b'interactions-v51', 1))
             else:
                 self.assertEqual(current, old, name)
 
@@ -1215,6 +1265,66 @@ class RouteResumeHardeningTests(unittest.TestCase):
         with patch('rogue_earned_route_process.time.monotonic', return_value=101.0):
             with self.assertRaises(TimeoutError):
                 route.check_time()
+
+
+class PaidTailBudgetCallerTests(unittest.TestCase):
+    """Exercise the actual settlement/censor caller, mocking transport only."""
+    def route(self, root, limit):
+        from collections import Counter
+        from rogue_earned_route import Controller
+        route = RouteExecution.__new__(RouteExecution)
+        route.harness, route.output = self, root
+        route.controller = Controller(1, first_limit=limit)
+        route.controller.consume_command(kind='action', action={'type': 'wait'})
+        route.report = {'outcome': None}
+        route.commands, route.counts, route.phase = [], Counter(), 'paid_tail'
+        route.player, route.check_time = Mock(), Mock()
+        route.current = {'type': 'ready', 'error': None,
+            'state': {'wizard_game': False, 'observation': {'ready': False,
+                'combat': {'terminal': False, 'preparation_remaining': '250',
+                           'preparation_active': False}}},
+            'intentions': [{'intention': 'paid-identity', 'phase': 'paused'}],
+            'readiness': {'resume': ['paid-identity'], 'cancel': ['paid-identity'],
+                          'admission': False}}
+        completed = copy.deepcopy(route.current)
+        completed['state']['observation']['ready'] = True
+        completed['state']['observation']['combat']['preparation_remaining'] = None
+        completed['intentions'] = []
+        completed['readiness'] = {'resume': [], 'cancel': [], 'admission': True}
+        route.frame = Mock(return_value=completed)
+        route.run_steps = lambda **kwargs: route.settle(route.current)
+        route.finish_evidence = Mock()
+        return route, completed
+
+    def test_paid_tail_at_exact_budget_censors_before_any_transport_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            route, _ = self.route(Path(directory), 1)
+            original = copy.deepcopy(route.current)
+            route.run_loop()
+            self.assertEqual(route.report['outcome'], 'censored_action_budget')
+            self.assertEqual(route.report['unsubmitted_budget_command'], {'type': 'resume_intention'})
+            self.assertEqual(route.current, original)
+            self.assertEqual(route.controller.commands, 1)
+            self.assertEqual(route.controller.command_kinds, {'action': 1})
+            self.assertEqual(route.commands, [])
+            self.assertFalse((route.output / 'commands.jsonl').exists())
+            route.player.write.assert_not_called()
+            route.frame.assert_not_called()
+            route.finish_evidence.assert_called_once_with()
+
+    def test_same_disclosed_tail_with_budget_submits_one_actual_resume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            route, completed = self.route(Path(directory), 2)
+            route.run_loop()
+            route.player.write.assert_called_once_with(json.dumps({'type': 'resume_intention'}))
+            self.assertEqual(route.current, completed)
+            self.assertEqual(route.controller.commands, 2)
+            self.assertEqual(route.controller.command_kinds, {'action': 1, 'resume': 1})
+            self.assertNotIn('unsubmitted_budget_command', route.report)
+            self.assertNotEqual(route.report['outcome'], 'censored_action_budget')
+            self.assertEqual([row['kind'] for row in route.commands], ['resume'])
+            self.assertEqual(len((route.output / 'commands.jsonl').read_text().splitlines()), 1)
+            route.finish_evidence.assert_called_once_with()
 
 
 if __name__ == '__main__':

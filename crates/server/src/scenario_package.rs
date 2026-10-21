@@ -52,13 +52,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v50";
-const VALIDATOR: &str = "tor-scenario-40";
+pub const RULESET: &str = "interactions-v51";
+const VALIDATOR: &str = "tor-scenario-41";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 28;
+pub const FORMAT: u32 = 29;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -236,6 +236,7 @@ pub struct Archetype {
     pub equipment_generation: Option<EquipmentGeneration>,
     pub consumable: Option<ConsumableSpec>,
     pub readable: Option<ReadableSpec>,
+    pub ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
     pub device: Option<DeviceSpec>,
     pub edible: Option<EdibleSpec>,
     pub supply: Option<String>,
@@ -269,6 +270,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             equipment_generation: Option<EquipmentGeneration>,
             consumable: Option<ConsumableSpec>,
             readable: Option<ReadableSpec>,
+            ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
             device: Option<DeviceSpec>,
             edible: Option<EdibleSpec>,
             supply: Option<String>,
@@ -307,6 +309,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             equipment_generation: fields.equipment_generation,
             consumable: fields.consumable,
             readable: fields.readable,
+            ground_scare: fields.ground_scare,
             device: fields.device,
             edible: fields.edible,
             supply: fields.supply,
@@ -341,6 +344,7 @@ impl Clone for Archetype {
             equipment_generation: self.equipment_generation,
             consumable: self.consumable.clone(),
             readable: self.readable.clone(),
+            ground_scare: self.ground_scare.clone(),
             device: self.device.clone(),
             edible: self.edible.clone(),
             supply: self.supply.clone(),
@@ -1773,6 +1777,8 @@ impl Package {
             seed,
             index.definitions.creature_catalog().content().clone(),
         );
+        game.defer_initial_awareness()
+            .map_err(|error| fail(format!("Initial awareness construction: {error:?}")))?;
         self.add_geometry(&mut game, &members)?;
         for destination in destinations {
             if !shell.contains_key(&destination) {
@@ -3560,6 +3566,8 @@ impl Package {
             seed,
             index.definitions.creature_catalog().content().clone(),
         );
+        game.defer_initial_awareness()
+            .map_err(|error| fail(format!("Initial awareness construction: {error:?}")))?;
         // Full authoring validation materializes each floor once. Drain this
         // temporary batch into definitions; it is never a terrain baseline.
         let mut generated = BTreeMap::new();
@@ -3647,6 +3655,8 @@ impl Package {
         }
         self.initialize_selected_character_with_index(&mut game, &index)?;
         self.configure_run(&mut game, &index)?;
+        game.initialize_discovery()
+            .map_err(|error| fail(format!("Initial discovery publication: {error:?}")))?;
         Ok(game)
     }
 
@@ -3957,6 +3967,8 @@ impl Package {
             seed,
             index.definitions.creature_catalog().content().clone(),
         );
+        game.defer_initial_awareness()
+            .map_err(|error| fail(format!("Initial awareness construction: {error:?}")))?;
         let (actors, items, doors) = index.ceilings;
         game.reserve_identities(actors, items, doors);
         // Only regions the run refers to are declared now: where its
@@ -4123,6 +4135,8 @@ impl Package {
             seed,
             index.definitions.creature_catalog().content().clone(),
         );
+        game.defer_initial_awareness()
+            .map_err(|error| fail(format!("Initial awareness construction: {error:?}")))?;
         self.add_geometry(&mut game, &shell)?;
         // Deferred stair destinations need only their structural declarations.
         for destination in index
@@ -4991,10 +5005,11 @@ mod tests {
             "creature",
             "anatomy",
             "equipment",
-            "equipment_generation",
             "projectile",
+            "equipment_generation",
             "consumable",
             "readable",
+            "ground_scare",
             "device",
             "edible",
             "supply",
@@ -5085,8 +5100,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-40");
-        assert_eq!(original.certificate.ruleset, "interactions-v50");
+        assert_eq!(original.certificate.validator, "tor-scenario-41");
+        assert_eq!(original.certificate.ruleset, "interactions-v51");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -5405,6 +5420,7 @@ mod tests {
             .get_mut("rogue.wand_fire")
             .unwrap();
         device.readable = Some(ReadableSpec {
+            control: None,
             descriptors: vec![],
             effects: vec![],
             identify: Some(vec![ItemClass::Wand]),
@@ -6478,6 +6494,7 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
         let mut package = read_package(&path).unwrap();
         let readable = ReadableSpec {
+            control: None,
             descriptors: vec![],
             effects: vec![],
             identify: Some(vec![ItemClass::Potion]),
@@ -6733,7 +6750,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v50"
+        let source = r#"import = "interactions-v51"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]
@@ -7629,7 +7646,9 @@ mod region_lifecycle_tests {
             game.region_state(*id),
             Some(tor_simulation::RegionState::Active | tor_simulation::RegionState::Frozen)
         )));
+        package.initialize_selected_character(&mut game).unwrap();
         package.configure_loaded_arena(&mut game).unwrap();
+        game.initialize_discovery().unwrap();
         (game, records)
     }
 
@@ -7826,7 +7845,11 @@ mod region_lifecycle_tests {
                     }
                     // Package::start deliberately defers arena setup until its
                     // participants are loaded, as Engine::start_streaming does.
+                    // Compare published games, not a complete reference with
+                    // an intermediate reconstruction before loadout/encounters.
+                    package.initialize_selected_character(&mut game).unwrap();
                     package.configure_loaded_arena(&mut game).unwrap();
+                    game.initialize_discovery().unwrap();
                     if package.manifest.procedural_worlds.is_empty() {
                         assert_same_game(&game, &whole, &context);
                     } else {
@@ -7995,3 +8018,7 @@ fn check_trap_effect(
         "Trap effect refers to an invalid equipment slot, condition, or descriptor",
     )
 }
+
+#[cfg(test)]
+#[path = "initial_awareness_authoring_tests.rs"]
+mod initial_awareness_authoring_tests;

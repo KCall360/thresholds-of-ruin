@@ -170,7 +170,8 @@ impl Game {
                 target_rider_participated: false,
                 effects: vec![],
             };
-            // An unavailable/dead/detached target has no mutation or RNG draw.
+            // The unavailable/dead/detached target has no application or check.
+            // The committed offensive source still emits its ordinary cue.
             let mut origin = self.capture_event_origin(outcome.actor, outcome.target);
             if matches!(
                 ability.invocation.aim,
@@ -178,15 +179,23 @@ impl Game {
             ) {
                 origin.cap_contact_target();
             }
-            self.push_event(
-                crate::combat::CombatEvent::Resolved {
-                    outcome: outcome.clone(),
-                    strike: Some(index as u16),
-                    source_disclosure: crate::combat::SourceAbilityDisclosure::Public,
-                },
-                Some(origin),
-            )?;
+            let awareness =
+                self.capture_unavailable_attack_awareness(outcome.actor, outcome.target)?;
+            let receipt =
+                self.publish_unavailable_primary(outcome.clone(), index as u16, origin)?;
+            self.seal_participant_events()?;
+            self.provoke_from_strike(&outcome, receipt, awareness)?;
             return Ok(outcome);
+        }
+        if self
+            .content
+            .rules()
+            .ability(&ability.ability)
+            .is_some_and(|definition| {
+                definition.interaction == crate::rules::Interaction::HostileToTarget
+            })
+        {
+            self.release_control_hold(ability.target)?;
         }
         let hold_damage = progress.hold_binding().and_then(|binding| {
             (ability.hold_damage_increment > 0
@@ -215,6 +224,7 @@ impl Game {
         {
             return Err(GameError::Rule(RuleError::InvalidPlan));
         }
+        let awareness = self.capture_attack_awareness(ability.actor, ability.target)?;
         let mut budget = resolve::StrikeBudget::new(strike);
         let mut activity = crate::lifecycle::DamageActivityGuard::default();
         let mut disclosure_origin = None;
@@ -308,7 +318,7 @@ impl Game {
             }
         }
         self.seal_participant_events()?;
-        self.provoke_from_strike(&primary.outcome, primary_receipt)?;
+        self.provoke_from_strike(&primary.outcome, primary_receipt, awareness)?;
         Ok(primary.outcome)
     }
     fn resolve_batch_in_transaction(
@@ -436,6 +446,17 @@ impl Game {
         activity: &mut crate::lifecycle::DamageActivityGuard,
     ) -> Result<Outcome, GameError> {
         crate::diagnostics::strike_resolution();
+        if self
+            .content
+            .rules()
+            .ability(&ray.ability)
+            .is_some_and(|definition| {
+                definition.interaction == crate::rules::Interaction::HostileToTarget
+            })
+        {
+            self.release_control_hold(target)?;
+        }
+        let awareness = self.capture_attack_awareness(ray.actor, target)?;
         self.settle_actor_time(target)?;
         let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
         let rules = &self.content.rules;
@@ -508,7 +529,7 @@ impl Game {
             origin,
         )?;
         self.seal_participant_events()?;
-        self.provoke_from_strike(&result.outcome, receipt)?;
+        self.provoke_from_strike(&result.outcome, receipt, awareness)?;
         Ok(result.outcome)
     }
     pub(crate) fn resolution_context(

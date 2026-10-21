@@ -65,6 +65,9 @@ impl Game {
             .scheduled_timers()
             .next()
             .map(|(deadline, _)| deadline)
+            .into_iter()
+            .chain(self.next_wandering_event_tick())
+            .min()
     }
 
     /// Settle only expired deadlines. Fractional progress on all other actors
@@ -82,7 +85,11 @@ impl Game {
         self.reconcile_recovery_contexts()?;
         self.reconcile_passive_discovery()?;
         self.settle_periodic_searches()?;
-        self.settle_periodic_relocations()
+        self.settle_periodic_relocations()?;
+        self.settle_aggravation()?;
+        self.reconcile_awareness()?;
+        self.reconcile_control_contacts()?;
+        self.settle_wandering_population()
     }
 
     pub(crate) fn settle_actor_time(&mut self, id: ActorId) -> Result<(), GameError> {
@@ -106,7 +113,8 @@ impl Game {
         if !eligible {
             self.apply_outcome(outcome)?;
             self.settle_periodic_search_for(id)?;
-            return self.settle_periodic_relocations_for(id);
+            self.settle_periodic_relocations_for(id)?;
+            return self.settle_aggravation_for(id);
         }
         let mut rng = self.rules_rng;
         let effect = trigger.sample(&mut rng);
@@ -120,6 +128,7 @@ impl Game {
         candidate.rules_rng = rng;
         candidate.settle_periodic_search_for(id)?;
         candidate.settle_periodic_relocations_for(id)?;
+        candidate.settle_aggravation_for(id)?;
         let mut rng = candidate.rules_rng;
         if let Some(effect) = effect {
             let crate::abilities::PlannedEffect::ApplyCondition {

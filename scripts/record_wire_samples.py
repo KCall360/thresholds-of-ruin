@@ -72,6 +72,13 @@ def discovery_recording_case():
         "test_text_examination_and_secret_open_survive_source_free_checkpoint")
 
 
+def scare_pickup_recording_case():
+    """Reuse paid partial Scare pickup/crumble and source-free recovery."""
+    from test_living_dungeon_process import LivingDungeonProcesses
+    return LivingDungeonProcesses(
+        "test_paid_scare_pickup_curse_crumble_remove_curse_and_restart")
+
+
 def kind(message):
     """A server message's kind, with an update's body kind."""
     if message["type"] == "update":
@@ -212,6 +219,21 @@ class Recorder(ProcessTestCase):
         sample = run_recording_case(amulet_recording_case(), "escape_sample")
         self.assertEqual(sample["type"], "snapshot")
         server_samples["zz.amulet_escape"] = sample
+
+    def record_scare_crumble(self, server_samples):
+        sample = run_recording_case(scare_pickup_recording_case(), "crumble_sample")
+        self.assertEqual(sample["type"], "snapshot")
+        self.assertFalse(sample["snapshot"]["state"]["wizard_game"])
+        events = [entry["content"].get("event")
+                  for entry in sample["snapshot"]["history"]["entries"]
+                  if entry["content"]["type"] == "action"]
+        crumbs = [event for event in events if event and event["type"] == "crumbled"]
+        self.assertTrue(crumbs, "record actual paid Scare crumble")
+        for event in crumbs:
+            self.assertEqual(set(event), {"type", "item", "quantity"})
+            self.assertTrue(event["item"].startswith("i_"))
+            self.assertEqual(event["quantity"], "1")
+        server_samples["zz.scare_crumble"] = sample
 
     def record_persistent_conditions(self, server_samples):
         case = utility_wands_recording_case()
@@ -605,6 +627,7 @@ class Recorder(ProcessTestCase):
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)
         self.record_discovery(server_samples)
+        self.record_scare_crumble(server_samples)
         self.server_samples = server_samples
 
 

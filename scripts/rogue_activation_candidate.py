@@ -7,7 +7,8 @@ are not balance recommendations or earned progression evidence. Run only in the
 qualified coordinator lane; the ordinary compiler creates candidate certificates.
 Reviewed 21-, 24- and 26-species inputs are conditioned to the same
 eighteen-species diagnostic output; none reproduces current production population
-or its Gold, perception, corrosion and ray encounters.
+or its Gold, perception, corrosion and ray encounters. The fixed diagnostic has
+no wandering policy and provides no evidence for current wandering pressure.
 """
 import argparse
 import copy
@@ -88,7 +89,8 @@ VAMPIRE_POOL = {"version": 1, "choices": [
 DEPTH_GROWTH = {"kind": "racial_after", "depth": 26}
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RULES = "crates/simulation/data/default-ruleset.toml"
-FORMAT = "tor-rogue-activation-inputs-v2"
+FORMAT = "tor-rogue-activation-inputs-v3"
+TRANSFORMATION_FORMAT = "tor-rogue-fixed-eighteen-transform-v1"
 # Package source is always injected. These are generator dependencies only.
 TOOL_INPUTS = ("scripts/rogue_activation_candidate.py", "scripts/rogue_activation_oracle.py",
                "scripts/arena_recipes.json",
@@ -183,6 +185,10 @@ def candidate_manifest(source, *, start_depth=1):
     manifest = copy.deepcopy(source)
     manifest["id"] = "rogue-measured-candidate"
     activation = manifest["floor_activation"]
+    # The exact reviewed source was checked above. This is the versioned fixed
+    # diagnostic transformation, not filtering unknown exclusion identities or
+    # qualifying current production's wandering policy with a reduced roster.
+    activation.pop("wandering", None)
     activation["carried_item_pools"] = {VAMPIRE_STOCK["pool"]: copy.deepcopy(VAMPIRE_POOL)}
     activation["profiles"]["rogue.low_depth"]["stages"] = [canonical_actor_stage(), *supply_stages()]
     if start_depth != 1:
@@ -242,6 +248,11 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
                  "source_provenance": provenance, "source_population_shape": shape,
                  "input_population_scope": population_scope(source),
                  "output_population_scope": population_scope(manifest),
+                 "population_transformation": {
+                     "format": TRANSFORMATION_FORMAT,
+                     "target_population_shape": "canonical_eighteen_species",
+                     "omitted_activation_fields": ["wandering"] if "wandering" in source["floor_activation"] else [],
+                     "wandering_evidence": "not_exercised"},
                  "source_package_inputs": package_hashes, "tool_inputs": tool_hashes,
                  "compiler_dependency_inputs": compiler_input_hashes,
                  "compiler_sha256": compiler_hash, "generation_status": "resolving_rules",
@@ -257,6 +268,8 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
                  "limitations": ["eighteen-species diagnostic output is not current twenty-one-species production; "
                      "Leprechaun, Nymph, Orc, the Leprechaun birth-Gold pool and room-Gold stage are omitted",
                      "later-source species remain required, not permanently omitted",
+                     "the fixed eighteen-species diagnostic has no wandering policy; "
+                     "it provides no current-production wandering-pressure evidence",
                      "open selection bands do not bypass current HD, numeric or storage capacity refusals",
                      "four independent draws can select four unicorns, vampires or jabberwocks; safety is unmeasured",
                      "Centaur 15%, Yeti 30%, Troll 50%, Vampire 20%, Jabberwock 70% birth stock uses a provisional equal ration/bandage pool",
@@ -275,7 +288,8 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
             "Leprechaun, Nymph, Orc, Medusa, Phantom, Xeroc, Aquator, Dragon, "
             "the Leprechaun birth-Gold pool, room-Gold stage and "
             "finite magic-potion, magic-scroll and magic-device stages are omitted; "
-            "finite equipment, equipment-scroll, ammunition and ring stages are omitted")
+            "finite equipment, equipment-scroll, ammunition and ring stages are omitted; "
+            "the finite control-scroll stage and wandering population policy are omitted")
     write_json(output / "partial.json", inventory)
     try:
         for group, values in (("package", snapshot), ("tools", tools), ("compiler", compiler_inputs)):

@@ -173,11 +173,6 @@ impl Behavior {
         }
         Ok(())
     }
-    /// TOR adapts Rogue's 2/3 wake chance to one committed eligible AI decision.
-    /// Candidate previews copy this state; only ordinary action publication saves it.
-    pub fn wakes(&mut self) -> bool {
-        !crate::dice::random_word(&mut self.rng).is_multiple_of(3)
-    }
 }
 impl crate::Actor {
     pub(crate) fn behavior_policy(&self) -> Option<BehaviorPolicy> {
@@ -225,8 +220,11 @@ impl Game {
         &mut self,
         outcome: &crate::abilities::Outcome,
         publication: crate::lifecycle::PublishedResolution,
+        awareness: crate::awareness::AttackAwarenessWitness,
     ) -> Result<(), GameError> {
         let event = self.published_primary_event(publication, outcome)?;
+        self.awareness_on_attack(outcome, awareness)?;
+        self.control_on_attack(outcome)?;
         if outcome.actor == outcome.target
             || !outcome.target_participated()
             || !self.alive(outcome.target)

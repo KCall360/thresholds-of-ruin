@@ -167,7 +167,7 @@ readable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turn
 
 [appearance_pools."rogue.scrolls"]
 asset = "item.scroll"
-appearances = ["scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA", "scroll titled TAL ION", "scroll titled UR SEK", "scroll titled KEL RAN", "scroll titled AN DOR", "scroll titled IV MEM", "scroll titled OS THAL", "scroll titled VEL TOR"]
+appearances = ["scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA", "scroll titled TAL ION", "scroll titled UR SEK", "scroll titled KEL RAN", "scroll titled AN DOR", "scroll titled IV MEM", "scroll titled OS THAL", "scroll titled VEL TOR", "scroll titled SAH REN", "scroll titled OR VETH", "scroll titled NEM AL", "scroll titled TIR OS", "scroll titled KHA MER"]
 
 [items."rogue.identify_scroll"]
 asset = "item.scroll"
@@ -567,7 +567,7 @@ equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add
 
 [appearance_pools."rogue.rings"]
 asset = "item.ring"
-appearances = ["agate ring", "bronze ring", "coral ring", "diamond ring", "emerald ring", "ivory ring", "jade ring", "opal ring", "ruby ring", "sapphire ring", "topaz ring", "amethyst ring"]
+appearances = ["agate ring", "bronze ring", "coral ring", "diamond ring", "emerald ring", "ivory ring", "jade ring", "opal ring", "ruby ring", "sapphire ring", "topaz ring", "amethyst ring", "garnet ring", "quartz ring"]
 
 # Paid completion applies 29-31 base turns once, then arrests gravity-directed
 # descent without granting voluntary vertical flight or touching loose items.
@@ -623,3 +623,80 @@ class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
 device = { ability = "rogue.wand_teleport_to", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+# Balance defaults: continual Stealth gets one advantage, not invisibility.
+[items."rogue.ring_stealth"]
+asset = "item.ring"
+name = "ring of stealth"
+identity = "rogue.ring_stealth"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }, { scope = "always", op = { kind = "perception", value = { kind = "continual_stealth", edge = 1 } } }], potency_modifiers = [] }
+
+# Periodic snapshot-location pulses; this cadence is TOR provisional tuning.
+# The disadvantage is Stealth-specific, never an attack or Search penalty.
+[items."rogue.ring_aggravation"]
+asset = "item.ring"
+name = "ring of aggravation"
+identity = "rogue.ring_aggravation"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "cursed" }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "aggravation", interval = 500, chance_denominator = 3, stealth_disadvantage = 1 } } }], potency_modifiers = [] }
+
+# Monster-control durations and finite supply rate are provisional TOR tuning.
+
+[items."rogue.aggravate_monster"]
+asset = "item.scroll"
+name = "scroll of aggravate monster"
+identity = "rogue.aggravate_monster"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { control = { kind = "aggravate" }, discovery = "on_use" }
+
+[items."rogue.create_monster"]
+asset = "item.scroll"
+name = "scroll of create monster"
+identity = "rogue.create_monster"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { control = { kind = "create_monster" }, discovery = "on_use" }
+
+[items."rogue.hold_monster"]
+asset = "item.scroll"
+name = "scroll of hold monster"
+identity = "rogue.hold_monster"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { control = { kind = "hold_nearby", condition = "rogue.held", duration = 1000, radius = 2 }, discovery = "on_use" }
+
+[items."rogue.monster_confusion"]
+asset = "item.scroll"
+name = "scroll of monster confusion"
+identity = "rogue.monster_confusion"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { control = { kind = "arm_confusion", condition = "rogue.potion_confusion", duration = 2000 }, discovery = "on_use" }
+
+[items."rogue.scare_monster"]
+asset = "item.scroll"
+name = "scroll of scare monster"
+identity = "rogue.scare_monster"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { control = { kind = "nothing" }, discovery = "never" }
+ground_scare = { condition = "rogue.scared", duration = 1000 }

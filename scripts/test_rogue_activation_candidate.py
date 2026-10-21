@@ -25,6 +25,9 @@ def preactivation_source():
     source = encounter_sources()["manifest"]
     activation = source["floor_activation"]
     activation.pop("carried_item_pools", None)
+    # This fixture deliberately describes the historical preactivation policy,
+    # not a partially stripped current living-dungeon policy.
+    activation.pop("wandering", None)
     stages = []
     for name, archetype, kind, count in (
             ("emus", "emu", "actors", 2), ("snakes", "snake", "actors", 2),
@@ -173,12 +176,19 @@ class RogueActivationCandidateTests(unittest.TestCase):
                                           source_provenance=provenance)
             self.assertEqual(result["source_population_shape"], "reviewed_" + shape + "_species_input")
             self.assertEqual(result["source_provenance"], provenance)
+            self.assertEqual(result["format"], "tor-rogue-activation-inputs-v3")
+            self.assertEqual(result["population_transformation"], {
+                "format": "tor-rogue-fixed-eighteen-transform-v1",
+                "target_population_shape": "canonical_eighteen_species",
+                "omitted_activation_fields": ["wandering"] if shape == "twenty_six" else [],
+                "wandering_evidence": "not_exercised"})
             species = sorted("rogue." + name for name in PLAYABLE_SPECIES)
             stages = ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations", "rogue.restore_strength"]
             input_stages = [*stages, "rogue.room_gold"]
             if shape == "twenty_six":
                 input_stages.extend(["rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices",
-                                     "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings"])
+                                     "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings",
+                                     "rogue.control_scrolls"])
             self.assertEqual(result["input_population_scope"], {
                 "species": sorted([*species, *("rogue." + name for name in omitted)]),
                 "stage_ids": input_stages,
@@ -190,10 +200,13 @@ class RogueActivationCandidateTests(unittest.TestCase):
             for exclusion in ("not current " + label + "-species production",
                               "Leprechaun birth-Gold pool", "room-Gold stage", *(name.title() for name in omitted)):
                 self.assertIn(exclusion, " ".join(result["limitations"]))
+            self.assertIn("no current-production wandering-pressure evidence", " ".join(result["limitations"]))
             if shape == "twenty_six":
                 self.assertIn("finite magic-potion, magic-scroll and magic-device stages are omitted",
                               result["limitations"][0])
                 self.assertIn("finite equipment, equipment-scroll, ammunition and ring stages are omitted", result["limitations"][0])
+                self.assertIn("finite control-scroll stage and wandering population policy are omitted",
+                              result["limitations"][0])
             for relative, fingerprint in result["source_package_inputs"].items():
                 raw = (supplied / relative).read_bytes()
                 self.assertEqual(fingerprint, hashlib.sha256(raw).hexdigest())
@@ -206,6 +219,33 @@ class RogueActivationCandidateTests(unittest.TestCase):
                 self.assertEqual((output / "sources/tools" / relative).read_bytes(), raw)
             manifest = tomllib.loads((output / "package/scenario.toml").read_text())
             self.assertEqual(manifest, candidate_manifest(preactivation_source()))
+            self.assertNotIn("wandering", manifest["floor_activation"])
+            self.assertEqual(population_shape(manifest), "canonical_eighteen_species")
+
+    def test_reviewed_wandering_is_explicitly_omitted_from_fixed_eighteen_diagnostic(self):
+        source = encounter_sources()["manifest"]
+        original = copy.deepcopy(source)
+        self.assertEqual(source["floor_activation"], reviewed_twenty_six_activation())
+        self.assertEqual(population_shape(source), "reviewed_twenty_six_species_input")
+        self.assertEqual(source["floor_activation"]["wandering"], {
+            "stage_id": "rogue.eight_species_foes",
+            "excluded_wandering_content": ["rogue.dragon", "rogue.ice_monster", "rogue.leprechaun",
+                                           "rogue.nymph", "rogue.venus_flytrap", "rogue.xeroc"],
+            "initial_delay": [6700, 7300], "retry_ticks": 400,
+            "chance": {"numerator": 1, "denominator": 6}, "living_cap": 8})
+        source_stages = source["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
+        self.assertEqual({choice["archetype"] for band in source_stages[0]["bands"]
+                          for choice in band["choices"]},
+                         {"rogue." + name for name in (*PLAYABLE_SPECIES, "leprechaun", "nymph", "orc",
+                                                       "medusa", "phantom", "xeroc", "aquator", "dragon")})
+        candidate = candidate_manifest(source)
+        self.assertNotIn("wandering", candidate["floor_activation"],
+                         "The fixed eighteen-species diagnostic does not exercise wandering")
+        self.assertEqual(candidate, candidate_manifest(preactivation_source()))
+        self.assertEqual(population_shape(candidate), "canonical_eighteen_species")
+        self.assertEqual(candidate_manifest(candidate), candidate)
+        self.assertEqual(tomllib.loads(toml_source(candidate)), candidate)
+        self.assertEqual(source, original, "The current production source policy remains intact")
 
     def test_current_twenty_six_input_preserves_eighteen_species_diagnostic_output(self):
         source = encounter_sources()["manifest"]
@@ -220,11 +260,40 @@ class RogueActivationCandidateTests(unittest.TestCase):
         self.assertEqual({choice["archetype"] for band in stages[0]["bands"] for choice in band["choices"]},
                          {"rogue." + name for name in PLAYABLE_SPECIES})
 
+    def test_wandering_source_policy_is_checked_before_fixed_diagnostic_omission(self):
+        source = encounter_sources()["manifest"]
+        self.assertEqual(population_shape(source), "reviewed_twenty_six_species_input")
+        self.assertEqual(population_shape(candidate_manifest(source)), "canonical_eighteen_species")
+        mutations = {
+            "missing_policy": lambda a: a.pop("wandering"),
+            "null_policy": lambda a: a.update(wandering=None),
+            "unknown_field": lambda a: a["wandering"].update(unreviewed=True),
+            "stage": lambda a: a["wandering"].update(stage_id="rogue.unreviewed"),
+            "unknown_exclusion": lambda a: a["wandering"]["excluded_wandering_content"].append("rogue.unreviewed"),
+            "missing_exclusion": lambda a: a["wandering"]["excluded_wandering_content"].pop(),
+            "exclusion_order": lambda a: a["wandering"]["excluded_wandering_content"].reverse(),
+            "initial_delay": lambda a: a["wandering"].update(initial_delay=[6700, 7301]),
+            "retry_ticks": lambda a: a["wandering"].update(retry_ticks=401),
+            "chance": lambda a: a["wandering"]["chance"].update(denominator=7),
+            "boolean_chance": lambda a: a["wandering"]["chance"].update(numerator=True),
+            "cap": lambda a: a["wandering"].update(living_cap=9),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(mutation=name):
+                changed = copy.deepcopy(source)
+                mutate(changed["floor_activation"])
+                self.assertNotEqual(json.dumps(changed, sort_keys=True), json.dumps(source, sort_keys=True))
+                for check in (population_shape, candidate_manifest):
+                    with self.assertRaisesRegex(ValueError, "Review changed population profile"):
+                        check(changed)
+        self.assertEqual(source["floor_activation"], reviewed_twenty_six_activation())
+
     def test_twenty_six_rejects_finite_stock_count_choice_boundary_and_order_drift(self):
         self.assertEqual(population_shape(encounter_sources()["manifest"]),
                          "reviewed_twenty_six_species_input")
         for identity in ("rogue.magic_potions", "rogue.magic_scrolls", "rogue.magic_devices",
-                         "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings"):
+                         "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings",
+                         "rogue.control_scrolls"):
             def stages(activation):
                 return activation["profiles"]["rogue.low_depth"]["stages"]
             def stage(activation):
@@ -694,7 +763,11 @@ class RogueActivationCandidateTests(unittest.TestCase):
                 [str(resolved_compiler), "validate", str((output / "package").resolve())],
                 capture_output=True, text=True, encoding="utf-8", timeout=30)
             self.assertEqual(result["validated_packages"], 1)
-            self.assertEqual(result["format"], "tor-rogue-activation-inputs-v2")
+            self.assertEqual(result["format"], "tor-rogue-activation-inputs-v3")
+            self.assertEqual(result["population_transformation"], {
+                "format": "tor-rogue-fixed-eighteen-transform-v1",
+                "target_population_shape": "canonical_eighteen_species",
+                "omitted_activation_fields": [], "wandering_evidence": "not_exercised"})
             self.assertEqual(result["artifact_purpose"], "diagnostic_population_package")
             self.assertFalse(result["production_mutated"])
             self.assertEqual(result["battle_evidence"], "not_run")

@@ -727,3 +727,42 @@ fn recorded_discovery_samples_keep_presence_family_and_shared_opening_distinct()
         "record actual presence, family, and shared entrance opening"
     );
 }
+
+#[test]
+fn recorded_scare_crumble_keeps_exact_opaque_unit_loss_without_transfer() {
+    let value = samples();
+    let mut witnessed = false;
+    for message in value["server"].as_array().unwrap() {
+        if message["type"] != "snapshot" {
+            continue;
+        }
+        for entry in message["snapshot"]["history"]["entries"]
+            .as_array()
+            .unwrap()
+        {
+            let event = &entry["content"]["event"];
+            if event["type"] != "crumbled" {
+                continue;
+            }
+            round_trip::<ServerMessage>(message);
+            let decoded: Event = round_trip(event);
+            assert!(matches!(decoded, Event::Crumbled { quantity: 1, .. }));
+            assert!(event["item"].as_str().unwrap().starts_with("i_"));
+            assert_eq!(
+                event
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from(["item", "quantity", "type"])
+            );
+            assert_eq!(message["snapshot"]["state"]["wizard_game"], false);
+            witnessed = true;
+        }
+    }
+    assert!(
+        witnessed,
+        "record actual current-writer Scare crumble via its paid process witness"
+    );
+}

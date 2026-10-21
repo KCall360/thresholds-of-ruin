@@ -572,6 +572,13 @@ pub fn action(event: &Event, view: &Observation) -> String {
                 Direction::Down => "down",
             }
         ),
+        Event::Crumbled { quantity, .. } => {
+            if *quantity == 1 {
+                "The item crumbles as you try to pick it up.".into()
+            } else {
+                format!("{quantity} items crumble as you try to pick them up.")
+            }
+        }
         Event::Taken {
             result, quantity, ..
         } => view.inventory.iter().find(|i| i.id == *result).map_or_else(
@@ -801,6 +808,26 @@ mod tests {
             action(&event, &view),
             "You leave the dungeon with the objective item."
         );
+    }
+
+    #[test]
+    fn crumbled_pickup_never_claims_inventory_transfer_or_invents_identity() {
+        let view = observation();
+        for (quantity, expected) in [
+            (1, "The item crumbles as you try to pick it up."),
+            (2, "2 items crumble as you try to pick them up."),
+        ] {
+            assert_eq!(
+                action(
+                    &Event::Crumbled {
+                        item: tor_protocol::ItemTarget::from_digest([9; 32]),
+                        quantity
+                    },
+                    &view
+                ),
+                expected
+            );
+        }
     }
 
     #[test]

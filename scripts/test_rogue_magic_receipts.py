@@ -6,6 +6,8 @@ not generated from production content or the receipt validator's own tables.
 import copy
 import unittest
 
+import rogue_magic_receipts
+
 from rogue_magic_receipts import (
     EQUIPMENT_ITEM_STAGE_IDS, MAGIC_ITEM_STAGE_IDS,
     assert_equipment_item_receipts, assert_finite_item_identity, assert_magic_item_receipts,
@@ -33,9 +35,9 @@ class RogueMagicReceiptTests(unittest.TestCase):
 
     def test_every_reviewed_subtype_is_eligible_only_in_its_magic_stage(self):
         for index, choices in enumerate((
-                ("rogue.healing", "rogue.confusion", "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing"),
-                ("rogue.identify_potion", "rogue.identify_scroll", "rogue.identify_wand", "rogue.sleep"),
-                ("rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning", "rogue.wand_invisibility", "rogue.wand_haste", "rogue.wand_slow"))):
+                ("rogue.healing", "rogue.confusion", "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing", "rogue.levitation"),
+                ("rogue.identify_potion", "rogue.identify_scroll", "rogue.identify_wand", "rogue.sleep", "rogue.teleportation"),
+                ("rogue.wand_fire", "rogue.wand_cold", "rogue.wand_lightning", "rogue.wand_invisibility", "rogue.wand_haste", "rogue.wand_slow", "rogue.wand_teleport_away", "rogue.wand_teleport_to"))):
             for choice in choices:
                 with self.subTest(stage=index, content=choice):
                     receipts = self.receipts()
@@ -126,7 +128,7 @@ class RogueEquipmentReceiptTests(unittest.TestCase):
                  "rogue.shortbow"),
                 ("rogue.enchant_armor", "rogue.protect_armor", "rogue.enchant_weapon", "rogue.remove_curse",
                  "rogue.identify_weapon", "rogue.identify_armor"),
-                ("rogue.arrow",), ('rogue.ring_protection', 'rogue.ring_add_strength', 'rogue.ring_sustain_strength', 'rogue.ring_see_invisible', 'rogue.ring_adornment', 'rogue.ring_dexterity', 'rogue.ring_increase_damage', 'rogue.ring_regeneration', 'rogue.ring_slow_digestion', 'rogue.ring_maintain_armor', 'rogue.ring_searching'))):
+                ("rogue.arrow",), ('rogue.ring_protection', 'rogue.ring_add_strength', 'rogue.ring_sustain_strength', 'rogue.ring_see_invisible', 'rogue.ring_adornment', 'rogue.ring_dexterity', 'rogue.ring_increase_damage', 'rogue.ring_regeneration', 'rogue.ring_slow_digestion', 'rogue.ring_maintain_armor', 'rogue.ring_searching', 'rogue.ring_teleportation', 'rogue.ring_stealth', 'rogue.ring_aggravation'))):
             for choice in choices:
                 with self.subTest(stage=index, content=choice):
                     receipts = self.receipts()
@@ -210,6 +212,88 @@ class RogueEquipmentReceiptTests(unittest.TestCase):
                 forged["spec"][field] = "rogue.other"
                 with self.subTest(content=content, field=field), self.assertRaises(AssertionError):
                     assert_finite_item_identity(self, forged, content)
+
+
+class RogueControlReceiptTests(unittest.TestCase):
+    def receipts(self):
+        return [{"id": "rogue.control_scrolls", "version": 1,
+                 "result": {"kind": "evaluated", "requested": 1, "attempts": [{
+                     "kind": "placed", "content": "rogue.aggravate_monster",
+                     "location": {"region": 1, "position": {"x": 1, "y": 2, "z": 0}},
+                     "entity": {"kind": "item", "id": 500, "quantity": 1}}]}}]
+
+    def check_receipts(self, receipts, **kwargs):
+        helper = getattr(rogue_magic_receipts, "assert_control_item_receipts", None)
+        self.assertTrue(callable(helper), "Control stock needs its own strict receipt owner")
+        return helper(self, receipts, **kwargs)
+
+    def test_all_five_controls_have_one_finite_owned_identity(self):
+        for content in ("rogue.aggravate_monster", "rogue.create_monster", "rogue.hold_monster",
+                        "rogue.monster_confusion", "rogue.scare_monster"):
+            with self.subTest(content=content):
+                receipt = self.receipts()
+                receipt[0]["result"]["attempts"][0]["content"] = content
+                self.assertEqual(self.check_receipts(receipt, require_placed=True), [("item", 500)])
+                for owner, validator in ((RogueMagicReceiptTests(), assert_magic_item_receipts),
+                                         (RogueEquipmentReceiptTests(), assert_equipment_item_receipts)):
+                    foreign = owner.receipts()
+                    for index in range(len(foreign)):
+                        wrong = copy.deepcopy(foreign)
+                        wrong[index]["result"]["attempts"][0]["content"] = content
+                        with self.subTest(foreign_stage=index), self.assertRaises(AssertionError):
+                            validator(self, wrong)
+        self.assertEqual(rogue_magic_receipts.CONTROL_ITEM_STAGE_IDS, ("rogue.control_scrolls",))
+
+    def test_control_rejects_forged_shape_quantity_location_and_foreign_choices(self):
+        self.assertEqual(self.check_receipts(self.receipts()), [("item", 500)])
+        attempt = ("result", "attempts", 0)
+        mutations = (
+            (("id",), "rogue.magic_scrolls"), (("version",), 2), (("version",), True),
+            (("unexpected",), 0), (("result", "requested"), 0),
+            (("result", "requested"), True), (("result", "attempts"), []),
+            (("result", "attempts"), self.receipts()[0]["result"]["attempts"] * 2),
+            ((*attempt, "content"), "rogue.sleep"), ((*attempt, "content"), "rogue.ring_stealth"),
+            ((*attempt, "kind"), "unknown"), ((*attempt, "entity", "kind"), "actor"),
+            ((*attempt, "entity", "id"), 0), ((*attempt, "entity", "id"), True),
+            ((*attempt, "entity", "id"), 1 << 64), ((*attempt, "entity", "quantity"), 0),
+            ((*attempt, "entity", "quantity"), 2), ((*attempt, "entity", "quantity"), True),
+            ((*attempt, "entity", "carried_loot"), None),
+            ((*attempt, "location", "region"), 0), ((*attempt, "location", "region"), True),
+            ((*attempt, "location", "position", "x"), "1"),
+        )
+        for path, value in mutations:
+            receipt = self.receipts()
+            target = receipt[0]
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path, value=value), self.assertRaises(AssertionError):
+                self.check_receipts(receipt)
+        for receipt in ([], self.receipts() * 2):
+            with self.assertRaises(AssertionError):
+                self.check_receipts(receipt)
+
+    def test_control_skip_has_no_identity_and_is_only_no_eligible_cell(self):
+        self.assertEqual(self.check_receipts(self.receipts()), [("item", 500)])
+        skipped = self.receipts()
+        skipped[0]["result"]["attempts"] = [{"kind": "skipped",
+            "content": "rogue.scare_monster", "reason": "no_eligible_cell"}]
+        self.assertEqual(self.check_receipts(skipped), [])
+        with self.assertRaises(AssertionError):
+            self.check_receipts(skipped, require_placed=True)
+        for mutation in ({"reason": "chance_miss"},
+                         {"entity": {"kind": "item", "id": 500, "quantity": 1}}):
+            changed = copy.deepcopy(skipped)
+            changed[0]["result"]["attempts"][0].update(mutation)
+            with self.assertRaises(AssertionError):
+                self.check_receipts(changed)
+
+    def test_control_identity_is_returned_for_cross_group_duplicate_rejection(self):
+        equipment = RogueEquipmentReceiptTests().receipts()
+        controls = self.receipts()
+        controls[0]["result"]["attempts"][0]["entity"]["id"] = 100
+        ids = assert_equipment_item_receipts(self, equipment) + self.check_receipts(controls)
+        self.assertNotEqual(len(ids), len(set(ids)), "Consumers must keep the combined owner list")
 
 
 if __name__ == "__main__":

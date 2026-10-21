@@ -151,6 +151,7 @@ pub(super) struct PreparedArchetype {
     pub equipment_generation: Option<tor_simulation::EquipmentGeneration>,
     pub consumable: Option<tor_simulation::ConsumableSpec>,
     pub readable: Option<tor_simulation::ReadableSpec>,
+    pub ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
     pub device: Option<tor_simulation::DeviceSpec>,
     pub edible: Option<tor_simulation::EdibleSpec>,
     pub supply: Option<tor_simulation::content_ids::SupplyId>,
@@ -205,6 +206,7 @@ impl PreparedArchetype {
                 .as_ref()
                 .map(|consumable| consumable.compile(catalog.content().rules()))
                 .transpose()?,
+            ground_scare: author.ground_scare.clone(),
             readable: author
                 .readable
                 .as_ref()
@@ -681,6 +683,7 @@ impl PreparedDefinitions {
             equipment_generation: inherited.equipment_generation,
             consumable: inherited.consumable.clone(),
             readable: inherited.readable.clone(),
+            ground_scare: inherited.ground_scare.clone(),
             device: inherited.device.clone(),
             edible: inherited.edible.clone(),
             supply: inherited.supply.clone(),
@@ -1457,6 +1460,7 @@ mod tests {
                 equipment_generation: None,
                 consumable: None,
                 readable: None,
+                ground_scare: None,
                 device: None,
                 edible: None,
                 supply: None,

@@ -61,6 +61,7 @@ fn scroll(game: &mut Game, id: u64, effects: Vec<Effect>) -> ItemId {
     spec.identity = "fixture.gear-scroll".into();
     spec.name = "equipment scroll".into();
     spec.readable = Some(ReadableSpec {
+        control: None,
         effects,
         descriptors: vec![],
         identify: None,

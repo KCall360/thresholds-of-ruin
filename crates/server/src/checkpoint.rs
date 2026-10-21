@@ -607,7 +607,7 @@ mod tests {
         assert!(package.get("rules_source").is_none());
         let rules: serde_json::Value =
             serde_json::from_str(package["rules_document"].as_str().unwrap()).unwrap();
-        assert_eq!(rules["format"], 23);
+        assert_eq!(rules["format"], 24);
         assert!(rules["document"].is_object());
         assert_eq!(
             archive["ruleset_hash"],
@@ -856,3 +856,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "wandering_checkpoint_tests.rs"]
+mod wandering_checkpoint_tests;

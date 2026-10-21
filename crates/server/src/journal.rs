@@ -132,6 +132,10 @@ pub enum Event {
         from: Position,
         to: Position,
     },
+    Crumbled {
+        item: u64,
+        quantity: u64,
+    },
     Taken {
         item: u64,
         result: u64,

@@ -972,9 +972,11 @@ impl Game {
                     .next_in(actor)
                     .into_iter()
                     .chain(actor.periodic_relocations.next_in(actor.alive()))
+                    .chain(actor.awareness.next_in(actor))
                     .min()
                     .and_then(|interval| actor.active_since.checked_add(interval))
             })
+            .chain(self.next_wandering_event_tick())
             .min()
             .map_or(until, |deadline| until.min(deadline));
         if until <= self.tick {

@@ -357,6 +357,8 @@ PCs and NPCs; identified values are private to the entitled actor.
 | Maintain armor | Prevents corrosion while worn; does not repair or permanently protect armor | 30 |
 | Searching | One free active Perception Search per 100 eligible actor-active ticks; multiple sources do not add scans | 10 |
 | Teleportation | Each exact worn source independently attempts same-floor relocation with probability 1/50 every 100 actor-active ticks | 0 |
+| Stealth | Continual opposed Stealth/Perception at awareness events, with one advantage; does not hide physically visible bodies | 30 |
+| Aggravation | Periodic snapshot-location alerts and one Stealth disadvantage; generated cursed | 0 |
 
 Protection is separate from the five-category magical armor ward. Signed
 reductions compose with ordinary reduction and the strongest applicable talent
@@ -386,9 +388,15 @@ scan or accrue suppressed time; the earned fraction survives. Each scan uses the
 shared active Search check without spending next-check benefits or interrupting
 paid work. See [discovery](../architecture/perception.md).
 
+Stealth and Aggravation capabilities do not stack. Aggravation's authored pulse
+trial is 1-in-3 every 500 wearer-active ticks. This cadence and Stealth's one
+advantage are provisional TOR tuning, not exact classic Rogue probabilities.
+See [awareness](../play/rogue.md#living-dungeon-pressure-and-awareness) for the
+event, sensory-contact and active-time boundaries. Manual Sneak remains deferred.
+
 The finite `rogue.rings` birth stage chooses one ring with weights
-9/9/5/10/1/8/8/4/9/5/5 in the table's order, without reordering other stage streams.
-Eleven concealed appearances are shared by the catalog. The paid identify-ring-or-wand
+9/9/5/10/1/8/8/4/9/5/5/5/7/10 in the table's order, without reordering other stage streams.
+Fourteen concealed appearances are shared by the catalog. The paid identify-ring-or-wand
 scroll permits either class through one server-owned choice, without exposing
 unidentified potency or curse state.
 
@@ -515,6 +523,55 @@ status displays “until removed”, and saved conditions retain that lifetime.
 The unchanged one-unit device stage now chooses equally among the three elemental
 and five utility wands, with eight distinct concealed appearances. These weights
 remain provisional TOR availability.
+
+## Monster-control scrolls
+
+Readable capabilities may carry exactly one `control` payload instead of immediate
+self-effects or identification. The paid plan retains that payload and validates
+it against the exact consumed item; retries and recovery cannot substitute a
+more powerful scroll. Each completed read consumes one unit even if no target or
+placement is available. The Rogue control-scroll stage makes one finite placement
+attempt per first-entered floor; its five equal weights are provisional tuning.
+
+| Scroll | Completed effect |
+| --- | --- |
+| Aggravate monster | One shared location-alert pulse. The position is a snapshot, not a disclosed identity or continuously tracked actor. |
+| Create monster | One depth-appropriate prepared creature in a legal adjacent horizontal cell, without birth loot. Failed placement still consumes the scroll. Created creatures neither consume wandering slots nor obey the eight-live-wanderer cap. |
+| Hold monster | Intellect + Lore against each engaged, disclosed hostile's Spiritual Defense within two horizontal cells and unobstructed sight. An ordinary actor-active condition denies voluntary actions and pauses preparations; a committed hostile attack attempt releases it whether the attempt hits or misses. |
+| Monster confusion | Arms one next-successful-physical-hit charge. Misses retain it; the first successful natural, selected-melee or projectile primary consumes it, including when the mental application is resisted. Another read replaces rather than banks a charge. Delivery uses Intellect + Lore against Spiritual Defense and the same ordinary Confused movement condition as the PC's confusion potion. |
+| Scare monster | Reading wastes one unit. Its useful capability belongs to an occupied ground scroll, described below. |
+
+Authored spells, rays and gaze attacks are not physical-hit delivery. Multi-strike
+sequences test each committed primary in order; riders do not spend another charge.
+Confusion does not choose targets, change allegiance or invent random attacks.
+The authored 2,000-active-tick confusion and 1,000-active-tick Hold/Scare durations
+are provisional TOR balance settings, not exact classic Rogue durations.
+
+An occupied ground Scare scroll automatically applies a finite AI Flee objective
+to an approaching hostile AI creature within one horizontal square, including
+diagonals. Walls and closed doors block the contact. There is **no resistance
+roll**; ordinary mind-affecting immunity remains effective. The objective retains
+the scroll location, not its occupant's identity. It neither cancels magical sleep
+nor activates an intact stationary Xeroc ambush, and it does not lock player input.
+The ordinary Flee policy prefers retreat but can defend when cornered.
+
+An exact scroll/recipient approach triggers at most once. Remaining adjacent,
+changing occupants, querying, reconnecting or restoring cannot reroll or refresh
+it. Genuine departure and return rearms the approach. Removing the scroll or
+moving its occupant does not cancel an already earned finite objective, and
+inactive-floor time does not spend its condition timer.
+
+Picking up non-cursed Scare units transfers those units and curses them. Picking
+up already cursed units crumbles them instead of adding them to inventory. Curse
+is homogeneous per-unit stack state: splitting, merging, dropping and save/restore
+preserve it. Ordinary remove-curse can clear carried Scare curse, after which the
+next ground pickup curses those units again. This is the selected adaptation's
+explicit pickup rule, not a claim that every NetHack edition behaves identically.
+
+The eight new living-dungeon actual-process contracts have passed, including
+source-free recovery. Complete required verification and final cross-platform CI
+remain pending; these focused results do not establish balance or complete-run
+qualification.
 
 ## Trap avoidance and exposure resistance
 

@@ -176,7 +176,7 @@ fn passive_species_wait_until_a_visible_hostile_strike_commits() {
 }
 
 #[test]
-fn mean_wake_is_one_committed_eligible_decision_and_queries_draw_nothing() {
+fn ordinary_awareness_has_no_wake_lottery_and_queries_draw_nothing() {
     let mut game = fixture(Disposition::Mean, 500);
     game.configure_run(
         ActorId(1),
@@ -203,7 +203,11 @@ fn mean_wake_is_one_committed_eligible_decision_and_queries_draw_nothing() {
     let queued = restore(&game);
     let execution = game.execute_next_intention().unwrap();
     execution.outcome.unwrap();
-    assert_eq!(game.actors[&ActorId(2)].behavior.rng, 0x9e3779b97f4a7c15);
+    assert_eq!(
+        game.actors[&ActorId(2)].behavior.rng,
+        0,
+        "ordinary awareness needs no extra wake lottery"
+    );
     let mut replay = queued;
     replay.execute_next_intention().unwrap().outcome.unwrap();
     assert_eq!(game, replay);

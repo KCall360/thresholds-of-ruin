@@ -198,6 +198,14 @@ pub enum Perception {
     ReadiedTouchAmbush {
         enabled: bool,
     },
+    ContinualStealth {
+        edge: u32,
+    },
+    Aggravation {
+        interval: u64,
+        chance_denominator: u32,
+        stealth_disadvantage: u32,
+    },
     PeriodicSearch {
         interval: u64,
     },
@@ -1580,6 +1588,46 @@ mod wearable_modifier_tests {
             let mut extra = value;
             extra["op"]["secret_ring"] = serde_json::json!(true);
             assert!(serde_json::from_value::<Modifier>(extra).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod awareness_authoring_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn authored_awareness_capabilities_compile_and_reject_invalid_policies() {
+        for good in [
+            json!({"kind":"continual_stealth","edge":1}),
+            json!({"kind":"aggravation","interval":500,"chance_denominator":3,"stealth_disadvantage":1}),
+        ] {
+            let modifier = json!({"scope":"always","op":{"kind":"perception","value":good}});
+            let authored: Modifier = serde_json::from_value(modifier.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&authored).unwrap(), modifier);
+            assert!(authored.compile().is_ok());
+            for field in good.as_object().unwrap().keys() {
+                let mut missing = modifier.clone();
+                missing["op"]["value"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+                assert!(serde_json::from_value::<Modifier>(missing).is_err());
+            }
+            let mut extra = modifier;
+            extra["op"]["value"]["unknown"] = json!(true);
+            assert!(serde_json::from_value::<Modifier>(extra).is_err());
+        }
+        for bad in [
+            json!({"kind":"aggravation","interval":0,"chance_denominator":3,"stealth_disadvantage":1}),
+            json!({"kind":"aggravation","interval":500,"chance_denominator":0,"stealth_disadvantage":1}),
+        ] {
+            let authored: Modifier = serde_json::from_value(
+                json!({"scope":"always","op":{"kind":"perception","value":bad}}),
+            )
+            .unwrap();
+            assert!(authored.compile().is_err());
         }
     }
 }

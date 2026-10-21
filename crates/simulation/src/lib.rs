@@ -10,7 +10,9 @@ mod actor_creatures;
 mod actor_record;
 mod actor_store;
 pub mod arena;
+mod awareness;
 pub mod content_ids;
+pub mod control_scrolls;
 mod creature_melee;
 mod creature_time;
 pub mod equipment_capacity;
@@ -442,6 +444,10 @@ pub enum OutcomeKind {
         from: Location,
         to: Location,
     },
+    Crumbled {
+        item: ItemId,
+        quantity: u64,
+    },
     Taken {
         item: ItemId,
         result: ItemId,
@@ -480,6 +486,8 @@ struct Actor {
     readied_ambush: readied_ambush::ReadiedAmbush,
     holds: linked_hold::HoldBook,
     behavior: behavior::Behavior,
+    awareness: awareness::Awareness,
+    control: control_scrolls::ControlState,
     active_since: u64,
     anatomy: Shared<AnatomySpec>,
     equipment: BTreeMap<EquipmentSlotId, ItemId>,
@@ -860,6 +868,8 @@ impl Game {
                 known_charges: Shared::default(),
                 known_equipment: Shared::default(),
                 discovery: Shared::default(),
+                awareness: Default::default(),
+                control: Default::default(),
                 search_clock: Default::default(),
                 periodic_relocations: Default::default(),
                 trap_contacts: Shared::default(),

@@ -2893,6 +2893,28 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
                 "guise_appearance",
             )?,
             ModifierOp::Perception {
+                value: crate::perception::PerceptionValue::ContinualStealth { edge },
+            } => bound(
+                u64::from(*edge) <= crate::limits::NUMERIC as u64,
+                "stealth_edge",
+            )?,
+            ModifierOp::Perception {
+                value:
+                    crate::perception::PerceptionValue::Aggravation {
+                        interval,
+                        chance_denominator,
+                        stealth_disadvantage,
+                    },
+            } => bound(
+                crate::perception::AggravationPolicy {
+                    interval: *interval,
+                    chance_denominator: *chance_denominator,
+                    stealth_disadvantage: *stealth_disadvantage,
+                }
+                .valid(),
+                "aggravation",
+            )?,
+            ModifierOp::Perception {
                 value: crate::perception::PerceptionValue::PeriodicSearch { interval },
             } => bound(
                 (1..=crate::limits::NUMERIC as u64).contains(interval),
@@ -3810,8 +3832,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v50\"",
-                "id = \"interactions-v50\"\nunknown = true"
+                "id = \"interactions-v51\"",
+                "id = \"interactions-v51\"\nunknown = true"
             ))
             .is_err()
         );

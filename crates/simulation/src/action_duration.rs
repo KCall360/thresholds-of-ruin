@@ -274,6 +274,7 @@ mod tests {
                     3 => {
                         spec.class = crate::ItemClass::Scroll;
                         spec.readable = Some(crate::ReadableSpec {
+                            control: None,
                             descriptors: vec![],
                             effects: vec![effect],
                             identify: None,

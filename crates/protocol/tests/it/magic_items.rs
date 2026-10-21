@@ -144,3 +144,25 @@ fn remembered_bonus_interaction_rejects_positional_records() {
     ]))
     .is_err());
 }
+
+#[test]
+fn crumbled_event_uses_only_opaque_source_and_exact_requested_quantity() {
+    let positive = json!({"type":"crumbled","item":item(),"quantity":"2"});
+    let event: Event = serde_json::from_value(positive.clone()).unwrap();
+    assert_eq!(
+        event,
+        Event::Crumbled {
+            item: item(),
+            quantity: 2
+        }
+    );
+    assert_eq!(serde_json::to_value(event).unwrap(), positive);
+    for malformed in [
+        json!({"type":"crumbled","item":item()}),
+        json!({"type":"crumbled","item":"71","quantity":"2"}),
+        json!({"type":"crumbled","item":item(),"quantity":"2","result":item()}),
+        json!({"type":"crumbled","item":item(),"quantity":"2","cursed":true}),
+    ] {
+        assert!(serde_json::from_value::<Event>(malformed).is_err());
+    }
+}

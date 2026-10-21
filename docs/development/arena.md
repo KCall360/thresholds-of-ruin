@@ -546,7 +546,8 @@ The API likewise requires
 `create_candidate(output, compiler, source_package=package, source_provenance={"reference": reference})`.
 It accepts only the exact known preactivation E/S profile, canonical activated
 eighteen-species profile, reviewed twenty-one-species input with L/N/O and Gold,
-or reviewed twenty-four-species input adding M/P/X. The two reviewed profiles
+reviewed twenty-four-species input adding M/P/X, or reviewed twenty-six-species
+input adding A/D and the current finite stock and wandering policy. The reviewed profiles
 have distinct independent pinned-selector oracles and input labels. Their exact
 roster, ordering, weights, growth, stages and stock policies must match; unknown,
 partially modified, overlapping or reordered activation rules reject. The 24-species
@@ -557,15 +558,19 @@ pins population policy, not arbitrary supplied rules/catalog bytes. The full
 declared source closure, resolved package rules and dependency identities are
 separately retained and fingerprinted; the compiler owns content validation.
 All accepted inputs materialize the same eighteen-species, four-stage diagnostic
-output without L/N/O or M/P/X, the Leprechaun birth-Gold pool or room-Gold stage.
-This reduced output is not current 24-species production population. Accepting
+output without L/N/O, M/P/X or A/D, the Leprechaun birth-Gold pool, room-Gold stage,
+later finite stock stages or wandering population policy. Source activation is
+checked in full before the fixed diagnostic transformation omits wandering;
+unknown exclusions or changed source policies are not filtered into acceptance.
+This reduced output is not current 26-species production population. Accepting
 current production as an input does not expand or qualify the retained study.
 The exact reviewed21 adapter and its result remain unchanged; reviewed24 is a
 separate adapter. The shared C/Y/T/V/G/J pool is not duplicated. Existing output directories are never reused.
 
-New `tor-rogue-activation-inputs-v2` inventories record `source_population_shape`
+New `tor-rogue-activation-inputs-v3` inventories record `source_population_shape`
 as `preactivation_es`, `canonical_eighteen_species`,
-`reviewed_twenty_one_species_input` or `reviewed_twenty_four_species_input`,
+`reviewed_twenty_one_species_input`, `reviewed_twenty_four_species_input` or
+`reviewed_twenty_six_species_input`,
 explicit package provenance, and separate
 `input_population_scope`/`output_population_scope` species, ordered stage IDs and
 pool IDs. Separate `source_package_inputs`, `tool_inputs` and
@@ -577,6 +582,14 @@ The pinned external Rogue selector reference is separate from the supplied TOR
 package reference. Changed generator bytes receive fresh source-closure hashes;
 prior inventories, fingerprints and retained campaign sources stay unchanged and
 do not qualify newly generated packages.
+
+The required `population_transformation` separately versions the fixed-eighteen
+contract, names its canonical output shape, and records whether the source's
+`wandering` field was omitted. `wandering_evidence = "not_exercised"` is explicit:
+neither this package nor its route results qualify current wandering pressure.
+The unchanged raw source package and its hashes retain the full input policy.
+Actual current-production living-dungeon acceptance remains separate; historical
+inventories and study inputs are not rewritten to the new transformation identity.
 
 The bands condition the pinned Rogue selector on eighteen eligible species
 K/E/B/S/H/I/R/Z/C/Q/Y/F/T/W/U/V/G/J. Kestrel is eligible at depths 1–6 and bat

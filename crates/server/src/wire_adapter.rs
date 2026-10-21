@@ -1041,6 +1041,10 @@ pub fn disclose_entry(
                         _ => unreachable!("movement has a move action"),
                     },
                 },
+                Event::Crumbled { item, quantity } => VisibleEvent::Crumbled {
+                    item: scope.item(s::ItemId(*item)),
+                    quantity: *quantity,
+                },
                 Event::Taken {
                     item,
                     result,
