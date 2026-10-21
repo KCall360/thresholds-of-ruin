@@ -29,7 +29,11 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
 - Follow the [development loop](docs/development/testing.md#development-loop):
   preflight compilation/lint before expensive links, establish the intended
   first-red failure, and consolidate known fixes into coherent build checkpoints.
-  Setup failures are not behavioral regression evidence. Use
+  Validate positive fixtures before negative mutations; keep independent expected
+  values, ordinary-actor and cross-feature witnesses, and explicit rejection tests.
+  Diagnose production, fixture and driver failures from contract evidence rather
+  than weakening assertions. Setup failures are not behavioral regression evidence.
+  Use
   [`scripts/feedback.py`](docs/development/testing.md#fast-local-rust-feedback)
   for repeated single-target Rust edits; it does not qualify quick, push, full or CI.
   Run affected unit tests during edits, then integration, Service contracts and

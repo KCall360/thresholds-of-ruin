@@ -1219,7 +1219,7 @@ impl Game {
                 .ok_or(GameError::UnknownActor)?
                 .creature();
             let check = crate::discovery::FrozenDiscoveryCheck::capture_skill_for(
-                &creature,
+                creature,
                 id,
                 source.skill,
                 source.edge,

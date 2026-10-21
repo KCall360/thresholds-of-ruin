@@ -214,7 +214,7 @@ mod tests {
             std::slice::from_ref(&readied),
         )
         .unwrap();
-        assert_eq!(without_primary.tokens, [distracted.clone()]);
+        assert_eq!(without_primary.tokens, std::slice::from_ref(&distracted));
         assert_eq!(without_primary.check.edge, -1);
         assert_eq!(creature, before);
         creature

@@ -71,6 +71,16 @@ Waking and thawing reconcile at authoritative boundaries. Reentry, reconnect,
 control transfer, rank changes and reload never reset failed passive receipts.
 Observation, previews and rendering neither roll nor mutate knowledge. Checks,
 knowledge and RNG publish transactionally; candidates have stable exact-ID order.
+
+Build-less exploration actors remain physical trap-contact owners. They retain
+contact identity and activation disclosure, including across restoration, but
+cannot make creature skill checks or receive creature injury, corrosion or
+condition payloads. A triggered arrow has no eligible creature to hit and leaves
+its ordinary ammunition; no defense or damage roll is invented. Trapdoors still
+open shared topology and teleport traps still relocate the body. This eligibility
+boundary belongs to trap dispatch, not the generic creature effect APIs; missing
+actors remain errors rather than harmless recipients.
+
 A branch-local derived witness skips unchanged passive reconciliation and is not
 saved authority. Initial construction explicitly reconciles before publishing its
 first immutable boundary; restoration never grants extra attempts.

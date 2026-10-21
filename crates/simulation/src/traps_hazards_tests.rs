@@ -177,6 +177,343 @@ fn advance_with_paid_waits(game: &mut Game, until: u64) {
     );
 }
 
+fn plain_body_fixture() -> (Game, ActorId) {
+    let (content_owner, _) = fixture(vec![]);
+    let mut game = Game::new(
+        (*content_owner.world).clone(),
+        43,
+        content_owner.content().clone(),
+    );
+    // A fresh ordinary actor, not a creature with its combat state stripped.
+    let actor = game
+        .spawn_actor(at(1), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    assert!(game.creature(actor).is_none());
+    (game, actor)
+}
+
+fn nonspatial_trap_kinds() -> [TrapKind; 6] {
+    [
+        TrapKind::Rust {
+            slot: "body_armor".into(),
+            amount: 1,
+        },
+        TrapKind::SleepingGas {
+            condition: "fixture_sleep".into(),
+            duration: 200,
+            exposure: Some("poison".into()),
+        },
+        TrapKind::BearTrap {
+            condition: "fixture_bear".into(),
+            duration: 300,
+        },
+        TrapKind::Arrow {
+            attack_bonus: 100,
+            ammunition: "fixture.arrow".into(),
+        },
+        TrapKind::PoisonDart {
+            attack_bonus: 100,
+            exposure: "poison".into(),
+        },
+        TrapKind::Mysterious {},
+    ]
+}
+
+fn restored_contact_game(game: &Game) -> Game {
+    let mut shared = crate::checkpoint::SharedState::default();
+    let checkpoint = game.checkpoint(&mut shared);
+    let checkpoint = serde_json::from_slice(&serde_json::to_vec(&checkpoint).unwrap()).unwrap();
+    let restored = Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap();
+    assert_eq!(restored, *game);
+    restored
+}
+
+#[test]
+fn plain_body_paid_trap_contacts_preserve_disclosure_and_reentry_without_creature_payloads() {
+    for kind in nonspatial_trap_kinds() {
+        let (mut game, actor) = plain_body_fixture();
+        let rng = game.rules_rng;
+        // Establish valid ordinary movement before introducing this trap.
+        game.act(actor, crate::Action::Move(Direction::East))
+            .unwrap();
+        assert_eq!((game.actors[&actor].location, game.tick), (at(2), 100));
+        game.act(actor, crate::Action::Move(Direction::West))
+            .unwrap();
+        assert_eq!((game.actors[&actor].location, game.tick), (at(1), 200));
+        let arrow = matches!(kind, TrapKind::Arrow { .. });
+        game.place_trap(
+            at(2),
+            Trap {
+                id: 1,
+                dc: 99,
+                avoidance_dc: Some(0),
+                kind: kind.clone(),
+            },
+        )
+        .unwrap();
+        assert!(!game.feature_known(actor, ConcealedFeatureId::Trap(1)));
+        game.act(actor, crate::Action::Move(Direction::East))
+            .unwrap_or_else(|error| panic!("valid plain-body contact with {kind:?}: {error:?}"));
+        assert_eq!((game.actors[&actor].location, game.tick), (at(2), 300));
+        assert!(game.feature_family_known(actor, ConcealedFeatureId::Trap(1)));
+        assert_eq!(
+            game.actors[&actor].trap_contacts.ids().collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            game.rules_rng, rng,
+            "no invented creature check or payload roll"
+        );
+        assert!(game.creature(actor).is_none() && game.health(actor).is_none());
+        assert!(game.actors[&actor].spatial_condition_anchors.0.is_empty());
+        assert!(game.actors[&actor].equipment.is_empty());
+        assert_eq!(game.items.len(), usize::from(arrow));
+        if arrow {
+            let item = game.items.iter().next().unwrap().1;
+            assert_eq!(item.location, crate::ItemLocation::Ground(at(2)));
+            assert_eq!(item.quantity, 1);
+            assert_eq!(item.spec.name, "ordinary arrow");
+            assert!(item.spec.projectile.is_some() && !item.spec.magical);
+        }
+        game.act(actor, crate::Action::Wait).unwrap();
+        game = restored_contact_game(&game);
+        let stationary = game.clone();
+        for _ in 0..2 {
+            game.scene(actor).unwrap();
+            game.reconcile_trap_contacts(actor, None).unwrap();
+        }
+        assert_eq!(
+            game, stationary,
+            "standing, queries and restore cannot retrigger"
+        );
+        game.act(actor, crate::Action::Move(Direction::West))
+            .unwrap();
+        assert!(game.actors[&actor].trap_contacts.ids().next().is_none());
+        // Already-owned knowledge licenses no fabricated Agility for a plain body.
+        game.act(actor, crate::Action::Move(Direction::East))
+            .unwrap();
+        assert_eq!((game.actors[&actor].location, game.tick), (at(2), 600));
+        assert_eq!(game.rules_rng, rng);
+        assert_eq!(
+            game.items.values().map(|item| item.quantity).sum::<u64>(),
+            if arrow { 2 } else { 0 }
+        );
+        assert!(game.feature_family_known(actor, ConcealedFeatureId::Trap(1)));
+        assert_eq!(
+            game.actors[&actor].trap_contacts.ids().collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+}
+
+#[test]
+fn plain_body_known_teleport_trap_still_relocates_and_restores_without_repeat() {
+    let (mut game, actor) = plain_body_fixture();
+    game.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+    game.place_trap(
+        at(2),
+        Trap {
+            id: 1,
+            dc: 99,
+            avoidance_dc: Some(0),
+            kind: TrapKind::Teleport {},
+        },
+    )
+    .unwrap();
+    game.reveal_feature_family(actor, ConcealedFeatureId::Trap(1))
+        .unwrap();
+    let rng = game.rules_rng;
+    game.act(actor, crate::Action::Move(Direction::East))
+        .unwrap();
+    let destination = game.actors[&actor].location;
+    assert_ne!(
+        destination,
+        at(2),
+        "plain bodies retain the physical relocation payload"
+    );
+    assert_eq!(destination.region, RegionId(1));
+    assert_eq!(
+        destination.position.z, 0,
+        "relocation chooses supported floor"
+    );
+    assert_eq!(game.tick, 100);
+    assert_ne!(
+        game.rules_rng, rng,
+        "real relocation still spends its destination draw"
+    );
+    assert!(game.creature(actor).is_none());
+    assert!(game.feature_family_known(actor, ConcealedFeatureId::Trap(1)));
+    assert!(game.actors[&actor].trap_contacts.ids().next().is_none());
+    game = restored_contact_game(&game);
+    let restored = game.clone();
+    game.scene(actor).unwrap();
+    game.reconcile_trap_contacts(actor, None).unwrap();
+    assert_eq!(game, restored);
+}
+
+#[test]
+fn plain_body_known_trapdoor_still_opens_and_falls_with_loose_stock() {
+    let (mut game, actor) = plain_body_fixture();
+    let target = Location {
+        region: RegionId(2),
+        position: Position { x: 3, y: 1, z: 1 },
+    };
+    game.add_chamber(Region {
+        id: target.region,
+        name: "below".into(),
+        bounds: Extent::new(6, 4, 2).unwrap(),
+    })
+    .unwrap();
+    game.register_named_anchors(
+        target.region,
+        BTreeMap::from([("landing".into(), target.position)]),
+    )
+    .unwrap();
+    for region in [RegionId(1), target.region] {
+        game.set_gravity(region, [0, 0, -1]).unwrap();
+    }
+    game.place_trap(
+        at(2),
+        Trap {
+            id: 1,
+            dc: 99,
+            avoidance_dc: Some(0),
+            kind: TrapKind::TrapDoor {
+                destination: tor_world::NamedAnchor {
+                    region: target.region,
+                    name: "landing".into(),
+                },
+                open: false,
+            },
+        },
+    )
+    .unwrap();
+    game.reveal_feature_family(actor, ConcealedFeatureId::Trap(1))
+        .unwrap();
+    let item = game.place_item(at(2), "stone".into()).unwrap();
+    let rng = game.rules_rng;
+    game.act(actor, crate::Action::Move(Direction::East))
+        .unwrap();
+    assert_eq!(
+        game.world.physics_neighbor(at(2), Direction::Down),
+        Some((target, 0))
+    );
+    assert!(!game.world.is_stair(at(2), Direction::Down));
+    assert!(matches!(
+        game.world.trap(at(2)).unwrap().kind,
+        TrapKind::TrapDoor { open: true, .. }
+    ));
+    advance_with_paid_waits(&mut game, 200);
+    assert_eq!(game.actors[&actor].location.region, target.region);
+    assert!(matches!(game.items[&item].location,
+        crate::ItemLocation::Ground(location) if location.region == target.region));
+    assert_eq!(
+        game.rules_rng, rng,
+        "no fabricated avoidance or injury roll"
+    );
+    assert!(game.creature(actor).is_none() && game.health(actor).is_none());
+    assert!(game.feature_family_known(actor, ConcealedFeatureId::Trap(1)));
+    let _ = restored_contact_game(&game);
+}
+
+#[test]
+fn trap_payload_eligibility_never_treats_a_missing_actor_as_a_plain_body() {
+    let (mut game, _) = plain_body_fixture();
+    let physical = [
+        TrapKind::Teleport {},
+        TrapKind::TrapDoor {
+            destination: tor_world::NamedAnchor {
+                region: RegionId(2),
+                name: "landing".into(),
+            },
+            open: false,
+        },
+    ];
+    for kind in nonspatial_trap_kinds().into_iter().chain(physical) {
+        let before = game.clone();
+        assert_eq!(
+            game.apply_trap_contact(ActorId(999), at(2), kind),
+            Err(GameError::UnknownActor)
+        );
+        assert_eq!(game, before);
+    }
+}
+
+#[test]
+fn plain_body_contact_rejects_invalid_raw_world_payload_without_partial_movement() {
+    let invalid = [
+        TrapKind::Rust {
+            slot: "missing_slot".into(),
+            amount: 1,
+        },
+        TrapKind::SleepingGas {
+            condition: "missing_condition".into(),
+            duration: 200,
+            exposure: Some("poison".into()),
+        },
+        TrapKind::SleepingGas {
+            condition: "fixture_sleep".into(),
+            duration: 200,
+            exposure: Some("missing_exposure".into()),
+        },
+        TrapKind::BearTrap {
+            condition: "missing_condition".into(),
+            duration: 300,
+        },
+        TrapKind::PoisonDart {
+            attack_bonus: 0,
+            exposure: "missing_exposure".into(),
+        },
+        TrapKind::Arrow {
+            attack_bonus: 0,
+            ammunition: "missing_ammunition".into(),
+        },
+    ];
+    for kind in invalid {
+        let (template, _) = plain_body_fixture();
+        let mut world = (*template.world).clone();
+        // Bypass Game::place_trap deliberately: raw World has no content
+        // catalog and Game::new is infallible. Contact still validates it.
+        world
+            .place_trap(
+                at(2),
+                Trap {
+                    id: 1,
+                    dc: 99,
+                    avoidance_dc: None,
+                    kind: kind.clone(),
+                },
+            )
+            .unwrap();
+        let mut game = Game::new(world, 43, template.content().clone());
+        let actor = game
+            .spawn_actor(at(1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.act(actor, crate::Action::Move(Direction::West))
+            .unwrap();
+        assert_eq!((game.actors[&actor].location, game.tick), (at(0), 100));
+        game.act(actor, crate::Action::Move(Direction::East))
+            .unwrap();
+        assert_eq!((game.actors[&actor].location, game.tick), (at(1), 200));
+        let before = game.clone();
+        assert_eq!(
+            game.apply_trap_contact(ActorId(999), at(2), kind.clone()),
+            Err(GameError::UnknownActor),
+            "missing identity precedes content validation"
+        );
+        assert_eq!(game, before);
+        assert_eq!(
+            game.act(actor, crate::Action::Move(Direction::East)),
+            Err(GameError::InvalidLocation),
+            "malformed contact payload {kind:?}"
+        );
+        assert_eq!(
+            game, before,
+            "rejection cannot publish movement, time, RNG, contact or stock"
+        );
+    }
+}
+
 #[test]
 fn reusable_arrow_misses_leave_real_ordinary_ammunition_and_do_not_repeat_in_place() {
     let (mut game, actor) = fixture(vec![]);
@@ -425,7 +762,7 @@ fn poison_dart_hit_and_athletics_resistance_are_separate_and_loss_is_restorable_
     use crate::attributes::Attribute;
     for sustained in [false, true] {
         let modifiers = sustained
-            .then(|| Modifier {
+            .then_some(Modifier {
                 scope: Scope::Always,
                 op: ModifierOp::SustainAttribute {
                     attribute: Attribute::Strength,

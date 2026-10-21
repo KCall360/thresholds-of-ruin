@@ -305,8 +305,14 @@ class RoguePerceptionProcesses(ProcessTestCase):
             touched = self.act(clients[0], {"type": "take", "item": item, "quantity": None})
             self.assertIsNone(touched["error"])
             self.assert_xeroc_revealed(touched)
-            self.assertEqual((tick(touched), u64(combat(touched)["recovery_remaining"])), (0, 50))
-            ready = self.advance_to(clients, 50)
+            # The already-prepared touch strike resolves at contact and spends
+            # the foe's decision on recovery. There is no stale foe prompt at
+            # tick 0: the next player publication completes the paid 50-tick
+            # probe. Observe its damage, not just a changed guise.
+            self.assertEqual((tick(touched), u64(combat(touched)["recovery_remaining"])), (50, 0))
+            self.assertLess(u64(combat(touched)["hp"]), u64(combat(initial[0])["hp"]))
+            self.assertIsNone(combat(touched)["preparation_remaining"])
+            ready = [touched, self.snapshot(clients[1])]
             self.assertTrue(observation(ready[0])["ready"])
         elif probe == "search":
             started = self.act(clients[0], ability(SEARCH, observation(initial[0])["self_target"]))

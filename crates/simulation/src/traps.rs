@@ -485,9 +485,11 @@ impl Game {
                 .filter(|trap| trap.id == id)
                 .ok_or(GameError::InvalidLocation)?;
             let kind = trap.kind.clone();
-            let avoidance_dc = trap
-                .avoidance_dc
-                .filter(|_| may_avoid && !matches!(kind, TrapKind::TrapDoor { open: true, .. }));
+            let avoidance_dc = trap.avoidance_dc.filter(|_| {
+                may_avoid
+                    && self.actors[&actor].combat.is_some()
+                    && !matches!(kind, TrapKind::TrapDoor { open: true, .. })
+            });
             if let Some(dc) = avoidance_dc {
                 if self.resolve_hazard_skill_check_in_transaction(
                     actor,
@@ -517,8 +519,18 @@ impl Game {
         kind: TrapKind,
     ) -> Result<(), GameError> {
         use crate::rules::{AmountExpr, Effect};
+        // Exploration bodies are valid contact owners, but have no creature
+        // checks, injury pool or condition/equipment-effect recipient. Keep
+        // topology, relocation, discovery and real missed-arrow stock intact.
+        let owner = self.actors.get(&actor).ok_or(GameError::UnknownActor)?;
+        // World construction validates geometry, not the pinned creature
+        // catalog. Ineligible recipients must not hide malformed content.
+        if !trap_content_valid(&self.content, &kind) {
+            return Err(GameError::InvalidLocation);
+        }
+        let has_creature = owner.combat.is_some();
         match kind {
-            TrapKind::Rust { slot, amount } => {
+            TrapKind::Rust { slot, amount } if has_creature => {
                 self.apply_effects_in_transaction(
                     actor,
                     &[Effect::CorrodeArmor {
@@ -532,7 +544,7 @@ impl Game {
                 condition,
                 duration,
                 exposure,
-            } => {
+            } if has_creature => {
                 let descriptors = exposure
                     .map(crate::content_ids::DescriptorId::new)
                     .transpose()
@@ -552,7 +564,7 @@ impl Game {
             TrapKind::BearTrap {
                 condition,
                 duration,
-            } => {
+            } if has_creature => {
                 let condition = crate::content_ids::ConditionId::new(condition)
                     .map_err(|_| GameError::InvalidLocation)?;
                 self.apply_effects_in_transaction(
@@ -599,12 +611,14 @@ impl Game {
                 attack_bonus,
                 ammunition,
             } => {
-                if !self.resolve_environmental_attack_in_transaction(
-                    actor,
-                    attack_bonus,
-                    &[trap_damage(6)],
-                    &[],
-                )? {
+                if !has_creature
+                    || !self.resolve_environmental_attack_in_transaction(
+                        actor,
+                        attack_bonus,
+                        &[trap_damage(6)],
+                        &[],
+                    )?
+                {
                     let spec = self
                         .content
                         .trap_ammunition(&ammunition)
@@ -616,7 +630,7 @@ impl Game {
             TrapKind::PoisonDart {
                 attack_bonus,
                 exposure,
-            } => {
+            } if has_creature => {
                 let hit = self.resolve_environmental_attack_in_transaction(
                     actor,
                     attack_bonus,
@@ -635,6 +649,10 @@ impl Game {
                     )?;
                 }
             }
+            TrapKind::Rust { .. }
+            | TrapKind::SleepingGas { .. }
+            | TrapKind::BearTrap { .. }
+            | TrapKind::PoisonDart { .. } => {}
             // Its discovery/contact is real, but a mysterious trap does not
             // invent a damaging, summoning or information-revealing mechanic.
             TrapKind::Mysterious {} => {}

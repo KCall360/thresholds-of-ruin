@@ -273,6 +273,31 @@ class DisclosedStepActions(unittest.TestCase):
         result["door"] = {"id": "observed-gate", "open": opened, "reachable": reachable}
         return result
 
+    def test_paid_restraint_wait_is_opt_in_and_requires_a_current_active_timer(self):
+        from rogue_test_support import disclosed_step_action
+        view = {"visible_cells": [], "combat": {"own_stats": {"conditions": []}}}
+        ordinary = {"type": "move", "direction": "east"}
+        self.assertEqual(disclosed_step_action(view, "east", wait_for_restraint=True), ordinary)
+        row = {"condition": {"id": "rogue.bear_trap"}, "phase": "active", "remaining_ticks": "200"}
+        view["combat"]["own_stats"]["conditions"] = [row]
+        before = copy.deepcopy(view)
+        self.assertEqual(disclosed_step_action(view, "east"), ordinary)
+        self.assertEqual(disclosed_step_action(view, "east", wait_for_restraint=True), {"type": "wait"})
+        self.assertEqual(view, before)
+        for change in ({"phase": "pending"}, {"phase": "expired"}, {"remaining_ticks": "0"},
+                       {"remaining_ticks": None}, {"condition": {"id": "unrelated"}}):
+            with self.subTest(change=change):
+                view["combat"]["own_stats"]["conditions"] = [{**row, **change}]
+                self.assertEqual(disclosed_step_action(view, "east", wait_for_restraint=True), ordinary)
+
+    def test_restraint_expiry_and_a_new_contact_are_reobserved_not_cached(self):
+        from rogue_test_support import disclosed_step_action
+        row = {"condition": {"id": "rogue.bear_trap"}, "phase": "active", "remaining_ticks": "200"}
+        view = {"visible_cells": [], "combat": {"own_stats": {"conditions": [row]}}}
+        for remaining, expected in [("200", "wait"), ("100", "wait"), ("0", "move"), ("200", "wait")]:
+            row["remaining_ticks"] = remaining
+            self.assertEqual(disclosed_step_action(view, "east", wait_for_restraint=True)["type"], expected)
+
     def test_closed_reachable_destination_opens_without_mutating_the_view(self):
         cells = [cell("here", 0, 0), self.gate()]
         before = copy.deepcopy(cells)

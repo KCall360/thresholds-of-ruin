@@ -27,7 +27,7 @@ pub(crate) enum ReadiedAmbush {
 pub(crate) enum ReadiedRecord {
     Unacquired,
     Ready {
-        source: CreatureRecord,
+        source: Box<CreatureRecord>,
         at: Placement,
         body: Shared<crate::BodySpec>,
         ability: AbilityId,
@@ -44,7 +44,7 @@ impl<'de> Deserialize<'de> for ReadiedRecord {
         enum Fields {
             Unacquired {},
             Ready {
-                source: CreatureRecord,
+                source: Box<CreatureRecord>,
                 at: Placement,
                 body: Shared<crate::BodySpec>,
                 ability: AbilityId,
@@ -89,7 +89,7 @@ impl ReadiedRecord {
                 body,
                 ability,
             } => Self::Ready {
-                source: CreatureRecord::capture(source),
+                source: Box::new(CreatureRecord::capture(source)),
                 at: *at,
                 body: body.clone(),
                 ability: ability.clone(),
@@ -312,6 +312,39 @@ mod tests {
             })
             .count()
     }
+    #[test]
+    fn compact_ready_record_preserves_named_source_shape_and_roundtrip() {
+        assert!(std::mem::size_of::<ReadiedRecord>() < std::mem::size_of::<CreatureRecord>());
+        let game = ready_fixture();
+        let state = &game.actors[&SUBJECT].readied_ambush;
+        let ReadiedAmbush::Ready {
+            source,
+            at,
+            body,
+            ability,
+        } = state
+        else {
+            panic!("fixture must acquire a real completed preparation");
+        };
+        // The source remains a direct named object, not an extra wrapper or
+        // positional alias. This literal boundary is independent of the record.
+        let expected = serde_json::json!({
+            "state": "ready",
+            "source": CreatureRecord::capture(source),
+            "at": at,
+            "body": body,
+            "ability": ability,
+        });
+        let record = ReadiedRecord::capture(state);
+        assert_eq!(serde_json::to_value(&record).unwrap(), expected);
+        let decoded: ReadiedRecord = serde_json::from_value(expected.clone()).unwrap();
+        assert_eq!(decoded, record);
+        assert_eq!(decoded.restore(game.content().clone()).unwrap(), *state);
+        let mut invalid = expected;
+        invalid["source"] = serde_json::json!([invalid["source"].clone()]);
+        assert!(serde_json::from_value::<ReadiedRecord>(invalid).is_err());
+    }
+
     #[test]
     fn contact_releases_one_completed_preparation_and_ordinary_recovery() {
         let mut game = ready_fixture();

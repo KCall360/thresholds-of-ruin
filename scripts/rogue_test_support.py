@@ -4,6 +4,7 @@ These flat-floor drivers do not reproduce the engine's general contact solver.
 The server still validates every submitted target and reports any refusal.
 """
 import json
+from scalar_wire import u64
 
 
 def disclosed_frames(player, start):
@@ -203,17 +204,24 @@ def ground_sight_candidate(actor, distance):
     return p["z"] == 0 and abs(p["x"]) + abs(p["y"]) + 1 <= distance
 
 
-def disclosed_step_action(observation, direction):
-    """Open the current disclosed cardinal destination before attempting its step.
+def disclosed_step_action(observation, direction, *, wait_for_restraint=False):
+    """Choose one paid action toward the current disclosed cardinal destination.
 
     This is not a movement solver: callers still select a disclosed route and
     the server validates it. A paid opening replaces, never accompanies, the
-    old move; the caller must reconsider the resulting observation.
+    old move; the caller must reconsider the resulting observation. Rogue
+    walkthroughs may opt into waiting out their authored bear-trap condition;
+    admission readiness alone does not imply that movement is permitted.
     """
     offset = next(((dx, dy, 0) for dx, dy, name in DisclosedFloorGraph.directions
                    if name == direction), None)
     if offset is None:
         raise ValueError("Expected a cardinal disclosed step")
+    if wait_for_restraint and any(
+            row["condition"]["id"] == "rogue.bear_trap" and row["phase"] == "active"
+            and row["remaining_ticks"] is not None and u64(row["remaining_ticks"]) > 0
+            for row in observation.get("combat", {}).get("own_stats", {}).get("conditions", [])):
+        return {"type": "wait"}
     closed = [cell["door"] for cell in observation["visible_cells"]
               if tuple(cell["position"][axis] for axis in ("x", "y", "z")) == offset
               and not cell["wall"] and cell.get("door") and not cell["door"]["open"]]

@@ -5,13 +5,13 @@
   "ruleset_dependencies": {
     "interactions-v50": "76a33642268cad95f0c10828eea8e5b633ba0f84802c172f308c5e64a51bcf5e"
   },
-  "content_hash": "f7be203dd5f8daf202fa04a14ebf27ce1588fea3f7fd5ecfbea2e13a955ded67",
+  "content_hash": "df14e89ae77145e9ecc1a4340e9d4a2f8a336ad06f7dfd3da953cb4ca71d5aa6",
   "files": {
     "index.json": "9bcdcd8e7340350480abf05c4edbe9b8a8ef04e77258d462167b598589354902",
     "rules.toml": "fb7832eaba143d588dbf7a922baf2641c8364b3dc07f8e64dbab6fa6f7545ab7",
-    "scenario.toml": "2ff76cc531f01c7d103879384ca72a6bcf25c53cf420a9e3371d942b1c083d52"
+    "scenario.toml": "19b37bb0a135c402aacb648ff45cf55d65e23078063ace6bbff1e96bcf054f13"
   },
   "regions": 0,
-  "model_hash": "deb59d7a3e055bfad5aaab50af9b06f00505b9507ce5b6549292ac5d8710632d",
+  "model_hash": "a0ba2cee55c011cf5f177087b8b5026944360c6705172bd83b23cc48c754336b",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }
