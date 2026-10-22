@@ -979,7 +979,7 @@ class CiWorkflowContract(unittest.TestCase):
         self.assertIn("permissions:\n  contents: read\n", workflow)
         self.assertNotRegex(workflow, r"(?m)^\s+\S+: write$")
         self.assertIn("          shared-key: ${{ matrix.profile }}-${{ matrix.partition }}-", self.job("profiles"))
-        self.assertIn("          save-if: ${{ github.ref == 'refs/heads/main' }}\n", self.job("profiles"))
+        self.assertIn("          save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}\n", self.job("profiles"))
 
     def test_cache_identity_includes_virtual_root_commands_partition_and_effective_flags(self):
         profiles = self.job("profiles")
@@ -987,7 +987,7 @@ class CiWorkflowContract(unittest.TestCase):
         self.assertIn("if: steps.build_key.outcome == 'success' && steps.build_key.outputs.key != ''", profiles)
         self.assertIn('      CARGO_PROFILE_DEV_DEBUG: "0"', profiles)
         self.assertIn('      CARGO_INCREMENTAL: "0"', profiles)
-        self.assertIn("save-if: ${{ github.ref == 'refs/heads/main' }}", profiles)
+        self.assertIn("save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}", profiles)
         self.assertNotIn('cache-workspace-crates: true', profiles)
         self.assertNotIn('cache-all-crates: true', profiles)
 

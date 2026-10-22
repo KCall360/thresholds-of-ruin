@@ -63,8 +63,18 @@ def directory(path):
     return path.resolve(strict=True)
 
 
-def stable_stat(info):
-    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+def stable_stat(info, *, cross_view=False):
+    """Exact same-view snapshots; align only Windows path/handle API semantics."""
+    mode, changed = info.st_mode, info.st_ctime_ns
+    birth = getattr(info, "st_birthtime_ns", None)
+    if cross_view and sys.platform == "win32":
+        # CPython path stat synthesizes executable bits from the filename.
+        # In 3.12 path ctime is CreationTime while fstat ctime is ChangeTime;
+        # birthtime aligns them. Older APIs without birthtime use creation ctime.
+        mode &= ~0o111
+        changed = birth if birth is not None else changed
+    return (info.st_dev, info.st_ino, mode, info.st_size, info.st_mtime_ns, changed,
+            birth, getattr(info, "st_file_attributes", 0) & 0x400)
 
 
 def file_identity(path):
@@ -72,7 +82,9 @@ def file_identity(path):
     require(0 < before.st_size <= MAX_ARCHIVE, "artifact size outside bound")
     digest = hashlib.sha256()
     with path.open("rb") as source:
-        require(stable_stat(os.fstat(source.fileno())) == stable_stat(before), "artifact changed while opening")
+        opened = os.fstat(source.fileno())
+        require(stable_stat(opened, cross_view=True) == stable_stat(before, cross_view=True),
+                "artifact changed while opening")
         remaining = before.st_size
         while remaining:
             block = source.read(min(remaining, 1024 * 1024))
@@ -80,8 +92,8 @@ def file_identity(path):
             digest.update(block)
             remaining -= len(block)
         require(not source.read(1), "artifact grew while hashing")
-        require(stable_stat(os.fstat(source.fileno())) == stable_stat(before), "artifact changed while hashing")
-    require(stable_stat(path.lstat()) == stable_stat(before), "artifact pathname changed while hashing")
+        require(stable_stat(os.fstat(source.fileno())) == stable_stat(opened), "artifact changed while hashing")
+    require(stable_stat(regular(path)) == stable_stat(before), "artifact pathname changed while hashing")
     return {"bytes": before.st_size, "sha256": digest.hexdigest()}
 
 
@@ -89,10 +101,12 @@ def read_small(path, limit):
     before = regular(path)
     require(before.st_size <= limit, "metadata file exceeds size bound")
     with path.open("rb") as source:
-        require(stable_stat(os.fstat(source.fileno())) == stable_stat(before), "metadata changed while opening")
+        opened = os.fstat(source.fileno())
+        require(stable_stat(opened, cross_view=True) == stable_stat(before, cross_view=True),
+                "metadata changed while opening")
         raw = source.read(limit + 1)
-        require(len(raw) <= limit and stable_stat(os.fstat(source.fileno())) == stable_stat(before)
-                and stable_stat(path.lstat()) == stable_stat(before), "metadata changed while reading")
+        require(len(raw) <= limit and stable_stat(os.fstat(source.fileno())) == stable_stat(opened)
+                and stable_stat(regular(path)) == stable_stat(before), "metadata changed while reading")
     return raw
 
 

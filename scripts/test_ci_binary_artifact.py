@@ -2,7 +2,11 @@
 import copy
 import io
 import json
+import hashlib
 import os
+import stat
+import sys
+from types import SimpleNamespace
 from pathlib import Path
 import tarfile
 import tempfile
@@ -253,6 +257,171 @@ class BinaryArtifactTests(unittest.TestCase):
             artifact.package({}, self.context, self.root / "missing")
         self.assertFalse((self.root / "missing").exists())
         self.assertEqual((self.output / "manifest.json").read_bytes(), before)
+
+    @staticmethod
+    def changed_stat(info, **changes):
+        fields = ('st_dev', 'st_ino', 'st_mode', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+        return SimpleNamespace(**{**{name: getattr(info, name) for name in fields},
+                                  'st_file_attributes': getattr(info, 'st_file_attributes', 0),
+                                  **({'st_birthtime_ns': info.st_birthtime_ns} if hasattr(info, 'st_birthtime_ns') else {}),
+                                  **changes})
+
+    def test_actual_executable_path_and_current_interpreter_hash_and_read(self):
+        path = self.root / 'actual-native.exe'
+        data = b'actual binary I/O fixture\x00\n'
+        path.write_bytes(data)
+        expected = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+        self.assertEqual(artifact.file_identity(path), expected)
+        self.assertEqual(artifact.read_small(path, len(data)), data)
+        interpreter = Path(sys.executable).resolve(strict=True)
+        expected_hash = hashlib.sha256()
+        with interpreter.open('rb') as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b''):
+                expected_hash.update(block)
+        self.assertEqual(artifact.file_identity(interpreter),
+                         {'bytes': interpreter.stat().st_size, 'sha256': expected_hash.hexdigest()})
+
+    def test_windows_filename_execute_bits_do_not_mean_replacement(self):
+        path = self.root / 'windows-mode.exe'
+        data = b'complete executable bytes\x00\n'
+        path.write_bytes(data)
+        expected = artifact.file_identity(path)
+        original = Path.lstat
+        def windows_path_info(candidate):
+            info = original(candidate)
+            return self.changed_stat(info, st_mode=info.st_mode | 0o111) if candidate == path else info
+        # Real file I/O; only model CPython's filename-derived Windows mode bits.
+        with patch.object(artifact.sys, 'platform', 'win32'), patch.object(Path, 'lstat', windows_path_info):
+            self.assertEqual(artifact.file_identity(path), expected)
+            self.assertEqual(artifact.read_small(path, len(data)), data)
+        with patch.object(artifact.sys, 'platform', 'linux'), patch.object(Path, 'lstat', windows_path_info):
+            with self.assertRaisesRegex(ValueError, 'changed while opening'):
+                artifact.file_identity(path)
+
+    def test_open_handle_identity_permissions_type_and_reparse_changes_reject(self):
+        path = self.executables['tor-server']
+        baseline = artifact.file_identity(path)
+        original = os.fstat
+        info = path.stat()
+        changes = ({'st_dev': info.st_dev + 1}, {'st_ino': info.st_ino + 1},
+                   {'st_mode': info.st_mode ^ stat.S_IWUSR}, {'st_size': info.st_size + 1},
+                   {'st_mtime_ns': info.st_mtime_ns + 1},
+                   {'st_mode': stat.S_IFDIR | 0o755}, {'st_file_attributes': 0x400})
+        for change in changes:
+            with self.subTest(change=change), patch.object(artifact.sys, 'platform', 'win32'), \
+                    patch.object(artifact.os, 'fstat', side_effect=lambda fd: self.changed_stat(original(fd), **change)):
+                with self.assertRaises(ValueError):
+                    artifact.file_identity(path)
+                with self.assertRaises(ValueError):
+                    artifact.read_small(path, 1024)
+        self.assertEqual(artifact.file_identity(path), baseline)
+
+    def test_windows_birthtime_aligns_distinct_path_and_handle_ctime(self):
+        path = self.root / 'windows-times.bin'
+        data = b'unchanged bytes'
+        path.write_bytes(data)
+        expected = artifact.file_identity(path)
+        original_path, original_fd = Path.lstat, os.fstat
+        def path_info(candidate):
+            return self.changed_stat(original_path(candidate), st_birthtime_ns=100, st_ctime_ns=100)
+        def handle_info(fd):
+            return self.changed_stat(original_fd(fd), st_birthtime_ns=100, st_ctime_ns=200)
+        with patch.object(artifact.sys, 'platform', 'win32'), patch.object(Path, 'lstat', path_info), \
+                patch.object(artifact.os, 'fstat', handle_info):
+            self.assertEqual(artifact.file_identity(path), expected)
+            self.assertEqual(artifact.read_small(path, len(data)), data)
+        with patch.object(artifact.sys, 'platform', 'linux'), patch.object(Path, 'lstat', path_info), \
+                patch.object(artifact.os, 'fstat', handle_info), self.assertRaises(ValueError):
+            artifact.file_identity(path)
+        for birthtime in (101, None):
+            def mismatched(fd):
+                info = handle_info(fd)
+                if birthtime is None:
+                    del info.st_birthtime_ns
+                else:
+                    info.st_birthtime_ns = birthtime
+                return info
+            with self.subTest(birthtime=birthtime), patch.object(artifact.sys, 'platform', 'win32'), \
+                    patch.object(Path, 'lstat', path_info), patch.object(artifact.os, 'fstat', mismatched), \
+                    self.assertRaises(ValueError):
+                artifact.file_identity(path)
+
+    def test_windows_legacy_absent_birthtime_keeps_creation_time_comparison(self):
+        path = self.root / 'legacy.bin'
+        path.write_bytes(b'legacy metadata')
+        expected = artifact.file_identity(path)
+        original_path, original_fd = Path.lstat, os.fstat
+        def legacy(info, ctime):
+            info = self.changed_stat(info, st_ctime_ns=ctime)
+            if hasattr(info, 'st_birthtime_ns'):
+                del info.st_birthtime_ns
+            return info
+        for handle_ctime in (100, 101):
+            with patch.object(artifact.sys, 'platform', 'win32'), \
+                    patch.object(Path, 'lstat', lambda candidate: legacy(original_path(candidate), 100)), \
+                    patch.object(artifact.os, 'fstat', lambda fd: legacy(original_fd(fd), handle_ctime)):
+                if handle_ctime == 100:
+                    self.assertEqual(artifact.file_identity(path), expected)
+                else:
+                    with self.assertRaises(ValueError):
+                        artifact.file_identity(path)
+
+    def test_windows_same_view_metadata_changes_are_not_masked(self):
+        path = self.executables['tor-server']
+        artifact.file_identity(path)
+        original_fd, original_path = os.fstat, Path.lstat
+        for view in ('handle', 'path'):
+            for field in ('st_mode', 'st_ctime_ns', 'st_birthtime_ns', 'st_file_attributes'):
+                for read in (artifact.file_identity, lambda file: artifact.read_small(file, 1024)):
+                    calls = 0
+                    def altered(value):
+                        nonlocal calls
+                        info = original_fd(value) if view == 'handle' else original_path(value)
+                        calls += 1
+                        if calls == 1:
+                            return info
+                        changed = (info.st_mode ^ 0o111 if field == 'st_mode' else
+                                   0x400 if field == 'st_file_attributes' else getattr(info, field, 0) + 1)
+                        return self.changed_stat(info, **{field: changed})
+                    with self.subTest(view=view, field=field), patch.object(artifact.sys, 'platform', 'win32'), \
+                            patch.object(artifact.os if view == 'handle' else Path,
+                                         'fstat' if view == 'handle' else 'lstat', new=altered):
+                        with self.assertRaises(ValueError):
+                            read(path)
+
+    def test_actual_same_byte_path_replacement_between_stat_and_open_rejects(self):
+        path = self.root / 'replace.bin'
+        path.write_bytes(b'same bytes')
+        artifact.file_identity(path)
+        saved = self.root / 'previous.bin'
+        original = Path.open
+        def replace(candidate, *args, **kwargs):
+            if candidate == path and args == ('rb',):
+                candidate.rename(saved)
+                candidate.write_bytes(b'same bytes')
+            return original(candidate, *args, **kwargs)
+        with patch.object(Path, 'open', replace), self.assertRaisesRegex(ValueError, 'changed while opening'):
+            artifact.file_identity(path)
+        self.assertEqual(path.read_bytes(), saved.read_bytes())
+        self.assertNotEqual(path.stat().st_ino, saved.stat().st_ino)
+
+    def test_actual_content_drift_after_read_rejects(self):
+        path = self.root / 'mutate.bin'
+        path.write_bytes(b'original')
+        artifact.file_identity(path)
+        before = path.stat()
+        original = os.fstat
+        calls = 0
+        def mutate(fd):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                path.write_bytes(b'modified')
+                os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+            return original(fd)
+        with patch.object(artifact.os, 'fstat', side_effect=mutate), \
+                self.assertRaisesRegex(ValueError, 'changed while hashing'):
+            artifact.file_identity(path)
 
     def test_hashing_does_not_confuse_read_access_time_with_mutation(self):
         path = self.executables["tor-server"]

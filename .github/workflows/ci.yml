@@ -150,8 +150,10 @@ jobs:
           # hash. The recipe explicitly hashes that root plus actual commands,
           # not reporting/logging source. Unknown recipes bypass only this cache.
           shared-key: ${{ matrix.profile }}-${{ matrix.partition }}-${{ steps.build_key.outputs.key }}
-          # Only main writes these caches. A cache hit never qualifies tests.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Main and same-repository PRs write only their natural ref-scoped caches.
+          # Forks never write; a cache hit never qualifies tests.
+          save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+          cache-on-failure: false
       - name: Install Linux Rust build libraries
         if: runner.os == 'Linux'
         # Dependency acquisition has its own bounded budget; a stalled mirror
@@ -221,13 +223,16 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Check artifact transport contracts before compiling
+        run: python -m unittest discover -s scripts -p test_ci_binary_artifact.py
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal
       - name: Cache ordinary application dependency recipe
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: ordinary-applications-v1-${{ matrix.profile }}-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+          cache-on-failure: false
       - name: Prepare ordinary application artifact parent
         run: python -c "from pathlib import Path; Path('.local').mkdir(exist_ok=True)"
       - name: Build exact-run ordinary applications
@@ -250,7 +255,7 @@ jobs:
       contents: read
       actions: read
       pull-requests: read
-    if: ${{ !cancelled() && needs.scope.outputs.mode != 'selected' && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}
+    if: ${{ !cancelled() && needs.windows_binaries.result == 'success' && needs.scope.outputs.mode != 'selected' && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}
     runs-on: ${{ matrix.os }}
     # Expose the effective verifier build flags before rust-cache computes its key.
     env:
@@ -290,8 +295,10 @@ jobs:
           # hash. The recipe explicitly hashes that root plus actual commands,
           # not reporting/logging source. Unknown recipes bypass only this cache.
           shared-key: ${{ matrix.profile }}-${{ matrix.partition }}-${{ steps.build_key.outputs.key }}
-          # Only main writes these caches. A cache hit never qualifies tests.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Main and same-repository PRs write only their natural ref-scoped caches.
+          # Forks never write; a cache hit never qualifies tests.
+          save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+          cache-on-failure: false
       - name: Install Linux Rust build libraries
         if: runner.os == 'Linux'
         # Dependency acquisition has its own bounded budget; a stalled mirror
@@ -369,7 +376,8 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: selected-v2-${{ runner.os }}-debug-rust-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+          cache-on-failure: false
       - name: Install native build and test dependencies
         if: runner.os == 'Linux'
         run: |
@@ -439,7 +447,8 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: selected-v2-${{ runner.os }}-debug-python-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+          cache-on-failure: false
       - name: Install native build and test dependencies
         if: runner.os == 'Linux' && needs.scope.outputs.requires_apps == 'true'
         run: |
@@ -501,7 +510,8 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: selected-v2-${{ runner.os }}-debug-python-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+          cache-on-failure: false
       - name: Install native build and test dependencies
         if: runner.os == 'Linux' && needs.scope.outputs.requires_apps == 'true'
         run: |
@@ -557,7 +567,8 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: selected-v2-${{ runner.os }}-release-python-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+          cache-on-failure: false
       - name: Install native build and test dependencies
         if: runner.os == 'Linux'
         run: |
@@ -614,7 +625,8 @@ jobs:
         with:
           workspaces: "crates/client-3d -> target"
           shared-key: selected-v2-${{ runner.os }}-debug-consumer-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+          cache-on-failure: false
       - name: Install native build and test dependencies
         if: runner.os == 'Linux'
         run: |

@@ -176,7 +176,7 @@ class WorkflowKeyTests(unittest.TestCase):
         self.assertIn("echo 'Dependency cache disabled: recipe helper failed.' >&2", workflow)
         self.assertIn("        if: steps.build_key.outcome == 'success' && steps.build_key.outputs.key != ''", workflow)
         self.assertIn("shared-key: ${{ matrix.profile }}-${{ matrix.partition }}-${{ steps.build_key.outputs.key }}", workflow)
-        self.assertIn("save-if: ${{ github.ref == 'refs/heads/main' }}", workflow)
+        self.assertIn("save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}", workflow)
         self.assertIn("run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}", workflow)
 
 

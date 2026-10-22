@@ -25,6 +25,23 @@ def workflow_step(name):
     return match[1]
 
 
+def workflow_job(name):
+    text = (ROOT / '.github/workflows/ci.yml').read_text()
+    return re.search(r'^  ' + re.escape(name) + r':\n(.*?)(?=^  \w|\Z)', text, re.M | re.S)[1]
+
+
+def consumer_permitted(name, *, producer='success', apps='true', mode='full', docs='false', cancelled=False):
+    expression = re.search(r'^    if: \$\{\{ (.+) \}\}$', workflow_job(name), re.M)[1]
+    values = {'cancelled()': repr(cancelled), 'needs.scope.result': repr('success'),
+              'needs.scope.outputs.mode': repr(mode), 'needs.scope.outputs.docs_only': repr(docs),
+              'needs.scope.outputs.requires_apps': repr(apps),
+              'needs.windows_binaries.result': repr(producer), 'needs.selected_rust.result': repr(producer),
+              '&&': 'and', '||': 'or', '!': 'not', '==': '==', '!=': '!=', '(': '(', ')': ')'}
+    tokens = re.findall(r"'[^']*'|[A-Za-z_.]+(?:\(\))?|&&|\|\||!=|==|[!()]|\S", expression)
+    translated = ' '.join(token if token.startswith("'") else values[token] for token in tokens)
+    return eval(translated, {'__builtins__': {}})
+
+
 class WorkflowAdoption(unittest.TestCase):
     def test_active_workflow_has_no_prior_head_or_postmerge_test_pass_adoption(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
@@ -33,6 +50,66 @@ class WorkflowAdoption(unittest.TestCase):
             self.assertNotIn(retired, workflow)
         self.assertIn('python scripts/verify.py full --ci-profile', workflow)
         self.assertIn('python scripts/ci_selected.py aggregate', workflow)
+
+    def test_cache_writes_stay_successful_and_same_repository_ref_scoped(self):
+        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        expressions = re.findall(r'^          save-if: \$\{\{ (.+) \}\}$', workflow, re.M)
+        caches = re.findall(r'uses: Swatinem/rust-cache@', workflow)
+        self.assertEqual(len(expressions), len(caches))
+        self.assertEqual(workflow.count('          cache-on-failure: false'), len(caches))
+        self.assertGreater(len(caches), 0)
+        for expression in expressions:
+            for passed in (False, True):
+                for event in ('push', 'pull_request', 'pull_request_target', 'workflow_dispatch', 'schedule'):
+                    for ref in ('refs/heads/main', 'refs/heads/topic', 'refs/pull/188/merge'):
+                        for head in ('owner/repo', 'fork/repo', ''):
+                            values = {'job.status': repr('success' if passed else 'failure'), 'github.ref': repr(ref),
+                                      'github.event_name': repr(event), 'github.repository': repr('owner/repo'),
+                                      'github.event.pull_request.head.repo.full_name': repr(head),
+                                      '&&': 'and', '||': 'or', '==': '==', '!=': '!=', '(': '(', ')': ')'}
+                            tokens = re.findall(r"'[^']*'|[A-Za-z_.]+(?:\(\))?|&&|\|\||!=|==|[()]|\S", expression)
+                            program = ' '.join(token if token.startswith("'") else values[token] for token in tokens)
+                            actual = eval(program, {'__builtins__': {}})
+                            expected = passed and event != 'pull_request_target' and (ref == 'refs/heads/main' or event == 'pull_request' and head == 'owner/repo')
+                            with self.subTest(event=event, ref=ref, head=head, passed=passed):
+                                self.assertEqual(actual, expected)
+        # No cross-PR cache namespace override or untrusted-trigger expansion.
+        self.assertNotIn('pull_request_target:', workflow)
+        self.assertNotIn('cache-on-failure: true', workflow)
+
+    def test_full_windows_consumers_never_start_without_successful_producer(self):
+        for producer in ('success', 'failure', 'cancelled', 'skipped', '', 'unknown'):
+            for cancelled in (False, True):
+                for docs in ('false', 'true'):
+                    with self.subTest(producer=producer, cancelled=cancelled, docs=docs):
+                        self.assertEqual(consumer_permitted('windows_python', producer=producer,
+                                                            cancelled=cancelled, docs=docs),
+                                         producer == 'success' and not cancelled and docs == 'false')
+        self.assertFalse(consumer_permitted('windows_python', mode='selected'))
+        # Independent Rust/Linux partitions must not acquire a producer barrier.
+        self.assertNotIn('windows_binaries', workflow_job('profiles'))
+        # Required full qualification still rejects failed producer/skipped shards.
+        gate = workflow_job('check')
+        self.assertIn("windows == ['success', 'success']", gate)
+        self.assertIn("WINDOWS_BINARIES_RESULT: ${{ needs.windows_binaries.result }}", gate)
+        self.assertIn("WINDOWS_PYTHON_RESULT: ${{ needs.windows_python.result }}", gate)
+
+    def test_native_artifact_contracts_run_before_any_producer_compile(self):
+        producer = workflow_job('windows_binaries')
+        self.assertIn('run: python -m unittest discover -s scripts -p test_ci_binary_artifact.py', producer)
+        self.assertLess(producer.index('Check artifact transport contracts before compiling'),
+                        producer.index('Build exact-run ordinary applications'))
+        self.assertNotIn('continue-on-error', producer)
+
+    def test_selected_consumer_keeps_pure_tooling_independent_of_app_producer(self):
+        for producer in ('success', 'failure', 'cancelled', 'skipped', '', 'unknown'):
+            with self.subTest(producer=producer):
+                self.assertEqual(consumer_permitted('selected_linux', producer=producer, mode='selected'),
+                                 producer == 'success')
+                self.assertTrue(consumer_permitted('selected_linux', producer=producer, mode='selected', apps='false'))
+                self.assertFalse(consumer_permitted('selected_linux', producer=producer, mode='selected',
+                                                    apps='false', cancelled=True))
+        self.assertFalse(consumer_permitted('selected_linux', mode='full', apps='false'))
 
     def test_complete_partition_is_fresh_and_uses_explicit_shell(self):
         block = workflow_step('Verify complete profile partition')

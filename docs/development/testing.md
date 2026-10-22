@@ -1536,11 +1536,17 @@ variants without changing this key. Cargo still checks artifact freshness, but
 an exact cache hit will not save newly built variants, so watch for repeated
 dependency compilation and update the explicit recipe when introducing builders.
 
-Dependency-only cache cleanup and main-only writes remain in place; these caches
-do not retain workspace outputs. Full-matrix keys distinguish platform, profile
-and partition. The selected application-artifact transport above is separate from
-this dependency cache and is not reusable test evidence.
-The first successful main run seeds new caches. Measure subsequent independent
-fresh-checkout runs, including restore size/time, dependency recompilation and
-whole-job time, before claiming savings; an initially cold run is not that
-comparison. A matching cache key never qualifies tests.
+Dependency-only cache cleanup remains in place; these caches do not retain
+workspace outputs. Successful main jobs and same-repository `pull_request` jobs
+may save caches; failed jobs, forks and `pull_request_target` may not. PR writes
+use GitHub's natural merge-ref scope, not a default-branch override: those caches
+are reusable only by that PR, not main or other PRs. See GitHub's
+[cache access restrictions](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
+Full-matrix keys still distinguish platform, profile and partition. The selected
+application-artifact transport above is separate from this dependency cache and
+is not reusable test evidence.
+The first successful eligible job can seed a new cache in its own scope.
+Workspace compilation still runs. Measure subsequent independent fresh-checkout
+runs, including restore size/time, dependency recompilation and whole-job time,
+before claiming savings; an initially cold run is not that comparison. A matching
+cache key never qualifies tests.
