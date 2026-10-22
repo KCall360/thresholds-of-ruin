@@ -2445,3 +2445,91 @@ async fn projectile_transport_keeps_pages_private_bounded_and_correlated() {
         server.await.unwrap();
     }
 }
+
+// Exercise the actual stderr payload constructor through JSON serialization;
+// no socket, wall-clock ordering assumption, or copied diagnostic encoder.
+#[test]
+fn timing_request_diagnostics_serialize_actual_request_classification() {
+    let baseline = timing_record(
+        "client_request",
+        "measured",
+        ActorId(1),
+        17,
+        None,
+        0.5,
+        None,
+    );
+    assert_eq!(baseline["timing_version"], 1);
+    assert_eq!(baseline["actor"], 1);
+    assert_eq!(baseline["revision"], 17);
+    assert_eq!(baseline["request_id"], "measured");
+    assert_eq!(baseline["duration_ms"], serde_json::Value::Null);
+    assert_eq!(baseline["previous_timing_write_ms"], 0.5);
+    assert!(baseline["unix_ns"].as_u64().is_some());
+    assert_eq!(baseline.as_object().unwrap().len(), 8);
+
+    let state = ClientState::from_snapshot(snapshot()).unwrap();
+    let action = Request::Command {
+        context: state.input_context(),
+        branch: state.branch().clone(),
+        command: Command::Act {
+            expected_revision: 17,
+            action: Action::Wait,
+        },
+    };
+    for (request, expected) in [
+        (action, "act"),
+        (
+            Request::Command {
+                context: state.input_context(),
+                branch: state.branch().clone(),
+                command: Command::ResumeIntention {
+                    expected_revision: 17,
+                    intention: IntentionId("pending-intention".into()),
+                },
+            },
+            "non_action",
+        ),
+        (Request::AcquireControl, "non_action"),
+        (Request::Snapshot, "non_action"),
+        (Request::Save, "non_action"),
+    ] {
+        let record = timing_record(
+            "client_request",
+            "measured",
+            ActorId(1),
+            17,
+            None,
+            0.5,
+            Some(&request),
+        );
+        let encoded = serde_json::to_string(&record).unwrap();
+        let decoded: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded["request_kind"], expected);
+        assert_eq!(decoded["event"], "client_request");
+        assert_eq!(decoded["request_id"], baseline["request_id"]);
+        assert_eq!(decoded["revision"], baseline["revision"]);
+        assert_eq!(decoded.as_object().unwrap().len(), 9);
+    }
+}
+
+#[test]
+fn timing_non_request_diagnostics_keep_existing_payload() {
+    for event in ["client_request_sent", "client_ack"] {
+        let record = timing_record(
+            event,
+            "measured",
+            ActorId(1),
+            17,
+            Some(1.25),
+            0.5,
+            Some(&Request::AcquireControl),
+        );
+        let decoded: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
+        assert_eq!(decoded["event"], event);
+        assert_eq!(decoded["duration_ms"], 1.25);
+        assert!(decoded.get("request_kind").is_none());
+        assert_eq!(decoded.as_object().unwrap().len(), 8);
+    }
+}

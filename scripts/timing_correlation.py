@@ -31,6 +31,34 @@ def diagnostic_write_costs(rows):
     return costs
 
 
+def event_positions(rows, kinds):
+    """Index required evidence without silently replacing an ambiguous record."""
+    positions = {}
+    for index, row in enumerate(rows):
+        if row['event'] not in kinds or not row.get('request_id'):
+            continue
+        key = (row['request_id'], row['event'])
+        if key in positions:
+            raise ValueError(f'Duplicate {row["event"]} diagnostic for request {row["request_id"]!r}')
+        positions[key] = index
+    return positions
+
+
+def client_event_order(positions, request, *, headless=False):
+    kinds = ('client_request', 'client_request_sent', 'client_ack')
+    if headless:
+        kinds += ('headless_report',)
+    indices = [positions[(request, kind)] for kind in kinds]
+    if headless and indices[-1] < indices[0]:
+        raise ValueError('Headless acknowledgement report precedes its request')
+    # These records are emitted sequentially by the client, unlike server
+    # handling/send diagnostics from independent tasks. Compare log positions,
+    # never wall timestamps: clock adjustments remain valid signed evidence.
+    if indices != sorted(indices):
+        raise ValueError(f'Invalid client diagnostic order for request {request!r}')
+    return indices
+
+
 def server_events(path):
     rows = events(path)
     dropped = 0
@@ -42,16 +70,29 @@ def server_events(path):
             dropped += count
     if dropped:
         raise ValueError(f'Server diagnostics dropped {dropped} records; correlation is incomplete')
-    return {(row['request_id'], row['event']): row for row in rows}
+    # A server log combines clients. Setup requests can legitimately share an
+    # identity across them; retain every row and require uniqueness only when
+    # resolving a measured request, rather than overwriting or rejecting setup.
+    indexed = {}
+    for row in rows:
+        indexed.setdefault((row['request_id'], row['event']), []).append(row)
+    return indexed
+
+
+def measured_server_event(indexed, request, kind):
+    candidates = indexed[(request, kind)]
+    if len(candidates) != 1:
+        raise ValueError(f'Duplicate {kind} diagnostic for measured request {request!r}')
+    return candidates[0]
 
 
 def correlate_ack(directory, result):
     directory = Path(directory)
     server = server_events(directory/'server.stderr.log')
     clients = {actor: events(directory/f'actor-{actor}.stderr.log') for actor in range(1,result['actors']+1)}
-    positions = {actor: {(r['request_id'], r['event']): index
-                         for index, r in enumerate(rows) if r.get('request_id')}
-                 for actor, rows in clients.items()}
+    positions = {actor: event_positions(rows, (
+        'client_request', 'client_request_sent', 'client_ack', 'headless_report'))
+        for actor, rows in clients.items()}
     writes = {actor:diagnostic_write_costs(rows) for actor,rows in clients.items()}
     output = []
     for sample in result['samples']:
@@ -59,11 +100,8 @@ def correlate_ack(directory, result):
             continue
         request = sample['request_id']
         client = clients[sample['actor']]
-        start_index, sent_index, ack_index, report_index = [
-            positions[sample['actor']][(request, kind)] for kind in
-            ('client_request', 'client_request_sent', 'client_ack', 'headless_report')]
-        if report_index < start_index:
-            raise ValueError('Headless acknowledgement report precedes its request')
+        start_index, sent_index, ack_index, report_index = client_event_order(
+            positions[sample['actor']], request, headless=True)
         start, sent, ack, report = [client[index] for index in
                                     (start_index, sent_index, ack_index, report_index)]
         # The client log establishes this causal window. Host wall-clock drift
@@ -71,7 +109,8 @@ def correlate_ack(directory, result):
         report_max = max(client[index]['duration_ms']
                          for index in range(start_index, report_index + 1)
                          if client[index]['event'] == 'headless_report')
-        handled, sent_ack = [server[(request,k)] for k in ('server_handled','server_ack_sent')]
+        handled, sent_ack = [measured_server_event(server, request, kind)
+                             for kind in ('server_handled', 'server_ack_sent')]
         row = dict(request_id=request, actor=sample['actor'], label=sample['label'],
                    request_diagnostic_write_ms=writes[sample['actor']].get((request,'client_request')),
                    sent_diagnostic_write_ms=writes[sample['actor']].get((request,'client_request_sent')),
@@ -100,7 +139,20 @@ def correlate_native(directory, result):
     directory = Path(directory)
     server = server_events(directory/'server.stderr.log')
     client = events(directory/'ascii.stderr.log')
-    requests = {r['revision']:r for r in client if r['event']=='client_request'}
+    positions = event_positions(client, ('client_request', 'client_request_sent', 'client_ack'))
+    requests = {}
+    for row in client:
+        if row['event'] == 'client_request':
+            candidates = requests.setdefault(row['revision'], [])
+            # Startup control/query requests can share an Act's revision. Only
+            # explicit producer classification may exclude them; unclassified
+            # legacy requests remain candidates and must still be unambiguous.
+            if 'request_kind' in row:
+                if row['request_kind'] not in ('act', 'non_action'):
+                    raise ValueError('Invalid native request_kind diagnostic')
+                if row['request_kind'] == 'non_action':
+                    continue
+            candidates.append(row)
     acknowledgements = {r['request_id']:r for r in client if r['event']=='client_ack'}
     sends = {r['request_id']:r for r in client if r['event']=='client_request_sent'}
     write_cost = diagnostic_write_costs(client)
@@ -119,24 +171,35 @@ def correlate_native(directory, result):
                 if not line.endswith('\n'):
                     break
                 raise
+            if frame['frame'] in frame_times:
+                raise ValueError(f'Duplicate native frame diagnostic {frame["frame"]!r}')
             if previous_frame is not None:
                 report_cost[previous_frame] = frame['profile']['previous_report_ms']
                 report_parts[previous_frame] = {k:frame['profile'].get('previous_report_'+k+'_ms') for k in ('encode','write')}
             previous_frame = frame['frame']
             frame_times[frame['frame']] = frame.get('presented_unix_ns')
             if frame.get('input_done') in ('up','down','left','right','ascend','descend') and not frame['busy']:
-                action_frames[int(frame['state']['revision'])-1] = frame['frame']
+                action_frames.setdefault(int(frame['state']['revision'])-1, []).append(frame['frame'])
     output = []
     for sample in result['samples']:
         # The complete single-actor traversal advances exactly one revision per
         # ordinary action. Modal door selection sends no request.
-        request = requests[sample['index']]
+        candidates = requests[sample['index']]
+        if len(candidates) != 1:
+            raise ValueError(f'Ambiguous native request revision {sample["index"]!r}')
+        request = candidates[0]
         request_id = request['request_id']
-        handled = server[(request_id,'server_handled')]
-        sent = server[(request_id,'server_ack_sent')]
+        client_event_order(positions, request_id)
+        handled = measured_server_event(server, request_id, 'server_handled')
+        sent = measured_server_event(server, request_id, 'server_ack_sent')
         ack = acknowledgements[request_id]
-        frame_id = (sample['presented_frame'] if 'presented_frame' in sample
-                    else action_frames[sample['index']])
+        if 'presented_frame' in sample:
+            frame_id = sample['presented_frame']
+        else:
+            candidates = action_frames[sample['index']]
+            if len(candidates) != 1:
+                raise ValueError(f'Ambiguous native frame revision {sample["index"]!r}')
+            frame_id = candidates[0]
         presented = frame_times.get(frame_id)
         output.append(dict(index=sample['index'], request_id=request_id,
             presentation_ms=sample['request_to_presentation_ms'],

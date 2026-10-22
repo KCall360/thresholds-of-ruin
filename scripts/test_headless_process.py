@@ -105,7 +105,8 @@ class HeadlessProcesses(ProcessTestCase):
         self.server()
         player = self.launch("tor-client-headless", ["--connect", self.address],
                              extra_env={"TOR_TIMING_DIAGNOSTICS": "1"})
-        self.frame(player, lambda f: f.get("type") == "ready")
+        initial = self.frame(player, lambda f: f.get("type") == "ready")
+        self.assertTrue(initial["has_control"])
         player.write(json.dumps({"type": "request", "request": {"type": "snapshot"}}))
         snapshot = self.frame(player, lambda f: f.get("type") == "ready")
         self.assertIsNone(snapshot["error"])
@@ -113,13 +114,41 @@ class HeadlessProcesses(ProcessTestCase):
         self.assertIs(type(snapshot["state"]["observation"]["actor"]), str)
         diagnostics = [json.loads(line) for line in player.transcript if line.startswith("{")]
         requests = [row for row in diagnostics if row.get("event") == "client_request"]
-        self.assertTrue(requests)
+        self.assertEqual(len(requests), 2)  # Startup AcquireControl, then explicit Snapshot.
         for row in requests:
             self.assertEqual(row["timing_version"], 1)
             self.assertIs(type(row["actor"]), int)
             self.assertIs(type(row["revision"]), int)
             self.assertEqual(row["actor"], int(snapshot["state"]["observation"]["actor"]))
             self.assertEqual(row["revision"], int(snapshot["state"]["revision"]))
+
+        self.assertEqual([row["request_kind"] for row in requests], ["non_action", "non_action"])
+        self.assertNotEqual(requests[0]["request_id"], requests[1]["request_id"])
+        self.assertEqual(initial["state"]["revision"], snapshot["state"]["revision"])
+
+        # Diagnostic JSON shares stdout but is not a gameplay frame. Submit
+        # exactly one ordinary action and ignore only those diagnostic rows.
+        player.write(json.dumps({"type": "act", "action": {"type": "wait"}}))
+        acted = self.frame(player, lambda f: f.get("type") == "ready")
+        self.assertIsNone(acted["error"])
+        previous_revision = int(snapshot["state"]["revision"])
+        if int(acted["state"]["revision"]) <= previous_revision:
+            acted = self.frame(player, lambda f: f.get("state") is not None
+                               and int(f["state"]["revision"]) > previous_revision)
+        self.assertIsNone(acted["error"])
+        self.assertGreater(int(acted["state"]["revision"]), previous_revision)
+        after = [json.loads(line) for line in player.transcript if line.startswith("{")]
+        action_requests = [row for row in after if row.get("event") == "client_request"]
+        self.assertEqual(action_requests[:2], requests)
+        self.assertEqual(len(action_requests), 3)
+        action = action_requests[2]
+        self.assertEqual(action["request_kind"], "act")
+        self.assertEqual(action["actor"], requests[0]["actor"])
+        self.assertEqual(action["revision"], requests[0]["revision"])
+        self.assertNotIn(action["request_id"], [row["request_id"] for row in requests])
+        for row in after:
+            if row.get("event") in ("client_request_sent", "client_ack"):
+                self.assertNotIn("request_kind", row)
 
     def test_checkpointed_portal_bodies_survive_cold_restore_rewind_and_replay(self):
         server = self.server('--checkpoint-interval', 1, wizard=True, scenario='physics-portal', seed=None)

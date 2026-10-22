@@ -15,6 +15,39 @@ use tokio_tungstenite::{
 };
 use tor_protocol::*;
 
+// This payload is opt-in stderr diagnostics, not the request wire format.
+fn timing_record(
+    event: &str,
+    request_id: &str,
+    actor: ActorId,
+    revision: u64,
+    duration_ms: Option<f64>,
+    previous_timing_write_ms: f64,
+    request: Option<&Request>,
+) -> serde_json::Value {
+    let mut record = serde_json::json!({"timing_version":1,"event":event,
+        "request_id":request_id,"actor":actor.0,
+        "revision":revision,"duration_ms":duration_ms,
+        "previous_timing_write_ms":previous_timing_write_ms,
+        "unix_ns":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()});
+    if let Some(request) = request.filter(|_| event == "client_request") {
+        // This names the typed request variant, not whether another command
+        // can have gameplay effects. Never infer it from a revision or UUID.
+        record["request_kind"] = serde_json::json!(if matches!(
+            request,
+            Request::Command {
+                command: Command::Act { .. },
+                ..
+            }
+        ) {
+            "act"
+        } else {
+            "non_action"
+        });
+    }
+    record
+}
+
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub type ConnectionError = Box<dyn Error + Send + Sync>;
 const DEADLINE: Duration = Duration::from_secs(10);
@@ -456,7 +489,7 @@ impl Connection {
         }
         let started = self.timing.then(std::time::Instant::now);
         if self.timing {
-            self.timing_event("client_request", &request_id, None);
+            self.timing_event("client_request", &request_id, None, Some(&request));
         }
         send(
             &mut self.socket,
@@ -472,6 +505,7 @@ impl Connection {
                 "client_request_sent",
                 &request_id,
                 Some(started.elapsed().as_secs_f64() * 1000.),
+                None,
             );
         }
         Ok(request_id)
@@ -540,7 +574,7 @@ impl Connection {
             }
             if self.timing {
                 if let ServerMessage::Ack { request_id, .. } = &message {
-                    self.timing_event("client_ack", request_id, None);
+                    self.timing_event("client_ack", request_id, None, None);
                 }
             }
             if let ServerMessage::Ack { receipt, .. } = &message {
@@ -832,15 +866,25 @@ impl Connection {
     }
 
     // Opt-in host diagnostics own their numeric scalar schema independently of wire encoding.
-    fn timing_event(&mut self, event: &str, request_id: &str, duration_ms: Option<f64>) {
+    fn timing_event(
+        &mut self,
+        event: &str,
+        request_id: &str,
+        duration_ms: Option<f64>,
+        request: Option<&Request>,
+    ) {
         let started = std::time::Instant::now();
         eprintln!(
             "{}",
-            serde_json::json!({"timing_version":1,"event":event,
-            "request_id":request_id,"actor":self.state.state().observation.actor.0,
-            "revision":self.state.state().revision,"duration_ms":duration_ms,
-            "previous_timing_write_ms":self.previous_timing_write_ms,
-            "unix_ns":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()})
+            timing_record(
+                event,
+                request_id,
+                self.state.state().observation.actor,
+                self.state.state().revision,
+                duration_ms,
+                self.previous_timing_write_ms,
+                request
+            )
         );
         self.previous_timing_write_ms = started.elapsed().as_secs_f64() * 1000.;
     }
