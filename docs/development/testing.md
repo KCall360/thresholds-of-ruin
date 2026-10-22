@@ -698,6 +698,18 @@ in bounded chunks, without another raw copy on disk. Saves, sidecars and other
 files retain their bytes and metadata. The original remains available until the
 complete staged directory is published; a failed transfer removes its staging
 directory and leaves the source evidence in place.
+Stopped-session rollover and live segmented capture have different ownership
+proofs. At the fall-credit test's existing restart boundaries, retention first
+requires every owned process to have finished stopping, a known child exit, a
+joined reader and closed child/queue handles; it rejects unowned process
+directories. Only then may the existing compressor replace complete logs after
+verifying their decoded bytes and publishing the retained-log manifest. It does
+not add gameplay stops, saves, waits or relaunches. See the
+[fall retention guards](../../scripts/test_fall_credit_process.py) and their
+[actual-caller regressions](../../scripts/test_fall_credit_retention.py).
+A supervisor's disappearance alone proves neither those child exits nor capture
+completeness. Never apply a stopped-only compressor to a live pressure session.
+
 The slow-spectator pressure test opts only its normal player's diagnostic stdout
 into 8 MiB lossless capture segments (`TOR_TEST_SEGMENTED_STDOUT_BYTES` in that
 launch's harness-only `extra_env`). The option is removed before child launch.
@@ -713,6 +725,20 @@ client output flags.
 Offline readers verify ordered segments and both compressed and decoded hashes;
 source-reader failures and unjoined readers cannot mark a prefix complete.
 Ordinary captures are unchanged.
+
+Capture fixtures must satisfy the same owned canonical-directory contract as real
+process launches. Canonicalize a test-owned temporary directory once at the
+fixture boundary; do not weaken storage's alias, symlink or root-identity rejection
+to accommodate a platform's temporary-path spelling. Test both the valid adapter
+and raw noncanonical rejection without writes.
+
+Keep each stream's byte contract distinct. Ordinary stdout explicitly writes LF;
+segmented stdout preserves UTF-8 LF bytes and logical offsets. The existing
+separate stderr text writer uses native newline translation, so its exact-byte
+oracle uses the platform newline. Exercise real LF and CRLF text writers while
+retaining the complete stdout/FIFO/archive assertions; normalizing all output
+would conceal a broken exact-byte capture contract. These boundaries are covered
+by [the capture tests](../../scripts/test_segmented_process_capture.py).
 
 Only per-segment staging is bounded: an arbitrarily fast producer, slow storage
 or incompressible output can still exhaust total disk space. Keep the existing
@@ -797,6 +823,21 @@ file was removed), preserving before/after content hashes and protected binary
 copies. Confirm that Cargo rebuilds the affected crate/dependency boundary. Do
 not broadly delete warm caches or substitute a full test run for this freshness
 guard; qualify the changed contracts through their normal focused checks.
+
+A pre-overwrite artifact inventory must include ordinary application outputs,
+normal examples and binaries supplied through `CARGO_BIN_EXE_*`, not only test
+executables. Cargo may build these for integration tests even when they are not
+selected test targets. Record exact profile/features and source provenance;
+matching package names or old fingerprints do not prove that the same executable
+exists or is independently retained.
+
+For a no-build process selection, inspect transitive launch helpers as well as
+test methods. `TOR_TEST_BINARIES` prevents the ordinary harness's build fallback,
+but is not a universal build prohibition: the
+[benchmark helper](../../scripts/performance_process_support.py) builds examples
+explicitly. Classify those owners separately before launching a bounded suite.
+Any permitted compiler version/metadata query must be distinguished from a build;
+do not count a guard-refused launch as gameplay failure or a successful test.
 
 Determine run status from the owned process session and saved completion/exit-code
 receipts. A process list from another shell or container may be isolated; absence

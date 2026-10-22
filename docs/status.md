@@ -578,22 +578,23 @@ unchanged scene-build counts alone do not establish per-fragment lookup cost.
 ### Rogue adaptation and shared mechanics
 
 Build on the generated-floor foundation and finite starter content rather than
-recreate them. Its
-ongoing performance acceptance, including persistence tails, is distinct from
-whether floor generation exists. Secrets and traps are implemented. Optional strict
-room omissions are available to authors but are not enabled in the live Rogue
-package. Opt-in dark-maze support and the related tactile Search and capped
-Awareness-based nonvisual disclosure changes have passed their focused runtime,
-server/schema and integration checks. The fixed forced-maze actual-process route
-also passes paid Search, traversal and source-free revisit checks with complete
-retained transport evidence. Its earlier all-dark discovery failure remains recorded;
-the successful run uses the approved tactile rule, not a weaker fixture or route cap.
-Live maze and omission policies remain disabled, and numerical enablement remains
-separate work. Final push and both-platform debug/release CI qualification remain
-pending; locally waived native graphical checks are not passes. Extend shared survival, items, ranged/perception and
-species behavior; qualify the complete 26-species roster and pressured runs. Work beyond the accepted 256-HD guard, including
-exact-row deep storage and disclosure paging, is deferred rather than a
-prerequisite for functional Rogue.
+recreate them. Performance acceptance, including persistence tails, is distinct
+from whether floor generation exists. Secrets, traps, optional strict room
+omissions and opt-in dark-room mazes are implemented. The maze/perception batch is
+merged with complete Windows/Linux debug and release CI; see the
+[published batch](https://github.com/KCall360/thresholds-of-ruin/pull/186).
+Its actual-process witnesses cover paid Search, traversal and source-free revisits.
+The earlier all-dark discovery failure motivated the approved tactile rule, not a
+weaker fixture, private route oracle or larger navigation cap.
+
+Live maze and omission policies remain disabled; numerical enablement is separate
+work. Development is paused at this completed batch. Further implementation or
+tuning requires a new go-ahead. Remaining work includes shared survival, items and
+species behavior, the complete 26-species roster's integrated acceptance and
+pressured runs. Topology/persistence witnesses do not establish survival balance.
+Local graphical waivers were not passes; they did not remove required CI coverage.
+Work beyond the accepted 256-HD guard, including exact-row deep storage and
+disclosure paging, remains deferred rather than a prerequisite for functional Rogue.
 The [Rogue plan](plans/rogue.md) defines the adaptation and dependency order.
 Rogue species are built through the [progression plan](plans/progression.md)'s
 advancement ledger, edge rules, regeneration and strike sequences; each of its

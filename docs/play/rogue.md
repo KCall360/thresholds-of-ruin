@@ -761,8 +761,8 @@ The first pickup of non-cursed Scare units makes them cursed. Picking up cursed
 units crumbles them instead of collecting them. Stacks preserve this curse through
 splitting, dropping and saves; remove-curse can clear carried Scare units.
 
-Confusion's 2,000 active ticks and Hold/Scare's 1,000 active ticks are provisional
-balance choices. All eight new living-dungeon actual-process contracts have
-passed, including source-free recovery. Complete required verification and final
-cross-platform CI remain pending; these focused results do not establish balance
-or complete-run qualification.
+Confusion's 2,000 active ticks and Hold/Scare's 1,000 active ticks remain provisional
+balance choices. These mechanics have actual-process and source-free recovery
+coverage and are part of the merged code covered by
+[Windows/Linux debug and release CI](https://github.com/KCall360/thresholds-of-ruin/actions/runs/39770714421/attempts/2).
+That verification does not establish balance or complete-run qualification.
