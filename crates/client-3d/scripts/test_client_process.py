@@ -1,5 +1,6 @@
 """Real server + Bevy window + OS input, maintained outside the core gate."""
 import os
+import re
 from pathlib import Path
 import shutil
 import socket
@@ -150,6 +151,29 @@ class Native3DProcesses(ProcessTestCase):
         # Only the named families are lined up.
         self.assertEqual(len(list(captures.glob("*.png"))), len(families) * 3)
 
+    def test_women_lineups_study_each_individuals_own_bust(self):
+        """A figure study lines up only women of each people, each with her
+        own resolved bust, and renders them to real GPU frames."""
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        captures = self.directory / "women-lineup"
+        captures.mkdir(parents=True)
+        families = ["Warrior", "orc", "nymph"]
+        window = self.launch("tor-client-3d", [
+            "--women", "--family", ",".join(families), "--capture", captures, "--capture-warmup", "2",
+        ], executable=executable)
+        self.assertEqual(window.child.wait(timeout=240), 0, "the study must finish once every family is captured")
+        for index, name in enumerate(families):
+            for view in ("line", "close-a", "close-b"):
+                image = captures / f"{index:02d}-{view}-{name}.png"
+                self.assertTrue(image.exists(), f"missing {image.name}")
+                self.assertGreater(len(image.read_bytes()), 4096, image.name)
+        log = window.stdout_path.read_text(encoding="utf-8")
+        for name in families:
+            busts = re.findall(rf"Lineup individual family={name} index=\d bust=(\w+):([\d.]+)", log)
+            self.assertEqual(len(busts), 5, f"{name}: every individual is a woman with a bust\n{log[-2000:]}")
+            self.assertGreater(len(set(busts)), 1, f"{name}: individuals differ: {busts}")
+        self.assertNotIn("panicked", log)
+
     def test_wardrobe_dresses_lineups_and_redresses_them_live(self):
         """Humanoids of different kinds are dressed in one outfit from the
         wardrobe, then redressed while they move, reaching real GPU frames."""
@@ -177,7 +201,7 @@ class Native3DProcesses(ProcessTestCase):
         # Nine four-second family studies allow a full 1.5-second wardrobe
         # cycle, including the native reset and return to the starting outfit.
         outfits = [line.rsplit(" as ", 1)[-1] for line in redressed]
-        self.assertEqual(outfits[:5], ["Knight", "Courtier", "Native", "Commoner", "Ranger"])
+        self.assertEqual(outfits[:6], ["Knight", "Courtier", "Leotard", "Sarong", "Tavern", "Queen"])
         self.assertTrue(any(" 0 humanoids" not in line for line in redressed), log[-2000:])
         self.assertNotIn("panicked", log)
 

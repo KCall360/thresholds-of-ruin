@@ -89,6 +89,7 @@ pub fn run(diagnostics: Diagnostics) {
         (
             tour,
             crate::creatures::animate,
+            crate::creatures::soften,
             crate::creatures::snuff,
             captions,
             capture,

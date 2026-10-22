@@ -64,6 +64,16 @@ pub struct Variant {
     /// Coat shade and pattern for beasts, 0 to 1 in steps.
     pub shade: u8,
     pub pattern: u8,
+    /// A woman's chest volume, in steps about her kind's typical size:
+    /// 0 much smaller, 2 typical, 4 much larger.
+    pub bust: u8,
+    /// Her chest's contour: 0 to 2 her kind's typical contour, 3 and up one
+    /// of the contour families in turn.
+    pub bust_form: u8,
+    /// 0 even, 1 her left side fuller, 2 her right.
+    pub bust_lean: u8,
+    /// A woman's figure: 0 straighter, 1 balanced, 2 hourglass.
+    pub figure: u8,
 }
 
 impl Default for Variant {
@@ -77,6 +87,10 @@ impl Default for Variant {
             beard: false,
             shade: 2,
             pattern: 0,
+            bust: 2,
+            bust_form: 0,
+            bust_lean: 0,
+            figure: 1,
         }
     }
 }
@@ -95,12 +109,30 @@ impl Variant {
             beard: !woman && rand(seed, 106) < 0.4,
             shade: pick(107, 5),
             pattern: pick(108, 4),
+            // Two rolls averaged: most women are near their kind's typical
+            // size, a few well above or below it.
+            bust: (((rand(seed, 109) + rand(seed, 110)) * 2.5) as u8).min(4),
+            bust_form: pick(111, 3 + anatomy::BustContour::FAMILIES.len() as u8),
+            bust_lean: if rand(seed, 112) < 0.7 {
+                0
+            } else {
+                1 + pick(113, 2)
+            },
+            figure: pick(114, 3),
         }
     }
 
     fn code(&self) -> String {
+        let bust = if self.woman {
+            format!(
+                "b{}{}{}f{}",
+                self.bust, self.bust_form, self.bust_lean, self.figure
+            )
+        } else {
+            String::new()
+        };
         format!(
-            "{}{}{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}{}{bust}",
             u8::from(self.woman),
             self.build,
             self.skin,
@@ -221,6 +253,17 @@ impl Look {
             seed,
             player.then(|| PLAYER_LOOK.get().copied()).flatten(),
         )
+    }
+
+    /// One individual with some of its variation set, for controlled studies.
+    pub fn preview_adjusted(
+        model: CreatureModel,
+        seed: u64,
+        adjust: impl FnOnce(&mut Variant),
+    ) -> Look {
+        let mut v = Self::with_choice(model, seed, None).v;
+        adjust(&mut v);
+        Self::with_choice(model, seed, Some(v))
     }
 
     fn with_choice(model: CreatureModel, seed: u64, choice: Option<Variant>) -> Look {
@@ -889,6 +932,16 @@ impl Look {
         self.v.woman
     }
 
+    /// A woman's resolved chest contour and volume, for review logs.
+    pub fn bust_summary(&self) -> Option<String> {
+        let bust = match self.plan {
+            Plan::Biped if self.v.woman => anatomy::HumanoidBody::resolve(self).bust?,
+            Plan::Centaur => anatomy::centaur_bust(self)?,
+            _ => return None,
+        };
+        Some(format!("{:?}:{:.2}", bust.contour, bust.volume))
+    }
+
     /// Height of the head's top, for labels.
     pub fn height(&self) -> f32 {
         let h = match (self.plan, self.style) {
@@ -1100,6 +1153,8 @@ pub enum Move {
     Gaze,
     /// A venomous or corroding bite.
     Bite(Accent),
+    /// A jump straight up on the spot: crouch, spring, flight and landing.
+    Jump,
 }
 
 impl Move {
@@ -1155,6 +1210,7 @@ impl Move {
             Move::Breath(_) => 1.2,
             Move::Gaze => 1.0,
             Move::Bite(_) => 0.6,
+            Move::Jump => 1.15,
         }
     }
 
@@ -1181,6 +1237,8 @@ impl Move {
             Move::Breath(_) => 0.5,
             Move::Gaze => 0.5,
             Move::Bite(_) => 0.42,
+            // The moment she leaves the ground.
+            Move::Jump => JUMP_TAKEOFF,
         }
     }
 
@@ -1188,9 +1246,43 @@ impl Move {
     pub fn offensive(self) -> bool {
         !matches!(
             self,
-            Move::Gesture | Move::Guard(_) | Move::Step | Move::Focus | Move::Mend
+            Move::Gesture | Move::Guard(_) | Move::Step | Move::Focus | Move::Mend | Move::Jump
         )
     }
+}
+
+/// When in a jump the feet leave the ground and meet it again.
+const JUMP_TAKEOFF: f32 = 0.3;
+const JUMP_LANDING: f32 = 0.7;
+
+/// A jump at progress `t`: how deeply the knees bend (crouching before,
+/// absorbing after), how high the body has risen, and how far the feet
+/// tuck beneath it in flight.
+pub(crate) fn jump_profile(t: f32) -> (f32, f32, f32) {
+    let flight = ((t - JUMP_TAKEOFF) / (JUMP_LANDING - JUMP_TAKEOFF)).clamp(0.0, 1.0);
+    let airborne = t > JUMP_TAKEOFF && t < JUMP_LANDING;
+    let rise = if airborne {
+        0.3 * 4.0 * flight * (1.0 - flight)
+    } else {
+        0.0
+    };
+    let tuck = if airborne {
+        (std::f32::consts::PI * flight).sin()
+    } else {
+        0.0
+    };
+    let gather = if t < JUMP_TAKEOFF {
+        // Down into the crouch, then driving up out of it.
+        let k = t / JUMP_TAKEOFF;
+        (std::f32::consts::PI * k.powf(0.7)).sin()
+    } else if t > JUMP_LANDING {
+        // The landing is absorbed, then she straightens.
+        let k = (t - JUMP_LANDING) / (1.0 - JUMP_LANDING);
+        0.85 * (std::f32::consts::PI * k.powf(0.45)).sin()
+    } else {
+        0.0
+    };
+    (gather, rise, tuck)
 }
 
 /// Renderer-only support memory. Each leg retains one ankle point and its
@@ -1236,6 +1328,8 @@ pub struct Anim {
     rest: f32,
     /// Hold the rest pose without fidgets, for portraits.
     pub quiet: bool,
+    /// Play this antic from the start of the clock, for studies.
+    pub antic: Option<u32>,
 }
 
 impl Anim {
@@ -1256,6 +1350,7 @@ impl Anim {
             fallen: 0.0,
             rest: 1.0,
             quiet: false,
+            antic: None,
         }
     }
 
@@ -1296,8 +1391,10 @@ mod reaction_tests;
 mod robe;
 #[cfg(test)]
 mod rogue_tests;
+#[cfg(test)]
+mod soft_tests;
 
-pub use animation::{animate, Boredom, BORED_AFTER};
+pub use animation::{animate, soften, Boredom, BORED_AFTER};
 pub use corpse::{snuff, spawn_corpse, Snuffed};
 pub use effects::{effects, stage, Bolt, Fade};
 pub use geometry::spawn;

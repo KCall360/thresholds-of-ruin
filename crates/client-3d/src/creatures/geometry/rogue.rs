@@ -200,7 +200,7 @@ mod feather_tests {
 // Shared pieces.
 
 /// A flat, pointed leaf from `root` along `dir`, broad a third of the way out.
-fn leaf(b: &mut Builder, root: Vec3, dir: Vec3, len: f32, width: f32, color: Vec3) {
+pub(super) fn leaf(b: &mut Builder, root: Vec3, dir: Vec3, len: f32, width: f32, color: Vec3) {
     let dir = dir.normalize_or(Vec3::NEG_Y);
     let across = dir.cross(Vec3::Y).normalize_or(Vec3::X);
     let bend = across.cross(dir).normalize_or(Vec3::Z) * len * 0.08;
@@ -856,16 +856,16 @@ pub(super) fn biped_extras(
                 Drape::Skirt(0.25),
                 "leaves",
                 |p| {
+                    // Each leaf is pinned to the sculpted hips it hangs from.
+                    let form = super::pelvis_shape(body);
                     for layer in 0..2 {
                         let count = 13 + layer * 3;
                         for k in 0..count {
                             let a = (k as f32 + layer as f32 * 0.5) / count as f32 * TAU;
                             let out = Vec3::new(a.sin(), 0.0, a.cos());
-                            let root = Vec3::new(
-                                a.sin() * pelvis.x * 1.05,
-                                0.04 - layer as f32 * 0.09,
-                                a.cos() * pelvis.z * 1.05,
-                            );
+                            let root =
+                                super::pelvis_surface(&form, 0.04 - layer as f32 * 0.09, out)
+                                    + out * 0.006;
                             let dir = (Vec3::NEG_Y + out * 0.35).normalize();
                             let shade = 0.8 + 0.35 * rand(99, k + layer * 40);
                             leaf(

@@ -247,8 +247,17 @@ fn pose(rig: &Rig, a: &mut Anim, fun: f32, dt: f32, supported: bool, moving: boo
         }
         if fun > 0.0 {
             let (w, gag, progress) = antic(a);
-            if w > 0.0 && !rogue::antics(&mut p, rig, a.time, gag, progress, w * calm * fun) {
-                antics(&mut p, rig, a.time, gag, progress, w * calm * fun);
+            let k = w * calm * fun;
+            // Every woman has one more antic beside her kind's own: she
+            // flirts with whoever is watching.
+            let flirts = gag == 2
+                && rig.plan == Plan::Biped
+                && rig.humanoid.is_some_and(|body| body.bust.is_some())
+                && rig.style != Style::Zombie;
+            if w > 0.0 && flirts {
+                flirt(&mut p, a.time, progress, k);
+            } else if w > 0.0 && !rogue::antics(&mut p, rig, a.time, gag, progress, k) {
+                antics(&mut p, rig, a.time, gag, progress, k);
             }
         }
     }
@@ -348,6 +357,13 @@ fn biped_walk_contacts(rig: &Rig, a: &Anim) -> [Vec3; 2] {
         let phase = a.walk * gait.cadence / TAU + i as f32 * 0.5;
         let (z, lift) = beast_step(phase, stance, span, clearance);
         contacts[i] += Vec3::new(0.0, lift, z) * blend;
+    }
+    if rig.humanoid.is_some_and(|body| body.bust.is_some()) && rig.style != Style::Zombie {
+        // She places each foot near the line she walks along, which swings
+        // her hips over it.
+        for contact in &mut contacts {
+            contact.x *= 1.0 - 0.3 * blend;
+        }
     }
     contacts
 }
@@ -983,6 +999,22 @@ fn grounded_action(p: &mut Pose, rig: &Rig, a: &Anim, m: Move, t: f32) {
         grounded_walk(p, rig, a);
     }
     let walking = biped_walk_contacts(rig, a);
+    if m == Move::Jump {
+        // The body drops into the crouch, springs and flies; the feet stay
+        // planted until takeoff and tuck beneath it in the air.
+        let (gather, rise, tuck) = jump_profile(t);
+        let scale = rig.humanoid.map_or(1.0, |body| body.build);
+        p.off[J::Lift as usize].y += (rise - 0.16 * gather) * scale;
+        let mut contacts = biped_rest_contacts(rig);
+        for contact in &mut contacts {
+            contact.y += (rise + 0.09 * tuck) * scale;
+        }
+        fit_biped_support(p, rig, &contacts, 1.0);
+        solve_biped_contacts(p, rig, &contacts, 1.0);
+        p.r(J::FootL, bow(-0.5 * tuck));
+        p.r(J::FootR, bow(-0.5 * tuck));
+        return;
+    }
     if matches!(m, Move::Step | Move::Mend) {
         let (mut planned, foot_angle) = if m == Move::Mend {
             mend_contacts(p, rig, t, weight)
@@ -1050,12 +1082,74 @@ fn antic(a: &Anim) -> (f32, u32, f32) {
     const PERIOD: f32 = 12.0;
     const START: f32 = 1.0;
     const END: f32 = 8.0;
-    let local = a.time + a.seed * 3.7;
+    let local = match a.antic {
+        Some(_) => a.time,
+        None => a.time + a.seed * 3.7,
+    };
     let t = local.rem_euclid(PERIOD);
     let round = (local / PERIOD).floor() as i64;
-    let gag = (round + a.seed as i64).rem_euclid(3) as u32;
+    let gag = a
+        .antic
+        .unwrap_or((round + a.seed as i64).rem_euclid(3) as u32);
     let w = ease((t - START) / 0.7) * ease((END - t) / 0.7);
     (w, gag, ((t - START) / (END - START)).clamp(0.0, 1.0))
+}
+
+/// A woman's flirt, over `progress` 0 to 1: a hip popped with her hand
+/// on it while she twirls a lock of hair, a kiss blown to whoever is
+/// watching, then a shimmy of the shoulders and a swish of the hips.
+fn flirt(p: &mut Pose, time: f32, progress: f32, k: f32) {
+    let t = progress;
+    let pose = envelope(t, 0.0, 0.08, 0.92, 1.0) * k;
+    let twirl = envelope(t, 0.02, 0.1, 0.34, 0.42) * k;
+    let kiss = envelope(t, 0.38, 0.46, 0.56, 0.6) * k;
+    let blow = envelope(t, 0.54, 0.6, 0.66, 0.74) * k;
+    let shimmy = envelope(t, 0.7, 0.76, 0.92, 0.98) * k;
+    // The hip popped out over her right leg, her right fist resting on it,
+    // her head tilted and turned toward the watcher. Her open left hand
+    // does the flirting.
+    p.r(J::Hips, Quat::from_rotation_z(-0.12 * pose));
+    p.r(J::Torso, Quat::from_rotation_z(0.1 * pose));
+    p.r(
+        J::Head,
+        Quat::from_rotation_z(-0.14 * pose) * Quat::from_rotation_y(0.18 * pose),
+    );
+    p.r(J::LegL, fwd(0.12 * pose));
+    p.r(J::ShinL, fwd(-0.2 * pose));
+    // Her arms are posed outright for each beat, over whatever her idle
+    // or her kind's fidget was doing with them.
+    let reach = |p: &mut Pose, j: J, target: Quat, w: f32| {
+        p.rot[j as usize] = p.rot[j as usize].slerp(target, w.clamp(0.0, 1.0));
+    };
+    reach(
+        p,
+        J::ArmR,
+        Quat::from_rotation_z(-0.52) * fwd(-0.32) * Quat::from_rotation_y(1.25),
+        pose,
+    );
+    reach(p, J::ForeR, fwd(1.75), pose);
+    // Her left hand up at the side of her head, winding a lock of hair.
+    let wind = (time * 7.0).sin();
+    // Raised forward first, then out to her side, so it rises beside
+    // her head rather than across her face.
+    reach(p, J::ArmL, fwd(2.1) * Quat::from_rotation_z(0.65), twirl);
+    reach(p, J::ForeL, fwd(2.0), twirl);
+    reach(p, J::HandL, Quat::from_rotation_x(0.45 * wind), twirl);
+    // The kiss: fingers to her lips, then swept out toward the watcher.
+    reach(p, J::ArmL, fwd(1.05) * Quat::from_rotation_z(-0.5), kiss);
+    reach(p, J::ForeL, fwd(2.2), kiss);
+    reach(p, J::ArmL, fwd(1.5) * Quat::from_rotation_z(0.4), blow);
+    reach(p, J::ForeL, fwd(0.25), blow);
+    p.r(J::Head, bow(0.08 * kiss - 0.06 * blow));
+    // A shimmy of the shoulders over a swish of the hips.
+    p.r(
+        J::Torso,
+        Quat::from_rotation_y((time * 15.0).sin() * 0.12 * shimmy),
+    );
+    p.r(
+        J::Hips,
+        Quat::from_rotation_z((time * 5.0).sin() * 0.1 * shimmy),
+    );
 }
 
 /// A whole number of turns over a gag's progress, so spins start and end square.
@@ -1366,6 +1460,32 @@ fn idle(p: &mut Pose, rig: &Rig, time: f32, seed: f32, k: f32) {
                 };
                 p.r(free, fwd(0.1 * side.abs() * k));
                 p.r(shin, fwd(-0.16 * side.abs() * k));
+                // Now and then, with her weight on her left leg, her free
+                // left hand comes to rest on that hip.
+                let mood = ease(((time * 0.045 + seed * 1.7).sin() - 0.1) / 0.4);
+                let hand = side.max(0.0) * mood * k;
+                p.r(
+                    J::ArmL,
+                    Quat::from_rotation_z(0.52 * hand)
+                        * fwd(-0.32 * hand)
+                        * Quat::from_rotation_y(-1.25 * hand),
+                );
+                p.r(J::ForeL, fwd(1.75 * hand));
+                // Every so often she tosses her head back and aside; long
+                // hair, hung as its own drape, swings with it.
+                let beat = (time / 11.0 + seed * 0.37).fract();
+                let toss = if beat < 0.07 {
+                    (std::f32::consts::PI * beat / 0.07).sin() * k
+                } else {
+                    0.0
+                };
+                let aside = if seed.fract() < 0.5 { 1.0 } else { -1.0 };
+                p.r(
+                    J::Head,
+                    Quat::from_rotation_y(0.4 * aside * toss) * bow(-0.22 * toss),
+                );
+                p.r(J::Torso, Quat::from_rotation_y(-0.08 * aside * toss));
+                p.r(J::HandL, Quat::from_rotation_z(-0.4 * hand));
             }
             p.r(J::LegL, Quat::from_rotation_z(sway * 0.03 * k));
             p.r(J::LegR, Quat::from_rotation_z(sway * 0.03 * k));
@@ -1513,8 +1633,14 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
     let cycle = if walking { w * gait.cadence } else { w };
     // Contact phase zero is left-foot forward. Its opposite shoulder and arm
     // lead at the same time, rather than lagging the new foot path by a quarter.
+    // Her arms swing a little less, carried close by the body.
+    let poise = if rig.humanoid.is_some_and(|body| body.bust.is_some()) && !zombie {
+        0.75
+    } else {
+        1.0
+    };
     let arm_swing = if walking {
-        cycle.cos() * gait.arm * blend
+        cycle.cos() * gait.arm * blend * poise
     } else {
         swing * 0.7
     };
@@ -1538,6 +1664,13 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
             J::Hips,
             Quat::from_rotation_y(-cycle.cos() * if lumber { 0.014 } else { 0.025 } * blend),
         );
+    }
+    if rig.humanoid.is_some_and(|body| body.bust.is_some()) && !zombie {
+        // Her carriage: the pelvis tips forward a little, the chest lifts
+        // against it and the head levels, the S-curve of the concept sheets.
+        p.r(J::Hips, bow(0.06));
+        p.r(J::Torso, bow(-0.1));
+        p.r(J::Head, bow(0.04));
     }
     if walking
         && rig.humanoid.is_some_and(|body| body.woman)
@@ -1905,6 +2038,24 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
             p.r(J::Head, bow((if upright { 0.24 } else { 0.45 }) * kneel));
         }
         Move::Breath(_) | Move::Gaze | Move::Bite(_) => rogue::biped_move(p, m, t),
+        Move::Jump => {
+            // The arms swing back into the crouch and up through the
+            // spring, ride high in flight and come forward for the landing.
+            let (gather, rise, tuck) = jump_profile(t);
+            let before = if t < 0.3 { gather } else { 0.0 };
+            let after = if t > 0.7 { gather } else { 0.0 };
+            let up = (rise / 0.3).clamp(0.0, 1.0).sqrt();
+            for (arm, fore, side) in [(J::ArmL, J::ForeL, 1.0f32), (J::ArmR, J::ForeR, -1.0)] {
+                p.r(
+                    arm,
+                    fwd(-0.75 * before + 2.4 * up + 0.7 * after)
+                        * Quat::from_rotation_z(side * (0.18 * up + 0.1 * after)),
+                );
+                p.r(fore, fwd(0.3 * before + 0.35 * up + 0.5 * after));
+            }
+            p.r(J::Torso, bow(0.32 * gather - 0.08 * tuck));
+            p.r(J::Head, bow(-0.2 * gather + 0.05 * tuck));
+        }
     }
 }
 
@@ -2647,10 +2798,144 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
     }
 }
 
+/// How quickly soft flesh springs back, and how its motion dies away.
+const SOFT_STIFFNESS: f32 = 420.0;
+const SOFT_DAMPING: f32 = 10.0;
+/// The furthest a soft region strays from rest, in model units.
+const SOFT_REACH: f32 = 0.02;
+
+/// Soft regions lag and settle as the body carrying them moves: each is a
+/// damped spring driven by its frame's own acceleration, so every motion
+/// that moves the body moves them too, without per-animation keys.
+pub fn soften(
+    time: Res<Time>,
+    frames: Query<&GlobalTransform>,
+    mut bones: Query<(&mut crate::props::SoftBone, &mut Transform, &ChildOf)>,
+) {
+    let dt = time.delta_secs();
+    if dt <= 0.0 {
+        return;
+    }
+    let dt = dt.min(0.05);
+    for (mut bone, mut transform, parent) in &mut bones {
+        let Ok(frame) = frames.get(parent.parent()) else {
+            continue;
+        };
+        let world = frame.transform_point(bone.rest);
+        let accel = match bone.history {
+            Some((last, before)) => (world - 2.0 * last + before) / (dt * dt),
+            None => Vec3::ZERO,
+        };
+        bone.history = Some((world, bone.history.map_or(world, |(last, _)| last)));
+        // Teleports and spawns are not motion the flesh should answer.
+        let accel = accel.clamp_length_max(40.0);
+        let (scale, rotation, _) = frame.to_scale_rotation_translation();
+        let local = (rotation.inverse() * accel) / scale.max(Vec3::splat(1e-3));
+        let steps = 4;
+        let h = dt / steps as f32;
+        for _ in 0..steps {
+            let a = -SOFT_STIFFNESS * bone.offset - SOFT_DAMPING * bone.velocity - local;
+            bone.velocity += a * h;
+            let next = bone.offset + bone.velocity * h;
+            bone.offset = next.clamp_length_max(SOFT_REACH);
+        }
+        // A slow breath lifts a chest a little forward and up, each body on
+        // its own rhythm.
+        let phase = parent.parent().index() as f32 * 1.37;
+        let breath = (time.elapsed_secs() * 1.7 + phase).sin() * bone.breath;
+        transform.translation =
+            bone.rest + bone.offset * bone.give + Vec3::new(0.0, 0.0022, 0.0014) * breath;
+    }
+}
+
 #[cfg(test)]
 mod support_tests {
     use super::*;
     use crate::creatures::rogue_tests::spawn_one;
+
+    #[test]
+    fn women_of_every_kind_flirt_and_men_do_not() {
+        // The flirt's kiss: her left forearm bent to her lips.
+        let kissing = |model: CreatureModel, woman: bool| {
+            let look = Look::with_choice(model, 7, Some(Variant { woman, ..default() }));
+            let (mut app, root) =
+                crate::creatures::rogue_tests::animate_look(look, 1, |_| Vec3::ZERO);
+            let world = app.world_mut();
+            let mut anim = world.get_mut::<Anim>(root).unwrap();
+            anim.antic = Some(2);
+            // A second of frames, ending at the height of the kiss, lets
+            // her idle and the antic ease fully in.
+            anim.time = 1.0 + 0.5 * 7.0 - 60.0 * 0.016;
+            world.insert_resource(Boredom(BORED_AFTER + 10.0));
+            for _ in 0..60 {
+                app.update();
+            }
+            let rig = app.world().get::<Rig>(root).unwrap();
+            let fore = rig.joint(J::ForeL).unwrap();
+            let bend = app.world().get::<Transform>(fore).unwrap().rotation;
+            // The kiss pose, with the arm's resting elbow bend laid over it.
+            bend.angle_between(fwd(2.2) * fwd(0.25)) < 0.08
+        };
+        for model in [
+            CreatureModel::Human,
+            CreatureModel::Orc,
+            CreatureModel::Nymph,
+        ] {
+            assert!(kissing(model, true), "{model:?}: she blows a kiss");
+            assert!(!kissing(model, false), "{model:?}: he does not");
+        }
+    }
+
+    #[test]
+    fn now_and_then_she_tosses_her_head() {
+        let look = Look::with_choice(
+            CreatureModel::Human,
+            7,
+            Some(Variant {
+                woman: true,
+                ..default()
+            }),
+        );
+        let (_, rig, _, _) = spawn_one(&look);
+        let seed = 0.25;
+        // The toss peaks at the middle of its window in each 11-second beat.
+        let at_beat = |beat: f32| (beat - (seed * 0.37f32).fract()).rem_euclid(1.0) * 11.0;
+        let head = |time: f32| {
+            let mut pose = Pose::new();
+            idle(&mut pose, &rig, time, seed, 1.0);
+            pose.rot[J::Head as usize]
+        };
+        let tossed = head(at_beat(0.035));
+        // Just after the toss, before her other motions have moved on.
+        let calm = head(at_beat(0.08));
+        assert!(
+            tossed.angle_between(calm) > 0.25,
+            "the toss turns her head well aside: {}",
+            tossed.angle_between(calm)
+        );
+    }
+
+    #[test]
+    fn her_walk_places_her_feet_nearer_the_line_of_travel() {
+        let narrowing = |woman: bool| {
+            let look = Look::with_choice(
+                CreatureModel::Human,
+                7,
+                Some(Variant { woman, ..default() }),
+            );
+            let (_, rig, _, _) = spawn_one(&look);
+            let mut walking = Anim::new(7, Vec3::ZERO);
+            walking.speed = 1.0;
+            let rest = biped_rest_contacts(&rig);
+            let planned = biped_walk_contacts(&rig, &walking);
+            planned[0].x.abs() / rest[0].x.abs()
+        };
+        assert!(narrowing(true) < 0.8, "her feet track nearer the line");
+        assert!(
+            (narrowing(false) - 1.0).abs() < 1e-4,
+            "his stay under his hips"
+        );
+    }
 
     #[test]
     fn amphibian_local_support_preserves_authored_lateral_foot_landmarks() {
