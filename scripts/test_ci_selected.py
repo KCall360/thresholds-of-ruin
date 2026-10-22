@@ -1,9 +1,12 @@
 """Selected assurance keeps independent test accounting and never claims full."""
 import copy
+from contextlib import redirect_stdout
+import io
 import os
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import ci_selected as selected
 import ci_test_plan as planner
@@ -44,6 +47,33 @@ class SelectedTests(unittest.TestCase):
         self.assertIn("service_contract_ci.py", str(commands["rust-debug"]))
         self.assertIn("fixture_contract::", commands["simulation-isolated"])
         self.assertNotIn("--release", commands["rust-debug"])
+
+    def test_windows_codec_dispatch_enables_support_for_all_integration_targets(self):
+        class ReachedCodecStage(Exception):
+            pass
+        lane = {'id': 'windows-debug-python', 'os': 'windows-latest', 'profile': 'debug',
+                'partition': 'python', 'test_ids': ['test_fixture.Case.test_value']}
+        seen = []
+        def execute(name, command, environment, directory, jobs, rerun):
+            seen.append(name)
+            if name == 'platform-codecs':
+                self.assertEqual(command, ['cargo', 'test', '-p', 'tor-protocol', '-p', 'tor-client-common',
+                                           '--locked', '--features', 'tor-client-common/test-support'])
+                self.assertEqual(environment, {})
+                # No --lib, --no-run, target filter, or Python execution may
+                # disguise an integration-library feature failure.
+                raise ReachedCodecStage
+            self.assertEqual(name, 'build-applications')
+            return {'step': name, 'code': 0, 'seconds': 0, 'note': ''}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(selected, 'ROOT', root), patch.object(selected.sys, 'platform', 'win32'), \
+                    patch.object(selected, 'clean_source'), patch.object(selected.verify, 'running_builds', return_value=False), \
+                    patch.object(selected.verify, 'free_memory_gb', return_value=8), \
+                    patch.object(selected.verify, 'run_step', side_effect=execute), redirect_stdout(io.StringIO()), \
+                    self.assertRaises(ReachedCodecStage):
+                selected.run({'mode': 'selected', 'lanes': [lane]}, lane['id'], root / 'logs')
+        self.assertEqual(seen, ['build-applications', 'platform-codecs'])
 
     def test_selected_physics_build_is_an_explicit_pre_worker_prerequisite(self):
         lane = {"id": "linux-debug-python", "profile": "debug", "partition": "python", "test_ids": [

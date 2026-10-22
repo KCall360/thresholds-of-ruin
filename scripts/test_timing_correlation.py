@@ -204,6 +204,82 @@ class CorrelationEvidenceIdentity(unittest.TestCase):
             with patch('timing_correlation.events', side_effect=[server, client]):
                 return correlate_native(directory, result)
 
+    def control_capture(self):
+        server, client, result, frames = self.producer_capture(True)
+        client[0]['request_kind'] = 'act'
+        # The real native startup sends AcquireControl with its own UUID at
+        # revision zero, then the first measured Act at that same revision.
+        # Keep complete triples, but use small independent timing constants.
+        control = '597ea555-58b7-46b6-8e71-0569031d53a6'
+        client[:0] = [
+            dict(event='client_request', request_id=control, revision=0,
+                 request_kind='non_action', unix_ns=-3000000),
+            dict(event='client_request_sent', request_id=control,
+                 unix_ns=-2000000, duration_ms=1),
+            dict(event='client_ack', request_id=control, unix_ns=-1000000),
+        ]
+        server[:0] = [
+            dict(event='server_handled', request_id=control, client=2,
+                 unix_ns=-2000000, lock_ms=0, duration_ms=1),
+            dict(event='server_ack_sent', request_id=control, client=2,
+                 unix_ns=-1500000),
+        ]
+        return server, client, result, frames
+
+    def test_explicit_native_control_at_action_revision_preserves_measurement(self):
+        baseline = self.complete_capture(True, *self.producer_capture(True))
+        for control_first in (True, False):
+            with self.subTest(control_first=control_first):
+                server, client, result, frames = self.control_capture()
+                if not control_first:
+                    client[:] = client[3:] + client[:3]
+                self.assertEqual(self.complete_capture(True, server, client, result, frames), baseline)
+
+    def test_explicit_native_kind_preserves_clock_and_server_order_semantics(self):
+        server, client, result, frames = self.control_capture()
+        self.assertEqual(len(self.complete_capture(True, server, client, result, frames)), 1)
+        # Wall-clock jumps cannot change request ownership. The send task can
+        # also publish its server record before the handler diagnostic arrives.
+        client[0]['unix_ns'] = 1000000000
+        result['samples'][0]['input_unix_ns'] = 20000000
+        server[-1]['unix_ns'] = 2000000
+        server.reverse()
+        row, = self.complete_capture(True, server, client, result, frames)
+        self.assertEqual(row['input_to_client_request_ms'], -19)
+        self.assertEqual(row['server_handle_to_ack_sent_ms'], -1)
+
+    def test_native_kind_does_not_guess_legacy_or_competing_actions(self):
+        for kind in ('act', 'legacy'):
+            with self.subTest(kind=kind):
+                server, client, result, frames = self.control_capture()
+                self.assertEqual(len(self.complete_capture(True, server, client, result, frames)), 1)
+                if kind == 'legacy':
+                    del client[0]['request_kind']
+                else:
+                    client[0]['request_kind'] = kind
+                with self.assertRaisesRegex(ValueError, 'Ambiguous native request revision 0'):
+                    self.complete_capture(True, server, client, result, frames)
+
+        server, client, result, frames = self.control_capture()
+        self.assertEqual(len(self.complete_capture(True, server, client, result, frames)), 1)
+        for row in client:
+            row.pop('request_kind', None)
+        # The original pre-classification trace cannot identify which complete
+        # request was an action. Do not guess that the first UUID was setup.
+        with self.assertRaisesRegex(ValueError, 'Ambiguous native request revision 0'):
+            self.complete_capture(True, server, client, result, frames)
+
+    def test_invalid_explicit_native_request_kind_is_not_legacy_or_excluded(self):
+        for kind in (None, True, 0, '', 'acquire_control', [], {}):
+            with self.subTest(kind=kind):
+                server, client, result, frames = self.producer_capture(True)
+                baseline = self.complete_capture(True, server, client, result, frames)
+                client[0]['request_kind'] = 'act'
+                self.assertEqual(self.complete_capture(True, server, client, result, frames), baseline)
+                client[0]['request_kind'] = kind
+                with self.assertRaisesRegex(ValueError, 'request_kind'):
+                    self.complete_capture(True, server, client, result, frames)
+
     def test_ack_duplicate_required_events_are_not_last_record_wins(self):
         for source, count in [('server', 2), ('client', 4)]:
             for index in range(count):

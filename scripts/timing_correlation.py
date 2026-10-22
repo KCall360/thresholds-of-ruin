@@ -143,7 +143,16 @@ def correlate_native(directory, result):
     requests = {}
     for row in client:
         if row['event'] == 'client_request':
-            requests.setdefault(row['revision'], []).append(row)
+            candidates = requests.setdefault(row['revision'], [])
+            # Startup control/query requests can share an Act's revision. Only
+            # explicit producer classification may exclude them; unclassified
+            # legacy requests remain candidates and must still be unambiguous.
+            if 'request_kind' in row:
+                if row['request_kind'] not in ('act', 'non_action'):
+                    raise ValueError('Invalid native request_kind diagnostic')
+                if row['request_kind'] == 'non_action':
+                    continue
+            candidates.append(row)
     acknowledgements = {r['request_id']:r for r in client if r['event']=='client_ack'}
     sends = {r['request_id']:r for r in client if r['event']=='client_request_sent'}
     write_cost = diagnostic_write_costs(client)

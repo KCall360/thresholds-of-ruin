@@ -76,7 +76,11 @@ def steps_for(lane, logs, workers, binaries=None):
         steps.append(("build-applications", ["cargo", "build", "--workspace", "--bins", "--locked",
                                             *(["--release"] if profile == "release" else [])], {}))
     if lane["id"] == "windows-debug-python":
-        steps.append(("platform-codecs", ["cargo", "test", "-p", "tor-protocol", "-p", "tor-client-common", "--locked"], {}))
+        # Integration targets link the normal library, where cfg(test) does
+        # not expose helpers. Full-workspace dev-dependencies used to supply
+        # this feature transitively; the narrowed package set must name it.
+        steps.append(("platform-codecs", ["cargo", "test", "-p", "tor-protocol", "-p", "tor-client-common", "--locked",
+                                           "--features", "tor-client-common/test-support"], {}))
     if profile == "release":
         steps.append(("release-sentinels", ["cargo", "test", "-p", "tor-world", "-p", "tor-protocol", "--locked", "--release"], {}))
     command = [sys.executable, str(ROOT / "scripts/test_runner.py"), "--workers", str(workers),
