@@ -257,14 +257,21 @@ impl Look {
 
     /// The same individual dressed from the wardrobe. Only humanoids that
     /// wear separable clothes can be redressed; the rest are returned as they
-    /// are. Each outfit is cut for this wearer and cached apart.
+    /// are. Each outfit is cut for this wearer and cached apart. Replacing an
+    /// outfit retains the original body's identity; Native restores that look.
     pub fn dressed(mut self, wardrobe: Wardrobe) -> Look {
-        if !outfit::dresses(&self) || wardrobe == Wardrobe::Native {
+        if !outfit::dresses(&self) {
+            return self;
+        }
+        let body_key = self.body_key.take().unwrap_or_else(|| self.key.clone());
+        if wardrobe == Wardrobe::Native {
+            self.outfit = None;
+            self.key = body_key;
             return self;
         }
         self.outfit = Some(outfit::Outfit::from_wardrobe(wardrobe, &self));
-        self.body_key = Some(self.key.clone());
-        self.key = format!("{}:{wardrobe:?}", self.key);
+        self.key = format!("{body_key}:{wardrobe:?}");
+        self.body_key = Some(body_key);
         self
     }
 
@@ -962,8 +969,18 @@ pub enum J {
     WingTipR,
     /// A lower jaw, or a flytrap's lower lobe.
     Jaw,
+    /// Paired upper fangs that fold into a closed serpent mouth.
+    Fangs,
 }
-const JOINTS: usize = 38;
+const JOINTS: usize = 39;
+
+/// A beast's terminal limb can support weight or remain free to grasp.
+/// Joint names stay stable; recipes choose behavior independently of species.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LimbRole {
+    Support,
+    Grasp,
+}
 
 #[derive(Component)]
 pub struct Rig {
@@ -976,6 +993,8 @@ pub struct Rig {
     segments: Vec<Entity>,
     /// Continuous caster garment with an owned mesh and shared material.
     robe: Option<robe::RobeRig>,
+    /// Instance-owned connected shoulder sheets; materials remain shared.
+    cloaks: Vec<cloak::CloakRig>,
     stride: f32,
     hunch: f32,
     style: Style,
@@ -985,6 +1004,8 @@ pub struct Rig {
     ankle_floor: f32,
     /// Leg length relative to a horse's, scaling crouch and step height.
     legs: f32,
+    /// Front left/right, rear left/right, in the support solver's slot order.
+    limb_roles: [LimbRole; 4],
     /// Half the body's width, the height it lies at when fallen on its side.
     girth: f32,
     /// Hanging cloth that swings on its own as the wearer moves.
@@ -1008,6 +1029,31 @@ pub(crate) enum Drape {
 impl Rig {
     pub fn joint(&self, j: J) -> Option<Entity> {
         self.joints[j as usize]
+    }
+
+    fn supports(&self, terminal: J) -> bool {
+        let slot = match terminal {
+            J::HoofFL => 0,
+            J::HoofFR => 1,
+            J::HoofBL => 2,
+            J::HoofBR => 3,
+            _ => return true,
+        };
+        self.limb_roles[slot] == LimbRole::Support
+    }
+
+    /// Authored bent landmarks own the knee direction; straight legacy chains
+    /// retain their family's conventional fore/hind bend.
+    fn support_bend(&self, shin: J, terminal: J, fallback: f32) -> f32 {
+        let upper = self.rest[shin as usize];
+        let target = upper + self.rest[terminal as usize];
+        let direction = target.normalize_or(Vec3::NEG_Y);
+        let knee = upper - direction * upper.dot(direction);
+        if knee.z.abs() > 0.025 {
+            knee.z.signum()
+        } else {
+            fallback
+        }
     }
 }
 
@@ -1238,6 +1284,9 @@ mod anatomy;
 mod animation;
 #[cfg(test)]
 mod art_contract_tests;
+mod cloak;
+#[cfg(test)]
+mod cloak_tests;
 mod corpse;
 mod effects;
 mod geometry;
@@ -1263,4 +1312,114 @@ pub fn individual(seed: Option<tor_protocol::AppearanceSeed>) -> u64 {
 /// A seed that stays the same for a creature of this name.
 pub fn seed(name: &str) -> u64 {
     hash(name)
+}
+
+#[cfg(test)]
+mod dressing_tests {
+    use super::*;
+
+    fn wearer() -> Look {
+        Look::with_choice(
+            CreatureModel::Zombie,
+            2,
+            Some(Variant {
+                woman: true,
+                build: 2,
+                ..default()
+            }),
+        )
+    }
+
+    fn assert_same_body(actual: &Look, expected: &Look) {
+        assert_eq!(actual.plan, expected.plan);
+        assert_eq!(actual.scale, expected.scale);
+        assert_eq!(actual.style, expected.style);
+        assert_eq!(actual.skin, expected.skin);
+        assert_eq!(actual.cloth, expected.cloth);
+        assert_eq!(actual.trim, expected.trim);
+        assert_eq!(actual.eyes, expected.eyes);
+        assert_eq!(actual.aura, expected.aura);
+        assert_eq!(actual.hunch, expected.hunch);
+        assert_eq!(actual.stride, expected.stride);
+        assert_eq!(actual.v, expected.v);
+    }
+
+    #[test]
+    fn selecting_the_same_outfit_is_idempotent() {
+        let base = wearer();
+        for wardrobe in Wardrobe::ALL {
+            let once = base.clone().dressed(wardrobe);
+            let twice = once.clone().dressed(wardrobe);
+            assert_eq!(twice.key, once.key, "{wardrobe:?} cache identity");
+            assert_eq!(twice.body_key, once.body_key, "{wardrobe:?} body identity");
+            assert_eq!(twice.outfit, once.outfit, "{wardrobe:?} garments");
+            assert_same_body(&twice, &base);
+        }
+    }
+
+    #[test]
+    fn replacing_an_outfit_matches_selecting_it_directly() {
+        let base = wearer();
+        for first in Wardrobe::ALL {
+            for next in Wardrobe::ALL {
+                let replaced = base.clone().dressed(first).dressed(next);
+                let direct = base.clone().dressed(next);
+                assert_eq!(
+                    outfit::Outfit::worn(&replaced),
+                    outfit::Outfit::worn(&direct),
+                    "{first:?} -> {next:?} must replace the whole outfit"
+                );
+                assert_eq!(replaced.key, direct.key, "{first:?} -> {next:?} cache");
+                assert_eq!(
+                    replaced.body_key, direct.body_key,
+                    "{first:?} -> {next:?} body identity"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn selecting_native_restores_the_original_outfit_and_identity() {
+        let base = wearer();
+        for wardrobe in Wardrobe::ALL {
+            let restored = base.clone().dressed(wardrobe).dressed(Wardrobe::Native);
+            assert!(restored.outfit.is_none(), "reset {wardrobe:?} to native");
+            assert_eq!(restored.key, base.key, "restore the native cache identity");
+            assert_eq!(restored.body_key, base.body_key);
+            assert_eq!(outfit::Outfit::worn(&restored), outfit::Outfit::worn(&base));
+            assert_same_body(&restored, &base);
+        }
+    }
+
+    #[test]
+    fn repeated_redressing_preserves_the_original_body_identity_and_traits() {
+        let base = wearer();
+        let mut look = base.clone();
+        for wardrobe in [Wardrobe::Ranger, Wardrobe::Courtier, Wardrobe::Knight] {
+            look = look.dressed(wardrobe);
+            assert_eq!(look.body_key.as_deref(), Some(base.key.as_str()));
+            assert_same_body(&look, &base);
+        }
+    }
+
+    #[test]
+    fn wardrobe_selections_leave_non_dressable_looks_unchanged() {
+        for model in [
+            CreatureModel::Guardian,
+            CreatureModel::Yeti,
+            CreatureModel::Mage,
+            CreatureModel::Bat,
+        ] {
+            let base = Look::of(model, 2);
+            assert!(!base.dresses(), "exercise the non-dressable boundary");
+            let mut look = base.clone();
+            for wardrobe in Wardrobe::ALL {
+                look = look.dressed(wardrobe);
+                assert_eq!(look.key, base.key, "{model:?} {wardrobe:?} identity");
+                assert_eq!(look.body_key, base.body_key);
+                assert_eq!(look.outfit, base.outfit);
+                assert_same_body(&look, &base);
+            }
+        }
+    }
 }

@@ -1,4 +1,4 @@
-use super::anatomy::{FOOT_SCALE, HIP_SCALE};
+use super::anatomy::{BirdBody, FOOT_SCALE, HIP_SCALE};
 use super::geometry::{snake_segment_radius, BIRD_ANKLE, SNAKE};
 use super::*;
 
@@ -161,6 +161,11 @@ pub fn animate(
         }
         place_segments(&rig, &anim, fun, &mut joints);
         swing_drapes(&rig, &anim, dt, &mut joints);
+        for cloak in &mut rig.cloaks {
+            if let Ok(transform) = joints.get(cloak.entity) {
+                super::cloak::place(cloak, transform.rotation, &mut meshes);
+            }
+        }
     }
 }
 
@@ -389,7 +394,7 @@ fn walk_legs(rig: &Rig, a: &Anim) -> [Option<WalkLeg>; 4] {
                    clearance: f32,
                    bend: f32,
                    floor: Option<f32>| {
-        if rig.joint(foot).is_some() {
+        if rig.joint(foot).is_some() && rig.supports(foot) {
             let rest = rig.rest[body as usize]
                 + rig.rest[thigh as usize]
                 + rig.rest[shin as usize]
@@ -442,7 +447,7 @@ fn walk_legs(rig: &Rig, a: &Anim) -> [Option<WalkLeg>; 4] {
                     1.6,
                     0.1,
                     1.0,
-                    Some(0.042),
+                    Some(BirdBody::ANKLE_HEIGHT + 0.002),
                 );
             }
         }
@@ -472,7 +477,7 @@ fn walk_legs(rig: &Rig, a: &Anim) -> [Option<WalkLeg>; 4] {
                     } else {
                         0.075 * legs
                     },
-                    if i < 2 { 1.0 } else { -1.0 },
+                    rig.support_bend(shin, foot, if i < 2 { 1.0 } else { -1.0 }),
                     Some(rig.ankle_floor),
                 );
             }
@@ -1972,7 +1977,7 @@ fn beast_limb(
 fn bird_pose(p: &mut Pose, s: f32, w: f32, breath: f32, m: Option<Move>, t: f32, local_legs: bool) {
     let walk = ease(s * 4.0);
     // Keep the front contact inside both bone lengths even at maximum
-    // breast pitch. A shorter, quicker step suits a long-legged ground bird.
+    // breast pitch. A shorter, quicker step suits the compact ground bird.
     const CADENCE: f32 = 1.6;
     let cycle = w * CADENCE;
     let action = m.map_or(0.0, |_| envelope(t, 0.0, 0.12, 0.86, 1.0));
@@ -2042,14 +2047,14 @@ fn bird_pose(p: &mut Pose, s: f32, w: f32, breath: f32, m: Option<Move>, t: f32,
             thigh,
             shin,
             foot,
-            Vec3::Y,
-            Vec3::new(side * 0.11, -0.1, 0.0),
-            Vec3::new(0.0, -0.4, 0.08),
+            Vec3::Y * BirdBody::BODY_HEIGHT,
+            BirdBody::hip(side),
+            BirdBody::UPPER,
             BIRD_ANKLE,
             Vec3::new(
-                side * 0.11,
-                0.042 + lift * walk + 0.28 * raised,
-                0.02 + z * walk + 0.38 * raised,
+                side * BirdBody::HIP.x,
+                BirdBody::ANKLE_HEIGHT + 0.002 + lift * walk + 0.28 * raised,
+                BirdBody::UPPER.z + BirdBody::LOWER.z + z * walk + 0.38 * raised,
             ),
             1.0,
             support,
@@ -2108,7 +2113,7 @@ fn quad_pose(
     let mut rear = 0.0;
     let mut stamp = 0.0;
     if rig.style.rogue_beast() {
-        rogue::beast_pose(p, rig, breath, m, t, walk);
+        rogue::beast_pose(p, rig, breath, m, t, walk, cycle);
     } else if let Some(m) = m {
         let hit = m.impact();
         let gather = envelope(t, 0.0, hit * 0.55, hit - 0.1, hit);
@@ -2170,6 +2175,9 @@ fn quad_pose(
         (J::BL, J::BLs, J::HoofBL, 0.25 + 0.25 * trot, false, 1.0),
         (J::BR, J::BRs, J::HoofBR, -0.25 + 0.25 * trot, false, -1.0),
     ] {
+        if !rig.supports(hoof) {
+            continue;
+        }
         let clearance = if rig.style == Style::Unicorn {
             0.11
         } else {
@@ -2193,12 +2201,12 @@ fn quad_pose(
             rig.rest[shin as usize],
             rig.rest[hoof as usize],
             Vec3::new(
-                hip.x + side * 0.012 * rear,
+                hip.x + rig.rest[shin as usize].x + rig.rest[hoof as usize].x + side * 0.012 * rear,
                 // The swept horn wall sits below the shallow inner sole.
                 rig.ankle_floor + lift * walk + raised * rig.legs,
-                hip.z + rig.rest[hoof as usize].z + z * walk + lead,
+                hip.z + rig.rest[shin as usize].z + rig.rest[hoof as usize].z + z * walk + lead,
             ),
-            if front { 1.0 } else { -1.0 },
+            rig.support_bend(shin, hoof, if front { 1.0 } else { -1.0 }),
             support,
         );
     }
@@ -2261,7 +2269,7 @@ fn death_pose(p: &mut Pose, rig: &Rig, d: f32, seed: f32) {
         }
         Plan::Centaur => {
             p.rot[J::Lift as usize] = Quat::from_rotation_z(side * FRAC_PI_2 * d);
-            p.off[J::Lift as usize] = Vec3::new(side * 0.72 * d, 0.2 * d, 0.0);
+            p.off[J::Lift as usize] = Vec3::new(side * 0.72 * d, rig.girth * d, 0.0);
             limp_legs(p, side, d);
             // The horse is already on its side. Turn the human chest face-up
             // around its own long axis; an additional sideways torso roll
@@ -2274,7 +2282,7 @@ fn death_pose(p: &mut Pose, rig: &Rig, d: f32, seed: f32) {
             for (arm, fore, spread) in [(J::ArmL, J::ForeL, 0.55), (J::ArmR, J::ForeR, -0.55)] {
                 // At the settled quarter-roll, body/torso x and arm z are
                 // vertical. The body's small x-axis slump preserves them.
-                let shoulder_height = 0.2
+                let shoulder_height = rig.girth
                     + side * (rig.rest[J::Body as usize].x + rig.rest[J::Torso as usize].x)
                     + rig.rest[arm as usize].z;
                 let length = rig.rest[fore as usize].length().max(0.001);
@@ -2365,9 +2373,9 @@ fn limp_legs(p: &mut Pose, side: f32, d: f32) {
 
 /// Clearance under a body band follows the same taper as its geometry.
 /// The separate sculpted skull has a deeper jaw than a body band's ellipse.
-fn snake_ground_height(index: usize, roll: f32) -> f32 {
+fn snake_ground_height(index: usize, roll: f32, style: Style) -> f32 {
     if index == 0 {
-        0.076
+        super::anatomy::SerpentHead::resolve(style).ground(roll)
     } else {
         let radius = snake_segment_radius(index);
         radius * (roll.sin().powi(2) + (0.75 * roll.cos()).powi(2)).sqrt() + 0.003
@@ -2396,35 +2404,6 @@ fn settled_ice_height(rotation: Quat) -> f32 {
         }
     }
     -bottom * 0.65 + 0.006
-}
-
-/// A flat spiral laid from the tail outward, its last few bands lifting the
-/// head in an S over the coil. The rattle rises from the centre.
-fn rattle_coil(n: usize) -> [Vec3; SNAKE] {
-    let mut points = [Vec3::ZERO; SNAKE];
-    let mut theta = 0.0f32;
-    for j in 0..n {
-        let i = n - 1 - j;
-        let radius = 0.07 + 0.075 * theta / TAU;
-        points[i] = Vec3::new(theta.cos() * radius, 0.0, theta.sin() * radius);
-        theta += 0.068 / radius;
-    }
-    for (i, point) in points.iter_mut().enumerate().take(n) {
-        let head = (1.0 - i as f32 / 5.0).max(0.0);
-        let rattle = (i as f32 + 4.0 - n as f32).max(0.0);
-        point.y = snake_ground_height(i, 0.0) + 0.3 * ease(head) + 0.05 * rattle;
-    }
-    if n > 1 {
-        // Face the head forward and draw the coil back beneath it.
-        let forward = (points[0] - points[1]).with_y(0.0).normalize_or(Vec3::Z);
-        let turn = Quat::from_rotation_arc(forward, Vec3::Z);
-        let head = turn * points[0].with_y(0.0);
-        for point in points.iter_mut().take(n) {
-            let y = point.y;
-            *point = (turn * point.with_y(0.0) - head + Vec3::Z * 0.42).with_y(y);
-        }
-    }
-    points
 }
 
 /// Snakes and floaters place their pieces along paths rather than joints.
@@ -2456,26 +2435,30 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
             let wave = a.walk * 2.2 + a.seed;
             let amplitude = 0.18 + 0.4 * ease(a.speed * 3.0);
             let rear = every(a.time + a.seed * 3.7, 8.0, 3.0, 6.5) * calm;
-            let raised = 0.24 * gather + 0.13 * strike + 0.19 * rear;
-            let mut live = Vec3::new(
-                0.018 * wave.sin() * a.speed,
-                snake_ground_height(0, 0.0) + raised,
-                0.6 - 0.09 * gather + 0.24 * strike,
-            );
-            let mut settled = Vec3::new(0.0, snake_ground_height(0, 2.6), 0.6);
-            let mut points = [Vec3::ZERO; SNAKE];
-            // A rattlesnake rests coiled, head raised over its rattle.
             let rattler = rig.style == Style::Rattlesnake;
             let still = (1.0 - ease(a.speed * 4.0)) * f32::from(u8::from(m.is_none()));
-            let coiled = if rattler { still * 0.92 } else { 0.0 };
-            let coil = rattle_coil(n);
+            // Default rest keeps the whole animal extended and readable.
+            // Head and rattle lift gently above the same continuous body path.
+            let warning = if rattler { still } else { 0.0 };
+            let raised = 0.24 * gather + 0.13 * strike + 0.19 * rear + 0.16 * warning;
+            let mut live = Vec3::new(
+                0.018 * wave.sin() * a.speed,
+                snake_ground_height(0, 0.0, rig.style) + raised,
+                0.6 - 0.09 * gather + 0.24 * strike,
+            );
+            let mut settled = Vec3::new(0.0, snake_ground_height(0, 2.6, rig.style), 0.6);
+            let mut points = [Vec3::ZERO; SNAKE];
             let mut previous_y = live.y;
             for (i, point) in points.iter_mut().enumerate().take(n) {
                 let f = i as f32;
                 if i > 0 {
                     let front = (1.0 - f / 7.0).max(0.0);
                     let idle = (a.time * 0.9 + a.seed - f * 0.24).sin() * 0.003 * calm;
-                    let y = snake_ground_height(i, 0.0) + raised * ease(front) + idle;
+                    let tail_lift = (f + 4.0 - n as f32).max(0.0) * 0.04 * warning;
+                    let y = snake_ground_height(i, 0.0, rig.style)
+                        + raised * ease(front)
+                        + idle
+                        + tail_lift;
                     let dy = (y - previous_y).clamp(-0.06, 0.06);
                     let yaw = (wave - f * 0.42).sin() * amplitude * (0.75 + 0.25 * f / n as f32);
                     // Advancing a constant length along the tangent keeps the
@@ -2484,7 +2467,7 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
                     live += Vec3::new(-yaw.sin() * horizontal, dy, -yaw.cos() * horizontal);
                     previous_y = live.y;
                     let fall_yaw = (f * 0.38 + a.seed * 0.2).sin() * 0.48;
-                    let fall_dy = snake_ground_height(i, 2.6) - settled.y;
+                    let fall_dy = snake_ground_height(i, 2.6, rig.style) - settled.y;
                     let fall_span = (0.068f32.powi(2) - fall_dy * fall_dy).max(0.0).sqrt();
                     settled += Vec3::new(
                         -fall_yaw.sin() * fall_span,
@@ -2492,7 +2475,7 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
                         -fall_yaw.cos() * fall_span,
                     );
                 }
-                let mut at = live.lerp(coil[i], coiled).lerp(settled, d);
+                let mut at = live.lerp(settled, d);
                 if spring > 0.0 {
                     // The optional long-idle gag winds into a continuous helix,
                     // with approximately the same spacing as the resting body.
@@ -2530,6 +2513,19 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
                     transform.rotation = Quat::from_rotation_arc(Vec3::Z, direction)
                         * Quat::from_rotation_z(d * 2.6)
                         * shake;
+                }
+            }
+            let gape = (0.02 + 0.90 * gather) * (1.0 - strike) * alive;
+            if let Some(jaw) = rig.joint(J::Jaw) {
+                if let Ok(mut transform) = joints.get_mut(jaw) {
+                    transform.rotation = bow(gape);
+                }
+            }
+            if let Some(fangs) = rig.joint(J::Fangs) {
+                if let Ok(mut transform) = joints.get_mut(fangs) {
+                    // Hinged fangs fold forward along the palate as the mouth
+                    // closes, rather than cutting through the lower jaw.
+                    transform.rotation = bow(-FRAC_PI_2 * (1.0 - (gape / 0.72).clamp(0.0, 1.0)));
                 }
             }
             if let Some(tongue) = rig.joint(J::Snout) {
@@ -2648,5 +2644,37 @@ fn place_segments(rig: &Rig, a: &Anim, fun: f32, joints: &mut Query<&mut Transfo
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod support_tests {
+    use super::*;
+    use crate::creatures::rogue_tests::spawn_one;
+
+    #[test]
+    fn amphibian_local_support_preserves_authored_lateral_foot_landmarks() {
+        let mut failures = Vec::new();
+        for model in [CreatureModel::Aquator, CreatureModel::Xeroc] {
+            let (_, rig, _, _) = spawn_one(&Look::of(model, 42));
+            let animation = Anim::new(42, Vec3::ZERO);
+            // A stationary guarded action invokes the local solver at full
+            // support weight; no walking-memory target can mask this path.
+            let mut pose = Pose::new();
+            quad_pose(&mut pose, &rig, 0.0, 0.0, 0.0, Some(Move::Step), 0.4, true);
+            let mut checked = 0;
+            for leg in walk_legs(&rig, &animation).into_iter().flatten() {
+                let actual = posed_ankle(&pose, &rig, leg);
+                if (actual.x - leg.rest.x).abs() > 0.002 {
+                    failures.push(format!(
+                        "{model:?} {:?}: posed x={:.5}, authored x={:.5}",
+                        leg.foot, actual.x, leg.rest.x
+                    ));
+                }
+                checked += 1;
+            }
+            assert_eq!(checked, 4, "{model:?} needs four supporting limbs");
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }

@@ -126,13 +126,15 @@ class Native3DProcesses(ProcessTestCase):
         self.assertFalse(errors, "\n".join(errors)[-2500:])
 
     def test_rogue_family_lineups_render_their_own_bodies_and_finish(self):
-        """The Rogue monsters' own recipes reach real GPU frames: a flier, a
-        winged beast, a rooted plant and a spectral body, each in a line-up."""
+        """Shared humanoid contours, fitted adult eyes and Rogue recipes reach
+        real GPU frames, including a glowing vampire, feathered and membrane-winged
+        beasts, a compact ground bird, two hinged biting snakes, a reared grasping aberration, a squat amphibian, an armored maw, a broad-leaved rooted trap
+        and a spectral body, each in a line-up."""
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         captures = self.directory / "rogue-lineup"
         captures.mkdir(parents=True)
         # Line-ups keep the bestiary's order whatever order the names are given in.
-        families = ["phantom", "bat", "dragon", "venus flytrap"]
+        families = ["vampire", "emu", "snake", "nymph", "medusa", "phantom", "wraith", "bat", "kestrel", "griffin", "dragon", "jabberwock", "aquator", "xeroc", "venus flytrap", "rattlesnake"]
         window = self.launch("tor-client-3d", [
             "--lineups", "--family", ",".join(reversed(families)), "--capture", captures, "--capture-warmup", "2",
         ], executable=executable)
@@ -154,24 +156,28 @@ class Native3DProcesses(ProcessTestCase):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         captures = self.directory / "wardrobe-lineup"
         captures.mkdir(parents=True)
-        families = ["Warrior", "medusa"]
+        families = ["Warrior", "blue sentinel", "zombie", "vampire", "orc", "nymph", "medusa", "phantom", "wraith"]
         window = self.launch("tor-client-3d", [
-            "--lineups", "--family", ",".join(families), "--outfit", "knight",
+            "--lineups", "--family", ",".join(families), "--outfit", "ranger",
             "--wardrobe-cycle", "1.5", "--capture", captures, "--capture-warmup", "2",
         ], executable=executable)
         self.assertEqual(window.child.wait(timeout=240), 0, "line-ups must finish while being redressed")
         for index, name in enumerate(families):
             for view in ("line", "close-a", "close-b"):
-                image = captures / f"{index:02d}-{view}-{name}.png"
+                label = name.replace(" ", "_")
+                image = captures / f"{index:02d}-{view}-{label}.png"
                 self.assertTrue(image.exists(), f"missing {image.name}")
                 data = image.read_bytes()
                 self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
                 self.assertGreater(len(data), 4096, image.name)
+        self.assertEqual(len(list(captures.glob("*.png"))), len(families) * 3)
         log = window.stdout_path.read_text(encoding="utf-8")
         redressed = [line for line in log.splitlines() if line.startswith("Wardrobe redressed")]
         self.assertTrue(redressed, "the wardrobe must redress the line-ups while they run")
-        # Knight is followed by Courtier, then the kinds' own outfits.
-        self.assertIn("as Courtier", redressed[0])
+        # Nine four-second family studies allow a full 1.5-second wardrobe
+        # cycle, including the native reset and return to the starting outfit.
+        outfits = [line.rsplit(" as ", 1)[-1] for line in redressed]
+        self.assertEqual(outfits[:5], ["Knight", "Courtier", "Native", "Commoner", "Ranger"])
         self.assertTrue(any(" 0 humanoids" not in line for line in redressed), log[-2000:])
         self.assertNotIn("panicked", log)
 

@@ -71,11 +71,78 @@ pub(crate) enum Outer {
         top: f32,
         sleeveless: bool,
         leather: bool,
-        /// The length of its free hem below the belt, if it has one.
-        peplum: Option<f32>,
+        /// Its free hem below the belt, including its cut, pigment and trim.
+        peplum: Option<Skirt>,
     },
     /// A plate cuirass with its gorget and gilt-edged tabard panels.
     Cuirass,
+}
+
+/// The opening belongs to the garment, independently of the wearer species.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Neckline {
+    Closed,
+    OpenV,
+}
+
+impl Neckline {
+    fn fitted(woman: bool) -> Self {
+        if woman {
+            Self::OpenV
+        } else {
+            Self::Closed
+        }
+    }
+}
+
+/// A free cloth panel, including the construction that travels with it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Skirt {
+    pub color: Vec3,
+    pub length: f32,
+    pub split: f32,
+    pub trim: Option<Vec3>,
+    pub cutaway: bool,
+}
+
+/// A closed shoulder-to-waist band fitted over the wearer's torso layers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Baldric {
+    pub color: Vec3,
+    pub reverse: bool,
+    pub buckle: bool,
+}
+
+/// A torso accessory chosen by the outfit, with its authored materials.
+/// Construction names allow the same ornament to dress another kind of body.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum TorsoOrnament {
+    Harness {
+        strap: Vec3,
+        ring: Vec3,
+        shoulder_straps: Option<Vec3>,
+    },
+    StockAndButtons {
+        stock: Vec3,
+        buttons: Vec3,
+        belt: Vec3,
+    },
+    LeafBodice {
+        leaves: Vec3,
+        pin: Vec3,
+    },
+    NeckBandAndDisc {
+        metal: Vec3,
+    },
+    KnottedSash {
+        sash: Vec3,
+        scarf: Option<Vec3>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Pouch {
+    pub color: Vec3,
 }
 
 /// One humanoid's clothes and armour.
@@ -83,14 +150,23 @@ pub(crate) enum Outer {
 pub(crate) struct Outfit {
     pub head: Headwear,
     pub tunic: Vec3,
+    pub neckline: Neckline,
+    pub neckline_edge: Vec3,
+    /// Binding or gorget pigment selected with the garment.
+    pub collar_edge: Vec3,
+    /// Bound edges of a sleeveless bodice, if the garment has them.
+    pub armhole_edge: Option<Vec3>,
+    pub torso_ornament: Option<TorsoOrnament>,
+    pub pouch: Option<Pouch>,
+    pub baldric: Option<Baldric>,
     pub arms: Arms,
     pub cuffs: Option<Vec3>,
     pub hands: Vec3,
     pub legs: Legs,
     pub feet: Feet,
     pub outer: Option<Outer>,
-    /// The tunic's skirt: colour and length.
-    pub skirt: Option<(Vec3, f32)>,
+    /// The tunic's free lower panels.
+    pub skirt: Option<Skirt>,
     /// A cloak and its lining.
     pub cloak: Option<(Vec3, Vec3)>,
 }
@@ -105,7 +181,7 @@ pub enum Wardrobe {
     Commoner,
     /// A leather jerkin over a tunic, a cloak and tall buckled boots.
     Ranger,
-    /// Full articulated plate over mail, with a tabard.
+    /// Full articulated plate over mail, with a tabard and a leather baldric.
     Knight,
     /// A long gown or coat-robe, fitted sleeves and a cloak.
     Courtier,
@@ -163,13 +239,26 @@ impl Outfit {
                 Outfit {
                     head: Headwear::Bare,
                     tunic,
+                    neckline: Neckline::fitted(fem),
+                    neckline_edge: tunic * 0.72,
+                    collar_edge: tunic * 0.72,
+                    armhole_edge: None,
+                    torso_ornament: None,
+                    pouch: None,
+                    baldric: None,
                     arms: Arms::Sleeves(tunic),
                     cuffs: None,
                     hands: l.skin,
                     legs: Legs::Trousers(Vec3::new(0.3, 0.24, 0.17)),
                     feet: Feet::Boots(plain_boots),
                     outer: None,
-                    skirt: Some((tunic * 0.98, if fem { 0.24 } else { 0.22 })),
+                    skirt: Some(Skirt {
+                        color: tunic * 0.98,
+                        length: if fem { 0.24 } else { 0.22 },
+                        split: if fem { 0.055 } else { 0.0 },
+                        trim: None,
+                        cutaway: false,
+                    }),
                     cloak: None,
                 }
             }
@@ -178,6 +267,17 @@ impl Outfit {
                 Outfit {
                     head: Headwear::HoodDown(Vec3::new(0.2, 0.28, 0.17)),
                     tunic,
+                    neckline: Neckline::fitted(fem),
+                    neckline_edge: tunic * 0.72,
+                    collar_edge: tunic * 0.72,
+                    armhole_edge: None,
+                    torso_ornament: None,
+                    pouch: Some(Pouch { color: LEATHER }),
+                    baldric: Some(Baldric {
+                        color: LEATHER,
+                        reverse: false,
+                        buckle: true,
+                    }),
                     arms: Arms::Sleeves(tunic),
                     cuffs: Some(LEATHER),
                     hands: LEATHER,
@@ -194,15 +294,38 @@ impl Outfit {
                         top: 0.465,
                         sleeveless: true,
                         leather: true,
-                        peplum: Some(0.08),
+                        peplum: Some(Skirt {
+                            color: LEATHER * 0.85 * 0.9,
+                            length: 0.08,
+                            split: 0.06,
+                            trim: Some(LEATHER * 0.85 * 0.9 * 0.7),
+                            cutaway: false,
+                        }),
                     }),
-                    skirt: Some((tunic * 0.98, if fem { 0.19 } else { 0.22 })),
+                    skirt: Some(Skirt {
+                        color: tunic * 0.98,
+                        length: if fem { 0.19 } else { 0.22 },
+                        split: 0.055,
+                        trim: None,
+                        cutaway: false,
+                    }),
                     cloak: Some((Vec3::new(0.2, 0.28, 0.17), Vec3::new(0.5, 0.42, 0.28))),
                 }
             }
             Wardrobe::Knight => Outfit {
                 head: Headwear::Helm,
                 tunic: l.cloth,
+                neckline: Neckline::Closed,
+                neckline_edge: l.cloth * 0.72,
+                collar_edge: GILT,
+                armhole_edge: None,
+                torso_ornament: None,
+                pouch: None,
+                baldric: Some(Baldric {
+                    color: LEATHER,
+                    reverse: true,
+                    buckle: true,
+                }),
                 arms: Arms::Plate,
                 cuffs: Some(STEEL * 0.85),
                 hands: STEEL,
@@ -215,7 +338,13 @@ impl Outfit {
                     cuffed: true,
                 }),
                 outer: Some(Outer::Cuirass),
-                skirt: Some((CREAM * 0.86, 0.26)),
+                skirt: Some(Skirt {
+                    color: CREAM * 0.86,
+                    length: 0.26,
+                    split: 0.0,
+                    trim: None,
+                    cutaway: false,
+                }),
                 cloak: None,
             },
             Wardrobe::Courtier => {
@@ -223,6 +352,13 @@ impl Outfit {
                 Outfit {
                     head: Headwear::Bare,
                     tunic: gown,
+                    neckline: Neckline::fitted(fem),
+                    neckline_edge: gown * 0.72,
+                    collar_edge: l.trim,
+                    armhole_edge: None,
+                    torso_ornament: None,
+                    pouch: None,
+                    baldric: None,
                     arms: Arms::Sleeves(gown),
                     cuffs: Some(l.trim),
                     hands: l.skin,
@@ -235,7 +371,13 @@ impl Outfit {
                         cuffed: false,
                     }),
                     outer: None,
-                    skirt: Some((gown, if fem { 0.72 } else { 0.6 })),
+                    skirt: Some(Skirt {
+                        color: gown,
+                        length: if fem { 0.72 } else { 0.6 },
+                        split: 0.05,
+                        trim: Some(l.trim),
+                        cutaway: false,
+                    }),
                     cloak: Some((gown * 0.55, l.trim)),
                 }
             }
@@ -344,7 +486,21 @@ impl Outfit {
             _ => None,
         };
         // A fitted outer garment: a jerkin, vest or coat over the tunic.
-        let peplum = geometry::jerkin_peplum(style);
+        let peplum = match style {
+            Style::Hero | Style::Scout => Some((0.08, 0.06)),
+            Style::Hobgoblin | Style::Orc => Some((0.06, 0.0)),
+            _ => None,
+        }
+        .map(|(length, split)| {
+            let color = LEATHER * if style == Style::Scout { 0.85 } else { 0.9 };
+            Skirt {
+                color,
+                length,
+                split,
+                trim: Some(color * 0.7),
+                cutaway: false,
+            }
+        });
         let shell = |color: Vec3, top: f32, sleeveless: bool, leather: bool| {
             Some(Outer::Shell {
                 color,
@@ -380,6 +536,18 @@ impl Outfit {
             Style::Hero | Style::Scout if fem => Some((tunic * 0.98, 0.19)),
             _ => Some((tunic * 0.98, 0.22)),
         };
+        let skirt = skirt.map(|(color, length)| Skirt {
+            color,
+            length,
+            split: match style {
+                Style::Hero | Style::Scout => 0.055,
+                Style::Leprechaun => 0.07,
+                Style::Medusa => 0.05,
+                _ => 0.0,
+            },
+            trim: matches!(style, Style::Medusa | Style::Leprechaun).then_some(l.trim),
+            cutaway: geometry::cutaway_coat(style),
+        });
         let cloak = match style {
             Style::Hero => Some((l.cloth * 0.62, l.trim)),
             Style::Vampire => Some((DARK, l.trim)),
@@ -402,9 +570,70 @@ impl Outfit {
             },
             _ => Headwear::Bare,
         };
+        let neckline_edge = if style == Style::Medusa {
+            l.trim
+        } else {
+            tunic * 0.72
+        };
+        let torso_ornament = match style {
+            Style::Orc | Style::Troll => Some(TorsoOrnament::Harness {
+                strap: LEATHER * 0.62,
+                ring: Vec3::new(0.82, 0.58, 0.26),
+                shoulder_straps: (style == Style::Troll).then_some(LEATHER * 0.7),
+            }),
+            Style::Leprechaun => Some(TorsoOrnament::StockAndButtons {
+                stock: CREAM,
+                buttons: GILT,
+                belt: LEATHER * 0.6,
+            }),
+            Style::Nymph => Some(TorsoOrnament::LeafBodice {
+                leaves: l.cloth,
+                pin: l.trim,
+            }),
+            Style::Medusa => Some(TorsoOrnament::NeckBandAndDisc { metal: l.trim }),
+            Style::Phantom | Style::Wraith => Some(TorsoOrnament::KnottedSash {
+                sash: if style == Style::Wraith {
+                    l.trim
+                } else {
+                    LEATHER * 0.7
+                },
+                scarf: (style == Style::Wraith).then_some(l.trim * 0.9),
+            }),
+            _ => None,
+        };
         Outfit {
             head,
             tunic,
+            neckline_edge,
+            collar_edge: l.trim,
+            armhole_edge: matches!(style, Style::Medusa | Style::Phantom | Style::Nymph)
+                .then_some(neckline_edge),
+            torso_ornament,
+            pouch: matches!(style, Style::Hero | Style::Scout).then_some(Pouch { color: LEATHER }),
+            neckline: Neckline::fitted(
+                fem && !matches!(
+                    style,
+                    Style::Sentinel
+                        | Style::Guardian
+                        | Style::Yeti
+                        | Style::Caster
+                        | Style::Hobgoblin
+                        | Style::Zombie
+                ),
+            ),
+            baldric: match style {
+                Style::Hero => Some(Baldric {
+                    color: LEATHER * 0.7,
+                    reverse: true,
+                    buckle: true,
+                }),
+                Style::Scout => Some(Baldric {
+                    color: LEATHER,
+                    reverse: false,
+                    buckle: false,
+                }),
+                _ => None,
+            },
             arms,
             cuffs,
             hands,

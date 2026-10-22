@@ -293,8 +293,31 @@ Objects:
   Slender and sturdy organic builds link shoulder, waist, hip and muscle shape;
   average bodies, vertical bone lengths and terminal sizes remain the anchors.
   Guardian and Yeti retain their separate mass recipes. These fitting rules are
-  foundations for equipment composition; interchangeable worn armor and general
-  data-driven creature authoring remain future integration work.
+  foundations for equipment composition. The offline wardrobe swaps fitted
+  clothing and plate, including garment-owned necklines, tunic and peplum cuts,
+  pigments and trim. Outer peplums attach to the selected torso shell's resolved waist
+  section and fit over the transformed tunic surface,
+  accounting for folds and thickness while retaining the fitted waist.
+  Reusable surface-fitted baldrics have open buckle hardware. Closed front,
+  back, shoulder and waist patches follow the combined tunic/outer-garment
+  support and clear plate, tabard and heraldry. Female cuts retain
+  their shaped neckline and fitted figure across mob bodies; zombie decay survives outfit changes.
+  Torso ornaments, sewn edging, collar/gorget colors and hip pouches follow the selected outfit;
+  native harnesses, jewelry and sashes no longer reappear on replacement clothes.
+  The Ranger recipe supplies its own pouch across wearer families.
+  Sequential outfit replacements preserve body identity and reuse unchanged
+  head/hair assets; selecting Native restores the original clothing and key.
+  Shared shoulder armor uses a hollow faceted crown and an overlapping lower
+  plate, fitted over the resolved arm rather than scaled from build alone.
+  Modeling follows the [Bold Storybook definition](../../docs/art/3d-art-direction.md#proportions-bold-storybook):
+  compact lengths, large anatomical heads and substantial hands/feet, adult faces,
+  lean female bodies with moderate hips and tapered thighs, and alluring
+  adult female clothing and accessories. Shared female pelvic breadth places
+  the leg roots independently of thigh muscle volume; leg and garment generation
+  use the same tapered shape across builds. Existing geometry still needs review
+  against that definition across front, side, rear and action silhouettes.
+  General gameplay worn-equipment integration and data-driven creature
+  authoring remain future work.
 - The Rogue bestiary: every monster in `scenarios/rogue-exploration` has a
   recipe of its own, drawn from the maintainer's concept sheets in
   [`docs/art/rogue-concepts`](../../docs/art/rogue-concepts/README.md). The orc,
@@ -302,12 +325,70 @@ Objects:
   shared humanoid body, as women and men; the medusa's hair is a crown of
   weaving serpents and the phantom is drawn translucent as its normal look.
   The bat and kestrel are always drawn on the wing, beating membrane or
-  feathered wings, and never plant feet. The griffin, dragon, jabberwock,
-  aquator and xeroc keep the four-legged support rig on their own short, heavy
-  legs and feet, with jaws, folded wings that mantle, tails and the aquator's
-  segmented tendrils. The Venus flytrap is rooted, swaying on a two-jointed
-  stem with a snapping trap, and the rattlesnake rests coiled, its rattle
-  buzzing. A disguised xeroc remains the item the server discloses.
+  feathered wings, and never plant feet. Kestrel and Griffin share
+  closed feather vanes with tapered points, a narrow central ridge and thickness
+  proportional to their width. Staggered short feather rows cover the wing arms
+  and overlap the long flight feathers. Griffin, Dragon, Aquator and Xeroc
+  retain four supporting legs. Jabberwock rears above bent hind legs with
+  free grasping forelimbs, a connected chest and a counterbalancing tail.
+  Support and grasp roles are explicit in the rig, so another reared creature
+  can reuse support handling without inheriting a quadruped's planted hands.
+  Profiled segments with rounded flesh terminations and claw palms supply
+  reusable limb volumes. Xeroc's
+  disclosed true form has a large articulated maw and thick overlapping shell
+  plates; both jaws share an oriented fang-row component. Plates seat on the
+  supporting convex body, with their own closed backs and thickness. Species
+  recipes retain their proportions and placement choices. Aquator has connected
+  shoulder and haunch masses, a broad cheeked skull and seated dark eyes.
+  Aquator and Xeroc share splayed supporting limb profiles and broad planar
+  soles, with webbed or blunt crawling toes. Walking and local action support
+  retain authored lateral as well as fore/aft foot offsets. See the
+  [composition procedure](../../docs/plans/rogue-creature-models.md#composing-future-non-humanoid-monsters)
+  for adding monsters with these pieces. Ice Monster refinement is deferred
+  while its character-sheet direction is reconsidered.
+  The Emu uses a compact shared ground-bird stance, substantial hocks and
+  tapered shanks, broad three-toed feet, a breast-rooted throat and a larger
+  anatomical skull. Its mesh and support solver resolve the same landmarks.
+  Both snakes have broad sculpted skulls, separate hinged lower jaws and paired
+  fangs that fold inside the closed mouth. Jaw, tongue and head-floor placement
+  share anatomy dimensions, including the head's support when fallen sideways.
+  The Venus flytrap is rooted, swaying on a two-jointed
+  stem supporting deep cupped trap lobes, staggered cilia and a broad fleshy
+  leaf rosette. Rosette and stalk growths share a closed leaf blade whose
+  breadth, arch, droop and rim color belong to the recipe. The rattlesnake rests in an extended S with its head and rattle raised,
+  its rattle buzzing. A disguised xeroc remains the item the server discloses.
+- Quagga, Unicorn and Centaur share compact equine support dimensions: shorter
+  cannons, distinct fore-knee and hind-hock landmarks, and a standing height
+  derived from their broad planar hoof soles. Ribcage and haunch masses balance
+  those shorter supports. A shared closed hoof wedge has a defined heel and
+  sloped toe. Horse and Unicorn muzzles join their nasal bridge and lower jaw
+  in one sculpt, with the muzzle pigment applied to the surface. Centaur side-fall
+  body height and arm support follow the barrel width rather than a fixed offset.
+- Griffin has a larger anatomical skull beneath its raised crest, a sculpted
+  feathered neck with surface-fitted groups, connected eagle shoulders and
+  shorter bent supports above broad talons. Lion haunches, hocks and paws remain
+  distinct. Griffin and Kestrel share closed ridged hooked mandibles, with each
+  recipe choosing their size and pigment.
+- Bat and Dragon wings share closed tensioned skin with curved scalloped edges,
+  shallow inter-finger camber and a sealed thick perimeter. Explicit outward
+  facing keeps the same pigments outside both mirrored wings. Aquator toe webs
+  reuse the membrane fan at foot scale; Bat wing supports are more substantial.
+- Dragon uses shorter bent supports, connected shoulder/haunch masses, broad
+  four-toed claw feet, a larger anatomical skull and a sculpted neck. Dragon and
+  Jabberwock share rendered head/jaw dimensions so the lower jaw and hinge stay
+  correlated with the skull; both reuse the substantial claw-foot construction.
+- Worn boots share a shaped leather upper and layered welt/outsole. Heeled
+  choices add a real raised arch and tapered block heel, with heel and forefoot
+  on the common sole plane. Flat choices retain a planted midsole. The same
+  outfit-controlled last supplies robe contact bounds; bare, stone and furry
+  foot recipes remain separate.
+- Shoulder cloaks share a connected two-sided sheet with a closed, thick perimeter,
+  gathered upper-back attachment and separate exterior/lining pigments. Clean and
+  torn hems use the same construction. Native Vampire and Wraith cloaks and Ranger
+  and Courtier replacements fit the resolved wearer; each cloak owns its moving
+  mesh while reusing the material. Upper rows stay attached as the lower cloth
+  follows the existing eased travel/turn swing. This is bounded procedural drape,
+  without general cloth collision or simulation.
 - Idles: at rest everyone breathes, shifts weight and looks about, with a
   fidget of their own every few seconds: the hero checks the blade, casters
   study a raised palm, sentinels settle the shield, the scout flips the dagger,
@@ -336,6 +417,11 @@ Objects:
   carved eye sockets, meshed by surface nets per individual. Narrow mouth
   contours follow the actual face surface as separate fitted accents so their
   edges remain legible below the face mesh's sampling scale.
+  Adult female eyes share an almond opening and socket-fitted globe; iris and
+  pupil surfaces clip to that opening, and continuous lids carry a visible upper
+  lash line. Ordinary pupils are round, while Medusa retains her slit. Glow
+  changes only the iris material. Lower-lid rims and adult cheek/jaw planes still
+  need style work.
 - Lighting follows the art direction: a dominant shadow-casting warm key,
   weaker cool fill and rim, contact shading, and localized magical accents.
   Matte cloth, satin leather and metal have distinct material responses.
@@ -348,8 +434,9 @@ Objects:
   tones, sculpted hair (men swept, cropped, tousled, slicked or tied back,
   some bearded; women long, ponytail, bun, braid or bob) in six colours and
   varied eye colour, their own clothing shades and, for casters and scouts,
-  hood up or down. Adult women use a defined waist, fuller bust and hips, strong
-  legs, fitted garments and shaped fantasy armor appropriate to each role.
+  hood up or down. Adult women use a defined waist, balanced bust, moderate hips,
+  naturally tapered athletic thighs and clear knees, with alluring fitted
+  garments and shaped fantasy armor appropriate to each role.
   Sentinels bear one of four emblems (sun, star, crescent
   or flame) on tabard and shield. Helmeted sentinels show a braid; hooded casters show
   locks framing the face. Beasts vary in coat, stripes, bands, fur or stone,
