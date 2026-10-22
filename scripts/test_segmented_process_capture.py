@@ -135,7 +135,10 @@ class SegmentedProcessCapture(unittest.TestCase):
                            process.lines.reader, process.lines.writer):
                 self.assertTrue(handle.closed)
             self.assertEqual(list(process.transcript), values)
-            self.assertEqual((diagnostics / "stderr.log").read_bytes(), b"complete stderr\n")
+            # Separate stderr retains the existing native text-file convention;
+            # only the stdout FIFO/segments below promise exact UTF-8 LF bytes.
+            self.assertEqual((diagnostics / "stderr.log").read_bytes(),
+                             ("complete stderr" + os.linesep).encode("utf-8"))
 
             # On the unchanged implementation all valid-baseline assertions
             # above pass; the first red is missing segmented retention here.
@@ -165,6 +168,29 @@ class SegmentedProcessCapture(unittest.TestCase):
             self.assertEqual(bytes(decoded), expected)
             self.assertNotIn("TOR_TEST_SEGMENTED_STDOUT_BYTES", launch.call_args.kwargs["env"])
             self.assertEqual(launch.call_args.kwargs["env"]["CAPTURE_FIXTURE"], "kept")
+
+    def test_full_capture_fixture_keeps_exact_bytes_with_lf_and_crlf_stderr_writers(self):
+        original_open = Path.open
+        for newline in ("\n", "\r\n"):
+            with self.subTest(stderr_newline=repr(newline)):
+                writes = []
+
+                def native_stderr_open(path, mode="r", *args, **kwargs):
+                    if path.name == "stderr.log" and mode == "w":
+                        self.assertEqual(args, ())
+                        self.assertEqual(kwargs, {"encoding": "utf-8"})
+                        # Model each platform's real text-file translation at
+                        # the existing Process.stop I/O boundary, nowhere else.
+                        kwargs["newline"] = newline
+                        writes.append(newline)
+                    return original_open(path, mode, *args, **kwargs)
+
+                with patch.object(Path, "open", new=native_stderr_open), \
+                        patch.object(os, "linesep", newline):
+                    # Reuse every FIFO, Unicode, raw/archive byte and lifecycle
+                    # assertion, rather than creating a weaker parallel fixture.
+                    self.test_opt_in_keeps_fifo_transcript_and_exact_decoded_bytes_after_stop()
+                self.assertEqual(writes, [newline])
 
     def test_invalid_opt_in_is_rejected_before_launch_or_storage_creation(self):
         invalid = ["", "0", "-1", "01", "1.0", " 128", "128 ", "１２８",
