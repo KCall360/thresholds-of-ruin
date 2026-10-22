@@ -5,8 +5,196 @@
 //! Every recipe composes the same sculpting helpers, joints and Storybook
 //! proportions as the rest of the cast. Nothing here decides what the server
 //! has not disclosed: a bat is drawn on the wing because it is a bat.
+use super::beast_parts::{FangArc, LeafBlade, ShellPlate};
 use super::*;
 use crate::sdf::{Sculpt, Shape::*};
+
+#[cfg(test)]
+mod feather_tests {
+    use super::*;
+
+    fn triangles(scale: f32) -> Vec<[Vec3; 3]> {
+        let mut parts = Parts::default();
+        parts.soften();
+        vane(
+            &mut parts.matte,
+            Vec3::ZERO,
+            Vec3::Z,
+            0.4 * scale,
+            0.06 * scale,
+            Vec3::X,
+            Vec3::ONE,
+            Some(Vec3::splat(0.2)),
+        );
+        mesh_triangles(parts)
+    }
+
+    fn mesh_triangles(parts: Parts) -> Vec<[Vec3; 3]> {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let mut meshes = Assets::<Mesh>::default();
+        let model = parts.finish(
+            &mut meshes,
+            &crate::props::PropMaterials::new(&mut materials),
+        );
+        let mesh = meshes.get(&model.0[0].0).unwrap();
+        let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("feather positions")
+        };
+        let indices: Vec<usize> = mesh.indices().unwrap().iter().collect();
+        indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| [t[0], t[1], t[2]].map(|i| Vec3::from(positions[i])))
+            .collect()
+    }
+
+    #[test]
+    fn covert_rows_mirror_with_both_flight_and_folded_wings() {
+        use std::collections::BTreeSet;
+        for folded in [false, true] {
+            let points = |side: f32| {
+                let mut parts = Parts::default();
+                let (wrist, chord, outward, width) = if folded {
+                    (
+                        Vec3::new(side * 0.1, 0.1, -0.24),
+                        Vec3::new(side * 0.45, -0.55, -0.7),
+                        Vec3::X * side,
+                        0.042,
+                    )
+                } else {
+                    (
+                        Vec3::new(side * 0.3, 0.04, -0.03),
+                        Vec3::new(side * 0.15, -0.04, -1.0),
+                        Vec3::Y,
+                        0.032,
+                    )
+                };
+                covert_rows(&mut parts.matte, wrist, chord, outward, width, BONE);
+                mesh_triangles(parts)
+                    .iter()
+                    .flatten()
+                    .map(|v| {
+                        let v = *v * Vec3::new(side, 1.0, 1.0);
+                        assert!(v.is_finite());
+                        v.to_array().map(|x| (x * 100_000.0).round() as i32)
+                    })
+                    .collect::<BTreeSet<_>>()
+            };
+            let left = points(1.0);
+            assert!(!left.is_empty());
+            assert_eq!(
+                left,
+                points(-1.0),
+                "layered feathers follow both mirrored wing frames"
+            );
+        }
+    }
+
+    #[test]
+    fn folded_primary_fans_mirror_across_the_body() {
+        use std::collections::BTreeSet;
+        let points = |side: f32| {
+            let mut parts = Parts::default();
+            parts.soften();
+            folded_primaries(&mut parts.matte, side, BONE);
+            mesh_triangles(parts)
+                .iter()
+                .flatten()
+                .map(|v| {
+                    let v = *v * Vec3::new(side, 1.0, 1.0);
+                    assert!(v.is_finite());
+                    v.to_array().map(|x| (x * 100_000.0).round() as i32)
+                })
+                .collect::<BTreeSet<_>>()
+        };
+        let left = points(1.0);
+        let right = points(-1.0);
+        assert!(!left.is_empty());
+        assert!(
+            left == right,
+            "folded primary fans must reflect across X without changing their Y/Z feather planes; {} points differ",
+            left.symmetric_difference(&right).count()
+        );
+    }
+
+    #[test]
+    fn feather_tip_converges_to_a_point_with_a_progressive_taper() {
+        let triangles = triangles(1.0);
+        let points: Vec<Vec3> = triangles.iter().flatten().copied().collect();
+        let tip: Vec<Vec3> = points
+            .iter()
+            .copied()
+            .filter(|v| v.z > 0.4 - 1e-6)
+            .collect();
+        assert!(!tip.is_empty(), "the feather reaches its authored length");
+        let tip_width = tip.iter().map(|v| v.x.abs()).fold(0.0, f32::max);
+        assert!(
+            tip_width < 1e-5,
+            "a quill ends at a point, not a blunt cap: {tip_width}"
+        );
+        let end_width = points
+            .iter()
+            .filter(|v| v.z > 0.36)
+            .map(|v| v.x.abs())
+            .fold(0.0, f32::max);
+        let body_width = points.iter().map(|v| v.x.abs()).fold(0.0, f32::max);
+        assert!(
+            end_width < body_width * 0.35,
+            "the final tenth narrows before reaching the point"
+        );
+    }
+
+    #[test]
+    fn feather_thickness_scales_with_its_vane() {
+        let thickness = |scale| {
+            triangles(scale)
+                .iter()
+                .flatten()
+                .map(|v| v.y.abs() / scale)
+                .fold(0.0, f32::max)
+        };
+        let ordinary = thickness(1.0);
+        assert!(ordinary > 0.001, "the feather is a two-sided solid");
+        for scale in [0.5, 2.0] {
+            assert!(
+                (thickness(scale) - ordinary).abs() < 1e-5,
+                "small and large feathers retain their thickness proportions"
+            );
+        }
+    }
+
+    #[test]
+    fn feather_shell_has_no_open_edges_or_degenerate_faces() {
+        use std::collections::HashMap;
+        let key = |p: Vec3| p.to_array().map(|x| (x * 1_000_000.0).round() as i32);
+        let mut edges = HashMap::new();
+        for triangle in triangles(1.0) {
+            assert!(
+                (triangle[1] - triangle[0])
+                    .cross(triangle[2] - triangle[0])
+                    .length()
+                    > 1e-10
+            );
+            let ids = triangle.map(key);
+            for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+                let pair = if ids[a] < ids[b] {
+                    (ids[a], ids[b])
+                } else {
+                    (ids[b], ids[a])
+                };
+                *edges.entry(pair).or_insert(0) += 1;
+            }
+        }
+        assert!(!edges.is_empty());
+        assert!(
+            edges.values().all(|&count| count == 2),
+            "both faces, root and pointed tip form one closed shell"
+        );
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Shared pieces.
@@ -230,18 +418,22 @@ fn leaf_crown(p: &mut Parts, color: Vec3, radius: f32, y: f32) {
 // ---------------------------------------------------------------------------
 // People-like monsters, dressed on the shared humanoid recipe.
 
-/// Chest details for the Rogue people, fitted to the outer garment.
-pub(super) fn torso_details(
+/// Outfit-selected torso ornaments, fitted to the resolved garment and underlay.
+pub(super) fn torso_ornament(
     p: &mut Parts,
-    l: &Look,
+    ornament: TorsoOrnament,
     body: HumanoidBody,
     garment: &Sculpt,
     skin: &Sculpt,
 ) {
     let b = body.build;
     let (sh, w) = (body.shoulders * b, body.waist * b);
-    match l.style {
-        Style::Orc | Style::Troll => {
+    match ornament {
+        TorsoOrnament::Harness {
+            strap: color,
+            ring: ring_color,
+            shoulder_straps,
+        } => {
             // A harness strap across the chest, buckled to a ring at the sternum.
             for front in [true, false] {
                 let strap = [
@@ -250,7 +442,7 @@ pub(super) fn torso_details(
                     (Vec2::new(-0.06 * b, 0.21), 0.026 * b),
                     (Vec2::new(-0.13 * w, 0.05), 0.022 * b),
                 ];
-                fitted_ribbon(&mut p.satin, garment, &strap, front, 0.016, LEATHER * 0.62);
+                fitted_ribbon(&mut p.satin, garment, &strap, front, 0.016, color);
             }
             let (ring, normal) = torso_surface_frame(garment, Vec2::new(0.03 * b, 0.31), true);
             p.metal.torus(
@@ -260,9 +452,9 @@ pub(super) fn torso_details(
                 0.008,
                 14,
                 4,
-                Vec3::new(0.82, 0.58, 0.26),
+                ring_color,
             );
-            if l.style == Style::Troll {
+            if let Some(color) = shoulder_straps {
                 // Shoulder straps over bare skin, riveted.
                 for side in [-1.0f32, 1.0] {
                     let front = torso_surface(skin, side * 0.1 * b, 0.42, true);
@@ -276,12 +468,16 @@ pub(super) fn torso_details(
                             back,
                         ],
                         &[(0.032, 0.011); 4],
-                        LEATHER * 0.7,
+                        color,
                     );
                 }
             }
         }
-        Style::Leprechaun => {
+        TorsoOrnament::StockAndButtons {
+            stock,
+            buttons,
+            belt,
+        } => {
             // A cream stock at the throat and gilt buttons down the waistcoat.
             fitted_ribbon(
                 &mut p.matte,
@@ -293,17 +489,17 @@ pub(super) fn torso_details(
                 ],
                 true,
                 0.012,
-                CREAM,
+                stock,
             );
             for k in 0..4 {
                 let (at, normal) =
                     torso_surface_frame(skin, Vec2::new(0.0, 0.12 + k as f32 * 0.065), true);
                 p.metal
-                    .blob(at + normal * 0.012, Vec3::splat(0.012), 0, 0.0, GILT);
+                    .blob(at + normal * 0.012, Vec3::splat(0.012), 0, 0.0, buttons);
             }
-            fitted_band(&mut p.satin, skin, 0.035, 0.07, 0.008, LEATHER * 0.6);
+            fitted_band(&mut p.satin, skin, 0.035, 0.07, 0.008, belt);
         }
-        Style::Nymph => {
+        TorsoOrnament::LeafBodice { leaves, pin } => {
             // A bodice of overlapping leaves, pinned with a gilt diamond.
             for k in 0..9 {
                 let x = ((k % 3) as f32 - 1.0) * 0.07 * b;
@@ -316,7 +512,7 @@ pub(super) fn torso_details(
                     dir + normal * 0.25,
                     0.08,
                     0.032,
-                    l.cloth * (0.85 + 0.3 * rand(98, k)),
+                    leaves * (0.85 + 0.3 * rand(98, k)),
                 );
             }
             let (at, normal) = torso_surface_frame(skin, Vec2::new(0.0, 0.1), true);
@@ -325,25 +521,20 @@ pub(super) fn torso_details(
                 Vec3::new(0.022, 0.03, 0.01),
                 0,
                 0.0,
-                l.trim,
+                pin,
             );
         }
-        Style::Medusa => {
+        TorsoOrnament::NeckBandAndDisc { metal } => {
             // A gilt neckline and a bronze disc at the waist.
-            fitted_band(&mut p.metal, skin, 0.42, 0.44, 0.01, l.trim);
+            fitted_band(&mut p.metal, skin, 0.42, 0.44, 0.01, metal);
             let (at, normal) = torso_surface_frame(skin, Vec2::new(0.0, 0.07), true);
             p.metal
-                .torus(at + normal * 0.02, normal, 0.03, 0.01, 14, 4, l.trim);
+                .torus(at + normal * 0.02, normal, 0.03, 0.01, 14, 4, metal);
             p.metal
-                .blob(at + normal * 0.022, Vec3::splat(0.02), 0, 0.0, l.trim * 0.8);
+                .blob(at + normal * 0.022, Vec3::splat(0.02), 0, 0.0, metal * 0.8);
         }
-        Style::Phantom | Style::Wraith => {
+        TorsoOrnament::KnottedSash { sash, scarf } => {
             // A knotted sash binds the torn cloth at the waist.
-            let sash = if l.style == Style::Wraith {
-                l.trim
-            } else {
-                LEATHER * 0.7
-            };
             fitted_band(&mut p.matte, garment, 0.02, 0.07, 0.01, sash);
             let (at, normal) = torso_surface_frame(garment, Vec2::new(0.05 * b, 0.045), true);
             p.matte.blob(
@@ -353,7 +544,7 @@ pub(super) fn torso_details(
                 0.0,
                 sash,
             );
-            if l.style == Style::Wraith {
+            if let Some(color) = scarf {
                 // The cowl of the cloak falls in a long scarf down the front.
                 fitted_ribbon(
                     &mut p.matte,
@@ -365,11 +556,10 @@ pub(super) fn torso_details(
                     ],
                     true,
                     0.016,
-                    l.trim * 0.9,
+                    color,
                 );
             }
         }
-        _ => {}
     }
 }
 
@@ -773,65 +963,9 @@ pub(super) fn biped_extras(
 
 /// A long hooded cloak worn to rags, hanging from the shoulders.
 fn wraith_cloak(kit: &mut Kit, l: &Look, body: HumanoidBody, torso: Entity) {
-    let cloak = l.cloth * 0.8;
-    let lining = l.trim * 0.7;
-    kit.drape(
-        torso,
-        Transform::from_xyz(0.0, 0.53, -0.15),
-        Drape::Cloak,
-        "cloak",
-        |p| {
-            let folds = 7;
-            for k in 0..folds {
-                let t = k as f32 / (folds - 1) as f32 * 2.0 - 1.0;
-                let top = Vec3::new(
-                    t * 0.18 * body.profile.shoulders,
-                    0.0,
-                    -0.01 - 0.02 * (1.0 - t * t),
-                );
-                let drop = 1.1 + 0.12 * rand(96, k);
-                let bottom = Vec3::new(
-                    t * 0.34 * body.profile.hips,
-                    -drop,
-                    -0.15 - 0.05 * (1.0 - t * t),
-                );
-                let mid = top.lerp(bottom, 0.5) + Vec3::new(0.0, 0.0, -0.03);
-                let c = if t.abs() > 0.9 {
-                    lining
-                } else {
-                    cloak * (0.92 + 0.08 * (k as f32 * 2.3).sin())
-                };
-                tube(
-                    &mut p.matte,
-                    &[top, mid, bottom],
-                    &[
-                        (0.045 * body.profile.shoulders, 0.025),
-                        (0.055, 0.03),
-                        (0.05 * body.profile.hips, 0.024),
-                    ],
-                    c,
-                );
-                // Each fold ends in torn rags.
-                strip(
-                    &mut p.matte,
-                    bottom,
-                    Vec3::new(t, 0.0, -1.0),
-                    Vec3::X,
-                    0.18 + 0.1 * rand(97, k),
-                    0.04,
-                    c * 0.9,
-                    41 + k,
-                );
-            }
-            p.matte.blob(
-                Vec3::ZERO,
-                Vec3::new(0.22 * body.profile.shoulders, 0.04, 0.06),
-                2,
-                0.0,
-                cloak,
-            );
-        },
-    );
+    let mut recipe = super::super::cloak::Recipe::new(body, l.cloth * 0.8, l.trim * 0.7, true);
+    recipe.length = 1.2;
+    kit.cloak(torso, recipe);
 }
 
 /// Serpents in place of hair: each its own posable piece rooted in the scalp.
@@ -925,20 +1059,25 @@ fn medusa_serpents(kit: &mut Kit, l: &Look, head: Entity) {
 /// Height of a flier's body above the floor, before its overall scale.
 pub(in crate::creatures) const FLIGHT: f32 = 1.6;
 
-/// A fan of triangles from `center` through the `rim`, its free edges
-/// scalloped between the points like stretched skin. Seen from both sides.
-fn membrane(b: &mut Builder, center: Vec3, rim: &[Vec3], color: Vec3) {
-    for pair in rim.windows(2) {
-        let (a, c) = (pair[0], pair[1]);
-        let scallop = a.lerp(c, 0.5).lerp(center, 0.16);
-        for tri in [[center, a, scallop], [center, scallop, c]] {
-            b.tri(tri, color);
-            b.tri([tri[0], tri[2], tri[1]], color * 0.82);
-        }
+/// Tensioned skin around the anatomical supports, with curved free edges and
+/// real thickness. Explicit facing keeps the same material outside both wings.
+pub(super) fn membrane(b: &mut Builder, center: Vec3, rim: &[Vec3], outward: Vec3, color: Vec3) {
+    let reach = rim.iter().map(|p| p.distance(center)).fold(0.0, f32::max);
+    super::membrane_parts::MembraneFan {
+        center,
+        rim,
+        outward,
+        scallop: 0.16,
+        camber: -reach * 0.027,
+        support_bow: reach * 0.018,
+        thickness: (reach * 0.009).clamp(0.003, 0.008),
     }
+    .emit(b, color);
 }
 
-/// A flat feather from `root` along `dir`, lying across `across`, barred.
+/// A closed feather with two broad vanes around a narrow raised rachis.
+/// Length, width and orientation belong to the wing recipe; thickness follows
+/// width, so small flight feathers and large beast quills share one form.
 #[allow(clippy::too_many_arguments)]
 fn vane(
     b: &mut Builder,
@@ -951,28 +1090,112 @@ fn vane(
     bars: Option<Vec3>,
 ) {
     let dir = dir.normalize_or(Vec3::NEG_Z);
-    let path = [
-        root,
-        root + dir * len * 0.3,
-        root + dir * len * 0.75,
-        root + dir * len,
+    let across =
+        (across - dir * across.dot(dir)).normalize_or(dir.cross(Vec3::Y).normalize_or(Vec3::X));
+    let normal = dir.cross(across);
+    // A narrow insertion, a full vane, then a long taper into one point.
+    const PROFILE: [(f32, f32); 7] = [
+        (0.0, 0.06),
+        (0.12, 0.48),
+        (0.32, 1.0),
+        (0.62, 0.9),
+        (0.82, 0.55),
+        (0.94, 0.16),
+        (1.0, 0.0),
     ];
-    let radii = [
-        Vec2::new(width * 0.35, 0.005),
-        Vec2::new(width, 0.006),
-        Vec2::new(width * 0.9, 0.005),
-        Vec2::new(width * 0.3, 0.002),
+    const STEPS: usize = 32;
+    const SECTION: [(f32, f32); 6] = [
+        (-1.0, 0.0),
+        (-0.045, 1.0),
+        (0.045, 1.0),
+        (1.0, 0.0),
+        (0.045, -1.0),
+        (-0.045, -1.0),
     ];
-    b.tube_framed(
-        &path,
-        &radii,
-        6,
-        &|_, _, t| match bars {
+    let rings: Vec<[Vec3; 6]> = (0..=STEPS)
+        .map(|row| {
+            let t = row as f32 / STEPS as f32;
+            let span = PROFILE.windows(2).find(|s| t <= s[1].0).unwrap();
+            let f = ease((t - span[0].0) / (span[1].0 - span[0].0));
+            let radius = width * (span[0].1 + (span[1].1 - span[0].1) * f);
+            let thickness = radius * 0.12 * (1.0 - 0.35 * t);
+            SECTION
+                .map(|(x, y)| root + dir * len * t + across * radius * x + normal * thickness * y)
+        })
+        .collect();
+    for row in 0..STEPS {
+        let t = (row as f32 + 0.5) / STEPS as f32;
+        let inside = root + dir * len * t;
+        let pigment = match bars {
             Some(bar) if (t * 9.0).fract() < 0.32 && t > 0.15 => bar,
             _ => color * (1.0 - 0.12 * t),
-        },
-        Some(across),
-    );
+        };
+        for column in 0..SECTION.len() {
+            let next = (column + 1) % SECTION.len();
+            let pigment = if column == 1 || column == 4 {
+                color.lerp(BONE, 0.18) * (1.0 - 0.08 * t)
+            } else {
+                pigment
+            };
+            b.quad_out(
+                [
+                    rings[row][column],
+                    rings[row + 1][column],
+                    rings[row + 1][next],
+                    rings[row][next],
+                ],
+                inside,
+                pigment,
+            );
+        }
+    }
+    // Close the inserted shaft. The far end converges to one shared tip, with
+    // no terminal cap or tiny open hole when the wing exposes its underside.
+    for column in 0..SECTION.len() {
+        b.tri_out(
+            [
+                root,
+                rings[0][column],
+                rings[0][(column + 1) % SECTION.len()],
+            ],
+            root + dir,
+            color,
+        );
+    }
+}
+
+/// Short overlapping feathers bridge the arm into its longer secondaries.
+/// The recipes provide the wing plane, while one staggered layout follows
+/// either a spread flight wing or a beast's folded wing.
+fn covert_rows(b: &mut Builder, wrist: Vec3, chord: Vec3, outward: Vec3, width: f32, color: Vec3) {
+    let span = wrist.normalize_or(Vec3::X);
+    let chord = chord.normalize_or(Vec3::NEG_Z);
+    let mut normal = span.cross(chord).normalize_or(outward);
+    if normal.dot(outward) < 0.0 {
+        normal = -normal;
+    }
+    for row in 0..2 {
+        for k in 0..5 {
+            let t = (k as f32 + row as f32 * 0.5) / 5.0;
+            let bow = (PI * t).sin();
+            // Neighboring vanes overlap in plan, so stack their solid shells
+            // instead of intersecting their ridges in one shared plane.
+            let shingle = (k as f32 - 2.0) * 0.3;
+            let root = wrist * t
+                + normal * width * (1.5 - row as f32 * 0.65 + 0.15 * bow + shingle)
+                + chord * width * (row as f32 * 1.35 - 0.6 + 0.6 * bow);
+            vane(
+                b,
+                root,
+                chord + span * (0.3 * (t - 0.5)),
+                width * (3.1 + row as f32 * 0.5 + 0.3 * bow),
+                width,
+                span,
+                color * (0.96 + 0.03 * (k % 2) as f32),
+                None,
+            );
+        }
+    }
 }
 
 /// A bat or a kestrel: a small body held aloft, wings spread to beat.
@@ -1258,29 +1481,24 @@ fn kestrel_head(p: &mut Parts, l: &Look) {
             }
         },
     );
-    // A yellow cere and a dark hooked beak.
     p.matte.blob(
         Vec3::new(0.0, 0.04, 0.075),
-        Vec3::new(0.028, 0.022, 0.02),
-        0,
+        Vec3::new(0.029, 0.023, 0.022),
+        1,
         0.0,
         Vec3::new(0.96, 0.76, 0.22),
     );
-    tube(
+    super::raptor_parts::HookedBeak {
+        root: Vec3::new(0.0, 0.018, 0.087),
+        length: 0.085,
+        half_width: 0.032,
+        depth: 0.046,
+        hook: 0.038,
+    }
+    .emit(
         &mut p.matte,
-        &[
-            Vec3::new(0.0, 0.035, 0.088),
-            Vec3::new(0.0, 0.03, 0.12),
-            Vec3::new(0.0, 0.005, 0.135),
-            Vec3::new(0.0, -0.012, 0.125),
-        ],
-        &[
-            (0.018, 0.016),
-            (0.013, 0.012),
-            (0.007, 0.006),
-            (0.002, 0.002),
-        ],
-        Vec3::new(0.3, 0.32, 0.36),
+        Vec3::new(0.22, 0.24, 0.28),
+        Vec3::new(0.30, 0.31, 0.34),
     );
     animal_eyes(
         p,
@@ -1298,7 +1516,7 @@ fn bat_arm(p: &mut Parts, l: &Look, side: f32, wrist: Vec3) {
     tube(
         &mut p.matte,
         &[Vec3::ZERO, wrist * 0.5 + Vec3::Y * 0.02, wrist],
-        &[(0.022, 0.022), (0.016, 0.016), (0.013, 0.013)],
+        &[(0.030, 0.030), (0.023, 0.023), (0.020, 0.020)],
         bone,
     );
     let flank = Vec3::new(side * 0.01, -0.05, -0.2);
@@ -1307,6 +1525,7 @@ fn bat_arm(p: &mut Parts, l: &Look, side: f32, wrist: Vec3) {
         &mut p.matte,
         Vec3::ZERO,
         &[wrist, trail + (wrist - trail) * 0.1, trail, flank],
+        Vec3::Y,
         l.cloth,
     );
 }
@@ -1324,7 +1543,7 @@ fn bat_hand(p: &mut Parts, l: &Look, side: f32, wrist: Vec3) {
         tube(
             &mut p.matte,
             &[Vec3::ZERO, tip * 0.55 + Vec3::Y * 0.012, tip],
-            &[(0.011, 0.011), (0.008, 0.008), (0.004, 0.004)],
+            &[(0.016, 0.016), (0.012, 0.012), (0.005, 0.005)],
             bone,
         );
     }
@@ -1341,7 +1560,7 @@ fn bat_hand(p: &mut Parts, l: &Look, side: f32, wrist: Vec3) {
     let trail = Vec3::new(side * 0.06, -0.04, -0.26) - wrist;
     let mut rim = tips.to_vec();
     rim.push(trail);
-    membrane(&mut p.matte, Vec3::ZERO, &rim, l.cloth);
+    membrane(&mut p.matte, Vec3::ZERO, &rim, Vec3::Y, l.cloth);
 }
 
 /// The kestrel's arm: rufous spotted coverts over a row of secondaries.
@@ -1350,9 +1569,9 @@ fn kestrel_arm(p: &mut Parts, l: &Look, side: f32, wrist: Vec3) {
     p.matte.tube_framed(
         &[Vec3::ZERO, wrist * 0.5 + Vec3::new(0.0, 0.015, 0.0), wrist],
         &[
-            Vec2::new(0.06, 0.02),
-            Vec2::new(0.07, 0.018),
-            Vec2::new(0.035, 0.014),
+            Vec2::new(0.036, 0.028),
+            Vec2::new(0.040, 0.024),
+            Vec2::new(0.025, 0.018),
         ],
         8,
         &|_, at, _| {
@@ -1363,6 +1582,14 @@ fn kestrel_arm(p: &mut Parts, l: &Look, side: f32, wrist: Vec3) {
             }
         },
         Some(Vec3::Z),
+    );
+    covert_rows(
+        &mut p.matte,
+        wrist,
+        Vec3::new(side * 0.15, -0.04, -1.0),
+        Vec3::Y,
+        0.032,
+        back,
     );
     for k in 0..6 {
         let t = (k as f32 + 0.5) / 6.0;
@@ -1425,6 +1652,18 @@ struct Leg {
     /// Radii at the hip, the knee and the ankle.
     radii: [f32; 3],
     foot: Foot,
+    /// Explicit elbow/knee and wrist/ankle vectors for a bent limb recipe.
+    /// None preserves the straight grounded families' established construction.
+    bent: Option<[Vec3; 2]>,
+    role: LimbRole,
+}
+
+impl Leg {
+    fn segments(self, side: f32) -> [Vec3; 2] {
+        self.bent
+            .unwrap_or([Vec3::Y * -self.upper, Vec3::new(0.0, -self.lower, ANKLE_Z)])
+            .map(|v| Vec3::new(v.x * side, v.y, v.z))
+    }
 }
 
 /// Height of the body joint, and the depth of each foot below its ankle.
@@ -1444,43 +1683,98 @@ fn stance(style: Style) -> Stance {
         lower,
         radii,
         foot,
+        bent: None,
+        role: LimbRole::Support,
     };
     let mut s = match style {
         // Storybook beasts stand on short, heavy legs under big bodies.
         Style::Griffin => Stance {
-            body: 0.68,
+            body: 0.62,
             depth: 0.07,
-            front: leg(0.15, 0.34, 0.26, 0.25, [0.12, 0.07, 0.05], Foot::Talon),
-            back: leg(0.16, -0.36, 0.28, 0.26, [0.15, 0.09, 0.07], Foot::Paw),
+            front: Leg {
+                bent: Some([Vec3::new(0.0, -0.22, -0.025), Vec3::new(0.0, -0.18, 0.045)]),
+                ..leg(0.17, 0.33, 0.22, 0.18, [0.135, 0.075, 0.06], Foot::Talon)
+            },
+            back: Leg {
+                bent: Some([Vec3::new(0.0, -0.23, 0.08), Vec3::new(0.0, -0.19, -0.06)]),
+                ..leg(0.18, -0.34, 0.23, 0.19, [0.17, 0.095, 0.075], Foot::Paw)
+            },
         },
         Style::Dragon => Stance {
-            body: 0.66,
+            body: 0.60,
             depth: 0.06,
-            front: leg(0.19, 0.3, 0.26, 0.24, [0.13, 0.085, 0.07], Foot::Claw),
-            back: leg(0.2, -0.34, 0.28, 0.26, [0.16, 0.095, 0.075], Foot::Claw),
+            front: Leg {
+                bent: Some([
+                    Vec3::new(0.04, -0.22, -0.05),
+                    Vec3::new(-0.015, -0.18, 0.08),
+                ]),
+                ..leg(0.20, 0.29, 0.22, 0.18, [0.15, 0.095, 0.08], Foot::Claw)
+            },
+            back: Leg {
+                bent: Some([
+                    Vec3::new(0.035, -0.24, 0.13),
+                    Vec3::new(-0.02, -0.19, -0.10),
+                ]),
+                ..leg(0.22, -0.34, 0.24, 0.19, [0.185, 0.105, 0.085], Foot::Claw)
+            },
         },
         Style::Jabberwock => Stance {
-            body: 0.8,
+            body: 0.62,
             depth: 0.06,
-            front: leg(0.22, 0.3, 0.46, 0.42, [0.11, 0.075, 0.06], Foot::Claw),
-            back: leg(0.18, -0.32, 0.34, 0.32, [0.14, 0.09, 0.07], Foot::Claw),
+            front: Leg {
+                hip: Vec3::new(0.24, 0.48, 0.19),
+                bent: Some([
+                    Vec3::new(0.035, -0.30, -0.11),
+                    Vec3::new(0.025, -0.31, 0.24),
+                ]),
+                role: LimbRole::Grasp,
+                ..leg(0.24, 0.19, 0.30, 0.31, [0.145, 0.085, 0.065], Foot::Claw)
+            },
+            back: Leg {
+                bent: Some([Vec3::new(0.0, -0.28, 0.18), Vec3::new(0.0, -0.28, -0.16)]),
+                ..leg(0.19, -0.28, 0.28, 0.28, [0.19, 0.10, 0.075], Foot::Claw)
+            },
         },
         Style::Aquator => Stance {
             body: 0.42,
             depth: 0.05,
-            front: leg(0.2, 0.22, 0.17, 0.16, [0.075, 0.052, 0.046], Foot::Webbed),
-            back: leg(0.21, -0.22, 0.18, 0.16, [0.085, 0.055, 0.048], Foot::Webbed),
+            front: Leg {
+                bent: Some([Vec3::new(0.10, -0.16, -0.05), Vec3::new(0.045, -0.15, 0.08)]),
+                ..leg(0.235, 0.20, 0.16, 0.15, [0.12, 0.075, 0.06], Foot::Webbed)
+            },
+            back: Leg {
+                bent: Some([
+                    Vec3::new(0.13, -0.13, 0.12),
+                    Vec3::new(-0.025, -0.17, -0.08),
+                ]),
+                ..leg(0.245, -0.22, 0.13, 0.17, [0.17, 0.085, 0.065], Foot::Webbed)
+            },
         },
         _ => Stance {
             body: 0.38,
             depth: 0.06,
-            front: leg(0.2, 0.2, 0.14, 0.14, [0.08, 0.072, 0.07], Foot::Stump),
-            back: leg(0.2, -0.2, 0.14, 0.14, [0.085, 0.074, 0.07], Foot::Stump),
+            front: Leg {
+                bent: Some([
+                    Vec3::new(0.11, -0.115, -0.05),
+                    Vec3::new(0.035, -0.125, 0.055),
+                ]),
+                ..leg(0.22, 0.20, 0.115, 0.125, [0.125, 0.085, 0.075], Foot::Stump)
+            },
+            back: Leg {
+                bent: Some([
+                    Vec3::new(0.11, -0.115, 0.05),
+                    Vec3::new(0.035, -0.125, -0.025),
+                ]),
+                ..leg(0.22, -0.22, 0.115, 0.125, [0.135, 0.09, 0.075], Foot::Stump)
+            },
         },
     };
     // Each hip sits where its sole meets the floor beneath the body joint.
     for l in [&mut s.front, &mut s.back] {
-        l.hip.y = l.upper + l.lower + s.depth - s.body;
+        if l.role == LimbRole::Support {
+            let segments = l.segments(1.0);
+            l.hip.y = -segments[0].y - segments[1].y + s.depth - s.body;
+        }
     }
     s
 }
@@ -1490,15 +1784,23 @@ pub(super) fn beast(kit: &mut Kit, lift: Entity, look: &Look) {
     let l = look.clone();
     let style = l.style;
     let s = stance(style);
+    kit.rig.limb_roles = [s.front.role, s.front.role, s.back.role, s.back.role];
     kit.rig.ankle_floor = s.depth + 0.008;
-    kit.rig.legs = (s.front.upper + s.front.lower) / 0.84;
+    let support = if s.front.role == LimbRole::Support {
+        s.front
+    } else {
+        s.back
+    };
+    kit.rig.legs = (support.upper + support.lower) / 0.84;
     // Shorter legs take shorter strides: a horse's reach at 0.85 cycles a
     // cell, scaled to these legs, so planted feet stay within reach.
     kit.rig.stride = kit.rig.stride.max(0.85 / kit.rig.legs);
     kit.rig.girth = match style {
         Style::Aquator => 0.33,
         Style::Xeroc => 0.36,
-        Style::Dragon => 0.28,
+        Style::Dragon => 0.43,
+        Style::Griffin => 0.30,
+        Style::Jabberwock => 0.32,
         _ => 0.24,
     };
     let body = kit.joint(J::Body, lift, Vec3::Y * s.body, "body", |p| match style {
@@ -1509,9 +1811,9 @@ pub(super) fn beast(kit: &mut Kit, lift: Entity, look: &Look) {
         _ => xeroc_body(p, &l),
     });
     let (neck_at, head_at) = match style {
-        Style::Griffin => (Vec3::new(0.0, 0.16, 0.42), Vec3::new(0.0, 0.24, 0.16)),
-        Style::Dragon => (Vec3::new(0.0, 0.14, 0.5), Vec3::new(0.0, 0.42, 0.26)),
-        Style::Jabberwock => (Vec3::new(0.0, 0.44, 0.34), Vec3::new(0.0, 0.3, 0.3)),
+        Style::Griffin => (Vec3::new(0.0, 0.13, 0.36), Vec3::new(0.0, 0.27, 0.14)),
+        Style::Dragon => (Vec3::new(0.0, 0.14, 0.40), Vec3::new(0.0, 0.34, 0.20)),
+        Style::Jabberwock => (Vec3::new(0.0, 0.50, 0.20), Vec3::new(0.0, 0.34, 0.20)),
         Style::Aquator => (Vec3::new(0.0, 0.06, 0.3), Vec3::new(0.0, 0.02, 0.06)),
         _ => (Vec3::new(0.0, 0.0, 0.34), Vec3::new(0.0, 0.02, 0.06)),
     };
@@ -1520,12 +1822,17 @@ pub(super) fn beast(kit: &mut Kit, lift: Entity, look: &Look) {
         Style::Dragon | Style::Jabberwock => scaled_neck(p, &l, head_at),
         _ => {}
     });
-    let head = kit.joint(J::Head, neck, head_at, "head", |p| match style {
-        Style::Griffin => griffin_head(p, &l),
-        Style::Dragon => dragon_head(p, &l),
-        Style::Jabberwock => jabberwock_head(p, &l),
-        Style::Aquator => aquator_head(p, &l),
-        _ => xeroc_head(p, &l),
+    let head = kit.joint(J::Head, neck, head_at, "head", |p| {
+        if matches!(style, Style::Dragon | Style::Jabberwock) {
+            p.set_transform(Affine3A::from_scale(ReptileHead::resolve(style).scale));
+        }
+        match style {
+            Style::Griffin => griffin_head(p, &l),
+            Style::Dragon => dragon_head(p, &l),
+            Style::Jabberwock => jabberwock_head(p, &l),
+            Style::Aquator => aquator_head(p, &l),
+            _ => xeroc_head(p, &l),
+        }
     });
     if matches!(
         style,
@@ -1534,7 +1841,7 @@ pub(super) fn beast(kit: &mut Kit, lift: Entity, look: &Look) {
         let jaw_at = match style {
             Style::Xeroc => Vec3::new(0.0, -0.02, 0.0),
             Style::Aquator => Vec3::new(0.0, -0.02, 0.02),
-            _ => Vec3::new(0.0, -0.02, 0.02),
+            _ => ReptileHead::resolve(style).hinge(),
         };
         kit.joint(J::Jaw, head, jaw_at, "jaw", |p| beast_jaw(p, &l));
     }
@@ -1562,10 +1869,15 @@ pub(super) fn beast(kit: &mut Kit, lift: Entity, look: &Look) {
     ];
     for (thigh, shin, foot, side, front, tag) in legs {
         let leg = if front { s.front } else { s.back };
+        let [upper_vector, lower_vector] = leg.segments(side);
         let hip = Vec3::new(side * leg.hip.x, leg.hip.y, leg.hip.z);
         let (upper_color, lower_color) = leg_colors(&l, front);
         let upper = kit.joint(thigh, body, hip, &format!("leg{tag}"), |p| {
             let [r0, r1, _] = leg.radii;
+            if leg.bent.is_some() {
+                profiled_segment(&mut p.matte, upper_vector, r0, r0 * 1.08, r1, upper_color);
+                return;
+            }
             p.matte.tube(
                 &[
                     Vec3::Y * leg.upper * 0.35,
@@ -1588,37 +1900,122 @@ pub(super) fn beast(kit: &mut Kit, lift: Entity, look: &Look) {
                 upper_color,
             );
         });
-        let lower = kit.joint(
-            shin,
-            upper,
-            Vec3::Y * -leg.upper,
-            &format!("shin{tag}"),
-            |p| {
-                let [_, r1, r2] = leg.radii;
-                p.matte.tube(
-                    &[
-                        Vec3::ZERO,
-                        Vec3::new(0.0, -leg.lower * 0.5, 0.008),
-                        Vec3::new(0.0, -leg.lower, ANKLE_Z),
-                    ],
-                    &[
-                        Vec2::splat(r1),
-                        Vec2::splat((r1 + r2) * 0.5),
-                        Vec2::splat(r2),
-                    ],
-                    12,
-                    &|_, _, t| upper_color.lerp(lower_color, ease(t * 2.0)),
-                );
-            },
+        let lower = kit.joint(shin, upper, upper_vector, &format!("shin{tag}"), |p| {
+            let [_, r1, r2] = leg.radii;
+            if leg.bent.is_some() {
+                profiled_segment(&mut p.matte, lower_vector, r1, r1 * 1.15, r2, lower_color);
+                return;
+            }
+            p.matte.tube(
+                &[
+                    Vec3::ZERO,
+                    Vec3::new(0.0, -leg.lower * 0.5, 0.008),
+                    Vec3::new(0.0, -leg.lower, ANKLE_Z),
+                ],
+                &[
+                    Vec2::splat(r1),
+                    Vec2::splat((r1 + r2) * 0.5),
+                    Vec2::splat(r2),
+                ],
+                12,
+                &|_, _, t| upper_color.lerp(lower_color, ease(t * 2.0)),
+            );
+        });
+        kit.joint(foot, lower, lower_vector, &format!("foot{tag}"), |p| {
+            if leg.role == LimbRole::Grasp {
+                claw_palm(&mut p.matte, side, 0.11, 0.105, lower_color, DARK * 2.2);
+            } else {
+                beast_foot(p, &l, leg.foot, s.depth, leg.radii[2], lower_color);
+            }
+        });
+    }
+}
+
+/// A connected muscular segment around an authored bone vector. The broad
+/// proximal belly narrows into a small joint instead of a cylindrical post.
+fn profiled_segment(b: &mut Builder, end: Vec3, root: f32, belly: f32, joint: f32, color: Vec3) {
+    let core_path = [-0.16, 0.08, 0.34, 0.72, 1.04].map(|t| end * t);
+    let core_radii = [
+        Vec2::new(root * 0.72, root * 0.68),
+        Vec2::new(root, root * 0.9),
+        Vec2::new(belly, belly * 0.86),
+        Vec2::new(joint * 1.35, joint * 1.2),
+        Vec2::new(joint, joint),
+    ];
+    let axis = end.normalize_or(Vec3::NEG_Y);
+    let mut path = Vec::with_capacity(13);
+    let mut radii = Vec::with_capacity(13);
+    // Flesh terminates in shallow elliptical domes. When a bent joint exposes
+    // either end, it reveals a rounded surface instead of a flat tube disk.
+    // Keep the authored muscle/joint rings and all rig landmarks unchanged.
+    for i in (1..=4).rev() {
+        let angle = i as f32 * FRAC_PI_2 / 4.0;
+        path.push(core_path[0] - axis * root * 0.55 * angle.sin());
+        radii.push(core_radii[0] * angle.cos().max(0.0));
+    }
+    path.extend(core_path);
+    radii.extend(core_radii);
+    for i in 1..=4 {
+        let angle = i as f32 * FRAC_PI_2 / 4.0;
+        path.push(core_path[4] + axis * joint * 0.55 * angle.sin());
+        radii.push(core_radii[4] * angle.cos().max(0.0));
+    }
+    b.tube_framed(&path, &radii, 16, &|_, _, _| color, Some(Vec3::X));
+}
+
+/// A hanging, opposable claw hand: broad palm, four separate curved fingers,
+/// and a thumb opposing them. Width and palm length are recipe dimensions.
+fn claw_palm(b: &mut Builder, side: f32, width: f32, length: f32, skin: Vec3, claw: Vec3) {
+    b.blob(
+        Vec3::new(0.0, -length * 0.65, 0.0),
+        Vec3::new(width, length * 0.9, width * 0.48),
+        3,
+        0.0,
+        skin,
+    );
+    for finger in 0..4 {
+        let across = (finger as f32 - 1.5) / 1.5;
+        let x = across * width * 0.72;
+        let reach = length * (1.15 - across.abs() * 0.12);
+        let root = Vec3::new(x, -length * 1.15, 0.008);
+        let knuckle = root + Vec3::new(across * width * 0.16, -reach * 0.56, 0.025);
+        let tip = root + Vec3::new(across * width * 0.22, -reach, 0.055);
+        tube(
+            b,
+            &[root, knuckle, tip],
+            &[(0.028, 0.026), (0.025, 0.023), (0.016, 0.017)],
+            skin,
         );
-        kit.joint(
-            foot,
-            lower,
-            Vec3::new(0.0, -leg.lower, ANKLE_Z),
-            &format!("foot{tag}"),
-            |p| beast_foot(p, &l, leg.foot, s.depth, leg.radii[2], lower_color),
+        tube(
+            b,
+            &[
+                tip,
+                tip + Vec3::new(0.0, -0.032, 0.036),
+                tip + Vec3::new(0.0, -0.028, 0.075),
+            ],
+            &[(0.019, 0.018), (0.013, 0.012), (0.001, 0.001)],
+            claw,
         );
     }
+    let root = Vec3::new(-side * width * 0.8, -length * 0.45, 0.0);
+    let middle = root + Vec3::new(-side * width * 0.65, -length * 0.45, 0.03);
+    let tip = root + Vec3::new(-side * width * 0.55, -length * 0.95, 0.065);
+    tube(
+        b,
+        &[root, middle, tip],
+        &[(0.036, 0.032), (0.029, 0.027), (0.018, 0.018)],
+        skin,
+    );
+    tube(
+        b,
+        &[
+            tip,
+            tip + Vec3::new(side * 0.02, -0.02, 0.032),
+            tip + Vec3::new(side * 0.052, -0.012, 0.055),
+        ],
+        &[(0.021, 0.019), (0.012, 0.011), (0.001, 0.001)],
+        claw,
+    );
 }
 
 fn tail_root(style: Style) -> Vec3 {
@@ -1634,7 +2031,7 @@ fn leg_colors(l: &Look, front: bool) -> (Vec3, Vec3) {
     match l.style {
         // Eagle forelegs: feathered above, yellow-brown scaly shanks below.
         Style::Griffin if front => (l.cloth, Vec3::new(0.62, 0.46, 0.2)),
-        Style::Xeroc => (l.skin, l.cloth * 0.9),
+        Style::Xeroc => (l.skin, l.skin),
         _ => (l.skin, l.skin * 0.92),
     }
 }
@@ -1645,18 +2042,17 @@ fn beast_foot(p: &mut Parts, l: &Look, foot: Foot, depth: f32, ankle: f32, color
     let sole = -depth;
     match foot {
         Foot::Talon => {
-            p.matte.blob(
-                Vec3::Y * sole * 0.6,
-                Vec3::splat(ankle * 1.2),
-                1,
-                0.0,
+            grounded_pad(
+                &mut p.matte,
+                depth,
+                Vec2::new(ankle * 1.2, ankle * 1.15),
                 color,
             );
             for (x, z) in [
-                (-0.045f32, 0.09f32),
-                (0.0, 0.11),
-                (0.045, 0.09),
-                (0.0, -0.06),
+                (-0.075f32, 0.105f32),
+                (0.0, 0.13),
+                (0.075, 0.105),
+                (0.0, -0.08),
             ] {
                 let tip = Vec3::new(x, sole + 0.012, z);
                 tube(
@@ -1702,66 +2098,104 @@ fn beast_foot(p: &mut Parts, l: &Look, foot: Foot, depth: f32, ankle: f32, color
                 );
             }
         }
-        Foot::Claw | Foot::Webbed => {
-            let webbed = foot == Foot::Webbed;
-            p.matte.blob(
-                Vec3::new(0.0, sole * 0.6, 0.02),
-                Vec3::new(ankle * 1.25, depth * 0.5, ankle * 1.5),
-                1,
-                0.0,
+        Foot::Claw => {
+            grounded_pad(
+                &mut p.matte,
+                depth,
+                Vec2::new(ankle * 1.4, ankle * 1.55),
                 color,
             );
-            let toes: Vec<Vec3> = (0..4)
+            let root = Vec3::new(0.0, sole + 0.033, 0.025);
+            for k in 0..4 {
+                let a = (k as f32 - 1.5) * 0.50;
+                let tip = Vec3::new(a.sin() * 0.145, sole + 0.018, a.cos() * 0.145 + 0.03);
+                let start = root + Vec3::X * (k as f32 - 1.5) * 0.018;
+                tube(
+                    &mut p.matte,
+                    &[start, start.lerp(tip, 0.55) + Vec3::Y * 0.012, tip],
+                    &[(0.033, 0.025), (0.026, 0.020), (0.019, 0.016)],
+                    color * (0.95 + 0.03 * k as f32),
+                );
+                let out = (tip - start).with_y(0.0).normalize_or(Vec3::Z);
+                tube(
+                    &mut p.matte,
+                    &[
+                        tip,
+                        tip + out * 0.035 + Vec3::Y * 0.004,
+                        tip + out * 0.055 - Vec3::Y * 0.018,
+                    ],
+                    &[(0.015, 0.013), (0.009, 0.008), (0.001, 0.001)],
+                    claw,
+                );
+            }
+        }
+        Foot::Webbed => {
+            // A broad low palm carries the web, rather than four thin toes
+            // sprouting from a narrow ankle. The fan remains below the ankle.
+            grounded_pad(&mut p.matte, depth, Vec2::new(0.115, 0.10), color);
+            let root = Vec3::new(0.0, sole + 0.022, 0.025);
+            let toes: Vec<_> = (0..4)
                 .map(|k| {
-                    let a = (k as f32 - 1.5) * if webbed { 0.42 } else { 0.32 };
-                    Vec3::new(a.sin() * 0.11, sole + 0.012, a.cos() * 0.11 + 0.02)
+                    let a = (k as f32 - 1.5) * 0.49;
+                    Vec3::new(a.sin() * 0.18, sole + 0.014, a.cos() * 0.18 + 0.025)
                 })
                 .collect();
             for (k, tip) in toes.iter().enumerate() {
-                let root = Vec3::new(0.0, sole * 0.6, 0.02);
                 tube(
                     &mut p.matte,
-                    &[root, root.lerp(*tip, 0.6) + Vec3::Y * 0.01, *tip],
-                    &[(0.022, 0.018), (0.017, 0.014), (0.012, 0.01)],
+                    &[
+                        root + Vec3::X * (k as f32 - 1.5) * 0.025,
+                        root.lerp(*tip, 0.55) + Vec3::Y * 0.012,
+                        *tip,
+                    ],
+                    &[(0.028, 0.022), (0.024, 0.018), (0.016, 0.014)],
                     color * (0.95 + 0.03 * k as f32),
                 );
-                let out = (*tip - root).with_y(0.0).normalize_or(Vec3::Z);
-                let tip_color = if webbed { l.trim } else { claw };
-                tube(
-                    &mut p.matte,
-                    &[*tip, *tip + out * 0.03, *tip + out * 0.05 - Vec3::Y * 0.012],
-                    &[(0.01, 0.009), (0.007, 0.006), (0.001, 0.001)],
-                    tip_color,
+                p.matte.blob(
+                    *tip + Vec3::Z * 0.012,
+                    Vec3::new(0.021, 0.014, 0.026),
+                    1,
+                    0.0,
+                    l.trim,
                 );
             }
-            if webbed {
-                let center = Vec3::new(0.0, sole + 0.008, 0.02);
-                membrane(&mut p.matte, center, &toes, l.skin * 0.6);
-            }
+            membrane(
+                &mut p.matte,
+                root - Vec3::Y * 0.01,
+                &toes,
+                Vec3::Y,
+                l.skin * 0.6,
+            );
         }
         Foot::Stump => {
-            p.matte.tube(
-                &[Vec3::Y * 0.01, Vec3::Y * sole * 0.5, Vec3::Y * sole],
-                &[
-                    Vec2::splat(ankle),
-                    Vec2::splat(ankle * 1.12),
-                    Vec2::splat(ankle * 1.2),
-                ],
-                12,
-                &|_, _, _| color,
-            );
+            grounded_pad(&mut p.matte, depth, Vec2::new(0.125, 0.115), color);
             for k in 0..3 {
-                let a = (k as f32 - 1.0) * 0.5;
+                let x = (k as f32 - 1.0) * 0.075;
                 p.matte.blob(
-                    Vec3::new(a.sin() * ankle * 1.1, sole + 0.012, a.cos() * ankle * 1.1),
-                    Vec3::new(0.018, 0.012, 0.012),
-                    0,
+                    Vec3::new(x, sole + 0.022, 0.13 - x.abs() * 0.25),
+                    Vec3::new(0.039, 0.022, 0.045),
+                    1,
                     0.0,
                     BONE * 0.85,
                 );
             }
         }
     }
+}
+
+/// A low load-bearing palm/sole shared by webbed and blunt crawling feet.
+/// Its bottom ring is planar at the foot's authored ground-contact depth.
+fn grounded_pad(b: &mut Builder, depth: f32, extent: Vec2, color: Vec3) {
+    b.tube(
+        &[
+            Vec3::new(0.0, 0.0, 0.025),
+            Vec3::new(0.0, -depth * 0.6, 0.025),
+            Vec3::new(0.0, -depth, 0.025),
+        ],
+        &[extent * 0.55, extent, extent * 0.96],
+        16,
+        &|_, _, _| color,
+    );
 }
 
 /// A row of dorsal spines or frills from `from` to `to`, shortening at both ends.
@@ -1803,22 +2237,33 @@ fn griffin_body(p: &mut Parts, l: &Look) {
     let mut torso = Sculpt::default();
     torso
         .add(
-            Ellipsoid(Vec3::new(0.0, -0.01, -0.05), Vec3::new(0.22, 0.24, 0.46)),
+            Ellipsoid(Vec3::new(0.0, -0.01, -0.05), Vec3::new(0.24, 0.255, 0.43)),
             0.0,
         )
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.03, 0.3), Vec3::new(0.24, 0.27, 0.24)),
+            Ellipsoid(Vec3::new(0.0, 0.03, 0.3), Vec3::new(0.265, 0.29, 0.24)),
             0.08,
         )
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.02, -0.38), Vec3::new(0.23, 0.24, 0.22)),
+            Ellipsoid(Vec3::new(0.0, 0.02, -0.38), Vec3::new(0.255, 0.26, 0.23)),
             0.07,
         );
+    // Feathered shoulders continue into the upper forelegs, concealing their
+    // insertion inside the breast instead of presenting separate capped posts.
+    for side in [-1.0, 1.0] {
+        torso.add(
+            Ellipsoid(
+                Vec3::new(side * 0.17, -0.10, 0.31),
+                Vec3::new(0.14, 0.19, 0.16),
+            ),
+            0.055,
+        );
+    }
     let (lion, feathers) = (l.skin, l.cloth);
     torso.mesh(
         &mut p.matte,
-        Vec3::new(-0.3, -0.3, -0.66),
-        Vec3::new(0.3, 0.32, 0.56),
+        Vec3::new(-0.33, -0.32, -0.66),
+        Vec3::new(0.33, 0.35, 0.58),
         0.012,
         &|at, normal| {
             // Feathers cover the eagle forequarters; the lion begins behind.
@@ -1848,29 +2293,46 @@ fn dragon_body(p: &mut Parts, l: &Look) {
     let mut torso = Sculpt::default();
     torso
         .add(
-            Ellipsoid(Vec3::new(0.0, -0.01, -0.06), Vec3::new(0.27, 0.27, 0.52)),
+            Ellipsoid(Vec3::new(0.0, -0.015, -0.05), Vec3::new(0.285, 0.285, 0.46)),
             0.0,
         )
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.02, 0.3), Vec3::new(0.25, 0.27, 0.24)),
+            Ellipsoid(Vec3::new(0.0, 0.025, 0.29), Vec3::new(0.26, 0.28, 0.24)),
             0.08,
         )
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.0, -0.4), Vec3::new(0.27, 0.27, 0.24)),
+            Ellipsoid(Vec3::new(0.0, 0.015, -0.37), Vec3::new(0.27, 0.28, 0.24)),
             0.08,
         );
+    for side in [-1.0, 1.0] {
+        torso
+            .add(
+                Ellipsoid(
+                    Vec3::new(side * 0.20, -0.09, 0.29),
+                    Vec3::new(0.17, 0.22, 0.20),
+                ),
+                0.055,
+            )
+            .add(
+                Ellipsoid(
+                    Vec3::new(side * 0.18, -0.08, -0.34),
+                    Vec3::new(0.19, 0.24, 0.24),
+                ),
+                0.055,
+            );
+    }
     let (red, belly) = (l.skin, l.cloth);
     torso.mesh(
         &mut p.matte,
-        Vec3::new(-0.34, -0.32, -0.7),
-        Vec3::new(0.34, 0.32, 0.58),
+        Vec3::new(-0.43, -0.37, -0.68),
+        Vec3::new(0.43, 0.36, 0.59),
         0.012,
         &|at, normal| scaled(red, belly, at, normal),
     );
     spines(
         &mut p.matte,
-        Vec3::new(0.0, 0.25, 0.42),
-        Vec3::new(0.0, 0.22, -0.56),
+        Vec3::new(0.0, 0.27, 0.40),
+        Vec3::new(0.0, 0.25, -0.55),
         9,
         0.1,
         l.cloth * 0.9,
@@ -1878,31 +2340,49 @@ fn dragon_body(p: &mut Parts, l: &Look) {
 }
 
 fn jabberwock_body(p: &mut Parts, l: &Look) {
-    // Hips low behind, the chest rearing high in front.
+    // A low, weight-bearing pelvis carries a tapering abdomen and high chest.
+    // Scapulae overlap the free arm roots; haunches overlap the bent hind legs.
     let mut torso = Sculpt::default();
     torso
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.0, -0.28), Vec3::new(0.22, 0.23, 0.27)),
+            Ellipsoid(Vec3::new(0.0, 0.015, -0.27), Vec3::new(0.25, 0.26, 0.30)),
             0.0,
         )
         .add(
             Capsule(
-                Vec3::new(0.0, 0.02, -0.2),
-                Vec3::new(0.0, 0.3, 0.22),
-                0.21,
-                0.22,
+                Vec3::new(0.0, 0.07, -0.19),
+                Vec3::new(0.0, 0.35, 0.12),
+                0.18,
+                0.23,
             ),
             0.08,
         )
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.32, 0.26), Vec3::new(0.26, 0.27, 0.22)),
+            Ellipsoid(Vec3::new(0.0, 0.39, 0.16), Vec3::new(0.27, 0.28, 0.25)),
             0.08,
         );
+    for side in [-1.0, 1.0] {
+        torso
+            .add(
+                Ellipsoid(
+                    Vec3::new(side * 0.20, 0.41, 0.14),
+                    Vec3::new(0.15, 0.20, 0.20),
+                ),
+                0.055,
+            )
+            .add(
+                Ellipsoid(
+                    Vec3::new(side * 0.15, -0.025, -0.27),
+                    Vec3::new(0.17, 0.22, 0.24),
+                ),
+                0.055,
+            );
+    }
     let (green, belly) = (l.skin, l.cloth);
     torso.mesh(
         &mut p.matte,
-        Vec3::new(-0.32, -0.28, -0.6),
-        Vec3::new(0.32, 0.62, 0.52),
+        Vec3::new(-0.39, -0.29, -0.62),
+        Vec3::new(0.39, 0.72, 0.49),
         0.012,
         &|at, normal| {
             if normal.z > 0.35 && at.z > 0.0 && at.x.abs() < 0.16 {
@@ -1915,7 +2395,7 @@ fn jabberwock_body(p: &mut Parts, l: &Look) {
     // Orange frills along the spine, and scale-feathers at the shoulders.
     spines(
         &mut p.matte,
-        Vec3::new(0.0, 0.54, 0.24),
+        Vec3::new(0.0, 0.64, 0.12),
         Vec3::new(0.0, 0.2, -0.5),
         10,
         0.12,
@@ -1923,7 +2403,7 @@ fn jabberwock_body(p: &mut Parts, l: &Look) {
     );
     for side in [-1.0f32, 1.0] {
         for k in 0..5 {
-            let root = Vec3::new(side * 0.22, 0.4 - k as f32 * 0.05, 0.26 - k as f32 * 0.04);
+            let root = Vec3::new(side * 0.27, 0.51 - k as f32 * 0.05, 0.18 - k as f32 * 0.04);
             leaf(
                 &mut p.matte,
                 root,
@@ -1937,21 +2417,40 @@ fn jabberwock_body(p: &mut Parts, l: &Look) {
 }
 
 fn aquator_body(p: &mut Parts, l: &Look) {
+    // A compact amphibian ribcage narrows between the shoulder girdle and
+    // powerful lateral haunches. Limb roots overlap these connected masses.
     let mut torso = Sculpt::default();
     torso
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.04, -0.02), Vec3::new(0.3, 0.24, 0.36)),
+            Ellipsoid(Vec3::new(0.0, 0.025, -0.02), Vec3::new(0.30, 0.21, 0.36)),
             0.0,
         )
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.0, 0.22), Vec3::new(0.27, 0.2, 0.18)),
-            0.08,
+            Ellipsoid(Vec3::new(0.0, -0.06, 0.19), Vec3::new(0.27, 0.15, 0.20)),
+            0.06,
         );
+    for side in [-1.0, 1.0] {
+        torso
+            .add(
+                Ellipsoid(
+                    Vec3::new(side * 0.235, -0.035, 0.18),
+                    Vec3::new(0.13, 0.15, 0.18),
+                ),
+                0.045,
+            )
+            .add(
+                Ellipsoid(
+                    Vec3::new(side * 0.245, -0.035, -0.22),
+                    Vec3::new(0.17, 0.18, 0.22),
+                ),
+                0.055,
+            );
+    }
     let (teal, cream, rust) = (l.skin, l.cloth, l.trim);
     torso.mesh(
         &mut p.matte,
-        Vec3::new(-0.38, -0.26, -0.44),
-        Vec3::new(0.38, 0.32, 0.44),
+        Vec3::new(-0.48, -0.27, -0.47),
+        Vec3::new(0.48, 0.30, 0.44),
         0.012,
         &|at, normal| {
             if normal.y < -0.3 || (normal.z > 0.5 && at.y < 0.05) {
@@ -1969,7 +2468,7 @@ fn aquator_body(p: &mut Parts, l: &Look) {
     // A crest of flexible dorsal gills.
     for k in 0..7 {
         let z = 0.12 - k as f32 * 0.07;
-        let root = Vec3::new(0.0, 0.27 - (k as f32 - 2.0).powi(2) * 0.004, z);
+        let root = torso.onto(Vec3::new(0.0, 0.5, z), Vec3::NEG_Y) - Vec3::Y * 0.006;
         let h = 0.14 - (k as f32 - 2.0).abs() * 0.012;
         p.matte.tube_framed(
             &[
@@ -1990,7 +2489,8 @@ fn aquator_body(p: &mut Parts, l: &Look) {
 }
 
 fn xeroc_body(p: &mut Parts, l: &Look) {
-    // A domed shell of plates over a soft tan underbody.
+    // The connected under-shell supports a few overlapping, thick scutes.
+    // Pigment alone cannot establish the silhouette of an armored creature.
     let mut shell = Sculpt::default();
     shell
         .add(
@@ -2004,19 +2504,24 @@ fn xeroc_body(p: &mut Parts, l: &Look) {
         Vec3::new(-0.4, -0.05, -0.46),
         Vec3::new(0.4, 0.32, 0.46),
         0.011,
-        &|at, _| {
-            // Seams between broad plates.
-            let u = (at.x * 9.0)
-                .sin()
-                .abs()
-                .min((at.z * 8.0 + at.x * 3.0).sin().abs());
-            if u < 0.12 {
-                plate * 0.55
-            } else {
-                plate * (0.95 + 0.08 * (at.z * 13.0).sin())
-            }
-        },
+        &|_, _| plate * 0.63,
     );
+    for row in 0..3 {
+        let z = 0.2 - row as f32 * 0.22;
+        let length = (z + 0.02) / 0.4;
+        let cross = (1.0 - length * length).sqrt();
+        for angle in [-0.86f32, 0.0, 0.86] {
+            ShellPlate::on_ellipsoid(
+                Vec3::new(0.0, 0.08, -0.02),
+                Vec3::new(0.34, 0.2, 0.4),
+                Vec3::new(cross * angle.sin(), cross * angle.cos(), length),
+                Vec2::new(if angle == 0.0 { 0.17 } else { 0.15 }, 0.18),
+                0.035,
+                0.018,
+            )
+            .emit(&mut p.matte, plate * 1.08);
+        }
+    }
     p.matte.blob(
         Vec3::new(0.0, -0.03, 0.0),
         Vec3::new(0.27, 0.1, 0.32),
@@ -2024,151 +2529,157 @@ fn xeroc_body(p: &mut Parts, l: &Look) {
         0.0,
         l.cloth,
     );
-    // The rim of the shell overhangs the body.
-    p.matte.torus(
-        Vec3::new(0.0, 0.0, -0.02),
-        Vec3::Y,
-        0.3,
-        0.035,
-        28,
-        6,
-        plate * 0.8,
-    );
 }
 
 fn griffin_neck(p: &mut Parts, l: &Look, head: Vec3) {
-    p.matte.tube(
-        &[
-            Vec3::new(0.0, -0.06, -0.06),
-            head * 0.5 + Vec3::Z * 0.03,
-            head,
-        ],
-        &[
-            Vec2::new(0.15, 0.17),
-            Vec2::new(0.1, 0.11),
-            Vec2::new(0.085, 0.09),
-        ],
-        12,
-        &|_, _, _| l.cloth,
+    let mut neck = Sculpt::default();
+    neck.add(
+        Ellipsoid(Vec3::new(0.0, -0.055, -0.055), Vec3::new(0.20, 0.18, 0.20)),
+        0.0,
+    )
+    .add(Ellipsoid(head * 0.38, Vec3::new(0.17, 0.17, 0.175)), 0.065)
+    .add(Ellipsoid(head * 0.84, Vec3::new(0.125, 0.14, 0.145)), 0.05);
+    neck.mesh(
+        &mut p.matte,
+        Vec3::new(-0.26, -0.25, -0.28),
+        Vec3::new(0.26, 0.43, 0.36),
+        0.01,
+        &|_, _| l.cloth,
     );
-    for k in 0..10 {
-        let a = k as f32 / 10.0 * TAU;
-        let root = head * 0.45 + Vec3::new(a.sin() * 0.1, 0.0, a.cos() * 0.1);
-        feather(
-            p,
-            root,
-            Vec3::new(a.sin(), 0.0, a.cos()),
-            0.12,
-            0.05,
-            l.cloth * (0.9 + 0.15 * rand(106, k)),
-        );
+    for row in 0..3 {
+        let t = 0.12 + row as f32 * 0.30;
+        for k in 0..9 {
+            let a = (k as f32 + row as f32 * 0.5) / 9.0 * TAU;
+            let radial = Vec3::new(a.sin(), 0.0, a.cos());
+            let root = neck.onto(head * t + radial * 0.45, -radial) + radial * 0.004;
+            let down = (Vec3::NEG_Y + radial * 0.5).normalize();
+            vane(
+                &mut p.matte,
+                root,
+                down,
+                0.16,
+                0.070,
+                Vec3::new(a.cos(), 0.0, -a.sin()),
+                l.cloth * (0.88 + 0.10 * rand(106, k + row * 9)),
+                None,
+            );
+        }
     }
 }
 
 fn scaled_neck(p: &mut Parts, l: &Look, head: Vec3) {
-    let (skin, belly) = (l.skin, l.cloth);
-    p.matte.tube(
-        &[
-            Vec3::new(0.0, -0.08, -0.08),
-            Vec3::new(0.0, head.y * 0.45, head.z * 0.25),
-            Vec3::new(0.0, head.y * 0.85, head.z * 0.7),
-            head,
-        ],
-        &[
-            Vec2::new(0.16, 0.17),
-            Vec2::new(0.12, 0.12),
-            Vec2::new(0.095, 0.1),
-            Vec2::new(0.085, 0.09),
-        ],
-        12,
-        &|dir, at, _| {
-            if dir.z > 0.45 || dir.y < -0.5 {
-                belly
-            } else {
-                scaled(skin, belly, at, dir)
-            }
-        },
-    );
+    let shape = ReptileHead::resolve(l.style);
+    let lobes = [
+        (
+            Vec3::new(0.0, -0.055, -0.055),
+            Vec3::new(0.16, 0.16, 0.17) * shape.scale,
+        ),
+        (head * 0.36, Vec3::new(0.125, 0.145, 0.14) * shape.scale),
+        (head * 0.85, Vec3::new(0.09, 0.12, 0.10) * shape.scale),
+    ];
+    let mut neck = Sculpt::default();
+    let mut low = Vec3::splat(f32::INFINITY);
+    let mut high = Vec3::splat(f32::NEG_INFINITY);
+    for (center, radii) in lobes {
+        neck.add(Ellipsoid(center, radii), 0.055);
+        low = low.min(center - radii - Vec3::splat(0.05));
+        high = high.max(center + radii + Vec3::splat(0.05));
+    }
+    neck.mesh(&mut p.matte, low, high, 0.01, &|at, normal| {
+        if normal.z > 0.45 || normal.y < -0.5 {
+            l.cloth
+        } else {
+            scaled(l.skin, l.cloth, at, normal)
+        }
+    });
     let crest = if l.style == Style::Jabberwock {
         l.trim
     } else {
         l.cloth * 0.9
     };
-    spines(
-        &mut p.matte,
-        Vec3::new(0.0, head.y * 0.3, -0.08),
-        head + Vec3::new(0.0, 0.08, -0.08),
-        6,
-        0.08,
-        crest,
-    );
+    for k in 0..6 {
+        let t = (k as f32 + 0.5) / 6.0;
+        let root = neck.onto(head * t + Vec3::NEG_Z * 0.5, Vec3::Z);
+        spines(
+            &mut p.matte,
+            root,
+            root + Vec3::new(0.0, 0.01, -0.02),
+            1,
+            0.08,
+            crest,
+        );
+    }
 }
 
 fn griffin_head(p: &mut Parts, l: &Look) {
     let mut skull = Sculpt::default();
     skull
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.05, 0.0), Vec3::new(0.1, 0.1, 0.11)),
+            Ellipsoid(Vec3::new(0.0, 0.065, -0.005), Vec3::new(0.15, 0.14, 0.15)),
             0.0,
         )
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.1, 0.06), Vec3::new(0.08, 0.025, 0.05)),
-            0.03,
+            Ellipsoid(Vec3::new(0.0, -0.005, 0.035), Vec3::new(0.13, 0.085, 0.125)),
+            0.045,
+        )
+        .add(
+            Ellipsoid(Vec3::new(0.0, 0.16, 0.07), Vec3::new(0.125, 0.032, 0.075)),
+            0.025,
+        )
+        .add(
+            Ellipsoid(Vec3::new(0.0, 0.075, 0.13), Vec3::new(0.083, 0.05, 0.06)),
+            0.025,
         );
     let frames = animal_eye_sockets(
         &mut skull,
-        Vec3::new(0.0, 0.08, 0.06),
-        0.06,
-        0.02,
-        Vec3::new(0.75, 0.15, 0.64),
+        Vec3::new(0.0, 0.115, 0.08),
+        0.11,
+        0.028,
+        Vec3::new(0.78, 0.16, 0.62),
     );
     let (cream, crown) = (l.cloth, l.skin);
+    let cere = Vec3::new(0.93, 0.67, 0.18);
     skull.mesh(
         &mut p.matte,
-        Vec3::new(-0.13, -0.07, -0.13),
-        Vec3::new(0.13, 0.17, 0.14),
-        0.005,
-        &|_, normal| if normal.y > 0.55 { crown } else { cream },
+        Vec3::new(-0.20, -0.115, -0.19),
+        Vec3::new(0.20, 0.24, 0.215),
+        0.007,
+        &|at, normal| {
+            if at.z > 0.13 && at.y < 0.125 {
+                cere
+            } else if normal.y > 0.65 {
+                crown
+            } else {
+                cream
+            }
+        },
     );
-    // A yellow cere and a great hooked beak.
-    p.matte.blob(
-        Vec3::new(0.0, 0.06, 0.1),
-        Vec3::new(0.04, 0.032, 0.028),
-        0,
-        0.0,
-        Vec3::new(0.95, 0.75, 0.22),
-    );
-    tube(
+    super::raptor_parts::HookedBeak {
+        root: Vec3::new(0.0, 0.045, 0.14),
+        length: 0.175,
+        half_width: 0.068,
+        depth: 0.085,
+        hook: 0.065,
+    }
+    .emit(
         &mut p.matte,
-        &[
-            Vec3::new(0.0, 0.06, 0.11),
-            Vec3::new(0.0, 0.055, 0.17),
-            Vec3::new(0.0, 0.02, 0.21),
-            Vec3::new(0.0, -0.025, 0.19),
-        ],
-        &[(0.034, 0.03), (0.026, 0.022), (0.012, 0.01), (0.002, 0.002)],
-        Vec3::new(0.95, 0.75, 0.22),
+        Vec3::new(0.14, 0.12, 0.10),
+        Vec3::new(0.20, 0.17, 0.13),
     );
-    p.matte.prism(
-        Vec3::new(0.0, 0.01, 0.2),
-        Vec3::new(0.0, -0.025, 0.19),
-        0.01,
-        0.0,
-        4,
-        DARK * 2.0,
-        0.0,
-    );
-    animal_eyes(p, frames, 0.02, Vec3::new(0.85, 0.55, 0.12), cream, None);
-    // Swept-back crest feathers.
-    for k in 0..7 {
-        let x = (k as f32 - 3.0) * 0.02;
-        feather(
-            p,
-            Vec3::new(x, 0.13, -0.04),
-            Vec3::new(x * 2.0, 0.6, -1.0).normalize(),
-            0.12,
-            0.04,
-            crown * (0.9 + 0.12 * rand(107, k)),
+    animal_eyes(p, frames, 0.028, Vec3::new(0.85, 0.55, 0.12), cream, None);
+    // Raised, swept groups follow the skull arc rather than one flat crown plane.
+    for k in 0..5 {
+        let u = (k as f32 - 2.0) / 2.0;
+        let root = Vec3::new(u * 0.10, 0.185 - u.abs() * 0.045, -0.05 - u.abs() * 0.025);
+        vane(
+            &mut p.matte,
+            root,
+            Vec3::new(u * 0.28, 0.85 - u.abs() * 0.25, -1.0),
+            0.17,
+            0.052,
+            Vec3::new(1.0, -u * 0.4, 0.0),
+            crown * (0.9 + 0.1 * rand(107, k)),
+            None,
         );
     }
 }
@@ -2239,7 +2750,7 @@ fn reptile_skull(p: &mut Parts, l: &Look, length: f32) -> Sculpt {
 }
 
 fn dragon_head(p: &mut Parts, l: &Look) {
-    reptile_skull(p, l, 1.0);
+    reptile_skull(p, l, ReptileHead::resolve(l.style).muzzle);
     let horn = Vec3::new(0.36, 0.24, 0.16);
     for side in [-1.0f32, 1.0] {
         tube(
@@ -2270,26 +2781,28 @@ fn dragon_head(p: &mut Parts, l: &Look) {
 }
 
 fn jabberwock_head(p: &mut Parts, l: &Look) {
-    reptile_skull(p, l, 1.25);
+    // A compact predatory skull under swept, branching horns. The long neck,
+    // rather than an elongated crocodile muzzle, carries the head silhouette.
+    reptile_skull(p, l, ReptileHead::resolve(l.style).muzzle);
     let antler = Vec3::new(0.4, 0.26, 0.16);
     for side in [-1.0f32, 1.0] {
         // Branching antler-horns.
         let base = Vec3::new(side * 0.06, 0.12, -0.03);
-        let fork = base + Vec3::new(side * 0.08, 0.12, -0.1);
+        let fork = base + Vec3::new(side * 0.085, 0.08, -0.14);
         tube(
             &mut p.matte,
-            &[base, fork, fork + Vec3::new(side * 0.05, 0.1, -0.12)],
-            &[(0.024, 0.024), (0.018, 0.018), (0.003, 0.003)],
+            &[base, fork, fork + Vec3::new(side * 0.075, 0.07, -0.16)],
+            &[(0.041, 0.037), (0.029, 0.026), (0.003, 0.003)],
             antler,
         );
         tube(
             &mut p.matte,
             &[
                 fork,
-                fork + Vec3::new(side * 0.1, 0.03, 0.02),
-                fork + Vec3::new(side * 0.15, 0.08, 0.06),
+                fork + Vec3::new(side * 0.09, -0.01, -0.015),
+                fork + Vec3::new(side * 0.15, 0.035, -0.055),
             ],
-            &[(0.016, 0.016), (0.012, 0.012), (0.002, 0.002)],
+            &[(0.024, 0.022), (0.017, 0.016), (0.002, 0.002)],
             antler,
         );
         // An orange frill around the face.
@@ -2309,8 +2822,8 @@ fn jabberwock_head(p: &mut Parts, l: &Look) {
     // Two buck teeth jutting from the snout.
     for side in [-1.0f32, 1.0] {
         p.matte.prism(
-            Vec3::new(side * 0.02, 0.0, 0.3),
-            Vec3::new(side * 0.022, -0.06, 0.31),
+            Vec3::new(side * 0.025, 0.0, 0.27),
+            Vec3::new(side * 0.03, -0.07, 0.29),
             0.014,
             0.0,
             4,
@@ -2321,94 +2834,118 @@ fn jabberwock_head(p: &mut Parts, l: &Look) {
 }
 
 fn aquator_head(p: &mut Parts, l: &Look) {
-    // A broad flat amphibian head with small black eyes set on top.
+    // Cheeks and eye hoods belong to the skull rather than separate spheres
+    // perched on a shallow muzzle pad. Keep the species' quiet dark eyes.
     let mut skull = Sculpt::default();
     skull.add(
-        Ellipsoid(Vec3::new(0.0, 0.04, 0.04), Vec3::new(0.22, 0.13, 0.15)),
+        Ellipsoid(Vec3::new(0.0, 0.035, 0.015), Vec3::new(0.27, 0.15, 0.18)),
         0.0,
+    );
+    for side in [-1.0, 1.0] {
+        skull
+            .add(
+                Ellipsoid(
+                    Vec3::new(side * 0.19, -0.005, 0.06),
+                    Vec3::new(0.105, 0.11, 0.15),
+                ),
+                0.04,
+            )
+            .add(
+                Ellipsoid(
+                    Vec3::new(side * 0.18, 0.13, 0.025),
+                    Vec3::new(0.1, 0.085, 0.105),
+                ),
+                0.035,
+            );
+    }
+    skull.carve(
+        Ellipsoid(
+            Vec3::new(0.0, -0.055, 0.175),
+            Vec3::new(0.235, 0.055, 0.115),
+        ),
+        0.012,
+    );
+    let frames = animal_eye_sockets(
+        &mut skull,
+        Vec3::new(0.0, 0.135, 0.04),
+        0.18,
+        0.036,
+        Vec3::new(0.2, 0.55, 0.85),
     );
     let (teal, cream) = (l.skin, l.cloth);
     skull.mesh(
         &mut p.matte,
-        Vec3::new(-0.26, -0.11, -0.13),
-        Vec3::new(0.26, 0.19, 0.22),
+        Vec3::new(-0.34, -0.14, -0.20),
+        Vec3::new(0.34, 0.24, 0.25),
         0.008,
         &|at, normal| {
-            if normal.y < -0.1 && at.z > 0.0 {
+            if normal.y < -0.2 && at.y < -0.035 && at.z > 0.0 {
                 cream
             } else {
                 teal
             }
         },
     );
-    for side in [-1.0f32, 1.0] {
-        let at = Vec3::new(side * 0.1, 0.15, 0.08);
-        p.matte.blob(at, Vec3::splat(0.04), 1, 0.0, teal);
-        p.satin.blob(
-            at + Vec3::new(side * 0.012, 0.012, 0.02),
-            Vec3::splat(0.027),
-            0,
-            0.0,
-            DARK * 1.2,
-        );
-        p.satin.blob(
-            at + Vec3::new(side * 0.02, 0.03, 0.035),
-            Vec3::splat(0.007),
-            0,
-            0.0,
-            Vec3::splat(1.5),
-        );
-    }
+    animal_eyes(p, frames, 0.036, Vec3::new(0.045, 0.055, 0.04), teal, None);
 }
 
 fn xeroc_head(p: &mut Parts, l: &Look) {
-    // A wide skull that is mostly mouth, with yellow slit eyes on top.
+    // A hooded maw: substantial cheeks around a deep open mouth, with eyes
+    // seated on the upper corners instead of a small turtle face.
     let mut skull = Sculpt::default();
     skull
         .add(
-            Ellipsoid(Vec3::new(0.0, 0.06, 0.04), Vec3::new(0.17, 0.1, 0.15)),
+            Ellipsoid(Vec3::new(0.0, 0.07, 0.0), Vec3::new(0.265, 0.21, 0.205)),
             0.0,
         )
         .carve(
-            Ellipsoid(Vec3::new(0.0, 0.0, 0.14), Vec3::new(0.13, 0.05, 0.1)),
-            0.02,
+            Ellipsoid(Vec3::new(0.0, -0.015, 0.16), Vec3::new(0.215, 0.185, 0.19)),
+            0.015,
         );
     let frames = animal_eye_sockets(
         &mut skull,
-        Vec3::new(0.0, 0.13, 0.06),
-        0.09,
-        0.024,
+        Vec3::new(0.0, 0.185, 0.09),
+        0.195,
+        0.036,
         Vec3::new(0.5, 0.7, 0.5),
     );
     let (plate, mouth) = (l.skin, l.trim);
     skull.mesh(
         &mut p.matte,
-        Vec3::new(-0.2, -0.04, -0.12),
-        Vec3::new(0.2, 0.18, 0.21),
-        0.006,
+        Vec3::new(-0.29, -0.16, -0.22),
+        Vec3::new(0.29, 0.3, 0.23),
+        0.008,
         &|at, normal| {
-            if normal.y < -0.3 && at.z > 0.05 {
+            if normal.z > 0.1 && at.z < 0.13 && at.y < 0.18 {
                 mouth
             } else {
                 plate
             }
         },
     );
-    // A ring of fangs along the upper lip.
-    for k in 0..9 {
-        let a = (k as f32 / 8.0 - 0.5) * 2.4;
-        let root = Vec3::new(a.sin() * 0.13, 0.03, 0.06 + a.cos() * 0.11);
-        p.matte.prism(
-            root,
-            root + Vec3::new(0.0, -0.045, 0.006),
-            0.01,
-            0.0,
-            4,
-            BONE,
-            0.0,
-        );
+    FangArc {
+        frame: Transform::from_xyz(0.0, -0.025, 0.09),
+        half_width: 0.225,
+        rise: 0.21,
+        depth: 0.095,
+        growth: Vec3::new(0.0, -1.0, 0.2),
+        length: 0.07,
+        radius: 0.016,
+        count: 11,
     }
-    animal_eyes(p, frames, 0.024, Vec3::new(0.96, 0.78, 0.12), plate, None);
+    .emit(&mut p.matte, BONE);
+    for angle in [-0.65f32, 0.0, 0.65] {
+        ShellPlate::on_ellipsoid(
+            Vec3::new(0.0, 0.07, 0.0),
+            Vec3::new(0.265, 0.21, 0.205),
+            Vec3::new(angle.sin(), angle.cos(), -0.15),
+            Vec2::new(0.115, 0.135),
+            0.025,
+            0.012,
+        )
+        .emit(&mut p.matte, plate * 1.08);
+    }
+    animal_eyes(p, frames, 0.036, Vec3::new(0.96, 0.78, 0.12), plate, None);
 }
 
 /// A lower jaw on its own joint, opened by bites, breath and gaping idles.
@@ -2417,55 +2954,51 @@ fn beast_jaw(p: &mut Parts, l: &Look) {
     match l.style {
         Style::Xeroc => {
             p.matte.blob(
-                Vec3::new(0.0, -0.02, 0.1),
-                Vec3::new(0.15, 0.04, 0.13),
+                Vec3::new(0.0, -0.085, 0.08),
+                Vec3::new(0.235, 0.075, 0.175),
                 2,
                 0.0,
                 skin * 0.9,
             );
             p.matte.blob(
-                Vec3::new(0.0, 0.0, 0.1),
-                Vec3::new(0.12, 0.02, 0.1),
+                Vec3::new(0.0, -0.035, 0.1),
+                Vec3::new(0.2, 0.035, 0.14),
                 1,
                 0.0,
                 mouth,
             );
-            for k in 0..8 {
-                let a = (k as f32 / 7.0 - 0.5) * 2.2;
-                let root = Vec3::new(a.sin() * 0.12, 0.0, 0.08 + a.cos() * 0.1);
-                p.matte.prism(
-                    root,
-                    root + Vec3::new(0.0, 0.04, 0.0),
-                    0.009,
-                    0.0,
-                    4,
-                    BONE,
-                    0.0,
-                );
+            FangArc {
+                frame: Transform::from_xyz(0.0, -0.005, 0.08),
+                half_width: 0.205,
+                rise: -0.012,
+                depth: 0.13,
+                growth: Vec3::Y,
+                length: 0.065,
+                radius: 0.014,
+                count: 9,
             }
+            .emit(&mut p.matte, BONE);
         }
         Style::Aquator => {
             p.matte.blob(
-                Vec3::new(0.0, -0.03, 0.06),
-                Vec3::new(0.2, 0.05, 0.13),
+                Vec3::new(0.0, -0.045, 0.075),
+                Vec3::new(0.24, 0.065, 0.155),
                 2,
                 0.0,
                 belly,
             );
             p.matte.blob(
-                Vec3::new(0.0, -0.01, 0.07),
-                Vec3::new(0.16, 0.02, 0.1),
+                Vec3::new(0.0, -0.012, 0.12),
+                Vec3::new(0.205, 0.018, 0.115),
                 1,
                 0.0,
                 Vec3::new(0.72, 0.38, 0.38),
             );
         }
         _ => {
-            let length = if l.style == Style::Jabberwock {
-                1.25
-            } else {
-                1.0
-            };
+            let shape = ReptileHead::resolve(l.style);
+            p.set_transform(Affine3A::from_scale(shape.rendered_scale()));
+            let length = shape.muzzle;
             p.matte.tube(
                 &[
                     Vec3::new(0.0, -0.01, -0.02),
@@ -2473,16 +3006,16 @@ fn beast_jaw(p: &mut Parts, l: &Look) {
                     Vec3::new(0.0, -0.01, 0.26 * length),
                 ],
                 &[
-                    Vec2::new(0.07, 0.035),
-                    Vec2::new(0.06, 0.03),
-                    Vec2::new(0.035, 0.02),
+                    Vec2::new(0.0875, 0.035),
+                    Vec2::new(0.075, 0.03),
+                    Vec2::new(0.04375, 0.02),
                 ],
                 10,
                 &|dir, _, _| if dir.y < 0.0 { belly } else { skin },
             );
             p.matte.blob(
                 Vec3::new(0.0, 0.005, 0.12 * length),
-                Vec3::new(0.045, 0.012, 0.1 * length),
+                Vec3::new(0.056, 0.012, 0.1 * length),
                 1,
                 0.0,
                 Vec3::new(0.74, 0.3, 0.32),
@@ -2537,14 +3070,23 @@ fn beast_tail(p: &mut Parts, l: &Look) {
             );
         }
         Style::Dragon | Style::Jabberwock => {
-            let long = if l.style == Style::Dragon { 1.0 } else { 0.9 };
-            let path = [
-                Vec3::ZERO,
-                Vec3::new(0.0, -0.1, -0.35) * long,
-                Vec3::new(0.0, -0.2, -0.7) * long,
-                Vec3::new(0.06, -0.14, -1.0) * long,
-                Vec3::new(0.12, -0.04, -1.2) * long,
-            ];
+            let path = if l.style == Style::Jabberwock {
+                [
+                    Vec3::ZERO,
+                    Vec3::new(0.0, -0.18, -0.35),
+                    Vec3::new(0.06, -0.32, -0.72),
+                    Vec3::new(0.15, -0.30, -1.10),
+                    Vec3::new(0.23, -0.18, -1.30),
+                ]
+            } else {
+                [
+                    Vec3::ZERO,
+                    Vec3::new(0.0, -0.1, -0.35),
+                    Vec3::new(0.0, -0.2, -0.7),
+                    Vec3::new(0.06, -0.14, -1.0),
+                    Vec3::new(0.12, -0.04, -1.2),
+                ]
+            };
             let (skin, belly) = (l.skin, l.cloth);
             p.matte.tube(
                 &path,
@@ -2626,7 +3168,13 @@ fn folded_wing(kit: &mut Kit, l: &Look, body: Entity, side: f32, wing: J, tip: J
             if dragon { bone } else { coverts },
         );
         if dragon {
-            membrane(&mut p.matte, Vec3::ZERO, &[wrist, trail], skin);
+            membrane(
+                &mut p.matte,
+                Vec3::ZERO,
+                &[wrist, trail],
+                Vec3::X * side,
+                skin,
+            );
             p.matte.prism(
                 wrist,
                 wrist + Vec3::new(0.0, 0.08, 0.04),
@@ -2637,17 +3185,14 @@ fn folded_wing(kit: &mut Kit, l: &Look, body: Entity, side: f32, wing: J, tip: J
                 0.0,
             );
         } else {
-            // Coverts lie over the arm; secondaries hang behind it.
-            p.matte.tube_framed(
-                &[Vec3::ZERO, wrist * 0.55, wrist],
-                &[
-                    Vec2::new(0.1, 0.03),
-                    Vec2::new(0.11, 0.03),
-                    Vec2::new(0.06, 0.02),
-                ],
-                8,
-                &|_, _, t| coverts * (0.95 + 0.06 * t),
-                Some(Vec3::Y),
+            // Layered coverts bridge the arm into the long secondaries.
+            covert_rows(
+                &mut p.matte,
+                wrist,
+                Vec3::new(side * 0.45, -0.55, -0.7),
+                Vec3::X * side,
+                0.042,
+                coverts,
             );
             for k in 0..6 {
                 let t = (k as f32 + 0.5) / 6.0;
@@ -2659,7 +3204,7 @@ fn folded_wing(kit: &mut Kit, l: &Look, body: Entity, side: f32, wing: J, tip: J
                     0.28,
                     0.07,
                     Vec3::new(0.0, 0.6, -0.8).normalize(),
-                    coverts.lerp(quills, 0.4),
+                    coverts.lerp(quills, 0.12),
                     None,
                 );
             }
@@ -2684,26 +3229,30 @@ fn folded_wing(kit: &mut Kit, l: &Look, body: Entity, side: f32, wing: J, tip: J
             }
             let mut rim = tips.to_vec();
             rim.push(trail_from_wrist);
-            membrane(&mut p.matte, Vec3::ZERO, &rim, skin);
+            membrane(&mut p.matte, Vec3::ZERO, &rim, Vec3::X * side, skin);
         } else {
-            // Primaries lie back along the flank, overlapping like shingles.
-            for k in 0..9 {
-                let a = k as f32 / 8.0;
-                let dir = Vec3::new(side * (0.18 + 0.2 * a), -0.12 - 0.35 * a, -1.0).normalize();
-                let across = Vec3::new(0.0, 1.0, 0.25 * side).normalize();
-                vane(
-                    &mut p.matte,
-                    Vec3::new(side * 0.01 * k as f32, -0.025 * k as f32, 0.0),
-                    dir,
-                    0.58 - 0.16 * a,
-                    0.075,
-                    across,
-                    quills * (0.9 + 0.15 * rand(110, k)),
-                    None,
-                );
-            }
+            folded_primaries(&mut p.matte, side, quills);
         }
     });
+}
+
+/// Primaries lie back along the flank, overlapping like shingles.
+fn folded_primaries(b: &mut Builder, side: f32, quills: Vec3) {
+    for k in 0..9 {
+        let a = k as f32 / 8.0;
+        let dir = Vec3::new(side * (0.18 + 0.2 * a), -0.12 - 0.35 * a, -1.0).normalize();
+        let across = Vec3::new(0.0, 1.0, 0.25).normalize();
+        vane(
+            b,
+            Vec3::new(side * 0.01 * k as f32, -0.025 * k as f32, 0.0),
+            dir,
+            0.58 - 0.16 * a,
+            0.075,
+            across,
+            quills * (0.9 + 0.15 * rand(110, k)),
+            None,
+        );
+    }
 }
 
 /// Two long sensing tendrils hang from the aquator's cheeks, each a chain of
@@ -2783,20 +3332,22 @@ pub(super) fn flytrap(kit: &mut Kit, lift: Entity, look: &Look) {
                 Vec3::new(0.44, 0.3, 0.2),
             );
         }
-        for k in 0..8 {
-            let a = (k as f32 + 0.5) / 8.0 * TAU;
-            let dir = Vec3::new(a.sin(), 0.55 + 0.2 * rand(113, k), a.cos());
-            let green = l.skin * (0.85 + 0.25 * rand(114, k));
-            leaf(&mut p.matte, Vec3::Y * 0.06, dir, 0.38, 0.11, green);
-            // A red rim along each leaf.
-            leaf(
-                &mut p.matte,
-                Vec3::Y * 0.065,
-                dir + Vec3::Y * 0.05,
-                0.34,
-                0.03,
-                l.cloth * 0.8,
-            );
+        for (count, length, width, rise) in [(8, 0.48, 0.16, 0.25), (5, 0.35, 0.13, 0.65)] {
+            for k in 0..count {
+                let a = (k as f32 + 0.5) / count as f32 * TAU + if count == 5 { 0.3 } else { 0.0 };
+                let out = Vec3::new(a.sin(), 0.0, a.cos());
+                LeafBlade {
+                    root: out * 0.035 + Vec3::Y * 0.065,
+                    direction: out + Vec3::Y * rise,
+                    length,
+                    half_width: width,
+                    arch: 0.20,
+                    droop: 0.14,
+                    color: l.skin * (0.92 + 0.16 * rand(114, k)),
+                    edge: l.cloth * 0.70,
+                }
+                .emit(&mut p.matte);
+            }
         }
     });
     let lower = kit.joint(J::Neck, base, Vec3::Y * 0.08, "stem", |p| {
@@ -2814,20 +3365,23 @@ pub(super) fn flytrap(kit: &mut Kit, lift: Entity, look: &Look) {
 fn stem(p: &mut Parts, l: &Look, top: Vec3) {
     p.matte.tube(
         &[Vec3::ZERO, top * 0.5 + Vec3::Z * 0.02, top],
-        &[Vec2::splat(0.05), Vec2::splat(0.044), Vec2::splat(0.04)],
-        10,
+        &[Vec2::splat(0.085), Vec2::splat(0.076), Vec2::splat(0.06)],
+        14,
         &|_, _, t| l.skin * (0.88 + 0.12 * (t * 9.0).sin().abs()),
     );
     // Small leaves sprout from the stem.
     for side in [-1.0f32, 1.0] {
-        leaf(
-            &mut p.matte,
-            top * 0.55,
-            Vec3::new(side, 0.4, 0.2),
-            0.12,
-            0.04,
-            l.skin * 0.95,
-        );
+        LeafBlade {
+            root: top * 0.45,
+            direction: Vec3::new(side, 0.6, 0.2),
+            length: 0.19,
+            half_width: 0.065,
+            arch: 0.16,
+            droop: 0.05,
+            color: l.skin * 0.95,
+            edge: l.cloth * 0.65,
+        }
+        .emit(&mut p.matte);
     }
 }
 
@@ -2836,22 +3390,25 @@ fn trap_lobe(p: &mut Parts, l: &Look, up: f32) {
     // Each lobe is half a shell hinged at the back, opening forward.
     let mut lobe = Sculpt::default();
     lobe.add(
-        Ellipsoid(Vec3::new(0.0, 0.0, 0.14), Vec3::new(0.15, 0.09, 0.15)),
+        Ellipsoid(Vec3::new(0.0, 0.0, 0.24), Vec3::new(0.28, 0.17, 0.27)),
         0.0,
     )
     .carve(Beyond(Vec3::NEG_Y * up, 0.0), 0.0)
     .carve(
-        Ellipsoid(Vec3::new(0.0, 0.0, 0.15), Vec3::new(0.12, 0.06, 0.12)),
+        Ellipsoid(
+            Vec3::new(0.0, -0.005 * up, 0.25),
+            Vec3::new(0.245, 0.135, 0.235),
+        ),
         0.01,
     );
     let (green, red) = (l.skin, l.cloth);
     lobe.mesh(
         &mut p.matte,
-        Vec3::new(-0.17, -0.1, -0.02),
-        Vec3::new(0.17, 0.1, 0.31),
-        0.006,
+        Vec3::new(-0.31, -0.19, -0.05),
+        Vec3::new(0.31, 0.19, 0.54),
+        0.009,
         &|at, normal| {
-            let inside = normal.y * up < -0.2 && (at.y * up) < 0.05;
+            let inside = normal.y * up < -0.2 && (at.y * up) < 0.14;
             if inside {
                 red
             } else {
@@ -2860,18 +3417,106 @@ fn trap_lobe(p: &mut Parts, l: &Look, up: f32) {
         },
     );
     // Teeth along the rim interlock when the trap closes.
-    for k in 0..13 {
-        let a = (k as f32 / 12.0 - 0.5) * 2.9 + if up > 0.0 { 0.0 } else { 0.12 };
-        let rim = Vec3::new(a.sin() * 0.15, 0.0, 0.14 + a.cos() * 0.15);
-        let out = Vec3::new(a.sin(), 0.0, a.cos());
-        p.matte.prism(
-            rim,
-            rim + out * 0.03 - Vec3::Y * up * 0.07,
-            0.008,
-            0.0,
-            4,
-            l.trim,
-            0.0,
+    FangArc {
+        frame: Transform::from_xyz(0.0, 0.0, 0.24).with_rotation(Quat::from_rotation_x(PI * 0.5)),
+        half_width: 0.28,
+        rise: 0.27,
+        depth: 0.0,
+        growth: Vec3::Z * up,
+        length: 0.12,
+        radius: 0.012,
+        count: 15,
+    }
+    .emit_offset(&mut p.matte, l.trim, if up > 0.0 { 0.0 } else { 0.09 });
+}
+
+#[cfg(test)]
+mod limb_parts_tests {
+    use super::*;
+
+    fn vertices(parts: Parts) -> Vec<Vec3> {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let mut meshes = Assets::<Mesh>::default();
+        let model = parts.finish(
+            &mut meshes,
+            &crate::props::PropMaterials::new(&mut materials),
         );
+        let mut points = Vec::new();
+        for (handle, _) in &model.0 {
+            let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(positions)) = meshes
+                .get(handle)
+                .unwrap()
+                .attribute(Mesh::ATTRIBUTE_POSITION)
+            else {
+                panic!("limb mesh positions")
+            };
+            points.extend(positions.iter().copied().map(Vec3::from));
+        }
+        assert!(!points.is_empty() && points.iter().all(|p| p.is_finite()));
+        points
+    }
+
+    #[test]
+    fn profiled_segments_keep_muscle_and_joint_landmarks_on_oblique_bones() {
+        for end in [Vec3::new(0.0, -0.4, 0.0), Vec3::new(0.06, -0.3, 0.22)] {
+            let mut parts = Parts::default();
+            profiled_segment(&mut parts.matte, end, 0.15, 0.18, 0.065, Vec3::ONE);
+            let points = vertices(parts);
+            let axis = end.normalize();
+            let length = end.length();
+            let mut belly = 0.0f32;
+            let mut distal = 0.0f32;
+            let mut distal_count = 0;
+            let mut reaches_joint = false;
+            for p in points {
+                let t = p.dot(axis) / length;
+                let radius = (p - axis * p.dot(axis)).length();
+                if (0.15..0.5).contains(&t) {
+                    belly = belly.max(radius);
+                }
+                if t > 0.9 {
+                    distal = distal.max(radius);
+                    distal_count += 1;
+                }
+                reaches_joint |= t >= 1.0;
+            }
+            assert!(
+                reaches_joint && distal_count >= 8,
+                "missing joint envelope for {end:?}"
+            );
+            assert!(
+                belly > distal * 1.6 && distal > 0.04,
+                "muscle must taper into a real joint: end={end:?}, belly={belly}, distal={distal}"
+            );
+        }
+    }
+
+    #[test]
+    fn grasping_palm_dimensions_and_opposed_thumb_transfer_between_sizes() {
+        let bounds = |width, length, side| {
+            let mut parts = Parts::default();
+            claw_palm(
+                &mut parts.matte,
+                side,
+                width,
+                length,
+                Vec3::ONE,
+                Vec3::splat(0.2),
+            );
+            vertices(parts).iter().fold(
+                (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+                |(low, high), p| (low.min(*p), high.max(*p)),
+            )
+        };
+        let (small_low, small_high) = bounds(0.07, 0.08, 1.0);
+        let (large_low, large_high) = bounds(0.13, 0.14, 1.0);
+        let (mirror_low, mirror_high) = bounds(0.13, 0.14, -1.0);
+        assert!(large_high.x - large_low.x > (small_high.x - small_low.x) * 1.4);
+        assert!(-large_low.y > -small_low.y * 1.3);
+        assert!(
+            large_high.z > 0.10 && large_low.y < -0.25,
+            "hanging curled fingers: {large_low:?}..{large_high:?}"
+        );
+        assert!((large_low.x + mirror_high.x).abs() < 0.005 && (large_high.x + mirror_low.x).abs() < 0.005, "opposed thumbs mirror across the palm: left={large_low:?}..{large_high:?}, right={mirror_low:?}..{mirror_high:?}");
     }
 }

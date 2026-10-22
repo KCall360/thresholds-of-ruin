@@ -59,13 +59,15 @@ impl Shape {
 }
 
 /// A step of a sculpt: add clay or carve it away, blended over `k`.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum Step {
     Add(Shape, f32),
     Carve(Shape, f32),
     /// Grow everything sculpted so far outward by a distance: a garment
     /// laid over the form it covers, its small hollows filled.
     Inflate(f32),
+    /// Join a complete layer, preserving its own order of growth and cuts.
+    Union(Sculpt, f32),
 }
 
 fn smooth_min(a: f32, b: f32, k: f32) -> f32 {
@@ -108,6 +110,15 @@ impl Sculpt {
         self
     }
 
+    /// Combine independently constructed layers without letting a child's
+    /// clipping planes trim earlier geometry.
+    pub fn union(&mut self, other: Sculpt, k: f32) -> &mut Self {
+        if !other.steps.is_empty() {
+            self.steps.push(Step::Union(other, k));
+        }
+        self
+    }
+
     pub fn distance(&self, p: Vec3) -> f32 {
         self.distance_among(p, self.steps.iter())
     }
@@ -127,6 +138,14 @@ impl Sculpt {
                 }
                 Step::Carve(s, k) => d = smooth_max(d, -s.distance(p), k),
                 Step::Inflate(amount) => d -= amount,
+                Step::Union(ref other, k) => {
+                    let child = other.distance(p);
+                    d = if d == f32::MAX {
+                        child
+                    } else {
+                        smooth_min(d, child, k)
+                    };
+                }
             }
         }
         d
@@ -178,6 +197,19 @@ impl Sculpt {
                 Step::Inflate(amount) => {
                     lo -= amount;
                     hi -= amount;
+                }
+                Step::Union(ref other, k) => {
+                    let (s_lo, s_hi) = other.steps_near(center, radius, &mut Vec::new());
+                    if !started {
+                        started = true;
+                        (lo, hi) = (s_lo, s_hi);
+                    } else {
+                        if s_lo >= hi + k.max(0.0) {
+                            continue;
+                        }
+                        hi = hi.min(s_hi);
+                        lo = lo.min(s_lo) - k.max(0.0) * 0.25;
+                    }
                 }
             }
             out.push(index);
@@ -483,6 +515,77 @@ impl Sculpt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn complete_layers_keep_their_clipping_local_to_the_child() {
+        let mut body = Sculpt::default();
+        body.add(
+            Shape::Ellipsoid(Vec3::Y * 0.25, Vec3::new(0.2, 0.3, 0.15)),
+            0.0,
+        );
+        let mut vest = body.clone();
+        vest.inflate(0.02).carve(Shape::Beyond(Vec3::Y, 0.4), 0.0);
+        let mut layers = body.clone();
+        layers.union(vest.clone(), 0.0);
+        let shoulder = Vec3::Y * 0.48;
+        assert!(body.distance(shoulder) < 0.0 && vest.distance(shoulder) > 0.0);
+        assert_eq!(
+            layers.distance(shoulder),
+            body.distance(shoulder),
+            "vest cut must not remove the tunic shoulder"
+        );
+        let chest = Vec3::new(0.0, 0.25, 0.16);
+        assert!(body.distance(chest) > 0.0 && vest.distance(chest) < 0.0);
+        assert_eq!(
+            layers.distance(chest),
+            vest.distance(chest),
+            "outer vest remains the exposed layer"
+        );
+        let mut alone = Sculpt::default();
+        alone.union(vest.clone(), 0.0).union(Sculpt::default(), 0.0);
+        assert_eq!(alone.distance(chest), vest.distance(chest));
+        layers.inflate(0.005);
+        assert_eq!(layers.distance(chest), vest.distance(chest) - 0.005);
+    }
+
+    #[test]
+    fn blocked_fields_preserve_independent_layer_unions() {
+        let mut body = Sculpt::default();
+        body.add(
+            Shape::Ellipsoid(Vec3::Y * 0.2, Vec3::new(0.19, 0.28, 0.16)),
+            0.0,
+        );
+        let mut vest = body.clone();
+        vest.inflate(0.02)
+            .carve(Shape::Beyond(Vec3::Y, 0.35), 0.004);
+        let mut far = Sculpt::default();
+        far.add(Shape::Ellipsoid(Vec3::X * 1.8, Vec3::splat(0.1)), 0.0);
+        let mut layers = body;
+        layers.union(vest, 0.006).union(far, 0.0).inflate(0.005);
+        let min = Vec3::new(-0.3, -0.15, -0.25);
+        let (step, size) = (0.025, (24, 32, 22));
+        let field = layers.field(min, step, size);
+        for k in 0..size.2 {
+            for j in 0..size.1 {
+                for i in 0..size.0 {
+                    let at = min + Vec3::new(i as f32, j as f32, k as f32) * step;
+                    let exact = layers.distance(at);
+                    let sampled = field[(k * size.1 + j) * size.0 + i];
+                    if exact.abs() <= 2.0 * step {
+                        assert_eq!(sampled, exact, "layer field near surface {at}");
+                    } else {
+                        assert_eq!(sampled > 0.0, exact > 0.0, "layer field sign {at}");
+                    }
+                }
+            }
+        }
+        let mut steps = Vec::new();
+        layers.steps_near(Vec3::Y * 0.2, 0.02, &mut steps);
+        assert!(
+            steps.len() < layers.steps.len(),
+            "distant child layers are still culled"
+        );
+    }
 
     #[test]
     fn culled_fields_match_full_evaluation_near_the_surface() {

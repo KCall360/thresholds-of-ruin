@@ -121,7 +121,7 @@ pub(super) fn rooted_pose(p: &mut Pose, a: &Anim, breath: f32, m: Option<Move>, 
         roll(-sway * 0.06) * bow((0.12 + 0.04 * (time * 0.9).sin()) * alive),
     );
     // At rest the trap hangs a little open, breathing.
-    let mut gape = (0.4 + 0.12 * (time * 0.8).sin()) * alive;
+    let mut gape = (0.55 + 0.10 * (time * 0.8).sin()) * alive;
     if let Some(m) = m {
         let (gather, strike, act) = timing(m, t);
         if m.offensive() {
@@ -135,13 +135,21 @@ pub(super) fn rooted_pose(p: &mut Pose, a: &Anim, breath: f32, m: Option<Move>, 
     }
     let gape = gape.clamp(0.0, 1.0);
     p.r(J::Head, bow(-0.55 * gape));
-    p.r(J::Jaw, bow(0.8 * gape));
+    p.r(J::Jaw, bow(1.5 * gape));
 }
 
 // ---------------------------------------------------------------------------
 // Beasts: jaws, wings and their signature moves.
 
-pub(super) fn beast_pose(p: &mut Pose, rig: &Rig, breath: f32, m: Option<Move>, t: f32, walk: f32) {
+pub(super) fn beast_pose(
+    p: &mut Pose,
+    rig: &Rig,
+    breath: f32,
+    m: Option<Move>,
+    t: f32,
+    walk: f32,
+    cycle: f32,
+) {
     let style = rig.style;
     let winged = matches!(style, Style::Griffin | Style::Dragon);
     // Jaws rest a fraction open and breathe; folded wings settle as it walks.
@@ -159,6 +167,7 @@ pub(super) fn beast_pose(p: &mut Pose, rig: &Rig, breath: f32, m: Option<Move>, 
         // It carries its chest high and its head forward.
         p.r(J::Neck, bow(0.1));
     }
+    grasping_forelimbs(p, rig, m, t, walk, cycle);
     let Some(m) = m else {
         return;
     };
@@ -233,6 +242,36 @@ pub(super) fn beast_pose(p: &mut Pose, rig: &Rig, breath: f32, m: Option<Move>, 
             if winged {
                 mantle(p, 0.4 * act);
             }
+        }
+    }
+}
+
+/// Free forelimbs balance the stride and reach into a two-handed rake. This
+/// follows limb roles, so another reared body can use the same motion without
+/// inheriting Jabberwock's neck, jaw, or tail recipe.
+fn grasping_forelimbs(p: &mut Pose, rig: &Rig, m: Option<Move>, t: f32, walk: f32, cycle: f32) {
+    let (gather, strike, act) = m.map_or((0.0, 0.0, 0.0), |m| timing(m, t));
+    let attacking = m.is_some_and(Move::offensive);
+    for (upper, fore, hand, side, phase) in [
+        (J::FL, J::FLs, J::HoofFL, 1.0, 0.0),
+        (J::FR, J::FRs, J::HoofFR, -1.0, PI),
+    ] {
+        if rig.supports(hand) {
+            continue;
+        }
+        let swing = (cycle + phase).sin() * 0.09 * walk;
+        p.r(upper, fwd(swing) * roll(side * 0.055));
+        p.r(fore, fwd(-swing * 0.6));
+        if attacking {
+            p.r(
+                upper,
+                fwd(0.55 * gather + 1.0 * strike) * roll(side * (0.24 * gather - 0.08 * strike)),
+            );
+            p.r(fore, fwd(-0.35 * gather + 0.35 * strike));
+            p.r(hand, fwd(-0.22 * strike));
+        } else if m.is_some() {
+            p.r(upper, fwd(0.35 * act) * roll(side * 0.18 * act));
+            p.r(fore, fwd(0.2 * act));
         }
     }
 }

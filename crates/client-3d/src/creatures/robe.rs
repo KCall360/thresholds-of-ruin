@@ -49,6 +49,128 @@ mod art_contract_tests {
     use super::*;
 
     #[test]
+    fn art_contract_posed_thigh_mesh_stays_inside_robe_contact_envelopes() {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let materials = crate::props::PropMaterials::new(&mut materials);
+        let mut meshes = Assets::<Mesh>::default();
+        for build in 0..3 {
+            let look = Look::with_choice(
+                CreatureModel::Mage,
+                42,
+                Some(Variant {
+                    woman: true,
+                    build,
+                    ..default()
+                }),
+            );
+            let body = HumanoidBody::resolve(&look);
+            let mut parts = Parts::default();
+            let (low, high) = body.thigh.mesh_bounds(0.02);
+            geometry::limb_form(body.thigh)
+                .mesh(&mut parts.matte, low, high, 0.007, &|_, _| Vec3::ONE);
+            let model = parts.finish(&mut meshes, &materials);
+            assert_eq!(model.0.len(), 1, "build {build}: expected one thigh mesh");
+            let mesh = meshes.get(&model.0[0].0).unwrap();
+            let VertexAttributeValues::Float32x3(positions) =
+                mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap()
+            else {
+                panic!("thigh mesh must expose positions");
+            };
+            let indices: Vec<usize> = mesh.indices().unwrap().iter().collect();
+            assert!(indices.len() >= 300, "build {build}: missing thigh surface");
+            // Bound the contact queries while sampling across the emitted mesh,
+            // including the smooth joins rather than just authored mass poles.
+            let stride = (indices.len() / 3).div_ceil(512);
+            let mut rest = [Vec3::ZERO; JOINTS];
+            for (joint, offset) in [
+                (J::LegL, body.leg_root(1.0)),
+                (J::LegR, body.leg_root(-1.0)),
+                (J::ShinL, body.knee()),
+                (J::ShinR, body.knee()),
+                (J::FootL, body.ankle()),
+                (J::FootR, body.ankle()),
+            ] {
+                rest[joint as usize] = offset;
+            }
+            for posed in [false, true] {
+                let mut rotations = [Quat::IDENTITY; JOINTS];
+                let mut offsets = [Vec3::ZERO; JOINTS];
+                if posed {
+                    rotations[J::LegL as usize] = Quat::from_euler(EulerRot::YXZ, 0.27, 0.8, -0.19);
+                    rotations[J::LegR as usize] =
+                        Quat::from_euler(EulerRot::YXZ, -0.31, -0.45, 0.23);
+                    rotations[J::ShinL as usize] = Quat::from_rotation_x(-0.65);
+                    rotations[J::ShinR as usize] = Quat::from_rotation_x(0.35);
+                    offsets[J::LegL as usize] = Vec3::new(0.01, 0.025, -0.02);
+                    offsets[J::LegR as usize] = Vec3::new(-0.015, -0.01, 0.025);
+                }
+                let limbs = posed_limbs(
+                    [body.thigh, body.shin],
+                    BootShape::fitted(body.build, -0.24),
+                    &rest,
+                    &rotations,
+                    &offsets,
+                );
+                let feet = posed_feet(body.feet, &limbs, &rest, &rotations, &offsets);
+                let proxies = body_proxies(&limbs, &feet);
+                for limb_index in [0, 2] {
+                    let limb = limbs[limb_index];
+                    let start = 6 + limb_index * (CORE_PIECES + 1);
+                    // Other legs and footwear must not conceal a missed thigh.
+                    let own_proxies = &proxies[start..start + CORE_PIECES + 1];
+                    let mut coverage = [0_usize; 3];
+                    for (triangle_index, triangle) in indices
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .enumerate()
+                        .step_by(stride)
+                    {
+                        let [a, b, c] = [triangle[0], triangle[1], triangle[2]]
+                            .map(|i| Vec3::from_array(positions[i]));
+                        for local in [
+                            a,
+                            b,
+                            c,
+                            (a + b) * 0.5,
+                            (b + c) * 0.5,
+                            (c + a) * 0.5,
+                            (a + b + c) / 3.0,
+                        ] {
+                            let third = ((-local.y / body.thigh.length * 3.0) as usize).min(2);
+                            coverage[third] += 1;
+                            let point = limb.origin + limb.inverse.inverse() * (local * LIMB_SCALE);
+                            assert!(
+                                own_proxies.iter().any(|proxy| {
+                                    proxy.overlaps(point, point)
+                                        && proxy.contact_normal([point; 3]).is_some()
+                                }),
+                                "build {build} posed {posed} limb {limb_index} triangle {triangle_index}: \
+                                 proxy misses emitted point {point:?}, local {local:?}"
+                            );
+                            // Horizontal robe-space rays exercise the actual
+                            // inverse pose and nonuniform Storybook scaling.
+                            for axis in [Vec3::X, Vec3::Z] {
+                                let far = limb_far(limb, point - axis, axis);
+                                assert!(
+                                    far.is_finite() && far >= 1.0 - 0.0002,
+                                    "build {build} posed {posed} limb {limb_index} triangle {triangle_index}: \
+                                     ray {axis:?} reaches {far:.6}, needs 1.0 at {point:?}, local {local:?}"
+                                );
+                            }
+                        }
+                    }
+                    assert!(
+                        coverage.iter().all(|count| *count >= 32),
+                        "build {build} posed {posed} limb {limb_index}: \
+                         insufficient proximal/middle/distal samples {coverage:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn art_contract_motion_changes_only_the_wearers_owned_cloth_mesh() {
         let look = Look::with_choice(
             CreatureModel::Mage,
@@ -61,6 +183,11 @@ mod art_contract_tests {
         );
         let body = HumanoidBody::resolve(&look);
         let boot = BootShape::fitted(body.build, -0.24);
+        let feet = super::super::anatomy::BootLast {
+            build: body.build,
+            heeled: false,
+        }
+        .contacts();
         let mut materials = Assets::<StandardMaterial>::default();
         let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
         let mut meshes = Assets::<Mesh>::default();
@@ -77,6 +204,7 @@ mod art_contract_tests {
             &look,
             body,
             boot,
+            feet,
             &[],
         );
         let second = spawn(
@@ -87,6 +215,7 @@ mod art_contract_tests {
             &look,
             body,
             boot,
+            feet,
             &[],
         );
         queue.apply(&mut world);
@@ -428,19 +557,30 @@ fn limb_far(limb: Limb, origin: Vec3, direction: Vec3) -> f32 {
     // The local smooth union can add at most .0075 at its capsule/belly join.
     // The clearance acts locally; it never expands an entire ring or garment.
     let margin = 0.0075;
-    let mut far = capsule_far(
-        o,
-        d,
-        s.length,
-        s.radius_top + margin,
-        s.radius_bottom + margin,
-    )
-    .max(ellipsoid_far(
-        o,
-        d,
-        s.belly_center,
-        s.belly + Vec3::splat(margin),
-    ));
+    let mut far = if let Some(contour) = s.contour {
+        contour.masses.iter().fold(f32::NEG_INFINITY, |far, mass| {
+            far.max(ellipsoid_far(
+                o,
+                d,
+                mass.center,
+                mass.level_radii(contour.margin()),
+            ))
+        })
+    } else {
+        capsule_far(
+            o,
+            d,
+            s.length,
+            s.radius_top + margin,
+            s.radius_bottom + margin,
+        )
+        .max(ellipsoid_far(
+            o,
+            d,
+            s.belly_center,
+            s.belly + Vec3::splat(margin),
+        ))
+    };
     if let Some(boot) = limb.boot {
         let half_cell = (limb.inverse * (Vec3::Y * ROW_HEIGHT * 0.5)) / scale;
         far = far.max(cuff_far(o, d, boot, half_cell));
@@ -565,6 +705,10 @@ fn body_proxies(limbs: &[Limb; 4], feet: &[Foot; 2]) -> [BodyProxy; CONTACT_PROX
             let limb = limbs[i / (CORE_PIECES + 1)];
             let piece = i % (CORE_PIECES + 1);
             let shape = limb.shape;
+            if let Some(contour) = shape.contour {
+                let mass = contour.masses[piece];
+                return BodyProxy::ellipsoid(limb, mass.center, mass.level_radii(contour.margin()));
+            }
             let margin = 0.0075;
             if piece == CORE_PIECES {
                 // This bounds the positive margin level of the approximate
@@ -1297,6 +1441,7 @@ pub(super) fn spawn(
     look: &Look,
     body: HumanoidBody,
     boot: BootShape,
+    feet: [(Vec3, Vec3); 3],
     sashes: &[SashTail],
 ) -> RobeRig {
     // One tiny shared recipe supplies the existing matte material. Dynamic
@@ -1440,7 +1585,7 @@ pub(super) fn spawn(
         mesh,
         shapes,
         boot,
-        feet: body.feet,
+        feet,
         rest,
         directions,
         points,

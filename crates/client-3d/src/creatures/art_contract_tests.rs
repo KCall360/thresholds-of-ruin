@@ -488,50 +488,300 @@ fn art_contract_heads_sit_close_on_the_shoulders() {
 }
 
 #[test]
-fn art_contract_womens_legs_are_full_at_the_hip_and_fine_at_the_ankle() {
-    // As on the concept sheets: her upper thigh flows full out of the hip,
-    // her seat is rounder, and her calf tapers to a finer ankle than his.
+fn art_contract_spawned_fitted_legs_are_lean_tapered_and_keep_build_identity() {
+    use bevy::render::mesh::VertexAttributeValues;
+
+    // A unique fitted-leg pigment isolates actual anatomy triangles from
+    // boots, wrappings and costume pieces. Preserve the emitted mesh scale;
+    // normalizing by resolved build removes species girth, not profile shape.
+    let measure = |model, woman, build| {
+        let mut look = appearance(model, woman, build).dressed(Wardrobe::Commoner);
+        look.outfit.as_mut().unwrap().legs = outfit::Legs::Fitted(Vec3::new(0.0, 0.0, 0.73));
+        let mut materials = Assets::<StandardMaterial>::default();
+        let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
+        let mut meshes = Assets::<Mesh>::default();
+        let mut world = World::new();
+        let parent = world.spawn_empty().id();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let rig = spawn(
+            &mut Commands::new(&mut queue, &world),
+            &mut library,
+            &mut meshes,
+            parent,
+            &look,
+        );
+        queue.apply(&mut world);
+        let body = rig.humanoid.unwrap();
+        let triangles = |joint| {
+            let entity = rig.joint(joint).unwrap();
+            let joint_transform = world.get::<Transform>(entity).unwrap();
+            let mut triangles = Vec::new();
+            for child in world.get::<Children>(entity).unwrap().iter() {
+                let Some(mesh) = world.get::<Mesh3d>(child).and_then(|m| meshes.get(&m.0)) else {
+                    continue;
+                };
+                let Some(VertexAttributeValues::Float32x3(positions)) =
+                    mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                else {
+                    panic!("{model:?} woman {woman} build {build}: leg positions")
+                };
+                let Some(VertexAttributeValues::Float32x4(colors)) =
+                    mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+                else {
+                    panic!("{model:?} woman {woman} build {build}: leg pigments")
+                };
+                let transform = joint_transform.compute_affine()
+                    * world.get::<Transform>(child).unwrap().compute_affine();
+                let indices: Vec<usize> = mesh.indices().unwrap().iter().collect();
+                for tri in indices.as_chunks::<3>().0 {
+                    if tri.iter().all(|&i| {
+                        let c = colors[i];
+                        c[0].abs() < 1e-6 && c[1].abs() < 1e-6 && c[2] > 0.01
+                    }) {
+                        triangles.push(tri.map(|i| {
+                            transform.transform_point3(Vec3::from(positions[i]))
+                                - joint_transform.translation
+                        }));
+                    }
+                }
+            }
+            assert!(
+                !triangles.is_empty(),
+                "{model:?} woman {woman} build {build} {joint:?}: no fitted-leg triangles"
+            );
+            triangles
+        };
+        // Intersect triangles rather than selecting nearby vertices, whose
+        // grid spacing can hide the narrow knee or favor one body build.
+        let section = |triangles: &[[Vec3; 3]], y: f32, axis: usize| {
+            let (mut low, mut high, mut hits) = (f32::INFINITY, f32::NEG_INFINITY, 0);
+            for tri in triangles {
+                for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+                    let (a, b) = (tri[a], tri[b]);
+                    if (a.y - b.y).abs() < 1e-7 {
+                        continue;
+                    }
+                    let t = (y - a.y) / (b.y - a.y);
+                    if (0.0..=1.0).contains(&t) {
+                        let x = a.lerp(b, t)[axis];
+                        low = low.min(x);
+                        high = high.max(x);
+                        hits += 1;
+                    }
+                }
+            }
+            assert!(
+                hits >= 12 && low < 0.0 && high > 0.0,
+                "{model:?} woman {woman} build {build}: section y={y:.4}, hits={hits}, x={low:.4}..{high:.4}"
+            );
+            (high - low) * 0.5 / body.build
+        };
+        let radius = |triangles: &[[Vec3; 3]], y| section(triangles, y, 0);
+        let thigh = triangles(J::LegL);
+        let shin = triangles(J::ShinL);
+        let right_thigh = triangles(J::LegR);
+        // Joint placement supplies the bilateral mirror. The anatomical
+        // cross-sections must match on both emitted legs, including depth.
+        for fraction in [0.15, 0.35, 0.65, 0.9] {
+            for axis in [0, 2] {
+                let y = -body.thigh.length * fraction;
+                assert!(
+                    (section(&thigh, y, axis) - section(&right_thigh, y, axis)).abs() < 0.0005,
+                    "{model:?} woman {woman} build {build}: mismatched bilateral section {fraction} axis {axis}"
+                );
+            }
+        }
+        let knee = world
+            .get::<Transform>(rig.joint(J::ShinL).unwrap())
+            .unwrap()
+            .translation;
+        let ankle = world
+            .get::<Transform>(rig.joint(J::FootL).unwrap())
+            .unwrap()
+            .translation;
+        let upper = [0.15, 0.25, 0.35, 0.45, 0.55]
+            .map(|t| radius(&thigh, knee.y * t))
+            .into_iter()
+            .fold(0.0, f32::max);
+        let distal = radius(&thigh, knee.y * 0.78);
+        let at_knee = radius(&thigh, knee.y * 0.98).max(radius(&shin, ankle.y * 0.02));
+        let calf = radius(&shin, ankle.y * 0.30);
+        let combined: Vec<_> = thigh
+            .iter()
+            .copied()
+            .chain(shin.iter().map(|tri| tri.map(|point| point + knee)))
+            .collect();
+        let approach = radius(&combined, knee.y * 0.88);
+        let knee_envelope = [0.94, 1.0, 1.04]
+            .map(|fraction| radius(&combined, knee.y * fraction))
+            .into_iter()
+            .fold(0.0f32, f32::max);
+        let bridge_ratio = radius(&thigh, knee.y * 0.19)
+            / radius(&thigh, knee.y * 0.06).min(radius(&thigh, knee.y * 0.35));
+        let proximal_aspect = section(&thigh, knee.y * 0.28, 2) / section(&thigh, knee.y * 0.28, 0);
+        let distal_aspect = section(&thigh, knee.y * 0.82, 2) / section(&thigh, knee.y * 0.82, 0);
+        (
+            upper,
+            distal,
+            at_knee,
+            calf,
+            knee,
+            ankle,
+            proximal_aspect,
+            distal_aspect,
+            approach,
+            knee_envelope,
+            bridge_ratio,
+        )
+    };
+
+    let mut failures = Vec::new();
     for model in [
         CreatureModel::Human,
+        CreatureModel::Scout,
         CreatureModel::Nymph,
         CreatureModel::Medusa,
+        CreatureModel::Zombie,
+        CreatureModel::Orc,
+    ] {
+        let mut envelopes = [[0.0; 3]; 2];
+        for build in 0..3 {
+            for woman in [false, true] {
+                let (
+                    upper,
+                    distal,
+                    knee,
+                    calf,
+                    knee_joint,
+                    ankle_joint,
+                    proximal_aspect,
+                    distal_aspect,
+                    approach,
+                    knee_envelope,
+                    bridge_ratio,
+                ) = measure(model, woman, build);
+                envelopes[usize::from(woman)][build as usize] = upper;
+                if !(upper > distal * 1.12 && distal > knee * 1.03 && calf > knee * 1.03) {
+                    failures.push(format!(
+                        "{model:?} woman {woman} build {build}: taper/calf recovery upper={upper:.5} distal={distal:.5} knee={knee:.5} calf={calf:.5}"
+                    ));
+                }
+                // The female thigh's upper muscle and distal/knee region
+                // need distinct front/side contours, rather than a circular
+                // tube with a uniformly smaller radius. These are emitted
+                // triangle-plane sections, including the actual mesh scale.
+                if woman && proximal_aspect - distal_aspect < 0.08 {
+                    failures.push(format!(
+                        "{model:?} woman {woman} build {build}: tubular side contour; proximal depth/width={proximal_aspect:.4}, distal={distal_aspect:.4}"
+                    ));
+                }
+                if woman && bridge_ratio < 0.94 {
+                    failures.push(format!(
+                        "{model:?} woman {woman} build {build}: pinched upper-thigh bridge ratio={bridge_ratio:.4}"
+                    ));
+                }
+                // Inspect the combined thigh and shin around the actual
+                // joint: a circular shin cap must not make an isolated bead
+                // after the distal thigh narrows. Include both sides of it.
+                if woman && knee_envelope > approach * 1.08 {
+                    failures.push(format!(
+                        "{model:?} woman {woman} build {build}: bulbous combined knee approach={approach:.5}, envelope={knee_envelope:.5}, ratio={:.4}", knee_envelope / approach
+                    ));
+                }
+                // These are the accepted joint landmarks, independent of
+                // girth and clothing; the new lean shape must not stretch legs.
+                if knee_joint.distance(Vec3::Y * -0.44) > 1e-6
+                    || ankle_joint.distance(Vec3::Y * -0.4) > 1e-6
+                {
+                    failures.push(format!(
+                        "{model:?} woman {woman} build {build}: shifted knee={knee_joint:?} ankle={ankle_joint:?}"
+                    ));
+                }
+            }
+            let male = envelopes[0][build as usize];
+            let female = envelopes[1][build as usize];
+            if female > male * 1.10 {
+                failures.push(format!(
+                    "{model:?} build {build}: inflated female peak={female:.5}, male={male:.5}, ratio={:.4} exceeds 1.10",
+                    female / male
+                ));
+            }
+        }
+        for (sex, widths) in envelopes.iter().enumerate() {
+            if !(widths[1] > widths[0] * 1.01 && widths[2] > widths[1] * 1.01) {
+                failures.push(format!(
+                    "{model:?} woman {}: normalized slim/sturdy/muscular envelopes lack distinct growth: {widths:?}",
+                    sex == 1
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn art_contract_humanoid_pelvis_is_moderate_and_sex_shape_survives() {
+    let mut failures = Vec::new();
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Scout,
+        CreatureModel::Nymph,
+        CreatureModel::Medusa,
+        CreatureModel::Zombie,
+        CreatureModel::Orc,
     ] {
         for build in 0..3 {
             let her = HumanoidBody::resolve(&appearance(model, true, build));
             let him = HumanoidBody::resolve(&appearance(model, false, build));
+            for body in [her, him] {
+                // Compare the supported pelvis after its actual mesh scale
+                // with the shoulder joint span, not with garment padding.
+                let half_width = body.pelvis_radii().x * storybook_part(Plan::Biped, J::Hips).x;
+                let shoulder = body.shoulder(1.0).x;
+                if half_width > shoulder * 0.98 {
+                    failures.push(format!(
+                        "{model:?} woman {} build {build}: pelvis halfwidth={half_width:.5}, shoulder={shoulder:.5}, ratio={:.4} exceeds 0.98",
+                        body.woman,
+                        half_width / shoulder
+                    ));
+                }
+            }
+            // Independent existing sex-shape witnesses remain: the leaner
+            // thigh direction does not remove the finer ankle or rounder seat.
             let per = |v: f32, body: &HumanoidBody| v / body.build;
-            assert!(
-                per(her.thigh.radius_top, &her) > per(him.thigh.radius_top, &him) * 1.08,
-                "{model:?} build {build}: her upper thigh"
+            let (her_ankle, his_ankle) = (
+                per(her.shin.radius_bottom, &her),
+                per(him.shin.radius_bottom, &him),
             );
-            assert!(
-                per(her.shin.radius_bottom, &her) < per(him.shin.radius_bottom, &him) * 0.92,
-                "{model:?} build {build}: her ankle"
+            let (her_depth, his_depth) = (
+                per(her.pelvis_radii().z, &her),
+                per(him.pelvis_radii().z, &him),
             );
-            assert!(
-                per(her.pelvis_radii().z, &her) > per(him.pelvis_radii().z, &him) * 1.05,
-                "{model:?} build {build}: her seat"
-            );
+            if her_ankle >= his_ankle * 0.92 || her_depth <= his_depth * 1.05 {
+                failures.push(format!(
+                    "{model:?} build {build}: normalized female/male ankle={her_ankle:.5}/{his_ankle:.5}, pelvis depth={her_depth:.5}/{his_depth:.5}"
+                ));
+            }
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
-fn art_contract_womens_brows_are_fine_high_and_calm() {
-    // As on the concept sheets: her brows are fine lines swelling a little
-    // toward the inner third and tapering at both ends, arched high, and only
-    // lightly drawn down even on the stern kinds; his are heavier.
+fn art_contract_adult_brows_have_substance_taper_and_species_expression() {
     for model in [
         CreatureModel::Human,
         CreatureModel::Medusa,
         CreatureModel::Vampire,
+        CreatureModel::Orc,
     ] {
         let her = geometry::brow_profile(&appearance(model, true, 1), 1.0);
         let him = geometry::brow_profile(&appearance(model, false, 1), 1.0);
         let widest = |b: &[(Vec3, (f32, f32))]| b.iter().map(|(_, r)| r.0).fold(0.0, f32::max);
+        let ratio = widest(&her) / widest(&him);
         assert!(
-            widest(&her) < widest(&him) * 0.5,
-            "{model:?}: her brow is fine"
+            (0.5..=0.8).contains(&ratio),
+            "{model:?}: adult brow substance: {ratio}"
         );
         let peak = her.iter().position(|(_, r)| r.0 == widest(&her)).unwrap();
         assert!(
@@ -542,8 +792,22 @@ fn art_contract_womens_brows_are_fine_high_and_calm() {
             her[3].1 .0 < widest(&her) * 0.4,
             "{model:?}: and tapers outward"
         );
-        // The arch: her brow rises well above its inner end.
         let rise = her.iter().map(|(at, _)| at.y).fold(f32::MIN, f32::max) - her[0].0.y;
-        assert!(rise > 0.012, "{model:?}: her brow arches high: {rise}");
+        let span = her[3].0.x - her[0].0.x;
+        assert!(
+            rise > 0.0 && rise / span <= 0.22,
+            "{model:?}: controlled arch {rise}/{span}"
+        );
+        let left = geometry::brow_profile(&appearance(model, true, 1), -1.0);
+        for (right, left) in her.iter().zip(left) {
+            assert_eq!(right.0 * Vec3::new(-1.0, 1.0, 1.0), left.0);
+            assert_eq!(right.1, left.1);
+        }
     }
+    let slope = |model| {
+        let brow = geometry::brow_profile(&appearance(model, true, 1), 1.0);
+        brow[0].0.y - brow[3].0.y
+    };
+    assert!(slope(CreatureModel::Orc) < slope(CreatureModel::Medusa));
+    assert!(slope(CreatureModel::Medusa) < slope(CreatureModel::Human));
 }

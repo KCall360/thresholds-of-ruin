@@ -24,30 +24,63 @@ must never imply an undisclosed weapon, condition, creature identity or result.
 
 ## Proportions: Bold Storybook
 
-Bold Storybook is the selected working direction from the
-[proportion comparison](proportion-study-rev1.png). The former five-foot-cube
-reference does not constrain the art. Favor a stronger character presence
-relative to the floor, a more compact body impression, larger expressive heads,
-broader hands and feet, and bolder garment and weapon masses. These proportions
-should carry personality and action at the actual gameplay camera.
+This definition governs modeling and animation work. Use it when older studies,
+implementation notes or existing proportion tests disagree with the target.
 
-Apply the direction across the cast. People and undead use distinct head, hand
-and body shapes; armored figures have stronger mass and readable protective
-layers; birds exaggerate the beak, head and feather silhouette; equines emphasize
-the skull, chest and hooves; serpents emphasize the head and flowing body rhythm;
-floaters rely on strong crystal or flame shapes. Preserve family differences
-rather than applying one cartoon head to every creature.
+Bold Storybook is a hand-sculpted fantasy style built around expressive
+characters, compact proportions, strong silhouettes, and rich, readable color.
+Imagine a dark-fairytale illustration brought to life as a carved 3D diorama.
 
-Adult female fantasy silhouettes remain part of this direction: defined waists,
-fuller figures, strong legs, fitted clothing and shaped armor. Stylized proportions
-and mature facial structure should work together. Keep slender, athletic and
-sturdy variants individually recognizable.
+- **Proportions:** Give characters visibly large anatomical heads, substantial
+  hands and feet, compact torsos, and shorter limbs. Judge skull size separately
+  from hair, horns, or headdresses. Keep faces unmistakably adult, with defined
+  brows, cheekbones, noses, and jaws. The exaggeration should remain clear when
+  the character is small on screen.
+- **Bodies:** Build coherent ribcages, pelvises, shoulders, and joints. Female
+  figures should be lean and lightly athletic, with moderate hips, naturally
+  tapered thighs, and clear knees. Preserve individual slender, sturdy, and
+  muscular builds. Compactness comes from shorter lengths and larger heads,
+  hands, and feet; avoid inflating thighs or other body masses.
+- **Character appeal:** Lean into classic fantasy archetypes. Adult female
+  characters can be alluring through mature faces, confident posture, flattering
+  necklines, fitted bodices, elegant boots, and deliberate costume shapes. Keep
+  their anatomy balanced and preserve each species' distinctive features.
+  Adult women, their clothing, armor, and accessories should be alluring.
+  Treat that appeal as an explicit design requirement across the figure
+  and the whole costume, including boots, jewelry, belts and other accessories.
+- **Shape language:** Establish identity through a few strong masses. Use broad
+  sculpted planes, controlled curves, and restrained facets. Hair and fur form
+  intentional clumps; feathers form overlapping groups; scales form broad
+  plates. Reserve fine detail for accents that reinforce the larger design.
+- **Clothing and materials:** Give garments believable thickness, supported
+  folds, and clear construction. Cloth drapes, leather holds structured panels,
+  and armor forms overlapping protective shells. Fit clothing to the body with
+  enough ease for movement. Separate materials through surface shape,
+  roughness, and restrained highlights.
+- **Creature anatomy:** Carry the same exaggeration into species-specific forms:
+  expressive beaks, substantial hooves, broad claws, strong muzzles, or
+  distinctive crystal masses. Retain recognizable skeletal structures and
+  meaningful differences between creature families.
+- **Color and light:** Use substantial blocks of expressive color—teal,
+  burgundy, ochre, chestnut, violet—with a clear value hierarchy. Illuminate
+  faces and shadow-side materials generously. Warm key light, soft cool fill,
+  and grounded contact shadows should reveal the sculpture.
 
-World cells still describe movement, support and occupied space. Visual scale and
-proportion are artistic choices; review adjacent creatures, narrow passages,
-weapon handling, targeting and corpses so the presentation remains understandable.
-The generated comparison illustrates the direction; its suggested scale changes
-and layouts are exploratory references rather than measured runtime specifications.
+For modeling and animation, design connected forms with clear joint landmarks
+and room to move. Check front, side, rear, and action silhouettes. Keep garment
+layers and attachments consistent across body variants, and make the weight
+believable through the supporting feet, pelvis, and chest.
+
+The [updated Rogue style guides](rogue-concepts/README.md) provide the current
+full-cast visual references, including the approved humanoid body reference.
+Use their front, side, rear and action views alongside this definition.
+
+The [proportion comparison](proportion-study-rev1.png) records the selection of
+Bold Storybook. Its suggested scales and layouts are exploratory references;
+the definition above sets the current target. The former five-foot-cube framing
+study is superseded. World cells still describe movement, support and occupied
+space. Review adjacent creatures, narrow passages, weapon handling, targeting
+and corpses so the presentation remains understandable.
 
 ## Current priority: improve the whole cast
 
@@ -93,13 +126,24 @@ Biped recipes now resolve one body description shared by mesh construction,
 joint placement, garment fitting and animation support. The same limb and foot
 shapes feed geometry and fitting, and animation reads the resolved build instead
 of inferring it from joint spacing. Guardian and Yeti exceptions remain explicit;
-equine and centaur dimensions remain separate. This preserves the accepted
-average family shapes while providing correlated body variation. Organic biped
-builds link shoulder, waist and hip ratios with upper-arm, forearm and thigh
-fullness. Lateral shoulder and hip roots follow those widths; vertical bone
-lengths, hands, feet and distal taper retain their established values. Garment
-widths and cuffs follow the same profile. This gives slender and sturdy bodies
-different mass distributions without adding independent random shape controls.
+equine and centaur dimensions remain separate. Species and build variation
+retain their distinct mass distributions. Organic biped builds link shoulder,
+waist and hip ratios with upper-arm, forearm and thigh fullness. Female pelvic
+breadth now places the leg roots independently of thigh muscle volume: the
+upper leg tapers into the knee instead of inheriting an extra hip-width
+multiplier. The finer ankle and pelvis depth remain distinct. Lateral shoulder and hip roots follow those widths; vertical bone
+lengths, hands, feet and ankle dimensions retain their established values.
+These describe the implementation baseline, not limits on the Bold Storybook
+target. Re-evaluate lengths, anatomical skull size and leg taper against that
+definition. Organic female thigh contours use connected upper attachment,
+quadriceps, distal taper and knee masses with independently shaped width and
+depth. Overlapping masses avoid pinched joins, and a fitted upper-shin cap
+preserves the knee transition. The same masses support the skin, fitted
+trousers, plate and posed robe contact. Continue assessing medial/lateral planes and the combined knee/shin
+silhouette; passing cross-section ratios alone does not establish the intended
+shape. Garment widths and cuffs follow the same profile. The existing
+correlation gives slender and sturdy bodies different mass distributions
+without adding independent random shape controls.
 
 Existing outer-torso recipes now distinguish cloth, leather and plate construction:
 rib and back ease varies by material, the waist stays fitted, and structured
@@ -164,12 +208,14 @@ and restrained acceleration rather than arbitrary vertical bobbing.
 
 ## Female figures, clothing and armor
 
-Lean a little into classic high-fantasy tropes for adult female PCs and mobs.
-Their figures and outfits should have a confident, appealing, intentionally
-feminine silhouette: a clearly shaped waist, fuller hips and bust, long strong
-legs, and a deliberate contrast between shoulder and hip lines. Keep anatomy
-coherent in motion. Allow slender, athletic and sturdy builds to express that
-direction differently, preserving stable individual variation.
+Adult female PCs and mobs, their clothing, armor, and accessories should be
+alluring. Use mature facial structure, confident posture, flattering
+necklines, fitted bodices, elegant boots, and deliberate costume shapes. Build
+lean, lightly athletic figures with balanced bust/waist/hip relationships,
+moderate hips, naturally tapered thighs and clear knees. Shorter limb lengths
+and larger anatomical heads, hands and feet establish the compact style.
+Preserve distinct slender, sturdy and muscular builds, each species' anatomy,
+and coherent movement.
 
 Clothing and armor should follow the figure. Use fitted bodices and cuirasses,
 shaped seams and lacing, defined belts, short split tunics or layered hip panels,
@@ -315,6 +361,13 @@ Review each representative creature at the normal gameplay camera and in a
 three-quarter portrait, front, side and back. A good portrait must also read in
 the actual game. Check silhouette in flat value, anatomy at joint extremes,
 weapon grip, cape/body intersections, foot contact and material separation.
+Measure anatomical skull size independently of hair, horns and headwear. Check
+compact lengths, substantial hands/feet, adult facial landmarks, moderate female
+hips, natural thigh taper and clear knees. Review whether female figures and
+their full costumes read as alluring, with each role and species still
+recognizable. Evaluate front, side, rear and action silhouettes across slender,
+sturdy and muscular builds. Passing construction tests alone does not establish
+this visual acceptance.
 
 Inspect motion at real speed and slow playback: idle, start, sustained walk,
 stop, turn, signature action, interrupted action, hurt and death. Compare at
@@ -484,10 +537,33 @@ nose/muzzle and properly placed mouth/tusks, the zombie's fitted open mouth,
 hobgoblin nose clearance and vampire fang attachment. These are reusable generated
 head components; they do not introduce per-frame facial animation.
 
+The shared adult female brow now has a substantial inner third, a restrained
+arch and a fine outer taper. Species expressions retain their relative inward
+slope. A shallow closed band fits both edges and its interior to the actual
+forehead; it keeps visible separation from the existing upper lids. Native
+front and side family studies support this bounded brow improvement.
+
+Adult female eyes now share one almond opening, a globe seated on the resolved
+socket plane, and continuous upper/lower lids that bridge to the face. Iris and
+pupil surfaces follow that globe and clip to the emitted opening. Ordinary
+humanoids have round pupils; Medusa retains her vertical slit. A deliberate
+upper lash line supplies readable feminine definition. Only the iris moves to
+the glowing material. Front and alternate-angle native views support this
+scoped construction improvement. The lower-lid rim remains somewhat heavy on
+Orc and Medusa; species expression and adult cheek/jaw planes remain open style
+work. These checks do not establish full adult-face or cast-wide acceptance.
+
 The shared equine overlap also closes exposed knee/hock endcaps in the reviewed
 fallen quagga, unicorn and centaur variants without visibly enlarged joints.
 Static visual acceptance does not approve real-speed gait, resolve remaining
-cloth penetrations, or replace the code tests deferred until PR preparation.
+cloth penetrations, or replace required code and native-process checks.
+
+The torso attachment pass removes the broken Orc harness and scarf transitions
+over its short shell while preserving the fitted waist. Shared bindings retain
+their full width until their support ends. The female vampire keeps the open
+bodice from her concept sheet without the male cravat. Binding shading,
+neckline construction and painted garment edges remain unfinished.
+These resting views do not approve action-pose clearance or full costumes.
 
 1. Establish a shared body description for geometry, joint landmarks, garment
    fit and motion support. Preserve accepted defaults, then introduce correlated
