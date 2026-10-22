@@ -65,6 +65,128 @@ class BinaryArtifactTests(unittest.TestCase):
         self.assertEqual(artifact.validate(self.output, "debug", "a" * 40), self.output / "bin")
         self.assertEqual(set(p.name for p in self.output.iterdir()), {"manifest.json", "executables.tar", "bin"})
 
+    def test_image_patch_drift_preserves_manifest_and_executable_bytes(self):
+        original = (self.output / "manifest.json").read_bytes()
+        consumer = copy.deepcopy(self.context)
+        consumer["runner"]["version"] = "20261021.278.1"
+        with patch.object(artifact, "current_context", return_value=consumer):
+            self.assertEqual(artifact.validate(self.output, "debug", "a" * 40), self.output / "bin")
+        self.assertEqual((self.output / "manifest.json").read_bytes(), original)
+        for name, source in self.executables.items():
+            self.assertEqual((self.output / "bin" / name).read_bytes(), source.read_bytes())
+
+    def test_image_compatibility_keeps_all_other_context_fields_exact(self):
+        changes = {"source_sha": "c" * 40, "tree": "c" * 40, "profile": "release",
+                   "platform": "Windows", "target": "other-target",
+                   "runner.os": "Windows", "runner.arch": "ARM64", "runner.image": "another-family",
+                   "workflow.repository": "other/repo", "workflow.run": "13", "workflow.attempt": "2",
+                   "toolchain.rustc": "other rustc", "toolchain.cargo": "other cargo",
+                   "recipe.runtime": "other-policy"}
+        for field, value in changes.items():
+            consumer = copy.deepcopy(self.context)
+            consumer["runner"]["version"] = "20261021.278.1"
+            parent = consumer
+            parts = field.split(".")
+            for part in parts[:-1]:
+                parent = parent[part]
+            parent[parts[-1]] = value
+            with self.subTest(field=field), patch.object(artifact, "current_context", return_value=consumer), \
+                    self.assertRaises(ValueError) as rejected:
+                artifact.validate(self.output, "debug", "a" * 40)
+            self.assertIn(field, str(rejected.exception))
+        original = self.manifest()
+        for parent, diagnostic in ((None, "context.keys"), ("runner", "runner.keys")):
+            value = copy.deepcopy(original)
+            target = value["context"] if parent is None else value["context"][parent]
+            target["untrusted-key-do-not-print"] = "untrusted-value-do-not-print"
+            self.write_manifest(value)
+            with self.assertRaises(ValueError) as rejected:
+                artifact.validate(self.output, "debug", "a" * 40)
+            self.assertIn(diagnostic, str(rejected.exception))
+            self.assertNotIn("untrusted", str(rejected.exception))
+        self.write_manifest(original)
+
+    def test_image_versions_are_bounded_and_local_hashes_cannot_drift(self):
+        original = self.manifest()
+        for version in ("", True, None, "not-a-version", "1." * 100, "20261021.278.1/extra"):
+            value = copy.deepcopy(original)
+            consumer = copy.deepcopy(self.context)
+            value["context"]["runner"]["version"] = consumer["runner"]["version"] = version
+            self.write_manifest(value)
+            with self.subTest(version=version), patch.object(artifact, "current_context", return_value=consumer), \
+                    self.assertRaisesRegex(ValueError, "runner.version"):
+                artifact.validate(self.output, "debug", "a" * 40)
+        missing = copy.deepcopy(original)
+        del missing["context"]["runner"]["version"]
+        self.write_manifest(missing)
+        with self.assertRaisesRegex(ValueError, "runner"):
+            artifact.validate(self.output, "debug", "a" * 40)
+        value = copy.deepcopy(original)
+        value["context"]["runner"]["version"] = "a" * 64
+        self.write_manifest(value)
+        consumer = copy.deepcopy(value["context"])
+        with patch.object(artifact, "current_context", return_value=consumer):
+            self.assertEqual(artifact.validate(self.output, "debug", "a" * 40), self.output / "bin")
+        for version in ("b" * 64, "20261021.278.1"):
+            consumer["runner"]["version"] = version
+            with patch.object(artifact, "current_context", return_value=consumer), \
+                    self.assertRaisesRegex(ValueError, "runner.version"):
+                artifact.validate(self.output, "debug", "a" * 40)
+        self.write_manifest(original)
+
+    def test_legacy_exact_image_runtime_policy_is_not_silently_adopted(self):
+        value = self.manifest()
+        value["context"]["recipe"]["runtime"] = "same-runner-image-and-checked-out-setup-v1"
+        self.write_manifest(value)
+        with self.assertRaises(ValueError):
+            artifact.validate(self.output, "debug", "a" * 40)
+
+    def test_cli_records_provenance_only_after_all_six_runtime_probes(self):
+        producer = copy.deepcopy(self.context)
+        producer["platform"] = "Windows" if os.name == "nt" else "Linux"
+        producer["runner"]["os"] = producer["platform"]
+        output = self.root / "runtime-provenance"
+        artifact.package(self.executables, producer, output)
+        with patch.object(artifact, "current_context", return_value=producer):
+            self.assertEqual(artifact.validate(output, "debug", "a" * 40), output / "bin")
+        raw = (output / "manifest.json").read_bytes()
+        certificate = (artifact.ROOT / "scenarios/two-room/validation.json").read_bytes()
+        def response(command, *args, **kwargs):
+            return certificate if command[1] == "check" else b"usage\n"
+        args = ["validate", str(output), "--profile", "debug", "--source-sha", "a" * 40, "--smoke"]
+        stream = io.StringIO()
+        with patch.object(artifact, "current_context", return_value=producer), \
+                patch.object(artifact, "probe", side_effect=response) as probes, patch.object(sys, "stdout", stream):
+            self.assertEqual(artifact.main(args), 0)
+        self.assertEqual(probes.call_count, 6)
+        lines = stream.getvalue().splitlines()
+        self.assertEqual(len(lines), 2)
+        receipt = json.loads(lines[0])
+        self.assertEqual(receipt, {"policy": "same-runner-family-and-checked-out-setup-v2",
+                                  "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                                  "source_sha": "a" * 40, "profile": "debug",
+                                  "producer_runner": producer["runner"], "consumer_runner": producer["runner"],
+                                  "smoke": "passed"})
+        self.assertEqual(lines[1], str(output / "bin"))
+        consumer = copy.deepcopy(producer)
+        consumer["runner"]["version"] = "20261021.278.1"
+        stream = io.StringIO()
+        with patch.object(artifact, "current_context", return_value=consumer), \
+                patch.object(artifact, "probe", side_effect=response) as probes, patch.object(sys, "stdout", stream):
+            self.assertEqual(artifact.main(args), 0)
+        self.assertEqual(probes.call_count, 6)
+        drift_receipt = json.loads(stream.getvalue().splitlines()[0])
+        self.assertEqual(drift_receipt, {**receipt, "consumer_runner": consumer["runner"]})
+        stream, errors = io.StringIO(), io.StringIO()
+        with patch.object(artifact, "current_context", return_value=producer), \
+                patch.object(artifact, "probe", return_value=None), patch.object(sys, "stdout", stream), \
+                patch.object(sys, "stderr", errors), patch.object(artifact, "build") as build:
+            self.assertEqual(artifact.main(args), 1)
+        self.assertEqual(stream.getvalue(), "")
+        self.assertIn("application smoke failed", errors.getvalue())
+        build.assert_not_called()
+        self.assertEqual((output / "manifest.json").read_bytes(), raw)
+
     def test_identity_mismatch_is_rejected_before_materialization(self):
         for key in ("source_sha", "tree", "profile", "target", "toolchain", "runner", "workflow", "recipe"):
             with self.subTest(key=key):

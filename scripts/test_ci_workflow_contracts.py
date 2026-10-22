@@ -101,6 +101,49 @@ class WorkflowAdoption(unittest.TestCase):
                         producer.index('Build exact-run ordinary applications'))
         self.assertNotIn('continue-on-error', producer)
 
+    def test_producer_smokes_fresh_transport_before_uploading_pristine_bundle(self):
+        producer = workflow_job('windows_binaries')
+        stage = workflow_step('Validate fresh producer transport and application runtime')
+        self.assertLess(producer.index('Build exact-run ordinary applications'),
+                        producer.index('Validate fresh producer transport and application runtime'))
+        self.assertLess(producer.index('Validate fresh producer transport and application runtime'),
+                        producer.index('Publish binaries, not test evidence'))
+        self.assertIn('shell: bash', stage)
+        self.assertIn('python scripts/ci_binary_artifact.py validate .local/producer-validation '
+                      '--profile ${{ matrix.profile }} --source-sha "$GITHUB_SHA" --smoke', stage)
+        self.assertNotIn('cargo ', stage)
+        self.assertNotIn('continue-on-error', stage)
+        upload = workflow_step('Publish binaries, not test evidence')
+        self.assertIn('.local/application-artifact/manifest.json', upload)
+        self.assertIn('.local/application-artifact/executables.tar', upload)
+        self.assertNotIn('producer-validation', upload)
+        # Execute the actual copy program: only immutable transport files move,
+        # archive modes simulate artifact download, and an old destination fails.
+        match = re.search(r"python - <<'PY'\n(.*?)\n          PY", stage, re.S)
+        self.assertIsNotNone(match)
+        program = '\n'.join(line[10:] for line in match[1].splitlines())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original = root / '.local/application-artifact'
+            original.mkdir(parents=True)
+            for name in ('manifest.json', 'executables.tar'):
+                path = original / name
+                path.write_bytes(('immutable:' + name).encode())
+                path.chmod(0o755)
+            (original / 'not-transport.txt').write_text('must not be copied')
+            before = {path.name: (path.read_bytes(), path.stat().st_mode) for path in original.iterdir()}
+            subprocess.run([sys.executable, '-c', program], cwd=root, check=True, timeout=10)
+            copied = root / '.local/producer-validation'
+            self.assertEqual({path.name for path in copied.iterdir()}, {'manifest.json', 'executables.tar'})
+            for path in copied.iterdir():
+                self.assertEqual(path.read_bytes(), before[path.name][0])
+                if os.name != 'nt':
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+            self.assertEqual({path.name: (path.read_bytes(), path.stat().st_mode) for path in original.iterdir()}, before)
+            rejected = subprocess.run([sys.executable, '-c', program], cwd=root,
+                                      capture_output=True, timeout=10)
+            self.assertNotEqual(rejected.returncode, 0)
+
     def test_selected_consumer_keeps_pure_tooling_independent_of_app_producer(self):
         for producer in ('success', 'failure', 'cancelled', 'skipped', '', 'unknown'):
             with self.subTest(producer=producer):

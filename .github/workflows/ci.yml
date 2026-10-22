@@ -237,6 +237,21 @@ jobs:
         run: python -c "from pathlib import Path; Path('.local').mkdir(exist_ok=True)"
       - name: Build exact-run ordinary applications
         run: python scripts/ci_binary_artifact.py build --profile ${{ matrix.profile }} --output .local/application-artifact
+      - name: Validate fresh producer transport and application runtime
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          source = Path('.local/application-artifact')
+          destination = Path('.local/producer-validation')
+          destination.mkdir()
+          for name in ('manifest.json', 'executables.tar'):
+              copied = destination / name
+              shutil.copyfile(source / name, copied)
+              copied.chmod(0o644)
+          PY
+          python scripts/ci_binary_artifact.py validate .local/producer-validation --profile ${{ matrix.profile }} --source-sha "$GITHUB_SHA" --smoke
       - name: Publish binaries, not test evidence
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

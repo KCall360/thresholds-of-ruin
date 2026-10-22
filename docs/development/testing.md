@@ -525,7 +525,7 @@ examples, system runtime libraries, or proof that tests passed.
 
 The producer uses a fixed ordinary-application recipe. Validation binds the clean
 source SHA/tree, Rust/Cargo/native target, profile and fixed flags/features,
-runner OS/architecture/image and workflow identity; it checks exact archive
+runner OS/architecture/image family and workflow identity; it checks exact archive
 membership, regular-file constraints, bounds and per-executable/archive hashes.
 The consumer gets only the validated binary directory. Missing native libraries
 still fail at actual launch; there is no hidden Cargo fallback or substitute
@@ -534,13 +534,25 @@ a signature or independent attestation. The fixed recipe also binds supported
 tracked Cargo configuration; external ancestor/Cargo-home configuration and
 unreviewed compiler/linker overrides are rejected, not silently normalized.
 
-The binding includes the run **attempt** and hosted image. A consumer-only retry
+The v2 runtime policy permits only hosted image patch-version drift within
+the same image family; independent hosted jobs cannot reliably pin a patch during
+rollout. Source, toolchain, target, recipe, OS, architecture and run **attempt**
+remain exact. Both bounded image-version identities are retained separately in
+the consumer's validation log after successful smoke, bound to the exact producer
+manifest bytes; the producer's identity is never rewritten. A consumer-only retry
 cannot accept an artifact from an earlier attempt: rerun the producer and its
-dependent consumers together rather than relaxing identity checks. Optional
-`validate --smoke` exercises five binaries' actual `--help` entry paths plus
+dependent consumers together rather than relaxing those identity checks.
+Mismatch diagnostics name only fixed, reviewed context fields.
+
+CI consumers require `validate --smoke` before application tests. It exercises
+five binaries' actual `--help` entry paths plus
 `tor-scenario check scenarios/two-room`, comparing its result with the checked-in
-certificate. These noninteractive probes do not prove sockets, graphics or
-gameplay; the selected application tests still own those boundaries.
+certificate. Shared Windows producers also validate a fresh transport copy and
+run these probes before uploading the original bundle, without another build.
+Same-family compatibility is not a guarantee about every runtime dependency:
+these noninteractive probes do not prove sockets, graphics or gameplay. Fresh
+application tests still own those boundaries, and a missing runtime or failed
+probe remains a hard failure, never an implicit rebuild or fallback.
 
 The required Linux application producer supplies this artifact to Linux debug
 Python; it shares the deterministic Rust owner when that coverage is required.

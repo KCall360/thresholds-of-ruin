@@ -145,7 +145,7 @@ def recipe(profile):
     require(profile in ("debug", "release"), "unsupported profile")
     return {"command": ["cargo", "build", "--workspace", "--bins", "--locked",
                         "--message-format=json-render-diagnostics", *(["--release"] if profile == "release" else [])],
-            "environment": BUILD_ENV, "features": [], "runtime": "same-runner-image-and-checked-out-setup-v1"}
+            "environment": BUILD_ENV, "features": [], "runtime": "same-runner-family-and-checked-out-setup-v2"}
 
 
 def cargo_profile(profile):
@@ -158,6 +158,47 @@ def command_output(command):
     output = probe(command, ROOT, issues, "binary-artifact", timeout=30, max_output_bytes=4 * 1024 * 1024)
     require(output is not None and not issues, "required identity command failed")
     return output.decode("utf-8").strip()
+
+
+def image_version_kind(value):
+    """Hosted patch releases may vary; local SDK fingerprints must remain exact."""
+    if isinstance(value, str):
+        if re.fullmatch(r"[0-9]{1,8}(?:\.[0-9]{1,8}){1,3}", value):
+            return "hosted"
+        if re.fullmatch(r"[0-9a-f]{64}", value):
+            return "local"
+    return None
+
+
+def require_compatible_context(producer, consumer):
+    """Compare fixed contract fields; never echo untrusted keys or values."""
+    require(isinstance(producer, dict), "artifact environment/source mismatch: context.keys")
+    differences = []
+    if set(producer) != set(consumer):
+        differences.append("context.keys")
+    for field in ("profile", "source_sha", "tree", "cargo_config", "platform", "target"):
+        if producer.get(field) != consumer.get(field):
+            differences.append(field)
+    groups = {"runner": ("os", "arch", "image", "version"),
+              "workflow": ("repository", "run", "attempt"), "toolchain": ("rustc", "cargo"),
+              "recipe": ("command", "environment", "features", "runtime")}
+    for group, fields in groups.items():
+        actual, expected = producer.get(group), consumer[group]
+        if not isinstance(actual, dict) or set(actual) != set(expected):
+            differences.append(f"{group}.keys")
+        if not isinstance(actual, dict):
+            continue
+        for field in fields:
+            left, right = actual.get(field), expected.get(field)
+            if group == "runner" and field == "version":
+                kinds = image_version_kind(left), image_version_kind(right)
+                matches = (kinds == ("hosted", "hosted")
+                           or (kinds == ("local", "local") and left == right))
+            else:
+                matches = left == right
+            if not matches:
+                differences.append(f"{group}.{field}")
+    require(not differences, "artifact environment/source mismatch: " + ", ".join(differences))
 
 
 def current_context(profile, source_sha):
@@ -183,6 +224,7 @@ def current_context(profile, source_sha):
             value = os.environ.get(key, "")
             require(re.fullmatch(r"[A-Za-z0-9_./+-]{1,160}", value), "missing or invalid runner/workflow identity")
             context[group][name] = value
+    require(image_version_kind(context["runner"]["version"]) is not None, "invalid runner.version")
     platform = context["runner"]["os"]
     require(platform in ("Linux", "Windows") and (platform == "Windows") == (os.name == "nt"), "unsupported platform")
     rustc, cargo = command_output(["rustc", "-Vv"]), command_output(["cargo", "-V"])
@@ -298,16 +340,18 @@ def check_archive(archive, identities, destination=None):
         require(source.read(tail) == b"\0" * tail and not source.read(1), "extra or incomplete archive payload")
 
 
-def validate(path, profile, source_sha):
+def validate_details(path, profile, source_sha):
     root = directory(path)
     require({p.name for p in root.iterdir()} <= {"manifest.json", "executables.tar", "bin"}, "unexpected bundle file")
     manifest_path = root / "manifest.json"
-    manifest = json.loads(read_small(manifest_path, 64 * 1024), object_pairs_hook=unique_object)
+    raw_manifest = read_small(manifest_path, 64 * 1024)
+    manifest = json.loads(raw_manifest, object_pairs_hook=unique_object)
     require(isinstance(manifest, dict) and set(manifest) == {"version", "context", "executables", "archive"}
             and type(manifest["version"]) is int and manifest["version"] == 1, "unsupported artifact manifest")
     context = current_context(profile, source_sha)
-    require(context["profile"] == profile and context["source_sha"] == source_sha
-            and manifest["context"] == context, "artifact environment/source mismatch")
+    require(context["profile"] == profile, "artifact environment/source mismatch: profile")
+    require(context["source_sha"] == source_sha, "artifact environment/source mismatch: source_sha")
+    require_compatible_context(manifest["context"], context)
     identities = manifest["executables"]
     require(isinstance(identities, dict) and set(identities) == set(BINARIES), "incomplete executable manifest")
     suffix = ".exe" if context["platform"] == "Windows" else ""
@@ -337,7 +381,16 @@ def validate(path, profile, source_sha):
         executable = bindir / row["path"]
         require(file_identity(executable) == {key: row[key] for key in ("bytes", "sha256")}, "materialized app mismatch")
         require(os.name == "nt" or stat.S_IMODE(regular(executable).st_mode) == row["mode"], "app mode mismatch")
-    return bindir
+    provenance = {"policy": context["recipe"]["runtime"],
+                  "manifest_sha256": hashlib.sha256(raw_manifest).hexdigest(),
+                  "source_sha": source_sha, "profile": profile,
+                  "producer_runner": manifest["context"]["runner"], "consumer_runner": context["runner"]}
+    return bindir, provenance
+
+
+def validate(path, profile, source_sha):
+    """Validate transport/compatibility only; callers must still run runtime smoke."""
+    return validate_details(path, profile, source_sha)[0]
 
 
 def build(profile, output):
@@ -398,9 +451,13 @@ def main(argv=None):
     consumer.add_argument("--smoke", action="store_true")
     args = parser.parse_args(argv)
     try:
-        result = build(args.profile, args.output) if args.command == "build" else validate(args.directory, args.profile, args.source_sha)
+        if args.command == "build":
+            result = build(args.profile, args.output)
+        else:
+            result, provenance = validate_details(args.directory, args.profile, args.source_sha)
         if args.command == "validate" and args.smoke:
             smoke(result)
+            print(json.dumps({**provenance, "smoke": "passed"}, sort_keys=True))
         print(result)
         return 0
     except (OSError, ValueError, KeyError, TypeError) as error:
