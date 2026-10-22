@@ -110,6 +110,13 @@ pub fn run() -> Result<(), Error> {
                 }
                 diagnostics.azimuth = Some(degrees.rem_euclid(360.0).to_radians());
             }
+            "--turn" => {
+                let degrees: f32 = value()?.parse()?;
+                if !degrees.is_finite() {
+                    return Err("--turn must be a finite number of degrees".into());
+                }
+                diagnostics.turn = degrees.to_radians();
+            }
             "--gallery" => gallery = true,
             "--bestiary" => bestiary = true,
             "--travel-study" => {
@@ -155,6 +162,38 @@ pub fn run() -> Result<(), Error> {
                     .filter(|name| !name.is_empty())
                     .collect();
             }
+            "--jump" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.jump = true;
+            }
+            "--bust-study" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.women = true;
+                diagnostics.bust_study = Some(match value()?.as_str() {
+                    "contours" => BustStudy::Contours,
+                    "volumes" => BustStudy::Volumes,
+                    other => return Err(format!("unknown bust study {other:?}").into()),
+                });
+            }
+            "--antic" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.lively = true;
+                diagnostics.bored = true;
+                diagnostics.antic = Some(value()?.parse()?);
+            }
+            "--lively" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.lively = true;
+            }
+            "--women" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.women = true;
+            }
             "--fallen-lineups" => {
                 bestiary = true;
                 diagnostics.lineups = true;
@@ -181,7 +220,7 @@ pub fn run() -> Result<(), Error> {
                     "tor-client-3d [--scenario DIR] [--save FILE | --save-root DIR] [--seed N] [--server-bin EXE]\n\
                      tor-client-3d --connect 127.0.0.1:PORT [--actor 1] [--observe]  (token from TOR_SERVER_TOKEN)\n\
                      Offline: --bestiary or --gallery [--azimuth DEGREES]\n\
-                     Model review: --lineups or --fallen-lineups [--capture DIR]\n\
+                     Model review: --lineups [--women] [--jump] [--lively] [--antic N] [--turn DEGREES] [--bust-study contours|volumes] or --fallen-lineups [--capture DIR]\n\
                      Motion review: --travel-study [--capture DIR --capture-every SECS]\n\
                      Without --connect it starts a private server with a fresh save.\n{HELP}"
                 );
@@ -296,6 +335,7 @@ pub fn run() -> Result<(), Error> {
             update_cave_params,
             follow_actors,
             creatures::animate,
+            creatures::soften,
             creatures::snuff,
             creatures::effects,
             tend_the_dead,
@@ -341,6 +381,15 @@ pub fn run() -> Result<(), Error> {
 
 const FOG: Color = Color::srgb(0.02, 0.022, 0.035);
 
+/// Which aspect of the chest a controlled line-up varies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BustStudy {
+    /// Each contour family in turn, at her kind's typical volume.
+    Contours,
+    /// Each volume step in turn, in her kind's typical contour.
+    Volumes,
+}
+
 /// Process-test aids: periodic screenshots and a wandering character.
 #[derive(Resource, Default)]
 pub(crate) struct Diagnostics {
@@ -350,6 +399,9 @@ pub(crate) struct Diagnostics {
     distance: Option<f32>,
     /// Offline camera orbit, in radians relative to the standard showcase view.
     azimuth: Option<f32>,
+    /// Line-up individuals turned from their usual facing, in radians:
+    /// a quarter turn shows each in profile.
+    turn: f32,
     /// Seconds between screenshots with --capture.
     capture_every: Option<f32>,
     /// In the bestiary, go straight to the close-ups.
@@ -366,6 +418,17 @@ pub(crate) struct Diagnostics {
     lineups: bool,
     /// Use the same generated lineup individuals in their settled death poses.
     fallen_lineups: bool,
+    /// Line up only women among people, for studying their figures.
+    women: bool,
+    /// Line-up individuals jump on the spot in turn, for studying motion.
+    jump: bool,
+    /// Line-up individuals keep their idle stances and fidgets.
+    lively: bool,
+    /// Line-up individuals all play this antic from the start, held long
+    /// enough to see it through.
+    antic: Option<u32>,
+    /// Line up women alike but for one aspect of their chest.
+    bust_study: Option<BustStudy>,
     /// Limit line-ups to these creatures, by their bestiary names.
     families: Vec<String>,
     /// What the bestiary's humanoids wear at first.

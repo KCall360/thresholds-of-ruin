@@ -411,24 +411,25 @@ fn check_visibility(
 #[test]
 fn native_medusa_sewn_edges_remain_visible_over_the_emitted_body() {
     let bands = [
+        // The armholes close under the arm: the bodice wraps the torso below.
         Band {
-            name: "lower armholes",
+            name: "below the armholes",
             low: 0.12,
             high: 0.18,
             back: true,
             coverage: Coverage::Absent,
         },
         Band {
-            name: "middle armholes",
-            low: 0.25,
-            high: 0.31,
+            name: "underarm armholes",
+            low: 0.43,
+            high: 0.46,
             back: true,
             coverage: Coverage::Bilateral,
         },
         Band {
             name: "upper armholes",
-            low: 0.35,
-            high: 0.39,
+            low: 0.47,
+            high: 0.5,
             back: true,
             coverage: Coverage::Bilateral,
         },
@@ -454,7 +455,7 @@ fn native_medusa_sewn_edges_remain_visible_over_the_emitted_body() {
         assert!(look.outfit.is_none());
         let mut suppressed = look.clone();
         let mut outfit = Outfit::worn(&look);
-        outfit.neckline = Neckline::Closed;
+        outfit.bodice.cut = Neckline::Closed;
         outfit.armhole_edge = None;
         // Its intentional metal neck band/disc is not a structural occluder.
         // Metal is excluded from the marked top faces, and removed in baseline.

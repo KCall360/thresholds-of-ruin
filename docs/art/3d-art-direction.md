@@ -239,6 +239,59 @@ consistent craftsmanship across sexes and builds. Apply the same care to mobs
 and PCs; cosmetic styling does not change their mechanical capabilities or
 invent undisclosed equipment.
 
+### Fitted garments and soft tissue
+
+Each individual's figure (straighter, balanced or hourglass) is her own roll,
+leaning toward her kind's typical figure, and every garment is fitted to it.
+Garments are cut from the resolved wearer rather than drawn over one fixed
+torso. A neckline is the garment's own cut (split, deep or court plunge, or a
+deep wrap whose left panel crosses beneath the point to the waist); a garment
+may lace its opening with straight cords between eyelets, and an outfit may
+let each wearer's own roll choose among its cuts. Outer layers open along the
+same cut and frame it. Sleeveless armholes close under the arm. Each outfit
+names its garment's support (none, loose or structured), which shapes how the
+painted tunic falls; plate is one forged volume across the chest, and a
+woman's knight wears low-cut plate with a gilt V edge and a tabard ending
+beneath it.
+
+Soft regions of the body are skinned to spring-driven bones that lag and
+settle as the body moves, driven by the body's own acceleration: every walk,
+jump, blow or fall moves them without per-animation keys. Plate holds them
+still and structured leather damps them. Each region is attached on the side
+it faces away from, so the same mechanism serves any soft mass.
+
+The pelvis is sculpted inside the envelope garments fit: a waist meeting the
+torso's own, hip shelves over the thigh heads, a lower belly and a rounded
+seat, fuller on a woman. Skirts measure that sculpt at their waistband, never
+shallower than the belt they hang from, and widen only the way the thighs
+press on them; anything hung round the hips is pinned to the sculpted
+surface. Garments over bare legs are cut high, their leg openings bound like
+the neckline.
+
+### Composing outfits from garment parts
+
+Outfits are built from shared parts, not modeled whole. A recipe starts from a
+plain outfit and names only what differs; each part is fitted to the
+resolved wearer, so any outfit dresses any humanoid and parts recombine:
+
+- **Bodice:** coverage (full, cropped with an even or pointed edge, or
+  bikini cups), what holds it up (shoulders, halter, one shoulder or a
+  strapless sweetheart), its neckline (plunge, wrap or keyhole), lacing,
+  support and fabric pattern. A man's bodice closes in the same cloth.
+- **Skirt:** length, slit, fullness, hem (even, pointed or high-low), a front
+  panel, sheer cloth, a pattern, and petticoats or tiers beneath, each with
+  its own length and hem.
+- **Sleeves:** plain, puffed, belled, gauntleted with a sheer drape, or an
+  off-shoulder band.
+- **Outer layers:** jerkins, gambesons and laced waist corsets that open along
+  the bodice's own cut.
+- **Headwear, footwear and trimmings:** hats, wreaths, circlets and veils;
+  pumps and sandals laced as far up the leg as they go; chokers, collars,
+  armlets, sashes, coin belts, pointed shoulders and garters.
+
+Fabric patterns (leopard, dots, ribbing) and sheer cloth are properties of
+any garment, not of particular outfits.
+
 ## Color philosophy: expressive color with a clear hierarchy
 
 Color should make the world inviting, strange and memorable. Dark fairytale

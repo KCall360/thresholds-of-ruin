@@ -78,6 +78,21 @@ fn components(last: BootLast) -> [Vec<[Vec3; 3]>; 3] {
     [loft(&upper), loft(&sole), heel]
 }
 
+/// A shoe on the same last: the upper closed in its colour, or for a sandal
+/// the bare foot, on a sole and heel of the shoe's.
+pub(super) fn emit_shoe(p: &mut Parts, last: BootLast, upper: Vec3, sole: Vec3) {
+    let [foot, base, heel] = components(last);
+    for face in foot {
+        p.satin.tri(face, upper);
+    }
+    for face in base {
+        p.matte.tri(face, sole * 0.6);
+    }
+    for face in heel {
+        p.matte.tri(face, sole * 0.8);
+    }
+}
+
 pub(super) fn emit(p: &mut Parts, last: BootLast, color: Vec3) {
     let [upper, sole, heel] = components(last);
     for face in upper {

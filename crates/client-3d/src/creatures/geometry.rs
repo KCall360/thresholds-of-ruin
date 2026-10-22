@@ -1,8 +1,14 @@
-use super::anatomy::{storybook_part, BootLast, BootShape, HumanoidBody, LimbShape, ReptileHead};
+use super::anatomy::{
+    storybook_part, BootLast, BootShape, Bust, HumanoidBody, LimbShape, ReptileHead,
+};
 use super::animation::ease;
-use super::outfit::{Arms, Baldric, Feet, Headwear, Legs, Neckline, Outer, Outfit, TorsoOrnament};
+use super::outfit::{
+    Arms, Baldric, Bodice, Cover, Feet, Headwear, Hem, Legs, Neckline, Outer, Outfit, Shoes, Skirt,
+    SleeveCut, Straps, Support, TorsoOrnament,
+};
 use super::*;
 
+mod accessory_parts;
 mod beast_parts;
 mod boot_parts;
 #[cfg(test)]
@@ -14,6 +20,7 @@ mod equine_parts;
 mod equine_tests;
 #[cfg(test)]
 mod griffin_tests;
+mod headwear_parts;
 mod membrane_parts;
 #[cfg(test)]
 mod membrane_tests;
@@ -34,6 +41,12 @@ mod aquator_tests;
 
 #[cfg(test)]
 mod flytrap_tests;
+
+#[cfg(test)]
+mod bust_tests;
+
+#[cfg(test)]
+mod wardrobe_parts_tests;
 
 #[cfg(test)]
 mod eye_tests;
@@ -436,31 +449,6 @@ mod art_contract_tests {
     }
 
     #[test]
-    fn art_contract_her_neckline_is_a_v_over_the_upper_chest_only() {
-        let front = Vec3::Z;
-        assert!(
-            decollete(Vec3::new(0.0, 0.45, 0.1), front, 0.9),
-            "open at the centre"
-        );
-        assert!(
-            decollete(Vec3::new(0.09, 0.52, 0.1), front, 0.9),
-            "wider at the collarbone"
-        );
-        assert!(
-            !decollete(Vec3::new(0.09, 0.42, 0.1), front, 0.9),
-            "covered beside the V"
-        );
-        assert!(
-            !decollete(Vec3::new(0.0, 0.3, 0.1), front, 0.9),
-            "covered below the bust line"
-        );
-        assert!(
-            !decollete(Vec3::new(0.0, 0.45, -0.1), Vec3::NEG_Z, 0.9),
-            "the back stays covered"
-        );
-    }
-
-    #[test]
     fn art_contract_long_hair_falls_in_locks_and_tails_lie_along_the_nape() {
         let look = |woman: bool, hair: u8| {
             Look::with_choice(
@@ -763,14 +751,15 @@ mod art_contract_tests {
             let plate = torso_garment(body, TorsoMaterial::Plate, true);
             let front =
                 |shape: &crate::sdf::Sculpt, x, y| shape.onto(Vec3::new(x, y, 0.6), Vec3::NEG_Z).z;
-            let centre = front(&plate, 0.0, 0.345);
-            let side = front(&plate, 0.073 * body.shoulders * body.build, 0.345);
+            let apex = body.bust.unwrap().apex(1.0);
+            let centre = front(&plate, 0.0, apex.y);
+            let side = front(&plate, apex.x, apex.y);
             assert!(
                 centre >= side - 0.01,
                 "plate must span the central chest valley"
             );
             assert!(
-                centre > front(&leather, 0.0, 0.345),
+                centre > front(&leather, 0.0, apex.y),
                 "materials need different construction"
             );
             assert!(
@@ -778,7 +767,7 @@ mod art_contract_tests {
                 "waist must remain fitted"
             );
             for x in [-0.08, 0.0, 0.08] {
-                let at = plate.onto(Vec3::new(x, 0.345, 0.6), Vec3::NEG_Z);
+                let at = plate.onto(Vec3::new(x, apex.y, 0.6), Vec3::NEG_Z);
                 assert!(at.is_finite() && plate.distance(at).abs() < 0.001);
             }
         }
@@ -831,9 +820,13 @@ impl Kit<'_, '_, '_> {
             .spawn((Transform::from_translation(at), Visibility::default()))
             .id();
         let proportion = storybook_part(self.rig.plan, j);
-        self.commands
-            .entity(e)
-            .with_children(|p| model.attach_scaled(p, proportion));
+        if model.1.is_empty() {
+            self.commands
+                .entity(e)
+                .with_children(|p| model.attach_scaled(p, proportion));
+        } else {
+            model.attach_soft(self.commands, e, proportion);
+        }
         self.commands.entity(parent).add_child(e);
         self.rig.joints[j as usize] = Some(e);
         self.rig.rest[j as usize] = at;
@@ -2702,6 +2695,8 @@ struct ClothSurface {
     folds: u32,
     split: f32,
     phase: f32,
+    /// How the hem is cut round the garment.
+    hem: Hem,
     fit: Option<std::sync::Arc<ClothFit>>,
 }
 
@@ -2713,8 +2708,13 @@ impl ClothSurface {
             folds,
             split,
             phase: rand(seed + 73, 0) * 0.4,
+            hem: Hem::Even,
             fit: None,
         }
+    }
+
+    fn with_hem(self, hem: Hem) -> Self {
+        Self { hem, ..self }
     }
 
     fn rows(&self) -> usize {
@@ -2724,7 +2724,7 @@ impl ClothSurface {
     fn point(&self, t: f32, angle: f32, inner: bool) -> Vec3 {
         let mut point = drape_point(
             self.cut,
-            self.length,
+            self.length * self.hem.reach(angle),
             self.folds,
             self.split,
             self.phase,
@@ -2941,10 +2941,241 @@ pub(super) fn cutaway_coat(style: Style) -> bool {
     style == Style::Leprechaun
 }
 
-/// Whether a point on the front of a woman's bodice lies in its low, shaped
-/// neckline: a V widening from the upper chest up to the collarbones.
-pub(super) fn decollete(at: Vec3, normal: Vec3, shoulders: f32) -> bool {
-    normal.z > 0.0 && at.y > 0.4 && at.x.abs() < 0.045 * shoulders + (at.y - 0.4) * 0.95
+/// Where the armhole's curve turns under the arm.
+const ARMPIT: f32 = 0.44;
+
+/// Where a sleeveless bodice's armhole edge lies at a height, from the
+/// midline: down from the shoulder strap and closing under the arm, so the
+/// bodice wraps the whole torso below the armpit. In front (`front` 1, the
+/// back 0) it curves out round a chest so the side of it stays covered.
+pub(super) fn armhole_edge(body: HumanoidBody, y: f32, front: f32) -> f32 {
+    let sh = body.shoulders * body.build;
+    let side = 0.16 * sh;
+    let under = ((ARMPIT - y) / 0.06).max(0.0);
+    let edge = side + under * under * 0.2 * sh;
+    let Some(bust) = body.bust else {
+        return edge;
+    };
+    let (center, radii) = bust.mass(1.0, 0.0);
+    let reach = (center.x + radii.x + 0.012).min(0.183 * sh * 0.97);
+    let t = ((y - center.y) / (radii.y + 0.05)).clamp(-1.0, 1.0);
+    edge.max(side + (reach - side).max(0.0) * (1.0 - t * t) * front)
+}
+
+/// Where a bikini top covers the torso: a cup over each side of her chest,
+/// fitted to its own size and contour, and the band beneath it all round.
+/// Returns how near the covered point lies to a cup's bound rim, 0 at its
+/// heart to 1 at the edge; a man has neither cups nor band.
+pub(super) fn bikini_cover(body: HumanoidBody, at: Vec3) -> Option<f32> {
+    let bust = body.bust?;
+    if (at.y - (bust.fold + 0.004)).abs() < 0.011 {
+        return Some(0.0);
+    }
+    [-1.0f32, 1.0]
+        .into_iter()
+        .filter_map(|side| {
+            let (center, radii) = bust.mass(side, 0.0);
+            let dx = (at.x - center.x) / (radii.x * 1.12);
+            let dy = (at.y - (center.y + 0.12 * radii.y)) / (radii.y * 1.28);
+            let d = (dx * dx + dy * dy).sqrt();
+            (d < 1.0 && at.z > center.z - radii.z * 0.8).then_some(d)
+        })
+        .reduce(f32::min)
+}
+
+/// Where a strapless bodice's top edge lies across the front at `x`: a
+/// sweetheart rising over each side of her chest and dipping between; behind
+/// (`front` 0) a level band at her underarm.
+pub(super) fn strapless_top(body: HumanoidBody, x: f32, front: f32) -> f32 {
+    let Some(bust) = body.bust else {
+        return 0.37 + 0.0 * front;
+    };
+    let (center, radii) = bust.mass(1.0, 0.0);
+    let peak = center.y + radii.y * 0.55;
+    let dip = center.y - radii.y * 0.1;
+    let d = x.abs() / center.x;
+    let sweetheart = if d < 1.0 {
+        dip + (peak - dip) * (1.0 - (1.0 - d) * (1.0 - d))
+    } else {
+        peak - (d - 1.0) * 0.06
+    };
+    let back = center.y + radii.y * 0.3;
+    back + (sweetheart - back) * front
+}
+
+/// Where a one-shoulder bodice's top edge lies at `x`: over her right
+/// shoulder, falling diagonally beneath her left arm.
+pub(super) fn one_shoulder_top(body: HumanoidBody, x: f32) -> f32 {
+    let sh = body.shoulders * body.build;
+    let low = body
+        .bust
+        .map_or(0.36, |bust| bust.apex(1.0).y + bust.radii.y * 0.45);
+    let t = ((x + 0.1 * sh) / (0.27 * sh)).clamp(0.0, 1.0);
+    0.56 + (low - 0.56) * t
+}
+
+/// Whether a bodice covers a point of the torso, by what holds it up and
+/// how far down it reaches; its neckline is cut separately.
+pub(super) fn bodice_covers(
+    body: HumanoidBody,
+    bodice: Bodice,
+    sleeveless: bool,
+    at: Vec3,
+) -> bool {
+    let front = ((at.z + 0.02) / 0.08).clamp(0.0, 1.0);
+    let fold = body.bust.map_or(0.27, |bust| bust.fold);
+    if let Cover::Crop(hem) = bodice.cover {
+        let angle = at.x.atan2(at.z);
+        let edge = fold - 0.03 - 0.04 * (1.0 - hem.reach(angle));
+        if at.y < edge {
+            return false;
+        }
+    }
+    let armhole = |front: f32| at.x.abs() > armhole_edge(body, at.y, front) || at.y > 0.51;
+    match bodice.straps {
+        Straps::Shoulders => !(sleeveless && armhole(front)),
+        Straps::Strapless => at.y < strapless_top(body, at.x, front),
+        // The strap itself runs over the top of her right shoulder; only
+        // the arm's side of it is bare.
+        Straps::OneShoulder => {
+            at.y < one_shoulder_top(body, at.x)
+                && !(at.x < 0.0 && sleeveless && at.x.abs() > armhole_edge(body, at.y, front))
+        }
+        Straps::Halter => {
+            if front < 0.5 {
+                // The back is bare above the band beneath her chest.
+                return at.y < fold + 0.02;
+            }
+            let (from, wide) = body.bust.map_or((0.33, 0.12), |bust| {
+                let (center, radii) = bust.mass(1.0, 0.0);
+                (center.y + radii.y * 0.3, center.x + radii.x)
+            });
+            // Each panel narrows from the side of her chest to the neck.
+            let t = ((at.y - from) / (0.55 - from)).clamp(0.0, 1.0);
+            at.y < 0.55 && at.x.abs() < wide + (0.045 * body.build - wide) * t
+        }
+    }
+}
+
+/// A garment's V opening resolved on one wearer: its point on the sternum
+/// and its edges rising to the collarbones, in torso coordinates.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct NecklineCut {
+    /// Height of the V's point and its half-width there.
+    pub bottom: f32,
+    pub point: f32,
+    /// Height of the collarbones and the opening's half-width there.
+    pub collar: f32,
+    pub wide: f32,
+    /// Whether a panel crosses over beneath the point.
+    pub wrap: bool,
+    /// A closed teardrop beneath the collar rather than a V to it.
+    pub keyhole: bool,
+}
+
+impl NecklineCut {
+    const THROAT: f32 = 0.46;
+    const COLLAR: f32 = 0.53;
+
+    /// The cut a neckline makes on this body, if it opens at all. The point
+    /// follows the chest down the sternum; the edges always keep the fullest
+    /// part of each side covered, however deep the plunge.
+    pub fn resolve(neckline: Neckline, body: HumanoidBody) -> Option<Self> {
+        let (depth, width, wrap, keyhole) = match neckline {
+            Neckline::Closed => return None,
+            Neckline::Plunge { depth, width, wrap } => (depth, width, wrap, false),
+            Neckline::Keyhole { depth, width } => (depth, width, false, true),
+        };
+        let sh = body.shoulders * body.build;
+        let fold = body.bust.map_or(0.3, |bust| bust.fold);
+        let bottom = Self::THROAT + (fold - Self::THROAT) * depth;
+        let mut cut = Self {
+            bottom,
+            point: 0.006,
+            collar: Self::COLLAR,
+            wide: width * sh,
+            wrap,
+            keyhole,
+        };
+        if let Some(bust) = body.bust {
+            // At the height of the fullest point the edge stays well inside
+            // it: the opening shows the upper slope and the sternum between,
+            // never the fullness itself.
+            let apex = bust.apex(1.0);
+            let limit = apex.x - 0.55 * bust.radii.x;
+            if apex.y > bottom && cut.edge(apex.y) > limit {
+                let t = (apex.y - bottom) / (Self::COLLAR - bottom);
+                cut.point = cut.point.min(limit * 0.5);
+                cut.wide = cut.point + (limit - cut.point) / t;
+            }
+        }
+        Some(cut)
+    }
+
+    /// The opening's half-width at a height, where it is open at all.
+    pub fn edge(&self, y: f32) -> f32 {
+        self.point + (self.wide - self.point) * (y - self.bottom) / (self.collar - self.bottom)
+    }
+
+    /// Whether a point on the front of the torso lies in the opening.
+    pub fn open(&self, at: Vec3) -> bool {
+        if self.keyhole {
+            return at.z > 0.0 && self.keyhole_reach(at) < 1.0;
+        }
+        at.z > 0.0 && at.y > self.bottom && at.x.abs() < self.edge(at.y)
+    }
+
+    /// The keyhole's top, below the collar, and how far a point lies out
+    /// across it: under 1 inside. Its edges follow the plunge's, narrowing
+    /// to a round top.
+    fn keyhole_reach(&self, at: Vec3) -> f32 {
+        let top = self.collar - 0.05;
+        let mid = (self.bottom + top) * 0.5;
+        let half = (top - self.bottom) * 0.5;
+        let wide = self.edge(mid).max(0.012);
+        let v = (at.y - mid) / half;
+        // Fuller below, as a drop.
+        let w = wide * (1.0 - 0.35 * v.max(0.0));
+        (at.x / w).powi(2) + v * v
+    }
+
+    /// Points round the keyhole's rim, for its binding.
+    pub fn keyhole_rim(&self) -> Vec<Vec2> {
+        let top = self.collar - 0.05;
+        let mid = (self.bottom + top) * 0.5;
+        let half = (top - self.bottom) * 0.5;
+        let wide = self.edge(mid).max(0.012);
+        (0..=20)
+            .map(|k| {
+                let a = k as f32 / 20.0 * TAU;
+                let v = a.sin();
+                Vec2::new(a.cos() * wide * (1.0 - 0.35 * v.max(0.0)), mid + v * half)
+            })
+            .collect()
+    }
+
+    /// The same opening carved through a layer worn over the garment, up
+    /// to that layer's top: a tapering cut along the chest's front, `margin`
+    /// wider so the outer edge frames the inner one.
+    pub fn opening(&self, body: HumanoidBody, top: f32, margin: f32) -> crate::sdf::Shape {
+        let b = body.build;
+        let sh = body.shoulders * b;
+        let above = top + 0.06;
+        let low = body.bust.map_or(
+            super::anatomy::chest_wall(b, sh, 0.0, self.bottom) + 0.02,
+            |bust| bust.apex(1.0).z + 0.01,
+        );
+        crate::sdf::Shape::Capsule(
+            Vec3::new(0.0, self.bottom - margin * 0.5, low),
+            Vec3::new(
+                0.0,
+                above,
+                super::anatomy::chest_wall(b, sh, 0.0, above) + 0.03,
+            ),
+            self.point + margin,
+            self.edge(above) + margin,
+        )
+    }
 }
 
 /// How a tunic skirt is cut for a body, before the hips' Storybook
@@ -2996,11 +3227,16 @@ pub(super) fn skirt_cut(
             .all(|&point| (point / worn).length_squared() <= 1.0)
     };
     // The waistband sits on the pelvis where it hangs from, just below the
-    // belt: the pelvis's section at that height, past its little wobble.
-    let pelvis = body.pelvis_radii();
+    // belt: the sculpted pelvis's own section at that height, measured
+    // across and front to back, its seat included.
+    let pelvis = pelvis_shape(body);
     let waist_y = 0.04;
-    let section = (1.0 - (waist_y / pelvis.y).powi(2)).max(0.0).sqrt() * 1.01;
-    let top = Vec2::new(pelvis.x, pelvis.z) * section + Vec2::splat(0.004);
+    // It hangs from beneath the belt, so it is never shallower than the
+    // belt above it, front to back.
+    let reach = |dir: Vec3| pelvis_surface(&pelvis, waist_y, dir).dot(dir);
+    let belt = super::robe::belt_radii(b, body.waist);
+    let depth = reach(Vec3::Z).max(reach(Vec3::NEG_Z)).max(belt.y);
+    let top = Vec2::new(reach(Vec3::X), depth) * 1.01 + Vec2::splat(0.004);
     let bottom = Vec2::new(flare * b * body.hips_width, flare * 0.74 * b);
     // Below the crotch, where the thighs part from the pelvis, down to the hem.
     // The hip falls just below where the thighs join the pelvis.
@@ -3022,8 +3258,17 @@ pub(super) fn skirt_cut(
             (y, points)
         })
         .collect();
+    // Which way the cloth is short at this ring: across, or front to back.
+    let short = |radii: Vec2, t: f32, points: &[Vec2]| {
+        let worn = radii * proportion - Vec2::splat(trough(t));
+        points
+            .iter()
+            .map(|&point| point / worn)
+            .filter(|q| q.length_squared() > 1.0)
+            .fold(Vec2::ZERO, |most, q| most.max(q.abs()))
+    };
     for _ in 0..120 {
-        let (mut hip_short, mut hem_short) = (false, false);
+        let (mut hip_short, mut hem_short) = (Vec2::ZERO, false);
         for (y, points) in &rings {
             let t = (waist_y - y) / (length + waist_y);
             if !contains(cut.radius(t), t, points) {
@@ -3031,17 +3276,21 @@ pub(super) fn skirt_cut(
                 // fall towards the hem is well under way, then the hem.
                 let fall = (t - cut.hip_at) / (1.0 - cut.hip_at).max(1e-4);
                 if ease(fall) < 0.5 {
-                    hip_short = true;
+                    hip_short = hip_short.max(short(cut.radius(t), t, points));
                 } else {
                     hem_short = true;
                 }
             }
         }
-        if !hip_short && !hem_short {
+        if hip_short == Vec2::ZERO && !hem_short {
             break;
         }
-        if hip_short {
-            cut.hip *= 1.015;
+        // The hip widens only the way the thighs press on it, so a skirt
+        // clearing the thighs at the sides still hugs the seat and belly.
+        if hip_short.x >= hip_short.y && hip_short != Vec2::ZERO {
+            cut.hip.x *= 1.015;
+        } else if hip_short != Vec2::ZERO {
+            cut.hip.y *= 1.015;
         }
         if hem_short {
             cut.hem *= 1.015;
@@ -3065,6 +3314,31 @@ pub(super) fn heeled_boots(style: Style, woman: bool) -> bool {
 /// A hollow garment with vertical folds, an elliptical silhouette and a
 /// narrow turned hem. Its length is the hem position, not a capsule's centre.
 fn draped_cloth(b: &mut Builder, surface: ClothSurface, color: Vec3, hem_color: Option<Vec3>) {
+    draped_cloth_painted(b, surface, &|_, _| color, hem_color);
+}
+
+/// A skirt's cloth as its recipe describes it: its colour, a front panel of
+/// another and any pattern, painted onto the draped surface.
+fn skirt_cloth(b: &mut Builder, surface: ClothSurface, skirt: Skirt) {
+    let paint = move |at: Vec3, angle: f32| {
+        let angle = (angle + PI).rem_euclid(TAU) - PI;
+        let base = match skirt.panel {
+            Some((color, share)) if angle.abs() < share * PI => color,
+            _ => skirt.color,
+        };
+        skirt.pattern.paint(base, at)
+    };
+    draped_cloth_painted(b, surface, &paint, skirt.trim);
+}
+
+/// Hanging cloth whose colour is painted per quad: `paint` gets a point on
+/// the cloth and its angle round, 0 at the front.
+fn draped_cloth_painted(
+    b: &mut Builder,
+    surface: ClothSurface,
+    paint: &dyn Fn(Vec3, f32) -> Vec3,
+    hem_color: Option<Vec3>,
+) {
     let ClothSurface {
         length,
         folds,
@@ -3092,6 +3366,7 @@ fn draped_cloth(b: &mut Builder, surface: ClothSurface, color: Vec3, hem_color: 
                 } else {
                     Vec3::Y * y
                 };
+                let color = paint(point((t0 + t1) * 0.5, mid, false), mid);
                 b.quad_out(
                     [
                         point(t0, a0, inner),
@@ -3117,7 +3392,7 @@ fn draped_cloth(b: &mut Builder, surface: ClothSurface, color: Vec3, hem_color: 
                     point(t, a0, true),
                 ],
                 Vec3::Y * (-length * 0.5),
-                color * 0.83,
+                paint(point(t, a0, false), a0) * 0.83,
             );
         }
     }
@@ -3137,7 +3412,7 @@ fn draped_cloth(b: &mut Builder, surface: ClothSurface, color: Vec3, hem_color: 
                         point(t0, a, true),
                     ],
                     inside,
-                    color * 0.83,
+                    paint(point(t0, a, false), a) * 0.83,
                 );
             }
         }
@@ -4253,6 +4528,53 @@ fn biped_neck(b: &mut Builder, build: f32, slim: f32, color: Vec3) {
     b.smooth = smooth;
 }
 
+/// What a styled sleeve adds over the shoulder and upper arm: a puff, or a
+/// gathered off-shoulder band, sheer or not.
+fn styled_sleeve_top(
+    p: &mut Parts,
+    sleeve: super::outfit::Sleeve,
+    side: f32,
+    b: f32,
+    arm_len: f32,
+) {
+    let builder = if sleeve.sheer {
+        &mut p.sheer
+    } else {
+        &mut p.matte
+    };
+    let color = sleeve.color;
+    if sleeve.puff || sleeve.cut == SleeveCut::Puff {
+        // A gathered puff over the shoulder, banded beneath.
+        builder.blob(
+            Vec3::new(side * 0.008, -0.045 * arm_len, 0.0),
+            Vec3::new(0.083, 0.078, 0.083) * b,
+            7,
+            0.08,
+            color,
+        );
+        builder.torus(
+            Vec3::Y * -0.105 * arm_len,
+            Vec3::Y,
+            0.052 * b,
+            0.011 * b,
+            14,
+            4,
+            sleeve.flare.unwrap_or(color * 0.85),
+        );
+    }
+    if sleeve.cut == SleeveCut::OffShoulder {
+        builder.torus(
+            Vec3::Y * -0.075 * arm_len,
+            Vec3::Y,
+            0.058 * b,
+            0.024 * b,
+            16,
+            6,
+            color,
+        );
+    }
+}
+
 /// One sleeve or bracer follows the forearm's full upper mass and narrow
 /// wrist. A thin coloured hem replaces stacked cylindrical cuff rings.
 fn biped_cuff(
@@ -4477,6 +4799,16 @@ fn torso_garment(
     torso_shape(body, Some(material), trim_neck)
 }
 
+/// Where a shell ends at the top: its own height, or for an under-chest
+/// corset just beneath the wearer's chest.
+pub(super) fn shell_top(body: HumanoidBody, top: f32, underbust: bool) -> f32 {
+    if underbust {
+        body.bust.map_or(top, |bust| bust.fold + 0.03)
+    } else {
+        top
+    }
+}
+
 /// Resolve the shell once for emission and attachments. Openings belong to
 /// this same surface so fitting cannot silently trace a different garment.
 fn outfit_shell(
@@ -4490,16 +4822,19 @@ fn outfit_shell(
         top,
         sleeveless,
         leather,
+        underbust,
         ..
     }) = outfit.outer
     else {
         return None;
     };
+    let top = shell_top(body, top, underbust);
     let b = body.build;
     let sh = body.shoulders * b;
     let fem = body.woman;
     let native = look.outfit.is_none();
     let style = look.style;
+    let plunge = NecklineCut::resolve(outfit.bodice.cut, body);
     let material = if leather {
         TorsoMaterial::Leather
     } else {
@@ -4513,29 +4848,35 @@ fn outfit_shell(
         for side in [-1.0f32, 1.0] {
             shell.carve(Beyond(Vec3::X * side, 0.185 * sh), 0.008);
         }
-        if !native || matches!(style, Style::Hero | Style::Scout | Style::Orc) {
-            // A shaped neckline leaves the fitted upper sides high
-            // while the centre opens over the under-tunic; hers
-            // plunges lower to frame the open bodice beneath.
-            let (depth, reach) = if fem { (0.0, 0.125) } else { (0.055, 0.105) };
-            shell.carve(
-                Ellipsoid(
-                    Vec3::new(0.0, top + depth, 0.135 * b),
-                    Vec3::new(0.11 * sh, reach, 0.15 * b),
-                ),
-                0.006,
-            );
+        if !underbust && (!native || matches!(style, Style::Hero | Style::Scout | Style::Orc)) {
+            // A shaped neckline leaves the fitted upper sides high while
+            // the centre opens over the under-tunic; over a plunging
+            // garment it follows that plunge, framing it.
+            if let Some(cut) = plunge {
+                shell.carve(cut.opening(body, top, 0.014), 0.006);
+            } else {
+                shell.carve(
+                    Ellipsoid(
+                        Vec3::new(0.0, top + 0.055, 0.135 * b),
+                        Vec3::new(0.11 * sh, 0.105, 0.15 * b),
+                    ),
+                    0.006,
+                );
+            }
         }
     }
     if native && fem && matches!(style, Style::Vampire | Style::Wraith) {
-        // Her coat falls open from the collar in a deep V.
-        shell.carve(
-            Ellipsoid(
-                Vec3::new(0.0, top + 0.01, 0.15 * b),
-                Vec3::new(0.085 * sh, 0.15, 0.13 * b),
+        // Her coat falls open from the collar down her plunge.
+        match plunge {
+            Some(cut) => shell.carve(cut.opening(body, top, 0.01), 0.006),
+            None => shell.carve(
+                Ellipsoid(
+                    Vec3::new(0.0, top + 0.01, 0.15 * b),
+                    Vec3::new(0.085 * sh, 0.15, 0.13 * b),
+                ),
+                0.006,
             ),
-            0.006,
-        );
+        };
     }
     if native && style == Style::Leprechaun {
         // The coat hangs open over the waistcoat.
@@ -4575,6 +4916,141 @@ fn shell_waist(form: &crate::sdf::Sculpt, body: HumanoidBody, height: f32) -> (V
     (radii, offset)
 }
 
+/// A woman's chest, each side one form attached across the rib cage: a broad
+/// base thickening the chest wall from sternum edge to the side, an upper
+/// slope leaving the wall high on the chest, and the lower fullness it runs
+/// into. `grow` lays a garment over the same supports.
+pub(super) fn bust_supports(body: &mut crate::sdf::Sculpt, bust: &Bust, grow: f32) {
+    use crate::sdf::Shape::*;
+    for side in [-1.0f32, 1.0] {
+        let (center, radii) = bust.mass(side, grow);
+        let mid = (bust.top + bust.fold) * 0.5;
+        // The base lies on the wall, not in front of it: it widens the
+        // attachment so the fullness grows out of the chest.
+        let depth = 0.022 + 0.3 * bust.radii.z;
+        body.add(
+            Ellipsoid(
+                Vec3::new(side * bust.root, mid, center.z - radii.z * 0.7),
+                Vec3::new(bust.footprint, (bust.top - bust.fold) * 0.5, depth) + Vec3::splat(grow),
+            ),
+            0.05,
+        );
+        // The upper slope: a tapering ramp from high on the chest wall down
+        // into the fullness, its curve set by the contour.
+        let start = bust.slope_start * Vec3::new(side, 1.0, 1.0);
+        body.add(
+            Capsule(
+                start,
+                center + Vec3::Y * radii.y * 0.25,
+                bust.slope + grow,
+                radii.x.min(radii.z) * 0.82,
+            ),
+            0.045,
+        )
+        .add(Ellipsoid(center, radii), 0.03);
+    }
+}
+
+/// The two halves of the seat, left then right: centre and radii.
+pub(super) fn seat_masses(body: HumanoidBody) -> [(Vec3, Vec3); 2] {
+    let r = body.pelvis_radii();
+    let depth = if body.woman { 0.58 } else { 0.48 };
+    [-1.0f32, 1.0].map(|side| {
+        (
+            Vec3::new(side * r.x * 0.36, -0.035, -r.z * 0.4),
+            r * Vec3::new(0.44, 0.68, depth),
+        )
+    })
+}
+
+/// The pelvis sculpted as one form inside its fitted envelope: a waist
+/// tapering up into the torso's own, shelves over the hip joints, a lower
+/// belly and a rounded seat, fuller on a woman. Garments that fit the
+/// envelope (skirts, belts, trousers) still contain it.
+pub(super) fn pelvis_shape(body: HumanoidBody) -> crate::sdf::Sculpt {
+    use crate::sdf::{Sculpt, Shape::*};
+    let b = body.build;
+    let r = body.pelvis_radii();
+    let seat = seat_masses(body)[1];
+    let mut pelvis = Sculpt::default();
+    pelvis
+        .add(
+            Ellipsoid(Vec3::new(0.0, -0.005, 0.0), r * Vec3::new(0.86, 0.82, 0.95)),
+            0.0,
+        )
+        // Up into the waist: just inside the torso's lowest support, so the
+        // two parts meet without a ridge and the torso's own garment, not
+        // the seat's, shows above the belt.
+        .add(
+            Ellipsoid(
+                body.torso + Vec3::new(0.0, 0.075, -0.004),
+                Vec3::new(0.15 * body.waist * b, 0.115, 0.108 * b) - Vec3::splat(0.005),
+            ),
+            0.045,
+        )
+        // The lower belly, soft and forward of the hip line.
+        .add(
+            Ellipsoid(
+                Vec3::new(0.0, -0.015, r.z * 0.16),
+                r * Vec3::new(0.7, 0.56, 0.6),
+            ),
+            0.045,
+        );
+    for side in [-1.0f32, 1.0] {
+        pelvis
+            // The hip shelf over the joint the thigh hangs from, as wide as
+            // the thigh's head beneath it up to the waistband.
+            .add(
+                Ellipsoid(
+                    Vec3::new(side * r.x * 0.6, -0.005, 0.0),
+                    r * Vec3::new(0.4, 0.8, 0.6),
+                ),
+                0.05,
+            )
+            // The seat: rounder and fuller on a woman.
+            .add(Ellipsoid(seat.0 * Vec3::new(side, 1.0, 1.0), seat.1), 0.04);
+    }
+    // The pelvis ends under the belt; above it the torso carries the form.
+    pelvis.carve(Beyond(Vec3::Y, 0.1 * b), 0.01);
+    pelvis
+}
+
+/// Where the sculpted pelvis's surface lies at a height, out along a
+/// horizontal direction: the anchor for anything hung round the hips.
+pub(super) fn pelvis_surface(pelvis: &crate::sdf::Sculpt, y: f32, out: Vec3) -> Vec3 {
+    pelvis.onto(Vec3::new(0.0, y, 0.0) + out * 0.5, -out)
+}
+
+/// A supporting garment does not follow the fold beneath a chest: it falls
+/// from the fullness to the rib cage, by `share` of the chest's depth.
+pub(super) fn bust_underbridge(
+    body: &mut crate::sdf::Sculpt,
+    bust: &Bust,
+    share: f32,
+    grow: f32,
+    allowance: f32,
+) {
+    use crate::sdf::Shape::*;
+    let low = bust.fold - 0.075;
+    for side in [-1.0f32, 1.0] {
+        let (center, radii) = bust.mass(side, 0.0);
+        // It falls straight down as a broad sheet whose lower edge lies
+        // flush on the rib cage, never a ridge or a lump on it.
+        let x = center.x * 0.9;
+        let spread = radii.x * 0.7;
+        let end = Vec3::new(x, low, bust.wall.front(x, low) - spread + 0.002);
+        body.add(
+            Capsule(
+                center,
+                end,
+                radii.z * share + grow + allowance,
+                spread + grow,
+            ),
+            0.04,
+        );
+    }
+}
+
 /// Body supports remain exact; garment ease is local to ribs and back so
 /// the waist stays fitted and the shoulder/neck openings keep their anchors.
 pub(super) fn torso_shape(
@@ -4586,19 +5062,13 @@ pub(super) fn torso_shape(
     let b = fit.build;
     let (sh, w) = (fit.shoulders * b, fit.waist * b);
     let fem = fit.woman;
+    // Structured fronts span the valley between the chest's fullness: by a
+    // share of its depth and an allowance past the material's own growth.
     let (grow, ease, bridge) = match material {
         None => (0.0, Vec2::ZERO, None),
-        Some(TorsoMaterial::Cloth) => (0.010, Vec2::new(0.006, 0.004), None),
-        Some(TorsoMaterial::Leather) => (
-            0.014,
-            Vec2::new(0.010, 0.006),
-            Some(0.070 * b + 0.014 + 0.004),
-        ),
-        Some(TorsoMaterial::Plate) => (
-            0.018,
-            Vec2::new(0.012, 0.008),
-            Some(0.087 * b + 0.018 + 0.008),
-        ),
+        Some(TorsoMaterial::Cloth) => (0.010, Vec2::new(0.006, 0.004), Some((0.55, 0.0))),
+        Some(TorsoMaterial::Leather) => (0.014, Vec2::new(0.010, 0.006), Some((0.8, 0.004))),
+        Some(TorsoMaterial::Plate) => (0.018, Vec2::new(0.012, 0.008), Some((1.0, 0.008))),
     };
     let g = Vec3::splat(grow);
     let rib_g = if material.is_some() {
@@ -4652,15 +5122,9 @@ pub(super) fn torso_shape(
             ),
             0.035,
         );
-        if fem {
-            body.add(
-                Ellipsoid(
-                    Vec3::new(side * 0.073 * sh, 0.345, 0.087 * b),
-                    Vec3::new(0.094 * b, 0.083, 0.087 * b) + g,
-                ),
-                0.038,
-            );
-        }
+    }
+    if let Some(bust) = fit.bust {
+        bust_supports(&mut body, &bust, grow);
     }
     if !fem {
         // One broad, shallow pectoral plane joins both shoulders to
@@ -4674,21 +5138,34 @@ pub(super) fn torso_shape(
             0.04,
         );
     }
-    // Structured fronts span the chest valley while the original supports
-    // retain the upper and lateral bust. A single replacement ellipsoid
+    // Structured fronts span the chest valley while the chest's own supports
+    // retain the upper and lateral form. A single replacement ellipsoid
     // would not enclose those offset supports without flattening the shape.
-    if fem {
-        if let Some(radius) = bridge {
+    if let (Some(bust), Some((share, allowance))) = (fit.bust, bridge) {
+        let (left, l) = bust.mass(-1.0, 0.0);
+        let (right, r) = bust.mass(1.0, 0.0);
+        body.add(
+            Capsule(
+                left,
+                right,
+                l.z * share + grow + allowance,
+                r.z * share + grow + allowance,
+            ),
+            0.02,
+        );
+        // Plate is forged as one protective volume across the chest, never
+        // a pair of cups: a single shell spans both sides and the valley.
+        if matches!(material, Some(TorsoMaterial::Plate)) {
+            let span = right.x + r.x * 0.75;
             body.add(
-                Capsule(
-                    Vec3::new(-0.073 * sh, 0.345, 0.087 * b),
-                    Vec3::new(0.073 * sh, 0.345, 0.087 * b),
-                    radius,
-                    radius,
+                Ellipsoid(
+                    Vec3::new(0.0, (left.y + right.y) * 0.5 + 0.01, right.z),
+                    Vec3::new(span, r.y * 1.35, r.z) + Vec3::splat(grow + allowance),
                 ),
-                0.02,
+                0.04,
             );
         }
+        bust_underbridge(&mut body, &bust, share, grow, allowance);
     }
     if trim_neck && material.is_some() {
         // The tunic ends at its fitted opening rather than climbing
@@ -4723,7 +5200,11 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     let native = l.outfit.is_none();
     let boots = match outfit.feet {
         Feet::Boots(boots) => Some(boots),
-        Feet::Bare(_) => None,
+        Feet::Bare(_) | Feet::Shoes(_) => None,
+    };
+    let shoes: Option<Shoes> = match outfit.feet {
+        Feet::Shoes(shoes) => Some(shoes),
+        _ => None,
     };
     // Footwear is fitted to the resolved wearer.
     let boot_shape = BootShape::fitted(
@@ -4740,11 +5221,16 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     // The colour of each layer.
     let tunic = outfit.tunic;
     let pants = outfit.pants();
-    let bare_arms = outfit.arms == Arms::Bare;
-    let barefoot = boots.is_none();
+    let bare_arms = outfit.arms.bare();
+    let barefoot = matches!(outfit.feet, Feet::Bare(_));
     let trousered = matches!(outfit.legs, Legs::Trousers(_));
     let boot = outfit.boot();
     let sleeve = outfit.sleeve(l.skin);
+    let fore_color = outfit.forearm(l.skin);
+    let styled = match outfit.arms {
+        Arms::Styled(sleeve) => Some(sleeve),
+        _ => None,
+    };
     let hand_color = outfit.hands;
     let trim_neck = !native
         || !matches!(
@@ -4763,8 +5249,61 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             );
             return;
         }
-        p.matte
-            .blob(Vec3::ZERO, body.pelvis_radii(), 3, 0.05, pants);
+        if furry {
+            p.matte
+                .blob(Vec3::ZERO, body.pelvis_radii(), 3, 0.05, outfit.seat());
+        } else {
+            let seat = outfit.seat();
+            let high_cut = matches!(outfit.legs, Legs::Bare(_));
+            let r = body.pelvis_radii();
+            // Over bare legs the garment is cut high: each leg opening
+            // rises from the crotch to the hip bone, by its share of the
+            // pelvis's half-width.
+            let leg_line = |x: f32| -0.075 * body.build + (x - 0.22).max(0.0).powf(1.3) * 0.24;
+            pelvis_shape(body).mesh(
+                &mut p.matte,
+                -r * 1.15 - Vec3::Y * 0.02,
+                r * 1.15 + Vec3::Y * 0.1,
+                0.0085,
+                &|at, _| {
+                    let x = at.x.abs() / r.x;
+                    if high_cut && x > 0.22 && at.y < leg_line(x) {
+                        l.skin
+                    } else {
+                        seat
+                    }
+                },
+            );
+            // Her seat gives as she moves, as her chest does, unless plate
+            // holds it.
+            if body.woman && outfit.legs != Legs::Plate && style != Style::Zombie {
+                let give = if high_cut { 0.7 } else { 0.55 };
+                for (center, radii) in seat_masses(body) {
+                    p.soft.push(crate::props::SoftRegion {
+                        center,
+                        radii,
+                        facing: -1.0,
+                        give,
+                    });
+                }
+            }
+            if high_cut {
+                // A sewn binding finishes each leg opening, front and back.
+                for front in [true, false] {
+                    for side in [-1.0f32, 1.0] {
+                        let at = |x: f32| (Vec2::new(side * x * r.x, leg_line(x)), 0.01);
+                        fitted_ribbon(
+                            &mut p.matte,
+                            &pelvis_shape(body),
+                            &[0.2, 0.35, 0.5, 0.62, 0.74, 0.84, 0.92].map(at),
+                            front,
+                            0.003,
+                            outfit.bodice.edge,
+                        );
+                    }
+                }
+            }
+        }
         if furry {
             p.matte.blob(
                 Vec3::new(0.0, -0.05, 0.0),
@@ -4825,18 +5364,23 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             }
         }
         let belt = super::robe::belt_radii(b, waist);
-        tube(
-            &mut p.satin,
-            &[Vec3::Y * BELT_BOTTOM_Y, Vec3::Y * BELT_TOP_Y],
-            &[(belt.x, belt.y), (belt.x, belt.y)],
-            LEATHER * 0.8,
-        );
-        p.metal.cuboid(
-            Vec3::new(0.0, BELT_CENTER_Y, belt.y + 0.008),
-            Vec3::new(0.035, 0.03, 0.012),
-            Quat::IDENTITY,
-            Vec3::new(0.74, 0.5, 0.26),
-        );
+        if outfit.belt {
+            tube(
+                &mut p.satin,
+                &[Vec3::Y * BELT_BOTTOM_Y, Vec3::Y * BELT_TOP_Y],
+                &[(belt.x, belt.y), (belt.x, belt.y)],
+                LEATHER * 0.8,
+            );
+            p.metal.cuboid(
+                Vec3::new(0.0, BELT_CENTER_Y, belt.y + 0.008),
+                Vec3::new(0.035, 0.03, 0.012),
+                Quat::IDENTITY,
+                Vec3::new(0.74, 0.5, 0.26),
+            );
+        }
+        if let Some(worn) = outfit.trimmings.waist {
+            accessory_parts::waist(p, worn, body);
+        }
         if style == Style::Caster {
             // The knot and its surface-bound tails share the garment/belt
             // frame. Fit depth to that belt while retaining the authored knot.
@@ -4861,21 +5405,32 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     });
     // Resolve the lower layer once so the tunic emitter and outer fit share
     // its cut, folds, phase and placement.
-    let skirt_layer = outfit.skirt.filter(|_| !blocky && !furry).map(|skirt| {
+    let skirt_surface = |skirt: Skirt, layer: u8, longer: f32, hem: Hem| {
         let flare = if cuirass {
             0.185
         } else {
             0.208 + skirt.length * 0.045
-        };
-        let cut = skirt_cut(body, flare, skirt.length, trousered, skirt.cutaway);
+        } * skirt.fullness
+            * (1.0 - 0.025 * f32::from(layer));
+        let length = skirt.length + longer;
+        let cut = skirt_cut(body, flare, length, trousered, skirt.cutaway);
         ClothSurface::new(
             cut,
-            skirt.length,
-            if skirt.length > 0.5 { 12 } else { 8 },
+            length,
+            if length > 0.5 || skirt.fullness > 1.2 {
+                12
+            } else {
+                8
+            },
             skirt.split,
-            u64::from(l.v.shade),
+            u64::from(l.v.shade) + u64::from(layer) * 31,
         )
-    });
+        .with_hem(hem)
+    };
+    let skirt_layer = outfit
+        .skirt
+        .filter(|_| !blocky && !furry)
+        .map(|skirt| skirt_surface(skirt, 0, 0.0, skirt.hem));
     let skirt_scale = storybook_part(Plan::Biped, J::Hips);
     // The tunic's skirt hangs from the pelvis on its own, free to sway.
     if let (Some(skirt), Some(surface)) = (outfit.skirt, skirt_layer.clone()) {
@@ -4885,8 +5440,42 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             Drape::Skirt(skirt.length),
             "skirt",
             skirt_scale,
-            |p| draped_cloth(&mut p.matte, surface, skirt.color, skirt.trim),
+            |p| {
+                let b = if skirt.sheer {
+                    &mut p.sheer
+                } else {
+                    &mut p.matte
+                };
+                skirt_cloth(b, surface, skirt);
+            },
         );
+        // Petticoats and tiers beneath, each a little longer and fuller at
+        // the hem than it shows.
+        for (k, layer) in skirt.layers.into_iter().enumerate() {
+            let Some(layer) = layer else {
+                continue;
+            };
+            let sheer = layer.sheer;
+            let under = Skirt {
+                color: layer.color,
+                trim: None,
+                panel: None,
+                pattern: super::outfit::Pattern::Plain,
+                ..skirt
+            };
+            let surface = skirt_surface(under, k as u8 + 1, layer.longer, layer.hem);
+            kit.drape_scaled(
+                hips,
+                Transform::IDENTITY,
+                Drape::Skirt(under.length),
+                &format!("skirt{}", k + 1),
+                skirt_scale,
+                |p| {
+                    let b = if sheer { &mut p.sheer } else { &mut p.matte };
+                    skirt_cloth(b, surface, under);
+                },
+            );
+        }
     }
     // A jerkin's free region: below the belt its leather is no longer
     // supported by the body and hangs as a short flared peplum over the tunic.
@@ -4950,10 +5539,11 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             &l,
             body,
             boot_shape,
-            if boots.is_some() && !blocky && !furry {
+            if (boots.is_some() || shoes.is_some()) && !blocky && !furry {
                 BootLast {
                     build: b,
-                    heeled: boots.is_some_and(|boots| boots.heel),
+                    heeled: boots.is_some_and(|boots| boots.heel)
+                        || shoes.is_some_and(|shoes| shoes.heel),
                 }
                 .contacts()
             } else {
@@ -5050,8 +5640,13 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         // same supports with material-specific room and chest construction.
         use crate::sdf::{Sculpt, Shape::*};
         let (sh, w) = (shoulders * b, waist * b);
-        let low_neck = outfit.neckline == Neckline::OpenV;
-        let body_shape = torso_shape(body, None, trim_neck);
+        let neckline = NecklineCut::resolve(outfit.bodice.cut, body);
+        let mut body_shape = torso_shape(body, None, trim_neck);
+        // The tunic painted on the body carries her chest as it is made to.
+        if let (Some(bust), Some(share)) = (body.bust, outfit.bodice.support.share()) {
+            bust_underbridge(&mut body_shape, &bust, share, 0.0, 0.0);
+        }
+        let body_shape = body_shape;
         let bare_shoulders = bare_arms;
         body_shape.mesh(
             &mut p.matte,
@@ -5059,11 +5654,18 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             Vec3::new(0.38, 0.64, 0.24) * b.max(1.0),
             0.0085,
             &|at, normal| {
-                let bare = bare_shoulders && (at.x.abs() > 0.16 * sh || at.y > 0.51);
-                // Women's bodices open in a low, shaped neckline over the
-                // collarbones and upper chest, as on the concept sheets.
-                let decollete = low_neck && decollete(at, normal, sh);
-                if decollete {
+                if outfit.bodice.cover == Cover::Bikini {
+                    // Each cup's rim is bound in a darker edge.
+                    return match bikini_cover(body, at) {
+                        Some(rim) if rim > 0.86 => outfit.bodice.edge,
+                        Some(_) => tunic * Sculpt::weave(at),
+                        None => l.skin,
+                    };
+                }
+                let bare = !bodice_covers(body, outfit.bodice, bare_shoulders, at);
+                // Women's bodices plunge down the sternum, showing the upper
+                // chest and the valley between.
+                if neckline.is_some_and(|cut| cut.open(at)) {
                     return l.skin;
                 }
                 if style == Style::Zombie && normal.z > 0.35 {
@@ -5081,44 +5683,198 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 if bare {
                     l.skin
                 } else {
-                    tunic * Sculpt::weave(at)
+                    outfit.bodice.pattern.paint(tunic, at) * Sculpt::weave(at)
                 }
             },
         );
-        if low_neck {
-            // A sewn edge finishes the neckline on both sides.
-            let edge = outfit.neckline_edge;
+        // The free edges of cropped, strapless and one-shoulder bodices
+        // are bound like any other.
+        let bound = outfit.bodice.edge;
+        if let Cover::Crop(hem) = outfit.bodice.cover {
+            let fold = body.bust.map_or(0.27, |bust| bust.fold);
+            for front in [true, false] {
+                let path: Vec<(Vec2, f32)> = (0..=12)
+                    .map(|k| {
+                        let x = (k as f32 / 12.0 - 0.5) * 0.36 * sh;
+                        let z = if front { 0.1 } else { -0.1 };
+                        let reach = hem.reach(x.atan2(z));
+                        (
+                            Vec2::new(x, fold - 0.03 - 0.04 * (1.0 - reach) + 0.004),
+                            0.009,
+                        )
+                    })
+                    .collect();
+                fitted_ribbon(&mut p.matte, &body_shape, &path, front, 0.004, bound);
+            }
+        }
+        match outfit.bodice.straps {
+            Straps::Strapless => {
+                for front in [true, false] {
+                    let f = if front { 1.0 } else { 0.0 };
+                    let path: Vec<(Vec2, f32)> = (0..=16)
+                        .map(|k| {
+                            let x = (k as f32 / 16.0 - 0.5) * 0.36 * sh;
+                            (Vec2::new(x, strapless_top(body, x, f) - 0.004), 0.009)
+                        })
+                        .collect();
+                    fitted_ribbon(&mut p.matte, &body_shape, &path, front, 0.004, bound);
+                }
+            }
+            Straps::OneShoulder => {
+                for front in [true, false] {
+                    let path: Vec<(Vec2, f32)> = (0..=12)
+                        .map(|k| {
+                            let x = -0.1 * sh + k as f32 / 12.0 * 0.27 * sh;
+                            (Vec2::new(x, one_shoulder_top(body, x) - 0.004), 0.009)
+                        })
+                        .collect();
+                    fitted_ribbon(&mut p.matte, &body_shape, &path, front, 0.004, bound);
+                }
+            }
+            Straps::Halter | Straps::Shoulders => {}
+        }
+        if let (Cover::Bikini, Some(bust)) = (outfit.bodice.cover, body.bust) {
+            // Halter strings rise from the top of each cup to the neck.
             for side in [-1.0f32, 1.0] {
-                let at = |y: f32| Vec2::new(side * (0.045 * sh + (y - 0.4) * 0.95), y);
+                let (center, radii) = bust.mass(side, 0.0);
+                let cup = Vec2::new(
+                    side * (center.x - 0.15 * radii.x),
+                    center.y + radii.y * 1.15,
+                );
+                let neck = Vec2::new(side * 0.055 * b, 0.53);
                 fitted_ribbon(
                     &mut p.matte,
                     &body_shape,
-                    &[
-                        (at(0.395), 0.011),
-                        (at(0.44), 0.012),
-                        (at(0.49), 0.012),
-                        (at(0.53), 0.011),
-                    ],
+                    &[0.0, 0.33, 0.66, 1.0].map(|t| (cup.lerp(neck, t), 0.007)),
                     true,
-                    0.004,
-                    edge,
+                    0.003,
+                    tunic * 0.8,
+                );
+                // A bound rim traced round the cup's own outline.
+                let rim: Vec<(Vec2, f32)> = (0..=16)
+                    .map(|k| {
+                        let a = k as f32 / 16.0 * TAU;
+                        let at = Vec2::new(
+                            center.x + a.cos() * radii.x * 1.12 * 0.95,
+                            center.y + 0.12 * radii.y + a.sin() * radii.y * 1.28 * 0.95,
+                        );
+                        (at, 0.008)
+                    })
+                    .collect();
+                fitted_ribbon(
+                    &mut p.matte,
+                    &body_shape,
+                    &rim,
+                    true,
+                    0.003,
+                    outfit.bodice.edge,
                 );
             }
         }
-        if let Some(edge) = outfit.armhole_edge.filter(|_| bare_arms) {
+        if let Some(cut) = neckline.filter(|cut| cut.keyhole) {
+            let rim: Vec<(Vec2, f32)> = cut
+                .keyhole_rim()
+                .into_iter()
+                .map(|at| (at, 0.009))
+                .collect();
+            fitted_ribbon(
+                &mut p.matte,
+                &body_shape,
+                &rim,
+                true,
+                0.004,
+                outfit.bodice.edge,
+            );
+        }
+        if let Some(cut) = neckline.filter(|cut| !cut.keyhole) {
+            // A sewn edge finishes the neckline on both sides, following
+            // the chest's upper slope to the collarbones.
+            let edge = outfit.bodice.edge;
+            for side in [-1.0f32, 1.0] {
+                let at = |t: f32| {
+                    let y = cut.bottom - 0.004 + (cut.collar - cut.bottom + 0.004) * t;
+                    (Vec2::new(side * cut.edge(y.max(cut.bottom)), y), 0.011)
+                };
+                let mut path: Vec<(Vec2, f32)> =
+                    [1.0, 0.8, 0.6, 0.4, 0.2, 0.0].into_iter().map(at).collect();
+                if cut.wrap && side > 0.0 {
+                    // Her left panel crosses over beneath the point and
+                    // runs down to the tie at the right of her waist.
+                    let waist = Vec2::new(-0.11 * sh, 0.1);
+                    let point = path[path.len() - 1].0;
+                    for t in [0.25f32, 0.5, 0.75, 1.0] {
+                        let along = point.lerp(waist, t);
+                        // Bowed a little, as the panel wraps the rib cage.
+                        let bow = (std::f32::consts::PI * t).sin() * 0.012;
+                        path.push((along + Vec2::new(0.0, -bow), 0.011));
+                    }
+                }
+                fitted_ribbon(&mut p.matte, &body_shape, &path, true, 0.004, edge);
+            }
+        }
+        if let (Some(cut), Some(cord)) = (neckline, outfit.bodice.lacing) {
+            // Laces cross the lower plunge between eyelets on its edges,
+            // drawn straight across the valley rather than into it.
+            let rows = 4;
+            let top = cut.bottom + (cut.collar - cut.bottom) * 0.55;
+            let eyelet = |side: f32, k: usize| {
+                let y = cut.bottom + 0.016 + (top - cut.bottom - 0.016) * k as f32 / rows as f32;
+                let at = torso_surface(&body_shape, side * (cut.edge(y) + 0.007), y, true);
+                at + Vec3::Z * 0.004
+            };
+            for k in 0..=rows {
+                for side in [-1.0f32, 1.0] {
+                    p.metal
+                        .blob(eyelet(side, k), Vec3::splat(0.0045), 0, 0.0, GILT * 0.8);
+                }
+            }
+            for k in 0..rows {
+                for side in [-1.0f32, 1.0] {
+                    tube(
+                        &mut p.matte,
+                        &[eyelet(side, k), eyelet(-side, k + 1)],
+                        &[(0.0032, 0.0032), (0.0032, 0.0032)],
+                        cord,
+                    );
+                }
+            }
+        }
+        // Her chest gives as she moves, less under structured leather and
+        // not at all under plate; a fuller chest gives more.
+        let support = match outfit.outer {
+            Some(Outer::Cuirass) => 0.0,
+            Some(Outer::Shell { leather: true, .. }) => Support::Structured.give(),
+            _ => 1.0,
+        }
+        .min(outfit.bodice.support.give());
+        if let Some(bust) = body.bust.filter(|_| support > 0.0) {
+            let give = support * (0.5 + 0.6 * bust.volume);
+            for side in [-1.0f32, 1.0] {
+                let (center, radii) = bust.mass(side, 0.0);
+                p.soft.push(crate::props::SoftRegion {
+                    center,
+                    radii,
+                    facing: 1.0,
+                    give,
+                });
+            }
+        }
+        if let Some(edge) = outfit
+            .armhole_edge
+            .filter(|_| bare_arms && outfit.bodice.straps == Straps::Shoulders)
+        {
             // A sleeveless bodice ends in sewn edges where the shoulders
             // and arms are bare, front and back.
             for front in [true, false] {
                 for side in [-1.0f32, 1.0] {
-                    let x = side * 0.16 * sh;
+                    let at = |y: f32| {
+                        let x = armhole_edge(body, y, if front { 1.0 } else { 0.0 });
+                        (Vec2::new(side * x, y), 0.011)
+                    };
                     fitted_ribbon(
                         &mut p.matte,
                         &body_shape,
-                        &[
-                            (Vec2::new(x * 0.98, 0.1), 0.011),
-                            (Vec2::new(x, 0.3), 0.012),
-                            (Vec2::new(x, 0.5), 0.011),
-                        ],
+                        &[at(0.425), at(0.445), at(0.47), at(0.5)],
                         front,
                         0.004,
                         edge,
@@ -5128,10 +5884,23 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         }
         // This is the same resolved surface used by the lower seam.
         let shell = shell_shape.as_ref();
-        if let (Some(shell), Some(Outer::Shell { color, top, .. })) = (shell, outfit.outer) {
+        if let (
+            Some(shell),
+            Some(Outer::Shell {
+                color,
+                top,
+                quilted,
+                underbust,
+                ..
+            }),
+        ) = (shell, outfit.outer)
+        {
+            let top = shell_top(body, top, underbust);
             let c = color;
+            // Padded cloth is matte; leather and fine cloth keep their sheen.
+            let builder = if quilted { &mut p.matte } else { &mut p.satin };
             shell.mesh(
-                &mut p.satin,
+                builder,
                 Vec3::new(-0.36, -0.03, -0.2) * b.max(1.0),
                 Vec3::new(0.36, top + 0.03, 0.22) * b.max(1.0),
                 0.0075,
@@ -5142,9 +5911,45 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     } else {
                         1.0
                     };
-                    c * seam * (1.0 + 0.03 * (at.y * 57.0 + at.x * 31.0).sin())
+                    // A gambeson is stitched in diamonds, each cell padded.
+                    let quilting = if quilted {
+                        let (u, v) = ((at.x + at.y) / 0.045, (at.x - at.y) / 0.045);
+                        let (du, dv) = (u - u.round(), v - v.round());
+                        if du.abs() < 0.07 || dv.abs() < 0.07 {
+                            0.72
+                        } else {
+                            1.0 - 0.12 * (du.abs() + dv.abs())
+                        }
+                    } else {
+                        1.0
+                    };
+                    c * seam * quilting * (1.0 + 0.03 * (at.y * 57.0 + at.x * 31.0).sin())
                 },
             );
+            if underbust {
+                // A corset laces up its front between gilt eyelets.
+                let rows = 5;
+                let eyelet = |side: f32, k: usize| {
+                    let y = 0.07 + (top - 0.095) * k as f32 / rows as f32;
+                    torso_surface(shell, side * 0.022 * b, y, true) + Vec3::Z * 0.003
+                };
+                for k in 0..=rows {
+                    for side in [-1.0f32, 1.0] {
+                        p.metal
+                            .blob(eyelet(side, k), Vec3::splat(0.0045), 0, 0.0, GILT * 0.8);
+                    }
+                }
+                for k in 0..rows {
+                    for side in [-1.0f32, 1.0] {
+                        tube(
+                            &mut p.matte,
+                            &[eyelet(side, k), eyelet(-side, k + 1)],
+                            &[(0.0032, 0.0032), (0.0032, 0.0032)],
+                            CREAM * 0.8,
+                        );
+                    }
+                }
+            }
         }
         // Where something sits on the front (or back) of the outer garment.
         // Resolve every structural layer once. Rendering and attachments
@@ -5154,6 +5959,9 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             plate
                 .carve(Beyond(Vec3::Y, 0.525), 0.004)
                 .carve(Beyond(Vec3::NEG_Y, -0.012), 0.0);
+            if let Some(cut) = neckline {
+                plate.carve(cut.opening(body, 0.525, 0.008), 0.006);
+            }
             plate
         });
         let garment = plate.as_ref().or(shell).unwrap_or(&body_shape);
@@ -5176,7 +5984,10 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 4,
                 outfit.collar_edge,
             );
-        } else if !bare_shoulders {
+        } else if !bare_shoulders
+            && outfit.bodice.cover != Cover::Bikini
+            && matches!(outfit.bodice.straps, Straps::Shoulders | Straps::Halter)
+        {
             fitted_band(
                 &mut p.matte,
                 &body_shape,
@@ -5239,7 +6050,31 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 &|_, normal| STEEL * (0.92 + 0.08 * normal.z.abs()),
             );
             fitted_band(&mut p.metal, cuirass, 0.018, 0.034, 0.004, GILT);
+            if let Some(cut) = neckline {
+                // A gilt rolled edge finishes the lowered V.
+                for side in [-1.0f32, 1.0] {
+                    let at = |t: f32| {
+                        let y = cut.bottom + (0.515 - cut.bottom) * t;
+                        (Vec2::new(side * (cut.edge(y) + 0.007), y), 0.019)
+                    };
+                    fitted_ribbon(
+                        &mut p.metal,
+                        cuirass,
+                        &[0.02, 0.2, 0.4, 0.6, 0.8, 1.0].map(at),
+                        true,
+                        0.003,
+                        GILT,
+                    );
+                }
+            }
             for front in [true, false] {
+                // Below a low-cut front the tabard rises only to a point
+                // beneath the plunge.
+                let top = match neckline.filter(|_| front) {
+                    Some(cut) => cut.bottom - 0.03,
+                    None => 0.512,
+                };
+                let rise = |y: f32| 0.035 + (y - 0.035) * (top - 0.035) / (0.512 - 0.035);
                 let edge = [
                     (0.035, 0.112 * w),
                     (0.16, 0.143 * sh),
@@ -5254,6 +6089,8 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     (0.435, 0.136 * sh),
                     (0.501, 0.064 * b),
                 ];
+                let edge = edge.map(|(y, x)| (rise(y), x));
+                let cloth = cloth.map(|(y, x)| (rise(y), x));
                 fitted_panel(&mut p.matte, cuirass, &edge, front, 0.009, GILT);
                 fitted_panel(
                     &mut p.matte,
@@ -5266,14 +6103,17 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 fitted_emblem(
                     &mut p.matte,
                     cuirass,
-                    Vec2::new(0.0, 0.31),
-                    0.075 * b,
+                    Vec2::new(0.0, rise(0.31)),
+                    0.075 * b * ((top - 0.035) / 0.477).sqrt(),
                     front,
                     CREAM,
                     l.cloth,
                     l.v.pattern,
                 );
             }
+        }
+        if let Some(worn) = outfit.trimmings.neck {
+            accessory_parts::neck_collar(p, worn, b);
         }
         if let Some(baldric) = outfit.baldric {
             fitted_baldric(p, garment, body, baldric, accessory_overlay);
@@ -5298,10 +6138,18 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 }
             }
             Style::Caster => {
+                // The placket rises to the collar, or to a point beneath
+                // her plunge.
+                let top = neckline.map_or(0.49, |cut| cut.bottom - 0.012);
+                let tip = if neckline.is_some() { 0.008 } else { 0.025 * b };
                 fitted_panel(
                     &mut p.matte,
                     &body_shape,
-                    &[(0.02, 0.025 * b), (0.25, 0.031 * b), (0.49, 0.025 * b)],
+                    &[
+                        (0.02, 0.025 * b),
+                        ((0.02 + top) * 0.5, 0.031 * b),
+                        (top, tip),
+                    ],
                     true,
                     0.01,
                     l.trim,
@@ -5416,6 +6264,9 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
             );
         } else {
             biped_neck(&mut p.matte, b, slim, neck);
+            if let Some(worn) = outfit.trimmings.neck {
+                accessory_parts::neck_band(p, worn, b, slim);
+            }
         }
         match style {
             Style::Guardian => {
@@ -5769,6 +6620,13 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                         }
                     }
                     Headwear::Bare => {}
+                    Headwear::Tricorn { color, trim } => headwear_parts::tricorn(p, color, trim),
+                    Headwear::WitchHat { color, band } => headwear_parts::witch_hat(p, color, band),
+                    Headwear::Wreath(color) => headwear_parts::wreath(p, color),
+                    Headwear::Circlet { color, gem, broad } => {
+                        headwear_parts::circlet(p, color, gem, broad)
+                    }
+                    Headwear::Veiled { cap, veil } => headwear_parts::veiled(p, cap, veil),
                 }
                 match style {
                     Style::Hero => {}
@@ -5921,6 +6779,15 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 // Rerebrace lames below the pauldron, each tucked under the last.
                 plate_lames(&mut p.metal, &rerebrace_lames(body));
             }
+            if let Some(styled) = styled {
+                styled_sleeve_top(p, styled, side, b, arm_len);
+            }
+            if let Some(color) = outfit.trimmings.armlets {
+                accessory_parts::armlet(p, color, b, arm_len);
+            }
+            if let Some(color) = outfit.trimmings.peaks {
+                accessory_parts::peak(p, color, side, b);
+            }
         });
         let lower = kit.joint(fore, upper, body.elbow(), &format!("fore{tag}"), |p| {
             if blocky {
@@ -5983,10 +6850,31 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     sleeve,
                 );
             } else {
-                biped_forearm(m, b, arm_len, body.profile.muscle, bare_arms, sleeve);
+                let fore_bare =
+                    bare_arms && !styled.is_some_and(|styled| styled.cut == SleeveCut::Gauntlet);
+                biped_forearm(m, b, arm_len, body.profile.muscle, fore_bare, fore_color);
             }
             let cuff = outfit.cuffs;
-            if style == Style::Caster {
+            if let Some(styled) =
+                styled.filter(|styled| matches!(styled.cut, SleeveCut::Bell | SleeveCut::Gauntlet))
+            {
+                // A bell flares from the elbow; a gauntlet's drape is sheer.
+                let flare = styled.flare.unwrap_or(styled.color);
+                let builder = if styled.cut == SleeveCut::Gauntlet {
+                    &mut p.sheer
+                } else {
+                    &mut p.matte
+                };
+                biped_cuff(
+                    builder,
+                    b * 1.15,
+                    arm_len,
+                    body.profile.muscle,
+                    true,
+                    flare,
+                    flare * 0.8,
+                );
+            } else if style == Style::Caster {
                 biped_cuff(m, b, arm_len, body.profile.muscle, true, sleeve, l.trim);
             } else if let Some(cuff) = cuff {
                 if metal {
@@ -6046,8 +6934,10 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                         | Style::Phantom
                         | Style::Wraith
                 );
-                let open =
-                    clawed || matches!(style, Style::Caster | Style::Leprechaun | Style::Nymph);
+                // A woman's free hand is open and relaxed, ready to gesture.
+                let open = clawed
+                    || body.bust.is_some()
+                    || matches!(style, Style::Caster | Style::Leprechaun | Style::Nymph);
                 if side > 0.0 && open {
                     open_hand(p, Vec3::Y * (0.01 * arm_len), side, b, hand_color, clawed);
                 } else {
@@ -6076,6 +6966,9 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
     ] {
         let tag = if side > 0.0 { "l" } else { "r" };
         let thigh = kit.joint(leg, hips, body.leg_root(side), &format!("leg{tag}"), |p| {
+            if let Some(color) = outfit.trimmings.garter.filter(|_| side > 0.0 && !blocky) {
+                accessory_parts::garter(p, color, b);
+            }
             if blocky {
                 stone(
                     &mut p.matte,
@@ -6186,16 +7079,40 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 sculpted_limb(&mut p.matte, body.shin, pants);
             }
             let boot_top = boot_shape.top;
-            p.satin.prism(
-                Vec3::Y * boot_top,
-                Vec3::Y * boot_shape.bottom,
-                boot_shape.radius_top,
-                boot_shape.radius_bottom,
-                8,
-                boot,
-                0.0,
-            );
-            if barefoot {
+            // Bare legs end in the foot itself, not in a shaft round the
+            // ankle, unless boots are pulled on over them.
+            let bare_leg = matches!(outfit.legs, Legs::Bare(_)) && boots.is_none();
+            if !bare_leg {
+                p.satin.prism(
+                    Vec3::Y * boot_top,
+                    Vec3::Y * boot_shape.bottom,
+                    boot_shape.radius_top,
+                    boot_shape.radius_bottom,
+                    8,
+                    boot,
+                    0.0,
+                );
+            }
+            if let Some(shoes) = shoes {
+                // An ankle strap, and for gladiator sandals straps laced
+                // up the shin, each round its own girth.
+                let low = boot_shape.bottom + 0.012;
+                let bands = 1 + (shoes.straps * 6.0).round() as usize;
+                for k in 0..bands {
+                    let y = low + 0.05 * k as f32;
+                    let girth = 0.045 + 0.022 * ((y - low) / 0.27).clamp(0.0, 1.0);
+                    p.satin.torus(
+                        Vec3::Y * y,
+                        Vec3::Y,
+                        girth * b + 0.004,
+                        0.006,
+                        12,
+                        3,
+                        shoes.color,
+                    );
+                }
+            }
+            if barefoot && !bare_leg {
                 // Wrappings bind the ankle and calf of a bare leg.
                 for y in [-0.3f32, -0.36] {
                     p.satin
@@ -6240,7 +7157,19 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                 );
                 return;
             }
-            if let Some(boots) = boots.filter(|_| !furry) {
+            if let Some(shoes) = shoes.filter(|_| !furry) {
+                p.set_transform(Affine3A::IDENTITY);
+                let upper = if shoes.sandal { l.skin } else { shoes.color };
+                boot_parts::emit_shoe(
+                    p,
+                    BootLast {
+                        build: b,
+                        heeled: shoes.heel,
+                    },
+                    upper,
+                    shoes.color,
+                );
+            } else if let Some(boots) = boots.filter(|_| !furry) {
                 p.set_transform(Affine3A::IDENTITY);
                 boot_parts::emit(
                     p,
@@ -6870,6 +7799,36 @@ fn quadruped(kit: &mut Kit, lift: Entity, look: &Look, centaur: bool) {
             // One torso rising out of the withers: waist, ribs, chest.
             let fem = l.v.woman;
             let w = if fem { 0.88 } else { 1.0 };
+            // Her chest is fitted to the rider's own rib cage, as a biped's is.
+            let bust = super::anatomy::centaur_bust(&l);
+            // Her leather wrap: from under the chest to a sweetheart edge
+            // over the upper slope, dipping between the two sides.
+            let wrap = bust.map(|bust| {
+                let apex = bust.apex(1.0);
+                let low = bust.fold - 0.05;
+                let high = apex.y + bust.radii.y * 0.62;
+                let dip = apex.y - 0.005;
+                move |x: f32| {
+                    let t = (x.abs() / apex.x).min(1.6);
+                    let edge = if t < 1.0 {
+                        dip + (high - dip) * (1.0 - (1.0 - t).powi(2))
+                    } else {
+                        high - (t - 1.0) * 0.06
+                    };
+                    (low, edge)
+                }
+            });
+            if let Some(bust) = bust {
+                for side in [-1.0f32, 1.0] {
+                    let (center, radii) = bust.mass(side, 0.0);
+                    p.soft.push(crate::props::SoftRegion {
+                        center,
+                        radii,
+                        facing: 1.0,
+                        give: 0.45 * (0.5 + 0.6 * bust.volume),
+                    });
+                }
+            }
             let body_shape = {
                 // Sculpted, as the people's torsos are: the waist rising out
                 // of the withers into ribs, chest and rounded shoulders.
@@ -6911,16 +7870,8 @@ fn quadruped(kit: &mut Kit, lift: Entity, look: &Look, centaur: bool) {
                         0.06,
                     );
                 }
-                if fem {
-                    for side in [-1.0f32, 1.0] {
-                        body.add(
-                            Ellipsoid(
-                                Vec3::new(side * 0.075, 0.34, 0.09),
-                                Vec3::new(0.09, 0.085, 0.085),
-                            ),
-                            0.045,
-                        );
-                    }
+                if let Some(bust) = bust {
+                    bust_supports(&mut body, &bust, 0.0);
                 } else {
                     // The male rider has the same broad continuous chest
                     // plane as the bipeds, with no paired forward cups.
@@ -6941,12 +7892,15 @@ fn quadruped(kit: &mut Kit, lift: Entity, look: &Look, centaur: bool) {
                     &|at, _| {
                         // The wrapped leather follows the sculpted chest and
                         // waist, preserving the figure instead of a rigid tube.
-                        let neckline = 0.405 - 0.035 * (1.0 - (at.x / 0.17).abs().min(1.0));
+                        let wrapped = wrap.is_some_and(|edges| {
+                            let (low, high) = edges(at.x);
+                            at.y > low && at.y < if at.z > 0.0 { high } else { 0.41 }
+                        });
                         if at.y < 0.035 {
                             // The coat transition is concealed by the belt;
                             // any overlap below it belongs to the equine body.
                             l.skin
-                        } else if fem && at.y > 0.215 && at.y < neckline {
+                        } else if wrapped {
                             LEATHER
                         } else {
                             l.cloth
@@ -6955,6 +7909,23 @@ fn quadruped(kit: &mut Kit, lift: Entity, look: &Look, centaur: bool) {
                 );
                 body
             };
+            if let Some(edges) = wrap {
+                // Its edges are turned and stitched, top and bottom.
+                for top in [true, false] {
+                    let at = |x: f32| {
+                        let (low, high) = edges(x);
+                        (Vec2::new(x, if top { high } else { low }), 0.012)
+                    };
+                    fitted_ribbon(
+                        &mut p.matte,
+                        &body_shape,
+                        &[-0.16, -0.12, -0.08, -0.04, 0.0, 0.04, 0.08, 0.12, 0.16].map(at),
+                        true,
+                        0.004,
+                        LEATHER * 0.7,
+                    );
+                }
+            }
             // A close-fitting diagonal baldric follows the chest and back;
             // it never projects as a rectangular plank past the shoulders.
             for front in [false, true] {

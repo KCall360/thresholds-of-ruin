@@ -54,6 +54,10 @@ summary and continuation order distinguish these limits from implemented work.
 | Build variation | Existing slender/average/sturdy choices link shoulders, waist, pelvis and muscle fullness | Average proportions and vertical bone lengths are anchors; this is not unrestricted morphology |
 | Shared fitting | Geometry, robe clearance and animation support use the resolved body; lateral joint roots and garment widths follow it | Arbitrary equipment fitting and compatibility are not implemented |
 | Torso layers | Cloth, leather and plate use material-specific rib/back ease; structured fronts bridge the chest with a fitted waist | Existing family cuts remain; sleeves and complete garment patterns need more work |
+| Figures | Each woman rolls her own figure, leaning toward her kind's typical one; the chest form is sculpted on a parameterized chest wall (bipeds and the centaur rider); garments name their support | Shapes are tuned by eye; no scaled or furred woman yet exercises a flatter species chest |
+| Necklines and openings | Garments own split, deep and court plunge cuts resolved against the wearer; outer shells and a woman's low-cut plate open along the same cut; armholes close under the arm; bare-legged garments are cut high | Edges are painted plus fitted bindings, so very coarse meshes can still show a stepped paint edge beside the binding |
+| Soft tissue | Soft regions are skinned to spring-driven bones that answer the body's acceleration in any motion; plate holds them, structured garments damp them | One spring per side; no cloth-on-skin interaction or per-move tuning |
+| Pelvis | One sculpted pelvis inside the fitted envelope; skirts measure it at the belt line and widen only where the thighs press | The envelope radii still bound fits elsewhere |
 | Faces | Joined lower-face/chin forms, surface-fitted mouth contours and family-specific nose/fang/tusk clearance | Expression comes from sculpted geometry; no facial-animation system |
 | Cloth | Each caster owns a continuous double-sided robe and bound sash, fitted to the final supported pose | Approximate body proxies and bounded contact correction cannot guarantee every contact is clear |
 | Motion | Grounded support/swing paths, turning, interrupted actions, supported falls and family-specific locomotion | Still-image review does not establish real-speed timing or absence of foot sliding |
@@ -61,7 +65,7 @@ summary and continuation order distinguish these limits from implemented work.
 | Shape and rendering | Connected organic joints, fitted trim, feather/floater forms, foreground lighting and material separation | Some forms still read as rounded primitives or a coating over anatomy |
 | Non-humanoid composition | Explicit support/grasp limb roles, authored bend landmarks, profiled limbs and claw palms; oriented thick scutes and fang arcs | Species proportions and placement remain Rust recipes; there is no external monster format |
 | Adult eyes and brows | Substantial fitted female brows and controlled arches; one almond eye boundary shared by clipped iris/pupil surfaces, fitted lids and a visible upper lash line; iris-only glow and Medusa slit pupils | Lower-lid rims, species expression and adult cheek/jaw planes still need style work |
-| Review tools | Offline lineups, fallen lineups, travel studies, appearance controls, camera azimuth and capture warmup | These are diagnostic views, not gameplay authority or automatic visual-quality scores |
+| Review tools | Offline lineups (with `--women`, `--jump`, `--turn` and timed motion frames), fallen lineups, travel studies, appearance controls, camera azimuth and capture warmup | These are diagnostic views, not gameplay authority or automatic visual-quality scores |
 
 The renderer retains remote-main's synchronous material-pipeline setup and CPU
 DX12 frame pacing alongside adjacent shader-compiler discovery. Explicit renderer

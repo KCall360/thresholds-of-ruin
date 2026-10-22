@@ -43,7 +43,7 @@ fn missing_creature_has_visible_geometry_and_no_invented_weapon_hand() {
         .iter(&world)
         .map(|mesh| (mesh.0.clone(), Handle::<StandardMaterial>::default()))
         .collect();
-    assert_drawable(&props::Model(models), &meshes);
+    assert_drawable(&props::Model(models, Vec::new()), &meshes);
 }
 
 #[test]

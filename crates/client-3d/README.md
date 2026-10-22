@@ -86,6 +86,16 @@ and stops it on exit. Other options:
   the first two individuals. `--family NAME[,NAME...]` limits the line-ups to
   the named creatures, as the bestiary labels them (for example
   `--lineups --family "dragon,venus flytrap"`).
+  `--women` lines up only women among people, standing closer and framed as
+  a figure study; `--jump` has each individual jump on the spot in turn;
+  `--lively` keeps their idle stances and fidgets; `--antic N` has them all
+  play one antic from the start (2 is the women's flirt), held long enough to
+  see it through; `--turn DEGREES` turns everyone from their usual facing
+  (90 for profiles); `--capture-every SECS` adds timed motion frames to the
+  line-up captures. `--outfit NAME` dresses humanoids from the wardrobe:
+  `commoner`, `ranger`, `knight`, `courtier`, `leotard`, `sarong`, `tavern`,
+  `queen`, `pharaoh`, `goddess`, `juliet`, `jungle`, `genie`, `princess`,
+  `pirate`, `maiden` and `witch`.
   Lineup capture deadlines use real time and wait for each GPU readback.
   Slow frames stop at each camera and family boundary so no view is skipped;
   creature animation retains its capped timestep.

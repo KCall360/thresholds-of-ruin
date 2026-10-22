@@ -1324,9 +1324,14 @@ fn every_dressable_humanoid_wears_every_outfit() {
                             ..
                         })
                     );
+                    // Each layer beneath a skirt hangs and sways on its own.
+                    let layers = outfit
+                        .skirt
+                        .map_or(0, |skirt| skirt.layers.iter().flatten().count());
                     assert_eq!(
                         skirts,
-                        usize::from(outfit.skirt.is_some()) + usize::from(peplum)
+                        usize::from(outfit.skirt.is_some()) + usize::from(peplum) + layers,
+                        "{model:?} {wardrobe:?} skirts"
                     );
                 }
                 // Plate is steel on the arms and legs; cloth outfits have none
@@ -1347,8 +1352,14 @@ fn every_dressable_humanoid_wears_every_outfit() {
                                 .is_some_and(|m| m.0 == metal)
                         })
                 };
+                // Metal on the arm is plate, or jewellery worn round it.
                 let plated = outfit.arms == outfit::Arms::Plate;
-                assert_eq!(steel_on(J::ArmL), plated, "{model:?} {wardrobe:?} arms");
+                let jewelled = outfit.trimmings.armlets.is_some();
+                assert_eq!(
+                    steel_on(J::ArmL),
+                    plated || jewelled,
+                    "{model:?} {wardrobe:?} arms"
+                );
                 assert_eq!(
                     steel_on(J::LegL),
                     outfit.legs == outfit::Legs::Plate,
@@ -1888,11 +1899,11 @@ fn replacement_neckline_edging_does_not_inherit_medusa_gilt() {
             (0.47..0.525).contains(&at.y) && at.x.abs() > 0.08 && at.z > 0.0
         });
         assert!(native_edge > 0, "keep Medusa's native gilt sewn edging");
-        // Medusa and Nymph resolve the same body dimensions. Keep every
-        // palette/variant field identical and isolate the upper sewn edge,
-        // above their separate native torso ornaments.
-        let mut nymph = medusa.clone();
-        nymph.style = Style::Nymph;
+        // The same Medusa with another trim: a replacement bodice's edging
+        // that inherited her gilt would change with it. Isolate the upper
+        // sewn edge, above her native torso ornament.
+        let mut regilt = medusa.clone();
+        regilt.trim = Vec3::new(0.7, 0.0, 0.7);
         for wardrobe in [Wardrobe::Commoner, Wardrobe::Ranger, Wardrobe::Courtier] {
             let neckline = |look: Look| {
                 surface_signature(
@@ -1904,7 +1915,7 @@ fn replacement_neckline_edging_does_not_inherit_medusa_gilt() {
                 )
             };
             let actual = neckline(medusa.clone());
-            let expected = neckline(nymph.clone());
+            let expected = neckline(regilt.clone());
             assert!(!actual.is_empty() && !expected.is_empty());
             assert!(
                 actual == expected,

@@ -74,6 +74,8 @@ const GROUP_TAGS: [&str; 4] = ["people", "beasts", "rogue-folk", "rogue-beasts"]
 const GROUPS: usize = ROWS.len();
 const WALK_TIME: f32 = 6.0;
 const MOVES_AT: f32 = 7.0;
+/// Seconds between the moves, all of them done before the reactions at 34.
+const MOVE_SPACING: f32 = 1.33;
 const CYCLE: f32 = 40.0;
 /// Close-up time for each creature after the group cycles.
 const PORTRAIT: f32 = 2.6;
@@ -81,7 +83,7 @@ const PORTRAIT: f32 = 2.6;
 const IDLE: f32 = 12.0;
 
 /// Every move, in the order the groups perform them.
-const MOVES: [Move; 19] = [
+const MOVES: [Move; 20] = [
     Move::Strike,
     Move::Thrust,
     Move::Combo(false),
@@ -101,6 +103,7 @@ const MOVES: [Move; 19] = [
     Move::Breath(Accent::Ember),
     Move::Gaze,
     Move::Bite(Accent::Teal),
+    Move::Jump,
 ];
 
 #[derive(Clone, Copy)]
@@ -117,7 +120,7 @@ fn schedule() -> Vec<(f32, Cue)> {
     let mut cues: Vec<(f32, Cue)> = MOVES
         .iter()
         .enumerate()
-        .map(|(i, m)| (MOVES_AT + i as f32 * 1.38, Cue::Do(*m)))
+        .map(|(i, m)| (MOVES_AT + i as f32 * MOVE_SPACING, Cue::Do(*m)))
         .collect();
     cues.extend([
         (34.0, Cue::Hit),
@@ -141,7 +144,7 @@ fn shots() -> Vec<(f32, String)> {
         (6.6, "walk-settled".to_string()),
     ];
     for (i, m) in MOVES.iter().enumerate() {
-        let at = MOVES_AT + i as f32 * 1.38;
+        let at = MOVES_AT + i as f32 * MOVE_SPACING;
         shots.push((at + m.impact() * m.duration() + 0.03, label(*m)));
     }
     shots.extend([
@@ -344,8 +347,10 @@ pub fn run(diagnostics: Diagnostics) {
         (
             direct,
             lineup,
+            lineup_jumps,
             redress,
             creatures::animate,
+            creatures::soften,
             creatures::snuff,
             creatures::effects,
             camera,
@@ -908,8 +913,8 @@ fn perform(
 }
 
 /// `--lineups`: each creature in turn, five individuals of it side by side,
-/// women and men alternating among people. `--fallen-lineups` reuses those
-/// individuals in their settled corpse poses.
+/// women and men alternating among people, or only women with `--women`.
+/// `--fallen-lineups` reuses those individuals in their settled corpse poses.
 #[derive(Resource, Default)]
 struct Lineup {
     elapsed: f32,
@@ -918,10 +923,22 @@ struct Lineup {
     shot: usize,
     height: f32,
     fallen_bounds: Vec<(Vec3, Vec3)>,
+    /// When the next `--capture-every` motion frame is due.
+    next_motion: f32,
 }
 
 /// Seconds each line-up stands before the next.
 const LINEUP: f32 = 4.0;
+
+/// Seconds a line-up stands: longer while studying an antic, which lasts
+/// eight seconds.
+fn lineup_secs(diagnostics: &Diagnostics) -> f32 {
+    if diagnostics.antic.is_some() {
+        9.0
+    } else {
+        LINEUP
+    }
+}
 const LINEUP_SHOTS: [(f32, &str, usize); 3] =
     [(1.9, "line", 0), (2.8, "close-a", 1), (3.8, "close-b", 2)];
 
@@ -955,7 +972,8 @@ fn lineup(
     } else {
         LINEUP_SHOTS[state.shot % LINEUP_SHOTS.len()].0
     };
-    let deadline = diagnostics.capture_warmup + next_family as f32 * LINEUP + next_moment;
+    let deadline =
+        diagnostics.capture_warmup + next_family as f32 * lineup_secs(&diagnostics) + next_moment;
     if pending.is_empty() {
         state.elapsed = (state.elapsed + time.delta_secs()).min(deadline);
     }
@@ -986,7 +1004,7 @@ fn lineup(
             let seed = base.wrapping_add(j * 7919);
             j += 1;
             let look = Look::preview(crate::showcase::creature(name), false, seed);
-            let want = seeds.len() % 2 == 0;
+            let want = diagnostics.women || seeds.len() % 2 == 0;
             if look.woman() == want
                 || j > 60
                 || !matches!(name, n if PEOPLE.contains(&n) || ROGUE_FOLK.contains(&n) || n == "centaur")
@@ -996,13 +1014,34 @@ fn lineup(
         }
         let mut height: f32 = 0.0;
         for (k, seed) in seeds.into_iter().enumerate() {
-            let look = Look::preview(crate::showcase::creature(name), false, seed);
+            let model = crate::showcase::creature(name);
+            let look = match diagnostics.bust_study {
+                None => Look::preview(model, false, seed),
+                Some(study) => Look::preview_adjusted(model, seed, |v| {
+                    v.woman = true;
+                    v.bust_lean = 0;
+                    match study {
+                        crate::BustStudy::Contours => {
+                            v.bust = 2;
+                            v.bust_form = 3 + k as u8;
+                        }
+                        crate::BustStudy::Volumes => {
+                            v.bust = k as u8;
+                            v.bust_form = 0;
+                        }
+                    }
+                }),
+            };
             height = height.max(look.height());
-            let home = Vec3::new(3.4 + k as f32 * 1.6, -0.5, 1.2);
+            if let Some(bust) = look.bust_summary() {
+                info!("Lineup individual family={name} index={k} bust={bust}");
+            }
+            let home = Vec3::new(3.4 + k as f32 * lineup_spacing(&diagnostics), -0.5, 1.2);
             let mut anim = Anim::new(seed, home);
-            anim.yaw = -0.45;
-            anim.target_yaw = Some(-0.45);
-            anim.quiet = true;
+            anim.yaw = -0.45 + diagnostics.turn;
+            anim.target_yaw = Some(anim.yaw);
+            anim.quiet = !diagnostics.lively;
+            anim.antic = diagnostics.antic;
             if diagnostics.fallen_lineups {
                 anim.dead = Some(1.0);
                 anim.target_yaw = None;
@@ -1028,7 +1067,7 @@ fn lineup(
         state.height = height;
     }
     // The whole line first, then close on the first two individuals.
-    let t = now - index as f32 * LINEUP;
+    let t = now - index as f32 * lineup_secs(&diagnostics);
     let height = state.height;
     let close = t > 2.1;
     if diagnostics.fallen_lineups && t > 0.2 && state.fallen_bounds.len() != state.group.len() {
@@ -1048,10 +1087,25 @@ fn lineup(
             fallen_lineup_camera(&state, t, projection, &diagnostics)
         } else if close {
             // Each of the first two in turn, the upper body filling the frame.
-            let x = if t > 3.0 { 5.0 } else { 3.4 };
+            let x = 3.4
+                + if t > 3.0 {
+                    lineup_spacing(&diagnostics)
+                } else {
+                    0.0
+                };
             (
                 Vec3::new(x, -0.5 + height * 0.78, 1.2),
                 Vec3::new(0.0, 0.22, 1.0) * (height * 0.75).max(1.1),
+            )
+        } else if diagnostics.women {
+            // A figure study: the five upper bodies side by side.
+            (
+                Vec3::new(
+                    3.4 + 2.0 * lineup_spacing(&diagnostics),
+                    -0.5 + height * 0.68,
+                    1.2,
+                ),
+                Vec3::new(0.0, 0.12, 1.0) * (height * 2.2).max(3.4),
             )
         } else {
             (
@@ -1063,7 +1117,7 @@ fn lineup(
     }
     for (when, tag, step) in LINEUP_SHOTS {
         let wanted = index * LINEUP_SHOTS.len() + step;
-        let due = diagnostics.capture_warmup + index as f32 * LINEUP + when;
+        let due = diagnostics.capture_warmup + index as f32 * lineup_secs(&diagnostics) + when;
         if state.elapsed >= due && state.shot <= wanted {
             state.shot = wanted + 1;
             if let Some(dir) = diagnostics.capture.clone() {
@@ -1086,6 +1140,51 @@ fn lineup(
                     .observe(save_to_disk(path));
             }
         }
+    }
+    // Motion frames between the named shots, for studying movement.
+    if let (Some(interval), Some(dir)) = (diagnostics.capture_every, diagnostics.capture.clone()) {
+        if interval.is_finite()
+            && interval > 0.0
+            && now > 0.0
+            && state.elapsed >= state.next_motion
+            && pending.is_empty()
+        {
+            state.next_motion = state.elapsed + interval.max(1.0 / 60.0);
+            let path = dir.join(format!(
+                "{:02}-motion-{t:06.3}-{}.png",
+                index,
+                name.replace(' ', "_")
+            ));
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(path));
+        }
+    }
+}
+
+/// `--jump`: each individual in the line-up jumps on the spot every two
+/// seconds, a little after the one before, so captures catch every phase.
+fn lineup_jumps(diagnostics: Res<Diagnostics>, state: Res<Lineup>, mut anims: Query<&mut Anim>) {
+    if !diagnostics.jump {
+        return;
+    }
+    for (k, &entity) in state.group.iter().enumerate() {
+        let Ok(mut anim) = anims.get_mut(entity) else {
+            continue;
+        };
+        let phase = (state.elapsed - 0.3 * k as f32).rem_euclid(2.0);
+        if anim.action.is_none() && phase < 0.1 {
+            anim.act(Move::Jump);
+        }
+    }
+}
+
+/// Distance between line-up individuals: closer for a study of women's figures.
+fn lineup_spacing(diagnostics: &Diagnostics) -> f32 {
+    if diagnostics.women {
+        0.95
+    } else {
+        1.6
     }
 }
 
