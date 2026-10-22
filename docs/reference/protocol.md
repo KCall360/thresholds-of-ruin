@@ -303,7 +303,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":59,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":60,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -541,6 +541,12 @@ position and underlying identity; the same entity seen through multiple portals
 remains distinct. Places use disclosed opaque keys and inventory uses item IDs.
 These edits expose no private region coordinates or topology. Cell shifts do not
 translate non-cell collections; changed projections are represented explicitly.
+
+Historical disclosed aim records admit at most 61,619 distinct occurrences. This
+bound covers every valid body/eye offset expanded by the capped physical sensory
+range, plus the synthetic stair pair; portal images retain their observer-frame
+offsets. It is a conservative geometry bound, not permission to exceed the
+aggregate retained-state or complete-response byte limits below.
 
 ### Retained state and delta bases
 

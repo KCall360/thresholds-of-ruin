@@ -445,12 +445,98 @@ impl Game {
         let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
         FrozenDiscoveryCheck::capture_for(&creature, actor)
     }
-    fn discovery_eligible(&self, actor: ActorId) -> bool {
-        self.actors.get(&actor).is_some_and(|owner| {
-            owner.alive() && owner.combat.is_some() && owner.perception().sight
-        }) && !self.actor_frozen(actor)
+    fn active_discovery_eligible(&self, actor: ActorId) -> bool {
+        self.actors
+            .get(&actor)
+            .is_some_and(|owner| owner.alive() && owner.combat.is_some())
+            && !self.actor_frozen(actor)
             && self.condition_allows_voluntary_input(actor)
     }
+    fn discovery_eligible(&self, actor: ActorId) -> bool {
+        self.active_discovery_eligible(actor) && self.actors[&actor].perception().sight
+    }
+
+    /// Physical touch only. Every component ordering must agree and remain
+    /// clear before the endpoint; a closed door may be the touched surface.
+    /// Unlike local awareness, this never reaches around a blocked corner.
+    fn tactile_discovery_cells(&self, actor: ActorId) -> BTreeSet<tor_world::Location> {
+        let owner = &self.actors[&actor];
+        let Some(body) = self.body_cells(owner.location, owner.orientation, &owner.body) else {
+            return BTreeSet::new();
+        };
+        let occupied_by_other = |at| {
+            self.actors
+                .at(&self.world, at)
+                .keys()
+                .any(|id| *id != actor && self.actors[id].alive())
+        };
+        let mut cells: BTreeSet<_> = body.iter().map(|(at, _)| *at).collect();
+        for (origin, _) in body {
+            for x in -1_i64..=1 {
+                for y in -1_i64..=1 {
+                    for z in -1_i64..=1 {
+                        let delta = [x, y, z];
+                        if delta == [0; 3] {
+                            continue;
+                        }
+                        let mut destination = None;
+                        let mut consistent = true;
+                        for order in [
+                            [0, 1, 2],
+                            [0, 2, 1],
+                            [1, 0, 2],
+                            [1, 2, 0],
+                            [2, 0, 1],
+                            [2, 1, 0],
+                        ] {
+                            let mut at = origin;
+                            let mut frame = 0;
+                            let mut remaining = delta.iter().filter(|v| **v != 0).count();
+                            for axis in order {
+                                if delta[axis] == 0 {
+                                    continue;
+                                }
+                                let mut component = [0; 3];
+                                component[axis] = delta[axis];
+                                let direction = tor_world::Direction::from_delta(
+                                    tor_world::rotate_vector(frame, component),
+                                )
+                                .expect("unit component");
+                                let Some((next, rotation)) =
+                                    self.world.physics_neighbor(at, direction)
+                                else {
+                                    consistent = false;
+                                    break;
+                                };
+                                remaining -= 1;
+                                if self.world.is_wall(next)
+                                    || occupied_by_other(next)
+                                    || (remaining != 0 && !self.world.walkable(next))
+                                {
+                                    consistent = false;
+                                    break;
+                                }
+                                at = next;
+                                frame = tor_world::compose_rotation(frame, rotation);
+                            }
+                            if !consistent || destination.is_some_and(|old| old != (at, frame)) {
+                                consistent = false;
+                                break;
+                            }
+                            destination = Some((at, frame));
+                        }
+                        if consistent {
+                            if let Some((at, _)) = destination {
+                                cells.insert(at);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        cells
+    }
+
     /// Eye sight only: awareness, contact and abstract stair landing projection do
     /// not license a concealed exterior cue. Alias/body cells deduplicate by ID.
     fn discovery_candidates(
@@ -479,11 +565,27 @@ impl Game {
             .flatten()
             .map(|(at, _)| at)
             .collect();
-        let origins: Vec<_> = sight
+        let mut origins: Vec<_> = sight
             .iter()
             .filter(|cell| cell.physical && body.contains(&cell.location))
             .map(|cell| cell.offset)
             .collect();
+        // A dark occupied cell is still a physical distance origin. Retain
+        // visible physical aliases, and add the resolved body's canonical frame
+        // offsets independently of illumination (never additional target cues).
+        if !body.is_empty() {
+            origins.extend(
+                owner
+                    .body
+                    .cells
+                    .iter()
+                    .map(|[x, y, z]| tor_world::Position {
+                        x: *x,
+                        y: *y,
+                        z: *z,
+                    }),
+            );
+        }
         let mut distances = BTreeMap::new();
         for cell in sight.iter().filter(|cell| cell.physical) {
             let range = origins
@@ -675,15 +777,39 @@ impl Game {
         actor: ActorId,
         roll: DiscoveryRoll,
     ) -> Result<(), GameError> {
-        let candidates = self.discovery_candidates(actor)?;
+        if !self.active_discovery_eligible(actor) {
+            return Ok(());
+        }
+        let mut candidates: BTreeMap<_, _> = self
+            .discovery_candidates(actor)?
+            .into_iter()
+            .map(|(feature, (dc, distance))| (feature, (dc, roll.at(distance))))
+            .collect();
+        for at in self.tactile_discovery_cells(actor) {
+            // A usable visual cue wins. Otherwise adjacent +1 and tactile -1
+            // cancel, using the same sample's middle total (no extra roll).
+            if let (Some(concealment), Some(door)) =
+                (self.world.secret_door(at), self.world.door(at))
+            {
+                candidates
+                    .entry(DiscoveryTarget::Door(door.id))
+                    .or_insert((Some(i64::from(concealment.dc)), roll.middle));
+            }
+            if let Some(trap) = self.world.trap(at) {
+                candidates
+                    .entry(DiscoveryTarget::Trap(trap.id))
+                    .or_insert((Some(i64::from(trap.dc)), roll.middle));
+            }
+            // Creature guises retain their visual/ambush contract, never touch.
+        }
         let mut knowledge = self
             .actors
             .get(&actor)
             .ok_or(GameError::UnknownActor)?
             .discovery
             .clone();
-        for (feature, (dc, distance)) in candidates {
-            if dc.is_none_or(|dc| roll.at(distance) >= dc) {
+        for (feature, (dc, total)) in candidates {
+            if dc.is_none_or(|dc| total >= dc) {
                 knowledge.update(feature, false, true, false)?;
             }
         }

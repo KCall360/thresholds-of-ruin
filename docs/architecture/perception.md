@@ -1,7 +1,8 @@
 # Perception and exact three-dimensional sight
 
 Every actor uses one authoritative perception model: illuminated eye-based
-three-dimensional sight plus immediate awareness around its occupied body.
+three-dimensional sight, immediate awareness around its occupied body, and
+Awareness-governed nonvisual perception when sight is obscured.
 Player observations, AI, items, place discovery and navigation use that same
 actor scene. Clients receive disclosed facts, never the hidden world.
 
@@ -41,7 +42,9 @@ All discovery uses Awareness-governed Perception and the shared 3d6/Edge kernel:
   bands, not an extension of the Manhattan sight-range cap. Passive checks add
   one further disadvantage. Thus adjacent passive is neutral before other
   modifiers; distant passive has two disadvantages. Ordinary cancellation and
-  the shared three-extra-dice cap apply.
+  the shared three-extra-dice cap apply. Distance origins are the actual resolved
+  body cells even when those cells are dark; an illuminated adjacent cue does
+  not become a distant check merely because the observer stands in darkness.
 - **Paid Search:** normal 50-tick preparation and 50-tick recovery remain subject
   to ordinary haste/slow timing. Preparation freezes the actor's Perception bonus
   and Edge; completion uses live physical candidates and distances. One shared
@@ -52,11 +55,24 @@ All discovery uses Awareness-governed Perception and the shared 3d6/Edge kernel:
   reservation lifecycle even when nothing is found; hidden candidate count does
   not change the sample or reservation. Incoming next-check-against modifiers do
   not apply to this targetless check.
+- **Tactile Search:** without usable illuminated sight, paid Search can feel for
+  a concealed entrance or trap on an occupied body cell or an immediately
+  reachable physical surface. It adds one disadvantage: the ordinary adjacent
+  advantage and this penalty cancel before other modifiers. Darkness and
+  blindness together do not apply the penalty twice. Visual candidates keep
+  their visual total; tactile candidates use the same sample's middle total,
+  never a second roll. Every diagonal component route must be clear and agree
+  on the endpoint; walls, intervening closed doors and other bodies obstruct
+  touch. A closed entrance may itself be the endpoint, not a passage through it.
+  Actual rotated physical joins work, but abstract stair landing projections do
+  not. This rule never identifies a creature's disguise or triggers a trap.
 - **Periodic search:** worn searching sources share one actor-active cadence;
   every 100 eligible ticks the ring runs the same active search for free. It does
   not consume, reserve, or borrow one-use check tokens. Passive checks and initial
   disguise formation likewise exclude those tokens. Ordinary timed, equipment
-  and talent Edge still applies.
+  and talent Edge still applies. In darkness an eligible scan shares the tactile
+  rule; blindness still pauses the existing ring clock and prevents automatic
+  scans. A blind actor may instead initiate an ordinary paid tactile Search.
 
 Physical features retain authored DCs; disguises instead use the stored contest
 described below. Paid and periodic searches do not automatically break adjacent
@@ -65,8 +81,9 @@ existed. A successful Search reveals trap presence, not its hidden family.
 A successful active discovery makes further passive attempts unnecessary; a
 failed active search does not consume either passive opportunity.
 
-An abstract stair landing, a radius-only proximity, darkness, an opaque barrier,
-blindness, sleep or other voluntary-action incapacity is not an eligible cue.
+Passive visual discovery still excludes darkness and blindness. Neither visual
+nor tactile discovery uses abstract stair projections or radius-only proximity;
+opaque barriers, sleep and voluntary-action incapacity remain effective gates.
 Waking and thawing reconcile at authoritative boundaries. Reentry, reconnect,
 control transfer, rank changes and reload never reset failed passive receipts.
 Observation, previews and rendering neither roll nor mutate knowledge. Checks,
@@ -222,16 +239,50 @@ The merge is independent of authored body-cell order. Streaming activation uses
 this same merged actor scene; geometry needed to compute it may remain loaded
 without being perceived or active.
 
-Beyond local awareness, only illuminated targets within range and line of sight
-are perceived. Dark air remains transparent: a lit room may be seen across a dark
-corridor. Target eligibility is checked before expensive occlusion tests.
+Ordinary eye sight requires illuminated targets within range and line of sight.
+Dark air remains transparent: a lit room may be seen across a dark corridor.
+Target eligibility is checked before expensive occlusion tests.
 
 Actors always perceive occupied cells and all 26 immediate neighbors around
-every body cell, including vertical and diagonal neighbors. This awareness does
-not require illumination or eye line of sight, and does not disclose beyond the
-neighboring cells. Physical joins carry these neighborhoods through their frames.
-Local awareness and distant sight share the resulting actor-specific scene used
-for items, actors, places, navigation knowledge and AI. Stale map memory remains.
+every body cell, including vertical and diagonal neighbors. This existing local
+awareness does not require illumination or eye line of sight. It is not an
+unoccluded cube that grows with Awareness.
+
+Beyond that neighbourhood, the current effective **Awareness attribute** governs
+nonvisual perception of unilluminated cells, or all cells while blind. The
+[Cosmere senses-range table](https://app.demiplane.com/nexus/cosmererpg/rules/senses-awareness)
+is adapted to the world's five-foot cells and explicitly capped at the existing
+normal sight limit; it does not increase that limit:
+
+| Effective Awareness | Source range | Current maximum |
+| --- | --- | --- |
+| 0 | 5 feet | 1 cell |
+| 1–2 | 10 feet | 2 cells |
+| 3–4 | 20 feet | 4 cells |
+| 5–6 | 50 feet | 10 cells |
+| 7–8 | 100 feet or normal sight limit, whichever is smaller | 16 cells / 80 feet |
+| 9+ | Unaffected by obscured senses, within normal range | 16 cells / 80 feet |
+
+Extended nonvisual perception uses the same physical occlusion and Manhattan
+geometry as sight, measured from occupied body cells in their portal-local
+frames. Walls, closed doors, missing geometry and ambiguous routes still block
+it. Abstract stairs do not transmit it. Darkness and blindness use the same
+range, without a second reduction when both apply. Effective equipment,
+conditions and restorable attribute losses participate; observation, recovery
+and AI cache witnesses change with the resulting range.
+
+This is ordinary disclosure, **not genuine sight, a discovery check, or true
+sight**. It does not recognize guises, expose secret doors or ground traps,
+identify invisible creatures at range, or license gaze/sight-required abilities.
+Paid adjacent Search remains a separate checked action. Contact, touch and melee
+reach do not grow with the disclosure range. Illuminated sight retains its own
+eye origin and eligibility rather than acquiring extra body-origin viewpoints.
+
+Physical joins carry the local and extended layers through their frames. The
+merged actor-specific scene is shared by items, actors, places, navigation and
+AI; load-only geometry dependencies are not disclosed automatically. The
+separate illuminated eye-sight vector remains authoritative for sight-required
+mechanics. Stale map memory remains memory, not current perception.
 
 Geometric scenes and illuminated scenes share the exact occlusion implementation
 but have distinct cache entries. Lighting edits invalidate only illumination

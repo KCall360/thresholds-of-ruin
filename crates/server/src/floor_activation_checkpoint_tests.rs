@@ -319,3 +319,196 @@ fn omitted_group_capacity_failure_preserves_exact_checkpoint_and_region_authorit
         bytes
     );
 }
+
+#[test]
+fn maze_trap_maximum_failure_preserves_exact_checkpoint_and_region_authority() {
+    let mut scenario = fixture();
+    let original = scenario.package.as_ref().unwrap();
+    let mut source = serde_json::to_value(&original.manifest).unwrap();
+    let recipe = &mut source["generation_recipes"]["exploration"];
+    recipe["version"] = json!(5);
+    let stages = recipe["stages"].as_array_mut().unwrap();
+    stages[2]["operation"]["width"] = json!([3, 3]);
+    stages[2]["operation"]["height"] = json!([3, 3]);
+    assert_eq!(stages[6]["operation"]["kind"], "room_lighting");
+    stages[6]["operation"]["darkness_roll"] = json!(1);
+    stages[6]["operation"]["darkness_start"] = json!(0);
+    stages.insert(
+        6,
+        json!({"id":"room_omissions", "version":1,
+            "operation":{"kind":"room_omissions", "config":{"count":[6,6]}}}),
+    );
+    stages.insert(
+        7,
+        json!({"id":"maze_rooms", "version":1,
+            "operation":{"kind":"maze_rooms", "config":{"one_in":1}}}),
+    );
+    stages.push(json!({"id":"hidden_traps", "version":1,
+    "operation":{"kind":"hidden_traps", "config":{
+        "count":[1,1], "dc":12, "rust_slot":"body_armor", "rust_amount":1,
+        "sleep_condition":"maze.rollback_sleep", "sleep_duration":100,
+        "sleep_exposure":null, "hazards":null
+    }}}));
+    // Default rules intentionally have no sleep blocker. Supply a complete,
+    // independently valid timed condition rather than letting an unresolved
+    // trap effect masquerade as the capacity failure under test.
+    let rules = format!(
+        "{}\n{}",
+        original.rules_source,
+        r#"
+[[conditions]]
+id = "maze.rollback_sleep"
+family = "maze.rollback_sleep"
+lifecycle = "timed"
+timing = { kind = "actor_active", on_expiry = { kind = "remove" } }
+restrictions = ["voluntary_actions"]
+preparation = "pause"
+name = "Maze rollback sleep"
+modifiers = []
+stacking = { kind = "keep" }
+source_scoped = false
+descriptors = []
+capacity = "reject"
+"#
+    );
+    scenario.package = Some(Arc::new(
+        Package::from_parts(serde_json::from_value(source).unwrap(), vec![], &rules).unwrap(),
+    ));
+    let mut engine = Engine::memory(scenario).unwrap();
+    engine.enable_wizard().unwrap();
+    let original = engine.archive.scenario.package.as_ref().unwrap();
+    let family = &original.manifest.procedural_worlds["dungeon"];
+    let group = family.group("dungeon", engine.game.seed(), 101).unwrap();
+    assert_eq!(
+        original
+            .build_group(
+                engine.game.seed(),
+                &original.index(engine.game.seed()).unwrap(),
+                RegionId(group.members[0]),
+            )
+            .unwrap()
+            .records
+            .len(),
+        9,
+        "the same maze, trap effects, population and distant floor must first prepare successfully"
+    );
+
+    // Independent capacity witness: before maze selection, exactly three 3x3
+    // rooms remain and the deep floor owns exactly two distinct stair cells.
+    // There are no trapdoor landing reservations, so at most 27 - 2 = 25
+    // ground traps fit even if every room stays ordinary.
+    let mut ordinary_recipe = original.manifest.generation_recipes["exploration"].clone();
+    ordinary_recipe.version = 4;
+    ordinary_recipe.stages.remove(7);
+    let definitions = group
+        .members
+        .iter()
+        .map(|id| {
+            family
+                .describe("dungeon", engine.game.seed(), *id)
+                .unwrap()
+                .unwrap()
+        })
+        .collect();
+    let ordinary = crate::generation_recipe::materialize(
+        "dungeon/101",
+        &group,
+        &ordinary_recipe,
+        definitions,
+        engine.game.seed(),
+    )
+    .unwrap();
+    assert_eq!(ordinary.rooms.len(), 3);
+    assert_eq!(
+        ordinary.rooms.iter().map(|r| r.cells.len()).sum::<usize>(),
+        27
+    );
+    let mut stair_cells = std::collections::BTreeSet::new();
+    for region in ordinary.regions.values() {
+        let generation = region.generate.as_ref().unwrap();
+        for (name, at) in &region.anchors {
+            if !generation.boundary_anchors.contains(name) {
+                assert!(generation.stair_anchors.contains(name));
+                assert_eq!(at[2], 0);
+                assert!(stair_cells.insert((region.id, at[0], at[1])));
+            }
+        }
+    }
+    assert_eq!(stair_cells.len(), 2);
+
+    let mut source = serde_json::to_value(&original.manifest).unwrap();
+    let stages = source["generation_recipes"]["exploration"]["stages"]
+        .as_array_mut()
+        .unwrap();
+    let trap = stages
+        .iter_mut()
+        .find(|stage| stage["operation"]["kind"] == "hidden_traps")
+        .unwrap();
+    assert_eq!(trap["operation"]["config"]["count"], json!([1, 1]));
+    trap["operation"]["config"]["count"] = json!([1, 26]);
+    let rejected = Arc::new(
+        Package::from_parts(
+            serde_json::from_value(source).unwrap(),
+            vec![],
+            &original.rules_source,
+        )
+        .unwrap(),
+    );
+    let failure = rejected
+        .build_group(
+            engine.game.seed(),
+            &rejected.index(engine.game.seed()).unwrap(),
+            RegionId(group.members[0]),
+        )
+        .err()
+        .unwrap();
+    assert!(
+        failure.message.contains("authored trap maximum"),
+        "{failure:?}"
+    );
+    engine
+        .regions
+        .as_mut()
+        .unwrap()
+        .bind_package_inputs(rejected.clone());
+    engine.archive.scenario.package = Some(rejected);
+    let before = engine.diagnostic_copy();
+    let bytes =
+        serde_json::to_vec(&Checkpoint::capture(&engine).encode("maze-rollback", 0)).unwrap();
+    let records = engine.regions.as_ref().unwrap().encoded_resident().unwrap();
+    let failure = engine
+        .command(
+            "player",
+            "maze-capacity",
+            ActorId(1),
+            "rejected-group",
+            &engine.branch().clone(),
+            Command::Wizard {
+                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                operation: WizardOperation::Teleport {
+                    actor: ActorId(1),
+                    position: Position {
+                        region: group.members[0],
+                        x: 1,
+                        y: 1,
+                        z: 0,
+                    },
+                },
+            },
+        )
+        .expect_err("insufficient full trap maximum must reject maze publication");
+    assert!(
+        failure.message.contains("authored trap maximum"),
+        "{failure:?}"
+    );
+    exact_equal(&engine, &before);
+    assert_eq!(authority(&engine), authority(&before));
+    assert_eq!(
+        engine.regions.as_ref().unwrap().encoded_resident().unwrap(),
+        records
+    );
+    assert_eq!(
+        serde_json::to_vec(&Checkpoint::capture(&engine).encode("maze-rollback", 0)).unwrap(),
+        bytes
+    );
+}

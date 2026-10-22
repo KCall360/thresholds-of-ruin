@@ -51,7 +51,8 @@ class LongRunDiagnosticChoices(unittest.TestCase):
                 driver.slow_spectator_recovery()
             relay.assert_called_once_with(driver.address, measure_actor_facts=True)
             launch.assert_called_once_with("tor-client-headless",
-                ["--connect", relay.return_value.address, "--omit-memory", "--compact-background"], token=TOKEN)
+                ["--connect", relay.return_value.address, "--omit-memory", "--compact-background"], token=TOKEN,
+                extra_env={"TOR_TEST_SEGMENTED_STDOUT_BYTES": "8388608"})
 
     def test_repeated_diagnostic_snapshots_explicitly_omit_unasserted_memory(self):
         driver = RunUntilBlockedProcesses()
@@ -248,7 +249,8 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         # The relay measures original server frames, before this stdout-only projection.
         # Background derived snapshots are unused; ready, action results and errors stay full.
         player = self.launch("tor-client-headless",
-                             ["--connect", player_relay.address, "--omit-memory", "--compact-background"], token=TOKEN)
+                             ["--connect", player_relay.address, "--omit-memory", "--compact-background"], token=TOKEN,
+                             extra_env={"TOR_TEST_SEGMENTED_STDOUT_BYTES": "8388608"})
         initial = self.frame(player, lambda f: f["type"] == "ready")
         send_budget = tcp_send_buffer_budget()
         relay = StreamRelay(self.address, receive_buffer=RECEIVE_BUFFER)

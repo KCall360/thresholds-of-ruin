@@ -111,10 +111,7 @@ fn past_public_plan_invalid_delta_is_atomic_and_aim_count_is_bounded() {
         assert_eq!(before, original);
     }
     let mut excessive = record();
-    excessive["state"]["aim"]["occurrences"] = json!(vec![
-        json!({"x":0,"y":0,"z":0});
-        33_usize.pow(3) + 64 * 27 + 3
-    ]);
+    excessive["state"]["aim"]["occurrences"] = json!(vec![json!({"x":0,"y":0,"z":0}); 61_620]);
     assert!(
         serde_json::from_slice::<CombatView>(&serde_json::to_vec(&combat(excessive)).unwrap())
             .is_err()
@@ -122,6 +119,39 @@ fn past_public_plan_invalid_delta_is_atomic_and_aim_count_is_bounded() {
     let mut future = record();
     future["observed_at"] = json!("101");
     assert_eq!(state(future).validate(), Err(InvalidState::InvalidCombat));
+}
+
+#[test]
+fn body_origin_public_plan_wire_accepts_the_independent_envelope_and_rejects_one_more() {
+    // This is the accepted historical-record bound, not a claim that one
+    // present-day target realizes every offset of the conservative envelope.
+    let baseline = combat(record());
+    serde_json::from_slice::<CombatView>(&serde_json::to_vec(&baseline).unwrap())
+        .expect("ordinary positive schema control");
+    let mut maximum = record();
+    maximum["state"]["aim"]["occurrences"] = json!((0..61_619)
+        .map(|x| json!({"x": x, "y": 0, "z": 0}))
+        .collect::<Vec<_>>());
+    let expected = combat(maximum.clone());
+    let bytes = serde_json::to_vec(&expected).unwrap();
+    let decoded: CombatView = serde_json::from_slice(&bytes)
+        .expect("the complete body-origin envelope is an accepted historical record");
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), expected);
+    assert_eq!(
+        serde_json::from_value::<CombatView>(expected).unwrap(),
+        decoded
+    );
+    assert_eq!(state(maximum.clone()).validate(), Ok(()));
+
+    maximum["state"]["aim"]["occurrences"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"x": 61_619, "y": 0, "z": 0}));
+    let excessive = combat(maximum);
+    assert!(
+        serde_json::from_slice::<CombatView>(&serde_json::to_vec(&excessive).unwrap()).is_err()
+    );
+    assert!(serde_json::from_value::<CombatView>(excessive).is_err());
 }
 // Append to protocol integration public_plan_observation after the frozen batch.
 #[test]

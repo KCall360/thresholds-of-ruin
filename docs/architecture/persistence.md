@@ -184,14 +184,14 @@ population, allocation and revision changes together with the candidate.
 
 Active-floor wandering clocks and living-birth ownership are retained at each
 checkpoint boundary separately from pooled population plans, prepared scopes and
-once-only entry receipts. The current save-57 snapshot uses a strict named
+once-only entry receipts. The current save-58 snapshot uses a strict named
 `floor_activation` reference containing `state` and required nullable `wandering`;
 its pooled base has canonical null `wandering`, never a second clock authority.
 Restoration reconstructs the complete activation state before validating that
 boundary's clocks, including when its immutable plan was already validated.
 Clock changes therefore do not duplicate large plans or require pruning rewind
 history or increasing the 64 MiB checkpoint bound. This is the current-only
-save-57 shape, not a fallback reader for earlier checkpoint representations.
+save-58 shape, not a fallback reader for earlier checkpoint representations.
 
 Unique retrieval keeps its small mutable identity/counter state separate from
 pooled immutable population data. Each accepted transaction carries its exact

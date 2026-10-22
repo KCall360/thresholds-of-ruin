@@ -11,6 +11,7 @@ pub(crate) struct SceneWitness {
     body: tor_world::Shared<crate::BodySpec>,
     disclosed: bool,
     sight: bool,
+    nonvisual_range: u8,
 }
 
 /// Derived actor scenes for observations and streaming pins. Shared across
@@ -47,12 +48,44 @@ impl Eq for ActorScenes {}
 /// Manhattan sight range in cells, measured from the eye cell.
 pub(crate) const SIGHT_RANGE: u8 = 16;
 
+impl crate::Actor {
+    /// Effective Awareness governs nonvisual disclosure, not genuine sight.
+    /// The source table is in feet; the user's explicit adaptation caps every
+    /// tier, including 9+, at the unchanged ordinary sight limit.
+    pub(crate) fn nonvisual_range(&self) -> u8 {
+        let awareness = self.combat.as_ref().map_or(0, |combat| {
+            combat
+                .creature()
+                .derived()
+                .attributes
+                .get(crate::attributes::Attribute::Awareness)
+        });
+        let feet = match awareness {
+            0 => 5,
+            1..=2 => 10,
+            3..=4 => 20,
+            5..=6 => 50,
+            7..=8 => 100,
+            _ => return SIGHT_RANGE,
+        };
+        (feet / tor_world::CELL_SIZE_FEET).min(u32::from(SIGHT_RANGE)) as u8
+    }
+}
+
 /// Where the scene places the landing of the abstract stair the actor stands
 /// on: straight up or down, just beyond any physically visible offset, so it
 /// never collides with a real cell. Travel learns stair links from it.
 pub(crate) fn stair_landing_offset(body: &crate::BodySpec, direction: Direction) -> Position {
     let [x, y, z] = body.eye;
-    let beyond = i32::from(SIGHT_RANGE) + x.abs() + y.abs() + z.abs() + 1;
+    let body_z = body
+        .cells
+        .iter()
+        .map(|cell| cell[2].abs())
+        .max()
+        .unwrap_or(0);
+    // Nonvisual geometry may originate above/below the eye on a large body.
+    // Keep the existing offset wherever it already exceeds that physical span.
+    let beyond = i32::from(SIGHT_RANGE) + (x.abs() + y.abs() + z.abs()).max(body_z) + 1;
     Position {
         x: 0,
         y: 0,
@@ -807,6 +840,7 @@ impl Game {
             body: actor.body.clone(),
             disclosed: self.alive(id) || self.combat.selected == Some(id),
             sight: actor.perception().sight,
+            nonvisual_range: actor.nonvisual_range(),
         })
     }
 
@@ -972,8 +1006,18 @@ impl Game {
             cell.offset.y += ey;
             cell.offset.z += ez;
         }
-        let mut scene =
-            merge_perception(self.local_awareness_at(location, orientation, body), scene);
+        let nonvisual = self.nonvisual_awareness_at(
+            location,
+            orientation,
+            body,
+            actor.nonvisual_range(),
+            actor.perception().sight,
+        );
+        let local = merge_perception(
+            self.local_awareness_at(location, orientation, body),
+            nonvisual,
+        );
+        let mut scene = merge_perception(local, scene);
         // Abstract stair links are traversal, not geometry: standing on one
         // discloses its landing as a separate occurrence beyond physical sight.
         for direction in [Direction::Up, Direction::Down] {
@@ -1042,6 +1086,72 @@ impl Game {
             }
         }
         scene
+    }
+
+    /// Unlike the preserved immediate neighbourhood, extended nonvisual
+    /// perception obeys ordinary physical occlusion and Manhattan distance.
+    /// Body origins preserve range for tall/wide actors and portal-local frames.
+    /// This layer never enters the separate eye-sight vector.
+    fn nonvisual_awareness_at(
+        &self,
+        location: Location,
+        orientation: u8,
+        body: &crate::BodySpec,
+        range: u8,
+        sight: bool,
+    ) -> Vec<tor_world::SightCell> {
+        if range <= 1 {
+            return Vec::new();
+        }
+        let Some(occupied) = self.body_cells(location, orientation, body) else {
+            return Vec::new();
+        };
+        let mut origins: Vec<_> = body.cells.iter().copied().zip(occupied).collect();
+        origins.sort_by_key(|(offset, _)| *offset);
+        let mut result = Vec::new();
+        for (offset, (at, frame)) in origins {
+            for mut cell in self.world.eye_scene(at, frame, range) {
+                // Usable illuminated sight retains its normal eye-origin gate.
+                // Blindness uses this same range, not a second reduced layer.
+                if sight && self.world.is_lit(cell.location) == Some(true) {
+                    continue;
+                }
+                cell.offset.x += offset[0];
+                cell.offset.y += offset[1];
+                cell.offset.z += offset[2];
+                result.push(cell);
+            }
+        }
+        result
+    }
+
+    /// Load-only geometry dependencies for exactly the actor scene above.
+    /// Disclosure remains the merged scene; loading a blocker is not seeing it.
+    pub(crate) fn perception_scene_regions(&self, id: ActorId) -> Vec<RegionId> {
+        let Some(actor) = self.actors.get(&id) else {
+            return Vec::new();
+        };
+        let mut regions = BTreeSet::new();
+        if let Some((eye, frame)) = self.eye(id) {
+            regions.extend(
+                self.world
+                    .illuminated_eye_scene_regions(eye, frame, SIGHT_RANGE)
+                    .unwrap_or_default(),
+            );
+        }
+        let range = actor.nonvisual_range();
+        if range > 1 {
+            if let Some(body) = self.body_cells(actor.location, actor.orientation, &actor.body) {
+                for (at, frame) in body {
+                    regions.extend(
+                        self.world
+                            .eye_scene_regions(at, frame, range)
+                            .unwrap_or_default(),
+                    );
+                }
+            }
+        }
+        regions.into_iter().collect()
     }
 
     /// The loaded actor's eye cell and frame, if its body resolves.
@@ -1585,3 +1695,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "observation_awareness_tests.rs"]
+mod awareness_tests;

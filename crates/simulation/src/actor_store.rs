@@ -27,6 +27,7 @@ fn fresh_perception_revision() -> u64 {
 /// must update this witness together with observation::SceneWitness.
 struct PerceptionInputs {
     perception: crate::perception::PerceptionCapabilities,
+    nonvisual_range: u8,
     guise: crate::perception::GuiseState,
     recognized_guises: Vec<ActorId>,
     location: Location,
@@ -43,6 +44,7 @@ impl PerceptionInputs {
         crate::diagnostics::perception_witness_capture();
         Self {
             perception: actor.perception(),
+            nonvisual_range: actor.nonvisual_range(),
             guise: actor.guise.clone(),
             recognized_guises: actor.discovery.recognized_guises(),
             location: actor.location,
@@ -60,6 +62,7 @@ impl PerceptionInputs {
     }
     fn matches(&self, actor: &Actor) -> bool {
         self.perception == actor.perception()
+            && self.nonvisual_range == actor.nonvisual_range()
             && self.guise == actor.guise
             && self.recognized_guises == actor.discovery.recognized_guises()
             && self.location == actor.location
@@ -86,6 +89,7 @@ struct VisibilityInputs {
     invisible: bool,
     see_invisible: bool,
     sight: bool,
+    nonvisual_range: u8,
     guised: bool,
     recognized_guises: Vec<ActorId>,
     location: Location,
@@ -105,6 +109,7 @@ impl VisibilityInputs {
             invisible: perception.is_some_and(|p| p.invisible),
             see_invisible: perception.is_some_and(|p| p.see_invisible),
             sight: perception.is_none_or(|p| p.sight),
+            nonvisual_range: actor.nonvisual_range(),
             guised: actor.guise.appearance().is_some(),
             recognized_guises: actor.discovery.recognized_guises(),
             location: actor.location,

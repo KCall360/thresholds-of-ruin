@@ -942,13 +942,7 @@ impl Game {
             need.active.extend(live.iter().copied());
             if actor.alive() {
                 if !cache.reach.contains_key(id) {
-                    let view = self
-                        .eye(*id)
-                        .and_then(|(eye, frame)| {
-                            self.world
-                                .illuminated_eye_scene_regions(eye, frame, SIGHT_RANGE)
-                        })
-                        .unwrap_or_default();
+                    let view = self.perception_scene_regions(*id);
                     let reach = self.reach_regions(*id);
                     cache.reach.insert(*id, (reach, view));
                 }
@@ -1050,7 +1044,9 @@ impl Game {
                     need.active
                         .extend(scene.into_iter().map(|cell| cell.location.region));
                     need.active.extend(stairs.iter().copied());
-                    if let Some(regions) =
+                    if let Some(actor) = actor {
+                        need.loaded.extend(self.perception_scene_regions(actor));
+                    } else if let Some(regions) =
                         self.world
                             .illuminated_eye_scene_regions(eye, frame, SIGHT_RANGE)
                     {

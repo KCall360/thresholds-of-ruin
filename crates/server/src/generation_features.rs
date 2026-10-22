@@ -30,7 +30,9 @@ pub(super) fn place_concealed_features(
     definitions: &mut BTreeMap<u64, RegionDef>,
     size: [i32; 3],
     bases: FeatureBases,
+    maze_slots: &[bool],
 ) -> Result<(), Failure> {
+    let maze_active = maze_slots.iter().any(|value| *value);
     let columns = run.group.grid[0] as usize;
     let to_local = |(x, y): (i32, i32)| {
         let slot = (y / size[1]) as usize * columns + (x / size[0]) as usize;
@@ -163,7 +165,20 @@ pub(super) fn place_concealed_features(
             }
             Operation::HiddenTraps { config } => {
                 let mut landing_cells = BTreeSet::new();
-                if config.hazards.is_some() {
+                if maze_active {
+                    for (slot, id) in run.group.members.iter().enumerate() {
+                        let offset = (
+                            (slot % columns) as i32 * size[0],
+                            (slot / columns) as i32 * size[1],
+                        );
+                        for (name, at) in &definitions[id].anchors {
+                            if name.starts_with("trapdoor_landing_") {
+                                landing_cells.insert((at[0] + offset.0, at[1] + offset.1));
+                            }
+                        }
+                    }
+                }
+                if config.hazards.is_some() && !maze_active {
                     // Each source region owns an ordinal namespace on the next
                     // depth's same slot. Generate all possible target anchors
                     // independently of whether the predecessor was ever built.
@@ -245,6 +260,7 @@ pub(super) fn place_concealed_features(
                 let mut candidates: Vec<_> = rooms
                     .iter()
                     .enumerate()
+                    .filter(|(slot, _)| !maze_slots[*slot])
                     .flat_map(|(slot, room)| {
                         let offset = (
                             (slot % columns) as i32 * size[0],
@@ -256,6 +272,19 @@ pub(super) fn place_concealed_features(
                     .collect();
                 candidates.sort();
                 candidates.dedup();
+                if maze_active {
+                    for &cell in candidates.iter().chain(landing_cells.iter()) {
+                        let (region, at) = to_local(cell);
+                        if definitions[&region].doors.iter().any(|door| {
+                            !door.open
+                                && door.at[..2] == at[..2]
+                                && door.at[2] < 2
+                                && door.at[2] + door.height as i32 > 0
+                        }) {
+                            return Err(fail("Maze reservation intersects a secret closure"));
+                        }
+                    }
+                }
                 let mut rng = stream(
                     run.seed,
                     run.identity,
@@ -264,6 +293,11 @@ pub(super) fn place_concealed_features(
                     stage,
                     "placement",
                 )?;
+                if maze_active && candidates.len() < config.count[1] as usize {
+                    return Err(fail(
+                        "Maze ordinary-room candidates cannot preserve authored trap maximum",
+                    ));
+                }
                 let maximum = config.count[1].min(candidates.len() as u32);
                 if config.count[0] > maximum {
                     return Err(fail(

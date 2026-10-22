@@ -1,4 +1,4 @@
-import = "interactions-v51"
+import = "interactions-v52"
 
 # A source-owned item ray, never a granted character ability.
 [[overrides]]

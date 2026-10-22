@@ -21,7 +21,7 @@ class FloorActivationProcess(ProcessTestCase):
         # the product receiving the playable starter and population.
         with (package / "scenario.toml").open("w", encoding="utf-8") as output:
             output.write('''
-format = 30
+format = 31
 id = "floor-activation"
 version = "1.0"
 ruleset = "rules.toml"
@@ -244,6 +244,12 @@ class OmittedRoomTopologyProcess(ProcessTestCase):
     """Actual Rogue stock, creatures, traps and wandering; no diagnostic tuning."""
 
     def test_ordinary_search_traversal_and_source_free_revisit_keep_real_rooms(self):
+        self.run_topology_route(mazes=False)
+
+    def test_dark_maze_search_traversal_and_source_free_revisit_keep_real_cells(self):
+        self.run_topology_route(mazes=True)
+
+    def run_topology_route(self, *, mazes):
         import json
         import tomllib
         from arena_matrix import toml_source
@@ -257,7 +263,8 @@ class OmittedRoomTopologyProcess(ProcessTestCase):
             ArchiveVerificationCache, CHUNK_SOFT_BYTES, CHUNK_HARD_BYTES, MINIMUM_FREE_BYTES,
         )
 
-        package = self.directory / "omitted-rogue"
+        label = "dark-maze" if mazes else "omitted"
+        package = self.directory / f"{label}-rogue"
         shutil.copytree(ROOT / "scenarios/rogue-exploration", package,
                         ignore=shutil.ignore_patterns(".compiled"))
         baseline = subprocess.run([self.bin / ("tor-scenario" + SUFFIX), "validate", package],
@@ -267,6 +274,12 @@ class OmittedRoomTopologyProcess(ProcessTestCase):
         manifest = tomllib.loads(path.read_text(encoding="utf-8"))
         wandering = manifest["floor_activation"]["wandering"].copy()
         manifest["generation_recipes"]["exploration"]["room_omissions"] = {"count": [3, 3]}
+        if mazes:
+            # Force the new capability only in this copied acceptance package;
+            # live probability, population, stock and hazard tuning stay intact.
+            recipe = manifest["generation_recipes"]["exploration"]
+            recipe["maze_rooms"] = {"one_in": 1}
+            recipe["lighting"] = {"darkness_roll": 1, "darkness_start": 0}
         path.write_text(toml_source(manifest), encoding="utf-8")
         self.assertEqual(tomllib.loads(path.read_text(encoding="utf-8"))
                          ["floor_activation"]["wandering"], wandering)
@@ -293,6 +306,14 @@ class OmittedRoomTopologyProcess(ProcessTestCase):
         self.assertEqual(len(room_ids), 6)
         self.assertEqual(room_ids, sorted(set(room_ids)))
         self.assertTrue(all(row["cells"] for row in scope["rooms"]))
+        if mazes:
+            def has_interior_wall(room):
+                cells = {(cell["position"]["x"], cell["position"]["y"])
+                         for cell in room["cells"]}
+                xs, ys = zip(*cells)
+                return len(cells) < (max(xs) - min(xs) + 1) * (max(ys) - min(ys) + 1)
+            self.assertTrue(any(has_interior_wall(room) for room in scope["rooms"]),
+                            "forced-maze acceptance must contain physical interior walls")
         self.assertIsNotNone(activation["wandering"])
         first = self.private_receipts()
         gold = next(row for row in first[0]["decisions"] if row["id"] == "rogue.room_gold")
@@ -363,7 +384,7 @@ class OmittedRoomTopologyProcess(ProcessTestCase):
             controller.consume_command(action=action)
             current = settle_rogue_action(self, player, self.act(player, action))
         else:
-            self.fail("Ordinary omitted-room route did not reach its paired stair within 2500 actions")
+            self.fail(f"Ordinary {label}-room route did not reach its paired stair within 2500 actions")
         self.assertFalse(current["state"]["wizard_game"])
         self.assertTrue(underfoot(current["state"])["stairs_up"])
         second = self.private_receipts()

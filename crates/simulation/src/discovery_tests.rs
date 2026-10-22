@@ -975,3 +975,6 @@ fn discovery_cache_retains_world_lighting_occlusion_and_waking_dependencies() {
 
 #[path = "discovery_guise_tests.rs"]
 mod guise_tests;
+
+#[path = "discovery_tactile_tests.rs"]
+mod tactile_tests;

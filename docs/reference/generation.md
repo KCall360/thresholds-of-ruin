@@ -120,7 +120,7 @@ resolved through its named anchor after that group publishes. Leaving a generate
 group for an authored chamber uses the same traversal and persistence machinery.
 
 Family-domain selection, port-slot selection, room geometry, graph connections,
-corridors, stair-cell selection, optional room omissions, lighting, secret entrances
+corridors, stair-cell selection, optional room omissions and dark-room mazes, lighting, secret entrances
 and hidden traps use separated deterministic
 streams. Family/group identity, seed and relevant normalized parameters participate;
 source comments, unrelated catalogs, exploration order and worker timing do not.
@@ -249,7 +249,9 @@ fill, grid partition, rooms, connected graph, corridors and stairs; version 2 ad
 lighting. Recipe version 3 appends optional secret entrances and hidden traps after
 any lighting stage. Recipe version 4 requires a room-omission stage immediately
 after the six geometry stages, before optional lighting, secrets and traps. Without
-that opt-in policy, the existing version 1–3 lowering is unchanged. Stage order is
+that opt-in policy, the existing version 1–3 lowering is unchanged. Recipe version 5
+requires one maze stage after optional omissions, then lighting before any secrets
+or traps. Without maze policy, version 1–4 lowering is unchanged. Stage order is
 fixed by this algorithm, not freely composable. Unique
 stage IDs are bounded ASCII alphanumeric/hyphen/underscore names, each stage uses
 version 1, room-range bounds are 3–30, and extra-edge ranges are ordered and at most
@@ -275,7 +277,7 @@ An omitted slot retains its existing corridor network and two-cell body clearanc
 not a room interior. Slot/member identities, protected entry/stair coordinates and
 the connected all-open route graph remain stable. Omitted rooms are absent from
 present-room metadata, so room-only loot and trap placement cannot treat them as
-rooms. This does not add mazes, alcoves or new population/balance policies.
+rooms. Omissions do not themselves add mazes, alcoves or population/balance policies.
 
 Absent policy and a realized omission count of zero preserve the exact legacy
 geometry and room-only trapdoor landing candidates. With actual omissions, each
@@ -286,6 +288,50 @@ independent. Insufficient endpoint or declared trap-minimum capacity rejects the
 whole prepared group without partial publication. Prepared metadata and saved
 ordinary region records remain the placement and persistence authorities; reopening
 does not reroll a realized floor from live authoring sources.
+
+### Optional dark-room mazes
+
+The optional strict `maze_rooms` record has one required unsigned field, `one_in`,
+in the range 1–10,000. It requires an explicit `lighting` policy. No value is a
+default, and **the live Rogue package does not enable mazes**. The source's 1-in-15
+frequency is historical reference, not approved live tuning.
+
+The existing darkness draw runs exactly once on its unchanged stream. Only present
+dark rooms not reserved for ordinary trap capacity receive one independently keyed
+maze trial. Before those trials, the generator reserves enough ordinary rooms for
+the entire authored trap **maximum**, not merely its minimum. Each room's guaranteed
+capacity is its floor cells minus distinct actual nonboundary entry/stair cells,
+then minus the maximum per-slot trapdoor landing count (clamped at zero). Lit rooms
+count first; a bounded independently shuffled set of dark rooms supplies any remaining
+capacity. Insufficient total guaranteed capacity rejects the new policy without
+rerolls or count reduction, even if favorable landing positions might have fit.
+
+A feasible policy with no realized maze preserves the complete old output exactly,
+including lighting, secrets, traps, landings and room metadata. When a maze realizes,
+all possible per-slot trapdoor landing ordinals are reserved from baseline open
+floor before carving or secret placement, including omitted and maze slots.
+Landing capacity failure rejects the entire preparation. The original rectangles,
+corridors, sampled entry/stair coordinates and reciprocal ports remain authoritative.
+
+Each selected rectangle receives a bounded iterative depth-first lattice maze and
+deterministic connectors to its mandatory corridor, entry/stair and landing cells.
+Both body heights remain clear along the connected floor. Connectors may introduce
+loops: this is a connected labyrinth, not a perfect-tree-maze guarantee. Mandatory
+points may consume all potential maze walls in a very small room. No alcoves or
+floor outside the original rectangle are added. Omitted rooms remain absent; each
+present room retains its slot ID and metadata containing **every actual open cell**
+inside its original rectangle, including corridor and connector cells.
+
+Secrets remain outside room interiors and cannot close a reserved landing. Ground
+traps use only retained ordinary-room floor; an independent final capacity check
+requires the full authored maximum before sampling the unchanged count range.
+Room-scoped loot and population use the actual walkable metadata, with their existing
+minimum-capacity rejection and atomic publication rules. Physical occlusion, carried
+light, observer knowledge and AI are unchanged: there is no whole-room revelation.
+
+This source checkpoint is not yet qualified: compilation, behavioral tests, current
+writer/certificate regeneration and actual-process acceptance remain pending. It
+must not be treated as live enablement or a completed verification gate.
 
 ### Secret entrances and hidden traps
 
@@ -310,7 +356,7 @@ doorless. A lit room illuminates its closure's exterior surface, not the corrido
 beyond it. Discovery is actor-owned; opening changes the one shared physical world.
 The all-open required-route graph is validated against the unchanged connected
 carving. There is no promise of an always-visible alternate route, and this stage
-does not itself omit rooms or add mazes; optional omissions are a separate stage.
+does not itself omit rooms or add mazes; those are separate optional stages.
 
 Traps select room-interior floor cells, avoiding reserved entry/stair anchors.
 They do not overlap secret mouths. Their placements and family draws are

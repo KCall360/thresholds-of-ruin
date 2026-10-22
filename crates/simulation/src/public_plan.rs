@@ -890,6 +890,56 @@ mod tests {
             },
         }
     }
+    #[test]
+    fn body_origin_public_plan_bound_survives_strict_checkpoint_json_roundtrip() {
+        let (mut game, actor) = observer();
+        assert!(restored(&game).is_ok(), "valid current checkpoint baseline");
+        let mut record = retained_record(&game, actor);
+        let PublicPlanState::Preparing {
+            aim: ObservedAim::Disclosed { occurrences, .. },
+            ..
+        } = &mut record.state
+        else {
+            panic!("disclosed historical record")
+        };
+        *occurrences = (0..61_619).map(|x| Position { x, y: 0, z: 0 }).collect();
+        let encoded = serde_json::to_vec(&record).unwrap();
+        let decoded: PublicPlanObservation = serde_json::from_slice(&encoded)
+            .expect("complete body-origin historical envelope remains decodable");
+        assert_eq!(decoded, record);
+        assert!(decoded.valid(&game.content.rules, &game.world));
+        game.actors.get_mut(&actor).unwrap().public_plan =
+            Some(tor_world::Shared::new(record.clone()));
+        let mut shared = crate::checkpoint::SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        let snapshot = serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        let shared = serde_json::from_slice(&serde_json::to_vec(&shared).unwrap()).unwrap();
+        let reopened = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
+        assert_eq!(reopened, game);
+        assert_eq!(reopened.public_plan_observation(actor), Some(&record));
+
+        let PublicPlanState::Preparing {
+            aim: ObservedAim::Disclosed { occurrences, .. },
+            ..
+        } = &mut record.state
+        else {
+            unreachable!()
+        };
+        occurrences.push(Position {
+            x: 61_619,
+            y: 0,
+            z: 0,
+        });
+        assert!(!record.valid(&game.content.rules, &game.world));
+        assert!(serde_json::from_slice::<PublicPlanObservation>(
+            &serde_json::to_vec(&record).unwrap()
+        )
+        .is_err());
+        assert!(serde_json::from_value::<PublicPlanObservation>(
+            serde_json::to_value(&record).unwrap()
+        )
+        .is_err());
+    }
     fn aim_storage(record: &PublicPlanObservation) -> *const Position {
         let PublicPlanState::Preparing {
             aim: ObservedAim::Disclosed { occurrences, .. },
