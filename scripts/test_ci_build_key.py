@@ -98,6 +98,41 @@ class RecipeKeyTests(unittest.TestCase):
                 with patch.object(verify, "plan", return_value=steps):
                     self.assertNotEqual(self.key(profile, "python"), before)
 
+    def test_python_key_contains_canonical_profile_wide_example_envelope(self):
+        for profile in ('debug', 'release'):
+            rows = ci_build_key.recipe(profile, 'python')
+            examples = [row for row in rows if '--example' in row['command']]
+            self.assertEqual(len(examples), 1, 'Explicit maintained-example recipe must be keyed')
+            command = ['cargo', 'build', '-p', 'tor-server', '--locked',
+                       '--example', 'combat_bench', '--example', 'horizon-profile', '--example', 'item_bench',
+                       '--example', 'latency_bench', '--example', 'physics_bench', '--example', 'place_bench',
+                       '--example', 'rogue_bench', '--example', 'scenario_bench']
+            if profile == 'release': command.append('--release')
+            self.assertEqual(examples[0]['command'], command)
+            self.assertEqual(examples[0]['cwd'], '$WORKSPACE')
+            self.assertFalse(any('--example' in row['command'] for row in ci_build_key.recipe(profile, 'rust')))
+
+    def test_example_envelope_mutations_change_only_relevant_dependency_key(self):
+        import ci_example_prerequisites as examples
+        before = self.key('debug', 'python')
+        rust = self.key('debug', 'rust')
+        with patch.dict(examples.OWNERS, {'test_new.Case.test_example': ('finite_claim_bench',)}):
+            self.assertNotEqual(self.key('debug', 'python'), before)
+            self.assertEqual(self.key('debug', 'rust'), rust)
+        # Owner membership/order does not change the deduplicated compiled recipe.
+        with patch.dict(examples.OWNERS, {'test_new.Case.test_alias': ('physics_bench',)}):
+            self.assertEqual(self.key('debug', 'python'), before)
+        original = examples.stage
+        for variation in ('flag', 'environment'):
+            def changed(*args, **kwargs):
+                name, command, environment = original(*args, **kwargs)
+                if variation == 'flag': command.append('--no-default-features')
+                else: environment['RUSTFLAGS'] = '-C opt-level=3'
+                return name, command, environment
+            with self.subTest(variation=variation), patch.object(examples, 'stage', side_effect=changed):
+                self.assertNotEqual(self.key('debug', 'python'), before)
+                self.assertEqual(self.key('debug', 'rust'), rust)
+
     def test_incidental_workspace_and_python_paths_do_not_change_key(self):
         before = self.key("debug", "python")
         root = self.root / "another-checkout"
@@ -176,7 +211,7 @@ class WorkflowKeyTests(unittest.TestCase):
         self.assertIn("echo 'Dependency cache disabled: recipe helper failed.' >&2", workflow)
         self.assertIn("        if: steps.build_key.outcome == 'success' && steps.build_key.outputs.key != ''", workflow)
         self.assertIn("shared-key: ${{ matrix.profile }}-${{ matrix.partition }}-${{ steps.build_key.outputs.key }}", workflow)
-        self.assertIn("save-if: ${{ github.ref == 'refs/heads/main' }}", workflow)
+        self.assertIn("save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}", workflow)
         self.assertIn("run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}", workflow)
 
 

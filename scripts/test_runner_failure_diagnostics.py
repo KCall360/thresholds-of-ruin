@@ -30,7 +30,7 @@ class FailureContexts(unittest.TestCase):
         diagnostic = next(row for row in rows if row['kind'] == 'diagnostic')
         self.assertEqual(diagnostic.get('failure_context', {}).get('phase'), 'method')
         source = diagnostic['failure_context']['source']
-        self.assertEqual(source['path'], 'scripts/test_ci_head_reuse_phase.py')
+        self.assertEqual(source['path'], 'scripts/test_runner_failure_diagnostics.py')
         self.assertTrue(source['function'].endswith('Example.test_body'))
         self.assertGreater(source['line'], 0)
         self.assertEqual(rows[-1]['failures'], 1)

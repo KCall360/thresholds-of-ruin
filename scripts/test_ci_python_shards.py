@@ -3,6 +3,9 @@ from collections import Counter
 from copy import deepcopy
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,6 +15,7 @@ import parallel_tests
 
 SHA = 'a' * 40
 RUN = '12345'
+ATTEMPT = '1'
 IDS = ['test_rogue_earned_route_process.Route.test_one',
        'test_arena_matrix_process.Matrix.test_two',
        'test_performance_process.Native.test_three',
@@ -24,7 +28,7 @@ def evidence(*, profile="release", ids=IDS):
     for index in (1, 2):
         selected = shards.selection(ids, index, profile=profile)
         rows = [{'kind': 'selection', 'test_ids': selected,
-                 'shard': shards.metadata(ids, index, SHA, RUN, profile=profile)}]
+                 'shard': shards.metadata(ids, index, SHA, RUN, ATTEMPT, profile=profile)}]
         rows += [{'kind': 'test', 'test_id': name, 'outcome': 'passed',
                   'failures': 0, 'errors': 0, 'subtests_failed': 0, 'subtests_skipped': 0}
                  for name in selected]
@@ -78,10 +82,109 @@ class PythonShardSelectionTests(unittest.TestCase):
 
 
 class PythonShardCoverageTests(unittest.TestCase):
+    def test_example_owner_requires_explicit_profile_build_before_workers(self):
+        physics = 'test_performance_process.PerformanceProcesses.test_physics_benchmark_reports_completed_durable_commit_timings'
+        ids = [physics, 'test_floor_activation_process.Other.test_value']
+        for profile in ('debug', 'release'):
+            receipts, summaries = evidence(profile=profile, ids=ids)
+            arguments = dict(expected_ids=ids, source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT, profile=profile)
+            with self.assertRaisesRegex(ValueError, 'verification stage'):
+                shards.validate_pair(receipts, summaries, **arguments)
+            name = 'build-examples-' + profile
+            summaries[1]['planned_steps'].insert(-1, name)
+            summaries[1]['steps'].insert(-1, {'step': name, 'status': 'passed', 'code': 0})
+            self.assertTrue(shards.validate_pair(receipts, summaries, **arguments)['complete'])
+            for mutation in ('wrong-profile', 'after-workers', 'duplicate', 'failed', 'unselected-shard'):
+                changed = deepcopy(summaries)
+                if mutation == 'wrong-profile':
+                    changed[1]['planned_steps'][-2] = 'build-examples-unknown'
+                    changed[1]['steps'][-2]['step'] = 'build-examples-unknown'
+                elif mutation == 'after-workers':
+                    for key in ('planned_steps', 'steps'):
+                        changed[1][key][-2:] = list(reversed(changed[1][key][-2:]))
+                elif mutation == 'duplicate':
+                    changed[1]['planned_steps'].insert(-1, name)
+                    changed[1]['steps'].insert(-1, {'step': name, 'status': 'passed', 'code': 0})
+                elif mutation == 'failed':
+                    changed[1]['steps'][-2]['code'] = 1
+                else:
+                    changed[2]['planned_steps'].insert(-1, name)
+                    changed[2]['steps'].insert(-1, {'step': name, 'status': 'passed', 'code': 0})
+                with self.subTest(profile=profile, mutation=mutation), self.assertRaisesRegex(ValueError, 'verification stage'):
+                    shards.validate_pair(receipts, changed, **arguments)
+
+    def test_successful_cohort_retains_origin_without_relabeling(self):
+        producers = {'result': 'success', 'outputs': {'producer_debug': '1', 'producer_release': '1'}}
+        owners = {'result': 'success', 'outputs': {f'shard_{profile}_{index}': '1'
+                  for profile in ('debug', 'release') for index in (1, 2)}}
+        self.assertEqual(shards.cohort_attempt(producers, owners, '2'),
+                         {'origin_attempt': '1', 'aggregate_attempt': '2'})
+        self.assertEqual(shards.cohort_attempt(producers, owners, '1'),
+                         {'origin_attempt': '1', 'aggregate_attempt': '1'})
+        for group_index in (0, 1):
+            for status in ('failure', 'cancelled', 'skipped', '', 'in_progress', None):
+                groups = deepcopy([producers, owners])
+                groups[group_index]['result'] = status
+                with self.subTest(group=group_index, status=status), self.assertRaisesRegex(ValueError, 'groups'):
+                    shards.cohort_attempt(*groups, '2')
+            for key in [*([producers, owners][group_index]['outputs'])]:
+                for value in (None, '', '0', '01', '-1', 'x', '2', '3', 1, True):
+                    groups = deepcopy([producers, owners])
+                    if value is None:
+                        del groups[group_index]['outputs'][key]
+                    else:
+                        groups[group_index]['outputs'][key] = value
+                    with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                        shards.cohort_attempt(*groups, '2')
+        for current in (None, '', '0', '01', '-1', True):
+            with self.subTest(current=current), self.assertRaises(ValueError):
+                shards.cohort_attempt(producers, owners, current)
+        future = deepcopy([producers, owners])
+        for group in future:
+            group['outputs'] = dict.fromkeys(group['outputs'], '3')
+        with self.assertRaisesRegex(ValueError, 'future'):
+            shards.cohort_attempt(*future, '2')
+
+    def test_cohort_actual_cli_binds_context_and_does_not_publish_failed_selection(self):
+        command = [sys.executable, str(Path(shards.__file__)), '--cohort', '--current-attempt', '2',
+                   '--source-sha', SHA, '--run-id', RUN]
+        producers = {'result': 'success', 'outputs': {'producer_debug': '1', 'producer_release': '1'}}
+        owners = {'result': 'success', 'outputs': {f'shard_{profile}_{index}': '1'
+                  for profile in ('debug', 'release') for index in (1, 2)}}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'outputs'
+            env = {**os.environ, 'WINDOWS_BINARIES': json.dumps(producers),
+                   'WINDOWS_PYTHON': json.dumps(owners), 'GITHUB_OUTPUT': str(output)}
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), {'source_sha': SHA, 'run_id': RUN,
+                'origin_attempt': '1', 'aggregate_attempt': '2'})
+            self.assertEqual(output.read_text(), 'origin_attempt=1\n')
+            for broken in ('{}', '{"result":"success","outputs":{}}',
+                           '{"result":"success","result":"success","outputs":{}}'):
+                output.unlink(missing_ok=True)
+                result = subprocess.run(command, env={**env, 'WINDOWS_PYTHON': broken},
+                                        capture_output=True, text=True, timeout=20)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(output.exists(), result.stderr)
+
+    def test_receipts_bind_exact_origin_attempt_not_current_aggregate_attempt(self):
+        receipts, summaries = evidence()
+        args = dict(source_sha=SHA, run_id=RUN, expected_ids=IDS, origin_attempt=ATTEMPT)
+        self.assertTrue(shards.validate_pair(receipts, summaries, **args)['complete'])
+        for key, value in [('origin_attempt', '2'), ('origin_attempt', None), ('version', 1),
+                           ('source_sha', 'b' * 40), ('run_id', '999')]:
+            altered = deepcopy(receipts)
+            altered[2][0]['shard'][key] = value
+            with self.subTest(key=key, value=value), self.assertRaisesRegex(ValueError, 'identity'):
+                shards.validate_pair(altered, summaries, **args)
+        with self.assertRaisesRegex(ValueError, 'identity'):
+            shards.validate_pair(receipts, summaries, **{**args, 'origin_attempt': '2'})
+
     def test_complete_current_identity_and_exact_union_pass(self):
         receipts, summaries = evidence()
-        result = shards.validate_pair(receipts, summaries, source_sha=SHA, run_id=RUN, expected_ids=IDS)
-        self.assertEqual(result, {'source_sha': SHA, 'run_id': RUN, 'shards': 2,
+        result = shards.validate_pair(receipts, summaries, source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT, expected_ids=IDS)
+        self.assertEqual(result, {'source_sha': SHA, 'run_id': RUN, 'origin_attempt': ATTEMPT, 'shards': 2,
                                  'selected_tests': 5, 'completed_tests': 5, 'complete': True})
 
     def test_absent_empty_cancelled_failed_incomplete_or_wrong_identity_fail(self):
@@ -110,14 +213,14 @@ class PythonShardCoverageTests(unittest.TestCase):
                 elif mutation == 'waived_bool': rows[-1]['waived'] = False
                 else: rows[1]['profile'] = 'debug'
                 with self.assertRaises(ValueError):
-                    shards.validate_pair(receipts, summaries, source_sha=SHA, run_id=RUN, expected_ids=IDS)
+                    shards.validate_pair(receipts, summaries, source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT, expected_ids=IDS)
 
     def test_artifact_reader_requires_both_unambiguous_complete_files(self):
         receipts, summaries = evidence()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with self.assertRaisesRegex(ValueError, 'Missing'):
-                shards.read_pair(root, source_sha=SHA, run_id=RUN, expected_ids=IDS)
+                shards.read_pair(root, source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT, expected_ids=IDS)
             for index in (1, 2):
                 folder = root / str(index) / 'full-ci-release-python'
                 folder.mkdir(parents=True)
@@ -128,22 +231,22 @@ class PythonShardCoverageTests(unittest.TestCase):
                     'complete': True, 'record': {'file': 'process-release-tests.jsonl',
                     'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}}]
                 (folder / 'summary.json').write_text(json.dumps(summaries[index]), encoding='utf-8')
-            self.assertTrue(shards.read_pair(root, source_sha=SHA, run_id=RUN, expected_ids=IDS)['complete'])
+            self.assertTrue(shards.read_pair(root, source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT, expected_ids=IDS)['complete'])
             (root / '2' / 'summary.json').write_text('{}', encoding='utf-8')
             with self.assertRaisesRegex(ValueError, 'ambiguous'):
-                shards.read_pair(root, source_sha=SHA, run_id=RUN, expected_ids=IDS)
+                shards.read_pair(root, source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT, expected_ids=IDS)
 
     def test_joint_omission_cannot_replace_independent_current_source_inventory(self):
         receipts, summaries = evidence()
         omitted = IDS[-1]
         shorter = IDS[:-1]
         for index in (1, 2):
-            receipts[index][0]['shard'] = shards.metadata(shorter, index, SHA, RUN)
+            receipts[index][0]['shard'] = shards.metadata(shorter, index, SHA, RUN, ATTEMPT)
             receipts[index][0]['test_ids'] = shards.selection(shorter, index)
             receipts[index] = [row for row in receipts[index] if row.get('test_id') != omitted]
             receipts[index][-1]['tests_run'] = len(shards.selection(shorter, index))
         with self.assertRaisesRegex(ValueError, 'current-source inventory'):
-            shards.validate_pair(receipts, summaries, expected_ids=IDS, source_sha=SHA, run_id=RUN)
+            shards.validate_pair(receipts, summaries, expected_ids=IDS, source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT)
 
     def test_boolean_integer_aliases_and_failed_build_stage_are_not_evidence(self):
         for field in ('version', 'index', 'count', 'summary', 'counter', 'stage'):
@@ -155,7 +258,7 @@ class PythonShardCoverageTests(unittest.TestCase):
                 elif field == 'counter': receipts[1][1]['failures'] = False
                 else: summaries[1]['steps'][0]['code'] = 1
                 with self.assertRaises(ValueError):
-                    shards.validate_pair(receipts, summaries, expected_ids=IDS, source_sha=SHA, run_id=RUN)
+                    shards.validate_pair(receipts, summaries, expected_ids=IDS, source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT)
 
 
 class DebugPythonShardContracts(unittest.TestCase):
@@ -178,7 +281,7 @@ class DebugPythonShardContracts(unittest.TestCase):
     def test_debug_receipts_require_profile_and_all_three_stages(self):
         ids = IDS + ['test_future_pure.Tool.test_case']
         receipts, summaries = evidence(profile='debug', ids=ids)
-        kwargs = dict(expected_ids=ids, source_sha=SHA, run_id=RUN, profile='debug')
+        kwargs = dict(expected_ids=ids, source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT, profile='debug')
         self.assertTrue(shards.validate_pair(receipts, summaries, **kwargs)['complete'])
         for mutation in ('missing', 'profile', 'digest', 'stage', 'joint_omission'):
             with self.subTest(mutation=mutation):
@@ -194,7 +297,7 @@ class DebugPythonShardContracts(unittest.TestCase):
                     rows, reports = evidence(profile='debug', ids=IDS)
                 with self.assertRaises(ValueError): shards.validate_pair(rows, reports, **kwargs)
         with self.assertRaises(ValueError):
-            shards.validate_pair(receipts, summaries, expected_ids=ids, source_sha=SHA, run_id=RUN)
+            shards.validate_pair(receipts, summaries, expected_ids=ids, source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT)
 
     def test_debug_artifact_reader_cannot_substitute_release_named_receipts(self):
         ids = IDS + ['test_future_pure.Tool.test_case']
@@ -209,7 +312,7 @@ class DebugPythonShardContracts(unittest.TestCase):
                 summaries[index]['receipt_completeness']['stages'] = [{'step': 'python-debug', 'complete': True,
                     'record': {'file': 'python-debug-tests.jsonl', 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}}]
                 (folder / 'summary.json').write_text(json.dumps(summaries[index]))
-            kwargs = dict(source_sha=SHA, run_id=RUN, expected_ids=ids, profile='debug')
+            kwargs = dict(source_sha=SHA, run_id=RUN, origin_attempt=ATTEMPT, expected_ids=ids, profile='debug')
             self.assertTrue(shards.read_pair(root, **kwargs)['complete'])
             (root / '2/python-debug-tests.jsonl').rename(root / '2/process-release-tests.jsonl')
             with self.assertRaisesRegex(ValueError, 'Missing'): shards.read_pair(root, **kwargs)

@@ -9,14 +9,38 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+import parallel_tests
 import perf_compare
 import performance_process_support as support
 import physics_smoke_process
 from physics_performance_report import CASES
-from process_harness import ROOT, SUFFIX
+from process_harness import ROOT, SUFFIX, ProcessTestCase
 
 
 class PhysicsSmokeSelection(unittest.TestCase):
+    def test_parser_coverage_uses_existing_server_test_target(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github/workflows/ci.yml').read_text()
+        self.assertNotIn('cargo test -p tor-server --example physics_bench', workflow)
+        self.assertIn('python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}', workflow)
+        support = root / 'crates/server/example_support/physics_options.rs'
+        library = (root / 'crates/server/src/lib.rs').read_text()
+        example = (root / 'crates/server/examples/physics_bench.rs').read_text()
+        self.assertIn('#[cfg(test)]\n#[path = "../example_support/physics_options.rs"]\nmod physics_options;', library)
+        self.assertIn('#[path = "../example_support/physics_options.rs"]\nmod physics_options;', example)
+        self.assertEqual(support.read_text().count('#[test]'), 3)
+
+    def test_existing_runner_loads_and_schedules_supplemental_process_without_native_lane(self):
+        loader = unittest.TestLoader()
+        tests = list(parallel_tests.flatten(loader.loadTestsFromName('physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume')))
+        self.assertFalse(loader.errors, loader.errors)
+        self.assertEqual([test.id() for test in tests], ['physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume'])
+        self.assertIsInstance(tests[0], ProcessTestCase)
+        self.assertTrue(parallel_tests.has_own_fixture(type(tests[0])))
+        headless, native = parallel_tests.plan(tests, {}, workers=2)
+        self.assertEqual(native, [])
+        self.assertEqual([name for batch in headless for name in batch.ids], ['physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume'])
+
     def rows(self, *, smoke):
         return [dict(workload='physics', version=1, actors=a, items=i, cells=c, falling=f,
                      sample=s, command_ms=[1.]*(a*8), client_apply_ms=[.1]*(a*8),
@@ -115,6 +139,65 @@ class BenchmarkProcessSupport(unittest.TestCase):
                 self.assertEqual(Path(calls[0][1]['stdout'].name), case.directory / 'physics_bench-build.log')
                 self.assertEqual(Path(calls[1][1]['stdout'].name), case.directory / 'physics_bench.jsonl')
                 self.assertEqual(Path(calls[1][1]['stderr'].name), case.directory / 'physics_bench-stderr.log')
+
+    def test_streaming_caller_uses_emitted_example_outside_application_bundle(self):
+        class ReportBoundary(Exception):
+            pass
+
+        for profile in ('debug', 'release'):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                loader = unittest.TestLoader()
+                case = next(iter(loader.loadTestsFromName(
+                    'test_performance_process.PerformanceProcesses.test_streaming_benchmark_emits_valid_nested_acquisition_profiles')))
+                self.assertFalse(loader.errors, loader.errors)
+                case.directory = root
+                case.bin = root / 'ordinary-app-bundle'
+                case.bin.mkdir()
+                executable = root / 'cargo-target' / profile / 'examples' / ('latency_bench' + SUFFIX)
+                executable.parent.mkdir(parents=True)
+                executable.write_bytes(b'independent emitted-example fixture')
+                self.assertFalse((case.bin / 'examples').exists())
+                args = ['--case', 'stream-r16-durable', '--cycles', '1', '--checkpoint-interval', '64']
+                rows = [{'kind': 'sample', 'actor': 7}]
+                calls = []
+
+                def run(command, **kwargs):
+                    calls.append((command, kwargs))
+                    if command[0] == 'cargo':
+                        kwargs['stdout'].write(json.dumps(self.artifact(executable, name='latency_bench')) + '\n')
+                    else:
+                        self.assertEqual(command, [executable, *args],
+                                         'launch the Cargo example, not the ordinary-app artifact directory')
+                        kwargs['stdout'].write(json.dumps(rows[0]) + '\n')
+
+                # First establish the real helper's independent JSON/path fixture.
+                with patch.dict(os.environ, {'TOR_TEST_PROFILE': profile}), \
+                        patch.object(support.subprocess, 'run', side_effect=run):
+                    self.assertEqual(support.benchmark(case, 'latency_bench', args, 120), rows)
+                self.assertEqual(len(calls), 2)
+                calls.clear()
+
+                def report_boundary(actual_rows, **kwargs):
+                    self.assertEqual(actual_rows, rows)
+                    self.assertEqual(kwargs, {'selected_case': 'stream-r16-durable'})
+                    # This fixture qualifies the launcher, not benchmark report semantics.
+                    raise ReportBoundary
+
+                with patch.dict(os.environ, {'TOR_TEST_PROFILE': profile}), \
+                        patch.object(support.subprocess, 'run', side_effect=run), \
+                        patch('performance_report.validate', side_effect=report_boundary), \
+                        self.assertRaises(ReportBoundary):
+                    case.test_streaming_benchmark_emits_valid_nested_acquisition_profiles()
+                build = ['cargo', 'build', '-p', 'tor-server', '--example', 'latency_bench',
+                         '--locked', '--message-format=json']
+                if profile == 'release':
+                    build.append('--release')
+                self.assertEqual([command for command, _ in calls], [build, [executable, *args]])
+                for index, (_, kwargs) in enumerate(calls):
+                    self.assertEqual(kwargs['timeout'], 600 if index == 0 else 120)
+                    self.assertEqual(kwargs['cwd'], ROOT)
+                    self.assertTrue(kwargs['check'])
 
     def test_launcher_propagates_build_run_and_report_failures(self):
         for failure_at in (1, 2):

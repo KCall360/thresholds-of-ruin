@@ -16,8 +16,9 @@ versions describe metadata, not imported code, package bytes or provenance. Nati
 package database metadata does not attest library bytes; volatile display state
 and non-allowlisted configuration remain unobserved. This producer
 never reads event payloads, credentials, arbitrary environment/configuration or
-network services, and never installs tools. The separate adoption consumer must
-validate these records with API-bound evidence; this producer makes no reuse decision.
+network services, and never installs tools. The active verifier and application
+artifact producer reuse its bounded environment, probe and checkout helpers;
+this optional collector makes no reuse decision.
 """
 
 import argparse
@@ -60,13 +61,12 @@ CONFIG_FILES = (
     "deny.toml", "ruff.toml", "AGENTS.md", "CONTRIBUTING.md", "docs/development/testing.md",
     "scripts/verify.py", "scripts/test_runner.py", "scripts/parallel_tests.py",
     "scripts/graphical_waiver.py", "scripts/ci_observation.py",
-    "scripts/ci_head_reuse.py", "scripts/ci_reuse_policy.py", "scripts/ci_reuse_registry.json",
-    "scripts/ci_scope.py", "scripts/ci_build_key.py", "scripts/ci_adoption.py", "scripts/service_contract_ci.py",
+    "scripts/ci_scope.py", "scripts/ci_build_key.py", "scripts/service_contract_ci.py",
     "scripts/service_contract_host.py", "scripts/process_harness.py", "scripts/ruleset_sources.py",
-    "scripts/ci_policy.py", "scripts/ci_coverage_manifest.json", "scripts/ci_shadow.py",
+    "scripts/ci_test_plan.py", "scripts/ci_test_contracts.py", "scripts/ci_selected.py",
+    "scripts/ci_binary_artifact.py", "scripts/ci_no_build.py",
 )
-OPTIONAL_FILES = frozenset((".cargo/config", ".cargo/config.toml", "scripts/ci_policy.py",
-                            "scripts/ci_coverage_manifest.json", "scripts/ci_shadow.py"))
+OPTIONAL_FILES = frozenset((".cargo/config", ".cargo/config.toml"))
 SHA = r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
 TOKEN = r"[A-Za-z0-9_.+-]{1,128}"
 ENVIRONMENT_FIELDS = {

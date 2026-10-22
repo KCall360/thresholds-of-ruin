@@ -103,7 +103,8 @@ scenario paths and resume behavior. Keep credentials and saves outside Git.
 
 Run focused checks while editing, `quick` at cohesive checkpoints, and the default
 `push` tier before every push unless a successful unchanged `full` run covers it.
-Both-platform debug/release CI on the final commit remains mandatory before merge.
+The final commit must pass its canonical selected or exhaustive CI plan and both
+required platform aggregates; selected assurance is not a full-matrix claim.
 Separate workflow/Python/dependency lint jobs are listed in the
 [testing policy](testing.md#running-the-checks). Record failures and checks not run;
 setup completion or a historical green run is not current verification evidence.

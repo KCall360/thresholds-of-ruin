@@ -2,14 +2,13 @@
 import json
 import os
 from pathlib import Path
-import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 from performance_driver import JsonProcess, run_demo
 from performance_process_support import assert_physics_report, benchmark
 
-from process_harness import ProcessTestCase, ROOT, SUFFIX, TOKEN
+from process_harness import ProcessTestCase, SUFFIX, TOKEN
 
 
 class PerformanceProcesses(ProcessTestCase):
@@ -89,17 +88,8 @@ class PerformanceProcesses(ProcessTestCase):
 
     def test_streaming_benchmark_emits_valid_nested_acquisition_profiles(self):
         from performance_report import validate
-        build = ['cargo', 'build', '-p', 'tor-server', '--example', 'latency_bench', '--locked']
-        if os.environ.get('TOR_TEST_PROFILE', 'debug') == 'release':
-            build.append('--release')
-        with (self.directory/'benchmark-build.log').open('w', encoding='utf-8') as log:
-            subprocess.run(build, cwd=ROOT, stdout=log, stderr=log, check=True, timeout=600)
-        output = self.directory/'acquisition.jsonl'
-        with output.open('w', encoding='utf-8') as log, (self.directory/'benchmark-stderr.log').open('w', encoding='utf-8') as errors:
-            subprocess.run([self.bin/'examples'/('latency_bench'+SUFFIX), '--case',
-                'stream-r16-durable', '--cycles', '1', '--checkpoint-interval', '64'],
-                cwd=ROOT, stdout=log, stderr=errors, check=True, timeout=120)
-        rows = [json.loads(line) for line in output.read_text(encoding='utf-8').splitlines()]
+        rows = self.benchmark('latency_bench', ['--case', 'stream-r16-durable',
+            '--cycles', '1', '--checkpoint-interval', '64'], 120)
         self.assertTrue(all(type(row['actor']) is int for row in rows if row['kind'] == 'sample'))
         metadata, samples, _ = validate(rows, selected_case='stream-r16-durable')
         self.assertEqual(metadata['stream-r16-durable']['region_acquisition_version'], 1)

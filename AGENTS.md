@@ -50,21 +50,20 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   across workers. Use owned sessions and exit receipts to establish run status;
   see [verification evidence](docs/development/testing.md#verification-evidence-and-reuse).
 - Before every push, pass the default `push` tier or `full`, except for the
-  [verified prose-only documentation path](docs/development/testing.md#prose-only-documentation-changes).
-  That path requires documentation/link and tooling checks locally and in CI.
-  A successful full
-  run satisfies the push gate for the same unchanged inputs, toolchain and test
-  configuration. The push tier is `quick` plus workspace-wide clippy and API
-  docs: it tests what the change can reach. CI requires complete debug and
-  release coverage on both platforms before merge, including for compatibility
-  and persistence changes. Run
-  targeted local release checks for performance or release-specific behavior.
-  Local full is required when CI cannot run or on request. Both-platform
-  debug/release CI on the final commit remains required before merging for every
-  change outside that narrow prose-only path. The final matrix may use
-  [validated corrective-head coverage](docs/development/testing.md#reusing-unchanged-results-after-an-expectation-only-pr-correction)
-  under the testing policy. Record
-  the tested state, commands and logs; report failures and checks not run.
+  [verified prose-only documentation path](docs/development/testing.md#prose-only-documentation-changes)
+  or an explicit task-scoped maintainer exception. Local `push` covers affected
+  packages/process owners plus workspace Clippy and API docs; it is not exhaustive
+  qualification. Keep the local feedback loop distinct from the
+  [risk-based CI gate](docs/development/testing.md#risk-based-ci-assurance).
+  CI reports **prose-only**, **selected-contract**, or **exhaustive** assurance.
+  Merge only after the canonical final-head plan and both required platform
+  aggregates pass; unknown scope/ownership and verification/build control changes
+  require full coverage. Selected PR/main results never qualify a full run or
+  satisfy a requirement for exhaustive release/scheduled verification. Preserve
+  every changed contract's independent tests and unique real boundary witnesses;
+  cadence changes do not authorize deleting coverage. Run targeted local release
+  checks for optimized/performance behavior. Record failures, deferred coverage,
+  waivers and checks not run, and follow the documented failure-feedback process.
   See [verification evidence](docs/development/testing.md#verification-evidence-and-reuse).
 - `verify.py` logs each step under `.local/verify/`, checks exit codes, and
   picks build jobs from free memory. Run other commands the same way,

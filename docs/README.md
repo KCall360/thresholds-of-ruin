@@ -43,6 +43,8 @@ rather than treating a historical plan as current behavior.
 
 - [Setup](development/setup.md): tools, platform/display prerequisites and environments
 - [Testing](development/testing.md): required layers, local tiers, CI and evidence
+- [Test objectives and owners](development/test-objectives.md): independent contract witnesses, affected selection and cadence
+- [CI cost baseline](development/ci-cost-baseline.md): measured runner cost, elapsed time and comparison limits
 - [Service contract pilot](development/service-contracts.md): opt-in catalog host, assertion ownership and qualification experiment
 - [Performance](development/performance.md): targets, workloads, comparisons and evidence
 - [Arena](development/arena.md): combat diagnostics, evaluation, matrices and search

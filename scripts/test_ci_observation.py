@@ -417,8 +417,8 @@ class Observation(unittest.TestCase):
         self.assertEqual(result["tools"]["python"]["distributions"], {"status": "unavailable"})
         self.assertFalse(result["complete"])
 
-    def test_stage_policy_inputs_are_hashed_when_installed_and_optional_when_absent(self):
-        names = ("scripts/ci_policy.py", "scripts/ci_coverage_manifest.json", "scripts/ci_shadow.py")
+    def test_cargo_config_inputs_are_hashed_when_installed_and_optional_when_absent(self):
+        names = (".cargo/config", ".cargo/config.toml")
         for name in names:
             (self.root / name).write_bytes(b"stage configuration\n")
         result = self.collect()

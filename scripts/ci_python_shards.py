@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 import re
 
+import ci_example_prerequisites
+
 SHARD_COUNT = 2
 LONG_MODULES = frozenset({"test_rogue_earned_route_process", "test_arena_matrix_process",
                           "test_performance_process"})
@@ -69,14 +71,40 @@ def discover_inventory(*, profile="release"):
     return ids
 
 
-def metadata(ids, index, source_sha, run_id, *, profile="release"):
+def attempt_number(value):
+    require(isinstance(value, str) and re.fullmatch(r'[1-9][0-9]{0,8}', value) is not None,
+            'Invalid execution attempt')
+    return int(value)
+
+
+def cohort_attempt(producers, shards, current_attempt):
+    """Retain one successful same-run cohort, never search older artifacts."""
+    current = attempt_number(current_attempt)
+    values = []
+    roles = ((producers, {'producer_debug', 'producer_release'}),
+             (shards, {'shard_debug_1', 'shard_debug_2', 'shard_release_1', 'shard_release_2'}))
+    # Status is authoritative even when a failed newer job emitted no outputs.
+    require(all(isinstance(group, dict) and group.get('result') == 'success'
+                for group, _ in roles), 'Current Windows groups did not succeed')
+    for group, keys in roles:
+        outputs = group.get('outputs')
+        require(isinstance(outputs, dict) and set(outputs) == keys, 'Missing or unexpected execution role')
+        values.extend(attempt_number(outputs[key]) for key in sorted(keys))
+    require(len(set(values)) == 1 and values[0] <= current,
+            'Mixed or future Windows execution attempts; rerun all jobs')
+    return {'origin_attempt': str(values[0]), 'aggregate_attempt': current_attempt}
+
+
+def metadata(ids, index, source_sha, run_id, origin_attempt, *, profile="release"):
     selection(ids, index, profile=profile)
-    return {"version": 1, "index": index, "count": SHARD_COUNT,
+    attempt_number(origin_attempt)
+    return {"version": 2, "origin_attempt": origin_attempt, "index": index, "count": SHARD_COUNT,
             "full_test_ids": ids, "plan_sha256": plan_digest(ids, profile=profile), "source_sha": source_sha, "run_id": run_id}
 
 
-def validate_pair(receipts, summaries, *, expected_ids, source_sha, run_id, profile="release"):
-    """Both fresh complete owners must prove the exact discovered multiset."""
+def validate_pair(receipts, summaries, *, expected_ids, source_sha, run_id, origin_attempt, profile="release"):
+    """Both original complete owners must prove the exact current-source multiset."""
+    attempt_number(origin_attempt)
     require(re.fullmatch(r'[0-9a-f]{40}', source_sha or '') is not None, "Invalid shard source")
     require(isinstance(run_id, str) and run_id.isdigit(), "Invalid shard run")
     require(set(receipts) == set(summaries) == {1, 2}, "Missing Python shard artifact")
@@ -89,10 +117,11 @@ def validate_pair(receipts, summaries, *, expected_ids, source_sha, run_id, prof
         require(rows[0].get('kind') == 'selection' and rows[-1].get('kind') == 'suite',
                 "Incomplete shard lifecycle")
         header = rows[0].get('shard', {})
-        require(type(header.get('version')) is int and header['version'] == 1
+        require(type(header.get('version')) is int and header['version'] == 2
                 and type(header.get('count')) is int and type(header.get('index')) is int
                 and header['index'] == index and header.get('count') == SHARD_COUNT
-                and header.get('source_sha') == source_sha and header.get('run_id') == run_id,
+                and header.get('source_sha') == source_sha and header.get('run_id') == run_id
+                and header.get('origin_attempt') == origin_attempt,
                 "Shard identity changed")
         inventory = header.get('full_test_ids')
         expected = selection(inventory, index, profile=profile)
@@ -129,17 +158,20 @@ def validate_pair(receipts, summaries, *, expected_ids, source_sha, run_id, prof
                 and summary.get('receipt_completeness', {}).get('complete') is True,
                 "Shard verifier did not finish cleanly")
         stages = ['build-process-debug', 'build-tools', 'python-debug'] if profile == 'debug' else ['build-process-release', 'process-release']
+        prerequisite = ci_example_prerequisites.stage(expected, profile)
+        if prerequisite:
+            stages.insert(-1, prerequisite[0])
         require(summary.get('planned_steps') == stages
                 and [row.get('step') for row in summary.get('steps', [])] == stages
                 and all(row.get('status') == 'passed' and type(row.get('code')) is int and row['code'] == 0
                         for row in summary['steps']), 'Missing or failed shard verification stage')
         completed.extend(row['test_id'] for row in tests)
     require(Counter(completed) == Counter(full), "Incomplete or overlapping shard union")
-    return {"source_sha": source_sha, "run_id": run_id, "shards": SHARD_COUNT,
+    return {"source_sha": source_sha, "run_id": run_id, "origin_attempt": origin_attempt, "shards": SHARD_COUNT,
             "selected_tests": len(full), "completed_tests": len(completed), "complete": True}
 
 
-def read_pair(directory, *, source_sha, run_id, expected_ids=None, profile="release"):
+def read_pair(directory, *, source_sha, run_id, origin_attempt, expected_ids=None, profile="release"):
     if expected_ids is None:
         expected_ids = discover_inventory(profile=profile)
     require(profile in ("debug", "release"), "Invalid Python shard profile")
@@ -161,7 +193,7 @@ def read_pair(directory, *, source_sha, run_id, expected_ids=None, profile="rele
                 and bound[0].get('record') == {'file': logs[0].name, 'bytes': len(raw),
                                               'sha256': hashlib.sha256(raw).hexdigest()},
                 'Shard receipt does not match verifier binding')
-    return validate_pair(receipts, summaries, expected_ids=expected_ids, source_sha=source_sha, run_id=run_id, profile=profile)
+    return validate_pair(receipts, summaries, expected_ids=expected_ids, source_sha=source_sha, run_id=run_id, origin_attempt=origin_attempt, profile=profile)
 
 
 def unique_object(pairs):
@@ -175,11 +207,28 @@ def unique_object(pairs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', choices=('debug', 'release'), default='release')
-    parser.add_argument('--directory', type=Path, required=True)
+    parser.add_argument('--directory', type=Path)
+    parser.add_argument('--origin-attempt')
+    parser.add_argument('--cohort', action='store_true')
+    parser.add_argument('--current-attempt')
     parser.add_argument('--source-sha', required=True)
     parser.add_argument('--run-id', required=True)
     args = parser.parse_args()
-    print(json.dumps(read_pair(args.directory, source_sha=args.source_sha, run_id=args.run_id, profile=args.profile), sort_keys=True))
+    require(re.fullmatch(r'[0-9a-f]{40}', args.source_sha) is not None, 'Invalid shard source')
+    require(re.fullmatch(r'[1-9][0-9]*', args.run_id) is not None, 'Invalid shard run')
+    if args.cohort:
+        require(args.directory is None and args.origin_attempt is None, 'Ambiguous cohort request')
+        result = cohort_attempt(
+            json.loads(os.environ['WINDOWS_BINARIES'], object_pairs_hook=unique_object),
+            json.loads(os.environ['WINDOWS_PYTHON'], object_pairs_hook=unique_object), args.current_attempt)
+        result.update(source_sha=args.source_sha, run_id=args.run_id)
+        with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as handle:
+            handle.write(f"origin_attempt={result['origin_attempt']}\n")
+    else:
+        require(args.directory is not None and args.current_attempt is None, 'Missing or ambiguous shard directory')
+        result = read_pair(args.directory, source_sha=args.source_sha, run_id=args.run_id,
+                           origin_attempt=args.origin_attempt, profile=args.profile)
+    print(json.dumps(result, sort_keys=True))
 
 
 if __name__ == '__main__':
