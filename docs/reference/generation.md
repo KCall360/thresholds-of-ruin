@@ -329,9 +329,10 @@ Room-scoped loot and population use the actual walkable metadata, with their exi
 minimum-capacity rejection and atomic publication rules. Physical occlusion, carried
 light, observer knowledge and AI are unchanged: there is no whole-room revelation.
 
-This source checkpoint is not yet qualified: compilation, behavioral tests, current
-writer/certificate regeneration and actual-process acceptance remain pending. It
-must not be treated as live enablement or a completed verification gate.
+This opt-in capability has behavioral, current-writer/certificate and actual-process
+coverage in the [merged maze batch](https://github.com/KCall360/thresholds-of-ruin/pull/186),
+which completed Windows/Linux debug and release CI. Qualification does not enable
+the live policy or approve a probability; those remain separate tuning decisions.
 
 ### Secret entrances and hidden traps
 

@@ -143,16 +143,27 @@ Do not mistake “implemented” for closure of those measurements.
 
 ### Layout, perception and discovery
 
-Reusable secret/discovery stages exist. Optional strict room omissions have local
-generation, persistence and process qualification as an opt-in authoring capability.
-Omission-free generation remains compatible; the live Rogue package does not enable
-omissions, and live tuning and mazes remain separate work. The seed-42 ordinary
-witness retains Rogue stock and wandering, paid Search, source-deleted reopening,
-paired-stair traversal and receipt-preserving revisits. Its explicitly versioned
-`omission_public_search` v1 test wrapper uses public disclosures while preserving
-Controller revision 7 and the 2,500-iteration navigation-loop cap. This is a topology
-and persistence witness, not general survival or balance qualification; final
-cross-platform CI remains a merge requirement.
+Reusable secret/discovery stages, optional strict room omissions and opt-in dark
+room mazes are implemented. Neither omission nor maze policies are enabled in the
+live Rogue package; selecting their probabilities remains separate tuning work.
+Absent policies and zero-realized mazes preserve the prior geometry and existing
+feature streams/output. Generation reserves the full authored trap maximum and
+landing namespace before maze carving, preserves required stair/portal identities
+and body clearance, and excludes maze cells from trap placement. See the
+[generation reference](../reference/generation.md) for the owning authoring contract.
+
+Ordinary and forced-maze process witnesses cover paid Search, paired-stair
+traversal, source-free reopening and receipt-preserving revisits through public
+observations. Their `omission_public_search` v1 wrapper preserves Controller
+revision 7 and the cumulative 2,500-iteration navigation-loop cap. This bounded
+public-search diagnostic policy establishes topology and persistence, not general
+AI, survival or balance. The merged batch also provides adjacent
+tactile Search and capped Awareness-based nonvisual disclosure. The latter does
+not grant genuine sight or identify concealment/disguise; tactile Search still
+requires its adjacent Perception check. Neither grants whole-room revelation. See
+[perception](../architecture/perception.md) for their separate boundaries.
+Development is paused; this remaining-work plan does not authorize implementation
+or live tuning.
 
 Lighting already exists; extend it without replacing TOR
 LOS with whole-room revelation. Typed sight/invisibility, mutual-sight gaze,

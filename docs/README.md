@@ -48,6 +48,8 @@ rather than treating a historical plan as current behavior.
 - [Arena](development/arena.md): combat diagnostics, evaluation, matrices and search
 - [Bounded ordinary earned-route qualification](development/rogue-earned-route.md)
 - [Wizard tools](development/wizard.md): privilege, inspection, setup and rewind
+- [Workspace recovery and preservation](development/workspace-recovery.md):
+  published Rogue handoff, missing-evidence boundaries and cleanup prerequisites
 
 ## Plans and external research
 
@@ -56,6 +58,8 @@ rather than treating a historical plan as current behavior.
 
 - [Remaining shared requirements](plans/requirements.md), including portable export
 - [Rogue adaptation](plans/rogue.md): decisions and remaining content/survival work
+- [Missing Rogue consumables and devices](plans/rogue-missing-consumables.md):
+  preserved design direction, deferred implementation and unresolved parameters
 - [Script extension design](plans/scripting.md): unimplemented runtime and open choices
 - [Progression and creature construction design](plans/progression-design.md):
   edge-first talents, regeneration and constructed Rogue monsters, with its
@@ -63,6 +67,8 @@ rather than treating a historical plan as current behavior.
 - [Presentation and atmosphere design](plans/presentation.md): implemented
   vocabulary and creature seeds, plus remaining traits, overrides and player choices
 - [Rogue 5.4.4 research](research/rogue-5.4.4/README.md): pinned edition, rules and catalog
+- [Stormlight starter armor comparison](research/stormlight-armor.md): pinned
+  external reference, expertise effects and explicit nonconversion boundaries
 
 [Status](status.md) owns project sequencing. Research is neither an alternate TOR
 ruleset nor a claim of executable parity. Useful rationale and historical evidence

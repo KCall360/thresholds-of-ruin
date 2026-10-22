@@ -86,6 +86,76 @@ Evidence:
 
 ## Preserve evidence, not chronology
 
+### Distinguish action admission, start and completion in test drivers
+
+Several Rogue process regressions exposed the same invalid assumption: an
+accepted command, an admission-ready frame or a snapshot from another actor did
+not establish that the original actor's paid work had completed. A queued Resume
+could publish its active start later; acting through a stale peer observation
+then produced a real rejection that some drivers ignored. The correction was an
+explicit boundary in each affected caller, not sleeps, automatic retries, a
+global change to command admission, or weaker gameplay assertions.
+
+Ordinary autonomous-progress tests wait for their own completed work. A fixture
+whose external peer must advance time instead waits for the same intention's
+active start, then refreshes that peer's context before its one checked action.
+Waiting for full owner completion there would deadlock. Actor revisions are
+actor-specific and must not be compared as a shared sequence number. Preserve
+intentional queued-action and early-rejection tests rather than applying one
+settlement helper indiscriminately.
+
+The actual-caller regressions in [PR #181](https://github.com/KCall360/thresholds-of-ruin/pull/181)
+and [PR #183](https://github.com/KCall360/thresholds-of-ruin/pull/183) retain these
+distinctions. [Testing](../development/testing.md#acceptance-tests-with-real-applications)
+owns the current driver contracts. Valid baselines, delayed publication orders,
+rejected-action negatives and unchanged action bounds make a regression stronger
+than a generic successful replay.
+
+### Diagnose reachability and diagnostic cost independently
+
+A connected dark floor need not be discoverable under the current sensory rule.
+An early maze witness had intact topology but a concealed route without an
+eligible visual cue. More rolls or a larger navigation budget would not repair
+ineligibility. The accepted change was bounded adjacent tactile Search, not a
+hidden route oracle, a favorable seed or a weakened sight assertion. Ordinary
+Awareness-based disclosure remains separate from genuine sight and from
+concealment/disguise discovery; see [perception](perception.md).
+
+Likewise, a storage-aborted pressure witness does not prove a runaway gameplay
+loop. Repeated derived client frames can amplify small wire updates. Lossless
+stopped-session retention requires closed capture ownership; a live backpressure
+connection needs per-segment-bounded lossless capture with resource guards,
+without restarting the unread consumer or changing pressure/action limits. Preserve the distinction between
+exact LF stdout and native text stderr, and retain independent rejection/identity
+checks. [PR #186](https://github.com/KCall360/thresholds-of-ruin/pull/186) and the
+[capture guidance](../development/testing.md#failure-diagnostics-and-timing-evidence)
+record the corrected owners and limits.
+
+### Preserve coverage when a CI schedule no longer fits
+
+A missing duration hint made a long omission owner look like a short test; adding
+its measured hint moved it into an early standalone batch without changing the
+selected inventory. Later complete-work accounting showed that ordering alone
+could not reliably fit the full Windows workload. Isolated profile shards were
+therefore introduced rather than increasing deadlines, omitting tests or adding
+unmeasured contention on one host.
+
+Whole-owner grouping, native fixture isolation, independent current-source
+inventory discovery, exact-once union and failed/missing-shard rejection remain
+mandatory. The extra independent build is an explicit resource tradeoff, not a
+performance claim. See [parallel execution](../development/testing.md#parallel-test-execution),
+[PR #183](https://github.com/KCall360/thresholds-of-ruin/pull/183) and
+[PR #184](https://github.com/KCall360/thresholds-of-ruin/pull/184).
+
+### Recover conclusions without inventing missing evidence
+
+The [workspace recovery guide](../development/workspace-recovery.md) records the
+published Rogue checkpoint and the limits of the later fresh-VM preservation
+pass. Remote source, workflow results, conversation summaries and local raw
+artifacts are different evidence classes. A published hash is not a backup of
+unavailable bytes, and a clean fresh clone says nothing about an inaccessible
+dirty checkout. Preserve those uncertainties before authorizing cleanup.
+
 The full former [refactor chronicle](https://github.com/KCall360/thresholds-of-ruin/blob/59f48988f562d89ac9a4130f4df43a2dc2819912/docs/history/refactoring-increments.md)
 and earlier [September archive](https://github.com/KCall360/thresholds-of-ruin/tree/docs-history-2026-09/docs)
 remain readable. Their pending statuses, test counts, formats, deployment notes and
