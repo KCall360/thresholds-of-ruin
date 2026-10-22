@@ -3,6 +3,7 @@
 The child is fake, but Process owns its real reader thread, FIFO and transcript.
 These are capture/caller tests, not actual network-pressure qualification.
 """
+from contextlib import contextmanager, nullcontext
 import gzip
 import hashlib
 import io
@@ -20,6 +21,73 @@ from process_harness import AdventureProcess, Process, TOKEN, SPECTATOR_TOKEN
 import test_run_until_blocked_process as pressure
 
 
+@contextmanager
+def capture_directory():
+    """Use the canonical spelling of our owned temporary diagnostics directory.
+
+    The storage API deliberately rejects aliases. OS temporary-directory paths
+    need not already use canonical spelling (for example Windows short names).
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        yield Path(directory).resolve(strict=True)
+
+
+class SegmentedFixtureDirectories(unittest.TestCase):
+    def test_owned_alias_is_canonicalized_before_storage_setup(self):
+        from segmented_process_capture import SegmentedOutputQueue, validate_retained_capture
+        with tempfile.TemporaryDirectory() as owner:
+            root = Path(owner).resolve(strict=True)
+            baseline = root / "baseline"
+            baseline.mkdir()
+            capture = SegmentedOutputQueue(baseline / "stdout.log", 128)
+            capture.put("valid baseline")
+            capture.put(None)
+            capture.close()
+            self.assertEqual(validate_retained_capture(capture.path)["total_lines"], 1)
+
+            child = root / "existing-child"
+            child.mkdir()
+            alias = child / ".."
+            self.assertTrue(alias.is_dir())
+            self.assertNotEqual(alias, root)
+            self.assertEqual(alias.resolve(strict=True), root)
+            # Exercise the real fixture adapter, not a mocked capture guard.
+            # This models a legal owned directory returned with alias spelling.
+            with patch.object(tempfile, "TemporaryDirectory", return_value=nullcontext(str(alias))):
+                with capture_directory() as diagnostics:
+                    self.assertEqual(diagnostics, root)
+                    self.assertEqual(diagnostics, diagnostics.resolve(strict=True))
+                    capture = SegmentedOutputQueue(diagnostics / "stdout.log", 128)
+                    capture.put("owned alias α")
+                    capture.put(None)
+                    capture.close()
+                    self.assertEqual(validate_retained_capture(capture.path)["total_lines"], 1)
+            self.assertEqual((root / "stdout-segments.json").read_bytes(),
+                             (alias / "stdout-segments.json").read_bytes())
+
+    def test_storage_still_rejects_noncanonical_root_and_wrong_name_without_writes(self):
+        from segmented_process_capture import CaptureError, SegmentedOutputQueue
+        with tempfile.TemporaryDirectory() as owner:
+            root = Path(owner).resolve(strict=True)
+            child = root / "existing-child"
+            child.mkdir()
+            baseline = root / "baseline"
+            baseline.mkdir()
+            capture = SegmentedOutputQueue(baseline / "stdout.log", 128)
+            capture.put("baseline")
+            capture.put(None)
+            capture.close()
+            before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+            for path in (child / ".." / "stdout.log", root / "wrong.log"):
+                with self.subTest(path=path):
+                    with self.assertRaisesRegex(CaptureError, "existing real diagnostics directory"):
+                        SegmentedOutputQueue(path, 128)
+                    self.assertEqual(before, {
+                        p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()
+                    })
+                    self.assertEqual(sorted(p.name for p in root.iterdir()), ["baseline", "existing-child"])
+
+
 class SegmentedProcessCapture(unittest.TestCase):
     def test_opt_in_keeps_fifo_transcript_and_exact_decoded_bytes_after_stop(self):
         values = ["α" * 70 + ":one", "😀" * 70 + ":two", "", "final fragment"]
@@ -32,7 +100,7 @@ class SegmentedProcessCapture(unittest.TestCase):
             stderr=io.StringIO("complete stderr\n"),
             poll=Mock(return_value=0), wait=Mock(return_value=0), kill=Mock(),
         )
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             diagnostics = Path(directory)
             with patch("process_harness.subprocess.Popen", return_value=child) as launch:
                 process = Process("tor-client-headless", ["--connect", "unused:1"],
@@ -101,7 +169,7 @@ class SegmentedProcessCapture(unittest.TestCase):
     def test_invalid_opt_in_is_rejected_before_launch_or_storage_creation(self):
         invalid = ["", "0", "-1", "01", "1.0", " 128", "128 ", "１２８",
                    str(64 * 1024 * 1024 + 1), 128, True]
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             diagnostics = Path(directory) / "not-created"
             for value in invalid:
                 with self.subTest(value=value), patch("process_harness.subprocess.Popen") as launch:
@@ -117,7 +185,7 @@ class SegmentedProcessCapture(unittest.TestCase):
             stderr=io.StringIO(), poll=Mock(return_value=0),
             wait=Mock(return_value=0), kill=Mock(),
         )
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             diagnostics = Path(directory)
             with patch.dict(os.environ, {"TOR_TEST_SEGMENTED_STDOUT_BYTES": "128"}), \
                     patch("process_harness.subprocess.Popen", return_value=child) as launch:
@@ -138,7 +206,7 @@ class SegmentedProcessCapture(unittest.TestCase):
             stderr=io.StringIO(), poll=Mock(return_value=0),
             wait=Mock(return_value=0), kill=Mock(),
         )
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             with patch("process_harness.subprocess.Popen", return_value=child):
                 process = Process("tor-client-headless", [], diagnostics=Path(directory),
                     separate_stderr=True, extra_env={"TOR_TEST_SEGMENTED_STDOUT_BYTES": "128"})
@@ -156,7 +224,7 @@ class SegmentedProcessCapture(unittest.TestCase):
     def test_reader_exception_after_valid_prefix_never_marks_capture_complete(self):
         from segmented_process_capture import CaptureError
         for process_type in (Process, AdventureProcess):
-            with self.subTest(process_type=process_type.__name__), tempfile.TemporaryDirectory() as directory:
+            with self.subTest(process_type=process_type.__name__), capture_directory() as directory:
                 release = threading.Event()
                 class BrokenStream(io.StringIO):
                     def fail_after_prefix(self):
@@ -198,7 +266,7 @@ class SegmentedProcessCapture(unittest.TestCase):
         from segmented_process_capture import CaptureError
         child = SimpleNamespace(pid=12345, stdin=io.StringIO(), stdout=io.StringIO("retained\n"),
             stderr=io.StringIO(), poll=Mock(return_value=0), wait=Mock(return_value=0), kill=Mock())
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             with patch("process_harness.subprocess.Popen", return_value=child):
                 process = Process("tor-client-headless", [], diagnostics=Path(directory),
                     separate_stderr=True, extra_env={"TOR_TEST_SEGMENTED_STDOUT_BYTES": "128"})
@@ -254,7 +322,7 @@ class SegmentedStorageBoundaries(unittest.TestCase):
         from segmented_process_capture import iter_retained_lines, validate_retained_capture
         values = ["αβγ", "", "😀" * 9 + "tail", "last"]
         expected = ("\n".join(values) + "\n").encode()
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             capture = self.capture(directory, 8)
             try:
                 for value in values:
@@ -296,7 +364,7 @@ class SegmentedStorageBoundaries(unittest.TestCase):
             if not release.wait(5):
                 raise AssertionError("Test did not release compressor")
             original(owner, row)
-        with tempfile.TemporaryDirectory() as directory, \
+        with capture_directory() as directory, \
                 patch.object(SegmentedOutputQueue, "_archive", paused):
             capture = self.capture(directory)
             writer = None
@@ -335,7 +403,7 @@ class SegmentedStorageBoundaries(unittest.TestCase):
                 if not release.wait(5):
                     raise AssertionError("Test did not release second archive")
             original(owner, row)
-        with tempfile.TemporaryDirectory() as directory, \
+        with capture_directory() as directory, \
                 patch.object(SegmentedOutputQueue, "_archive", paused):
             capture = self.capture(directory, 8)
             consumer = None
@@ -375,7 +443,7 @@ class SegmentedStorageBoundaries(unittest.TestCase):
 
     def test_held_diagnostic_iterator_does_not_deadlock_close_or_lose_raw_bytes(self):
         from segmented_process_capture import iter_retained_lines, validate_retained_capture
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             capture = self.capture(directory)
             capture.put("alpha")
             capture.put("beta")
@@ -410,7 +478,7 @@ class SegmentedStorageBoundaries(unittest.TestCase):
 
     def test_compression_failure_preserves_raw_prefix_and_closes_owned_handles(self):
         from segmented_process_capture import CaptureError
-        with tempfile.TemporaryDirectory() as directory, \
+        with capture_directory() as directory, \
                 patch("segmented_process_capture.gzip.GzipFile", side_effect=OSError("controlled compressor failure")):
             capture = self.capture(directory)
             capture.put("all original bytes")
@@ -429,7 +497,7 @@ class SegmentedStorageBoundaries(unittest.TestCase):
 
     def test_offline_reopen_rejects_corrupt_archives_and_malformed_manifests(self):
         from segmented_process_capture import CaptureError, validate_retained_capture
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             capture = self.capture(directory, 8)
             capture.put("unicode αβγ across chunks")
             capture.put(None)
@@ -473,7 +541,7 @@ class SegmentedStorageBoundaries(unittest.TestCase):
 
     def test_raw_corruption_is_rejected_even_when_length_and_mtime_are_restored(self):
         from segmented_process_capture import CaptureError, validate_retained_capture
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             capture = self.capture(directory)
             capture.put("unchanged-sized record")
             iterator = capture.iter_lines()
@@ -498,14 +566,14 @@ class SegmentedStorageBoundaries(unittest.TestCase):
         names = ["stdout.log", "stdout-segments.json", "stdout-segments.json.partial",
                  "stdout-segment-00000000.raw"]
         for name in names:
-            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+            with self.subTest(name=name), capture_directory() as directory:
                 existing = Path(directory) / name
                 existing.write_bytes(b"preexisting owner")
                 with self.assertRaises(CaptureError):
                     self.capture(directory)
                 self.assertEqual(existing.read_bytes(), b"preexisting owner")
                 self.assertEqual(list(Path(directory).iterdir()), [existing])
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             capture = self.capture(directory)
             archive = Path(directory) / "stdout-segment-00000000.raw.gz"
             archive.write_bytes(b"different archive owner")
@@ -520,7 +588,7 @@ class SegmentedStorageBoundaries(unittest.TestCase):
 
     def test_changed_root_identity_is_rejected_before_any_chunk_creation(self):
         from segmented_process_capture import CaptureError
-        with tempfile.TemporaryDirectory() as directory:
+        with capture_directory() as directory:
             capture = self.capture(directory)
             with patch("segmented_process_capture._directory_identity", return_value=(-1, -1)):
                 with self.assertRaisesRegex(CaptureError, "directory was replaced"):
@@ -539,7 +607,7 @@ class SegmentedStorageBoundaries(unittest.TestCase):
             if not release.wait(5):
                 raise AssertionError("Test did not release archival")
             original(owner, row)
-        with tempfile.TemporaryDirectory() as directory, \
+        with capture_directory() as directory, \
                 patch.object(SegmentedOutputQueue, "_archive", paused):
             capture = self.capture(directory, 8)
             try:
@@ -566,7 +634,7 @@ class SegmentedStorageBoundaries(unittest.TestCase):
             capture = SegmentedOutputQueue(*args, **kwargs)
             owned.append(capture)
             return capture
-        with tempfile.TemporaryDirectory() as directory, \
+        with capture_directory() as directory, \
                 patch("segmented_process_capture.SegmentedOutputQueue", side_effect=prepare), \
                 patch("process_harness.subprocess.Popen", side_effect=OSError("controlled launch failure")):
             with self.assertRaisesRegex(OSError, "controlled launch failure"):
