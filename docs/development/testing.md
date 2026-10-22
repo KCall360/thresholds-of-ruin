@@ -698,6 +698,29 @@ in bounded chunks, without another raw copy on disk. Saves, sidecars and other
 files retain their bytes and metadata. The original remains available until the
 complete staged directory is published; a failed transfer removes its staging
 directory and leaves the source evidence in place.
+The slow-spectator pressure test opts only its normal player's diagnostic stdout
+into 8 MiB lossless capture segments (`TOR_TEST_SEGMENTED_STDOUT_BYTES` in that
+launch's harness-only `extra_env`). The option is removed before child launch.
+The stalled spectator, network relays, wire-byte pressure formula, action counts,
+20,000-turn bound and deadlines are unchanged. Complete-record FIFO publication,
+Unicode output, consumed transcript offsets and full decoded evidence stay intact.
+A separate compressor repacks only sealed byte segments with no producer writer
+or FIFO/diagnostic reader; fsynced, atomically published manifests precede removal
+of those segment originals. POSIX additionally fsyncs the directory. Windows does not expose that
+directory-sync operation here: this is not a universal power-loss durability
+guarantee. It never compresses a live raw segment, drops records or changes
+client output flags.
+Offline readers verify ordered segments and both compressed and decoded hashes;
+source-reader failures and unjoined readers cannot mark a prefix complete.
+Ordinary captures are unchanged.
+
+Only per-segment staging is bounded: an arbitrarily fast producer, slow storage
+or incompressible output can still exhaust total disk space. Keep the existing
+free-space guards; compression is not permission to relax them. Compression can
+change scheduling, so pure capture tests do not substitute for the actual unread
+spectator connection/stall/disconnection assertions. Retained manifests and
+segments are part of the process diagnostics, not a new gameplay save format.
+
 Repeated earned-route attempt snapshots use lossless compact JSON. Every full
 snapshot, checkpoint, byte limit, flush/fsync and atomic replacement remains;
 only whitespace changes, not report fields or qualification evidence.

@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **59**, save format **57**, scenario format **30**, ruleset
-**`interactions-v51`**, scenario validator **`tor-scenario-42`**. Unsupported
+**Current formats:** protocol **60**, save format **58**, scenario format **31**, ruleset
+**`interactions-v52`**, scenario validator **`tor-scenario-43`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **24**, ContentPackage **27** and
+The independent compiled inputs use RulesInput **24**, ContentPackage **28** and
 RegionInput **8**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -582,8 +582,15 @@ recreate them. Its
 ongoing performance acceptance, including persistence tails, is distinct from
 whether floor generation exists. Secrets and traps are implemented. Optional strict
 room omissions are available to authors but are not enabled in the live Rogue
-package; mazes and live omission tuning remain separate work. Extend shared
-survival, items, ranged/perception and
+package. Opt-in dark-maze support and the related tactile Search and capped
+Awareness-based nonvisual disclosure changes have passed their focused runtime,
+server/schema and integration checks. The fixed forced-maze actual-process route
+also passes paid Search, traversal and source-free revisit checks with complete
+retained transport evidence. Its earlier all-dark discovery failure remains recorded;
+the successful run uses the approved tactile rule, not a weaker fixture or route cap.
+Live maze and omission policies remain disabled, and numerical enablement remains
+separate work. Final push and both-platform debug/release CI qualification remain
+pending; locally waived native graphical checks are not passes. Extend shared survival, items, ranged/perception and
 species behavior; qualify the complete 26-species roster and pressured runs. Work beyond the accepted 256-HD guard, including
 exact-row deep storage and disclosure paging, is deferred rather than a
 prerequisite for functional Rogue.

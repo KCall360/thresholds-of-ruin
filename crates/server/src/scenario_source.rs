@@ -558,6 +558,79 @@ extra_connections = [0, 1]
     }
 
     #[test]
+    fn maze_rooms_are_strict_opt_in_with_lighting_and_recipe_five_ownership() {
+        let geometry = r#"
+[generation_recipes.caves]
+kind = "grid_rooms"
+version = 1
+room_width = [4, 6]
+room_height = [3, 5]
+extra_connections = [0, 1]
+"#;
+        let lighting = "lighting = { darkness_roll = 10, darkness_start = 1 }\n";
+        let mut absent: toml::Value = toml::from_str(&format!("{geometry}{lighting}")).unwrap();
+        normalize_recipes(&mut absent, "world.toml").unwrap();
+        let old = serde_json::to_value(&absent["generation_recipes"]["caves"]).unwrap();
+        assert_eq!(old["version"], 2);
+        for omissions in [false, true] {
+            for one_in in [1, 10_000] {
+                let omission = if omissions {
+                    "room_omissions = { count = [0, 3] }\n"
+                } else {
+                    ""
+                };
+                let source =
+                    format!("{geometry}{lighting}{omission}maze_rooms = {{ one_in = {one_in} }}\n");
+                let mut value: toml::Value = toml::from_str(&source).unwrap();
+                normalize_recipes(&mut value, "world.toml").unwrap();
+                let current = serde_json::to_value(&value["generation_recipes"]["caves"]).unwrap();
+                assert_eq!(current["version"], 5);
+                let stages = current["stages"].as_array().unwrap();
+                assert_eq!(&stages[..6], &old["stages"].as_array().unwrap()[..6]);
+                let maze = 6 + usize::from(omissions);
+                assert_eq!(stages.len(), maze + 2);
+                assert_eq!(
+                    stages[maze],
+                    serde_json::json!({
+                        "id":"maze_rooms", "version":1,
+                        "operation":{"kind":"maze_rooms", "config":{"one_in":one_in}}
+                    })
+                );
+                assert_eq!(stages[maze + 1], old["stages"][6]);
+            }
+        }
+        for policy in [
+            "{}",
+            "{ one_in = 0 }",
+            "{ one_in = 10001 }",
+            "{ one_in = -1 }",
+            "{ one_in = true }",
+            "{ one_in = 1.5 }",
+            "{ one_in = [1] }",
+            "{ one_in = 1, chance = 1 }",
+            "[1]",
+        ] {
+            let mut value: toml::Value =
+                toml::from_str(&format!("{geometry}{lighting}maze_rooms = {policy}\n")).unwrap();
+            let error = normalize_recipes(&mut value, "world.toml").unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("world.toml: generation_recipes.caves"),
+                "{}",
+                error.message
+            );
+        }
+        let mut unlit: toml::Value =
+            toml::from_str(&format!("{geometry}maze_rooms = {{ one_in = 1 }}\n")).unwrap();
+        assert!(normalize_recipes(&mut unlit, "world.toml").is_err());
+        assert!(toml::from_str::<toml::Value>(&format!(
+            "{geometry}{lighting}maze_rooms = {{ one_in = 1, one_in = 1 }}\n"
+        ))
+        .is_err());
+    }
+
+    #[test]
     fn module_count_and_source_byte_limits_fail_before_outputs() {
         let names: Vec<_> = (0..64).map(|i| format!("module-{i}.toml")).collect();
         let root = source_package(&serde_json::to_string(&names).unwrap());

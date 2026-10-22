@@ -535,9 +535,11 @@ class Transcript(Sequence):
     Sequence offsets remain stable for existing before/after message assertions.
     Full iteration and slicing are explicit reads, not permanently retained frames.
     """
-    def __init__(self, path):
+    def __init__(self, path, *, source=None):
         self.path = path
-        path.touch()
+        self.source = source
+        if source is None:
+            path.touch()
         self.count = 0
         self.tail = deque()
         self.tail_chars = 0
@@ -553,6 +555,10 @@ class Transcript(Sequence):
         return self.count
 
     def __iter__(self):
+        if self.source is not None:
+            with closing(self.source.iter_lines()) as lines:
+                yield from islice(lines, self.count)
+            return
         with self.path.open(encoding="utf-8") as log:
             for line in islice(log, self.count):
                 yield line.removesuffix("\n")
@@ -641,6 +647,19 @@ class Process:
                  diagnostics=None, save_actor=None):
         environment = {k: v for k, v in os.environ.items() if k not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
         environment.update(extra_env or {})
+        # Harness-only, explicitly per-launch: never alter the child's wire or
+        # stdout projection and never inherit a global opt-in accidentally.
+        capture_key = "TOR_TEST_SEGMENTED_STDOUT_BYTES"
+        capture_option = (extra_env or {}).get(capture_key)
+        environment.pop(capture_key, None)
+        segment_bytes = None
+        if capture_option is not None:
+            if (not isinstance(capture_option, str) or not capture_option.isascii()
+                    or not capture_option.isdecimal() or str(int(capture_option)) != capture_option
+                    or not 1 <= int(capture_option) <= 64 * 1024 * 1024):
+                raise ValueError("Segmented stdout size must be a canonical integer in 1..67108864")
+            segment_bytes = int(capture_option)
+        self._segmented_stdout = segment_bytes is not None
         self.executable = Path(executable)
         if self.executable.stem == "tor-client-ascii":
             _require_native_display(environment)
@@ -664,17 +683,30 @@ class Process:
                          "profile": os.environ.get("TOR_TEST_PROFILE", "debug"),
                          "started_at": time.time(), "cwd": str(ROOT),
                          "separate_stderr": separate_stderr}
-        self.child = subprocess.Popen(
-            self.metadata["command"], cwd=ROOT,
-            env={**environment, "TOR_SERVER_TOKEN": token},
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE if separate_stderr else subprocess.STDOUT,
-            text=True, encoding="utf-8", bufsize=1,
-        )
+        self.lines = None
+        if segment_bytes is not None:
+            from segmented_process_capture import SegmentedOutputQueue
+            # Prepare capture before launching a child: a storage failure cannot
+            # leave an unowned child running. Popen closes non-inherited FDs.
+            self.lines = SegmentedOutputQueue(self.stdout_path, segment_bytes)
+            self.metadata["stdout_capture"] = {"kind": "lossless_segments", "segment_bytes": segment_bytes}
+        try:
+            self.child = subprocess.Popen(
+                self.metadata["command"], cwd=ROOT,
+                env={**environment, "TOR_SERVER_TOKEN": token},
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE if separate_stderr else subprocess.STDOUT,
+                text=True, encoding="utf-8", bufsize=1,
+            )
+        except BaseException:
+            if self.lines is not None:
+                self.lines.close()
+            raise
         self.metadata["pid"] = self.child.pid
         self._write_status("launched")
-        self.lines = OutputQueue(self.stdout_path)
-        self.transcript = Transcript(self.stdout_path)
+        if self.lines is None:
+            self.lines = OutputQueue(self.stdout_path)
+        self.transcript = Transcript(self.stdout_path, source=self.lines if segment_bytes is not None else None)
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
 
@@ -696,6 +728,10 @@ class Process:
         try:
             for line in self.child.stdout:
                 self._record_line(line.rstrip("\n"))
+        except BaseException as error:
+            if getattr(self, "_segmented_stdout", False):
+                self.lines.fail(error)
+            raise
         finally:
             self.lines.put(None)
 
@@ -724,6 +760,14 @@ class Process:
             if time.monotonic() >= deadline:
                 raise self._failure("Process output deadline")
             if matched:
+                if getattr(self, "_segmented_stdout", False):
+                    try:
+                        result = self.lines.read_between(start, self.lines.offset, deadline=deadline)
+                    except queue.Empty:
+                        raise self._failure("Process output deadline") from None
+                    if time.monotonic() >= deadline:
+                        raise self._failure("Process output deadline")
+                    return result
                 return self.lines.read_between(start, self.lines.offset)
 
     def write(self, line):
@@ -753,6 +797,8 @@ class Process:
         finally:
             self.child.wait(timeout=10)
             self.reader.join(timeout=10)
+            if getattr(self, "_segmented_stdout", False) and self.reader.is_alive():
+                self.lines.fail(RuntimeError("Stdout reader did not finish before capture cleanup"))
             for stream in (self.child.stdin, self.child.stdout):
                 stream.close()
             if self.child.stderr is not None:
@@ -783,6 +829,10 @@ class AdventureProcess(Process):
                     pending = ""
             if pending:
                 self._record_line(pending)
+        except BaseException as error:
+            if getattr(self, "_segmented_stdout", False):
+                self.lines.fail(error)
+            raise
         finally:
             self.lines.put(None)
 

@@ -29,8 +29,21 @@ pub const STAT_MAGNITUDE: i64 = 1000;
 pub const DERIVED_ATTRIBUTE: u16 = 1000;
 pub const DICE_SIDES: u16 = 1000;
 pub const SIGHT_RANGE: u16 = 16;
-/// Full sight cube plus the maximum body's local-awareness cells and stair pair.
-pub const PUBLIC_AIM_OCCURRENCES: usize = (2 * SIGHT_RANGE as usize + 1).pow(3) + 64 * 27 + 2;
+/// Every body/eye offset lies in [-8, 8]^3. Each physical view adds an L1 ball
+/// of radius SIGHT_RANGE; portal repeats never add a second result for one
+/// offset. The cube's interior, faces, edges and corners therefore contribute
+/// 17^3 + 6*17^2*r + 12*17*C(r,2) + 8*C(r,3) offsets. The preserved immediate
+/// neighbourhood is contained in that envelope. Add the two abstract stairs.
+/// This conservative scene bound also bounds one aim's historical occurrences
+/// and distinct perceived threats; it is not a claimed attainable single aim.
+pub const PUBLIC_AIM_OCCURRENCES: usize = {
+    let r = SIGHT_RANGE as usize;
+    17_usize.pow(3)
+        + 6 * 17_usize.pow(2) * r
+        + 12 * 17 * (r * (r - 1) / 2)
+        + 8 * (r * (r - 1) * (r - 2) / 6)
+        + 2
+};
 pub const EQUIPMENT_SOCKETS: usize = 64;
 pub const CONSUMABLE_EFFECTS: usize = 16;
 
@@ -48,3 +61,24 @@ pub const EVENT_RECEIPTS: usize = 262_144;
 
 /// Retained exact HD choice versions supporting first-earned Intellect thresholds.
 pub const EXPERTISE_HISTORY_ROWS: usize = 4096;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn body_origin_occurrence_limit_matches_the_independent_integer_envelope() {
+        let mut physical = 0;
+        for x in -24_i32..=24 {
+            for y in -24_i32..=24 {
+                for z in -24_i32..=24 {
+                    let distance = [x, y, z]
+                        .into_iter()
+                        .map(|coordinate| (coordinate.abs() - 8).max(0))
+                        .sum::<i32>();
+                    physical += usize::from(distance <= 16);
+                }
+            }
+        }
+        assert_eq!(physical, 61_617);
+        assert_eq!(super::PUBLIC_AIM_OCCURRENCES, physical + 2);
+    }
+}

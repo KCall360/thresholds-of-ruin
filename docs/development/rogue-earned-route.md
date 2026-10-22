@@ -18,14 +18,14 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v21` retains exact package inputs and its
+`scripts/fixtures/rogue-earned-baseline-v23` retains exact package inputs and its
 current bundled-rule dependency hash. Its latest source-only transition advances
-only the previous scenario header; the bundled rules import and dependency hash
-are unchanged.
+only the bundled rules import for tactile Search; the scenario header is unchanged.
+The new dependency hash identifies the current rules, not requalified route outcomes.
 All other authored package bytes, including anatomy, items, player kits and
-population stages, are unchanged; no room-omission policy, wandering policy, control
+population stages, are unchanged; no maze or room-omission policy, wandering policy, control
 scrolls, utility-magic or ring loot, discovery stages, traps or secret closures are
-imported. Frozen v6–v20 inputs and their source/transition receipts remain immutable research
+imported. Frozen v6–v22 inputs and their source/transition receipts remain immutable research
 evidence. Shared living-dungeon, awareness, hazards, levitation, discovery, wearable, utility-magic, persistent-condition and
 action-duration rules
 make this a new experiment input, with no claim of identical outcomes or a
@@ -350,7 +350,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v21"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v23"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```

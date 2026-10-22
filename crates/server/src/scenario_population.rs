@@ -1812,15 +1812,20 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
 
     #[test]
     fn room_gold_source_free_package_preserves_activated_and_unentered_scope_metadata() {
-        room_gold_source_free_metadata(None);
+        room_gold_source_free_metadata(None, false);
     }
 
     #[test]
     fn omitted_rooms_have_no_gold_receipts_or_metadata_after_source_free_restore() {
-        room_gold_source_free_metadata(Some(3));
+        room_gold_source_free_metadata(Some(3), false);
     }
 
-    fn room_gold_source_free_metadata(omissions: Option<u32>) {
+    #[test]
+    fn maze_rooms_keep_actual_gold_cells_in_source_free_future_floors() {
+        room_gold_source_free_metadata(Some(3), true);
+    }
+
+    fn room_gold_source_free_metadata(omissions: Option<u32>, mazes: bool) {
         let baseline = fixture();
         baseline.check().unwrap();
         let package = changed(&baseline, |value| {
@@ -1831,6 +1836,17 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
                     "id":"room_omissions", "version":1,
                     "operation":{"kind":"room_omissions", "config":{"count":[count,count]}}
                 }));
+            }
+            if mazes {
+                let recipe = &mut value["generation_recipes"]["exploration"];
+                recipe["version"] = json!(5);
+                let stages = recipe["stages"].as_array_mut().unwrap();
+                let position = 6 + usize::from(omissions.is_some());
+                assert_eq!(stages[position]["operation"]["kind"], json!("room_lighting"));
+                stages[position]["operation"]["darkness_roll"] = json!(1);
+                stages[position]["operation"]["darkness_start"] = json!(0);
+                stages.insert(position, json!({"id":"maze_rooms", "version":1,
+                    "operation":{"kind":"maze_rooms", "config":{"one_in":1}}}));
             }
             value["archetypes"]["marker"]["stackable"] = json!(true);
             value["floor_activation"]["profiles"]["plain"]["stages"] = json!([{
@@ -1858,6 +1874,33 @@ choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
             serde_json::to_value(&source_free_future.regions).unwrap()
         );
         assert_eq!(generated.rooms, source_free_future.rooms);
+        if mazes {
+            let baseline = baseline.generated_group("dungeon/2", 42).unwrap();
+            assert!(
+                generated.rooms.iter().any(|room| {
+                    room.cells.len()
+                        < baseline
+                            .rooms
+                            .iter()
+                            .find(|old| old.id == room.id)
+                            .unwrap()
+                            .cells
+                            .len()
+                }),
+                "source-free witness must actually contain carved maze walls"
+            );
+            for room in &generated.rooms {
+                for cell in &room.cells {
+                    let region = &generated.regions[&cell.region.0];
+                    assert!((0..2).all(|z| !region.walls.contains(&[
+                        cell.position.x,
+                        cell.position.y,
+                        z
+                    ])));
+                }
+            }
+        }
+
         assert_eq!(
             generated.regions.len(),
             9,

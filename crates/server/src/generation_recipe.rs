@@ -35,6 +35,7 @@ pub struct GridRoomsPreset {
     pub room_height: [u32; 2],
     pub extra_connections: [u32; 2],
     pub room_omissions: Option<RoomOmissions>,
+    pub maze_rooms: Option<MazeRooms>,
     pub lighting: Option<RoomLighting>,
     pub secret_entrances: Option<SecretEntrances>,
     pub hidden_traps: Option<HiddenTraps>,
@@ -56,6 +57,28 @@ impl<'de> Deserialize<'de> for RoomOmissions {
         let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self {
             count: fields.count,
+        })
+    }
+}
+
+/// Optional bounded maze trial among eligible dark rooms. Absence retains the
+/// existing recipe and all existing geometry and feature streams.
+#[derive(Clone, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MazeRooms {
+    pub one_in: u32,
+}
+
+impl<'de> Deserialize<'de> for MazeRooms {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            one_in: u32,
+        }
+        let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
+        Ok(Self {
+            one_in: fields.one_in,
         })
     }
 }
@@ -156,6 +179,17 @@ impl GridRoomsPreset {
                 },
             ));
         }
+        if let Some(config) = &self.maze_rooms {
+            if self.lighting.is_none() {
+                return Err(fail("Maze rooms require an explicit lighting policy"));
+            }
+            stages.push((
+                "maze_rooms",
+                Operation::MazeRooms {
+                    config: config.clone(),
+                },
+            ));
+        }
         if let Some(lighting) = &self.lighting {
             stages.push((
                 "lighting",
@@ -182,7 +216,9 @@ impl GridRoomsPreset {
             ));
         }
         let recipe = Recipe {
-            version: if self.room_omissions.is_some() {
+            version: if self.maze_rooms.is_some() {
+                5
+            } else if self.room_omissions.is_some() {
                 4
             } else if self.secret_entrances.is_some() || self.hidden_traps.is_some() {
                 3
@@ -238,6 +274,9 @@ pub enum Operation {
     RoomOmissions {
         config: RoomOmissions,
     },
+    MazeRooms {
+        config: MazeRooms,
+    },
     RoomLighting {
         darkness_roll: u32,
         darkness_start: u32,
@@ -274,15 +313,37 @@ pub(crate) fn check_group(group: &GenerationGroup) -> Result<(), Failure> {
 }
 
 pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
+    let has_omissions = recipe
+        .stages
+        .get(6)
+        .is_some_and(|stage| matches!(stage.operation, Operation::RoomOmissions { .. }));
+    let maze_position = 6 + usize::from(has_omissions);
+    let lighting_position = if recipe.version == 5 {
+        maze_position + 1
+    } else if recipe.version == 4 {
+        7
+    } else {
+        6
+    };
     if !((recipe.version == 1 && recipe.stages.len() == 6)
         || (recipe.version == 2 && recipe.stages.len() == 7)
         || (recipe.version == 3 && (7..=9).contains(&recipe.stages.len()))
         || (recipe.version == 4
             && (7..=10).contains(&recipe.stages.len())
-            && matches!(recipe.stages[6].operation, Operation::RoomOmissions { .. })))
+            && matches!(recipe.stages[6].operation, Operation::RoomOmissions { .. }))
+        || (recipe.version == 5
+            && (8..=11).contains(&recipe.stages.len())
+            && recipe
+                .stages
+                .get(maze_position)
+                .is_some_and(|stage| matches!(stage.operation, Operation::MazeRooms { .. }))
+            && recipe
+                .stages
+                .get(lighting_position)
+                .is_some_and(|stage| matches!(stage.operation, Operation::RoomLighting { .. }))))
     {
         return Err(fail(
-            "Recipe requires ordered geometry, optional omissions, lighting, secret entrances and traps",
+            "Recipe requires ordered geometry, optional omissions, optional dark mazes with lighting, secret entrances and traps",
         ));
     }
     let mut names = BTreeSet::new();
@@ -304,18 +365,19 @@ pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
             | (Operation::GridPartition, 1)
             | (Operation::Corridors, 4)
             | (Operation::Stairs, 5) => true,
-            (Operation::RoomOmissions { config }, 6) if recipe.version == 4 => {
+            (Operation::RoomOmissions { config }, 6) if (4..=5).contains(&recipe.version) => {
                 config.count[0] <= config.count[1]
                     && config.count[1] < MAX_GRID_SIDE * MAX_GRID_SIDE
             }
-            (Operation::RoomLighting { darkness_roll, .. }, n)
-                if n == if recipe.version == 4 { 7 } else { 6 } =>
-            {
+            (Operation::MazeRooms { config }, n) if recipe.version == 5 && n == maze_position => {
+                (1..=10_000).contains(&config.one_in)
+            }
+            (Operation::RoomLighting { darkness_roll, .. }, n) if n == lighting_position => {
                 extra_order = 1;
                 (1..=10_000).contains(darkness_roll)
             }
             (Operation::SecretEntrances { config }, n)
-                if n >= 6 && (3..=4).contains(&recipe.version) && extra_order < 2 =>
+                if n >= 6 && (3..=5).contains(&recipe.version) && extra_order < 2 =>
             {
                 extra_order = 2;
                 config.chance_per_mille <= 1000
@@ -323,7 +385,7 @@ pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
                     && tor_world::Concealment { dc: config.dc }.valid()
             }
             (Operation::HiddenTraps { config }, n)
-                if n >= 6 && (3..=4).contains(&recipe.version) && extra_order < 3 =>
+                if n >= 6 && (3..=5).contains(&recipe.version) && extra_order < 3 =>
             {
                 extra_order = 3;
                 config.count[0] <= config.count[1]
@@ -758,7 +820,8 @@ pub fn materialize_with_feature_bases(
             }
         }
     }
-    open.extend(corridor_cells);
+    open.extend(corridor_cells.iter().copied());
+    let mut dark_rooms = vec![false; count];
     validate_carving(&open, [width, height, size[2]])?;
     for (slot, id) in group.members.iter().enumerate() {
         let def = definitions.get_mut(id).expect("checked member");
@@ -791,9 +854,10 @@ pub fn materialize_with_feature_bases(
             else {
                 unreachable!()
             };
-            if (rng.range(0, darkness_roll as i32 - 1) as u32)
-                >= group.depth.saturating_sub(darkness_start)
-            {
+            let lit = (rng.range(0, darkness_roll as i32 - 1) as u32)
+                >= group.depth.saturating_sub(darkness_start);
+            dark_rooms[slot] = !lit;
+            if lit {
                 let mut illuminated = BTreeSet::new();
                 for &(x, y) in &room_cells[slot] {
                     for z in 0..2 {
@@ -838,6 +902,15 @@ pub fn materialize_with_feature_bases(
             }
         }
     }
+    let maze_slots = maze::carve(
+        &run,
+        &mut open,
+        &corridor_cells,
+        &mut room_cells,
+        &dark_rooms,
+        &mut definitions,
+        size,
+    )?;
     place_concealed_features(
         &run,
         &open,
@@ -845,6 +918,7 @@ pub fn materialize_with_feature_bases(
         &mut definitions,
         size,
         feature_bases,
+        &maze_slots,
     )?;
     // Opening every discoverable closure restores exactly this connected carving;
     // features never erase a corridor, stair or room from the required route graph.
@@ -938,6 +1012,7 @@ mod tests {
             room_height: [3, 3],
             extra_connections: [0, 0],
             room_omissions: None,
+            maze_rooms: None,
             lighting: None,
             secret_entrances: None,
             hidden_traps: None,
@@ -1046,6 +1121,7 @@ mod tests {
             room_height: [3, 5],
             extra_connections: [0, 2],
             room_omissions: None,
+            maze_rooms: None,
             lighting: None,
             secret_entrances: None,
             hidden_traps: None,
@@ -1168,6 +1244,7 @@ mod tests {
             room_height: [3, 4],
             extra_connections: [0, 0],
             room_omissions: None,
+            maze_rooms: None,
             lighting: Some(RoomLighting {
                 darkness_roll: 10,
                 darkness_start: 1,
@@ -1459,6 +1536,7 @@ mod tests {
                 room_height: [room_size, room_size],
                 extra_connections: [0, 0],
                 room_omissions: Some(RoomOmissions { count: [5, 5] }),
+                maze_rooms: None,
                 lighting: None,
                 secret_entrances: None,
                 hidden_traps: None,
@@ -1934,6 +2012,7 @@ mod tests {
             room_height: [3, 3],
             extra_connections: [0, 0],
             room_omissions: None,
+            maze_rooms: None,
             lighting: None,
             secret_entrances: None,
             hidden_traps: Some(HiddenTraps {
@@ -2069,6 +2148,7 @@ mod tests {
             room_height: [3, 4],
             extra_connections: [0, 0],
             room_omissions: None,
+            maze_rooms: None,
             lighting: None,
             secret_entrances: None,
             hidden_traps: Some(HiddenTraps {
@@ -2136,9 +2216,13 @@ mod tests {
         }
         assert!(doors > 0, "witness actual generated trapdoors");
     }
+    include!("generation_maze_tests.rs");
 }
 
 #[path = "generation_features.rs"]
 mod features;
 use features::place_concealed_features;
 pub use features::{FeatureBases, FEATURE_IDENTITY_STRIDE};
+
+#[path = "generation_maze.rs"]
+mod maze;

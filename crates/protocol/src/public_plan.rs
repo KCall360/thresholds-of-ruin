@@ -3,7 +3,10 @@
 use crate::{ContentRef, Position};
 use serde::{Deserialize, Serialize};
 
-pub const MAX_PUBLIC_AIM_OCCURRENCES: usize = 33_usize.pow(3) + 64 * 27 + 2;
+/// Body-origin physical envelope [-8,8]^3 + the radius-16 Manhattan ball,
+/// plus two abstract stair occurrences. Mirrors the simulation structural
+/// bound without importing simulation types into the wire schema.
+pub const MAX_PUBLIC_AIM_OCCURRENCES: usize = 61_619;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

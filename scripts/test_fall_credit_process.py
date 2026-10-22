@@ -7,10 +7,27 @@ import unittest
 from checkpoint_payload import decode_checkpoint_payload
 from fall_credit_package import fall_credit_package
 from process_harness import ProcessTestCase
+from rogue_earned_route_process import ArchiveVerificationCache, compress_completed_logs
 
 
 def view(frame):
     return frame["state"]["observation"]
+
+
+def retain_stopped_fall_logs(test, cache):
+    """Repack only fully stopped owned sessions; never change commands or saves."""
+    owned = {process.diagnostics.resolve() for process in test.processes}
+    observed = {path.resolve() for path in test.directory.glob("process-*") if path.is_dir()}
+    test.assertEqual(observed, owned, "Every retained process directory must have an owner")
+    for process in test.processes:
+        test.assertEqual(process.diagnostics.resolve().parent, test.directory.resolve())
+        test.assertTrue(process._stopped, "Process stop must finish before retention")
+        test.assertIsNotNone(process.child.poll(), "Process exit must be observed before retention")
+        test.assertFalse(process.reader.is_alive(), "Output reader must finish before retention")
+        for handle in (process.child.stdin, process.child.stdout, process.child.stderr,
+                       process.lines.reader, process.lines.writer):
+            test.assertTrue(handle is None or handle.closed, "Output handles must close before retention")
+    return compress_completed_logs(test.directory, cache=cache)
 
 
 class FallCreditProcesses(ProcessTestCase):
@@ -28,6 +45,7 @@ class FallCreditProcesses(ProcessTestCase):
         self.assertIsNone(self.act(ready[0][0], {"type": "wait"})["error"])
 
     def test_immediate_fatal_fall_owner_survives_journal_only_and_checkpoint_tail(self):
+        retention_cache = ArchiveVerificationCache()
         for checkpointed in (False, True):
             with self.subTest(checkpointed=checkpointed):
                 name = "fall-checkpoint" if checkpointed else "fall-journal"
@@ -79,6 +97,7 @@ class FallCreditProcesses(ProcessTestCase):
                 server.stop(save=False)
                 owner.stop()
                 victim.stop()
+                retain_stopped_fall_logs(self, retention_cache)
                 interval = 4096 if checkpointed else 0
                 server = self.server("--checkpoint-interval", interval, scenario=package, seed=None)
                 owner, _ = self.client()
@@ -98,6 +117,7 @@ class FallCreditProcesses(ProcessTestCase):
                 server.stop(save=False)
                 owner.stop()
                 victim.stop()
+                retain_stopped_fall_logs(self, retention_cache)
                 server = self.server("--checkpoint-interval", interval, scenario=package, seed=None)
                 owner, _ = self.client()
                 victim, continued = self.client(actor=2)
@@ -118,6 +138,7 @@ class FallCreditProcesses(ProcessTestCase):
                 server.stop(save=False)
                 owner.stop()
                 victim.stop()
+                retain_stopped_fall_logs(self, retention_cache)
                 server = self.server("--checkpoint-interval", interval, scenario=package, seed=None)
                 owner, _ = self.client()
                 victim, dead_again = self.client(actor=2)
@@ -129,6 +150,7 @@ class FallCreditProcesses(ProcessTestCase):
                 server.stop(save=False)
                 owner.stop()
                 victim.stop()
+                retain_stopped_fall_logs(self, retention_cache)
 
 
 if __name__ == "__main__":

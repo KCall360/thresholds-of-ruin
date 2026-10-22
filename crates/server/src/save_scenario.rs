@@ -668,6 +668,10 @@ enum Operation {
         #[serde(with = "mapped")]
         config: crate::generation_recipe::RoomOmissions,
     },
+    MazeRooms {
+        #[serde(with = "mapped")]
+        config: crate::generation_recipe::MazeRooms,
+    },
     RoomLighting {
         darkness_roll: u32,
         darkness_start: u32,
@@ -688,6 +692,12 @@ enum Operation {
 )]
 struct RoomOmissions {
     count: [u32; 2],
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::generation_recipe::MazeRooms", deny_unknown_fields)]
+struct MazeRooms {
+    one_in: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -3985,6 +3995,7 @@ named_remote!(
     Concealment => source::Concealment,
     Operation => crate::generation_recipe::Operation,
     RoomOmissions => crate::generation_recipe::RoomOmissions,
+    MazeRooms => crate::generation_recipe::MazeRooms,
     SecretEntrances => crate::generation_recipe::SecretEntrances,
     HiddenTraps => crate::generation_recipe::HiddenTraps,
     HazardTraps => crate::generation_recipe::HazardTraps,
@@ -4252,7 +4263,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 27;
+const CONTENT_PACKAGE_FORMAT: u32 = 28;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4616,6 +4627,102 @@ mod tests {
     }
 
     #[test]
+    fn stored_maze_rooms_require_exact_named_config() {
+        use super::{Borrowed, Owned};
+        type Operation = crate::generation_recipe::Operation;
+        let good = r#"{"kind":"maze_rooms","config":{"one_in":1}}"#;
+        let Owned(operation) =
+            crate::storage::codec::strict::<Owned<Operation>>(good.as_bytes()).unwrap();
+        assert_eq!(
+            serde_json::to_value(Borrowed(&operation)).unwrap(),
+            serde_json::from_str::<serde_json::Value>(good).unwrap()
+        );
+        for bad in [
+            r#"{"kind":"maze_rooms"}"#,
+            r#"{"kind":"maze_rooms","config":null}"#,
+            r#"{"kind":"maze_rooms","config":{}}"#,
+            r#"{"kind":"maze_rooms","config":{"one_in":1,"surprise":0}}"#,
+            r#"{"kind":"maze_rooms","config":{"one_in":1},"surprise":0}"#,
+            r#"{"kind":"maze_rooms","config":[1]}"#,
+            r#"["maze_rooms",{"one_in":1}]"#,
+            r#"{"kind":"maze_rooms","config":{"one_in":false}}"#,
+            r#"{"kind":"maze_rooms","config":{"one_in":-1}}"#,
+            r#"{"kind":"maze_rooms","config":{"one_in":4294967296}}"#,
+            r#"{"kind":"maze_rooms","config":{"one_in":1.0}}"#,
+            r#"{"kind":"maze_rooms","config":{"one_in":1,"one_in":1}}"#,
+            r#"{"kind":"maze_rooms","config":{"one_in":1},"config":{"one_in":1}}"#,
+            r#"{"kind":"maze_rooms","kind":"maze_rooms","config":{"one_in":1}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<Owned<Operation>>(bad).is_err(),
+                "{bad}"
+            );
+            assert!(
+                crate::storage::codec::strict::<Owned<Operation>>(bad.as_bytes()).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn stored_maze_recipe_preserves_lighting_order_and_version_ownership() {
+        use super::{Borrowed, Owned};
+        use crate::generation_recipe::{check, Recipe};
+        let good = serde_json::json!({"version":5,"stages":[
+            {"id":"stone","version":1,"operation":{"kind":"stone_fill"}},
+            {"id":"slots","version":1,"operation":{"kind":"grid_partition"}},
+            {"id":"rooms","version":1,"operation":{"kind":"rooms","width":[4,6],"height":[3,5]}},
+            {"id":"connections","version":1,"operation":{"kind":"connected_graph","extra":[0,1]}},
+            {"id":"corridors","version":1,"operation":{"kind":"corridors"}},
+            {"id":"stairs","version":1,"operation":{"kind":"stairs"}},
+            {"id":"maze_rooms","version":1,"operation":{"kind":"maze_rooms","config":{"one_in":1}}},
+            {"id":"lighting","version":1,"operation":{"kind":"room_lighting","darkness_roll":10,"darkness_start":1}}
+        ]});
+        let Owned(recipe) =
+            crate::storage::codec::strict::<Owned<Recipe>>(&serde_json::to_vec(&good).unwrap())
+                .unwrap();
+        check(&recipe).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&recipe)).unwrap(), good);
+        for (path, value) in [
+            ("/version", serde_json::json!(4)),
+            ("/version", serde_json::json!(6)),
+            ("/stages/6/version", serde_json::json!(2)),
+            ("/stages/6/id", serde_json::json!("stairs")),
+            ("/stages/6/operation/config/one_in", serde_json::json!(0)),
+            (
+                "/stages/6/operation/config/one_in",
+                serde_json::json!(10001),
+            ),
+        ] {
+            let mut invalid = good.clone();
+            *invalid.pointer_mut(path).unwrap() = value;
+            let Owned(recipe) = serde_json::from_value::<Owned<Recipe>>(invalid).unwrap();
+            assert!(check(&recipe).is_err(), "{path}");
+        }
+        for mutation in 0..4 {
+            let mut invalid = good.clone();
+            let stages = invalid["stages"].as_array_mut().unwrap();
+            match mutation {
+                0 => {
+                    stages.remove(7);
+                }
+                1 => {
+                    stages.remove(6);
+                }
+                2 => stages.swap(6, 7),
+                3 => {
+                    let mut duplicate = stages[6].clone();
+                    duplicate["id"] = serde_json::json!("other_maze");
+                    stages.insert(7, duplicate);
+                }
+                _ => unreachable!(),
+            }
+            let Owned(recipe) = serde_json::from_value::<Owned<Recipe>>(invalid).unwrap();
+            assert!(check(&recipe).is_err(), "mutation {mutation}");
+        }
+    }
+
+    #[test]
     fn discovery_formats_match_independent_payload_boundaries() {
         assert_eq!(
             (
@@ -4627,13 +4734,13 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (57, 30, "interactions-v51", 24, 8, 27, "tor-arena-run-v5")
+            (58, 31, "interactions-v52", 24, 8, 28, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn discovery_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 59);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 60);
         assert_eq!(super::RULES_INPUT_FORMAT, 24);
         assert_eq!(super::REGION_INPUT_FORMAT, 8);
         // Semantic rule, region and package payload versions advance independently
