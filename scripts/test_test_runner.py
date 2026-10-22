@@ -318,7 +318,7 @@ class Sample(unittest.TestCase):
 
 
 class CiShardRunnerContract(unittest.TestCase):
-    def execute(self, index, *, failing=False):
+    def execute(self, index, *, failing=False, profile="release"):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             scripts = root / 'scripts'
@@ -327,15 +327,29 @@ class CiShardRunnerContract(unittest.TestCase):
             (scripts / 'test_rogue_earned_route_process.py').write_text(
                 body % ("self.fail('paid owner failed')" if failing else 'pass'), encoding='utf-8')
             (scripts / 'test_future_process.py').write_text(body % 'pass', encoding='utf-8')
+            (scripts / 'test_future_pure.py').write_text(body % 'pass', encoding='utf-8')
             timings = root / 'timings.jsonl'
+            pattern = 'test_*.py' if profile == 'debug' else 'test_*process.py'
             command = [sys.executable, str(Path(__file__).with_name('test_runner.py')),
-                       '--ci-python-shard', str(index), 'discover', '-s', 'scripts', '-p', 'test_*process.py', '-v']
+                       '--ci-python-shard', str(index), 'discover', '-s', 'scripts', '-p', pattern, '-v']
             result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=20,
                 env={**{key: value for key, value in os.environ.items() if key != 'PYTHONPATH'},
-                     'TOR_TEST_PROFILE': 'release', 'TOR_TEST_TIMINGS': str(timings),
+                     'TOR_TEST_PROFILE': profile, 'TOR_TEST_TIMINGS': str(timings),
                      'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123'})
-            rows = [json.loads(line) for line in timings.read_text().splitlines()]
+            rows = [json.loads(line) for line in timings.read_text().splitlines()] if timings.exists() else []
             return result, rows
+
+    def test_debug_actual_dispatch_retains_pure_and_process_full_union(self):
+        results = [self.execute(index, profile='debug') for index in (1, 2)]
+        self.assertTrue(all(result.returncode == 0 for result, _ in results),
+                        [result.stderr for result, _ in results])
+        expected = ['test_future_pure.Owner.test_owner', 'test_future_process.Owner.test_owner',
+                    'test_rogue_earned_route_process.Owner.test_owner']
+        completed = [row['test_id'] for _, rows in results for row in rows if row['kind'] == 'test']
+        self.assertEqual(sorted(completed), sorted(expected))
+        for _, rows in results:
+            self.assertEqual(sorted(rows[0]['shard']['full_test_ids']), sorted(expected))
+            self.assertTrue(all(row['profile'] == 'debug' for row in rows))
 
     def test_actual_discovery_dispatch_runs_exactly_one_owner_per_shard(self):
         results = [self.execute(index) for index in (1, 2)]

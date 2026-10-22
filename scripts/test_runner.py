@@ -190,10 +190,12 @@ def main(argv=None):
     if local.workers < 1:
         parser.error('--workers must be at least 1')
     if local.ci_python_shard is not None and (local.from_file or local.waive_local_graphical
-            or os.environ.get('TOR_TEST_PROFILE') != 'release' or not os.environ.get('TOR_TEST_TIMINGS')):
-        parser.error('--ci-python-shard requires complete release discovery and timing evidence')
-    if local.ci_python_shard is not None and arguments != ['discover', '-s', 'scripts', '-p', 'test_*process.py', '-v']:
-        parser.error('--ci-python-shard requires the original complete release discovery')
+            or os.environ.get('TOR_TEST_PROFILE') not in ('debug', 'release') or not os.environ.get('TOR_TEST_TIMINGS')):
+        parser.error('--ci-python-shard requires complete profile discovery and timing evidence')
+    profile = os.environ.get('TOR_TEST_PROFILE', 'debug')
+    pattern = 'test_*.py' if profile == 'debug' else 'test_*process.py'
+    if local.ci_python_shard is not None and arguments != ['discover', '-s', 'scripts', '-p', pattern, '-v']:
+        parser.error('--ci-python-shard requires the original complete profile discovery')
     if local.from_file:
         # Parallel workers receive their test names in a file: a long batch
         # would exceed the Windows command-line limit.
@@ -234,9 +236,9 @@ def main(argv=None):
                     import ci_python_shards
                     tests = list(parallel_tests.flatten(suite))
                     full = [test.id() for test in tests]
-                    selected = set(ci_python_shards.selection(full, local.ci_python_shard))
+                    selected = set(ci_python_shards.selection(full, local.ci_python_shard, profile=profile))
                     shard = ci_python_shards.metadata(full, local.ci_python_shard,
-                        os.environ.get('GITHUB_SHA'), os.environ.get('GITHUB_RUN_ID'))
+                        os.environ.get('GITHUB_SHA'), os.environ.get('GITHUB_RUN_ID'), profile=profile)
                     suite = unittest.TestSuite(test for test in tests if test.id() in selected)
                 if handle is not None:
                     try:

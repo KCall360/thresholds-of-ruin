@@ -19,25 +19,26 @@ IDS = ['test_rogue_earned_route_process.Route.test_one',
        'test_future_new_process.Future.test_five']
 
 
-def evidence():
+def evidence(*, profile="release", ids=IDS):
     receipts, summaries = {}, {}
     for index in (1, 2):
-        selected = shards.selection(IDS, index)
+        selected = shards.selection(ids, index, profile=profile)
         rows = [{'kind': 'selection', 'test_ids': selected,
-                 'shard': shards.metadata(IDS, index, SHA, RUN)}]
+                 'shard': shards.metadata(ids, index, SHA, RUN, profile=profile)}]
         rows += [{'kind': 'test', 'test_id': name, 'outcome': 'passed',
                   'failures': 0, 'errors': 0, 'subtests_failed': 0, 'subtests_skipped': 0}
                  for name in selected]
         rows += [{'kind': 'suite', 'successful': True, 'tests_run': len(selected),
                   'failures': 0, 'errors': 0, 'skipped': 0, 'waived': 0, 'expected_failures': 0,
                   'unexpected_successes': 0, 'waived_tests': [], 'not_started': [], 'batch_errors': []}]
-        receipts[index] = [dict(schema_version=1, profile='release', **row) for row in rows]
-        summaries[index] = {'ci_profile': 'release', 'ci_partition': 'python', 'ci_python_shard': index,
+        receipts[index] = [dict(schema_version=1, profile=profile, **row) for row in rows]
+        stages = ['build-process-debug', 'build-tools', 'python-debug'] if profile == 'debug' else ['build-process-release', 'process-release']
+        summaries[index] = {'ci_profile': profile, 'ci_partition': 'python', 'ci_python_shard': index,
                             'clean_passed': True, 'gate_passed': True, 'evidence_origin': 'fresh',
                             'receipt_completeness': {'complete': True}, 'waived_steps': [], 'not_run_steps': [],
-                            'planned_steps': ['build-process-release', 'process-release'],
+                            'planned_steps': stages,
                             'steps': [{'step': name, 'status': 'passed', 'code': 0}
-                                      for name in ('build-process-release', 'process-release')]}
+                                      for name in stages]}
     return receipts, summaries
 
 
@@ -155,3 +156,69 @@ class PythonShardCoverageTests(unittest.TestCase):
                 else: summaries[1]['steps'][0]['code'] = 1
                 with self.assertRaises(ValueError):
                     shards.validate_pair(receipts, summaries, expected_ids=IDS, source_sha=SHA, run_id=RUN)
+
+
+class DebugPythonShardContracts(unittest.TestCase):
+    def test_authoritative_full_debug_discovery_keeps_all_pure_and_fixture_owners(self):
+        root = Path(__file__).resolve().parent
+        tests = list(parallel_tests.flatten(unittest.TestLoader().discover(str(root), pattern='test_*.py', top_level_dir=str(root))))
+        expected = [test.id() for test in tests]
+        self.assertEqual(Counter(shards.discover_inventory(profile='debug')), Counter(expected))
+        parts = [shards.selection(expected, index, profile='debug') for index in (1, 2)]
+        self.assertEqual(Counter(parts[0] + parts[1]), Counter(expected))
+        self.assertFalse(set(parts[0]) & set(parts[1]))
+        self.assertTrue(any(name.startswith('test_ci_python_shards.') for name in parts[1]))
+        for module in {type(test).__module__ for test in tests}:
+            owners = {index for index, ids in enumerate(parts) for name in ids if name.split('.')[0] == module}
+            self.assertEqual(len(owners), 1, module)
+        release = shards.discover_inventory()
+        self.assertTrue(all(name.split('.')[0].endswith('_process') for name in release))
+        self.assertTrue(set(release) < set(expected))
+
+    def test_debug_receipts_require_profile_and_all_three_stages(self):
+        ids = IDS + ['test_future_pure.Tool.test_case']
+        receipts, summaries = evidence(profile='debug', ids=ids)
+        kwargs = dict(expected_ids=ids, source_sha=SHA, run_id=RUN, profile='debug')
+        self.assertTrue(shards.validate_pair(receipts, summaries, **kwargs)['complete'])
+        for mutation in ('missing', 'profile', 'digest', 'stage', 'joint_omission'):
+            with self.subTest(mutation=mutation):
+                rows, reports = deepcopy(receipts), deepcopy(summaries)
+                if mutation == 'missing': del rows[2]
+                elif mutation == 'profile':
+                    for row in rows[1]: row['profile'] = 'release'
+                elif mutation == 'digest': rows[1][0]['shard']['plan_sha256'] = shards.plan_digest(IDS)
+                elif mutation == 'stage':
+                    reports[1]['planned_steps'].remove('build-tools')
+                    reports[1]['steps'] = [row for row in reports[1]['steps'] if row['step'] != 'build-tools']
+                else:
+                    rows, reports = evidence(profile='debug', ids=IDS)
+                with self.assertRaises(ValueError): shards.validate_pair(rows, reports, **kwargs)
+        with self.assertRaises(ValueError):
+            shards.validate_pair(receipts, summaries, expected_ids=ids, source_sha=SHA, run_id=RUN)
+
+    def test_debug_artifact_reader_cannot_substitute_release_named_receipts(self):
+        ids = IDS + ['test_future_pure.Tool.test_case']
+        receipts, summaries = evidence(profile='debug', ids=ids)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index in (1, 2):
+                folder = root / str(index)
+                folder.mkdir()
+                raw = '\n'.join(json.dumps(row) for row in receipts[index]).encode()
+                (folder / 'python-debug-tests.jsonl').write_bytes(raw)
+                summaries[index]['receipt_completeness']['stages'] = [{'step': 'python-debug', 'complete': True,
+                    'record': {'file': 'python-debug-tests.jsonl', 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}}]
+                (folder / 'summary.json').write_text(json.dumps(summaries[index]))
+            kwargs = dict(source_sha=SHA, run_id=RUN, expected_ids=ids, profile='debug')
+            self.assertTrue(shards.read_pair(root, **kwargs)['complete'])
+            (root / '2/python-debug-tests.jsonl').rename(root / '2/process-release-tests.jsonl')
+            with self.assertRaisesRegex(ValueError, 'Missing'): shards.read_pair(root, **kwargs)
+
+    def test_release_default_digest_and_selection_remain_exact(self):
+        payload = {'version': 1, 'count': 2, 'long_modules': sorted(shards.LONG_MODULES), 'full_test_ids': sorted(IDS)}
+        expected = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        self.assertEqual(shards.plan_digest(IDS), expected)
+        self.assertEqual(shards.selection(IDS, 1), IDS[:3])
+        self.assertEqual(shards.selection(IDS, 2), IDS[3:])
+        self.assertNotEqual(shards.plan_digest(IDS, profile='debug'), expected)
+        with self.assertRaises(ValueError): shards.selection(IDS + ['test_future_pure.Tool.test_case'], 2)

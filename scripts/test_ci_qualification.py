@@ -26,8 +26,9 @@ NOW = datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc)
 SOURCE_NAME = f"Qualification source ({SYNTHETIC})"
 MATRIX = [(os, profile, part) for os in ("windows-latest", "ubuntu-latest")
           for profile in ("debug", "release") for part in ("rust", "python")
-          if (os, profile, part) != ("windows-latest", "release", "python")]
-MATRIX += [("windows-latest", "release", f"python shard {index}") for index in (1, 2)]
+          if not (os == "windows-latest" and part == "python")]
+MATRIX += [("windows-latest", profile, f"python shard {index}")
+           for profile in ("debug", "release") for index in (1, 2)]
 
 
 class ApiFixture:
@@ -121,20 +122,21 @@ class QualificationDecisions(unittest.TestCase):
                                           "tree": TREE, "url": "https://github.com/KCall360/thresholds-of-ruin/actions/runs/101/attempts/1"})
 
     def test_both_shard_jobs_are_required_and_legacy_eight_cell_success_is_insufficient(self):
-        self.assertEqual(len(qualification.MATRIX), 9)
-        self.assertEqual(len(self.api.jobs()["jobs"]), 16)
-        for index in (1, 2):
-            for outcome in ("missing", "failure", "cancelled", "skipped"):
-                with self.subTest(index=index, outcome=outcome):
-                    self.api = ApiFixture()
-                    jobs = self.api.jobs()["jobs"]
-                    name = f"Rust (windows-latest, release, python shard {index})"
-                    job = next(row for row in jobs if row['name'] == name)
-                    if outcome == 'missing':
-                        jobs.remove(job)
-                    else:
-                        job['conclusion'] = outcome
-                    self.rejects()
+        self.assertEqual(len(qualification.MATRIX), 10)
+        self.assertEqual(len(self.api.jobs()["jobs"]), 17)
+        for profile in ("debug", "release"):
+            for index in (1, 2):
+                for outcome in ("missing", "failure", "cancelled", "skipped"):
+                    with self.subTest(index=index, outcome=outcome):
+                        self.api = ApiFixture()
+                        jobs = self.api.jobs()["jobs"]
+                        name = f"Rust (windows-latest, {profile}, python shard {index})"
+                        job = next(row for row in jobs if row['name'] == name)
+                        if outcome == 'missing':
+                            jobs.remove(job)
+                        else:
+                            job['conclusion'] = outcome
+                        self.rejects()
         self.api = ApiFixture()
         jobs = self.api.jobs()["jobs"]
         jobs[:] = [row for row in jobs if 'python shard 2' not in row['name']]
