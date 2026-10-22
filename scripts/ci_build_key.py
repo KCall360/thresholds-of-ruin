@@ -1,7 +1,8 @@
-"""Key the explicit CI build recipe, not verifier/workflow source text.
+"""Key the CI profile dependency-recipe envelope, not source prose.
 
 Cargo and rust-cache remain responsible for dependencies and artifact freshness.
-Known Python checks are opaque: builds hidden in their bodies are not discovered.
+The Python envelope includes all maintained example prerequisites shared across
+shards, not a claim about each shard execution. Other Python bodies stay opaque.
 Unknown top-level composition disables caching; full verification still runs.
 """
 import argparse
@@ -11,6 +12,7 @@ import sys
 from pathlib import Path
 
 import service_contract_ci
+import ci_example_prerequisites
 import verify
 
 
@@ -29,6 +31,10 @@ def normalize(value):
 def recipe(profile, partition):
     rows = []
     steps = verify.plan("full", set(), [], ci_profile=profile, ci_partition=partition)
+    if partition == 'python':
+        prerequisite = ci_example_prerequisites.stage(list(ci_example_prerequisites.OWNERS), profile)
+        if prerequisite:
+            steps.append(prerequisite)
     for _, command, overrides in steps:
         command = list(command)
         opaque = False

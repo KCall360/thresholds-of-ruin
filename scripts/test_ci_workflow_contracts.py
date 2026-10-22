@@ -51,6 +51,43 @@ class WorkflowAdoption(unittest.TestCase):
         self.assertIn('python scripts/verify.py full --ci-profile', workflow)
         self.assertIn('python scripts/ci_selected.py aggregate', workflow)
 
+    def test_full_windows_retention_has_unique_success_only_role_outputs(self):
+        cases = [('windows_binaries', 'Record successful producer attempt', 'producer',
+                  [('debug', None), ('release', None)]),
+                 ('windows_python', 'Record successful shard attempt', 'shard',
+                  [(profile, index) for profile in ('debug', 'release') for index in (1, 2)])]
+        for job_name, step_name, prefix, roles in cases:
+            job = workflow_job(job_name)
+            for profile, index in roles:
+                key = f'{prefix}_{profile}' + (f'_{index}' if index else '')
+                self.assertIn(f'{key}: ${{{{ steps.execution_attempt.outputs.{key} }}}}', job)
+            step = workflow_step(step_name)
+            self.assertIn('if: success() && !cancelled()', step)
+            self.assertIn('id: execution_attempt', step)
+            self.assertGreater(job.index(step_name), job.index('uses: actions/upload-artifact@'))
+            command = re.search(r'^        run: (.+)$', step, re.M)[1]
+            for profile, index in roles:
+                rendered = command.replace('${{ matrix.profile }}', profile).replace('${{ matrix.shard }}', str(index))
+                with tempfile.TemporaryDirectory() as directory:
+                    output = Path(directory) / 'output'
+                    result = subprocess.run([workflow_bash(), '-e', '-c', rendered],
+                        env={**os.environ, 'GITHUB_OUTPUT': output.as_posix(), 'GITHUB_RUN_ATTEMPT': '7'},
+                        capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    key = f'{prefix}_{profile}' + (f'_{index}' if index else '')
+                    self.assertEqual(output.read_text(), f'{key}=7\n')
+        gate = workflow_job('check')
+        self.assertIn('id: windows_cohort', gate)
+        self.assertIn('shell: bash', workflow_step('Select successful full Windows execution cohort'))
+        self.assertIn('WINDOWS_BINARIES: ${{ toJSON(needs.windows_binaries) }}', gate)
+        self.assertIn('WINDOWS_PYTHON: ${{ toJSON(needs.windows_python) }}', gate)
+        self.assertLess(gate.index('Select successful full Windows execution cohort'),
+                        gate.index('Require both complete Windows debug Python shards'))
+        for profile in ('debug', 'release'):
+            step = workflow_step(f'Require both complete Windows {profile} Python shards')
+            self.assertIn('--origin-attempt "${{ steps.windows_cohort.outputs.origin_attempt }}"', step)
+            self.assertNotIn('github.run_attempt', step)
+
     def test_cache_writes_stay_successful_and_same_repository_ref_scoped(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         expressions = re.findall(r'^          save-if: \$\{\{ (.+) \}\}$', workflow, re.M)

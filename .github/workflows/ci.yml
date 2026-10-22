@@ -217,6 +217,9 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
+    outputs:
+      producer_debug: ${{ steps.execution_attempt.outputs.producer_debug }}
+      producer_release: ${{ steps.execution_attempt.outputs.producer_release }}
     steps:
       - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -262,6 +265,11 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+      - name: Record successful producer attempt
+        id: execution_attempt
+        if: success() && !cancelled()
+        shell: bash
+        run: echo "producer_${{ matrix.profile }}=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
   windows_python:
     name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.shard && format('python shard {0}', matrix.shard) || matrix.partition }})
@@ -284,6 +292,11 @@ jobs:
         profile: [debug, release]
         partition: [python]
         shard: [1, 2]
+    outputs:
+      shard_debug_1: ${{ steps.execution_attempt.outputs.shard_debug_1 }}
+      shard_debug_2: ${{ steps.execution_attempt.outputs.shard_debug_2 }}
+      shard_release_1: ${{ steps.execution_attempt.outputs.shard_release_1 }}
+      shard_release_2: ${{ steps.execution_attempt.outputs.shard_release_2 }}
     steps:
       - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -368,6 +381,11 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
+      - name: Record successful shard attempt
+        id: execution_attempt
+        if: success() && !cancelled()
+        shell: bash
+        run: echo "shard_${{ matrix.profile }}_${{ matrix.shard }}=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
   selected_rust:
     name: Selected (${{ needs.scope.outputs.build_lane }})
@@ -714,22 +732,32 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Select successful full Windows execution cohort
+        id: windows_cohort
+        shell: bash
+        if: matrix.os == 'windows-latest' && needs.scope.outputs.docs_only == 'false' && needs.scope.outputs.mode == 'full'
+        env:
+          WINDOWS_BINARIES: ${{ toJSON(needs.windows_binaries) }}
+          WINDOWS_PYTHON: ${{ toJSON(needs.windows_python) }}
+        run: |
+          mkdir -p .local/shard-coverage
+          python scripts/ci_python_shards.py --cohort --current-attempt "$GITHUB_RUN_ATTEMPT" --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" | tee .local/shard-coverage/cohort.json
       - name: Require both complete Windows debug Python shards
         if: matrix.os == 'windows-latest' && needs.scope.outputs.docs_only == 'false' && needs.scope.outputs.mode == 'full'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-debug-python-shard-1-attempt-${{ github.run_attempt }} --dir .local/shard-coverage/debug/1
-          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-debug-python-shard-2-attempt-${{ github.run_attempt }} --dir .local/shard-coverage/debug/2
-          python scripts/ci_python_shards.py --profile debug --directory .local/shard-coverage/debug --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-debug-python-shard-1-attempt-${{ steps.windows_cohort.outputs.origin_attempt }} --dir .local/shard-coverage/debug/1
+          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-debug-python-shard-2-attempt-${{ steps.windows_cohort.outputs.origin_attempt }} --dir .local/shard-coverage/debug/2
+          python scripts/ci_python_shards.py --profile debug --directory .local/shard-coverage/debug --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --origin-attempt "${{ steps.windows_cohort.outputs.origin_attempt }}"
       - name: Require both complete Windows release Python shards
         if: matrix.os == 'windows-latest' && needs.scope.outputs.docs_only == 'false' && needs.scope.outputs.mode == 'full'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-release-python-shard-1-attempt-${{ github.run_attempt }} --dir .local/shard-coverage/release/1
-          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-release-python-shard-2-attempt-${{ github.run_attempt }} --dir .local/shard-coverage/release/2
-          python scripts/ci_python_shards.py --directory .local/shard-coverage/release --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-release-python-shard-1-attempt-${{ steps.windows_cohort.outputs.origin_attempt }} --dir .local/shard-coverage/release/1
+          gh run download "$GITHUB_RUN_ID" --name verification-windows-latest-release-python-shard-2-attempt-${{ steps.windows_cohort.outputs.origin_attempt }} --dir .local/shard-coverage/release/2
+          python scripts/ci_python_shards.py --directory .local/shard-coverage/release --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --origin-attempt "${{ steps.windows_cohort.outputs.origin_attempt }}"
       - name: Independently reconcile selected contract receipts
         if: needs.scope.outputs.docs_only == 'false' && needs.scope.outputs.mode == 'selected'
         env:

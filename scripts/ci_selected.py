@@ -14,6 +14,7 @@ import subprocess
 import sys
 
 import ci_test_plan as planner
+import ci_example_prerequisites
 import verify
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -89,13 +90,17 @@ def steps_for(lane, logs, workers, binaries=None):
     elif not tooling:
         target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
         environment["TOR_SCENARIO_COMPILER"] = str(target / profile / ("tor-scenario.exe" if os.name == "nt" else "tor-scenario"))
+    prerequisite = ci_example_prerequisites.stage(lane['test_ids'], profile)
+    require(not tooling or prerequisite is None, 'tooling lane contains a compiled example owner')
+    if prerequisite:
+        steps.append(prerequisite)
     steps.append(("python-selected", command, environment))
     return steps
 
 
-def required_stages(lane):
+def required_stages(lane, test_ids=()):
     """Independent ordered role contract, never derived from uploaded receipts."""
-    return {
+    stages = {
         "linux-debug-rust": ["fmt", "clippy", "simulation-isolated", "architecture", "rustdoc", "rust-debug", "publish-applications"],
         "linux-debug-build": ["publish-applications"],
         "linux-tooling": ["python-selected"],
@@ -105,6 +110,12 @@ def required_stages(lane):
         "linux-release-python": ["build-applications", "release-sentinels", "python-selected"],
         "linux-3d-consumer": ["consumer-check", "consumer-model"],
     }[lane]
+    if 'python-selected' in stages:
+        prerequisite = ci_example_prerequisites.stage(test_ids, 'release' if lane == 'linux-release-python' else 'debug')
+        require(not lane.endswith('-tooling') or prerequisite is None, 'tooling lane contains a compiled example owner')
+        if prerequisite:
+            stages.insert(stages.index('python-selected'), prerequisite[0])
+    return stages
 
 
 def binding(path):
@@ -168,7 +179,7 @@ def validate_receipts(plan, receipts):
                 and row.get("run_id") == os.environ.get("GITHUB_RUN_ID", "")
                 and row.get("run_attempt") == os.environ.get("GITHUB_RUN_ATTEMPT", ""), "stale, failed or nonselected evidence")
         require(row.get("test_ids") == expected[row["lane"]]["test_ids"], "lane test identities differ")
-        require(row.get("steps") and [step.get("step") for step in row["steps"]] == required_stages(row["lane"])
+        require(row.get("steps") and [step.get("step") for step in row["steps"]] == required_stages(row["lane"], expected[row["lane"]]["test_ids"])
                 and all(type(step.get("code")) is int and step["code"] == 0 for step in row["steps"]),
                 "missing, extra or failed canonical lane stage")
         if row["lane"] in ("linux-tooling", "windows-tooling"):
@@ -220,7 +231,7 @@ def run(plan, lane_id, directory, binary_artifact=None, produce_binaries=None):
         require(lane_id in ("linux-debug-rust", "linux-debug-build") and binary_artifact is None, "only deterministic build owner may publish applications")
         steps.append(("publish-applications", [sys.executable, str(ROOT / "scripts/ci_binary_artifact.py"),
                       "build", "--profile", "debug", "--output", str(produce_binaries.resolve())], {}))
-    require([name for name, _, _ in steps] == required_stages(lane_id), "execution plan lacks a required role")
+    require([name for name, _, _ in steps] == required_stages(lane_id, lane["test_ids"]), "execution plan lacks a required role")
     results = []
     failure = None
     with verify.Lock(ROOT / ".local/verify.lock"):

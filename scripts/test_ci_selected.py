@@ -45,6 +45,79 @@ class SelectedTests(unittest.TestCase):
         self.assertIn("fixture_contract::", commands["simulation-isolated"])
         self.assertNotIn("--release", commands["rust-debug"])
 
+    def test_selected_physics_build_is_an_explicit_pre_worker_prerequisite(self):
+        lane = {"id": "linux-debug-python", "profile": "debug", "partition": "python", "test_ids": [
+            "physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume"]}
+        steps = selected.steps_for(lane, Path("/logs"), 2, Path("/verified-apps"))
+        self.assertEqual([name for name, _, _ in steps], ["build-examples-debug", "python-selected"])
+        self.assertEqual(steps[0][1], ['cargo', 'build', '-p', 'tor-server', '--locked', '--example', 'physics_bench'])
+        self.assertEqual(steps[0][2], {})
+
+    def test_example_prerequisites_have_exact_owner_subset_and_profile(self):
+        import ci_example_prerequisites as examples
+        prefix = 'test_performance_process.PerformanceProcesses.'
+        small = prefix + 'test_small_maintained_producers_emit_complete_valid_reports'
+        streaming = prefix + 'test_streaming_benchmark_emits_valid_nested_acquisition_profiles'
+        physics = 'physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume'
+        self.assertIsNone(examples.stage(['test_verify.Plans.test_full'], 'debug'))
+        self.assertEqual(examples.stage([streaming], 'release'), ('build-examples-release',
+                         ['cargo', 'build', '-p', 'tor-server', '--locked', '--example', 'latency_bench', '--release'], {}))
+        command = examples.stage([small, small], 'debug')[1]
+        self.assertEqual(command[5:], ['--example', 'combat_bench', '--example', 'horizon-profile',
+                                      '--example', 'item_bench', '--example', 'place_bench', '--example', 'scenario_bench'])
+        self.assertEqual(selected.required_stages('linux-debug-python', [physics]),
+                         ['validate-applications', 'build-examples-debug', 'python-selected'])
+        with self.assertRaises(ValueError): examples.stage([physics], 'relase')
+        with self.assertRaises(ValueError): examples.stage(physics, 'debug')
+        lane = {'id': 'linux-tooling', 'profile': 'debug', 'partition': 'tooling', 'test_ids': [physics]}
+        with self.assertRaisesRegex(ValueError, 'tooling lane'):
+            selected.steps_for(lane, Path('/logs'), 2)
+
+    def test_example_owner_mapping_tracks_actual_benchmark_callers(self):
+        import ast
+        import ci_example_prerequisites as examples
+        owners = set()
+        for module in ('test_performance_process', 'physics_smoke_process'):
+            tree = ast.parse((selected.ROOT / 'scripts' / (module + '.py')).read_text())
+            for cls in (node for node in tree.body if isinstance(node, ast.ClassDef)):
+                for method in (node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name.startswith('test_')):
+                    calls = [node for node in ast.walk(method) if isinstance(node, ast.Call)]
+                    if any((isinstance(node.func, ast.Name) and node.func.id == 'benchmark') or
+                           (isinstance(node.func, ast.Attribute) and node.func.attr == 'benchmark') for node in calls):
+                        identity = f'{module}.{cls.name}.{method.name}'
+                        owners.add(identity)
+                        names = {node.value for node in ast.walk(method)
+                                 if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                                 and (node.value.endswith('_bench') or node.value == 'horizon-profile')}
+                        self.assertEqual(set(examples.OWNERS.get(identity, ())), names, identity)
+        self.assertEqual(set(examples.OWNERS), owners)
+        names = examples.stage(sorted(owners), 'debug')[1][6::2]
+        self.assertEqual(names, ['combat_bench', 'horizon-profile', 'item_bench', 'latency_bench',
+                                 'physics_bench', 'place_bench', 'rogue_bench', 'scenario_bench'])
+
+    def test_selected_receipts_reject_missing_extra_and_reordered_example_stages(self):
+        physics = 'physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume'
+        plan = {'mode': 'selected', 'policy_version': planner.POLICY_VERSION, 'source_sha': 'a' * 40,
+                'source_tree': 'b' * 40, 'lanes': [{'id': 'windows-debug-python', 'test_ids': [physics]}]}
+        row = {'policy_version': planner.POLICY_VERSION, 'assurance': 'selected-pr-contracts',
+               'source_sha': plan['source_sha'], 'source_tree': plan['source_tree'],
+               'plan_sha256': planner.digest(plan), 'run_id': os.environ.get('GITHUB_RUN_ID', ''),
+               'run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT', ''), 'lane': 'windows-debug-python',
+               'evidence_origin': 'fresh', 'passed': True, 'test_ids': [physics],
+               'steps': [{'step': name, 'code': 0} for name in
+                         ['build-applications', 'platform-codecs', 'build-examples-debug', 'python-selected']]}
+        selected.validate_receipts(plan, [row])
+        for names in (['build-applications', 'platform-codecs', 'python-selected'],
+                      ['build-applications', 'platform-codecs', 'build-examples-release', 'python-selected'],
+                      ['build-applications', 'platform-codecs', 'python-selected', 'build-examples-debug'],
+                      ['build-applications', 'platform-codecs', 'build-examples-debug', 'build-examples-debug', 'python-selected']):
+            with self.subTest(names=names), self.assertRaisesRegex(ValueError, 'canonical lane stage'):
+                selected.validate_receipts(plan, [dict(row, steps=[{'step': name, 'code': 0} for name in names])])
+        broken = copy.deepcopy(row)
+        broken['steps'][2]['code'] = 1
+        with self.assertRaisesRegex(ValueError, 'canonical lane stage'):
+            selected.validate_receipts(plan, [broken])
+
     def test_release_has_real_optimized_correctness_and_explicit_selected_ids(self):
         lane = {"id": "linux-release-python", "profile": "release", "partition": "python",
                 "test_ids": ["test_fixture.Case.test_value"]}

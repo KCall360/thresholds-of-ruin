@@ -140,6 +140,65 @@ class BenchmarkProcessSupport(unittest.TestCase):
                 self.assertEqual(Path(calls[1][1]['stdout'].name), case.directory / 'physics_bench.jsonl')
                 self.assertEqual(Path(calls[1][1]['stderr'].name), case.directory / 'physics_bench-stderr.log')
 
+    def test_streaming_caller_uses_emitted_example_outside_application_bundle(self):
+        class ReportBoundary(Exception):
+            pass
+
+        for profile in ('debug', 'release'):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                loader = unittest.TestLoader()
+                case = next(iter(loader.loadTestsFromName(
+                    'test_performance_process.PerformanceProcesses.test_streaming_benchmark_emits_valid_nested_acquisition_profiles')))
+                self.assertFalse(loader.errors, loader.errors)
+                case.directory = root
+                case.bin = root / 'ordinary-app-bundle'
+                case.bin.mkdir()
+                executable = root / 'cargo-target' / profile / 'examples' / ('latency_bench' + SUFFIX)
+                executable.parent.mkdir(parents=True)
+                executable.write_bytes(b'independent emitted-example fixture')
+                self.assertFalse((case.bin / 'examples').exists())
+                args = ['--case', 'stream-r16-durable', '--cycles', '1', '--checkpoint-interval', '64']
+                rows = [{'kind': 'sample', 'actor': 7}]
+                calls = []
+
+                def run(command, **kwargs):
+                    calls.append((command, kwargs))
+                    if command[0] == 'cargo':
+                        kwargs['stdout'].write(json.dumps(self.artifact(executable, name='latency_bench')) + '\n')
+                    else:
+                        self.assertEqual(command, [executable, *args],
+                                         'launch the Cargo example, not the ordinary-app artifact directory')
+                        kwargs['stdout'].write(json.dumps(rows[0]) + '\n')
+
+                # First establish the real helper's independent JSON/path fixture.
+                with patch.dict(os.environ, {'TOR_TEST_PROFILE': profile}), \
+                        patch.object(support.subprocess, 'run', side_effect=run):
+                    self.assertEqual(support.benchmark(case, 'latency_bench', args, 120), rows)
+                self.assertEqual(len(calls), 2)
+                calls.clear()
+
+                def report_boundary(actual_rows, **kwargs):
+                    self.assertEqual(actual_rows, rows)
+                    self.assertEqual(kwargs, {'selected_case': 'stream-r16-durable'})
+                    # This fixture qualifies the launcher, not benchmark report semantics.
+                    raise ReportBoundary
+
+                with patch.dict(os.environ, {'TOR_TEST_PROFILE': profile}), \
+                        patch.object(support.subprocess, 'run', side_effect=run), \
+                        patch('performance_report.validate', side_effect=report_boundary), \
+                        self.assertRaises(ReportBoundary):
+                    case.test_streaming_benchmark_emits_valid_nested_acquisition_profiles()
+                build = ['cargo', 'build', '-p', 'tor-server', '--example', 'latency_bench',
+                         '--locked', '--message-format=json']
+                if profile == 'release':
+                    build.append('--release')
+                self.assertEqual([command for command, _ in calls], [build, [executable, *args]])
+                for index, (_, kwargs) in enumerate(calls):
+                    self.assertEqual(kwargs['timeout'], 600 if index == 0 else 120)
+                    self.assertEqual(kwargs['cwd'], ROOT)
+                    self.assertTrue(kwargs['check'])
+
     def test_launcher_propagates_build_run_and_report_failures(self):
         for failure_at in (1, 2):
             with self.subTest(failure_at=failure_at), tempfile.TemporaryDirectory() as directory:

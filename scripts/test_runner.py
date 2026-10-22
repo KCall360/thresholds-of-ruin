@@ -238,7 +238,8 @@ def main(argv=None):
                     full = [test.id() for test in tests]
                     selected = set(ci_python_shards.selection(full, local.ci_python_shard, profile=profile))
                     shard = ci_python_shards.metadata(full, local.ci_python_shard,
-                        os.environ.get('GITHUB_SHA'), os.environ.get('GITHUB_RUN_ID'), profile=profile)
+                        os.environ.get('GITHUB_SHA'), os.environ.get('GITHUB_RUN_ID'),
+                        os.environ.get('GITHUB_RUN_ATTEMPT'), profile=profile)
                     suite = unittest.TestSuite(test for test in tests if test.id() in selected)
                 if handle is not None:
                     try:

@@ -335,7 +335,7 @@ class CiShardRunnerContract(unittest.TestCase):
             result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=20,
                 env={**{key: value for key, value in os.environ.items() if key != 'PYTHONPATH'},
                      'TOR_TEST_PROFILE': profile, 'TOR_TEST_TIMINGS': str(timings),
-                     'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123'})
+                     'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '3'})
             rows = [json.loads(line) for line in timings.read_text().splitlines()] if timings.exists() else []
             return result, rows
 
@@ -349,6 +349,7 @@ class CiShardRunnerContract(unittest.TestCase):
         self.assertEqual(sorted(completed), sorted(expected))
         for _, rows in results:
             self.assertEqual(sorted(rows[0]['shard']['full_test_ids']), sorted(expected))
+            self.assertEqual(rows[0]['shard']['origin_attempt'], '3')
             self.assertTrue(all(row['profile'] == 'debug' for row in rows))
 
     def test_actual_discovery_dispatch_runs_exactly_one_owner_per_shard(self):

@@ -108,6 +108,28 @@ class Selection(unittest.TestCase):
         self.assertIn("--smoke", actual[0][1])
         self.assertNotIn("cargo", actual[0][1])
 
+    def test_full_example_prerequisites_follow_exact_shard_before_workers(self):
+        import ci_binary_artifact
+        import ci_example_prerequisites as examples
+        ids = sorted(name for name in examples.OWNERS if name.startswith('test_performance_process.'))
+        ids += ['test_floor_activation_process.Other.test_value']
+        for profile in ('debug', 'release'):
+            original = verify.plan('full', set(), [], ci_profile=profile, ci_partition='python')
+            for shard in (1, 2):
+                with self.subTest(profile=profile, shard=shard):
+                    steps = verify.full_example_steps(original, shard, {profile: ids})
+                    builds = [step for step in steps if step[0].startswith('build-examples-')]
+                    self.assertEqual(len(builds), 1 if shard == 1 else 0)
+                    if shard == 1:
+                        self.assertEqual(steps[-2], builds[0])
+                        self.assertEqual(builds[0][1][6:21:2], ['combat_bench', 'horizon-profile', 'item_bench',
+                                         'latency_bench', 'physics_bench', 'place_bench', 'rogue_bench', 'scenario_bench'])
+                        self.assertEqual('--release' in builds[0][1], profile == 'release')
+                        self.assertNotIn('--examples', builds[0][1])
+                    with patch.object(ci_binary_artifact, 'validate', return_value=Path('/verified/bin')):
+                        adapted = verify.ci_binary_steps(steps, Path('/artifact'), profile, 'a' * 40)
+                    self.assertEqual([step for step in adapted if step[0].startswith('build-examples-')], builds)
+
     def test_bad_binary_artifact_never_rebuilds_or_selects_fallback_binaries(self):
         import ci_binary_artifact
         original = verify.plan("full", set(), [], ci_profile="release", ci_partition="python")
@@ -1138,7 +1160,7 @@ class CiPythonShardPlanning(unittest.TestCase):
         def capture(name, command, env, logs, jobs, rerun):
             seen.append(name)
             if name == 'python-debug':
-                self.assertEqual(seen, ['build-process-debug', 'build-tools', 'python-debug'])
+                self.assertEqual(seen, ['build-process-debug', 'build-tools', 'build-examples-debug', 'python-debug'])
                 self.assertEqual(env.get('TOR_TEST_PROFILE'), 'debug')
                 self.assertIn('--ci-python-shard', command)
                 self.assertIn('test_*.py', command)
@@ -1203,7 +1225,7 @@ class CiPythonShardPlanning(unittest.TestCase):
         self.assertIn('ref: ${{ github.sha }}', gate)
         for profile in ('debug', 'release'):
             for index in (1, 2):
-                self.assertIn(f'--name verification-windows-latest-{profile}-python-shard-{index}-attempt-${{{{ github.run_attempt }}}} --dir .local/shard-coverage/{profile}/{index}', gate)
+                self.assertIn(f'--name verification-windows-latest-{profile}-python-shard-{index}-attempt-${{{{ steps.windows_cohort.outputs.origin_attempt }}}} --dir .local/shard-coverage/{profile}/{index}', gate)
         self.assertIn('--profile debug --directory .local/shard-coverage/debug', gate)
         self.assertIn('--directory .local/shard-coverage/release', gate)
         self.assertIn('--source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"', gate)

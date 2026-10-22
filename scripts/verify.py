@@ -35,6 +35,7 @@ import time
 
 import graphical_waiver
 import ci_observation
+import ci_example_prerequisites
 import parallel_tests
 from ci_scope import RUST_DOCUMENTATION_INPUTS
 
@@ -49,6 +50,8 @@ CI_STAGE_PARTITIONS = {
     "clippy": "rust",
     "simulation-isolated": "rust",
     "build-tools": "python",
+    "build-examples-debug": "python",
+    "build-examples-release": "python",
     "python-debug": "python",
     "architecture": "rust",
     "rustdoc": "rust",
@@ -306,6 +309,24 @@ def ci_partition_steps(steps, profile, partition):
             command.append("--release")
         selected.insert(0, (f"build-process-{profile}", command, {}))
     return selected
+
+
+def full_example_steps(steps, shard=None, inventories=None):
+    """Schedule only discovered example owners before their worker stage."""
+    import ci_python_shards
+    result = []
+    for name, command, env in steps:
+        if name in ('python-debug', 'process-release'):
+            profile = 'debug' if name == 'python-debug' else 'release'
+            ids = (ci_python_shards.discover_inventory(profile=profile) if inventories is None
+                   else inventories[profile])
+            if shard is not None:
+                ids = ci_python_shards.selection(ids, shard, profile=profile)
+            prerequisite = ci_example_prerequisites.stage(ids, profile)
+            if prerequisite:
+                result.append(prerequisite)
+        result.append((name, command, env))
+    return result
 
 
 def ci_binary_steps(steps, artifact, profile, source_sha):
@@ -765,6 +786,8 @@ def main(argv=None):
         steps = [(name, [*command[:2], "--ci-python-shard", str(args.ci_python_shard), *command[2:]],
                           {**env, "TOR_TEST_PROFILE": "debug"} if name == "python-debug" else env)
                  if name in ("process-release", "python-debug") else (name, command, env) for name, command, env in steps]
+    if args.ci_python_shard is not None:
+        steps = full_example_steps(steps, args.ci_python_shard)
     if args.ci_binaries:
         steps = ci_binary_steps(steps, args.ci_binaries, args.ci_profile, os.environ.get("GITHUB_SHA", ""))
     priority = changed_test_modules(paths)

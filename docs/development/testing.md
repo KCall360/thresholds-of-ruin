@@ -544,6 +544,19 @@ cannot accept an artifact from an earlier attempt: rerun the producer and its
 dependent consumers together rather than relaxing those identity checks.
 Mismatch diagnostics name only fixed, reviewed context fields.
 
+An unrelated **full-mode** job retry may retain the already-successful Windows
+execution cohort from the same workflow run and source. The aggregate requires
+successful producer and shard matrix results plus six unique, success-only role
+outputs (two producers and four shards), all naming one positive origin attempt
+no later than the current attempt. It downloads only that exact cohort and checks
+source/run/origin identity, complete fresh execution receipts and the independently
+discovered current test inventory. Missing or mixed outputs or missing/invalid
+evidence fail closed; there is no artifact search or older-cohort fallback. The
+result records the original execution attempt separately from the aggregation
+attempt, not a new execution claim. Selected-mode receipts do not use this path.
+A newly rerun consumer still needs binaries from its own attempt; rerun the whole
+producer/consumer cohort when necessary rather than mixing attempts.
+
 CI consumers require `validate --smoke` before application tests. It exercises
 five binaries' actual `--help` entry paths plus
 `tor-scenario check scenarios/two-room`, comparing its result with the checked-in
@@ -666,6 +679,18 @@ same-attempt producer artifact instead. Only those application build stages are
 replaced, never test execution; corrupt/mismatched/missing artifacts fail rather
 than fall back to a guessed executable. The dedicated local/full debug compiler
 prerequisite remains when no qualified artifact supplies it.
+
+Ordinary application artifacts deliberately exclude benchmark examples. Full
+Windows shards and selected assurance lanes use a separate, profile-specific
+locked build phase for the examples required by their independently selected
+test IDs, before Python workers start.
+Full Windows shard 1 currently needs the eight maintained examples; selected
+lanes build only their actual owners' subset, and tooling-only lanes build none.
+The phase is required in the plan and receipt, runs without competing test-worker
+builds, and stays within the existing job budget. Each owner's original build
+check still runs (normally a no-op), resolves Cargo's reported executable, and
+retains all runtime limits and report assertions. Binary transport does not make
+this compilation cost disappear or qualify benchmark execution by itself.
 
 Service contracts belong to the Rust partitions: their wrapper uses the exact
 host executable emitted by the successful Cargo test command. Python partitions'
@@ -1493,10 +1518,12 @@ This uses the same trust in reviewed CI/test code as a normal full run, not stro
 attestation. Completeness is not full-matrix qualification or permission to reuse
 or skip work, and prose-only results never become full-run evidence.
 
-### Why CI does not reuse passing results
+### Why CI does not adopt passes from other runs
 
 Premerge, corrective-head and main runs execute every lane of their own canonical
-plan freshly. The previous exact-tree and expectation-only pass-adoption tools,
+plan freshly. The same-run full Windows retry cohort described above is retained
+execution, not cross-head/cross-run adoption or a fresh test claim. The previous
+exact-tree and expectation-only pass-adoption tools,
 registries and implementation-only tests are removed; Git history preserves them.
 The removal is not authority to delete gameplay coverage, fresh-gate assertions,
 receipt completeness or unique process/native/durability witnesses.
@@ -1528,8 +1555,10 @@ qualification.
 
 CI's shared key includes an explicit root-manifest hash, profile, partition and
 the build recipe produced by [`scripts/ci_build_key.py`](../../scripts/ci_build_key.py).
-The recipe uses the existing verifier plan and Service host's Cargo command
-builder, preserving actual Cargo arguments and verifier environment overrides.
+The recipe is a shared profile envelope, not the exact execution of each shard.
+It uses the existing verifier plan and Service host's Cargo command builder,
+and includes the canonical maintained-example prerequisite for Python partitions,
+preserving Cargo arguments and verifier environment overrides.
 It normalizes only the checkout prefix and recognized Python launcher identity;
 it does not hash complete workflow/verifier files. Reporting-only and logging
 edits therefore need not discard dependency caches. The pinned action still adds
