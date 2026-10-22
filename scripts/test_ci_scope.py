@@ -20,19 +20,20 @@ def job(name):
     return re.search(r'^  ' + name + r':\n(.*?)(?=^  \w|\Z)', workflow, re.M | re.S)[1]
 
 
-def job_condition(name, scope_result, docs_only, *, cancelled=False, event="push", measure=False):
+def job_condition(name, scope_result, docs_only, *, cancelled=False, event="push", measure=False, assurance="full"):
     """Evaluate only the checked-in scope conditions' small expression vocabulary."""
     expression = re.search(r'^    if: (.+)$', job(name), re.M)[1].strip()
     if expression.startswith('${{') and expression.endswith('}}'):
         expression = expression[3:-2].strip()
-    tokens = re.findall(r"'[^']*'|[A-Za-z_.]+(?:\(\))?|&&|==|[!()]|\S", expression)
+    tokens = re.findall(r"'[^']*'|[A-Za-z_.]+(?:\(\))?|&&|!=|==|[!()]|\S", expression)
     values = {
+        'needs.scope.outputs.mode': repr(assurance),
         'needs.scope.result': repr(scope_result), 'needs.scope.outputs.docs_only': repr(docs_only),
         'always()': 'True', 'cancelled()': repr(cancelled),
         'github.event_name': repr(event), 'inputs.measure_windows_candidate': repr(measure),
         "'workflow_dispatch'": "'workflow_dispatch'",
-        "'success'": "'success'", "'true'": "'true'",
-        '&&': 'and', '==': '==', '!': 'not', '(': '(', ')': ')',
+        "'success'": "'success'", "'true'": "'true'", "'selected'": "'selected'",
+        '&&': 'and', '!=': '!=', '==': '==', '!': 'not', '(': '(', ')': ')',
     }
     # Unknown tokens fail rather than silently acquiring different semantics.
     translated = ' '.join(values[token] for token in tokens)
@@ -59,21 +60,16 @@ class WorkflowScopeContract(unittest.TestCase):
                     self.assertTrue(job_condition(name, scope, mode), 'Live runs still need the full path')
                     self.assertFalse(job_condition(name, scope, mode, cancelled=True))
 
-    def test_unsupported_combined_measurement_never_launches_expensive_jobs(self):
+    def test_retired_measurement_cannot_disable_manual_full_jobs(self):
+        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        self.assertNotIn('measure_windows_candidate', workflow)
         for name in ('dependencies', 'profiles'):
-            for scope in ('success', 'failure', 'cancelled', 'skipped', '', 'unknown'):
-                for mode in ('true', 'false', '', 'unknown'):
-                    for event in ('workflow_dispatch', 'push', 'pull_request', 'schedule'):
-                        for requested in (False, True):
-                            with self.subTest(job=name, scope=scope, mode=mode, event=event, requested=requested):
-                                expected = not (event == 'workflow_dispatch' and requested) and not (scope == 'success' and mode == 'true')
-                                self.assertEqual(job_condition(name, scope, mode, event=event, measure=requested), expected)
-                                self.assertFalse(job_condition(name, scope, mode, event=event, measure=requested, cancelled=True))
+            self.assertTrue(job_condition(name, 'success', 'false', event='workflow_dispatch'))
 
     def test_existing_aggregate_checks_intentional_skip_and_failures(self):
         body = job('check')
         self.assertIn('name: Rust (${{ matrix.os }})', body)
-        self.assertIn('needs: [scope, tooling, profiles, dependencies]', body)
+        self.assertIn('needs: [scope, tooling, profiles, windows_python, windows_binaries, dependencies, selected_rust, selected_linux, selected_windows, selected_release, selected_consumer]', body)
         self.assertIn('if: always()', body)
         match = re.search(r"python - <<'PY'\n(.*?)\n          PY", body, re.S)
         self.assertIsNotNone(match, 'The required aggregate needs an explicit scope-aware gate')
@@ -87,7 +83,10 @@ class WorkflowScopeContract(unittest.TestCase):
                                 mode == 'true' and profiles == dependencies == 'skipped'
                                 or mode == 'false' and profiles == dependencies == 'success')
                             environment = dict(DOCS_ONLY=mode, SCOPE_RESULT=scope, TOOLING_RESULT=tooling,
-                                               PROFILES_RESULT=profiles, DEPENDENCIES_RESULT=dependencies)
+                                               PROFILES_RESULT=profiles, DEPENDENCIES_RESULT=dependencies,
+                                               WINDOWS_PYTHON_RESULT=profiles, WINDOWS_BINARIES_RESULT=profiles, ASSURANCE_MODE='full', CONSUMER_REQUIRED='true', APPLICATIONS_REQUIRED='false',
+                                               SELECTED_RUST='skipped', SELECTED_LINUX='skipped', SELECTED_WINDOWS='skipped',
+                                               SELECTED_RELEASE='skipped', SELECTED_CONSUMER='skipped' if mode == 'true' else 'success')
                             with self.subTest(**environment), patch.dict(os.environ, environment), redirect_stdout(io.StringIO()):
                                 try:
                                     exec(compile(program, '<workflow aggregate>', 'exec'), {})
@@ -96,6 +95,55 @@ class WorkflowScopeContract(unittest.TestCase):
                                 else:
                                     passed = True
                                 self.assertEqual(passed, expected)
+
+    def test_full_gate_requires_fresh_consumer_even_after_full_profiles_pass(self):
+        body = job('check')
+        match = re.search(r"python - <<'PY'\n(.*?)\n          PY", body, re.S)
+        program = '\n'.join(line[10:] for line in match[1].splitlines())
+        valid = dict(DOCS_ONLY='false', SCOPE_RESULT='success', TOOLING_RESULT='success',
+                     PROFILES_RESULT='success', WINDOWS_PYTHON_RESULT='success', WINDOWS_BINARIES_RESULT='success',
+                     DEPENDENCIES_RESULT='success', ASSURANCE_MODE='full', CONSUMER_REQUIRED='true',
+                     SELECTED_RUST='skipped', SELECTED_LINUX='skipped', SELECTED_WINDOWS='skipped',
+                     SELECTED_RELEASE='skipped', SELECTED_CONSUMER='success')
+        for status in ('success', 'failure', 'cancelled', 'skipped', ''):
+            with patch.dict(os.environ, {**valid, 'SELECTED_CONSUMER': status}), self.assertRaises(SystemExit) as outcome:
+                exec(compile(program, '<full consumer aggregate>', 'exec'), {})
+            self.assertEqual(outcome.exception.code == 0, status == 'success')
+        consumer = job('selected_consumer')
+        condition = re.search(r'^    if: (.+)$', consumer, re.M)[1]
+        self.assertNotIn("mode == 'selected'", condition)
+        self.assertIn("docs_only == 'false'", condition)
+        self.assertIn("consumer_3d == 'true'", condition)
+        self.assertIn('cargo check --manifest-path crates/client-3d/Cargo.toml --bin tor-client-3d --locked', consumer)
+        self.assertIn('cargo test --manifest-path crates/client-3d/Cargo.toml -p tor-client-3d-model --locked', consumer)
+        self.assertIn("shell: bash", consumer)
+
+    def test_selected_policy_skips_only_full_profiles_not_dependencies(self):
+        self.assertFalse(job_condition('profiles', 'success', 'false', assurance='selected'))
+        self.assertTrue(job_condition('dependencies', 'success', 'false', assurance='selected'))
+        for mode in ('', 'unknown'):
+            self.assertTrue(job_condition('profiles', 'success', 'false', assurance=mode))
+
+    def test_selected_and_tooling_aggregates_reject_missing_or_unexpected_jobs(self):
+        body = job('check')
+        match = re.search(r"python - <<'PY'\n(.*?)\n          PY", body, re.S)
+        program = '\n'.join(line[10:] for line in match[1].splitlines())
+        for apps, consumer in ((False, False), (True, False), (True, True)):
+            valid = dict(DOCS_ONLY='false', SCOPE_RESULT='success', TOOLING_RESULT='success', PROFILES_RESULT='skipped',
+                         WINDOWS_PYTHON_RESULT='skipped', WINDOWS_BINARIES_RESULT='skipped', DEPENDENCIES_RESULT='success', ASSURANCE_MODE='selected', CONSUMER_REQUIRED=str(consumer).lower(),
+                         APPLICATIONS_REQUIRED=str(apps).lower(), SELECTED_RUST='success' if apps else 'skipped',
+                         SELECTED_LINUX='success', SELECTED_WINDOWS='success', SELECTED_RELEASE='success' if apps else 'skipped',
+                         SELECTED_CONSUMER='success' if consumer else 'skipped')
+            variants = [(valid, True)]
+            for key in ('SCOPE_RESULT', 'TOOLING_RESULT', 'PROFILES_RESULT', 'DEPENDENCIES_RESULT', 'WINDOWS_PYTHON_RESULT', 'WINDOWS_BINARIES_RESULT',
+                        'SELECTED_RUST', 'SELECTED_LINUX', 'SELECTED_WINDOWS', 'SELECTED_RELEASE', 'SELECTED_CONSUMER'):
+                for status in ('success', 'failure', 'cancelled', 'skipped'):
+                    if status != valid[key]:
+                        variants.append(({**valid, key: status}, False))
+            for environment, expected in variants:
+                with self.subTest(**environment), patch.dict(os.environ, environment), self.assertRaises(SystemExit) as outcome:
+                    exec(compile(program, '<selected aggregate>', 'exec'), {})
+                self.assertEqual(outcome.exception.code == 0, expected)
 
 
 class GitScopeContract(unittest.TestCase):

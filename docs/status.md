@@ -167,8 +167,10 @@ against the production Service. Focused feedback does not qualify quick, push,
 full or CI, and Service contracts do not replace unique real transport, client
 or persistence witnesses. The conservative
 [prose-only documentation path](development/testing.md#prose-only-documentation-changes)
-runs documentation/link and tooling checks; executable documentation inputs and
-every non-prose change retain full Windows/Linux debug/release CI.
+runs documentation/link and tooling checks. Non-prose changes use the
+[risk-based CI plan](development/testing.md#risk-based-ci-assurance): selected
+contract assurance or exhaustive Windows/Linux debug/release qualification.
+Weekly scheduled, on-demand and release full runs retain deferred exhaustive coverage.
 
 Creature state now has a shared permanent compilation beneath its effective
 sheet. Equipment, conditions and restorable losses reuse exact per-HD Health
@@ -464,8 +466,8 @@ catalog integration, Service and ordinary-process witnesses cover these contract
 The process fixture uses a labeled durable victim, harmless natural provocation
 and strengthened equipped recovery damage; production L/N/O builds and AI are
 unchanged. This proves ownership, disclosure and recoverability, not pursuit or
-survival balance. Complete Windows/Linux debug/release CI remains required before
-merge.
+survival balance. Focused evidence does not replace the current
+[required CI assurance gate](development/testing.md#risk-based-ci-assurance).
 
 The M/P/X cohort adds Medusa's eight monstrous-humanoid/reptilian
 HD with GZ1(1), NA1(2), NA2(4), Presence-bound Spellcasting and 3d4/3d4/2d5
@@ -484,7 +486,8 @@ synthetic room geometry, external foe control and a durable living observer;
 it establishes mechanisms, not autonomous pursuit or survival balance.
 Current scenario certificates, save fixtures and actual wire recordings are
 regenerated, including the separate 3D menagerie certificate. These focused
-checks do not replace complete Windows/Linux debug/release CI before merge.
+checks do not replace the current
+[required CI assurance gate](development/testing.md#risk-based-ci-assurance).
 
 ## Important limitations
 

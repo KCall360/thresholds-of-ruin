@@ -9,14 +9,38 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+import parallel_tests
 import perf_compare
 import performance_process_support as support
 import physics_smoke_process
 from physics_performance_report import CASES
-from process_harness import ROOT, SUFFIX
+from process_harness import ROOT, SUFFIX, ProcessTestCase
 
 
 class PhysicsSmokeSelection(unittest.TestCase):
+    def test_parser_coverage_uses_existing_server_test_target(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github/workflows/ci.yml').read_text()
+        self.assertNotIn('cargo test -p tor-server --example physics_bench', workflow)
+        self.assertIn('python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}', workflow)
+        support = root / 'crates/server/example_support/physics_options.rs'
+        library = (root / 'crates/server/src/lib.rs').read_text()
+        example = (root / 'crates/server/examples/physics_bench.rs').read_text()
+        self.assertIn('#[cfg(test)]\n#[path = "../example_support/physics_options.rs"]\nmod physics_options;', library)
+        self.assertIn('#[path = "../example_support/physics_options.rs"]\nmod physics_options;', example)
+        self.assertEqual(support.read_text().count('#[test]'), 3)
+
+    def test_existing_runner_loads_and_schedules_supplemental_process_without_native_lane(self):
+        loader = unittest.TestLoader()
+        tests = list(parallel_tests.flatten(loader.loadTestsFromName('physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume')))
+        self.assertFalse(loader.errors, loader.errors)
+        self.assertEqual([test.id() for test in tests], ['physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume'])
+        self.assertIsInstance(tests[0], ProcessTestCase)
+        self.assertTrue(parallel_tests.has_own_fixture(type(tests[0])))
+        headless, native = parallel_tests.plan(tests, {}, workers=2)
+        self.assertEqual(native, [])
+        self.assertEqual([name for batch in headless for name in batch.ids], ['physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume'])
+
     def rows(self, *, smoke):
         return [dict(workload='physics', version=1, actors=a, items=i, cells=c, falling=f,
                      sample=s, command_ms=[1.]*(a*8), client_apply_ms=[.1]*(a*8),

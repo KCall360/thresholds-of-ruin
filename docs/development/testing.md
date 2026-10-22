@@ -1,14 +1,16 @@
 # Testing and verification policy
 
-Testing is a core part of every change in this repository. A feature, fix, or
-refactor is not complete until its changed contracts and affected boundaries are
-covered and the full Windows/Linux debug/release CI matrix passes. This page is the
-authoritative statement of that policy. [Development practices](../../CONTRIBUTING.md)
-cover the rest of the contribution workflow.
+A change is complete when its changed contracts have independent coverage and
+its canonical CI assurance gate passes. This page is the authoritative policy;
+[development practices](../../CONTRIBUTING.md) covers the rest of contribution.
 
-The narrow [prose-only documentation path](#prose-only-documentation-changes)
-uses documentation/link and tooling checks instead of application builds/tests.
-All other changes retain the full gates below; uncertain scope selects full.
+CI distinguishes **prose-only**, **selected-contract**, and **exhaustive** results.
+The [risk-based gate](#risk-based-ci-assurance) selects required owners from
+complete change evidence; uncertain scope or ownership escalates rather than
+silently dropping coverage. Exhaustive Windows/Linux debug/release verification
+remains available and required on its full cadence and explicit risk triggers.
+A selected result is not a full-matrix pass. The narrow
+[prose-only documentation path](#prose-only-documentation-changes) remains unchanged.
 
 Start with [development setup](setup.md): Rust components, the pinned
 Python environment, a graphical desktop and a local Git comparison base are
@@ -18,6 +20,9 @@ pre-push gate. The tier does not substitute for the test-writing obligations bel
 ## Find the requirement
 
 - [Running checks](#running-the-checks): focused/quick/push/full and CI gates
+- [Risk-based CI assurance](#risk-based-ci-assurance): selection, escalation and failure feedback
+- [Test objectives](test-objectives.md): independent owners and retained extended witnesses
+- [CI cost baseline](ci-cost-baseline.md): measured cost and honest comparisons
 - [Evidence reuse](#verification-evidence-and-reuse): when an unchanged run counts
 - [Exact local mouse exception](#focused-iteration-and-local-mouse-exception): one opt-in local waiver, never a CI waiver
 - [Required layers](#required-test-layers): unit through real-process acceptance
@@ -38,10 +43,14 @@ pre-push gate. The tier does not substitute for the test-writing obligations bel
 4. **Every bug gets a regression test.** The test must fail before the fix and
    pass after it. Keep its coverage permanently; a replacement must satisfy the
    [contract ownership](#contract-ownership) requirements.
-5. **Windows and Linux are both first-class.** Windows is the primary platform;
-   Linux is tested continuously. A change isn't done until CI passes on both.
-6. **Debug and release both run.** Optimized builds can expose timing and
-   ordering problems that debug builds hide. The debug (`dev`) profile keeps
+5. **Windows and Linux are both first-class.** Windows is the primary platform.
+   Selected CI retains genuine platform witnesses and affected owners; exhaustive
+   cadence retains both complete platforms. Neither a Linux-only result nor a
+   missing display silently qualifies a Windows/native contract.
+6. **Profiles are distinct evidence.** Optimized builds can expose timing and
+   ordering problems debug builds hide. Selected CI retains a release sentinel
+   and affected release owners; full cadence covers both complete profiles.
+   The debug (`dev`) profile keeps
    debug assertions and overflow checks but is lightly optimized
    (`opt-level = 1`, dependencies at 2; see `Cargo.toml`), which roughly halves
    the simulation-heavy process tests for about half a minute more per
@@ -112,8 +121,10 @@ Keep regression coverage permanently, rather than requiring duplicate assertions
 at every layer. Moving or removing a test requires reviewed assertion parity,
 demonstrated bug detection and preservation of every unique boundary witness.
 Matching names, passing counts or a faster run do not establish equivalence.
-This policy does not authorize skipping tests, deferring detection, or reducing
-the full CI matrix.
+Moving assertions and changing execution cadence are separate decisions. The
+[risk-based gate](#risk-based-ci-assurance) explicitly defers unrelated exhaustive
+execution, but never grants permission to delete unique coverage or claim that a
+smaller witness proves a boundary it does not exercise.
 
 ### Acceptance tests with real applications
 
@@ -325,11 +336,14 @@ When you find or fix a bug:
 
 ## Independent 3D client
 
-`crates/client-3d` is an optional, independently maintained workspace. The core
-verifier and dependency graph deliberately exclude it. Changes to core gameplay,
-protocol or other clients do not run 3D checks or require a simultaneous 3D update.
-This is a maintenance boundary, not a waiver of contract coverage for changes
-to the 3D client itself.
+`crates/client-3d` is an optional, independently maintained workspace with its
+own full verifier. Core gameplay, protocol or other-client changes do not by
+themselves trigger its full native/render matrix or require a simultaneous 3D
+update. The risk-based core plan does add a lightweight Linux consumer lane for
+affected shared protocol/client-common contracts: the actual 3D application must
+compile and its model tests must pass. Conservative full plans also run this
+compatibility lane. That check is not graphical or visual qualification. The maintenance boundary never waives contract coverage
+for changes to the 3D client itself.
 
 When maintaining that client, run both profiles explicitly from the repository
 root:
@@ -345,8 +359,10 @@ it prints. It checks tooling, the authored
 showcase, formatting, lint, architecture, renderer/model contracts and actual
 native process acceptance using matching backend binaries. Source changes during
 a run invalidate its receipt. Its dedicated workflow runs Windows/Linux debug
-and release jobs only for its own subtree, its workflow, or a manual dispatch.
-Core checks remain required when a change also touches core files.
+and release jobs for its own non-scenario subtree, its workflow, or a manual
+dispatch. Scenario-only refreshes use core scenario validation instead; mixed
+client edits still trigger the full client workflow. Core checks remain required
+when a change also touches core files.
 
 Native cases open the actual Bevy window, capture GPU frames and deliver OS input.
 They cover native movement, door toggling, fetching to a disclosed item cell,
@@ -363,11 +379,11 @@ See the [3D guide](../../crates/client-3d/README.md) and
 - **CI:** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs the
   build and test checks on `windows-latest` and `ubuntu-latest`, and the
   platform-independent tooling and dependency checks once on `ubuntu-latest`.
-  All of them must pass before a PR is merged, except the dependency-advisory
-  check, which only warns on PRs so a newly published advisory doesn't block
-  unrelated work. CI also runs weekly on `main`,
-  so new advisories and stable-toolchain changes surface without waiting for
-  an unrelated PR.
+  Both required platform aggregates validate the canonical selected/full plan
+  before merge. Dependency advisories remain warning-only on PRs, so a newly
+  published advisory does not block unrelated work; their main/full-cadence policy
+  remains strict. Fresh weekly scheduled exhaustive runs surface regressions, advisories
+  and toolchain changes without waiting for an affected PR.
 - **Graphical tests require a display.** Linux CI installs X11 libraries,
   Xvfb, xauth, and xdotool and runs the Python suites under
   `xvfb-run -a -s "-screen 0 1280x1024x24"`. Windows uses its native desktop.
@@ -388,7 +404,7 @@ See the [3D guide](../../crates/client-3d/README.md) and
 [contract ownership](#contract-ownership), feature acceptance and regression
 coverage still apply. A tier can only run tests that exist; missing coverage
 leaves a change incomplete, however green the tiers look. Tiered runs save time
-while the complete suite remains required in CI.
+while the complete suite remains maintained and required by exhaustive cadence.
 
 [`scripts/verify.py`](../../scripts/verify.py) runs these checks in tiers. It
 writes each step's log to the gitignored local directory, checks exit codes, and prints a compact
@@ -401,9 +417,164 @@ without a duplicate run on unchanged inputs:
 | --- | --- | --- | --- |
 | Focused checks | During edits and at completed behavior checkpoints | Failing behavior/regression and affected unit tests during edits; affected integration, Service contracts and actual-process scenarios when the behavior is complete, repeated after changes affecting it | Establish a failing reproduction first and give fast feedback while retaining complete coverage before merge |
 | `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the process tests the change touches, plus the smoke set when the change can reach every process test | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
-| `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Everything in `quick`, plus workspace-wide clippy and warning-free API docs | Catches regressions in what the change can reach, and the lint and doc failures CI would reject, in minutes rather than an hour. CI runs the complete suites before merge |
-| `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; both-platform CI is still required before merging |
-| CI | **Required before every merge** | The full matrix on Windows and Linux, plus tooling/dependency checks; verified prose-only changes use the documentation path below | Full CI proves both platforms and profiles; a documentation-only result makes no such claim |
+| `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Everything in `quick`, plus workspace-wide clippy and warning-free API docs | Catches regressions in what the change can reach, and the lint and doc failures CI would reject, in minutes rather than an hour. CI independently selects its required assurance gate |
+| `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; the canonical CI gate is still required before merging |
+| CI | **Required before every merge** | Canonical selected-contract or exhaustive plan, tooling/dependency checks and both platform aggregates; verified prose-only changes use the documentation path below | Report the actual assurance mode; only an exhaustive result proves the complete matrix |
+
+### Risk-based CI assurance
+
+The objective is faster useful failure feedback and lower total execution cost,
+not fewer assertions or a target test count. The [measured baseline](ci-cost-baseline.md)
+separates compilation, setup, test work, elapsed time and runner-hours. It does not
+establish a speedup for a changed workflow. The
+[contract registry and objective guide](test-objectives.md) explain what each
+boundary proves and which longer campaigns remain unique owners.
+
+The workflow preserves the required `Rust (windows-latest)` and
+`Rust (ubuntu-latest)` aggregate names. Their meaning is **the complete required
+plan passed**, not that every possible profile ran. A missing, failed, cancelled,
+waived, duplicated, stale or incomplete required result cannot become green.
+
+| Assurance | Selection and meaning |
+| --- | --- |
+| Prose-only | The unchanged complete-diff prose classifier plus documentation/tooling checks; no application qualification |
+| Selected-contract | Supported PR and main-push changes with complete Git scope and reviewed ownership; Linux/Windows tooling, plus explicit application/Rust lanes when required, real platform witnesses, release sentinel/affected owners, and any required downstream 3D compatibility |
+| Exhaustive | Full profile/partition matrix on both platforms for weekly scheduled, on-demand, release and required risk escalation; all existing full owners remain discoverable |
+
+Pure tooling changes use Linux and Windows tooling closure without compiling
+unrelated Rust applications. Windows no-build tooling uses digest-bound Python
+startup interception plus a required actual extensionless `cargo -V` probe;
+this covers reviewed Python launch paths, not an OS sandbox or arbitrary native
+or shell descendants. Process/helper changes add an explicit application
+producer and real boundary owners. Semantic Rust/content changes add Linux
+deterministic workspace Rust/Service coverage and affected debug/release process
+boundaries. The registry's explicit `requires_apps` and `requires_rust` decisions
+control these choices; an empty test list is not permission to skip a build or
+claim a missing lane passed. Unknown dependencies still escalate.
+
+The selected plan binds policy version, exact checked-out source/tree, current
+independent discovery, changed paths, contract reasons and required lanes. PR
+scope covers both branch changes from the merge base and the synthetic-merge
+delta; supported main pushes cover the complete before/after range. A caller
+cannot substitute an arbitrary narrow file list. Missing/shallow/ambiguous Git
+history, unsupported events, unknown paths/owners/dependencies, invalid discovery
+or missing fixed witnesses select full coverage or block qualification. New owner
+registrations require review, not an automatic allowlist refresh to turn CI green.
+
+Changes to verification controls, ownership/planning/receipt code, workflow,
+Cargo/toolchain/features or build configuration force exhaustive execution. Other
+reviewed domains expand to their explicit broad/extended owners: topology and
+paid discovery retain full ordinary routes; persisted authority/growth retain
+replay and earned-route owners; transport retains real pressure/recovery owners;
+optimized/performance behavior expands release coverage. Consult the registry
+rather than guessing from file names. A reviewer can require more coverage for a
+new cross-feature contract or uncertain semantic dependency. No override may
+narrow a mandatory plan. This testing-regime rollout itself requires full CI.
+
+Selected execution is a deliberate tradeoff: an unrelated regression outside its
+mapped contracts can be found later by the exhaustive cadence. Fixed smoke is
+not equivalent to the long earned or dark-maze routes, and independent discovery
+proves inventory accounting, not the completeness of assertions. Preserve all
+full tests until a separately reviewed replacement demonstrates assertion parity,
+intended bug detection and every unique process/native/durability boundary.
+
+A release candidate requires exhaustive qualification; do not infer it from a
+selected main run. Manual full verification remains available before publishing
+a release, and release-event CI also uses full mode.
+
+All active selected and exhaustive CI lanes execute fresh tests. The retired
+pass-adoption and corrective-head machinery is removed, not kept as a dormant
+alternate gate; Git history retains the experiment. A binary artifact is reusable
+code, not test evidence. Qualified ordinary
+application builds may be shared between compatible consumers; Service-feature,
+test, benchmark and ordinary application recipes are not interchangeable. Bind
+source, toolchain/target/profile/features, build recipe and executable bytes before
+launch. Missing or mismatched inputs must not silently select an older executable.
+
+#### Explain a local selection
+
+To inspect a proposed affected plan without building or running tests:
+
+```sh
+python scripts/ci_test_plan.py --base origin/main
+```
+
+Use an available, reviewed comparison ref. The explanation includes branch
+changes from its merge base and tracked staged/unstaged changes; untracked source,
+unavailable discovery or uncertain ownership conservatively produces full mode.
+Inspect the reasons, contract IDs and exact lane test IDs rather than only the
+mode. The output is explicitly `local-proposed-plan-not-qualification`: its HEAD
+identity does not certify dirty inputs, it runs no tests, cannot set CI job
+outputs, and never waives local `quick`/`push` or a required full gate.
+
+The optional `--output` chooses a local destination; the default stays in the
+gitignored verification area. In CI, `python scripts/ci_test_plan.py` derives
+scope from the trusted event and checkout rather than that local base argument.
+[`ci_selected.py`](../../scripts/ci_selected.py) executes each required lane and
+reconciles fresh receipts against a newly computed canonical plan. Use the
+workflow's exact lane commands and environment for qualification; a hand-edited
+JSON plan or a local explanation is not an accepted substitute.
+
+#### Qualified application artifacts
+
+[`ci_binary_artifact.py`](../../scripts/ci_binary_artifact.py) transports ordinary
+application binaries within one reviewed workflow/run/attempt. Its manifest and
+minimal executable archive contain the server, scenario/arena tools, and headless,
+Text and ASCII clients. They do not bundle a Service host, Cargo cache, benchmark
+examples, system runtime libraries, or proof that tests passed.
+
+The producer uses a fixed ordinary-application recipe. Validation binds the clean
+source SHA/tree, Rust/Cargo/native target, profile and fixed flags/features,
+runner OS/architecture/image and workflow identity; it checks exact archive
+membership, regular-file constraints, bounds and per-executable/archive hashes.
+The consumer gets only the validated binary directory. Missing native libraries
+still fail at actual launch; there is no hidden Cargo fallback or substitute
+older executable. The trust boundary is the same-workflow reviewed producer, not
+a signature or independent attestation. The fixed recipe also binds supported
+tracked Cargo configuration; external ancestor/Cargo-home configuration and
+unreviewed compiler/linker overrides are rejected, not silently normalized.
+
+The binding includes the run **attempt** and hosted image. A consumer-only retry
+cannot accept an artifact from an earlier attempt: rerun the producer and its
+dependent consumers together rather than relaxing identity checks. Optional
+`validate --smoke` exercises five binaries' actual `--help` entry paths plus
+`tor-scenario check scenarios/two-room`, comparing its result with the checked-in
+certificate. These noninteractive probes do not prove sockets, graphics or
+gameplay; the selected application tests still own those boundaries.
+
+The required Linux application producer supplies this artifact to Linux debug
+Python; it shares the deterministic Rust owner when that coverage is required.
+Selected Windows debug and Linux release keep their builds co-located. In the
+full matrix, one ordinary application producer per Windows profile serves both
+Python shards; independent Rust jobs do not wait on that producer. Preserve
+Service-feature separation and actual client smoke tests after validation. A
+shared build saves only work it actually replaces: measure build, transfer,
+validation and runtime costs together before claiming an improvement.
+
+#### Failure feedback and escalation
+
+- A failed selected owner blocks its gate. Diagnose the earliest actual contract
+  failure and keep the original result; do not normalize it away with deadlines,
+  retries, stronger fixture actors, changed seeds or weakened assertions.
+- On a scheduled/full failure, identify the responsible contract and whether the
+  earlier selected plan should have included it. Preserve the failing evidence,
+  assign the correction, and do not rely on that affected fast-path mapping until
+  the missing edge/regression is fixed or exhaustive coverage is required for it.
+  This feedback is currently maintainer-enforced: the planner does not query prior
+  scheduled-full health or automatically suspend selected mode. Before merging affected
+  work, the maintainer must resolve the failure or require a fresh exhaustive run
+  covering the affected ownership; a selected pass alone does not clear it. An
+  infrastructure failure is not a behavioral pass or a reason to delete an owner.
+- Add a cheap independent regression where it proves the defect, plus the unique
+  real boundary witness where needed. A setup error is not an intended first-red.
+  Selection defects need positive and negative change/ownership cases as well as
+  exact selected-result accounting; test-count equality alone is insufficient.
+- Recheck the exact final plan after source/control changes. Report selected and
+  deferred coverage, full-cadence failures and local environment limitations.
+  Main's selected pass does not close a separate failing exhaustive run.
+- Compare updated cost only on compatible source/toolchain/runner/cache conditions.
+  Include build/transfer overhead and both latency and runner-hours; timing hints
+  may reorder work, never decide whether an assertion is required.
 
 ### Prose-only documentation changes
 
@@ -411,7 +582,8 @@ The shared predicate in [`scripts/ci_scope.py`](../../scripts/ci_scope.py) allow
 only root `README.md`, `AGENTS.md`, `CONTRIBUTING.md` and Markdown below `docs/`.
 It excludes `docs/reference/protocol.md`: its wire examples are inputs to real
 Rust decoder tests. Code, tests, scripts, workflows, configuration, dependencies,
-assets, executable files, symlinks and unknown paths require the normal full path.
+assets, executable files, symlinks and unknown paths are not prose-only; they
+require the normal risk-based planner or its conservative full fallback.
 Windows-reserved or ambiguous names also select full: prose paths use simple
 lowercase components without spaces or trailing dots, except exact `README.md` files.
 Add any new executable documentation input to the shared exclusion map when introduced.
@@ -433,21 +605,22 @@ both the whole branch from its merge base and the actual synthetic merge delta;
 push classification covers the complete before/after range. Renames are compared
 as deletion plus addition, so renaming code into Markdown cannot hide it. Empty,
 missing, shallow, malformed, oversized or ambiguous evidence selects full CI.
-Manual and weekly scheduled runs always remain full.
+Manual, release and weekly scheduled runs remain exhaustive.
 
 The documentation/link suite and tooling lint still gate prose-only CI. Only a
 successful scope/documentation job may intentionally skip dependency and full
 matrix jobs. The existing required `Rust (windows-latest)` and
 `Rust (ubuntu-latest)` aggregates validate the selected path: they require those
-intentional skips plus successful documentation/tooling checks, or the full
-matrix for every other change. Unexpected skips, cancellation and failures do
+intentional skips plus successful documentation/tooling checks, or successful
+completion of every lane required by the canonical non-prose plan. Unexpected skips, cancellation and failures do
 not become a successful documentation gate. Dependency jobs retain their existing
 full-run advisory/policy rules. A prose-only pass is not full-matrix evidence and
 cannot qualify later application changes or exact-tree full-run reuse.
 
 ### Full CI partitions
 
-CI runs four independent profile jobs on Linux and six on Windows, selected with
+In exhaustive mode, CI runs four independent profile jobs on Linux and six on
+Windows, selected with
 `full --ci-profile debug|release --ci-partition rust|python`:
 
 | Profile | Partition | Complete coverage |
@@ -460,22 +633,27 @@ CI runs four independent profile jobs on Linux and six on Windows, selected with
 Each Windows Python profile uses two isolated jobs with `--ci-python-shard 1|2`.
 Whole test modules (including fixture and native owners) belong to one shard;
 the exact union retains every current profile test, including newly discovered
-modules. Each job builds its own profile applications, retain two headless
-workers plus the serialized native lane, and keep the 40-minute job deadline.
+modules. Each profile has one separate ordinary-application producer whose
+validated artifact serves both Python shards. Each shard retains two headless
+workers, a serialized native lane and the 40-minute job deadline; every selected
+test still executes freshly. Artifact/receipt names include the run attempt.
 The Windows aggregate independently discovers the current full inventory and
 requires both successful, complete, source- and profile-bound receipts for each profile. Missing, cancelled,
 failed or incomplete shards fail the gate. Shards cannot adopt unsharded prior
-results. The full required job inventory is 17 checks.
+results. The workflow is the authoritative full job inventory; selected-mode
+lanes never stand in for a missing full partition.
 
 `--ci-partition` requires both `full` and an explicit `--ci-profile`. Each
 partition selects complete coverage without consulting Git merge history.
 Stages have explicit owners; an unclassified new stage rejects partition
-planning rather than silently omitting coverage. Every command and environment
-in a complete profile runs in exactly one partition. Python partitions also
-explicitly build all workspace application/compiler binaries for their profile
-before discovery. The debug partition retains the dedicated scenario-compiler
-build. These prerequisite builds intentionally overlap the process harness's
-own build check; no test command is replaced or skipped.
+planning rather than silently omitting coverage. Every required test stage and
+environment belongs to its complete partition. Python partitions need explicit
+ordinary application/compiler prerequisites before discovery. Unshared plans
+build them locally; full Windows shards use `--ci-binaries` to validate the
+same-attempt producer artifact instead. Only those application build stages are
+replaced, never test execution; corrupt/mismatched/missing artifacts fail rather
+than fall back to a guessed executable. The dedicated local/full debug compiler
+prerequisite remains when no qualified artifact supplies it.
 
 Service contracts belong to the Rust partitions: their wrapper uses the exact
 host executable emitted by the successful Cargo test command. Python partitions'
@@ -485,31 +663,30 @@ same wrapper when their selected packages include `tor-server`.
 Without `--ci-partition`, each `--ci-profile` selects its complete profile. The
 ordered debug/release union is the local `full` plan. A CI run
 does not certify a local run, and one partition never satisfies the full or
-merge gate. Python/native jobs retain the pinned Python interpreter and native
+exhaustive merge gate. Python/native jobs retain the pinned Python interpreter and native
 Windows or Linux Xvfb display in both profiles. Rust-only jobs need no display,
 but retain the Linux libraries required to compile and link the ASCII crate.
 Profile caches remain separate. Artifacts and verification log directories
 identify their profile and partition. The required `Rust (windows-latest)` and
-`Rust (ubuntu-latest)` checks fail unless every profile/partition on both
-platforms succeeds, including when any constituent is cancelled or skipped,
-except for the explicit prose-only path above.
+`Rust (ubuntu-latest)` checks require every profile/partition on both platforms
+in exhaustive mode. A cancelled or unexpectedly skipped constituent cannot pass;
+selected and prose-only modes have their separately validated plans above.
 
-Whole-job budgets are 60 minutes for Rust and 40 minutes for Python/native.
-With parallel workers and the optimized debug profile,
-[measured CI evidence](https://github.com/KCall360/thresholds-of-ruin/actions/runs/38620000651)
-puts the slowest Python/native job (Windows release) at 23.0 minutes and Windows
-debug at 22.3 minutes, each including setup and builds without a warm dependency
-cache. The 40-minute budget leaves over 70% headroom for cold caches. The
-slowest Rust job (Windows release) measured 31.0 minutes. Scheduling and
-whole-job budgets do not change individual test deadlines. Cancelled, skipped
-or incomplete jobs never satisfy the merge gate, regardless of partially passing
-results. `verify.py` does not run actionlint, ruff or cargo-deny; these remain
-separate required CI jobs, with the advisory-only PR exception documented below.
+Full-job budgets remain 60 minutes for Rust and 40 minutes for Python/native.
+These are infrastructure ceilings, not promises of spare capacity or changes to
+individual test deadlines. Use the [current cost baseline](ci-cost-baseline.md)
+and measured selected/full runs to assess headroom; older timings do not prove
+current workloads fit. Cancellation, missing outcomes and partial passes do not
+satisfy a required plan. `verify.py` does not run actionlint, Ruff or cargo-deny;
+these retain their separate workflow ownership and advisory policy.
 
 The Python authoring tools call the authoritative Rust scenario compiler.
-Every debug verification plan explicitly builds `tor-scenario` before Python
-tool tests and selects that binary, including when only documentation changed.
-The adapter never silently builds a binary or falls back to a Python resolver.
+The existing local quick/push/full debug plans build `tor-scenario` before
+compiler-dependent authoring tests. Selected CI gives those owners explicit
+application requirements even when their classes derive from plain `TestCase`;
+class shape or a non-process filename does not prove a test needs no binaries.
+Unrelated pure-tooling and prose-only gates need no compiler. The adapter never
+silently builds a binary or falls back to a Python resolver.
 
 ### Development loop
 
@@ -600,9 +777,10 @@ repeat them when later changes affect it. Expand the focused set
 when a failure or changed boundary warrants it. Do not run quick, push and full
 back to back merely because all three commands exist. Run one `push` gate per
 stable PR checkpoint; a successful unchanged full run also covers that gate.
-Let CI run the complete debug and release suites before merge, including
-for protocol, ruleset, save-format, persistence, storage, toolchain and dependency
-changes. These boundaries still require complete coverage in both profiles.
+Let the canonical CI plan select its complete affected coverage; use exhaustive
+mode when the planner or a reviewed risk decision requires it. Shared schemas,
+persistence, rules and toolchain changes need their broad cross-feature and
+profile owners, not only a newly added local regression.
 
 Keep the intended package/feature configuration consistent within a qualification
 checkpoint. Cargo workspace feature unification can produce different dependency
@@ -616,7 +794,7 @@ performance measurements. Select the affected tests and workloads based on the
 behavior being investigated. Do not run the whole local release suite merely
 because a performance measurement needs release binaries. Escalate to local
 `full` when CI cannot run or a maintainer requests it. Local full coverage does
-not waive the requirement for both-platform CI before merge.
+not waive the canonical final-head CI gate before merge.
 
 Focused commands use the existing suite; they introduce no separate test tier
 or exclusions. For example:
@@ -637,8 +815,8 @@ and scope. Record the exact tested, waived and CI-only checks and the authorizat
 never generalize it into a new default tier or waiver. Use the existing
 [local graphical waiver mechanism](#focused-iteration-and-local-mouse-exception)
 when applicable. Otherwise the documented push/full gates remain unchanged, and
-complete exact-head Windows/Linux debug/release CI is required before merge
-outside the prose-only documentation path.
+the exact-head canonical CI gate is required before merge. A local exception
+does not reduce the required selected/full plan.
 
 A push-gate exception is not permission to defer predictable failures to CI.
 Unless explicitly waived within that authorization, retain a risk-based pre-push
@@ -861,7 +1039,7 @@ and not-run results accurately; it is not a qualification pass. Cancellation
 must not obstruct the newer run. The required gate selected for the final head
 must still pass.
 
-At the same stable checkpoint, a narrow correction does not require repeating
+At the same local stable checkpoint, a narrow correction does not require repeating
 checks whose complete source, test, fixture, dependency, toolchain and configuration
 inputs remain unchanged. Record the original immutable state, the corrected state,
 content hashes and the dependency-based affected set. Rerun the changed behavior
@@ -871,17 +1049,17 @@ coverage ledger may reconcile completed, input-qualified checks with the fresh
 results; it must identify every required target and explicitly retain any local
 waiver. It is not a claim that the original gate passed. Failed checks, newly added
 tests, uncertain dependency boundaries and missing targets cannot be covered by
-reuse. Broaden verification whenever the changed boundary requires it. Full
-exact-head Windows/Linux debug and release CI remains mandatory before merge
-outside the prose-only documentation path.
+reuse. Broaden verification whenever the changed boundary requires it. The exact-head canonical CI plan remains mandatory before merge; reuse cannot
+turn selected evidence into an exhaustive result.
 
 This permits rapid focused iteration without automatically rerunning a broad
 local gate after each narrow commit. Run the broad gate at meaningful integration
 checkpoints, then close any corrections with the smallest complete evidence set.
 
-Outside the prose-only documentation path, the final commit must still pass the
-complete Windows/Linux CI matrix, in debug and release. Evidence reuse does not
-remove, ignore or permanently exclude tests.
+The final commit must pass every lane of its canonical selected or exhaustive
+CI plan. Evidence reuse does not remove, ignore or permanently exclude tests, and
+only an exhaustive plan proves the complete Windows/Linux debug/release matrix.
+Active CI executes fresh lanes; a local reuse ledger is not its substitute.
 Separate test replacements require the reviewed parity evidence described in
 [contract ownership](#contract-ownership). Changes to harness parallelism, timing
 or test selection need their own reviewed implementation and tests (`test_parallel_tests.py`,
@@ -951,8 +1129,8 @@ script data or the test infrastructure) runs those plus the smoke set,
 `SMOKE_PROCESS_TESTS` in `verify.py`: fast suites that start every client and
 cover movement, items, doors, intentions, checkpoints and package loading.
 `push` selects process tests the same way; `full` and full CI always run every
-process test. The local tiers are fast filters, not the complete gate: CI on
-both platforms is, and nothing merges without it.
+process test. Local tiers are feedback filters, not the canonical CI assurance
+plan. Both required platform aggregates must validate that final plan before merge.
 
 ### Parallel test execution
 
@@ -1011,9 +1189,10 @@ the summary says whether the rerun passed, so an intermittent failure is
 visible instead of hidden.
 
 A lower tier never replaces a higher one when that one is required, and no tier
-replaces CI. Outside the prose-only path, the full Windows and Linux matrix below must pass on the final
-commit before merging. The following individual commands are a diagnostic reference, not a replacement
-for the verifier: rustdoc and release-process checks below are also required.
+replaces CI. The canonical plan must pass on the final commit before merging;
+when it requires exhaustive mode, the full Windows/Linux matrix below remains
+mandatory. These individual commands are diagnostic references, not a replacement
+for the verifier or its required stages.
 The `full` tier includes:
 
 ```sh
@@ -1067,7 +1246,7 @@ What full CI runs once, on Linux:
 | --- | --- |
 | Workflow lint | `actionlint` |
 | Python lint | `ruff check scripts` (bug-focused rules in [`ruff.toml`](../../ruff.toml)) |
-| Dependency advisories | `cargo deny check advisories` (advisory-only on PRs; fails on `main` and the weekly run) |
+| Dependency advisories | `cargo deny check advisories` (advisory-only on PRs; fails on `main` and scheduled full runs) |
 | Dependency policy | `cargo deny check bans licenses sources` (policy in [`deny.toml`](../../deny.toml)) |
 
 If any check can't run locally, say so in the PR and explain why. CI is still
@@ -1214,8 +1393,8 @@ tests. Run integration, Service contracts and real-process acceptance tests at
 completed behavior checkpoints, repeating them after changes to the covered
 behavior. Run quick at cohesive subsystem checkpoints, rather than after every
 small edit. Coverage of [every changed contract](#contract-ownership) remains
-required before merge; push and final-commit Windows/Linux debug/release CI gates
-remain mandatory.
+required before merge; the local push floor and final-commit canonical CI gate
+remain mandatory. A native waiver never changes selected/full CI obligations.
 
 The standing local waiver is
 `test_travel_process.TravelProcesses.test_native_underscore_and_mouse_click`. `python scripts/verify.py push --waive-local-mouse` records that
@@ -1262,101 +1441,21 @@ generic capability directly; these checks do not certify the final Warrior talen
 prerequisite chain. `record_wire_samples.py` records an actual paid snapshot from
 the same ordinary fixture. Never hand-edit a prior recording to add the new fields.
 
-### Optional Windows candidate measurement
+### Measuring verification cost
 
-The CI workflow's `measure_windows_candidate` manual-dispatch input is
-currently unavailable: it requests both Windows profiles, but each profile now has
-two independent shard receipts rather than the single complete baseline needed
-by the comparison tool. Leave the input disabled. Enabling it fails explicitly
-in the scope job before profile builds or dependency jobs begin; it does not
-silently run only debug or accept a partial release baseline. No new independent
-debug-targeting workflow option is provided.
+Use the [cost baseline guide](ci-cost-baseline.md) and
+[`ci_cost_report.py`](../../scripts/ci_cost_report.py) to compare complete execution
+inventories. Report elapsed latency and runner-hours separately, retain failed
+and retried work, and label missing timestamps or incomplete inventory as limits.
+An ordered candidate-after-baseline comparison benefits from warmed binaries and
+OS caches; test-stage cost alone is neither whole-workflow latency nor unbiased
+cold-start performance. A lower duration never justifies dropping a contract.
 
-The existing local comparison tooling remains available for an independently
-completed, full single-profile baseline. Invalid audits or an incomplete
-baseline stop the comparison. Missing, duplicated, failed or skipped selected
-tests fail it; there are no graphical waivers or automatic retries.
-
-The candidate retains new tests by default. Explicit deferrals carry their own
-semantic justification and relevant source/fixture fingerprints in
-`scripts/ci_coverage_manifest.json`; they do not assert redundant coverage.
-`scripts/ci_policy.py` reports the proposed selection. Missing, unknown, deleted,
-risky or stale inputs select exhaustive coverage in the ordinary policy path.
-Manual measurement uses its separately named `reviewed_candidate` helper after
-the full baseline; it never fabricates pull-request change evidence.
-
-Artifacts under `shadow-debug` and `shadow-release` include the exact selected
-IDs, raw timings, failure artifacts and comparison report. Compare test-step
-elapsed times only. The second pass benefits from already-built binaries and
-warm application/OS caches, so this ordered comparison is biased and does not
-predict whole-job cost or merge latency. Debug includes pure tooling tests, as
-does its full baseline; release compares process tests only. All existing full
-checks remain required, and a failed optional measurement is visible as a failed
-manual workflow. Broader cadence or merge-gate changes require separate measured
-qualification and review.
-
-Each full profile partition also uploads bounded before/after checkout, run,
-configuration and resolved-tool observations. These explicitly identify themselves
-as untrusted observations: PR-controlled code can forge them, collection is not
-atomic, and a complete report is not an attestation or permission to reuse tests.
-Shallow checkouts record the actual commit object's parent headers. Missing
-metadata remains visible as incomplete; the producer does not collect credentials,
-arbitrary environment contents or network data. Only the separately checked
-[postmerge consumer](#reusing-exact-tree-postmerge-cells) may adopt a prior cell.
-
-The Windows free-memory CIM observation uses a 15-second timed wait; other
-probes retain 5 seconds. These budgets exclude the existing reader joins and
-process cleanup, so they are not total-function deadlines or a promise that
-every CIM query completes. The memory output cap remains 128 bytes. A timed-out
-or unavailable sizing observation remains null and incomplete, with no retry or
-cached sizing; missing adoption evidence still requires fresh full verification.
-
-### Reporting possible exact-tree qualification
-
-The optional `Qualification source` job records GitHub's evaluated source SHA in
-its job name. Every checkout explicitly uses that same `github.sha`; on a PR this
-is the synthetic merge checkout, not the PR head reported by the workflow-runs
-API. The job executes no repository code on PR events. On main pushes,
-[`scripts/ci_qualification.py`](../../scripts/ci_qualification.py) reads GitHub's
-run, attempt, job, PR and Git-object APIs and reports whether a recent completed
-premerge full run is a possible same-tree qualification candidate.
-
-This metadata decision remains reporting-only: every result sets
-`reporting_only: true` and `full_required: true`. A candidate alone cannot waive
-verification; it supplies a source identity to the separate per-cell consumer
-below. Fresh main dependency/advisory checks for non-prose changes and the weekly
-exhaustive schedule remain unchanged. Prose-only runs are ineligible as full-run
-qualification evidence. The report job is non-blocking and introduces no builds
-or test reruns. Its API/error handling cannot turn a skipped required job green.
-
-The bounded comparison supports only this repository's ordinary two-parent
-same-repository PR merges and first-attempt CI runs. It checks the exact PR
-base/head, synthetic merge parents/tree, main target, workflow identity, complete
-successful job inventory, per-cell checkout/verification step outcomes and
-unchanged qualification-control content and modes in the base, PR head and final
-merge. Checking the head prevents a modified workflow from fabricating the source
-identity and then restoring baseline controls during merge. Missing or ambiguous evidence, reruns, forks,
-unsupported merge methods, changed controls, expired evidence, incomplete API
-pagination and API errors report no candidate. Evidence must start within the
-previous 24 hours and finish before the associated merge. Changed qualification
-controls require fresh full verification. GitHub may
-empty a run's PR-association array after merge; the merged-PR record, source head
-and independently resolved synthetic/target parents still bind the exact tree in
-that case, but do not independently identify the run's originating PR. A nonempty
-conflicting association rejects the candidate. Source discovery includes
-failed and pending runs, so an old green run cannot hide another result; the
-report rechecks the current run, matching run inventory and main tip at the end.
-Attempt and current-run endpoints can retain different update timestamps. The
-report compares their identity and lifecycle fields, independently requires every
-response's interval to contain all source jobs and finish before merge, and
-rechecks each attempt/list snapshot against the same endpoint. A changed timestamp
-within an endpoint still rejects the candidate; no tolerance or retry is applied.
-
-The report does not trust uploaded observations or cached build products. Even
-a positive comparison is metadata evidence only: it does not independently
-certify clean inputs throughout execution, per-test completeness or equivalence
-of resolved hosted images/toolchains. Those require the separate per-cell checks
-below. No saving is established by a matching metadata report.
+The old Windows shadow-candidate measurement command and manual workflow input
+are removed with the pass-reuse experiment. Their implementation remains in Git
+history, not as an alternate current qualification path. Current measurements
+must preserve profile/shard accounting and the selected-versus-full distinction;
+a partial profile cannot stand in for a complete baseline.
 
 ### Reporting verifier receipt completeness
 
@@ -1369,114 +1468,42 @@ digest instead of copying the records. Missing, malformed, duplicate, interrupte
 skipped or waived evidence is incomplete and never overrides command exits.
 Rust retains the normal successful Cargo invocation as its trusted boundary;
 the summary also preserves the precise Service host artifact/result, without a
-second Rust runner or test inventory. Existing before/after observations identify
-the source tree, configuration, tools and installed Python distribution metadata.
-Parent and per-stage environment observations are distinct. The observer also
-records bounded Linux native-package database metadata and the fixed graphical
-setup mode; native library bytes, volatile display state, package contents and
-unlisted inputs remain outside this evidence.
+second Rust runner or test inventory. The selected runner independently binds
+its canonical plan, exact source and fresh lane outcomes; full partition receipts
+retain their complete-stage and test accounting. The retained
+[`ci_observation.py`](../../scripts/ci_observation.py) helpers still supply bounded
+checkout/probe and allowlisted environment data to the verifier and binary-artifact
+validation. Separate workflow before/after-observation jobs are removed. Such
+metadata is not atomic or authenticated provenance: reviewed-code trust still
+applies, installed package metadata does not prove package bytes, and native
+library bytes, volatile display state and unlisted inputs remain outside it.
 This uses the same trust in reviewed CI/test code as a normal full run, not stronger
 attestation. Completeness is not full-matrix qualification or permission to reuse
 or skip work, and prose-only results never become full-run evidence.
 
-### Reusing exact-tree postmerge cells
+### Why CI does not reuse passing results
 
-On main pushes, [`scripts/ci_adoption.py`](../../scripts/ci_adoption.py) may adopt
-one of the eight fully tested premerge cells after setup and before verification.
-Ordinary premerge, manual and weekly full runs execute every selected cell; the
-bounded corrective-head exception below is separate. The prose-only path, matrix and required aggregate names are unchanged. An adopted
-run cannot become a source: sources must be successful first-attempt PR runs
-whose actual full verification steps passed. There is no adoption chain.
+Premerge, corrective-head and main runs execute every lane of their own canonical
+plan freshly. The previous exact-tree and expectation-only pass-adoption tools,
+registries and implementation-only tests are removed; Git history preserves them.
+The removal is not authority to delete gameplay coverage, fresh-gate assertions,
+receipt completeness or unique process/native/durability witnesses.
 
-Each cell needs the metadata match above and an exact Rust dependency-cache hit.
-The cache requirement protects cache population/performance; it is never test
-qualification. The consumer separately binds a unique artifact to the API's
-source run, attempt and successful job, verifies its compressed digest and byte
-limits, and reads bounded ZIP members without extracting archive paths. API
-credentials never follow artifact redirects to storage. It rechecks the source
-run, current main tip and active target run before accepting.
+Reusing a pass removes another opportunity to detect nondeterminism and adds
+proof/API/receipt complexity. A matching Git tree or cache hit never established
+every volatile machine input or guaranteed a cost saving. Source identity, exact
+selected outcomes, clean lifecycle completion, toolchain/profile and input
+provenance remain necessary checks where applicable, but none turns a reused
+binary or old result into fresh test execution. Dependency caches and validated
+application artifacts may save compilation; neither is a test pass.
 
-The source's clean before/after observations must be stable and match the target's
-tree, configuration hashes, hosted image, tool versions, Python distribution
-metadata, allowlisted environment fingerprints, Linux package database and
-graphical setup. Windows native dependencies remain covered by the matching
-hosted image and unchanged setup contract rather than a separate package scan.
-Unknown external display/runtime overrides are ineligible. Target memory-based
-build/test limits must match the actual source invocation. Planned stages,
-effective stage environments and digest-bound Python/Cargo/Service receipts are
-revalidated using the existing verifier. Successful Cargo remains the trusted
-Rust boundary; this does not introduce another runner or stronger attestation.
-The observation, adoption-helper and full-verification steps use the same explicit
-Bash shell on both platforms so inherited inputs such as `PATH` remain comparable.
-Per-stage overrides remain distinct and exactly checked; shell differences do not
-permit ignoring or normalizing an environment mismatch.
-
-Missing, ambiguous, expired, malformed or mismatched evidence, a cache miss, and
-ordinary helper errors or its 90-second timeout all fall back to normal full
-verification. Cancellation stops work. The final cell assertion accepts only a
-successful fresh verifier or an explicit successful adoption with the verifier
-intentionally skipped. An adoption receipt identifies both source and target
-runs, their links, the source artifact digest and that tests did not execute
-again in this cell. Required aggregates still require successful cell outcomes.
-
-Adoption preserves the premerge coverage of the exact tree while removing a
-second execution; it also removes that extra chance to detect nondeterministic
-failures. Package metadata is not package-byte provenance, and neither path
-certifies every volatile machine input. Keep the existing weekly exhaustive
-run. The control-changing rollout itself requires full CI; measure savings only
-after a real subsequent adoption and a deliberate fallback have been observed.
-
-### Reusing unchanged results after an expectation-only PR correction
-
-[`scripts/ci_head_reuse.py`](../../scripts/ci_head_reuse.py) is a separate optional
-PR-only proof, not a relaxation of exact-tree postmerge adoption. Initially it
-supports modifications to existing study, roster and chill process-test leaves
-listed in [`scripts/ci_reuse_registry.json`](../../scripts/ci_reuse_registry.json).
-Every other tracked path, file mode and inventory must remain identical between
-the old and new synthetic trees. Unknown paths, additions, deletions, renames,
-shared helpers, controls, fixtures and action changes select full verification.
-
-The reviewed leaf skeleton permits only bounded, side-effect-free expected-value
-edits at acceptance assertions, including primitive containers, safe `len`, and
-simple comprehensions over declared immutable values. Actual operands, setup
-guards, control flow and actions stay fixed. Optional immutable imports and
-expectation-only local bindings have explicit rules. Source must be UTF-8.
-The registry pins broad consumer owners and the import-time closure; immutable
-species tuple data can evolve without approving new provider code. Maintaining
-that audit when introducing outside consumers is a code-review obligation.
-Literal-reference guards add protection; they do not infer arbitrary dynamic
-Python/Rust dependencies. Consumer-owner drift needs explicit review and a fresh
-baseline, not an automatic pin refresh.
-
-Source and target must be first attempts of the same open, same-repository PR,
-with unchanged current main base and a direct parent corrective head. The proof
-binds exact API synthetic commits/trees, unchanged controls, unique digest-checked
-artifacts, complete terminal cells, strict resolved environments and sizing, and
-source age within 24 hours. A superseded globally cancelled run may contribute
-already completed cells; interrupted/cancelled cells never qualify. Old receipts
-without the new failure-phase and explicit fresh-origin evidence are ineligible.
-
-Successful whole Rust cells can be borrowed. Python requires exact exhaustive
-selection and terminal accounting; every failed ID must be an ordinary method
-AssertionError at an eligible old-source assertion in a changed leaf. Setup,
-teardown, cleanup, worker errors, failed subtests, skips, waivers, duplicates and
-missing/not-started IDs reject. Every changed module method and applicable cheap
-tooling test runs freshly, with the ordinary application/compiler builds intact.
-A successful final verifier proves the disjoint source/fresh coverage union and
-rechecks clean checkout, live PR/head/base and source/target attempts. Probe failure
-selects full verification; failed or partial fresh execution cannot become a pass.
-
-Completed earned-route results retain their original whole-source fingerprints;
-this reviewed provenance exception never rebases reports or permits cross-head
-resume. Existing fingerprint/resume guards remain unchanged. Hashing overhead and
-ordinary setup/build time remain, so reuse is not an exact runtime prediction.
-Composite summaries identify both sources and cannot be borrowed again, including
-by postmerge adoption: main conservatively runs fresh after a composite PR cell.
-This can reduce correction-to-merge latency without reducing total worker compute
-by the same amount. The control-changing rollout runs full, and requires a future
-fresh baseline before any reuse. Measure a real qualifying correction and deliberate
-fallback before claiming an end-to-end speedup; local synthetic fixtures prove the
-selection/accounting contract, not hosted CI performance.
+Current corrections rerun their canonical selected or full plan. Failed,
+incomplete or composite old receipts cannot turn a fresh lane green; reports keep
+their original fingerprints and are never rewritten to qualify another head.
+The [local unchanged-input evidence ledger](#verification-evidence-and-reuse)
+remains a separate, explicitly bounded development practice. Reintroducing CI
+pass adoption would require a reviewed design, negative tests, measured benefit
+and an explicit policy change, not an undocumented runner option.
 
 ### Source-aware dependency cache trial
 
@@ -1509,8 +1536,10 @@ variants without changing this key. Cargo still checks artifact freshness, but
 an exact cache hit will not save newly built variants, so watch for repeated
 dependency compilation and update the explicit recipe when introducing builders.
 
-Dependency-only cleanup and main-only writes remain in place; workspace outputs
-are not newly retained. Profile/partition keys retain eight platform variants.
+Dependency-only cache cleanup and main-only writes remain in place; these caches
+do not retain workspace outputs. Full-matrix keys distinguish platform, profile
+and partition. The selected application-artifact transport above is separate from
+this dependency cache and is not reusable test evidence.
 The first successful main run seeds new caches. Measure subsequent independent
 fresh-checkout runs, including restore size/time, dependency recompilation and
 whole-job time, before claiming savings; an initially cold run is not that

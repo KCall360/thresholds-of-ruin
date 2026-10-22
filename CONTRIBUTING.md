@@ -25,13 +25,17 @@ for repeated single-target Rust edits; it does not qualify a verification gate),
 `push` tier (or `full`) before every push, except for
 [verified prose-only documentation changes](docs/development/testing.md#prose-only-documentation-changes),
 which require documentation/link and tooling checks locally and in CI.
-`push` tests what the change can reach; full CI requires complete coverage. Run targeted release checks for
-performance/release-specific behavior; local full is required when CI cannot run
-or on request. Full Windows/Linux debug/release CI on the final commit remains
-required before merge outside that narrow prose-only path, including separate tooling/dependency jobs.
-The final matrix may use
-[validated corrective-head coverage](docs/development/testing.md#reusing-unchanged-results-after-an-expectation-only-pr-correction)
-under the testing policy.
+`push` tests what the change can reach; it is not full qualification. Run targeted
+release checks for performance/release-specific behavior; local full is required
+when CI cannot run or on request. The canonical
+[risk-based CI plan](docs/development/testing.md#risk-based-ci-assurance) chooses
+prose-only, selected-contract, or exhaustive coverage. Both required platform
+aggregates must pass for the exact final head. Selected results deliberately
+leave unrelated exhaustive coverage to weekly scheduled/on-demand/release verification;
+they must not be described as a full Windows/Linux debug/release pass. Unknown
+scope or ownership and verification/build-control changes require full coverage.
+A scheduled-full failure is actionable evidence to fix and feed back into ownership,
+not permission to ignore the failing test or keep relying on a missed fast path.
 
 A full run covers the local push gate for unchanged inputs, toolchain and test
 configuration. Record the tested state, failures and checks not run; stale,
@@ -99,8 +103,10 @@ code and tests as well. Update relevant source comments and CLI help pointers.
 
 ## Publishing
 
-- Work on a feature branch and open a pull request. Windows and Linux CI must
-  pass before merging.
+- Work on a feature branch and open a pull request. The exact-head canonical CI
+  plan and both required platform aggregates must pass before merging. Report
+  whether that proves selected or exhaustive coverage; a green selected gate is
+  not an exhaustive-matrix claim.
 - Batch small plan, strategy, and documentation updates, and publish them at
   meaningful checkpoints (a completed feature or milestone, or a consolidated
   strategy revision), or when the maintainer asks. Don't open a separate PR for

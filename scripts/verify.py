@@ -4,17 +4,17 @@ Tiers (see docs/development/testing.md#running-the-checks):
 
   quick  at stable checkpoints: formatting, clippy and debug tests for affected
          packages, the Python tool tests, and the process tests the change maps to
-  push   before pushing: every debug check CI runs; release coverage runs in CI
-  full   exactly what CI runs on one platform, debug and release; also covers
+  push   before pushing: broad local debug checks; affected release checks as needed
+  full   exhaustive checks on one platform, debug and release; also covers
          the push gate for unchanged inputs, toolchain and test configuration
 
 Affected packages include every workspace package that depends on a changed one.
 Anything the mapping doesn't recognize selects everything, so a tier can run more
-than it needs but never less. CI's full Windows and Linux matrix remains the
-required gate before merging. CI partitions each debug/release profile into Rust
-and Python/native checks. All partitions are required; one is never a full or
-merge gate. The complete debug profile has the same checks as local push;
-CI evidence does not certify a local run.
+than it needs but never less. CI independently selects reviewed PR/main contracts
+or exhaustive coverage; both platform aggregates remain required before merging.
+Exhaustive CI partitions each debug/release profile into Rust and Python/native
+checks. One partition is never a full or merge gate. Scheduled, manual and release
+runs retain exhaustive coverage. CI evidence does not certify a local run.
 
 Tiers only choose which existing tests run. Every feature and bug fix must add
 its tests to the suite (docs/development/testing.md), and this script warns when code
@@ -308,6 +308,29 @@ def ci_partition_steps(steps, profile, partition):
     return selected
 
 
+def ci_binary_steps(steps, artifact, profile, source_sha):
+    """Replace only ordinary app build prerequisites with exact-run validation.
+
+    Tests and their existing stage identities remain unchanged. This is binary
+    transport, never cached test evidence; invalid artifacts raise without a
+    rebuild or guessed target-directory fallback.
+    """
+    import ci_binary_artifact
+    artifact = Path(artifact).resolve()
+    binaries = ci_binary_artifact.validate(artifact, profile, source_sha)
+    validate = [sys.executable, str(SCRIPTS / "ci_binary_artifact.py"), "validate", str(artifact),
+                "--profile", profile, "--source-sha", source_sha, "--smoke"]
+    result = []
+    for name, command, env in steps:
+        if name in (f"build-process-{profile}", "build-tools"):
+            command = validate
+        elif python_test_prefix(command) is not None:
+            env = {**env, "TOR_TEST_BINARIES": str(binaries),
+                   "TOR_SCENARIO_COMPILER": str(binaries / ("tor-scenario.exe" if os.name == "nt" else "tor-scenario"))}
+        result.append((name, command, env))
+    return result
+
+
 def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None, workers=1, failfast=False):
     """Ordered steps; CI may partition only an explicitly selected full profile."""
     if ci_profile is not None and (tier != "full" or ci_profile not in ("debug", "release")):
@@ -336,8 +359,8 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None
     steps = [("fmt", ["cargo", "fmt", "--all", "--check"], {})]
     rustdoc = ("rustdoc", ["cargo", "doc", "--workspace", "--no-deps", "--document-private-items", "--locked", *host_feature], doc)
     if tier in ("quick", "push"):
-        # Local gates give fast feedback on what the change can reach; CI runs
-        # the complete debug and release suites on both platforms before merge.
+        # Local gates give fast feedback on what the change can reach; CI selects
+        # reviewed contracts or exhaustive coverage with separate assurance.
         # push adds the workspace-wide lint and API docs CI would reject.
         if tier == "push":
             steps.append(("clippy", ["cargo", "clippy", "--workspace", "--all-targets", "--locked", *host_feature, "--", "-D", "warnings"], {}))
@@ -664,7 +687,7 @@ def main(argv=None):
                         help="CI-only Rust or Python/native stages; requires full and --ci-profile; all partitions are required")
     parser.add_argument("--ci-python-shard", type=int, choices=(1, 2),
                         help="Explicit complete Windows Python profile shard; both are required")
-    parser.add_argument("--cross-head-proof", type=Path, help="CI-only optional current-target reuse proof; invalid proof runs full")
+    parser.add_argument("--ci-binaries", type=Path, help="Exact-run ordinary application artifact for fresh full Python partitions")
     parser.add_argument("--base", default="origin/main", help="Compare against this ref to find changes")
     parser.add_argument("--jobs", type=int, help="CARGO_BUILD_JOBS; chosen from free memory by default")
     parser.add_argument("--rerun-failed", action="store_true", help="Rerun failed Python tests once to show whether they are intermittent")
@@ -687,10 +710,11 @@ def main(argv=None):
     if args.ci_partition and (args.tier != "full" or args.ci_profile is None):
         parser.error("--ci-partition requires full and --ci-profile")
     if args.ci_python_shard is not None and (sys.platform != "win32" or args.tier != "full" or args.ci_profile not in ("debug", "release")
-            or args.ci_partition != "python" or args.cross_head_proof or args.fail_fast or args.rerun_failed):
+            or args.ci_partition != "python" or args.fail_fast or args.rerun_failed):
         parser.error("--ci-python-shard requires fresh complete Windows profile Python verification")
-    if args.cross_head_proof and (args.tier != "full" or not args.ci_partition or args.fail_fast or args.rerun_failed):
-        parser.error("--cross-head-proof requires an ordinary full CI partition")
+    if args.ci_binaries and (args.tier != "full" or args.ci_partition != "python" or not args.ci_profile
+            or args.fail_fast or args.rerun_failed or not os.environ.get("CI")):
+        parser.error("--ci-binaries requires fresh full CI Python verification without evidence reuse")
     if args.waive_local_mouse and (args.ci_profile or os.environ.get("CI")):
         parser.error("--waive-local-mouse is local only")
     graphical_manifest = None
@@ -741,6 +765,8 @@ def main(argv=None):
         steps = [(name, [*command[:2], "--ci-python-shard", str(args.ci_python_shard), *command[2:]],
                           {**env, "TOR_TEST_PROFILE": "debug"} if name == "python-debug" else env)
                  if name in ("process-release", "python-debug") else (name, command, env) for name, command, env in steps]
+    if args.ci_binaries:
+        steps = ci_binary_steps(steps, args.ci_binaries, args.ci_profile, os.environ.get("GITHUB_SHA", ""))
     priority = changed_test_modules(paths)
     if priority:
         steps = [(name, command, {**env, "TOR_TEST_PRIORITY": ",".join(priority)}) for name, command, env in steps]
@@ -781,18 +807,6 @@ def main(argv=None):
                 env = {**env, "_graphical_waiver": graphical_manifest}
             updated.append((name, command, env))
         steps = updated
-    cross_head = None
-    if args.cross_head_proof:
-        import ci_head_reuse
-        try:
-            raw = args.cross_head_proof.read_bytes()
-            if len(raw) > 2 * 1024 * 1024: raise ValueError("proof budget")
-            candidate = ci_head_reuse.adoption.document(raw)
-            selected = ci_head_reuse.selected_plan(candidate, steps, profile=args.ci_profile,
-                partition=args.ci_partition, jobs=jobs, workers=workers, directory=logs)
-            steps, cross_head = selected, candidate
-        except Exception:
-            print("Optional cross-head evidence unavailable or ineligible; running full partition.")
     results, failed = [], False
     with Lock(ROOT / ".local" / "verify.lock"):
         for name, command, env in steps:
@@ -803,15 +817,6 @@ def main(argv=None):
             failed |= result["code"] != 0
             results.append(result)
             print(f"  {name}: {'WAIVED' if result['note'].startswith('WAIVED') else 'ok' if result['code'] == 0 else 'FAILED'} ({result['seconds']:.0f}s)", flush=True)
-
-    cross_union = None
-    if cross_head is not None and not failed:
-        try:
-            cross_union = ci_head_reuse.union(cross_head, steps, results, logs, jobs)
-            if cross_union.get("complete") is not True: raise ValueError("incomplete union")
-        except Exception:
-            failed = True
-            cross_union = {"complete": False, "reason": "fresh and borrowed coverage did not qualify"}
 
     lines = [f"{'step':16} {'result':8} {'time':>7}  note"]
     for r in results:
@@ -834,10 +839,10 @@ def main(argv=None):
         partition = f"{args.ci_profile}/{args.ci_partition}" if args.ci_partition else args.ci_profile
         lines.append(f"CI {partition} partition only; all Rust and Python/native partitions of both profiles on both platforms are required. This partition is not a full run or a merge gate.")
     elif args.tier == "quick":
-        lines.append("Run push before pushing. CI runs the complete debug/release suites on both platforms and is required before merging.")
+        lines.append("Run push before pushing. Both CI platform aggregates are required; the canonical plan selects contract or exhaustive assurance.")
     elif args.tier == "push":
         status = "Local debug push gate FAILED; resolve failures before pushing. " if failed else "Local debug push gate complete. "
-        lines.append(status + "CI runs the complete debug/release suites on both platforms and is required before merging. "
+        lines.append(status + "Both CI platform aggregates are required; the canonical plan selects contract or exhaustive assurance. "
                      "Run targeted local release checks for performance or release-specific behavior; use full when CI cannot run or on request.")
     else:
         lines.append("CI on both platforms is required before merging.")
@@ -847,6 +852,7 @@ def main(argv=None):
     not_run = [result["step"] for result in results if result["code"] is None]
     evidence = {"schema_version": 1, "tier": args.tier, "ci_profile": args.ci_profile,
                 "ci_partition": args.ci_partition, "ci_python_shard": args.ci_python_shard,
+                "application_artifact": str(args.ci_binaries) if args.ci_binaries else None,
                 "scope": "ci-partition" if args.ci_profile else "local", "jobs": jobs,
                 "test_workers": workers, "planned_steps": [name for name, _, _ in steps],
                 "receipt_completeness": receipt_completeness(steps, results, logs, jobs),
@@ -857,9 +863,7 @@ def main(argv=None):
                            "status": "waived" if result["step"] in waived else "not_run" if result["code"] is None
                                      else "passed" if result["code"] == 0 else "failed",
                            "command": result.get("command", command)} for result, (_, command, _) in zip(results, steps)]}
-    evidence["evidence_origin"] = "cross_head_composite" if cross_head is not None else "fresh"
-    if cross_head is not None:
-        evidence["cross_head"] = {**cross_head, "union": cross_union}
+    evidence["evidence_origin"] = "fresh"
     (logs / "summary.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
     print(summary)
     return 1 if failed else 0
