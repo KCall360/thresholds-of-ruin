@@ -467,7 +467,10 @@ class PostmergeTests(unittest.TestCase):
                 self.assertEqual(json.loads(value), self.compiler)
 
     def test_real_bounded_transport_caps_both_pipes_and_terminates_timeout(self):
-        self.assertEqual(postmerge.bounded_capture([sys.executable, '-c', 'print("valid")'], timeout=10), b'valid\n')
+        for payload in (b'valid\n', b'valid\r\n', b'\x00\xff\n'):
+            command = [sys.executable, '-c', f'import sys; sys.stdout.buffer.write({payload!r})']
+            with self.subTest(payload=payload):
+                self.assertEqual(postmerge.bounded_capture(command, timeout=10), payload)
         for stream in ('stdout', 'stderr'):
             command = [sys.executable, '-c', f'import sys; sys.{stream}.write("x" * {postmerge.MAX_BYTES + 65536})']
             with self.subTest(stream=stream), self.assertRaisesRegex(ValueError, 'size bound'):
@@ -568,8 +571,10 @@ class PostmergeTests(unittest.TestCase):
             proof, _, rows = self.receipt_fixture()
             seen = []
             with tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
+                root = Path(temporary).resolve()
                 target = root / 'shared-target'
+                (root / 'unused').mkdir()
+                target_alias = root / 'unused' / '..' / 'shared-target'
                 logs = root / '.local/postmerge'
                 def execute(name, command, environment, directory, jobs, rerun):
                     seen.append(name)
@@ -585,7 +590,7 @@ class PostmergeTests(unittest.TestCase):
                         (directory / 'python-postmerge-tests.jsonl').write_text(
                             ''.join(json.dumps(row) + '\n' for row in emitted))
                     return {'code': 1 if failure == 'stage' and name == 'platform-codecs' else 0}
-                with patch.dict(os.environ, {'CARGO_TARGET_DIR': str(target)}), \
+                with patch.dict(os.environ, {'CARGO_TARGET_DIR': str(target_alias)}), \
                         patch.object(postmerge, 'ROOT', root), \
                         patch.object(postmerge, 'validate_local', return_value=proof), \
                         patch.object(postmerge, 'toolchain', return_value=self.compiler), \
