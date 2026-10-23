@@ -8,8 +8,8 @@ from timing_correlation import correlate_ack, correlate_native, events, server_e
 
 
 def ack_capture():
-    server = [dict(event='server_handled', request_id='request', unix_ns=3000000, lock_ms=.1, duration_ms=1),
-              dict(event='server_ack_sent', request_id='request', unix_ns=4000000, duration_ms=.1)]
+    server = [dict(event='server_handled', client=2, request_id='request', unix_ns=3000000, lock_ms=.1, duration_ms=1),
+              dict(event='server_ack_sent', client=2, request_id='request', unix_ns=4000000, duration_ms=.1)]
     client = [dict(event='client_request', request_id='request', unix_ns=1000000),
               dict(event='client_request_sent', request_id='request', unix_ns=2000000, duration_ms=1),
               dict(event='client_ack', request_id='request', unix_ns=5000000),
@@ -63,8 +63,8 @@ class TimingCorrelation(unittest.TestCase):
     def test_native_report_cost_belongs_to_preceding_frame_and_log_event(self):
         for input_done in (None, "up"):
             with self.subTest(input_done=input_done):
-                server = [dict(event='server_handled', request_id='r', unix_ns=3000000, lock_ms=0, duration_ms=1),
-                          dict(event='server_ack_sent', request_id='r', unix_ns=4000000)]
+                server = [dict(event='server_handled', client=2, request_id='r', unix_ns=3000000, lock_ms=0, duration_ms=1),
+                          dict(event='server_ack_sent', client=2, request_id='r', unix_ns=4000000)]
                 client = [dict(event='client_request', request_id='r', revision=0, unix_ns=1000000),
                           dict(event='client_request_sent', request_id='r', duration_ms=1, previous_timing_write_ms=.4),
                           dict(event='client_ack', request_id='r', unix_ns=5000000, previous_timing_write_ms=.5),
@@ -89,8 +89,8 @@ class TimingCorrelation(unittest.TestCase):
                 self.assertEqual(row['presented_to_reader_ms'],2)
 
     def test_server_client_reader_are_joined_by_request_identity(self):
-        server = [dict(event='server_handled', request_id='request', unix_ns=3000000, lock_ms=.1, duration_ms=1),
-                  dict(event='server_ack_sent', request_id='request', unix_ns=4000000, duration_ms=.1)]
+        server = [dict(event='server_handled', client=2, request_id='request', unix_ns=3000000, lock_ms=.1, duration_ms=1),
+                  dict(event='server_ack_sent', client=2, request_id='request', unix_ns=4000000, duration_ms=.1)]
         client = [dict(event='client_request', request_id='request', unix_ns=1000000),
                   dict(event='client_request_sent', request_id='request', unix_ns=2000000, duration_ms=1),
                   dict(event='client_ack', request_id='request', unix_ns=5000000),
@@ -150,7 +150,7 @@ class CorrelationEvidenceIdentity(unittest.TestCase):
             result['samples'][0]['request_id'] = request
         return server, client, result, frames
 
-    def complete_capture(self, native, server, client, result, frames):
+    def complete_capture(self, native, server, client, result, frames, *, tail=''):
         """Exercise the JSONL reader as well as correlation, with producer-shaped IDs."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -160,7 +160,7 @@ class CorrelationEvidenceIdentity(unittest.TestCase):
                     json.dumps(dict(timing_version=1, **row)) + '\n' for row in rows), encoding='utf-8')
             if native:
                 (root / 'ascii.stdout.jsonl').write_text(
-                    ''.join(json.dumps(frame) + '\n' for frame in frames), encoding='utf-8')
+                    ''.join(json.dumps(frame) + '\n' for frame in frames) + tail, encoding='utf-8')
             return (correlate_native if native else correlate_ack)(root, result)
 
     def test_real_client_attachment_ids_are_not_global_request_identities(self):
@@ -348,7 +348,9 @@ class CorrelationEvidenceIdentity(unittest.TestCase):
 
     def test_native_legacy_frame_lookup_rejects_ambiguous_revision_only_when_used(self):
         server, client, result, frames = native_capture()
-        frames.insert(1, dict(frames[0], frame=3))
+        frames.append(dict(frames[0], frame=3))
+        # Keep the selected frame's actual successor while testing a separate
+        # revision collision, rather than introducing an unrelated frame reorder.
         # Explicit measured-frame identity remains authoritative even when
         # several presented frames acknowledge the same observation revision.
         self.assertEqual(len(self.native(server, client, result, frames)), 1)
@@ -396,3 +398,138 @@ class CorrelationEvidenceIdentity(unittest.TestCase):
         server.reverse()
         row, = self.native(server, client, result, frames)
         self.assertEqual(row['server_handle_to_ack_sent_ms'], -1)
+
+
+    def test_native_selected_report_requires_its_actual_successor(self):
+        for order in ((1, 3), (1, 3, 2), (2, 1)):
+            with self.subTest(order=order):
+                server, client, result, frames = self.producer_capture(True)
+                frames.append(dict(frame=3, profile=dict(previous_report_ms=9,
+                    previous_report_encode_ms=4, previous_report_write_ms=5)))
+                row, = self.complete_capture(True, server, client, result, frames)
+                self.assertEqual(row['measured_frame_report_ms'], 2)
+                self.assertEqual(row['measured_frame_encode_ms'], .5)
+                self.assertEqual(row['measured_frame_write_ms'], 1.5)
+                by_id = {frame['frame']: frame for frame in frames}
+                # Missing/reordered rows cannot turn frame 2's report cost into
+                # frame 1's cost, nor disguise an observed successor as absent.
+                with self.assertRaisesRegex(ValueError, 'successor'):
+                    self.complete_capture(True, server, client, result,
+                                          [by_id[index] for index in order])
+
+    def test_native_selected_frame_must_exist_even_when_timestamp_is_optional(self):
+        server, client, result, frames = self.producer_capture(True)
+        row, = self.complete_capture(True, server, client, result, frames)
+        self.assertEqual(row['presented_to_reader_ms'], 2)
+        del frames[0]['presented_unix_ns']
+        row, = self.complete_capture(True, server, client, result, frames)
+        self.assertIsNone(row['presented_to_reader_ms'])
+        self.assertEqual(row['measured_frame_report_ms'], 2)
+        with self.assertRaisesRegex(ValueError, 'Missing.*frame'):
+            self.complete_capture(True, server, client, result, frames[1:])
+
+    def test_native_unmeasured_gaps_do_not_require_global_continuity(self):
+        server, client, result, frames = self.producer_capture(True)
+        baseline = self.complete_capture(True, server, client, result, frames)
+        # This retained fragment need not begin at frame 1. Only the selected
+        # frame and its immediate successor determine its report attribution.
+        frames[0]['frame'], frames[1]['frame'] = 8, 9
+        result['samples'][0]['presented_frame'] = 8
+        frames[:0] = [dict(frame=3, profile=dict(previous_report_ms=30)),
+                      dict(frame=6, profile=dict(previous_report_ms=60))]
+        frames.append(dict(frame=12, profile=dict(previous_report_ms=120)))
+        self.assertEqual(self.complete_capture(True, server, client, result, frames), baseline)
+
+    def test_native_final_selected_frame_allows_missing_or_partial_tail(self):
+        server, client, result, frames = self.producer_capture(True)
+        baseline, = self.complete_capture(True, server, client, result, frames)
+        self.assertEqual(baseline['measured_frame_report_ms'], 2)
+        for tail in ('', '{"frame":2,"profile":'):
+            with self.subTest(tail=tail):
+                row, = self.complete_capture(True, server, client, result, frames[:1], tail=tail)
+                expected = dict(baseline, measured_frame_report_ms=None,
+                                measured_frame_encode_ms=None, measured_frame_write_ms=None)
+                self.assertEqual(row, expected)
+        self.assertEqual(self.complete_capture(True, server, client, result, frames,
+                                              tail='{"frame":3'), [baseline])
+
+    def test_native_selected_boundary_preserves_signed_clocks_and_async_server_order(self):
+        server, client, result, frames = self.producer_capture(True)
+        self.assertEqual(self.complete_capture(True, server, client, result, frames)[0]
+                         ['measured_frame_report_ms'], 2)
+        frames[0]['presented_unix_ns'] = -7000000
+        result['samples'][0]['line_unix_ns'] = -9000000
+        server[1]['unix_ns'] = 2000000
+        server.reverse()
+        row, = self.complete_capture(True, server, client, result, frames)
+        self.assertEqual(row['measured_frame_report_ms'], 2)
+        self.assertEqual(row['presented_to_reader_ms'], -2)
+        self.assertEqual(row['client_ack_to_presented_ms'], -12)
+        self.assertEqual(row['server_handle_to_ack_sent_ms'], -1)
+
+    def test_measured_server_pair_requires_one_connection_not_actor_index(self):
+        for native in (False, True):
+            with self.subTest(native=native):
+                server, client, result, frames = self.producer_capture(native)
+                baseline = self.complete_capture(native, server, client, result, frames)
+                for row in server:
+                    row['client'] = 73  # Independent of the driver's actor 1.
+                server.reverse()  # Independent server tasks can log out of order.
+                self.assertEqual(self.complete_capture(native, server, client, result, frames), baseline)
+                server[0]['client'] = 74
+                with self.assertRaisesRegex(ValueError, 'client identity'):
+                    self.complete_capture(native, server, client, result, frames)
+
+    def test_measured_server_client_identity_is_required_typed_u64(self):
+        for native in (False, True):
+            for index in (0, 1):
+                for invalid in (None, True, -1, 2**64, '2', 2.0, 'missing'):
+                    with self.subTest(native=native, index=index, invalid=invalid):
+                        server, client, result, frames = self.producer_capture(native)
+                        self.assertEqual(len(self.complete_capture(native, server, client, result, frames)), 1)
+                        if invalid == 'missing':
+                            del server[index]['client']
+                        else:
+                            server[index]['client'] = invalid
+                        with self.assertRaisesRegex(ValueError, 'client identity'):
+                            self.complete_capture(native, server, client, result, frames)
+
+    def invalid_numeric_capture(self, native, server, client, result, frames):
+        # An assert rejects in ordinary Python but silently disappears with -O.
+        # Require an explicit parser error in either interpreter configuration.
+        with self.assertRaisesRegex(ValueError, 'finite|diagnostic write'):
+            try:
+                self.complete_capture(native, server, client, result, frames)
+            except AssertionError:
+                self.fail('Numeric evidence validation relies on an optimizable assert')
+
+    def test_measured_numeric_evidence_validation_survives_optimization(self):
+        for native in (False, True):
+            for invalid in (float('nan'), float('inf'), -float('inf'), True):
+                with self.subTest(native=native, invalid=invalid):
+                    server, client, result, frames = self.producer_capture(native)
+                    self.assertEqual(self.complete_capture(native, server, client, result, frames)[0]
+                                     ['server_handle_ms'], 1)
+                    server[0]['duration_ms'] = invalid
+                    self.invalid_numeric_capture(native, server, client, result, frames)
+
+    def test_optional_native_report_parts_still_require_finite_numbers(self):
+        for part in ('previous_report_ms', 'previous_report_encode_ms', 'previous_report_write_ms'):
+            for invalid in (float('nan'), float('inf'), -float('inf'), True):
+                with self.subTest(part=part, invalid=invalid):
+                    server, client, result, frames = self.producer_capture(True)
+                    self.assertEqual(self.complete_capture(True, server, client, result, frames)[0]
+                                     ['measured_frame_report_ms'], 2)
+                    frames[1]['profile'][part] = invalid
+                    self.invalid_numeric_capture(True, server, client, result, frames)
+
+    def test_diagnostic_write_validation_survives_optimization(self):
+        for native in (False, True):
+            for invalid in (float('nan'), float('inf'), -float('inf'), True, -1, None):
+                with self.subTest(native=native, invalid=invalid):
+                    server, client, result, frames = self.producer_capture(native)
+                    client[1]['previous_timing_write_ms'] = .25
+                    self.assertEqual(self.complete_capture(native, server, client, result, frames)[0]
+                                     ['request_diagnostic_write_ms'], .25)
+                    client[1]['previous_timing_write_ms'] = invalid
+                    self.invalid_numeric_capture(native, server, client, result, frames)

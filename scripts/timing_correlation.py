@@ -26,7 +26,8 @@ def diagnostic_write_costs(rows):
     for previous, following in zip(client, client[1:]):
         if 'previous_timing_write_ms' in following:
             value = following['previous_timing_write_ms']
-            assert type(value) in (int,float) and math.isfinite(value) and value >= 0
+            if not (type(value) in (int,float) and math.isfinite(value) and value >= 0):
+                raise ValueError('Invalid diagnostic write duration: expected a finite nonnegative number')
             costs[(previous['request_id'], previous['event'])] = value
     return costs
 
@@ -86,6 +87,18 @@ def measured_server_event(indexed, request, kind):
     return candidates[0]
 
 
+def measured_server_pair(indexed, request):
+    handled, sent = [measured_server_event(indexed, request, kind)
+                     for kind in ('server_handled', 'server_ack_sent')]
+    # Both producers stamp the same transport connection ID. It is not the
+    # driver's actor index; unrelated setup requests may still share an ID.
+    clients = [row.get('client') for row in (handled, sent)]
+    if (any(type(client) is not int or not 0 <= client < 2**64 for client in clients)
+            or clients[0] != clients[1]):
+        raise ValueError(f'Invalid server client identity for measured request {request!r}')
+    return handled, sent
+
+
 def correlate_ack(directory, result):
     directory = Path(directory)
     server = server_events(directory/'server.stderr.log')
@@ -109,8 +122,7 @@ def correlate_ack(directory, result):
         report_max = max(client[index]['duration_ms']
                          for index in range(start_index, report_index + 1)
                          if client[index]['event'] == 'headless_report')
-        handled, sent_ack = [measured_server_event(server, request, kind)
-                             for kind in ('server_handled', 'server_ack_sent')]
+        handled, sent_ack = measured_server_pair(server, request)
         row = dict(request_id=request, actor=sample['actor'], label=sample['label'],
                    request_diagnostic_write_ms=writes[sample['actor']].get((request,'client_request')),
                    sent_diagnostic_write_ms=writes[sample['actor']].get((request,'client_request_sent')),
@@ -128,9 +140,10 @@ def correlate_ack(directory, result):
                    driver_queue_ms=sample['request_to_ack_ms']-sample['request_to_ack_line_ms'])
         # Cross-process clocks may drift or adjust; a receiver can also run
         # before a sender returns. Preserve signed diagnostics without clamping.
-        assert all((v is None and k.endswith('_diagnostic_write_ms')) or
+        if not all((v is None and k.endswith('_diagnostic_write_ms')) or
                    (type(v) in (int,float) and math.isfinite(v))
-                   for k,v in row.items() if k.endswith('_ms'))
+                   for k,v in row.items() if k.endswith('_ms')):
+            raise ValueError('Invalid acknowledgement timing: expected finite numeric evidence')
         output.append(row)
     return output
 
@@ -160,6 +173,7 @@ def correlate_native(directory, result):
     # Recover that later sample rather than assigning the previous call to the
     # frame being measured. This read happens offline, after the workload.
     action_frames, report_cost, frame_times, report_parts = {}, {}, {}, {}
+    following_frames = {}
     previous_frame = None
     with (directory/'ascii.stdout.jsonl').open() as stream:
         for line in stream:
@@ -174,6 +188,7 @@ def correlate_native(directory, result):
             if frame['frame'] in frame_times:
                 raise ValueError(f'Duplicate native frame diagnostic {frame["frame"]!r}')
             if previous_frame is not None:
+                following_frames[previous_frame] = frame['frame']
                 report_cost[previous_frame] = frame['profile']['previous_report_ms']
                 report_parts[previous_frame] = {k:frame['profile'].get('previous_report_'+k+'_ms') for k in ('encode','write')}
             previous_frame = frame['frame']
@@ -190,8 +205,7 @@ def correlate_native(directory, result):
         request = candidates[0]
         request_id = request['request_id']
         client_event_order(positions, request_id)
-        handled = measured_server_event(server, request_id, 'server_handled')
-        sent = measured_server_event(server, request_id, 'server_ack_sent')
+        handled, sent = measured_server_pair(server, request_id)
         ack = acknowledgements[request_id]
         if 'presented_frame' in sample:
             frame_id = sample['presented_frame']
@@ -200,7 +214,18 @@ def correlate_native(directory, result):
             if len(candidates) != 1:
                 raise ValueError(f'Ambiguous native frame revision {sample["index"]!r}')
             frame_id = candidates[0]
-        presented = frame_times.get(frame_id)
+        if frame_id not in frame_times:
+            raise ValueError(f'Missing selected native frame diagnostic {frame_id!r}')
+        following = following_frames.get(frame_id)
+        # Dirty presentations increment the producer's frame ID exactly once.
+        # A later parsed row is not necessarily the true next report if the
+        # capture has a gap or reorder. Validate only this measured boundary.
+        # A final frame may lack its optional report cost, unless its actual
+        # successor was already observed earlier (a known reorder, not a tail).
+        if ((following is not None and following != frame_id + 1)
+                or (following is None and frame_id + 1 in frame_times)):
+            raise ValueError(f'Invalid selected native frame successor for {frame_id!r}')
+        presented = frame_times[frame_id]
         output.append(dict(index=sample['index'], request_id=request_id,
             presentation_ms=sample['request_to_presentation_ms'],
             input_to_client_request_ms=(request['unix_ns']-sample['input_unix_ns'])/1e6,
@@ -222,8 +247,9 @@ def correlate_native(directory, result):
     optional = {'request_diagnostic_write_ms','sent_diagnostic_write_ms','ack_diagnostic_write_ms',
                 'client_ack_to_presented_ms','presented_to_reader_ms','measured_frame_encode_ms',
                 'measured_frame_write_ms','measured_frame_report_ms'}
-    assert all((v is None and k in optional) or (type(v) in (int,float) and math.isfinite(v))
-               for row in output for k,v in row.items() if k.endswith('_ms'))
+    if not all((v is None and k in optional) or (type(v) in (int,float) and math.isfinite(v))
+               for row in output for k,v in row.items() if k.endswith('_ms')):
+        raise ValueError('Invalid native timing: expected finite numeric evidence')
     return output
 
 
