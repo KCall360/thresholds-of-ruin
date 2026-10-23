@@ -19,6 +19,8 @@ pub enum Plan {
     Centaur,
     Serpent,
     Floater,
+    /// Rooted in place: a plant on its stem.
+    Rooted,
     Marker,
 }
 
@@ -40,6 +42,11 @@ pub struct Look {
     stride: f32,
     /// This individual's variation within its kind.
     v: Variant,
+    /// The clothes and armour it was dressed in, if not its kind's own.
+    outfit: Option<outfit::Outfit>,
+    /// Its cache identity before it was dressed: the body every outfit is
+    /// cut for.
+    body_key: Option<String>,
 }
 
 /// How one individual differs from others of its kind: for people, sex,
@@ -153,6 +160,42 @@ enum Style {
     Wisp,
     Ice,
     Common,
+    Orc,
+    Troll,
+    Leprechaun,
+    Nymph,
+    Medusa,
+    Phantom,
+    Wraith,
+    Bat,
+    Kestrel,
+    Griffin,
+    Dragon,
+    Jabberwock,
+    Aquator,
+    Xeroc,
+    Flytrap,
+    Rattlesnake,
+}
+
+impl Style {
+    /// Winged creatures always drawn on the wing, never perched.
+    fn flies(self) -> bool {
+        matches!(self, Style::Bat | Style::Kestrel)
+    }
+
+    /// See-through in every light: its normal look, not a hidden state.
+    fn ghostly(self) -> bool {
+        self == Style::Phantom
+    }
+
+    /// The four-legged Rogue beasts built by their own recipes.
+    fn rogue_beast(self) -> bool {
+        matches!(
+            self,
+            Style::Griffin | Style::Dragon | Style::Jabberwock | Style::Aquator | Style::Xeroc
+        )
+    }
 }
 
 const LEATHER: Vec3 = Vec3::new(0.34, 0.2, 0.12);
@@ -193,6 +236,13 @@ impl Look {
                 | Style::Hobgoblin
                 | Style::Centaur
                 | Style::Common
+                | Style::Orc
+                | Style::Troll
+                | Style::Leprechaun
+                | Style::Nymph
+                | Style::Medusa
+                | Style::Phantom
+                | Style::Wraith
         );
         look.v = if model == CreatureModel::Placeholder {
             Variant::default()
@@ -203,6 +253,31 @@ impl Look {
         look.key = format!("{}:{}", look.key, look.v.code());
         look.scale *= BODY_SCALE;
         look
+    }
+
+    /// The same individual dressed from the wardrobe. Only humanoids that
+    /// wear separable clothes can be redressed; the rest are returned as they
+    /// are. Each outfit is cut for this wearer and cached apart. Replacing an
+    /// outfit retains the original body's identity; Native restores that look.
+    pub fn dressed(mut self, wardrobe: Wardrobe) -> Look {
+        if !outfit::dresses(&self) {
+            return self;
+        }
+        let body_key = self.body_key.take().unwrap_or_else(|| self.key.clone());
+        if wardrobe == Wardrobe::Native {
+            self.outfit = None;
+            self.key = body_key;
+            return self;
+        }
+        self.outfit = Some(outfit::Outfit::from_wardrobe(wardrobe, &self));
+        self.key = format!("{body_key}:{wardrobe:?}");
+        self.body_key = Some(body_key);
+        self
+    }
+
+    /// Whether this look can be redressed from the wardrobe.
+    pub fn dresses(&self) -> bool {
+        outfit::dresses(self)
     }
 
     /// Apply this individual's variation to the designed look.
@@ -309,6 +384,77 @@ impl Look {
                     Vec3::new(0.66, 0.56, 0.5),
                 ][v.shade as usize];
             }
+            Style::Orc => {
+                self.skin = [
+                    Vec3::new(0.52, 0.6, 0.26),
+                    Vec3::new(0.46, 0.56, 0.24),
+                    Vec3::new(0.58, 0.62, 0.3),
+                    Vec3::new(0.42, 0.52, 0.28),
+                    Vec3::new(0.55, 0.56, 0.22),
+                ][v.skin as usize];
+            }
+            Style::Troll => {
+                self.skin = [
+                    Vec3::new(0.66, 0.56, 0.24),
+                    Vec3::new(0.6, 0.52, 0.22),
+                    Vec3::new(0.7, 0.6, 0.3),
+                    Vec3::new(0.56, 0.5, 0.26),
+                    Vec3::new(0.64, 0.5, 0.2),
+                ][v.skin as usize];
+            }
+            Style::Leprechaun | Style::Nymph => {
+                self.skin = SKINS[(v.skin as usize).min(3)];
+                if self.style == Style::Leprechaun {
+                    // Each wears a coat of their own green.
+                    self.cloth = [
+                        Vec3::new(0.12, 0.38, 0.22),
+                        Vec3::new(0.1, 0.32, 0.18),
+                        Vec3::new(0.16, 0.42, 0.2),
+                        Vec3::new(0.08, 0.34, 0.26),
+                    ][v.pattern as usize];
+                } else {
+                    self.cloth = [
+                        Vec3::new(0.3, 0.5, 0.18),
+                        Vec3::new(0.24, 0.44, 0.2),
+                        Vec3::new(0.38, 0.52, 0.2),
+                        Vec3::new(0.28, 0.48, 0.26),
+                    ][v.pattern as usize];
+                }
+            }
+            Style::Medusa => {
+                self.skin = [
+                    Vec3::new(0.62, 0.66, 0.4),
+                    Vec3::new(0.56, 0.62, 0.38),
+                    Vec3::new(0.66, 0.64, 0.42),
+                    Vec3::new(0.52, 0.58, 0.4),
+                    Vec3::new(0.6, 0.6, 0.36),
+                ][v.skin as usize];
+                self.cloth *= 1.0 + 0.12 * s;
+            }
+            Style::Phantom | Style::Wraith => {
+                self.skin = [
+                    Vec3::new(0.66, 0.72, 0.82),
+                    Vec3::new(0.6, 0.66, 0.78),
+                    Vec3::new(0.7, 0.74, 0.8),
+                    Vec3::new(0.62, 0.7, 0.76),
+                    Vec3::new(0.56, 0.62, 0.74),
+                ][v.skin as usize];
+                self.cloth *= 1.0 + 0.1 * s;
+            }
+            Style::Bat
+            | Style::Kestrel
+            | Style::Griffin
+            | Style::Dragon
+            | Style::Jabberwock
+            | Style::Aquator
+            | Style::Xeroc
+            | Style::Flytrap => {
+                self.skin *= 1.0 + 0.08 * s;
+            }
+            Style::Rattlesnake => {
+                self.skin *= 1.0 + 0.1 * s;
+                self.cloth *= 1.0 - 0.06 * s;
+            }
             _ => {}
         }
     }
@@ -328,6 +474,8 @@ impl Look {
             hunch: 0.0,
             stride: 1.0,
             v: Variant::default(),
+            outfit: None,
+            body_key: None,
         };
         let teal = Vec3::new(0.045, 0.6, 0.55);
         if model == CreatureModel::Placeholder {
@@ -466,7 +614,10 @@ impl Look {
                 )
             };
         }
-        if matches!(model, CreatureModel::Hobgoblin | CreatureModel::Troll) {
+        if let Some(look) = Self::rogue(model, &base) {
+            return look;
+        }
+        if model == CreatureModel::Hobgoblin {
             return Look {
                 scale: 0.95,
                 hunch: 0.15,
@@ -547,6 +698,192 @@ impl Look {
         base(Plan::Biped, Style::Common, SKIN, tint * 0.6, LEATHER)
     }
 
+    /// The Rogue scenario's own monsters, each from its concept sheet.
+    fn rogue(
+        model: CreatureModel,
+        base: &dyn Fn(Plan, Style, Vec3, Vec3, Vec3) -> Look,
+    ) -> Option<Look> {
+        let rgb = Vec3::new;
+        let look = match model {
+            CreatureModel::Orc => Look {
+                scale: 1.04,
+                hunch: 0.08,
+                stride: 0.9,
+                ..base(
+                    Plan::Biped,
+                    Style::Orc,
+                    rgb(0.52, 0.6, 0.26),
+                    rgb(0.36, 0.22, 0.13),
+                    rgb(0.62, 0.12, 0.12),
+                )
+            },
+            CreatureModel::Troll => Look {
+                scale: 1.14,
+                hunch: 0.22,
+                stride: 0.8,
+                ..base(
+                    Plan::Biped,
+                    Style::Troll,
+                    rgb(0.66, 0.56, 0.24),
+                    rgb(0.36, 0.38, 0.22),
+                    rgb(0.32, 0.18, 0.12),
+                )
+            },
+            CreatureModel::Leprechaun => Look {
+                scale: 0.76,
+                stride: 1.25,
+                ..base(
+                    Plan::Biped,
+                    Style::Leprechaun,
+                    SKIN,
+                    rgb(0.12, 0.38, 0.22),
+                    GILT,
+                )
+            },
+            CreatureModel::Nymph => Look {
+                scale: 0.96,
+                stride: 1.05,
+                ..base(
+                    Plan::Biped,
+                    Style::Nymph,
+                    SKIN,
+                    rgb(0.3, 0.5, 0.18),
+                    rgb(0.8, 0.66, 0.25),
+                )
+            },
+            CreatureModel::Medusa => Look {
+                eyes: Some(Accent::Amber),
+                ..base(
+                    Plan::Biped,
+                    Style::Medusa,
+                    rgb(0.62, 0.66, 0.4),
+                    rgb(0.42, 0.12, 0.24),
+                    rgb(0.78, 0.52, 0.24),
+                )
+            },
+            CreatureModel::Phantom => Look {
+                eyes: Some(Accent::Travel),
+                stride: 0.9,
+                ..base(
+                    Plan::Biped,
+                    Style::Phantom,
+                    rgb(0.66, 0.72, 0.82),
+                    rgb(0.36, 0.3, 0.55),
+                    rgb(0.24, 0.2, 0.36),
+                )
+            },
+            CreatureModel::Wraith => Look {
+                scale: 1.04,
+                hunch: 0.1,
+                eyes: Some(Accent::Teal),
+                stride: 0.85,
+                ..base(
+                    Plan::Biped,
+                    Style::Wraith,
+                    rgb(0.62, 0.68, 0.76),
+                    rgb(0.18, 0.2, 0.26),
+                    rgb(0.18, 0.42, 0.42),
+                )
+            },
+            CreatureModel::Bat => Look {
+                scale: 0.82,
+                stride: 1.4,
+                ..base(
+                    Plan::Bird,
+                    Style::Bat,
+                    rgb(0.56, 0.32, 0.18),
+                    rgb(0.42, 0.2, 0.26),
+                    rgb(0.86, 0.74, 0.56),
+                )
+            },
+            CreatureModel::Kestrel => Look {
+                scale: 0.8,
+                stride: 1.4,
+                ..base(
+                    Plan::Bird,
+                    Style::Kestrel,
+                    rgb(0.72, 0.38, 0.18),
+                    rgb(0.92, 0.8, 0.62),
+                    rgb(0.52, 0.56, 0.62),
+                )
+            },
+            CreatureModel::Griffin => Look {
+                scale: 1.06,
+                stride: 0.8,
+                ..base(
+                    Plan::Quadruped,
+                    Style::Griffin,
+                    rgb(0.74, 0.5, 0.24),
+                    rgb(0.94, 0.88, 0.72),
+                    rgb(0.12, 0.42, 0.42),
+                )
+            },
+            CreatureModel::Dragon => Look {
+                scale: 1.22,
+                stride: 0.65,
+                ..base(
+                    Plan::Quadruped,
+                    Style::Dragon,
+                    rgb(0.72, 0.2, 0.12),
+                    rgb(0.9, 0.74, 0.52),
+                    rgb(0.5, 0.12, 0.14),
+                )
+            },
+            CreatureModel::Jabberwock => Look {
+                scale: 1.12,
+                stride: 0.75,
+                ..base(
+                    Plan::Quadruped,
+                    Style::Jabberwock,
+                    rgb(0.32, 0.46, 0.26),
+                    rgb(0.88, 0.78, 0.6),
+                    rgb(0.9, 0.48, 0.16),
+                )
+            },
+            CreatureModel::Aquator => Look {
+                scale: 0.95,
+                stride: 1.6,
+                ..base(
+                    Plan::Quadruped,
+                    Style::Aquator,
+                    rgb(0.16, 0.5, 0.52),
+                    rgb(0.9, 0.84, 0.66),
+                    rgb(0.9, 0.42, 0.12),
+                )
+            },
+            CreatureModel::Xeroc => Look {
+                scale: 0.92,
+                stride: 1.7,
+                ..base(
+                    Plan::Quadruped,
+                    Style::Xeroc,
+                    rgb(0.46, 0.28, 0.34),
+                    rgb(0.78, 0.66, 0.48),
+                    rgb(0.62, 0.16, 0.2),
+                )
+            },
+            CreatureModel::Flytrap => base(
+                Plan::Rooted,
+                Style::Flytrap,
+                rgb(0.36, 0.58, 0.22),
+                rgb(0.72, 0.18, 0.16),
+                rgb(0.94, 0.88, 0.66),
+            ),
+            CreatureModel::Rattlesnake => Look {
+                scale: 1.45,
+                ..base(
+                    Plan::Serpent,
+                    Style::Rattlesnake,
+                    rgb(0.5, 0.48, 0.24),
+                    rgb(0.78, 0.64, 0.36),
+                    rgb(0.88, 0.82, 0.62),
+                )
+            },
+            _ => return None,
+        };
+        Some(look)
+    }
+
     /// Whether this individual is a woman.
     pub fn woman(&self) -> bool {
         self.v.woman
@@ -554,14 +891,21 @@ impl Look {
 
     /// Height of the head's top, for labels.
     pub fn height(&self) -> f32 {
-        let h = match self.plan {
-            Plan::Biped => 1.85,
-            Plan::Bird => 1.75,
-            Plan::Quadruped => 1.7,
-            Plan::Centaur => 2.2,
-            Plan::Serpent => 0.6,
-            Plan::Floater => 1.6,
-            Plan::Marker => 1.0,
+        let h = match (self.plan, self.style) {
+            (_, Style::Bat | Style::Kestrel) => 1.9,
+            (_, Style::Dragon) => 1.55,
+            (_, Style::Griffin) => 1.45,
+            (_, Style::Jabberwock) => 1.8,
+            (_, Style::Aquator) => 0.85,
+            (_, Style::Xeroc) => 0.72,
+            (Plan::Biped, _) => 1.85,
+            (Plan::Bird, _) => 1.75,
+            (Plan::Quadruped, _) => 1.7,
+            (Plan::Centaur, _) => 2.2,
+            (Plan::Serpent, _) => 0.6,
+            (Plan::Floater, _) => 1.6,
+            (Plan::Rooted, _) => 1.3,
+            (Plan::Marker, _) => 1.0,
         };
         h * self.scale
     }
@@ -618,8 +962,25 @@ pub enum J {
     HoofFR,
     HoofBL,
     HoofBR,
+    /// Wings: the arm from the shoulder, and the hand that carries the tip.
+    WingL,
+    WingR,
+    WingTipL,
+    WingTipR,
+    /// A lower jaw, or a flytrap's lower lobe.
+    Jaw,
+    /// Paired upper fangs that fold into a closed serpent mouth.
+    Fangs,
 }
-const JOINTS: usize = 33;
+const JOINTS: usize = 39;
+
+/// A beast's terminal limb can support weight or remain free to grasp.
+/// Joint names stay stable; recipes choose behavior independently of species.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LimbRole {
+    Support,
+    Grasp,
+}
 
 #[derive(Component)]
 pub struct Rig {
@@ -632,16 +993,67 @@ pub struct Rig {
     segments: Vec<Entity>,
     /// Continuous caster garment with an owned mesh and shared material.
     robe: Option<robe::RobeRig>,
+    /// Instance-owned connected shoulder sheets; materials remain shared.
+    cloaks: Vec<cloak::CloakRig>,
     stride: f32,
     hunch: f32,
     style: Style,
     /// Overall size, applied to whole-body offsets (lunges, falls).
     scale: f32,
+    /// A four-legged beast's ankle height with its soles on the floor.
+    ankle_floor: f32,
+    /// Leg length relative to a horse's, scaling crouch and step height.
+    legs: f32,
+    /// Front left/right, rear left/right, in the support solver's slot order.
+    limb_roles: [LimbRole; 4],
+    /// Half the body's width, the height it lies at when fallen on its side.
+    girth: f32,
+    /// Hanging cloth that swings on its own as the wearer moves.
+    drapes: Vec<(Entity, Drape)>,
+}
+
+/// How a piece of hanging cloth swings.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Drape {
+    /// A cloak or cape from the shoulders: it flares back as its wearer
+    /// travels and trails through turns.
+    Cloak,
+    /// A skirt, kilt, coat tails or rags from the hips, of this length: it
+    /// sways with the stride, longer cloth more slowly and less far.
+    Skirt(f32),
+    /// Long loose hair from the crown: it trails through turns, lifts and
+    /// settles with each step and stirs at rest.
+    Hair,
 }
 
 impl Rig {
     pub fn joint(&self, j: J) -> Option<Entity> {
         self.joints[j as usize]
+    }
+
+    fn supports(&self, terminal: J) -> bool {
+        let slot = match terminal {
+            J::HoofFL => 0,
+            J::HoofFR => 1,
+            J::HoofBL => 2,
+            J::HoofBR => 3,
+            _ => return true,
+        };
+        self.limb_roles[slot] == LimbRole::Support
+    }
+
+    /// Authored bent landmarks own the knee direction; straight legacy chains
+    /// retain their family's conventional fore/hind bend.
+    fn support_bend(&self, shin: J, terminal: J, fallback: f32) -> f32 {
+        let upper = self.rest[shin as usize];
+        let target = upper + self.rest[terminal as usize];
+        let direction = target.normalize_or(Vec3::NEG_Y);
+        let knee = upper - direction * upper.dot(direction);
+        if knee.z.abs() > 0.025 {
+            knee.z.signum()
+        } else {
+            fallback
+        }
     }
 }
 
@@ -682,6 +1094,12 @@ pub enum Move {
     Step,
     /// Kneeling to bind one's wounds (Bind Wounds).
     Mend,
+    /// Fire or frost breathed from an open jaw (Breath Weapon).
+    Breath(Accent),
+    /// A confusing stare (Confusing Gaze).
+    Gaze,
+    /// A venomous or corroding bite.
+    Bite(Accent),
 }
 
 impl Move {
@@ -701,6 +1119,12 @@ impl Move {
             "rogue.fear" => Move::Fear,
             "rogue.drain_vitality" => Move::Drain,
             "rogue.freezing_touch" => Move::Touch(Accent::Travel),
+            "rogue.breath_weapon" => Move::Breath(Accent::Ember),
+            "rogue.confusing_gaze" => Move::Gaze,
+            "rogue.corrode" => Move::Touch(Accent::Amber),
+            "rogue.energy_drain" => Move::Drain,
+            "rogue.ambush_from_guise" => Move::Shove,
+            "rogue.venomous_bite" => Move::Bite(Accent::Teal),
             "brace_for_impact" => Move::Guard(Accent::Gold),
             "shell_impact" | "shell_keen" | "shell_energy" => Move::Guard(Accent::Teal),
             "guarded_step" => Move::Step,
@@ -728,6 +1152,9 @@ impl Move {
             Move::Guard(_) => 1.1,
             Move::Step => 0.8,
             Move::Mend => 1.5,
+            Move::Breath(_) => 1.2,
+            Move::Gaze => 1.0,
+            Move::Bite(_) => 0.6,
         }
     }
 
@@ -751,6 +1178,9 @@ impl Move {
             Move::Guard(_) => 0.25,
             Move::Step => 0.3,
             Move::Mend => 0.6,
+            Move::Breath(_) => 0.5,
+            Move::Gaze => 0.5,
+            Move::Bite(_) => 0.42,
         }
     }
 
@@ -799,6 +1229,11 @@ pub struct Anim {
     dodge: Option<f32>,
     /// Death progress, 0 to 1. A corpse holds 1.
     pub dead: Option<f32>,
+    /// How far down it still is after being revived: it rises out of its
+    /// death pose instead of snapping upright.
+    fallen: f32,
+    /// How fully the idle fidgets are in play, easing between actions.
+    rest: f32,
     /// Hold the rest pose without fidgets, for portraits.
     pub quiet: bool,
 }
@@ -818,6 +1253,8 @@ impl Anim {
             hurt: None,
             dodge: None,
             dead: None,
+            fallen: 0.0,
+            rest: 1.0,
             quiet: false,
         }
     }
@@ -835,12 +1272,10 @@ impl Anim {
     }
 
     pub fn hit(&mut self, delay: f32) {
-        self.contacts = WalkContacts::default();
         self.hurt = Some(-delay);
     }
 
     pub fn miss(&mut self, delay: f32) {
-        self.contacts = WalkContacts::default();
         self.dodge = Some(-delay);
     }
 }
@@ -849,17 +1284,24 @@ mod anatomy;
 mod animation;
 #[cfg(test)]
 mod art_contract_tests;
+mod cloak;
+#[cfg(test)]
+mod cloak_tests;
 mod corpse;
 mod effects;
 mod geometry;
+mod outfit;
 #[cfg(test)]
 mod reaction_tests;
 mod robe;
+#[cfg(test)]
+mod rogue_tests;
 
 pub use animation::{animate, Boredom, BORED_AFTER};
 pub use corpse::{snuff, spawn_corpse, Snuffed};
 pub use effects::{effects, stage, Bolt, Fade};
 pub use geometry::spawn;
+pub use outfit::Wardrobe;
 
 /// Convert only the shared cosmetic seed to this renderer's variation stream.
 /// Unknown appearance uses one neutral recipe; interaction targets never seed it.
@@ -870,4 +1312,114 @@ pub fn individual(seed: Option<tor_protocol::AppearanceSeed>) -> u64 {
 /// A seed that stays the same for a creature of this name.
 pub fn seed(name: &str) -> u64 {
     hash(name)
+}
+
+#[cfg(test)]
+mod dressing_tests {
+    use super::*;
+
+    fn wearer() -> Look {
+        Look::with_choice(
+            CreatureModel::Zombie,
+            2,
+            Some(Variant {
+                woman: true,
+                build: 2,
+                ..default()
+            }),
+        )
+    }
+
+    fn assert_same_body(actual: &Look, expected: &Look) {
+        assert_eq!(actual.plan, expected.plan);
+        assert_eq!(actual.scale, expected.scale);
+        assert_eq!(actual.style, expected.style);
+        assert_eq!(actual.skin, expected.skin);
+        assert_eq!(actual.cloth, expected.cloth);
+        assert_eq!(actual.trim, expected.trim);
+        assert_eq!(actual.eyes, expected.eyes);
+        assert_eq!(actual.aura, expected.aura);
+        assert_eq!(actual.hunch, expected.hunch);
+        assert_eq!(actual.stride, expected.stride);
+        assert_eq!(actual.v, expected.v);
+    }
+
+    #[test]
+    fn selecting_the_same_outfit_is_idempotent() {
+        let base = wearer();
+        for wardrobe in Wardrobe::ALL {
+            let once = base.clone().dressed(wardrobe);
+            let twice = once.clone().dressed(wardrobe);
+            assert_eq!(twice.key, once.key, "{wardrobe:?} cache identity");
+            assert_eq!(twice.body_key, once.body_key, "{wardrobe:?} body identity");
+            assert_eq!(twice.outfit, once.outfit, "{wardrobe:?} garments");
+            assert_same_body(&twice, &base);
+        }
+    }
+
+    #[test]
+    fn replacing_an_outfit_matches_selecting_it_directly() {
+        let base = wearer();
+        for first in Wardrobe::ALL {
+            for next in Wardrobe::ALL {
+                let replaced = base.clone().dressed(first).dressed(next);
+                let direct = base.clone().dressed(next);
+                assert_eq!(
+                    outfit::Outfit::worn(&replaced),
+                    outfit::Outfit::worn(&direct),
+                    "{first:?} -> {next:?} must replace the whole outfit"
+                );
+                assert_eq!(replaced.key, direct.key, "{first:?} -> {next:?} cache");
+                assert_eq!(
+                    replaced.body_key, direct.body_key,
+                    "{first:?} -> {next:?} body identity"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn selecting_native_restores_the_original_outfit_and_identity() {
+        let base = wearer();
+        for wardrobe in Wardrobe::ALL {
+            let restored = base.clone().dressed(wardrobe).dressed(Wardrobe::Native);
+            assert!(restored.outfit.is_none(), "reset {wardrobe:?} to native");
+            assert_eq!(restored.key, base.key, "restore the native cache identity");
+            assert_eq!(restored.body_key, base.body_key);
+            assert_eq!(outfit::Outfit::worn(&restored), outfit::Outfit::worn(&base));
+            assert_same_body(&restored, &base);
+        }
+    }
+
+    #[test]
+    fn repeated_redressing_preserves_the_original_body_identity_and_traits() {
+        let base = wearer();
+        let mut look = base.clone();
+        for wardrobe in [Wardrobe::Ranger, Wardrobe::Courtier, Wardrobe::Knight] {
+            look = look.dressed(wardrobe);
+            assert_eq!(look.body_key.as_deref(), Some(base.key.as_str()));
+            assert_same_body(&look, &base);
+        }
+    }
+
+    #[test]
+    fn wardrobe_selections_leave_non_dressable_looks_unchanged() {
+        for model in [
+            CreatureModel::Guardian,
+            CreatureModel::Yeti,
+            CreatureModel::Mage,
+            CreatureModel::Bat,
+        ] {
+            let base = Look::of(model, 2);
+            assert!(!base.dresses(), "exercise the non-dressable boundary");
+            let mut look = base.clone();
+            for wardrobe in Wardrobe::ALL {
+                look = look.dressed(wardrobe);
+                assert_eq!(look.key, base.key, "{model:?} {wardrobe:?} identity");
+                assert_eq!(look.body_key, base.body_key);
+                assert_eq!(look.outfit, base.outfit);
+                assert_same_body(&look, &base);
+            }
+        }
+    }
 }

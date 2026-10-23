@@ -85,12 +85,20 @@ pub struct PropMaterials {
     /// Leather and other surfaces with a soft sheen.
     satin: Handle<StandardMaterial>,
     metal: Handle<StandardMaterial>,
+    /// Translucent spectral surfaces, faintly lit from within.
+    ghost: Handle<StandardMaterial>,
     glow: HashMap<Accent, Handle<StandardMaterial>>,
     /// The same accents nearly put out, for the glow on the dead.
     dim: HashMap<Accent, Handle<StandardMaterial>>,
 }
 
 impl PropMaterials {
+    /// The polished metal every model's armour and fittings share.
+    #[cfg(test)]
+    pub fn metal(&self) -> &Handle<StandardMaterial> {
+        &self.metal
+    }
+
     pub fn new(materials: &mut Assets<StandardMaterial>) -> Self {
         let glow = [
             Accent::Teal,
@@ -148,6 +156,13 @@ impl PropMaterials {
                 reflectance: 0.5,
                 ..default()
             }),
+            ghost: materials.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 1.0, 1.0, 0.78),
+                emissive: LinearRgba::rgb(0.035, 0.05, 0.09),
+                perceptual_roughness: 0.6,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
             glow,
             dim,
         }
@@ -167,6 +182,12 @@ impl PropMaterials {
 
     pub fn glow(&self, accent: Accent) -> Handle<StandardMaterial> {
         self.glow[&accent].clone()
+    }
+
+    /// The translucent material spectral bodies are drawn with.
+    #[cfg(test)]
+    pub fn ghost(&self) -> Handle<StandardMaterial> {
+        self.ghost.clone()
     }
 }
 
@@ -199,6 +220,8 @@ pub(crate) struct Parts {
     pub satin: Builder,
     pub metal: Builder,
     pub glow: Builder,
+    /// Seen through: drawn with the translucent spectral material.
+    pub ghost: Builder,
     pub accent: Option<Accent>,
 }
 
@@ -214,6 +237,9 @@ impl Parts {
         if let Some(mesh) = self.metal.finish() {
             model.0.push((meshes.add(mesh), materials.metal.clone()));
         }
+        if let Some(mesh) = self.ghost.finish() {
+            model.0.push((meshes.add(mesh), materials.ghost.clone()));
+        }
         if let (Some(mesh), Some(accent)) = (self.glow.finish(), self.accent) {
             model.0.push((meshes.add(mesh), materials.glow(accent)));
         }
@@ -227,6 +253,7 @@ impl Parts {
             &mut self.satin,
             &mut self.metal,
             &mut self.glow,
+            &mut self.ghost,
         ] {
             b.res = (9, 16);
             b.sides_mul = 2;
@@ -239,6 +266,16 @@ impl Parts {
         self.satin.xf = xf;
         self.metal.xf = xf;
         self.glow.xf = xf;
+        self.ghost.xf = xf;
+    }
+
+    /// Move every opaque surface into the translucent spectral layer; glowing
+    /// eyes and accents stay solid so they still read through the body.
+    pub(crate) fn ghostify(&mut self) {
+        for b in [&mut self.matte, &mut self.satin, &mut self.metal] {
+            let taken = std::mem::take(b);
+            self.ghost.absorb(taken);
+        }
     }
 }
 
@@ -1479,6 +1516,33 @@ impl Default for Builder {
 }
 
 impl Builder {
+    /// Whether nothing has been built yet.
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.positions.is_empty()
+    }
+
+    /// The box enclosing everything built so far.
+    #[cfg(test)]
+    pub(crate) fn bounds(&self) -> (Vec3, Vec3) {
+        self.positions.iter().fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |(low, high), p| {
+                let p = Vec3::from_array(*p);
+                (low.min(p), high.max(p))
+            },
+        )
+    }
+
+    /// Take over another builder's finished triangles.
+    pub(crate) fn absorb(&mut self, other: Builder) {
+        self.positions.extend(other.positions);
+        self.normals.extend(other.normals);
+        self.colors.extend(other.colors);
+        self.shades.extend(other.shades);
+        self.smooth |= other.smooth;
+    }
+
     /// Average each vertex's normal with those of coincident vertices whose
     /// faces meet at a gentle angle, so curves shade softly and creases stay.
     fn soften(&mut self) {

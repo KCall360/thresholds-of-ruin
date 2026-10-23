@@ -138,6 +138,23 @@ pub fn run() -> Result<(), Error> {
                 bestiary = true;
                 diagnostics.lineups = true;
             }
+            "--outfit" => {
+                // Dress every humanoid in the bestiary from the wardrobe.
+                let name = value()?;
+                diagnostics.outfit = creatures::Wardrobe::parse(&name)
+                    .ok_or_else(|| format!("unknown outfit {name}"))?;
+            }
+            "--wardrobe-cycle" => {
+                // Redress the bestiary's humanoids every so many seconds.
+                diagnostics.wardrobe_cycle = Some(value()?.parse()?);
+            }
+            "--family" => {
+                diagnostics.families = value()?
+                    .split(',')
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+                    .collect();
+            }
             "--fallen-lineups" => {
                 bestiary = true;
                 diagnostics.lineups = true;
@@ -349,6 +366,12 @@ pub(crate) struct Diagnostics {
     lineups: bool,
     /// Use the same generated lineup individuals in their settled death poses.
     fallen_lineups: bool,
+    /// Limit line-ups to these creatures, by their bestiary names.
+    families: Vec<String>,
+    /// What the bestiary's humanoids wear at first.
+    outfit: creatures::Wardrobe,
+    /// Redress them in the next outfit every so many seconds.
+    wardrobe_cycle: Option<f32>,
     /// Offline travel, fast gait transitions, and interrupted contact recovery.
     travel_study: bool,
     shots: u32,
