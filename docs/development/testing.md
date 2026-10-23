@@ -4,7 +4,8 @@ A change is complete when its changed contracts have independent coverage and
 its canonical CI assurance gate passes. This page is the authoritative policy;
 [development practices](../../CONTRIBUTING.md) covers the rest of contribution.
 
-CI distinguishes **prose-only**, **selected-contract**, and **exhaustive** results.
+CI distinguishes **prose-only**, **selected-contract**, **exhaustive**, and
+**prior exact-tree full qualification plus fresh main integration** results.
 The [risk-based gate](#risk-based-ci-assurance) selects required owners from
 complete change evidence; uncertain scope or ownership escalates rather than
 silently dropping coverage. Exhaustive Windows/Linux debug/release verification
@@ -342,8 +343,18 @@ themselves trigger its full native/render matrix or require a simultaneous 3D
 update. The risk-based core plan does add a lightweight Linux consumer lane for
 affected shared protocol/client-common contracts: the actual 3D application must
 compile and its model tests must pass. Conservative full plans also run this
-compatibility lane. That check is not graphical or visual qualification. The maintenance boundary never waives contract coverage
-for changes to the 3D client itself.
+compatibility lane. That check is not graphical or visual qualification. The
+maintenance boundary never waives contract coverage for changes to the 3D client
+itself.
+
+That compile/model-only lane uses
+[`ci_consumer_dependencies.py`](../../scripts/ci_consumer_dependencies.py): only
+`pkg-config`, ALSA and udev development packages, with no recommended packages,
+the configured repository trust, bounded retries and unchanged two-/three-minute
+update/install limits. A bounded `pkg-config` probe must succeed before Cargo.
+This does not remove native/render dependencies from other lanes or turn a
+download/setup timeout into a pass. Hosted minimal-package build success and
+setup-cost improvement require actual measurements.
 
 When maintaining that client, run both profiles explicitly from the repository
 root:
@@ -440,6 +451,7 @@ waived, duplicated, stale or incomplete required result cannot become green.
 | Prose-only | The unchanged complete-diff prose classifier plus documentation/tooling checks; no application qualification |
 | Selected-contract | Supported PR and main-push changes with complete Git scope and reviewed ownership; Linux/Windows tooling, plus explicit application/Rust lanes when required, real platform witnesses, release sentinel/affected owners, and any required downstream 3D compatibility |
 | Exhaustive | Full profile/partition matrix on both platforms for weekly scheduled, on-demand, release and required risk escalation; all existing full owners remain discoverable |
+| Prior exact-tree full plus fresh main | Only an otherwise-full main push with independently validated full-PR evidence for the identical merged tree and parents; fresh tooling, dependency enforcement and Linux integration still run. This is not fresh exhaustive execution |
 
 Pure tooling changes use Linux and Windows tooling closure without compiling
 unrelated Rust applications. Windows no-build tooling uses digest-bound Python
@@ -462,7 +474,8 @@ or missing fixed witnesses select full coverage or block qualification. New owne
 registrations require review, not an automatic allowlist refresh to turn CI green.
 
 Changes to verification controls, ownership/planning/receipt code, workflow,
-Cargo/toolchain/features or build configuration force exhaustive execution. Other
+Cargo/toolchain/features or build configuration force exhaustive PR execution.
+An otherwise-full main push has only the narrowly proven exception below. Other
 reviewed domains expand to their explicit broad/extended owners: topology and
 paid discovery retain full ordinary routes; persisted authority/growth retain
 replay and earned-route owners; transport retains real pressure/recovery owners;
@@ -478,18 +491,52 @@ proves inventory accounting, not the completeness of assertions. Preserve all
 full tests until a separately reviewed replacement demonstrates assertion parity,
 intended bug detection and every unique process/native/durability boundary.
 
-A release candidate requires exhaustive qualification; do not infer it from a
-selected main run. Manual full verification remains available before publishing
+A release candidate requires exhaustive qualification; do not infer a fresh full
+run from selected or inherited post-merge assurance. Manual full verification remains available before publishing
 a release, and release-event CI also uses full mode.
 
 All active selected and exhaustive CI lanes execute fresh tests. The retired
 pass-adoption and corrective-head machinery is removed, not kept as a dormant
-alternate gate; Git history retains the experiment. A binary artifact is reusable
+alternate gate; Git history retains the experiment. The separate exact-tree
+post-merge mode below does not revive those generic reuse paths. A binary artifact is reusable
 code, not test evidence. Qualified ordinary
 application builds may be shared between compatible consumers; Service-feature,
 test, benchmark and ordinary application recipes are not interchangeable. Bind
 source, toolchain/target/profile/features, build recipe and executable bytes before
 launch. Missing or mismatched inputs must not silently select an older executable.
+
+#### Exact-tree post-merge assurance
+
+[`ci_postmerge.py`](../../scripts/ci_postmerge.py) optimizes only an otherwise-full,
+ordinary merge push to `main`. Ordinary selected/prose main pushes, PRs, scheduled
+runs, manual full runs and release events keep their normal policy. The assurance
+label is `prior-exact-tree-full-plus-fresh-main`, never `exhaustive-matrix`.
+
+A full PR can publish a qualification seal only after its required full groups
+and both aggregates pass. The resolver accepts only the merged PR's newest
+canonical successful run, completed before the merge and within 24 hours. It
+independently checks complete GitHub job/artifact metadata, the digest-bound seal,
+repository, exact tested and merged trees and parents, workflow bytes, policy and
+current discovered inventory. All nine actual Rust/Cargo role identities must
+agree; scope resolves the current compiler, and fresh integration rechecks it.
+Missing, expired, ambiguous or mismatched evidence keeps the ordinary full plan;
+there is no search for an older green run or arbitrary user-supplied proof.
+Selected, prose-only and inherited post-merge results cannot produce a full seal
+or chain qualification into another tree/run.
+
+Main still runs fresh repository tooling, blocking dependency advisory checks,
+a Linux debug application build, unfiltered protocol/client-common tests with
+the required test-support feature, all currently discovered pure tests, and the
+two fixed paired-stair and journal-only exploration persistence witnesses.
+Both platform aggregates require the proof and complete fresh-main evidence.
+They do not claim that Windows, release or the full process matrix executed again.
+Once the post-merge plan is selected, a failed/missing smoke result blocks its
+gate; it is not silently turned into a pass or an older result.
+
+This trades a redundant identical-tree matrix for explicit prior coverage and
+fresh integration. It does not remove full tests or change release/weekly full
+requirements. Hosted proof acceptance and runner-hour savings must be measured;
+local proof fixtures alone do not establish either.
 
 #### Explain a local selection
 
@@ -707,7 +754,8 @@ Profile caches remain separate. Artifacts and verification log directories
 identify their profile and partition. The required `Rust (windows-latest)` and
 `Rust (ubuntu-latest)` checks require every profile/partition on both platforms
 in exhaustive mode. A cancelled or unexpectedly skipped constituent cannot pass;
-selected and prose-only modes have their separately validated plans above.
+selected, prose-only and exact-tree post-merge modes have their separately
+validated plans above.
 
 Full-job budgets remain 60 minutes for Rust and 40 minutes for Python/native.
 These are infrastructure ceilings, not promises of spare capacity or changes to

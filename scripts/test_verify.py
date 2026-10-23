@@ -1017,7 +1017,7 @@ class CiWorkflowContract(unittest.TestCase):
         gate = self.job("check")
         self.assertIn("    name: Rust (${{ matrix.os }})\n", gate)
         self.assertIn("        os: [windows-latest, ubuntu-latest]\n", gate)
-        self.assertIn("    needs: [scope, tooling, profiles, windows_python, windows_binaries, dependencies, selected_rust, selected_linux, selected_windows, selected_release, selected_consumer]\n", gate)
+        self.assertIn("    needs: [scope, tooling, profiles, windows_python, windows_binaries, dependencies, selected_rust, selected_linux, selected_windows, selected_release, selected_consumer, postmerge]\n", gate)
         self.assertIn("    if: always()\n", gate)
         self.assertIn("          PROFILES_RESULT: ${{ needs.profiles.result }}\n", gate)
         self.assertNotIn("continue-on-error", gate)
@@ -1030,7 +1030,7 @@ class CiWorkflowContract(unittest.TestCase):
             with self.subTest(outcome=outcome), patch.dict(os.environ, {
                     "DOCS_ONLY": "false", "SCOPE_RESULT": "success", "TOOLING_RESULT": "success",
                     "DEPENDENCIES_RESULT": "success", "WINDOWS_PYTHON_RESULT": "success", "WINDOWS_BINARIES_RESULT": "success",
-                    "ASSURANCE_MODE": "full", "CONSUMER_REQUIRED": "true", "APPLICATIONS_REQUIRED": "false",
+                    "ASSURANCE_MODE": "full", "POSTMERGE_RESULT": "skipped", "CONSUMER_REQUIRED": "true", "APPLICATIONS_REQUIRED": "false",
                     "SELECTED_RUST": "skipped", "SELECTED_LINUX": "skipped", "SELECTED_WINDOWS": "skipped",
                     "SELECTED_RELEASE": "skipped", "SELECTED_CONSUMER": "success"}):
                 result = run_workflow_shell(command, outcome)

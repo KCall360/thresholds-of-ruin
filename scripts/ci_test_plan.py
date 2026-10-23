@@ -17,7 +17,7 @@ import ci_scope
 import parallel_tests
 
 ROOT = Path(__file__).resolve().parent.parent
-POLICY_VERSION = 2
+POLICY_VERSION = 3
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 TEST_ID = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*){2,}\Z")
 CONTROL_PREFIXES = (".github/", ".cargo/", "scripts/ci_", "scripts/test_ci_",
@@ -165,7 +165,7 @@ def make_plan(event_name, source_sha, tree, paths, inventory, selection):
     return result
 
 
-def current_plan(*, root=ROOT, event_name=None, event=None, source_sha=None):
+def normal_plan(*, root=ROOT, event_name=None, event=None, source_sha=None):
     event_name = event_name or os.environ.get("GITHUB_EVENT_NAME", "local")
     source_sha = source_sha or os.environ.get("GITHUB_SHA", "")
     tree = ""
@@ -191,6 +191,27 @@ def current_plan(*, root=ROOT, event_name=None, event=None, source_sha=None):
         return result
     except (OSError, ValueError, TypeError, KeyError, ImportError, subprocess.SubprocessError):
         return full_plan(source_sha, tree, ["scope, discovery or ownership evidence unavailable"])
+
+
+def current_plan(*, root=ROOT, event_name=None, event=None, source_sha=None):
+    name = event_name or os.environ.get('GITHUB_EVENT_NAME', 'local')
+    normal = normal_plan(root=root, event_name=name, event=event, source_sha=source_sha)
+    # Preserve ordinary selected/prose behavior. Only otherwise-full main
+    # pushes may use an exact-tree prior-full qualification; all other events
+    # and any unavailable authority retain their normal assurance requirement.
+    if name != 'push' or normal['mode'] != 'full':
+        return normal
+    try:
+        if event is None:
+            raw = Path(os.environ['GITHUB_EVENT_PATH']).read_bytes()
+            require(len(raw) <= ci_scope.MAX_DIFF_BYTES, 'event budget')
+            event = json.loads(raw)
+        if ci_scope.classify(root, name, event, normal['source_sha'])['docs_only']:
+            return normal
+        import ci_postmerge
+        return ci_postmerge.resolve(normal, event, root)
+    except (OSError, ValueError, TypeError, KeyError, ImportError, subprocess.SubprocessError):
+        return normal
 
 
 def local_plan(base, root=ROOT):
@@ -233,6 +254,7 @@ def main(argv=None):
         matrix = {"include": [{key: row[key] for key in ("id", "os", "profile", "partition")} for row in result["lanes"]]}
         with Path(output).open("a", encoding="utf-8") as handle:
             handle.write("mode=" + result["mode"] + "\n")
+            handle.write("postmerge_release=" + result.get('postmerge_proof', {}).get('current_toolchain', {}).get('release', '') + "\n")
             handle.write("consumer_3d=" + ("true" if result["consumer_3d"] else "false") + "\n")
             handle.write("requires_apps=" + ("true" if result.get("requires_apps") else "false") + "\n")
             handle.write("build_lane=" + ("linux-debug-rust" if result.get("requires_rust") else "linux-debug-build") + "\n")

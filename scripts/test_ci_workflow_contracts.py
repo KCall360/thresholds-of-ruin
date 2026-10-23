@@ -43,7 +43,7 @@ def consumer_permitted(name, *, producer='success', apps='true', mode='full', do
 
 
 class WorkflowAdoption(unittest.TestCase):
-    def test_active_workflow_has_no_prior_head_or_postmerge_test_pass_adoption(self):
+    def test_active_workflow_has_no_retired_generic_pass_adoption(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         for retired in ('python scripts/ci_adoption.py', 'python scripts/ci_head_reuse.py',
                         'python scripts/ci_qualification.py', '--cross-head-proof', 'steps.adoption'):

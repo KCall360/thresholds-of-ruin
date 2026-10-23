@@ -55,10 +55,15 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   packages/process owners plus workspace Clippy and API docs; it is not exhaustive
   qualification. Keep the local feedback loop distinct from the
   [risk-based CI gate](docs/development/testing.md#risk-based-ci-assurance).
-  CI reports **prose-only**, **selected-contract**, or **exhaustive** assurance.
+  CI reports **prose-only**, **selected-contract**, **exhaustive**, or the narrowly
+  qualified **prior-exact-tree-full plus fresh-main** assurance below.
   Merge only after the canonical final-head plan and both required platform
   aggregates pass; unknown scope/ownership and verification/build control changes
-  require full coverage. Selected PR/main results never qualify a full run or
+  require full PR coverage. Only an otherwise-full main push may use the
+  [exact-tree post-merge proof](docs/development/testing.md#exact-tree-post-merge-assurance)
+  plus fresh integration; missing proof retains normal full execution. It is not
+  a fresh exhaustive run or authority for another retained qualification.
+  Selected PR/main results never qualify a full run or
   satisfy a requirement for exhaustive release/scheduled verification. Preserve
   every changed contract's independent tests and unique real boundary witnesses;
   cadence changes do not authorize deleting coverage. Run targeted local release

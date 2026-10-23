@@ -32,7 +32,7 @@ def job_condition(name, scope_result, docs_only, *, cancelled=False, event="push
         'always()': 'True', 'cancelled()': repr(cancelled),
         'github.event_name': repr(event), 'inputs.measure_windows_candidate': repr(measure),
         "'workflow_dispatch'": "'workflow_dispatch'",
-        "'success'": "'success'", "'true'": "'true'", "'selected'": "'selected'",
+        "'success'": "'success'", "'true'": "'true'", "'selected'": "'selected'", "'postmerge'": "'postmerge'",
         '&&': 'and', '!=': '!=', '==': '==', '!': 'not', '(': '(', ')': ')',
     }
     # Unknown tokens fail rather than silently acquiring different semantics.
@@ -69,7 +69,7 @@ class WorkflowScopeContract(unittest.TestCase):
     def test_existing_aggregate_checks_intentional_skip_and_failures(self):
         body = job('check')
         self.assertIn('name: Rust (${{ matrix.os }})', body)
-        self.assertIn('needs: [scope, tooling, profiles, windows_python, windows_binaries, dependencies, selected_rust, selected_linux, selected_windows, selected_release, selected_consumer]', body)
+        self.assertIn('needs: [scope, tooling, profiles, windows_python, windows_binaries, dependencies, selected_rust, selected_linux, selected_windows, selected_release, selected_consumer, postmerge]', body)
         self.assertIn('if: always()', body)
         match = re.search(r"python - <<'PY'\n(.*?)\n          PY", body, re.S)
         self.assertIsNotNone(match, 'The required aggregate needs an explicit scope-aware gate')
@@ -84,7 +84,7 @@ class WorkflowScopeContract(unittest.TestCase):
                                 or mode == 'false' and profiles == dependencies == 'success')
                             environment = dict(DOCS_ONLY=mode, SCOPE_RESULT=scope, TOOLING_RESULT=tooling,
                                                PROFILES_RESULT=profiles, DEPENDENCIES_RESULT=dependencies,
-                                               WINDOWS_PYTHON_RESULT=profiles, WINDOWS_BINARIES_RESULT=profiles, ASSURANCE_MODE='full', CONSUMER_REQUIRED='true', APPLICATIONS_REQUIRED='false',
+                                               WINDOWS_PYTHON_RESULT=profiles, WINDOWS_BINARIES_RESULT=profiles, ASSURANCE_MODE='full', POSTMERGE_RESULT='skipped', CONSUMER_REQUIRED='true', APPLICATIONS_REQUIRED='false',
                                                SELECTED_RUST='skipped', SELECTED_LINUX='skipped', SELECTED_WINDOWS='skipped',
                                                SELECTED_RELEASE='skipped', SELECTED_CONSUMER='skipped' if mode == 'true' else 'success')
                             with self.subTest(**environment), patch.dict(os.environ, environment), redirect_stdout(io.StringIO()):
@@ -102,7 +102,7 @@ class WorkflowScopeContract(unittest.TestCase):
         program = '\n'.join(line[10:] for line in match[1].splitlines())
         valid = dict(DOCS_ONLY='false', SCOPE_RESULT='success', TOOLING_RESULT='success',
                      PROFILES_RESULT='success', WINDOWS_PYTHON_RESULT='success', WINDOWS_BINARIES_RESULT='success',
-                     DEPENDENCIES_RESULT='success', ASSURANCE_MODE='full', CONSUMER_REQUIRED='true',
+                     DEPENDENCIES_RESULT='success', ASSURANCE_MODE='full', POSTMERGE_RESULT='skipped', CONSUMER_REQUIRED='true',
                      SELECTED_RUST='skipped', SELECTED_LINUX='skipped', SELECTED_WINDOWS='skipped',
                      SELECTED_RELEASE='skipped', SELECTED_CONSUMER='success')
         for status in ('success', 'failure', 'cancelled', 'skipped', ''):
@@ -130,13 +130,13 @@ class WorkflowScopeContract(unittest.TestCase):
         program = '\n'.join(line[10:] for line in match[1].splitlines())
         for apps, consumer in ((False, False), (True, False), (True, True)):
             valid = dict(DOCS_ONLY='false', SCOPE_RESULT='success', TOOLING_RESULT='success', PROFILES_RESULT='skipped',
-                         WINDOWS_PYTHON_RESULT='skipped', WINDOWS_BINARIES_RESULT='skipped', DEPENDENCIES_RESULT='success', ASSURANCE_MODE='selected', CONSUMER_REQUIRED=str(consumer).lower(),
+                         WINDOWS_PYTHON_RESULT='skipped', WINDOWS_BINARIES_RESULT='skipped', DEPENDENCIES_RESULT='success', ASSURANCE_MODE='selected', POSTMERGE_RESULT='skipped', CONSUMER_REQUIRED=str(consumer).lower(),
                          APPLICATIONS_REQUIRED=str(apps).lower(), SELECTED_RUST='success' if apps else 'skipped',
                          SELECTED_LINUX='success', SELECTED_WINDOWS='success', SELECTED_RELEASE='success' if apps else 'skipped',
                          SELECTED_CONSUMER='success' if consumer else 'skipped')
             variants = [(valid, True)]
             for key in ('SCOPE_RESULT', 'TOOLING_RESULT', 'PROFILES_RESULT', 'DEPENDENCIES_RESULT', 'WINDOWS_PYTHON_RESULT', 'WINDOWS_BINARIES_RESULT',
-                        'SELECTED_RUST', 'SELECTED_LINUX', 'SELECTED_WINDOWS', 'SELECTED_RELEASE', 'SELECTED_CONSUMER'):
+                        'SELECTED_RUST', 'SELECTED_LINUX', 'SELECTED_WINDOWS', 'SELECTED_RELEASE', 'SELECTED_CONSUMER', 'POSTMERGE_RESULT'):
                 for status in ('success', 'failure', 'cancelled', 'skipped'):
                     if status != valid[key]:
                         variants.append(({**valid, key: status}, False))

@@ -88,7 +88,12 @@ def cohort_attempt(producers, shards, current_attempt):
                 for group, _ in roles), 'Current Windows groups did not succeed')
     for group, keys in roles:
         outputs = group.get('outputs')
-        require(isinstance(outputs, dict) and set(outputs) == keys, 'Missing or unexpected execution role')
+        extra = {'toolchain_producer_debug', 'toolchain_producer_release'} if group is producers else set()
+        require(isinstance(outputs, dict) and set(outputs) in (keys, keys | extra), 'Missing or unexpected execution role')
+        if extra and set(outputs) == keys | extra:
+            from ci_postmerge import toolchain
+            for key in extra:
+                toolchain(outputs[key])
         values.extend(attempt_number(outputs[key]) for key in sorted(keys))
     require(len(set(values)) == 1 and values[0] <= current,
             'Mixed or future Windows execution attempts; rerun all jobs')

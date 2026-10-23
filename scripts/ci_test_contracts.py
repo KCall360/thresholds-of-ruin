@@ -51,6 +51,8 @@ REVIEWED_OWNERS = {
     'test_ci_binary_artifact': ('BinaryArtifactTests', 'ContextTests'),
     'test_ci_cost_report': ('CostReport',),
     'test_ci_selected': ('SelectedTests',),
+    'test_ci_postmerge': ('PostmergeTests',),
+    'test_ci_consumer_dependencies': ('ConsumerDependencies',),
     'test_ci_no_build': ('ToolingNoBuildTests',),
     'test_ci_workflow_contracts': ('WorkflowAdoption',),
     'test_ci_build_key': ('RecipeKeyTests', 'RecipeProcessTests', 'WorkflowKeyTests'),
