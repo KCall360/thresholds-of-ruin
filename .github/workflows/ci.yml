@@ -21,11 +21,16 @@ concurrency:
 jobs:
   scope:
     name: Change scope and documentation
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       docs_only: ${{ steps.scope.outputs.docs_only }}
       mode: ${{ steps.plan.outputs.mode }}
+      postmerge_release: ${{ steps.plan.outputs.postmerge_release }}
       consumer_3d: ${{ steps.plan.outputs.consumer_3d }}
       requires_apps: ${{ steps.plan.outputs.requires_apps }}
       build_lane: ${{ steps.plan.outputs.build_lane }}
@@ -45,6 +50,8 @@ jobs:
         run: python3 scripts/ci_scope.py
       - name: Select independently scoped assurance policy
         id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci_test_plan.py --output .local/ci-plan/plan.json
       - name: Retain selected policy explanation
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -100,11 +107,18 @@ jobs:
   profiles:
     name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})
     needs: scope
+    outputs:
+      toolchain_linux_debug_rust: ${{ steps.toolchain.outputs.toolchain_linux_debug_rust }}
+      toolchain_linux_debug_python: ${{ steps.toolchain.outputs.toolchain_linux_debug_python }}
+      toolchain_linux_release_rust: ${{ steps.toolchain.outputs.toolchain_linux_release_rust }}
+      toolchain_linux_release_python: ${{ steps.toolchain.outputs.toolchain_linux_release_python }}
+      toolchain_windows_debug_rust: ${{ steps.toolchain.outputs.toolchain_windows_debug_rust }}
+      toolchain_windows_release_rust: ${{ steps.toolchain.outputs.toolchain_windows_release_rust }}
     permissions:
       contents: read
       actions: read
       pull-requests: read
-    if: ${{ !cancelled() && needs.scope.outputs.mode != 'selected' && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}
+    if: ${{ !cancelled() && needs.scope.outputs.mode != 'selected' && needs.scope.outputs.mode != 'postmerge' && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}
     runs-on: ${{ matrix.os }}
     # Expose the effective verifier build flags before rust-cache computes its key.
     env:
@@ -194,6 +208,11 @@ jobs:
         env:
           VERIFICATION_OUTCOME: ${{ steps.verification.outcome }}
         run: test "$VERIFICATION_OUTCOME" = success
+      - name: Record the actual tested compiler
+        id: toolchain
+        if: success() && !cancelled()
+        shell: bash
+        run: python scripts/ci_postmerge.py toolchain --role ${{ runner.os == 'Linux' && 'linux' || 'windows' }}_${{ matrix.profile }}_${{ matrix.partition }}
       - name: Preserve verification logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -218,6 +237,8 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
     outputs:
+      toolchain_producer_debug: ${{ steps.toolchain.outputs.toolchain_producer_debug }}
+      toolchain_producer_release: ${{ steps.toolchain.outputs.toolchain_producer_release }}
       producer_debug: ${{ steps.execution_attempt.outputs.producer_debug }}
       producer_release: ${{ steps.execution_attempt.outputs.producer_release }}
     steps:
@@ -270,6 +291,11 @@ jobs:
         if: success() && !cancelled()
         shell: bash
         run: echo "producer_${{ matrix.profile }}=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Record the actual application compiler
+        id: toolchain
+        if: success() && !cancelled()
+        run: python scripts/ci_postmerge.py toolchain --role producer_${{ matrix.profile }}
+
 
   windows_python:
     name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.shard && format('python shard {0}', matrix.shard) || matrix.partition }})
@@ -278,7 +304,7 @@ jobs:
       contents: read
       actions: read
       pull-requests: read
-    if: ${{ !cancelled() && needs.windows_binaries.result == 'success' && needs.scope.outputs.mode != 'selected' && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}
+    if: ${{ !cancelled() && needs.windows_binaries.result == 'success' && needs.scope.outputs.mode != 'selected' && needs.scope.outputs.mode != 'postmerge' && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}
     runs-on: ${{ matrix.os }}
     # Expose the effective verifier build flags before rust-cache computes its key.
     env:
@@ -638,6 +664,8 @@ jobs:
   selected_consumer:
     name: 3D compatibility (linux-3d-consumer)
     needs: [scope]
+    outputs:
+      toolchain_consumer: ${{ steps.toolchain.outputs.toolchain_consumer }}
     if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'false' && needs.scope.outputs.consumer_3d == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -660,11 +688,9 @@ jobs:
           shared-key: selected-v2-${{ runner.os }}-debug-consumer-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
           cache-on-failure: false
-      - name: Install native build and test dependencies
+      - name: Install minimal 3D compile dependencies
         if: runner.os == 'Linux'
-        run: |
-          timeout --kill-after=10s 2m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 update
-          timeout --kill-after=10s 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 install -y libx11-dev libxcursor-dev libxrandr-dev xvfb xauth xdotool libasound2-dev libudev-dev libxi-dev libxinerama-dev libegl1-mesa-dev libvulkan-dev
+        run: python scripts/ci_consumer_dependencies.py
       - name: Require native Windows desktop
         if: runner.os == 'Windows'
         run: python -c "import ctypes; assert ctypes.windll.user32.GetDesktopWindow(), 'A native Windows desktop is required'"
@@ -710,14 +736,98 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Preserve required platform names. Only the proved prose-only path may skip
-  # the matrix; missing scope, cancellation and unexpected skips cannot pass.
+      - name: Record the actual compatibility compiler
+        id: toolchain
+        if: success() && !cancelled()
+        run: python scripts/ci_postmerge.py toolchain --role consumer
+
+
+  postmerge:
+    name: Post-merge integration
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'false' && needs.scope.outputs.mode == 'postmerge' }}
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      RUSTUP_TOOLCHAIN: ${{ needs.scope.outputs.postmerge_release }}
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Checkout the exact merged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Retrieve this run's scoped qualification proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --name assurance-plan-attempt-${{ github.run_attempt }} --dir .local/postmerge-plan
+      - name: Install the scope-resolved compiler
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - name: Restore compilation candidates, never test passes
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          shared-key: postmerge-v1-${{ runner.os }}-debug-${{ hashFiles('Cargo.lock', 'scripts/ci_postmerge.py') }}
+          save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+          cache-on-failure: false
+      - name: Install ordinary native build headers
+        run: |
+          timeout --kill-after=10s 2m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          timeout --kill-after=10s 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends libx11-dev libxcursor-dev libxrandr-dev
+      - name: Install pinned test environment
+        run: |
+          python -m venv .local/arena-search-python
+          .local/arena-search-python/bin/pip install --disable-pip-version-check --require-hashes -r .github/requirements-arena-search.txt
+          echo "$PWD/.local/arena-search-python/bin" >> "$GITHUB_PATH"
+      - name: Execute fresh main integration and pure tests
+        run: python scripts/ci_postmerge.py smoke --plan .local/postmerge-plan/plan.json
+      - name: Preserve fresh main evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: postmerge-integration-attempt-${{ github.run_attempt }}
+          path: .local/postmerge/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  full_qualification:
+    name: Full PR qualification
+    needs: [scope, tooling, dependencies, profiles, windows_binaries, windows_python, selected_consumer, check]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.mode == 'full' && needs.scope.outputs.docs_only == 'false' && needs.check.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested merge tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Seal only complete fresh full PR coverage
+        env:
+          QUALIFICATION_NEEDS: ${{ toJSON(needs) }}
+        run: python scripts/ci_postmerge.py seal
+      - name: Retain exact-tree full qualification
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: full-pr-qualification-attempt-${{ github.run_attempt }}
+          path: .local/full-qualification/qualification.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 2
+
+  # Preserve required names; each explicit assurance mode has its own exact roles.
   check:
     permissions:
       contents: read
       actions: read
     name: Rust (${{ matrix.os }})
-    needs: [scope, tooling, profiles, windows_python, windows_binaries, dependencies, selected_rust, selected_linux, selected_windows, selected_release, selected_consumer]
+    needs: [scope, tooling, profiles, windows_python, windows_binaries, dependencies, selected_rust, selected_linux, selected_windows, selected_release, selected_consumer, postmerge]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -765,6 +875,14 @@ jobs:
         run: |
           gh run download "$GITHUB_RUN_ID" --pattern 'selected-receipt-*-attempt-${{ github.run_attempt }}' --dir .local/selected-receipts
           python scripts/ci_selected.py aggregate --receipts .local/selected-receipts
+      - name: Independently reconcile retained full and fresh main evidence
+        if: needs.scope.outputs.docs_only == 'false' && needs.scope.outputs.mode == 'postmerge'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --name assurance-plan-attempt-${{ github.run_attempt }} --dir .local/postmerge-plan
+          gh run download "$GITHUB_RUN_ID" --name postmerge-integration-attempt-${{ github.run_attempt }} --dir .local/postmerge-evidence
+          python scripts/ci_postmerge.py aggregate --plan .local/postmerge-plan/plan.json --directory .local/postmerge-evidence
       - name: Require the complete selected CI gate
         env:
           DOCS_ONLY: ${{ needs.scope.outputs.docs_only }}
@@ -782,6 +900,7 @@ jobs:
           SELECTED_WINDOWS: ${{ needs.selected_windows.result }}
           SELECTED_RELEASE: ${{ needs.selected_release.result }}
           SELECTED_CONSUMER: ${{ needs.selected_consumer.result }}
+          POSTMERGE_RESULT: ${{ needs.postmerge.result }}
         run: |
           python - <<'PY'
           import os
@@ -798,6 +917,10 @@ jobs:
                        and dependencies == 'success' and selected[1:3] == ['success', 'success']
                        and selected[0] == selected[3] == ('success' if os.environ['APPLICATIONS_REQUIRED'] == 'true' else 'skipped')
                        and consumer == ('success' if os.environ['CONSUMER_REQUIRED'] == 'true' else 'skipped'))
+          retained = (mode == 'false' and os.environ['ASSURANCE_MODE'] == 'postmerge'
+                      and profiles == 'skipped' and windows == ['skipped', 'skipped']
+                      and dependencies == 'success' and all_skipped and os.environ['POSTMERGE_RESULT'] == 'success')
+          ordinary = os.environ['POSTMERGE_RESULT'] == 'skipped' and (docs or full or contracts)
           # Advisory-only PR jobs retain their existing nonblocking policy.
-          raise SystemExit(0 if shared and (docs or full or contracts) else 'Required CI gate did not pass')
+          raise SystemExit(0 if shared and (ordinary or retained) else 'Required CI gate did not pass')
           PY

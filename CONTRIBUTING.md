@@ -33,7 +33,12 @@ prose-only, selected-contract, or exhaustive coverage. Both required platform
 aggregates must pass for the exact final head. Selected results deliberately
 leave unrelated exhaustive coverage to weekly scheduled/on-demand/release verification;
 they must not be described as a full Windows/Linux debug/release pass. Unknown
-scope or ownership and verification/build-control changes require full coverage.
+scope or ownership and verification/build-control changes require full PR coverage.
+Only an otherwise-full main push can use
+[prior exact-tree full qualification plus fresh main integration](docs/development/testing.md#exact-tree-post-merge-assurance).
+Ordinary selected/prose main runs are unchanged; missing proof retains full
+execution. This distinct assurance must not be reported as freshly rerunning the
+full matrix, or used to qualify another retained result.
 A scheduled-full failure is actionable evidence to fix and feed back into ownership,
 not permission to ignore the failing test or keep relying on a missed fast path.
 
@@ -105,8 +110,9 @@ code and tests as well. Update relevant source comments and CLI help pointers.
 
 - Work on a feature branch and open a pull request. The exact-head canonical CI
   plan and both required platform aggregates must pass before merging. Report
-  whether that proves selected or exhaustive coverage; a green selected gate is
-  not an exhaustive-matrix claim.
+  the actual assurance mode. Selected coverage is not exhaustive; post-merge
+  exact-tree assurance distinguishes the prior full run from newly executed
+  main checks rather than relabeling old tests as fresh.
 - Batch small plan, strategy, and documentation updates, and publish them at
   meaningful checkpoints (a completed feature or milestone, or a consolidated
   strategy revision), or when the maintainer asks. Don't open a separate PR for
