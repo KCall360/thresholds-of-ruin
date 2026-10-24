@@ -46,6 +46,10 @@ isolation and storage rollback; actual Text/process checks and genuine current
 save/wire fixtures pass. Remaining consumables, spatial integration and broader
 qualification are unfinished; no shipped Nothing catalog entry or live-pool change
 is implied by the generic device foundation. Historical local results do not qualify this tree.
+A bounded row-run registry and test-only explicit/generated spatial compiler now
+have fresh full-library coverage; they are not yet installed in Game or its saves.
+The [spatial integration plan](plans/rogue-spatial-registry-reconstruction.md) owns
+remaining canonical-source, codec and capacity work.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the

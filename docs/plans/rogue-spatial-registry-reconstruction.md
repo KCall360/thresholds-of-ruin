@@ -55,7 +55,8 @@ rooms. Its independent geometry oracle expects 115,200 room-volume cells and
 materialization and Engine construction are positive prerequisites. It is not a
 whole-floor load, registry, source-free or archive-capacity proof.
 
-Conservative design estimates, **not finalized admission constants**:
+Conservative design estimates, **not finalized admission constants or an
+authored-scope maximum**:
 
 | Geometry | Primary/reference or run estimate |
 | --- | --- |
@@ -65,6 +66,16 @@ Conservative design estimates, **not finalized admission constants**:
 | One full 32 by 32 by 8 authored room | 11,264 illumination points, 336 surface runs plus 256 primary runs |
 | 64 such full authored rooms | 1,245,184 combined references, 37,888 runs |
 | Loose primary plus self-and-six-face work | 4,194,304 combined references |
+
+The generated grid limit is 64 members, but authored packages permit up to
+65,536 regions, each at most 32 by 32 by 8, subject to existing aggregate
+validation-work and source limits. The checked package route caps repeated
+cell-work at 67,108,864; this is not a per-scope reference allowance. Population
+PreparedScope limits are independent. Retain that authored admission envelope;
+use a modest source-valid scope with more than 64 members as a witness rather
+than materializing an impractical maximum world or imposing an artificial
+64-member spatial cap. Derive production budgets from existing validated work
+and the actual encoded representation.
 
 Actual open mouths can split runs. Fragmentation requires bounded work and encoded
 size accounting, not silent truncation. Do not present these estimates as proof
@@ -210,10 +221,14 @@ prerequisites succeeded, including the corrected junction, selected maze and
 chance-zero/full secret-door contrasts. The standalone World prerequisite probe
 also passed; it did not qualify generated compilation.
 
-The reviewed green implementation is now staged for fresh validation: structural
-registry checks/atomic insertion, explicit-World canonical compilation, and a
-bounded generated-source projection retaining labels from the same generation
-pass. Runtime green results remain pending. The server compiler and ephemeral
+The reviewed green implementation passes the fresh full simulation library
+(1,783 tests) and server library (1,033 tests), with no ignored or filtered tests
+in those runs. Workspace all-target Clippy with warnings denied and 19
+documentation tests passed after canonical formatting and before those runtimes.
+These are focused development receipts, not quick/push/full or native gates.
+Implemented boundaries are structural registry checks/atomic insertion,
+explicit-World compilation, and a bounded generated-source projection retaining
+labels from the same generation pass. The server compiler and ephemeral
 generation provenance are currently test-only because there is no runtime
 consumer yet; this does not install or retain spatial topology in a game. No
 codec, Game integration, generated-World compilation or source-free canonical
@@ -260,3 +275,72 @@ root, not just the current game. A shared decoder budget must charge nested
 runs/labels and every directory/root reference before allocation. Per-list bounds
 alone are insufficient. Keep the outer 64 MiB archive limit unchanged; final
 encoded-byte, run and root limits still require measured proof.
+
+
+## Next production integration and strict codec contracts
+
+The next codec should be closed and named, using existing named-map helpers and
+budgeted seeds rather than a general serialization framework. `CellRun` names
+region/z/y/first_x/last_x; membership uses a closed primary kind/positive ID and
+required nullable doorway. Scope contains id/members/primary/rooms; passage IDs
+remain derived. Reject positional, missing, duplicate and unknown fields at every
+layer. World RegionId zero remains structurally legal even where authored
+package IDs have stricter rules.
+
+Proposed checkpoint ownership is one `SharedState.spatial` pool containing scope
+payloads and registry directories, plus a required `Snapshot.spatial` directory
+index. Directories are ordered by scope identity, not allocation order. Reject
+invalid references, duplicate/alias identities, overlapping member ownership and
+unreferenced surplus pool entries. Reuse one RestoreContext for current and all
+historical snapshots. Equal immutable payloads are pooled once; every root and
+directory binding still counts. Exact field promotion remains coordinated with
+current-format writers and genuine fixtures.
+
+Thread one aggregate decode budget through nested seeds. Charge entry minima
+before nested allocation, run widths after their fixed scalar record but before
+retaining it, and labels before copying them into retained strings. Do not use
+untrusted size hints, parse a discarded oversized tail, or build a serde Value
+first. A JSON tokenizer may already allocate an escaped scalar before its visitor;
+the existing 64 MiB raw/decompressed bound remains relevant, so do not claim seeds
+eliminate that parser allocation. Serializer controls must cover maximum-width
+operands, escaped labels, empty/multiple entries and all framing. Root-reference
+charging must reuse the independently bounded history reader or a proved fixed
+reserve; post-hoc validation is not pre-allocation protection.
+
+For actual World compilation, reuse existing Package region and portal parsing
+through one bounded ephemeral join descriptor consumed by both ordinary Game
+construction and a temporary source World. Apply walls then openings and retain
+exact anchor/rotation diagnostics. Do not expose mutable Game.world, open runtime
+doors to obtain a baseline, persist another portal graph, or include abstract
+stairs as physical component edges. The current internal compiler still needs a
+source-first exterior-mouth ambiguity guard: multiple neighboring cells of the
+same room are valid, but neighboring interiors of different rooms must reject
+regardless of supplied owner. Generated provenance already rejects competing
+owners. Add clear diagnostics and authored/source-free contrasts before public
+schema integration; current eight fixtures do not qualify that edge.
+
+Install a generated scope atomically with its prepared region records, independent
+of optional population activation, before candidate publication. Authored
+installation policy remains explicit: prefer full scope metadata on the first
+prepared member without loading, activating or pinning its peers, then prove the
+initial/frozen/detached/history behavior. Enabled-source validation separately
+requires metadata availability. Do not silently infer scopes from zones or
+physical connectedness.
+
+Canonical restore must compare the independently expected scope set as well as
+each payload. Per-root loaded (active/frozen) plus detached member records are the
+candidate existing preparation witness; unbuilt declarations, population scopes,
+the registry under audit and archive-global caches are not substitutes. Prove
+that witness through initial construction, eviction and historical restore before
+relying on it. Earlier roots must not require scopes prepared only later. Reject
+whole-scope omission from historical-only and detached roots, not only malformed
+rows. Any missing lifecycle evidence must be resolved explicitly rather than
+adding parallel mutable history.
+
+Acceptance includes real Engine/Service admission, population-free contrast,
+source-deleted reopen using retained package authority, structural-but-canonical
+corruption in current/detached/history roots, exact retry and late-store rollback.
+Keep request IDs monotonic across reconnects. A source-free codec roundtrip alone
+is not the deleted-scenario Service witness. Production source integration,
+rotated portals, nonmonotonic generator member order, reserved/wide mouths,
+omitted rooms, actual encoded-capacity proof and Room Light remain unfinished.
