@@ -369,13 +369,34 @@ history reader enforces its 256 retained-boundary limit before allocation; its
 current post-decode check is not such protection. Actual encoded fixtures,
 whole-game headroom and bounded history integration remain prerequisites.
 
-### Exterior-owner regression cohort (not yet run)
+### Exterior-owner regression cohort
 
 The next two test-only compiler witnesses retain a valid U-shaped room with three
 adjacent cells of one owner, then split it into two ordinary rooms. The split
 geometry first compiles with a passage-primary mouth. Claiming that exterior
 mouth for either adjoining room must fail with an explicit ambiguous-owner error;
 a true interior marker retains its existing rule. This isolates physical-owner
-ambiguity from invalid geometry and preserves World equality. The current
-compiler still checks only that the supplied owner is adjacent; the negative is
-an intended first-red, not an already implemented production validation claim.
+ambiguity from invalid geometry and preserves World equality. The frozen first-red ran all ten compiler tests: nine controls passed and the
+ambiguity negative failed because the compiler accepted the supplied matching
+owner despite a second physical owner. The narrow correction now checks unique
+planar ownership, with its green runtime still pending; this remains a test-only
+compiler, not installed production source validation.
+
+
+### Standalone codec first-red implementation checkpoint
+
+The next source cohort adds the reviewed standalone `PoolSeed`/`EncodedPool`
+scaffold and three tests, without Game fields or save-format migration. Private
+`DecodedPool` must be consumed by root validation before producing private
+`ValidatedPool`; only the latter may be encoded. Indices are explicit u32 with
+checked future capture conversion. Caller limits retain the actual root reserve,
+independent directory bound and shared charged-byte allowance.
+
+The initial independent serialization skeleton test is an arithmetic control.
+A structurally valid 65-member typed envelope establishes the intended missing
+codec failure, not a canonical authored-geometry witness. Top-level malformed
+cases are anchored by the same successful-decode prerequisite. Encoding, decoding
+and root validation are deliberate error stubs until this first-red is observed;
+no bounded nested decoder or persistence acceptance is implied. Subsequent
+max-width actual-writer, nested-shape, allocation-tail, exact aggregate, sharing
+and source-free/current-history tests remain required.

@@ -156,14 +156,25 @@ pub(super) fn compile(
         if !valid(*p) || !s.rooms.contains_key(owner) {
             return Err(spatial_invalid("doorway owner"));
         }
-        if interiors.get(&key(*p)) != Some(&PrimarySpace::Room(*owner))
-            && !PLANAR.into_iter().any(|d| {
-                world.physics_neighbor(*p, d).is_some_and(|(q, _)| {
-                    interiors.get(&key(q)) == Some(&PrimarySpace::Room(*owner))
-                })
-            })
-        {
-            return Err(spatial_invalid("doorway not adjacent to owner"));
+        if interiors.get(&key(*p)) != Some(&PrimarySpace::Room(*owner)) {
+            // Exterior ownership must be unique across physical planar room
+            // neighbors, not merely contain the supplied owner. At most four
+            // neighbors are visited; repeated cells of one room remain valid.
+            let mut adjacent_owner = None;
+            for direction in PLANAR {
+                if let Some(PrimarySpace::Room(room)) = world
+                    .physics_neighbor(*p, direction)
+                    .and_then(|(neighbor, _)| interiors.get(&key(neighbor)))
+                {
+                    if adjacent_owner.is_some_and(|previous| previous != *room) {
+                        return Err(spatial_invalid("ambiguous exterior doorway owner"));
+                    }
+                    adjacent_owner = Some(*room);
+                }
+            }
+            if adjacent_owner != Some(*owner) {
+                return Err(spatial_invalid("doorway not adjacent to owner"));
+            }
         }
         if primary
             .insert(key(*p), PrimarySpace::Room(*owner))
