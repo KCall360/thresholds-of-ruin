@@ -6,6 +6,21 @@ maintainer directed a redo on 2026-10-24. This checkout starts from published ma
 `511ea466e14892075af030a78d254f1101e7c813`; no lost commit or historical test receipt
 qualifies this source. [Current status](../status.md) owns implemented scope.
 
+## Opt-in Nothing catalog reconstruction checkpoint (2026-10-24)
+
+The production catalog now declares `rogue.wand_nothing` using the existing paid,
+checkless self-device path: three to seven initial charges, empty effects, and
+Never discovery. A ninth distinct wand appearance covers the added catalog
+identity; seeded cosmetic assignments may consequently differ. The eight live
+wand-stock choices, weights and starting kits are unchanged. This is opt-in
+content, not a live distribution change.
+
+The missing-definition first-red retained a passing live-stock control. The new
+three-test content owner and nine existing catalog/inventory tests now pass.
+Imported-catalog Service and actual Text/process acceptance are being added;
+their runtime results and regenerated package certificates remain pending.
+No lost application binary or previous executor receipt qualifies this content.
+
 ## Fresh device foundation acceptance checkpoint (2026-10-24)
 
 The complete server library now passes 1,025 tests, including the corrected OnUse

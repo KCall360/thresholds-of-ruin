@@ -14,6 +14,7 @@ from arena_matrix import toml_source
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, non_graphical
 from status_condition_package import checkpoint
 from self_device_package import prepare as prepare_self_device
+from nothing_catalog_package import prepare as prepare_imported_nothing
 
 
 def observation(frame):
@@ -492,6 +493,68 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(after["rules_rng"], before["rules_rng"])
         self.assertTrue(all(not row["identified"] for row in items(completed, "wand")))
         self.assertFalse(completed["state"]["wizard_game"])
+
+
+    @non_graphical
+    def test_imported_nothing_unknown_direction_paid_identity_and_self_skip(self):
+        package = prepare_imported_nothing(self)
+        self.server("--checkpoint-interval", 1, scenario=package)
+        probe, initial = self.client(observe=True)
+        text, _ = self.text_client()
+        for ground in observation(initial)["ground_items"]:
+            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+        carried = self.snapshot(probe)
+        self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0,
+                         "effective compiled speed must preserve exact base-turn timing")
+        first, second = items(carried, "wand")
+        scroll, = items(carried, "scroll")
+        self.assertTrue(all(not row["identified"] for row in items(carried, "wand")))
+        modes = {row["item"]: row["device_activation"] for row in interactions(carried)["inventory"]}
+        self.assertEqual(modes[first["id"]], "direction")
+        self.assertEqual(modes[second["id"]], "direction")
+        before = checkpoint(self, probe)
+        self.assertEqual(before["actors"]["1"]["turn_ticks"], 100)
+        initial_counts = {str(i): before["items"][str(i)]["charges"] for i in (30, 31)}
+        self.assertTrue(all(3 <= count <= 7 for count in initial_counts.values()))
+        self.assertIn("direction", text.command("zap #" + first["id"]).lower())
+        self.assertEqual(checkpoint(self, probe), before, "unsubmitted missing aim costs nothing")
+        text.command("zap #" + first["id"] + " east")
+        spent = self.snapshot(probe)
+        after = checkpoint(self, probe)
+        self.assertEqual(int(observation(spent)["tick"]), int(observation(carried)["tick"]) + 100)
+        spent_ids = [key for key in initial_counts if after["items"][key]["charges"] == initial_counts[key] - 1]
+        self.assertEqual(len(spent_ids), 1)
+        selected_physical = spent_ids[0]
+        for key in initial_counts:
+            self.assertEqual(after["items"][key]["charges"], initial_counts[key] - (key == selected_physical))
+        remaining = initial_counts[selected_physical] - 1
+        self.assertEqual(after["rules_rng"], before["rules_rng"])
+        self.assertEqual(observation(spent)["combat"]["own_stats"]["conditions"],
+                         observation(carried)["combat"]["own_stats"]["conditions"])
+        self.assertTrue(all(not row["identified"] for row in items(spent, "wand")))
+        self.assertIsNone(charges(spent, first["id"]))
+        text.command("read #" + scroll["id"])
+        self.assertIsNotNone(interactions(self.snapshot(probe))["identification"])
+        text.command("identify #" + first["id"])
+        learned = self.snapshot(probe)
+        self.assertEqual(charges(learned, first["id"]), remaining)
+        self.assertIsNone(charges(learned, second["id"]))
+        self.assertTrue(all(row["identified"] for row in items(learned, "wand")))
+        modes = {row["item"]: row["device_activation"] for row in interactions(learned)["inventory"]}
+        self.assertEqual(modes[first["id"]], "self_target")
+        self.assertEqual(modes[second["id"]], "self_target")
+        spectator, followed = self.client(SPECTATOR_TOKEN, observe=True)
+        followed_modes = {row["item"]: row["device_activation"] for row in interactions(followed)["inventory"]}
+        self.assertEqual(followed_modes, modes)
+        known_before = checkpoint(self, probe)
+        self.assertEqual(known_before["actors"]["1"]["turn_ticks"], 100)
+        text.command("zap #" + first["id"])
+        final = self.snapshot(probe)
+        self.assertEqual(int(observation(final)["tick"]), int(observation(learned)["tick"]) + 100)
+        self.assertEqual(charges(final, first["id"]), remaining - 1)
+        self.assertIsNone(charges(final, second["id"]))
+        self.assertFalse(final["state"]["wizard_game"])
+
 
 
 if __name__ == "__main__":

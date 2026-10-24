@@ -948,3 +948,205 @@ fn late_store_rejection_rolls_back_self_effect_charge_and_on_use_identity() {
     ));
     assert_eq!(wire.checkpoint(), settled);
 }
+
+// No source/catalog mutation: production resolved archetypes and rules are retained.
+fn imported_nothing_source(root: &Path) -> crate::Scenario {
+    let production_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+    let production = crate::scenario_package::resolve_source(&production_root).unwrap();
+    let rules =
+        std::fs::read_to_string(production_root.join(&production.manifest.ruleset)).unwrap();
+    let rules = resolve_rules_source(&rules, "rules.toml").unwrap().source;
+    let mut manifest = serde_json::to_value(production.manifest).unwrap();
+    let original_items = manifest["archetypes"].clone();
+    let original_creatures = manifest["creatures"].clone();
+    assert_eq!(
+        original_items["rogue.wand_nothing"]["device"]["ability"],
+        "rogue.wand_nothing"
+    );
+    assert_eq!(
+        original_items["rogue.wand_nothing"]["device"]["discovery"],
+        "never"
+    );
+    manifest["id"] = json!("imported-nothing-service");
+    manifest["characters"].as_array_mut().unwrap().truncate(1);
+    let owner = &mut manifest["characters"][0];
+    owner["anchor"] = json!("1/start");
+    owner["known_identities"] = json!([]);
+    owner["loadout"] = json!([]);
+    owner["creature"]["nutrition"] = json!({"kind":"exempt"});
+    owner["creature"]["future_growth"] = json!({"kind":"disabled"});
+    for key in [
+        "procedural_worlds",
+        "generation_recipes",
+        "generation_groups",
+        "stair_pairs",
+    ] {
+        manifest[key] = json!({});
+    }
+    for key in ["floor_activation", "unique_retrieval", "objective"] {
+        manifest[key] = Value::Null;
+    }
+    assert_eq!(manifest["archetypes"], original_items);
+    assert_eq!(manifest["creatures"], original_creatures);
+    let region: crate::scenario_package::RegionDef = serde_json::from_value(json!({
+        "id":1,"name":"Imported Nothing laboratory","size":[7,5,2],"chamber":true,
+        "anchors":{"start":[2,2,0]},"items":[
+            {"id":30,"at":[2,2,0],"archetype":"rogue.wand_nothing"},
+            {"id":20,"at":[2,2,0],"archetype":"rogue.identify_wand","quantity":1}
+        ]
+    }))
+    .unwrap();
+    let checked = Package::from_parts(
+        serde_json::from_value(manifest).unwrap(),
+        vec![region],
+        &rules,
+    )
+    .unwrap();
+    checked.check().unwrap();
+    assert_eq!(
+        checked
+            .rules()
+            .unwrap()
+            .document()
+            .constants
+            .item_timing
+            .consume_turns,
+        1
+    );
+    crate::scenario_package::write_package(
+        root,
+        &checked.manifest,
+        &checked.region_defs().unwrap(),
+        &rules,
+    )
+    .unwrap();
+    crate::scenario_package::check(root).unwrap();
+    crate::scenario_package::load(root, 42, None, true).unwrap()
+}
+
+#[test]
+fn imported_nothing_paid_unknown_then_identified_self_survives_source_deleted_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("source");
+    let database = directory.path().join("nothing.db");
+    let mut wire = Wire::new(Engine::open(&database, imported_nothing_source(&root)).unwrap());
+    assert_eq!(wire.service.engine.actors(), vec![OWNER]);
+    let wand = wire.take(ItemClass::Wand);
+    let scroll = wire.take(ItemClass::Scroll);
+    let physical = nothing_wand_id(&wire, wand);
+    let unknown = wire.snapshot(OWNER);
+    assert!(!nothing_identified(&unknown, wand));
+    assert_eq!(
+        nothing_affordance(&unknown, wand).device_activation,
+        Some(DeviceActivation::Direction)
+    );
+    assert_eq!(nothing_affordance(&unknown, wand).charges, None);
+    let bad = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::SelfTarget {},
+        },
+    );
+    let untouched = wire.checkpoint();
+    rejected(wire.send(OWNER, "unknown-self-rejected", bad));
+    assert_eq!(wire.checkpoint(), untouched);
+    assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
+    let before = wire.checkpoint();
+    let initial = nothing_items(&before)[&physical]["charges"]
+        .as_u64()
+        .unwrap();
+    assert!((3..=7).contains(&initial));
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::West,
+            },
+        },
+    );
+    let admitted = ack(wire.send(OWNER, "catalog-nothing-unknown", request.clone()));
+    let completed = wire.finish(OWNER, "catalog-nothing-unknown", &request);
+    assert_eq!(admitted.entry_id(), completed.entry_id());
+    let after = wire.checkpoint();
+    let zap_ticks =
+        after["game"]["tick"].as_u64().unwrap() - before["game"]["tick"].as_u64().unwrap();
+    assert!(zap_ticks > 0);
+    assert_eq!(nothing_items(&after)[&physical]["charges"], initial - 1);
+    assert_eq!(after["game"]["rules_rng"], before["game"]["rules_rng"]);
+    assert!(!nothing_identified(&wire.snapshot(OWNER), wand));
+    assert_eq!(
+        ack(wire.send(OWNER, "catalog-nothing-unknown", request)),
+        completed
+    );
+    assert_eq!(wire.checkpoint(), after);
+
+    // Independent same-source consume-turn baseline: ordinary paid Read uses
+    // exactly the same turn law, without assuming Rogue's effective speed is0.
+    assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
+    let before_read = wire.checkpoint();
+    wire.act("pay-catalog-identify", Action::Read { item: scroll });
+    let after_read = wire.checkpoint();
+    let read_ticks = after_read["game"]["tick"].as_u64().unwrap()
+        - before_read["game"]["tick"].as_u64().unwrap();
+    assert_eq!(zap_ticks, read_ticks);
+    let paid = choice(&wire.snapshot(OWNER));
+    wire.act(
+        "catalog-identify",
+        Action::Identify {
+            choice: paid.choice,
+            item: Some(wand),
+        },
+    );
+    let known = wire.snapshot(OWNER);
+    assert!(nothing_identified(&known, wand));
+    assert_eq!(
+        nothing_affordance(&known, wand).device_activation,
+        Some(DeviceActivation::SelfTarget)
+    );
+    assert_eq!(
+        nothing_affordance(&known, wand).charges,
+        Some((initial - 1).try_into().unwrap())
+    );
+    assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
+    let before_self = wire.checkpoint();
+    let self_request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::SelfTarget {},
+        },
+    );
+    ack(wire.send(OWNER, "catalog-nothing-self", self_request.clone()));
+    let self_receipt = wire.finish(OWNER, "catalog-nothing-self", &self_request);
+    let saved = wire.checkpoint();
+    assert_eq!(nothing_items(&saved)[&physical]["charges"], initial - 2);
+    assert_eq!(saved["game"]["rules_rng"], before_self["game"]["rules_rng"]);
+    assert_eq!(
+        saved["game"]["tick"].as_u64().unwrap() - before_self["game"]["tick"].as_u64().unwrap(),
+        read_ticks
+    );
+    wire.service.engine.flush().unwrap();
+    let serial = wire.serial;
+    drop(wire);
+    std::fs::remove_dir_all(&root).unwrap();
+    assert!(!root.exists());
+    let engine = Engine::open(&database, crate::Scenario::two_room(999)).unwrap();
+    assert_eq!(checkpoint(&engine), saved);
+    let mut wire = Wire::new(engine); // only the one real human owner
+    wire.serial = serial;
+    let restored = wire.snapshot(OWNER);
+    assert!(nothing_identified(&restored, wand));
+    assert_eq!(
+        nothing_affordance(&restored, wand).device_activation,
+        Some(DeviceActivation::SelfTarget)
+    );
+    let retry_before = wire.checkpoint();
+    assert_eq!(
+        ack(wire.send(OWNER, "catalog-nothing-self", self_request)),
+        self_receipt
+    );
+    assert_eq!(wire.checkpoint(), retry_before);
+}

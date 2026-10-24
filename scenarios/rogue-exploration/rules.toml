@@ -327,3 +327,10 @@ value = { id = "rogue.held", family = "rogue.held", lifecycle = "timed", name = 
 op = "add"
 path = ["conditions", "rogue.scared"]
 value = { id = "rogue.scared", family = "rogue.scared", lifecycle = "timed", name = "Scared", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = ["mind_affecting"], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }
+
+# A real self-device activation with no check or effect; ordinary item timing
+# and exact instance charge payment remain owned by the shared device executor.
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_nothing"]
+value = { id = "rogue.wand_nothing", name = "Nothing", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "self_only" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }

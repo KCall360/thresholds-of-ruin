@@ -253,7 +253,7 @@ device = { ability = "rogue.wand_slow", initial_charges = { minimum = 3, maximum
 
 [appearance_pools."rogue.wands"]
 asset = "item.wand"
-appearances = ["ash wand", "copper wand", "ivory wand", "obsidian wand", "oak wand", "glass wand", "willow wand", "iron wand"]
+appearances = ["ash wand", "copper wand", "ivory wand", "obsidian wand", "oak wand", "glass wand", "willow wand", "iron wand", "elm wand"]
 
 # Finite gear. Rogue source weapon dice and existing birth distributions are
 # preserved; skill/category, uniform 60/40 timing and armor physical DR are
@@ -700,3 +700,14 @@ stackable = true
 appearance_pool = "rogue.scrolls"
 readable = { control = { kind = "nothing" }, discovery = "never" }
 ground_scare = { condition = "rogue.scared", duration = 1000 }
+
+# Opt-in catalog definition only; no live floor stock or starting-kit entry.
+[items."rogue.wand_nothing"]
+asset = "item.wand"
+name = "wand of nothing"
+identity = "rogue.wand_nothing"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_nothing", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
