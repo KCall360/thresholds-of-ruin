@@ -202,12 +202,30 @@ was blocked); that is fixture failure, not behavioral evidence. Its correction
 keeps all three open-cell and physical-neighbor prerequisites. These focused
 receipts are not verification gates or geometry integration qualification.
 
-The next source-first cohort adds exterior doorway ownership, closure-only
-illumination, independent source-work/output bounds, valid singleton and
-all-doorway passage components, and actual generated secret/maze contrasts.
-Runtime results for those revised contracts remain pending. The registry still
-has no serialization or Game integration, and the compiler remains an explicit
-unsupported stub until green implementation is separately tested.
+The revised source-first cohort established all intended boundaries: four core
+controls passed and nine registry tests failed at missing enforcement, insertion
+or derived passage counts. All eight server tests reached the unsupported
+compiler/source stubs after their actual World and generated-package
+prerequisites succeeded, including the corrected junction, selected maze and
+chance-zero/full secret-door contrasts. The standalone World prerequisite probe
+also passed; it did not qualify generated compilation.
+
+The reviewed green implementation is now staged for fresh validation: structural
+registry checks/atomic insertion, explicit-World canonical compilation, and a
+bounded generated-source projection retaining labels from the same generation
+pass. Runtime green results remain pending. The server compiler and ephemeral
+generation provenance are currently test-only because there is no runtime
+consumer yet; this does not install or retain spatial topology in a game. No
+codec, Game integration, generated-World compilation or source-free canonical
+restore claim follows from this checkpoint. Production integration must promote
+the same authority with actual lifecycle witnesses, not retain test-only behavior
+as completed gameplay.
+
+With ample measured executor headroom, repeated development feedback may use
+the supported incremental mode with one owner/job and unchanged resource guards.
+Receipts distinguish it from the preceding non-incremental cohorts; final
+canonical gate configuration is unchanged. Interrupted caches and obsolete
+artifacts never qualify source, and cleanup still needs its applicable authority.
 
 ## Derived passage namespace and source provenance
 

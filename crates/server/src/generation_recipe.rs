@@ -671,6 +671,98 @@ fn validate_carving(open: &BTreeSet<(i32, i32)>, size: [i32; 3]) -> Result<(), F
 pub struct GeneratedGroup {
     pub regions: BTreeMap<u64, RegionDef>,
     pub rooms: Vec<tor_simulation::floor_activation::PreparedRoomGroup>,
+    #[cfg(test)]
+    pub(crate) spatial: GeneratedSpatialProvenance,
+}
+
+/// Ephemeral labels from the SAME completed generation pass as regions/rooms.
+/// No saved graph, RNG replay, population change or public authored format.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct GeneratedSpatialProvenance {
+    pub ordinary_room_ids: BTreeSet<u32>,
+    pub doorway_owners: BTreeMap<tor_world::Location, u32>,
+    pub closure_faces: BTreeSet<tor_world::Location>,
+}
+
+#[cfg(test)]
+fn retain_spatial_provenance(
+    group: &GenerationGroup,
+    size: [i32; 3],
+    present: &[bool],
+    maze_slots: &[bool],
+    room_cells: &[Vec<(i32, i32)>],
+    open: &BTreeSet<(i32, i32)>,
+) -> Result<GeneratedSpatialProvenance, Failure> {
+    if present.len() != group.members.len()
+        || maze_slots.len() != present.len()
+        || room_cells.len() != present.len()
+    {
+        return Err(fail("Spatial generation labels must match actual slots"));
+    }
+    let columns = group.grid[0] as usize;
+    let mut result = GeneratedSpatialProvenance::default();
+    let mut ordinary = BTreeMap::new();
+    for (slot, cells) in room_cells.iter().enumerate() {
+        let room = u32::try_from(slot)
+            .ok()
+            .and_then(|n| n.checked_add(1))
+            .ok_or_else(|| fail("Room identity overflow"))?;
+        if !present[slot] || maze_slots[slot] {
+            continue;
+        }
+        result.ordinary_room_ids.insert(room);
+        let ox = (slot % columns) as i32 * size[0];
+        let oy = (slot / columns) as i32 * size[1];
+        for &(x, y) in cells {
+            let p = (x + ox, y + oy);
+            if !open.contains(&p) || ordinary.insert(p, room).is_some() {
+                return Err(fail("Conflicting final ordinary-room cells"));
+            }
+        }
+    }
+    // ALL ordinary open mouths, independently of reserved anchors, width,
+    // closure maximum/chance/eligibility. This consumes no RNG and does not
+    // change the existing secret candidate set or candidate iteration order.
+    let mut owners = BTreeMap::new();
+    for (&(x, y), &room) in &ordinary {
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let mouth = (x + dx, y + dy);
+            if !open.contains(&mouth) || ordinary.contains_key(&mouth) {
+                continue;
+            }
+            if owners
+                .insert(mouth, room)
+                .is_some_and(|prior| prior != room)
+            {
+                return Err(fail("Generated doorway has competing room owners"));
+            }
+        }
+    }
+    for ((x, y), room) in owners {
+        if x < 0 || y < 0 {
+            return Err(fail("Generated doorway outside group"));
+        }
+        let slot = (y / size[1]) as usize * columns + (x / size[0]) as usize;
+        let region = *group
+            .members
+            .get(slot)
+            .ok_or_else(|| fail("Generated doorway outside group"))?;
+        for z in 0..size[2] {
+            result.doorway_owners.insert(
+                tor_world::Location {
+                    region: tor_world::RegionId(region),
+                    position: tor_world::Position {
+                        x: x % size[0],
+                        y: y % size[1],
+                        z,
+                    },
+                },
+                room,
+            );
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -911,6 +1003,9 @@ pub fn materialize_with_feature_bases(
         &mut definitions,
         size,
     )?;
+    #[cfg(test)]
+    let mut spatial =
+        retain_spatial_provenance(group, size, &present, &maze_slots, &room_cells, &open)?;
     place_concealed_features(
         &run,
         &open,
@@ -920,6 +1015,29 @@ pub fn materialize_with_feature_bases(
         feature_bases,
         &maze_slots,
     )?;
+    // Retain the already-placed physical closures, without repeating decisions.
+    // A maze/passage closure without ordinary-room ownership stays a closure,
+    // but does not fabricate a Room illumination owner.
+    #[cfg(test)]
+    for (region, def) in &definitions {
+        for door in &def.doors {
+            for dz in 0..i32::from(door.height) {
+                let at = tor_world::Location {
+                    region: tor_world::RegionId(*region),
+                    position: tor_world::Position {
+                        x: door.at[0],
+                        y: door.at[1],
+                        z: door.at[2]
+                            .checked_add(dz)
+                            .ok_or_else(|| fail("Door face coordinate overflow"))?,
+                    },
+                };
+                if spatial.doorway_owners.contains_key(&at) {
+                    spatial.closure_faces.insert(at);
+                }
+            }
+        }
+    }
     // Opening every discoverable closure restores exactly this connected carving;
     // features never erase a corridor, stair or room from the required route graph.
     validate_carving(&open, [width, height, size[2]])?;
@@ -946,6 +1064,8 @@ pub fn materialize_with_feature_bases(
     Ok(GeneratedGroup {
         regions: definitions,
         rooms,
+        #[cfg(test)]
+        spatial,
     })
 }
 
