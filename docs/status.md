@@ -45,8 +45,8 @@ neither is integrated into gameplay yet. Fresh Service checks cover OnUse observ
 isolation and storage rollback; actual Text/process checks and genuine current
 save/wire fixtures pass. Remaining consumables, spatial integration and broader
 qualification are unfinished. The opt-in Nothing catalog definition now has pure
-content coverage; imported-catalog runtime acceptance and refreshed certificates
-remain pending. Live pools are unchanged. Historical local results do not qualify
+content coverage and a freshly validated package certificate; imported-catalog
+runtime acceptance remains pending. Live pools are unchanged. Historical local results do not qualify
 this tree.
 A bounded row-run registry and test-only explicit/generated spatial compiler now
 have fresh full-library coverage; they are not yet installed in Game or its saves.

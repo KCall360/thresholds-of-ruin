@@ -17,8 +17,10 @@ content, not a live distribution change.
 
 The missing-definition first-red retained a passing live-stock control. The new
 three-test content owner and nine existing catalog/inventory tests now pass.
-Imported-catalog Service and actual Text/process acceptance are being added;
-their runtime results and regenerated package certificates remain pending.
+Fresh ordinary applications compile successfully. The actual compiler validates
+the imported process fixture and production catalog, and the refreshed certificate
+passes the repository source-byte check. Imported-catalog Service and actual
+Text/process witnesses are present but their runtime results remain pending.
 No lost application binary or previous executor receipt qualifies this content.
 
 ## Fresh device foundation acceptance checkpoint (2026-10-24)
