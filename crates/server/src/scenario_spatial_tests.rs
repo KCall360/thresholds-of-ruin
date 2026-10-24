@@ -672,3 +672,119 @@ fn generated_selected_maze_uses_final_open_cells_as_passages_not_population_room
     );
     assert_eq!(source.passages.len(), expected.len());
 }
+
+fn exterior_owner_fixture() -> (World, CanonicalSpatialSource) {
+    let mut world = World::new(vec![], vec![]).unwrap();
+    world
+        .add_chamber(Region {
+            id: RegionId(1),
+            name: "exterior ownership".into(),
+            bounds: Extent::new(5, 5, 1).unwrap(),
+        })
+        .unwrap();
+    // One connected ordinary U-shaped room surrounds an exterior mouth on
+    // three planar sides. Multiple adjacent CELLS are not multiple owners.
+    let interior = vec![
+        at(1, 1, 0),
+        at(2, 1, 0),
+        at(3, 1, 0),
+        at(1, 2, 0),
+        at(3, 2, 0),
+    ];
+    let mouth = at(2, 2, 0);
+    for y in 0..5 {
+        for x in 0..5 {
+            let p = at(x, y, 0);
+            if p != mouth && !interior.contains(&p) {
+                world.set_wall(p, true).unwrap();
+            }
+        }
+    }
+    assert!(interior.iter().chain([&mouth]).all(|p| world.walkable(*p)));
+    assert_eq!(
+        world.physics_neighbor(mouth, Direction::West),
+        Some((at(1, 2, 0), 0))
+    );
+    assert_eq!(
+        world.physics_neighbor(mouth, Direction::East),
+        Some((at(3, 2, 0), 0))
+    );
+    assert_eq!(
+        world.physics_neighbor(mouth, Direction::North),
+        Some((at(2, 1, 0), 0))
+    );
+    let room = RoomId::new(1).unwrap();
+    (
+        world,
+        CanonicalSpatialSource {
+            id: "exterior-unique-owner".into(),
+            members: vec![RegionId(1)],
+            rooms: BTreeMap::from([(room, interior)]),
+            passages: vec![],
+            doorways: BTreeMap::from([(mouth, room)]),
+            closure_faces: BTreeSet::new(),
+        },
+    )
+}
+
+#[test]
+fn exterior_doorway_multiple_adjacent_cells_of_one_room_are_valid() {
+    let (world, source) = exterior_owner_fixture();
+    let before = world.geometry_snapshot();
+    let scope = compile(&world, &source, &budget(), &work_budget()).unwrap();
+    assert_eq!(world.geometry_snapshot(), before);
+    let expected = Membership::new(
+        PrimarySpace::Room(RoomId::new(1).unwrap()),
+        Some(PassageId::new(1).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(
+        scope
+            .primary
+            .iter()
+            .find(|run| run.cells.contains(at(2, 2, 0)))
+            .unwrap()
+            .membership,
+        expected
+    );
+    assert_eq!(scope.validate(&budget()).unwrap().passages, 1);
+}
+
+#[test]
+fn exterior_doorway_rejects_two_physical_room_owners_even_when_declared_owner_matches() {
+    let (world, mut source) = exterior_owner_fixture();
+    // Valid same-World/source baseline precedes the competing-owner mutation.
+    compile(&world, &source, &budget(), &work_budget()).unwrap();
+    let room1 = RoomId::new(1).unwrap();
+    let room2 = RoomId::new(2).unwrap();
+    source
+        .rooms
+        .insert(room1, vec![at(1, 1, 0), at(2, 1, 0), at(1, 2, 0)]);
+    source.rooms.insert(room2, vec![at(3, 1, 0), at(3, 2, 0)]);
+    let mouth = at(2, 2, 0);
+    // The split-room geometry is valid when mouth is ordinary passage-primary:
+    // only giving that exterior cell an arbitrary Room owner is ambiguous.
+    source.doorways.clear();
+    source.passages.push(mouth);
+    compile(&world, &source, &budget(), &work_budget()).unwrap();
+    source.passages.clear();
+    for declared in [room1, room2] {
+        source.doorways.insert(mouth, declared);
+        let before = world.geometry_snapshot();
+        let failure = compile(&world, &source, &budget(), &work_budget())
+            .expect_err("an authored matching owner cannot hide a distinct physical owner");
+        assert_eq!(failure.code, ErrorCode::InvalidAction);
+        assert_eq!(failure.message, "ambiguous exterior doorway owner");
+        assert_eq!(world.geometry_snapshot(), before);
+    }
+    // Existing interior-marker rule is deliberately unchanged: true interior
+    // ownership, unlike an exterior claim, already identifies the primary room.
+    source.rooms.get_mut(&room1).unwrap().push(mouth);
+    source
+        .rooms
+        .get_mut(&room1)
+        .unwrap()
+        .sort_by_key(|p| (p.region, p.position.z, p.position.y, p.position.x));
+    source.doorways.insert(mouth, room1);
+    compile(&world, &source, &budget(), &work_budget()).unwrap();
+}

@@ -368,3 +368,14 @@ existing source-work bounds. A proposed 257-root reserve is valid only after the
 history reader enforces its 256 retained-boundary limit before allocation; its
 current post-decode check is not such protection. Actual encoded fixtures,
 whole-game headroom and bounded history integration remain prerequisites.
+
+### Exterior-owner regression cohort (not yet run)
+
+The next two test-only compiler witnesses retain a valid U-shaped room with three
+adjacent cells of one owner, then split it into two ordinary rooms. The split
+geometry first compiles with a passage-primary mouth. Claiming that exterior
+mouth for either adjoining room must fail with an explicit ambiguous-owner error;
+a true interior marker retains its existing rule. This isolates physical-owner
+ambiguity from invalid geometry and preserves World equality. The current
+compiler still checks only that the supplied owner is adjacent; the negative is
+an intended first-red, not an already implemented production validation claim.
