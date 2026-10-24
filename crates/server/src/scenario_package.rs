@@ -19,8 +19,12 @@ mod diagnostics;
 mod instantiation;
 #[path = "scenario_population.rs"]
 mod population;
+// Compiler first-red boundary only; no public authored schema or runtime integration.
 #[path = "scenario_retrieval.rs"]
 mod retrieval;
+#[cfg(test)]
+#[path = "scenario_spatial.rs"]
+mod spatial;
 pub use population::{
     ActorPopulationBand, ActorPopulationChoice, CarriedItemChoice, CarriedItemPool, CarriedLoot,
     CarryChance, CharacterLoadout, FloorActivation, PopulationAdvancement, PopulationBand,

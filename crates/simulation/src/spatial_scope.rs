@@ -4,6 +4,8 @@
 //! A later source verifier must establish those facts; World alone owns physical
 //! adjacency and portal transforms. No classification creates a residency pin.
 
+pub mod registry;
+
 use std::num::NonZeroU32;
 
 /// Room and passage identifiers deliberately occupy separate namespaces.
