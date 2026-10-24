@@ -681,5 +681,44 @@ class DiscoveryRecordingContracts(unittest.TestCase):
                 self.assertEqual(samples, {"existing": {"type": "palette"}})
 
 
+class SelfDeviceRecordingContracts(unittest.TestCase):
+    def case(self, failure=None):
+        source = {"type": "snapshot", "request_id": "exact-self-device", "snapshot": {
+            "state": {"wizard_game": False, "observation": {"interactions": {
+                "inventory": [{"item": "opaque-item", "device_activation": "self_target"}]}}}}}
+        case, trace = recording_case(failure)
+        original = type(case).runTest
+        def record(subject):
+            subject.self_device_sample = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_existing_non_graphical_actual_text_case(self):
+        case = record_wire_samples.self_device_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_text_nothing_unknown_direction_and_identified_self_skip")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_self_device_snapshot_is_preserved_only_after_cleanup(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.self_device_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_self_device(samples)
+        self.assertEqual(samples, {"zz.self_device": source})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.self_device"], case.self_device_sample)
+
+    def test_self_device_failed_cleanup_does_not_publish_partial_sample(self):
+        for failure in ("cleanup", "class_cleanup"):
+            with self.subTest(failure=failure):
+                case, _, _ = self.case(failure)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.self_device_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_self_device(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
 if __name__ == "__main__":
     unittest.main()

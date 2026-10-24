@@ -65,6 +65,12 @@ def utility_wands_recording_case():
         "test_persistent_first_contact_utility_state_displays_in_text_and_reopens_without_source")
 
 
+def self_device_recording_case():
+    """Reuse real Text Nothing/Identify/self-aim acceptance and its raw snapshot."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_text_nothing_unknown_direction_and_identified_self_skip")
+
+
 def discovery_recording_case():
     """Reuse Text examination/opening and source-free checkpoint acceptance."""
     from test_discovery_process import DiscoveryProcesses
@@ -219,6 +225,16 @@ class Recorder(ProcessTestCase):
         sample = run_recording_case(amulet_recording_case(), "escape_sample")
         self.assertEqual(sample["type"], "snapshot")
         server_samples["zz.amulet_escape"] = sample
+
+    def record_self_device(self, server_samples):
+        sample = run_recording_case(self_device_recording_case(), "self_device_sample")
+        self.assertEqual(sample["type"], "snapshot")
+        state = sample["snapshot"]["state"]
+        self.assertFalse(state["wizard_game"])
+        rows = state["observation"]["interactions"]["inventory"]
+        self.assertTrue(any(row["device_activation"] == "self_target" for row in rows),
+                        "capture the actual known-self device affordance")
+        server_samples["zz.self_device"] = sample
 
     def record_scare_crumble(self, server_samples):
         sample = run_recording_case(scare_pickup_recording_case(), "crumble_sample")
@@ -623,6 +639,7 @@ class Recorder(ProcessTestCase):
         self.record_public_plan(server_samples)
         self.record_nutrition(server_samples)
         self.record_magic_items(server_samples)
+        self.record_self_device(server_samples)
         self.record_personal_conditions(server_samples)
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)

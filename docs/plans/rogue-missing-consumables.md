@@ -6,6 +6,32 @@ maintainer directed a redo on 2026-10-24. This checkout starts from published ma
 `511ea466e14892075af030a78d254f1101e7c813`; no lost commit or historical test receipt
 qualifies this source. [Current status](../status.md) owns implemented scope.
 
+## Fresh device foundation acceptance checkpoint (2026-10-24)
+
+The complete server library now passes 1,025 tests, including the corrected OnUse
+fixture, independent actor knowledge, self-device storage-publication rollback,
+paused identification/reopen and the actual maximal 64-member generated geometry
+prerequisite. The latter proves existing source geometry capacity, not a new
+spatial registry. Protocol library tests pass 33 and integration tests 278.
+The earlier 1,773-test simulation result remains the unchanged core implementation
+receipt; no final whole-workspace or native gate is claimed.
+
+Freshly built server/scenario/headless/Text applications pass two new actual
+self-device process tests and four existing non-graphical magic-item contrasts.
+They exercise unidentified direction prompting, identified self skipping, exact
+100-tick payment and user-only nonempty effect application. Dedicated self-device
+paused/retry process traffic remains separate from the fresh Service proof.
+The real recorder captured 50 client and 50 server samples in wire 61, including
+an actual identified self-device snapshot; historical fixtures remain unchanged.
+The current writer produced saved-scenario 59. Its recording run intentionally
+changed that fixture and therefore failed the feedback wrapper's unchanged-input
+qualification; normal subsequent server tests passed with recording disabled.
+
+Canonical formatting and all-target preflight preceded the runtime checks. The
+reconstruction backup exception remains distinct from quick/push/full/hosted
+qualification. Remaining consumables and genuine room/appearance integration,
+current native auditing, final performance and complete gates remain unfinished.
+
 ## Fresh self-device execution checkpoint (2026-10-24)
 
 The admitted charged self-device regression is now green through the existing

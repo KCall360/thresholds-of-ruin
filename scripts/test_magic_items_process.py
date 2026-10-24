@@ -3,6 +3,7 @@
 Backend contracts own outcome permutations. These witnesses own actual input,
 paid-choice UI recovery, spectator presentation and one retained device plan.
 """
+import json
 import shutil
 import subprocess
 import unittest
@@ -12,6 +13,7 @@ from arena_matrix import toml_source
 
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, non_graphical
 from status_condition_package import checkpoint
+from self_device_package import prepare as prepare_self_device
 
 
 def observation(frame):
@@ -407,6 +409,88 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         device = final["items"][str(pending["plan"]["item"])]
         self.assertEqual(device["charges"], 2)
         self.assertEqual(len(items(completed, "wand")), 2)
+        self.assertFalse(completed["state"]["wizard_game"])
+
+
+    @non_graphical
+    def test_text_nothing_unknown_direction_and_identified_self_skip(self):
+        package = prepare_self_device(self)
+        self.server("--checkpoint-interval", 1, scenario=package)
+        probe, initial = self.client(observe=True)
+        text, _ = self.text_client()
+        for ground in observation(initial)["ground_items"]:
+            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+        carried = self.snapshot(probe)
+        first, second = items(carried, "wand")
+        scroll, = items(carried, "scroll")
+        self.assertTrue(all(not row["identified"] for row in items(carried, "wand")))
+        modes = {row["item"]: row["device_activation"] for row in interactions(carried)["inventory"]}
+        self.assertEqual(modes[first["id"]], "direction")
+        self.assertEqual(modes[second["id"]], "direction")
+        before = checkpoint(self, probe)
+        self.assertEqual(before["actors"]["1"]["turn_ticks"], 100)
+        self.assertEqual(sorted(before["items"][str(i)]["charges"] for i in (30, 31)), [3, 3])
+        self.assertIn("direction", text.command("zap #" + first["id"]).lower())
+        self.assertEqual(checkpoint(self, probe), before, "unsubmitted missing aim costs nothing")
+        text.command("zap #" + first["id"] + " east")
+        spent = self.snapshot(probe)
+        after = checkpoint(self, probe)
+        self.assertEqual(int(observation(spent)["tick"]), int(observation(carried)["tick"]) + 100)
+        self.assertEqual(sorted(after["items"][str(i)]["charges"] for i in (30, 31)), [2, 3])
+        self.assertEqual(after["rules_rng"], before["rules_rng"])
+        self.assertEqual(observation(spent)["combat"]["own_stats"]["conditions"],
+                         observation(carried)["combat"]["own_stats"]["conditions"])
+        self.assertTrue(all(not row["identified"] for row in items(spent, "wand")))
+        self.assertIsNone(charges(spent, first["id"]))
+        text.command("read #" + scroll["id"])
+        self.assertIsNotNone(interactions(self.snapshot(probe))["identification"])
+        text.command("identify #" + first["id"])
+        learned = self.snapshot(probe)
+        self.assertEqual(charges(learned, first["id"]), 2)
+        self.assertIsNone(charges(learned, second["id"]))
+        self.assertTrue(all(row["identified"] for row in items(learned, "wand")))
+        modes = {row["item"]: row["device_activation"] for row in interactions(learned)["inventory"]}
+        self.assertEqual(modes[first["id"]], "self_target")
+        self.assertEqual(modes[second["id"]], "self_target")
+        spectator, followed = self.client(SPECTATOR_TOKEN, observe=True)
+        followed_modes = {row["item"]: row["device_activation"] for row in interactions(followed)["inventory"]}
+        self.assertEqual(followed_modes, modes)
+        known_before = checkpoint(self, probe)
+        self.assertEqual(known_before["actors"]["1"]["turn_ticks"], 100)
+        text.command("zap #" + first["id"])
+        final = self.snapshot(probe)
+        self.assertEqual(int(observation(final)["tick"]), int(observation(learned)["tick"]) + 100)
+        self.assertEqual(charges(final, first["id"]), 1)
+        self.assertIsNone(charges(final, second["id"]))
+        self.assertFalse(final["state"]["wizard_game"])
+        messages = [json.loads(line).get("message") for line in probe.transcript if line.startswith("{")]
+        self.self_device_sample = next(message for message in reversed(messages)
+                                      if message and message["type"] == "snapshot")
+
+    @non_graphical
+    def test_self_condition_reaches_user_not_direction_recipient(self):
+        package = prepare_self_device(self, peer=True, condition=True)
+        self.server("--checkpoint-interval", 1, scenario=package)
+        peer, _ = self.client(actor=2)
+        subject, initial = self.client()
+        carried = self.collect(subject, initial, [peer])
+        wand = items(carried, "wand")[0]
+        def selected(frame):
+            return [row for row in observation(frame)["combat"]["own_stats"]["conditions"]
+                    if row["condition"]["id"] == "fixture.self_device"]
+        self.assertEqual(selected(carried), [])
+        self.assertEqual(selected(self.snapshot(peer)), [])
+        before = checkpoint(self, subject)
+        started = self.act(subject, {"type": "zap", "item": wand["id"],
+                                    "aim": {"kind": "direction", "direction": "east"}})
+        self.assertIsNone(started["error"])
+        completed = self.advance(subject, [peer])
+        self.assertEqual(len(selected(completed)), 1)
+        self.assertEqual(selected(self.snapshot(peer)), [], "supplied direction is not self-effect target authority")
+        after = checkpoint(self, subject)
+        self.assertEqual(sorted(after["items"][str(i)]["charges"] for i in (30, 31)), [2, 3])
+        self.assertEqual(after["rules_rng"], before["rules_rng"])
+        self.assertTrue(all(not row["identified"] for row in items(completed, "wand")))
         self.assertFalse(completed["state"]["wizard_game"])
 
 

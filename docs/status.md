@@ -41,9 +41,11 @@ knowledge-gated common/Text/ASCII prompts now have fresh focused coverage. Paid
 self-device execution passes Nothing and nonempty-effect Service contrasts,
 including charge/retry and paused identification with source-deleted reopen. The
 pure room/passage predicate and appearance selector also pass their fresh tests;
-neither is integrated into gameplay yet. A new OnUse timing fixture still needs
-correction, and genuine current-format corpus regeneration, actual-process checks,
-remaining mechanics and broader qualification are unfinished. Historical local results do not qualify this tree.
+neither is integrated into gameplay yet. Fresh Service checks cover OnUse observer
+isolation and storage rollback; actual Text/process checks and genuine current
+save/wire fixtures pass. Remaining consumables, spatial integration and broader
+qualification are unfinished; no shipped Nothing catalog entry or live-pool change
+is implied by the generic device foundation. Historical local results do not qualify this tree.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the

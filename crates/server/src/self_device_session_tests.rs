@@ -587,6 +587,22 @@ fn on_use_self_condition_identifies_only_on_completion_and_other_owner_remains_u
     let scenario = crate::scenario_package::load(root.path(), 42, None, true).unwrap();
     let mut wire = Wire::new(Engine::memory(scenario).unwrap());
     let wand = wire.take(ItemClass::Wand);
+    // Pickup resolves immediately for the owner, but the other external actor
+    // is still due at tick0. Advance that real actor once before measuring the
+    // zap; admission readiness alone does not imply execution readiness.
+    assert_eq!(wire.service.engine.next_actor(), Some(OTHER));
+    let peer_wait = wire.request(OTHER, Action::Wait);
+    ack(wire.send(OTHER, "on-use-peer-ready", peer_wait.clone()));
+    wire.finish(OTHER, "on-use-peer-ready", &peer_wait);
+    assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
+    let ready = wire.checkpoint();
+    let tick = ready["game"]["tick"].as_u64().unwrap();
+    assert_eq!(nothing_actor(&ready, OWNER)["ready_at"], tick);
+    let peer_ready = nothing_actor(&ready, OTHER)["ready_at"].as_u64().unwrap();
+    assert!(
+        tick < peer_ready && peer_ready < tick + 100,
+        "peer boundary must stop inside, not before or after, the 100-tick preparation"
+    );
     let physical = nothing_wand_id(&wire, wand);
     let peer = wire.snapshot(OTHER);
     let peer_wand = peer
@@ -665,13 +681,16 @@ fn on_use_self_condition_identifies_only_on_completion_and_other_owner_remains_u
     wire.drain(OWNER);
     wire.drain(OTHER);
     let started = ack(wire.send(OWNER, "on-use-self", request.clone()));
-    assert!(matches!(
-        started,
-        RequestReceipt::Admitted {
-            phase: IntentionPhase::Started,
-            ..
-        }
-    ));
+    assert!(
+        matches!(
+            started,
+            RequestReceipt::Admitted {
+                phase: IntentionPhase::Started,
+                ..
+            }
+        ),
+        "actual preparation receipt: {started:?}"
+    );
     assert_eq!(started.entry_id(), admitted.entry_id());
     let pending = wire.checkpoint();
     assert_eq!(nothing_items(&pending)[&physical]["charges"], 3);
@@ -763,4 +782,169 @@ fn on_use_self_condition_identifies_only_on_completion_and_other_owner_remains_u
     assert!(!snapshot.has_control);
     assert_eq!(ack(wire.send(OWNER, "on-use-self", request)), completed);
     assert_eq!(wire.checkpoint(), after);
+}
+
+#[test]
+fn late_store_rejection_rolls_back_self_effect_charge_and_on_use_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("source");
+    let path = directory.path().join("self-effect.db");
+    let source = self_device_source(&root, false, true);
+    let package = source.package.as_ref().unwrap();
+    let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    manifest["archetypes"]["ember"]["device"]["discovery"] = json!("on_use");
+    let rules = toml::to_string(package.rules().unwrap().document()).unwrap();
+    let package = Package::from_parts(
+        serde_json::from_value(manifest).unwrap(),
+        package.region_defs().unwrap(),
+        &rules,
+    )
+    .unwrap();
+    package.check().unwrap();
+    crate::scenario_package::write_package(
+        &root,
+        &package.manifest,
+        &package.region_defs().unwrap(),
+        &rules,
+    )
+    .unwrap();
+    let fixture = crate::scenario_package::load(&root, 42, None, true).unwrap();
+    let mut wire = Wire::new(Engine::open(&path, fixture.clone()).unwrap());
+    let wand = wire.take(ItemClass::Wand);
+    let physical = nothing_wand_id(&wire, wand);
+    let observed = wire.snapshot(OWNER);
+    assert!(!nothing_identified(&observed, wand));
+    assert_eq!(
+        nothing_affordance(&observed, wand).device_activation,
+        Some(DeviceActivation::Direction)
+    );
+    assert!(!observed
+        .state
+        .observation
+        .combat
+        .as_ref()
+        .unwrap()
+        .own_stats
+        .as_ref()
+        .unwrap()
+        .conditions
+        .iter()
+        .any(|c| c.condition.id == "fixture.self_device"));
+    assert_eq!(nothing_items(&wire.checkpoint())[&physical]["charges"], 3);
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::West,
+            },
+        },
+    );
+    let admitted = ack(wire.send(OWNER, "atomic-self", request.clone()));
+    wire.service.engine.flush().unwrap();
+    drop(wire);
+    let saved = crate::inspect_save(&path).unwrap();
+    let mut engine = Engine::open_with_policy(
+        &path,
+        fixture.clone(),
+        crate::SavePolicy {
+            max_pending_bytes: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let before = checkpoint(&engine);
+    // Prove the storage fault will reject this still-unexecuted self payload.
+    assert_eq!(nothing_items(&before)[&physical]["charges"], 3);
+    let observed = engine.observation(OWNER).unwrap();
+    assert!(
+        !observed
+            .inventory
+            .iter()
+            .find(|row| row.id == wand)
+            .unwrap()
+            .identified
+    );
+    assert!(!observed
+        .combat
+        .as_ref()
+        .unwrap()
+        .own_stats
+        .as_ref()
+        .unwrap()
+        .conditions
+        .iter()
+        .any(|row| row.condition.id == "fixture.self_device"));
+    let RequestReceipt::Admitted {
+        intention, phase, ..
+    } = &admitted
+    else {
+        panic!("actual admission")
+    };
+    assert_eq!(*phase, IntentionPhase::Queued);
+    let statuses = engine.pending_intentions(OWNER);
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(&statuses[0].intention, intention);
+    assert_eq!(statuses[0].phase, IntentionPhase::Queued);
+    let sequence = engine.save_status().accepted_sequence;
+    for _ in 0..2 {
+        let error = engine.execute_next_intention().unwrap_err();
+        assert_eq!(error.code, ErrorCode::StorageFailure);
+        assert_eq!(
+            error.message,
+            "Save queue is full; wait for saving to finish before retrying"
+        );
+        assert_eq!(checkpoint(&engine), before);
+        assert_eq!(engine.save_status().accepted_sequence, sequence);
+        assert_eq!(crate::inspect_save(&path).unwrap(), saved);
+    }
+    drop(engine);
+    let mut engine = Engine::open(&path, fixture).unwrap();
+    engine.execute_next_intention().unwrap().unwrap();
+    let after = checkpoint(&engine);
+    assert_eq!(nothing_items(&after)[&physical]["charges"], 2);
+    assert_eq!(after["game"]["rules_rng"], before["game"]["rules_rng"]);
+    assert_eq!(
+        after["game"]["tick"].as_u64().unwrap(),
+        before["game"]["tick"].as_u64().unwrap() + 100
+    );
+    let mut wire = Wire::new(engine);
+    let observed = wire.snapshot(OWNER);
+    assert!(nothing_identified(&observed, wand));
+    assert_eq!(
+        nothing_affordance(&observed, wand).charges,
+        None,
+        "OnUse identity does not reveal the exact charge balance"
+    );
+    assert_eq!(
+        nothing_affordance(&observed, wand).device_activation,
+        Some(DeviceActivation::SelfTarget)
+    );
+    let conditions = &observed
+        .state
+        .observation
+        .combat
+        .as_ref()
+        .unwrap()
+        .own_stats
+        .as_ref()
+        .unwrap()
+        .conditions;
+    let applied: Vec<_> = conditions
+        .iter()
+        .filter(|c| c.condition.id == "fixture.self_device")
+        .collect();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(applied[0].remaining_ticks, Some(2000));
+    let settled = wire.checkpoint();
+    let retry = ack(wire.send(OWNER, "atomic-self", request));
+    assert_eq!(retry.entry_id(), admitted.entry_id());
+    assert!(matches!(
+        retry,
+        RequestReceipt::Admitted {
+            phase: IntentionPhase::Resolved,
+            ..
+        }
+    ));
+    assert_eq!(wire.checkpoint(), settled);
 }
