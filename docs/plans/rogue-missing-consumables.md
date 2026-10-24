@@ -239,6 +239,40 @@ Source flytrap miss damage outside the gate is a historical artifact, not an
 intended exception to TOR cancellation. Source regeneration flags alone do not
 establish a cancellation rule for TOR's implemented recovery.
 
+## Current reconstruction checkpoint
+
+Strict device-aim/input-affordance schemas and their callers are scaffolded under
+the current protocol/save identities. Fresh workspace all-target compilation
+passes. Independent controls establish closed aim decoding, free rejection of an
+unknown device's forged self aim, and unchanged real paid ray-device retry
+semantics. Source-first tests now demonstrate missing self-device support after
+valid source construction, missing known-self client prompt behavior, and missing
+pure room/passage membership and appearance algorithms. These intentional reds
+are not implemented gameplay or a passing qualification gate. The authentic wire
+corpus remains pending a real application recording; it is not hand-updated.
+
+Next: implement the bounded source/planning layer, prove real paid self-effect
+execution and save/reopen boundaries with independent nonempty payload controls,
+then complete delivery and affected client behavior. No final full, release,
+independent 3D or native qualification exists for this reconstruction yet.
+
+## Retained rendering lesson, requiring fresh proof
+
+The lost implementation identified a concrete ASCII rendering cost: cloning the
+complete remembered-map storage during each rendered frame. Reconstruct the
+narrow borrowed traversal at the rendering stage instead of repeating that
+allocation. Preserve occurrence positions, height filtering, ordering, current
+cell precedence, glyph/appearance overlays and remembered tint. A pointer-backed
+regression must prove the render path borrows the original retained storage;
+a separately materialized old-output oracle must prove exact tile equivalence,
+including repeated/aliased map occurrences and hallucination overlays.
+
+Historical median improvements were reported for large single and burst
+workloads, but their source and raw artifacts are unavailable. They are a design
+lead, not accepted measurements for this reconstruction. Run fresh isolated,
+interleaved release comparisons and retain residual costs and tail variability.
+Do not remove overlays or required observer/fuel updates to improve timings.
+
 ## Withdrawn alternatives
 
 The earlier unapproved candidate tables are intentionally removed to prevent

@@ -1075,7 +1075,13 @@ fn private_utility_views(
     // Reuse the host's actual event-time observation boundary so a bystander
     // gets a witnessed receipt, rather than reconstructing history on a read.
     game.host_region_continuation = true;
-    execute(game, Action::Zap { item, aim });
+    execute(
+        game,
+        Action::Zap {
+            item,
+            aim: crate::DeviceAim::Direction { direction },
+        },
+    );
     let witness = game.event_observation_witness();
     let mut views = Vec::new();
     for observer in [ActorId(1), ActorId(2), ActorId(3)] {
