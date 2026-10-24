@@ -60,9 +60,7 @@ impl Meter {
             passages: size(195)?,
             runs: size(107)?,
             label_bytes: size(6)?,
-            expanded_refs: (self.limit / 107)
-                .checked_mul(1_u64 << 32)
-                .unwrap_or(u64::MAX),
+            expanded_refs: (self.limit / 107).saturating_mul(1_u64 << 32),
         })
     }
 }
@@ -97,31 +95,6 @@ impl<'de> DeserializeSeed<'de> for RejectEntry {
 impl<'de, T: Entry> DeserializeSeed<'de> for ListSeed<'_, T> {
     type Value = Vec<T>;
     fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Vec<T>, D::Error> {
-        impl<'de, T: Entry> Visitor<'de> for ListSeed<'_, T> {
-            type Value = Vec<T>;
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a bounded spatial sequence")
-            }
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<T>, A::Error> {
-                let mut values = Vec::new();
-                loop {
-                    if self.maximum.is_some_and(|max| values.len() >= max as usize) {
-                        if seq.next_element_seed(RejectEntry)?.is_some() {
-                            unreachable!();
-                        }
-                        return Ok(values);
-                    }
-                    let Some(value) = seq.next_element_seed(EntrySeed::<T> {
-                        meter: self.meter,
-                        marker: PhantomData,
-                    })?
-                    else {
-                        return Ok(values);
-                    };
-                    values.push(value);
-                }
-            }
-        }
         d.deserialize_seq(self)
     }
 }
@@ -299,36 +272,6 @@ struct LabelSeed<'a>(&'a mut Meter);
 impl<'de> DeserializeSeed<'de> for LabelSeed<'_> {
     type Value = String;
     fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<String, D::Error> {
-        impl<'de> Visitor<'de> for LabelSeed<'_> {
-            type Value = String;
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a bounded nonempty scope label")
-            }
-            fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<String, E> {
-                if s.is_empty() || s.chars().any(char::is_control) {
-                    return Err(E::custom("invalid scope label"));
-                }
-                self.0.charge::<E>(
-                    u64::try_from(s.len())
-                        .ok()
-                        .and_then(|n| n.checked_mul(6))
-                        .ok_or_else(|| E::custom("label charge overflow"))?,
-                )?;
-                Ok(s.to_owned())
-            }
-            fn visit_string<E: serde::de::Error>(self, s: String) -> Result<String, E> {
-                if s.is_empty() || s.chars().any(char::is_control) {
-                    return Err(E::custom("invalid scope label"));
-                }
-                self.0.charge::<E>(
-                    u64::try_from(s.len())
-                        .ok()
-                        .and_then(|n| n.checked_mul(6))
-                        .ok_or_else(|| E::custom("label charge overflow"))?,
-                )?;
-                Ok(s)
-            }
-        }
         d.deserialize_string(self)
     }
 }
@@ -685,5 +628,63 @@ impl Serialize for EncodedPool<'_> {
         .serialize(s)
     }
 }
+
+impl<'de, T: Entry> Visitor<'de> for ListSeed<'_, T> {
+    type Value = Vec<T>;
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a bounded spatial sequence")
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<T>, A::Error> {
+        let mut values = Vec::new();
+        loop {
+            if self.maximum.is_some_and(|max| values.len() >= max as usize) {
+                if seq.next_element_seed(RejectEntry)?.is_some() {
+                    unreachable!();
+                }
+                return Ok(values);
+            }
+            let Some(value) = seq.next_element_seed(EntrySeed::<T> {
+                meter: self.meter,
+                marker: PhantomData,
+            })?
+            else {
+                return Ok(values);
+            };
+            values.push(value);
+        }
+    }
+}
+
+impl<'de> Visitor<'de> for LabelSeed<'_> {
+    type Value = String;
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a bounded nonempty scope label")
+    }
+    fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<String, E> {
+        if s.is_empty() || s.chars().any(char::is_control) {
+            return Err(E::custom("invalid scope label"));
+        }
+        self.0.charge::<E>(
+            u64::try_from(s.len())
+                .ok()
+                .and_then(|n| n.checked_mul(6))
+                .ok_or_else(|| E::custom("label charge overflow"))?,
+        )?;
+        Ok(s.to_owned())
+    }
+    fn visit_string<E: serde::de::Error>(self, s: String) -> Result<String, E> {
+        if s.is_empty() || s.chars().any(char::is_control) {
+            return Err(E::custom("invalid scope label"));
+        }
+        self.0.charge::<E>(
+            u64::try_from(s.len())
+                .ok()
+                .and_then(|n| n.checked_mul(6))
+                .ok_or_else(|| E::custom("label charge overflow"))?,
+        )?;
+        Ok(s)
+    }
+}
+
 #[cfg(test)]
 mod tests;

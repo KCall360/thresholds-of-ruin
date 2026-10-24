@@ -430,3 +430,22 @@ counts are 1,170 primary and 3,900 surface references, 1,430 runs, and 6,500 sca
 terrain cells. It is not a public spatial metadata schema, loaded Game registry,
 maximum-world/archive-capacity proof or source-free restore witness. Those
 production integration boundaries remain next work after standalone codec green.
+
+The first green preflight caught three mechanical lint issues before linking:
+manual saturating arithmetic and two visitor implementations nested below their
+type scope. The equivalent idiomatic correction passes strict workspace
+all-target Clippy; full runtime acceptance is still pending.
+
+The next checkpoint integration should reuse infallible trusted capture of shared
+references and fallible checked serialization, rather than migrate every capture
+caller to a new transaction API. Construct validated encoding authority only after
+capacity/conflict checks; internal usize indices require checked u32 wire
+conversion. Since JSON field order is arbitrary, shared-pool decoding may need an
+explicit internal deferred-root mode. It must retain the same meter, charge actual
+root references before copying them or returning validated authority, and consume
+the candidate once. Keep the public exact-reserve standalone route unchanged.
+Bound history before appending/reading the excess subtree, collect all current and
+retained root indices before restore publication, and reject nonempty restored
+registries until canonical source/expected-set verification is installed. The
+final source verifier must also reject an empty registry that omits required
+scopes; a temporary nonempty rejection is not that final verifier.
