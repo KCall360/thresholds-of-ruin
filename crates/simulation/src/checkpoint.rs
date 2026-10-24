@@ -326,6 +326,10 @@ pub struct RestoreContext<'a> {
 }
 
 impl<'a> RestoreContext<'a> {
+    pub fn bind_spatial_roots(&mut self, _snapshots: &[&Snapshot]) -> Result<(), PersistError> {
+        Ok(())
+    }
+
     pub fn new(shared: &'a SharedState, content: Arc<Content>) -> Self {
         Self {
             shared,
@@ -728,6 +732,7 @@ impl Game {
                 snapshot.world,
             )?,
             map_validation: Default::default(),
+            spatial_registry: Shared::new(Default::default()),
             seed: snapshot.seed,
             tick: snapshot.tick,
             actors: context.actors(snapshot.actors, snapshot.items)?,

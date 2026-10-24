@@ -50,7 +50,9 @@ Text/Service acceptance including source-deleted reopen. The complete-pool test
 fixture is corrected and the fresh full server library passes. Live pools are unchanged. Historical local results do not qualify
 this tree.
 A bounded row-run registry and test-only explicit/generated spatial compiler now
-have fresh full-library coverage; they are not yet installed in Game or its saves.
+have fresh full-library coverage. A strict standalone pooled codec also passes;
+Game/history persistence installation is now under source-first reconstruction,
+not yet a completed saved gameplay capability.
 The [spatial integration plan](plans/rogue-spatial-registry-reconstruction.md) owns
 remaining canonical-source, codec and capacity work.
 Existing live item distributions remain unchanged and polymorph remains separate.

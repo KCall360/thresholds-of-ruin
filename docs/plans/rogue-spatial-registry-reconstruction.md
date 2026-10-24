@@ -402,7 +402,7 @@ max-width actual-writer, nested-shape, allocation-tail, exact aggregate, sharing
 and source-free/current-history tests remain required.
 
 
-### Standalone codec green implementation cohort (runtime pending)
+### Standalone codec green implementation cohort
 
 The initial codec first-red produced one passing arithmetic control and two
 intended valid-decode stub failures. The next implementation replaces those stubs
@@ -411,8 +411,8 @@ serialization adapters and consuming root validation. Expanded witnesses cover
 actual writer bounds, nested required/unknown/duplicate/positional fields,
 required-nullable doorway and numeric domains, exact charge versus one byte less,
 shared historical subsets and rejecting oversized tails before reading them.
-These new tests have not yet run; they do not inherit a strictness pass from the
-initial missing-decoder failures.
+These expanded tests now pass in the fresh 1,792-test simulation library. They
+do not inherit a strictness pass from the initial missing-decoder failures.
 
 This pool explicitly represents immutable package-and-seed geometry: each scope
 identity and region ownership is assigned once, and historical roots select
@@ -434,7 +434,11 @@ production integration boundaries remain next work after standalone codec green.
 The first green preflight caught three mechanical lint issues before linking:
 manual saturating arithmetic and two visitor implementations nested below their
 type scope. The equivalent idiomatic correction passes strict workspace
-all-target Clippy; full runtime acceptance is still pending.
+all-target Clippy. At source `d80a11975fb73dadfda113686bce70480064bef5`,
+fresh full simulation and server libraries pass 1,792 and
+1,037 tests respectively, with none ignored or filtered. The real 65-member
+authored witness is included. These are focused development receipts, not
+quick/push/full/native verification gates; Game/save installation is next.
 
 The next checkpoint integration should reuse infallible trusted capture of shared
 references and fallible checked serialization, rather than migrate every capture
@@ -449,3 +453,16 @@ retained root indices before restore publication, and reject nonempty restored
 registries until canonical source/expected-set verification is installed. The
 final source verifier must also reject an empty registry that omits required
 scopes; a temporary nonempty rejection is not that final verifier.
+
+
+### Game/history retention first-red checkpoint (runtime pending)
+
+The next source cohort introduces only the minimal shared Game registry and
+registration/binding test seams, with three retention witnesses. The current
+checkpoint schema deliberately remains unchanged in this first-red: native
+installation, encoded pooled retention and the 257/258 archive envelope are not
+yet implemented. Four server witnesses independently establish genuine captured
+checkpoint prerequisites, the decode-only 256-boundary envelope, rejection before
+an oversized 257th subtree, and the closed nonempty-registry audit seam. These
+are missing-behavior tests, not valid-history or source-canonical acceptance.
+The reviewed green wiring remains separate until these failures are observed.

@@ -6,7 +6,7 @@
 
 use super::{Membership, PrimarySpace, RoomId};
 use std::collections::{BTreeMap, BTreeSet};
-use tor_world::{Location, RegionId};
+use tor_world::{Location, RegionId, Shared};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellRun {
@@ -232,14 +232,21 @@ impl Scope {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Registry {
-    scopes: BTreeMap<String, Scope>,
+    scopes: BTreeMap<String, Shared<Scope>>,
 }
 impl Registry {
+    pub fn scopes(&self) -> impl Iterator<Item = &Scope> {
+        self.payloads().map(|s| &**s)
+    }
+    pub(crate) fn payloads(&self) -> impl Iterator<Item = &Shared<Scope>> {
+        self.scopes.values()
+    }
+
     /// Identical registration still revalidates the whole aggregate budget.
     pub fn register(&mut self, scope: Scope, budget: &Budget) -> Result<(), Error> {
         let incoming = scope.validate(budget)?;
         if let Some(existing) = self.scopes.get(&scope.id) {
-            if existing != &scope {
+            if &**existing != &scope {
                 return Err(Error::Conflict);
             }
         }
@@ -261,7 +268,7 @@ impl Registry {
             return Ok(());
         }
         usage.checked_add(incoming)?.within(budget)?;
-        self.scopes.insert(scope.id.clone(), scope);
+        self.scopes.insert(scope.id.clone(), Shared::new(scope));
         Ok(())
     }
     pub fn lookup(&self, scope: &str, location: Location) -> Option<Membership> {

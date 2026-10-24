@@ -6,6 +6,7 @@
 
 pub mod codec;
 pub mod registry;
+mod retention;
 
 use std::num::NonZeroU32;
 
