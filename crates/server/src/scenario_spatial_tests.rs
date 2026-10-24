@@ -8,9 +8,16 @@ fn budget() -> Budget {
         scopes: 1,
         members: 2,
         rooms: 2,
+        passages: 8,
         runs: 4096,
         expanded_refs: 32768,
         label_bytes: 64,
+    }
+}
+fn work_budget() -> CompilerWorkBudget {
+    CompilerWorkBudget {
+        source_entries: 100_000,
+        terrain_cells: 100_000,
     }
 }
 fn at(x: i32, y: i32, z: i32) -> Location {
@@ -76,11 +83,12 @@ fn explicit_geometry_compiles_exact_volume_doorway_and_six_face_surfaces() {
         members: vec![RegionId(1)],
         rooms: BTreeMap::from([(room, room_cells)]),
         passages,
-        doorways: vec![at(2, 1, 0), at(2, 1, 1)],
+        doorways: BTreeMap::from([(at(2, 1, 0), room), (at(2, 1, 1), room)]),
+        closure_faces: BTreeSet::new(),
     };
     let before = world.geometry_snapshot();
-    let compiled =
-        compile(&world, &source, &budget()).expect("valid explicit canonical source must compile");
+    let compiled = compile(&world, &source, &budget(), &work_budget())
+        .expect("valid explicit canonical source must compile");
     assert_eq!(world.geometry_snapshot(), before, "compilation is pure");
     assert_eq!(compiled.id, source.id);
     assert_eq!(compiled.members, source.members);
@@ -133,8 +141,7 @@ fn explicit_geometry_compiles_exact_volume_doorway_and_six_face_surfaces() {
     assert!(!actual_surfaces.contains(&at(0, 0, 0)));
 }
 
-#[test]
-fn retained_generated_recipe_supplies_full_volume_not_population_floor_only() {
+fn generated_pair_package() -> Package {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/rogue-geometry");
     let mut manifest = super::super::resolve_source(&root).unwrap().manifest;
     let family = manifest.procedural_worlds.get_mut("dungeon").unwrap();
@@ -158,6 +165,12 @@ fn retained_generated_recipe_supplies_full_volume_not_population_floor_only() {
     )
     .unwrap();
     package.check().unwrap();
+    package
+}
+
+#[test]
+fn retained_generated_recipe_supplies_full_volume_not_population_floor_only() {
+    let package = generated_pair_package();
     let generated = package.generated_group("dungeon/1", 42).unwrap();
     assert_eq!(generated.regions.len(), 2);
     assert_eq!(generated.rooms.len(), 2);
@@ -165,7 +178,7 @@ fn retained_generated_recipe_supplies_full_volume_not_population_floor_only() {
         .rooms
         .iter()
         .all(|r| r.cells.len() == 900 && r.cells.iter().all(|p| p.position.z == 0)));
-    let source = generated_source(&package, "dungeon/1", 42, &budget())
+    let source = generated_source(&package, "dungeon/1", 42, &budget(), &work_budget())
         .expect("validated recipe must supply canonical source");
     assert_eq!(source.members, vec![RegionId(1), RegionId(2)]);
     assert_eq!(source.rooms.len(), 2);
@@ -183,8 +196,29 @@ fn retained_generated_recipe_supplies_full_volume_not_population_floor_only() {
         assert_eq!(room.iter().copied().collect::<BTreeSet<_>>(), expected);
         assert_eq!(room.len(), 1800);
     }
-    assert!(!source.passages.is_empty());
-    assert!(!source.doorways.is_empty());
+    // Two maximal adjacent rooms leave exactly two outer gap cells per z,
+    // both room-owned doorways. No fabricated passage-primary cell is needed.
+    let mut expected_doorways = BTreeMap::new();
+    for z in 0..2 {
+        let a = Location {
+            region: RegionId(1),
+            position: Position { x: 31, y: 16, z },
+        };
+        let b = Location {
+            region: RegionId(2),
+            position: Position { x: 0, y: 16, z },
+        };
+        assert!(!generated.regions[&1].walls.contains(&[31, 16, z]));
+        assert!(!generated.regions[&2].walls.contains(&[0, 16, z]));
+        expected_doorways.insert(a, RoomId::new(1).unwrap());
+        expected_doorways.insert(b, RoomId::new(2).unwrap());
+    }
+    assert_eq!(source.doorways, expected_doorways);
+    assert!(
+        source.passages.is_empty(),
+        "actual two-cell gap is entirely room-owned doorways"
+    );
+    assert!(source.closure_faces.is_empty());
 }
 
 #[test]
@@ -207,7 +241,7 @@ fn doorway_junction_joins_passage_arms_but_ordinary_room_interior_does_not() {
     let left = at(1, 1, 0);
     let doorway = at(2, 1, 0);
     let right = at(3, 1, 0);
-    assert!([left, doorway, right].iter().any(|p| !world.walkable(*p)));
+    assert!([left, doorway, right].iter().all(|p| world.walkable(*p)));
     assert_eq!(
         world.physics_neighbor(left, Direction::East),
         Some((doorway, 0))
@@ -222,7 +256,8 @@ fn doorway_junction_joins_passage_arms_but_ordinary_room_interior_does_not() {
         members: vec![RegionId(1)],
         rooms: BTreeMap::from([(room, vec![doorway])]),
         passages: vec![left, right],
-        doorways: vec![doorway],
+        doorways: BTreeMap::from([(doorway, room)]),
+        closure_faces: BTreeSet::new(),
     };
     let membership = |scope: &tor_simulation::spatial_scope::registry::Scope, p| {
         let matching: Vec<_> = scope
@@ -233,8 +268,8 @@ fn doorway_junction_joins_passage_arms_but_ordinary_room_interior_does_not() {
         assert_eq!(matching.len(), 1);
         matching[0].membership
     };
-    let joined =
-        compile(&world, &source, &budget()).expect("explicit doorway joins both real passage arms");
+    let joined = compile(&world, &source, &budget(), &work_budget())
+        .expect("explicit doorway joins both real passage arms");
     let p1 = PassageId::new(1).unwrap();
     assert_eq!(
         membership(&joined, left),
@@ -246,8 +281,8 @@ fn doorway_junction_joins_passage_arms_but_ordinary_room_interior_does_not() {
         Membership::new(PrimarySpace::Room(room), Some(p1)).unwrap()
     );
     source.doorways.clear();
-    let separated =
-        compile(&world, &source, &budget()).expect("ordinary room is not a passage component edge");
+    let separated = compile(&world, &source, &budget(), &work_budget())
+        .expect("ordinary room is not a passage component edge");
     assert_eq!(
         membership(&separated, left),
         Membership::new(PrimarySpace::Passage(p1), None).unwrap()
@@ -260,4 +295,380 @@ fn doorway_junction_joins_passage_arms_but_ordinary_room_interior_does_not() {
         membership(&separated, doorway),
         Membership::new(PrimarySpace::Room(room), None).unwrap()
     );
+}
+
+fn exterior_fixture() -> (World, CanonicalSpatialSource) {
+    let mut world = World::new(vec![], vec![]).unwrap();
+    world
+        .add_chamber(Region {
+            id: RegionId(1),
+            name: "external mouth".into(),
+            bounds: Extent::new(5, 3, 2).unwrap(),
+        })
+        .unwrap();
+    for z in 0..2 {
+        for y in 0..3 {
+            for x in 0..5 {
+                if y != 1 || !(1..=3).contains(&x) {
+                    world.set_wall(at(x, y, z), true).unwrap();
+                }
+            }
+        }
+    }
+    let room = RoomId::new(1).unwrap();
+    let source = CanonicalSpatialSource {
+        id: "outer-mouth".into(),
+        members: vec![RegionId(1)],
+        rooms: BTreeMap::from([(room, vec![at(1, 1, 0), at(1, 1, 1)])]),
+        passages: vec![at(3, 1, 0), at(3, 1, 1)],
+        doorways: BTreeMap::from([(at(2, 1, 0), room), (at(2, 1, 1), room)]),
+        closure_faces: BTreeSet::from([at(2, 1, 0), at(2, 1, 1)]),
+    };
+    assert!(source
+        .rooms
+        .values()
+        .flatten()
+        .chain(&source.passages)
+        .chain(source.doorways.keys())
+        .all(|p| world.walkable(*p)));
+    assert!(source
+        .doorways
+        .keys()
+        .all(|p| !source.rooms[&room].contains(p)));
+    assert_eq!(
+        world.physics_neighbor(at(1, 1, 0), Direction::East),
+        Some((at(2, 1, 0), 0))
+    );
+    (world, source)
+}
+
+#[test]
+fn external_doorway_retains_room_ownership_without_dilating_its_light_faces() {
+    let (world, source) = exterior_fixture();
+    let compiled =
+        compile(&world, &source, &budget(), &work_budget()).expect("canonical external mouth");
+    let room = RoomId::new(1).unwrap();
+    let passage = PassageId::new(1).unwrap();
+    for z in 0..2 {
+        let run = compiled
+            .primary
+            .iter()
+            .find(|r| r.cells.contains(at(2, 1, z)))
+            .unwrap();
+        assert_eq!(
+            run.membership,
+            Membership::new(PrimarySpace::Room(room), Some(passage)).unwrap()
+        );
+    }
+    let actual: BTreeSet<_> = compiled.rooms[0].runs.iter().flat_map(expanded).collect();
+    let mut expected = BTreeSet::new();
+    for z in -1..=2 {
+        expected.insert(at(1, 1, z));
+    }
+    for z in 0..2 {
+        for (x, y) in [(0, 1), (1, 0), (1, 2), (2, 1)] {
+            expected.insert(at(x, y, z));
+        }
+    }
+    assert_eq!(actual, expected);
+    assert_eq!(actual.len(), 12);
+    for p in [
+        at(2, 0, 0),
+        at(2, 2, 1),
+        at(2, 1, -1),
+        at(2, 1, 2),
+        at(3, 1, 0),
+    ] {
+        assert!(
+            !actual.contains(&p),
+            "external mouth must not create its own light shell"
+        );
+    }
+    let mut open_source = source.clone();
+    open_source.closure_faces.clear();
+    let open = compile(&world, &open_source, &budget(), &work_budget()).unwrap();
+    assert_eq!(
+        open.primary, compiled.primary,
+        "closure eligibility does not repartition mouths"
+    );
+    let open_faces: BTreeSet<_> = open.rooms[0].runs.iter().flat_map(expanded).collect();
+    assert_eq!(
+        open_faces,
+        expected
+            .difference(&source.closure_faces)
+            .copied()
+            .collect()
+    );
+}
+
+#[test]
+fn compiler_source_work_and_exact_output_limits_are_independent() {
+    let (world, source) = exterior_fixture();
+    let mut output = budget();
+    output.expanded_refs = 18;
+    output.runs = 14;
+    let exact_work = CompilerWorkBudget {
+        source_entries: 8,
+        terrain_cells: 140,
+    };
+    let result =
+        compile(&world, &source, &output, &exact_work).expect("exact output and source bounds");
+    assert_eq!(
+        result
+            .primary
+            .iter()
+            .map(|r| r.cells.expanded_len().unwrap())
+            .sum::<u64>(),
+        6
+    );
+    assert_eq!(
+        result
+            .rooms
+            .iter()
+            .flat_map(|r| &r.runs)
+            .map(|r| r.expanded_len().unwrap())
+            .sum::<u64>(),
+        12
+    );
+    assert_eq!(
+        result.primary.len() + result.rooms.iter().map(|r| r.runs.len()).sum::<usize>(),
+        14
+    );
+    let mut short_output = output;
+    short_output.expanded_refs = 17;
+    assert!(compile(&world, &source, &short_output, &exact_work).is_err());
+    assert!(compile(
+        &world,
+        &source,
+        &output,
+        &CompilerWorkBudget {
+            source_entries: 7,
+            ..exact_work
+        }
+    )
+    .is_err());
+    assert!(compile(
+        &world,
+        &source,
+        &output,
+        &CompilerWorkBudget {
+            terrain_cells: 139,
+            ..exact_work
+        }
+    )
+    .is_err());
+    let mut foreign = source.clone();
+    foreign.doorways.insert(
+        Location {
+            region: RegionId(9),
+            position: Position { x: 2, y: 1, z: 0 },
+        },
+        RoomId::new(1).unwrap(),
+    );
+    assert!(compile(&world, &foreign, &budget(), &work_budget()).is_err());
+    let mut solid = source.clone();
+    solid.doorways.insert(at(0, 0, 0), RoomId::new(1).unwrap());
+    assert!(compile(&world, &solid, &budget(), &work_budget()).is_err());
+}
+
+#[test]
+fn single_exterior_doorway_is_a_valid_passage_component_without_degree_rule() {
+    let mut world = World::new(vec![], vec![]).unwrap();
+    world
+        .add_chamber(Region {
+            id: RegionId(0),
+            name: "valid region zero".into(),
+            bounds: Extent::new(3, 1, 1).unwrap(),
+        })
+        .unwrap();
+    let p = |x| Location {
+        region: RegionId(0),
+        position: Position { x, y: 0, z: 0 },
+    };
+    world.set_wall(p(0), true).unwrap();
+    assert!(world.walkable(p(1)) && world.walkable(p(2)));
+    assert_eq!(
+        world.physics_neighbor(p(2), Direction::West),
+        Some((p(1), 0))
+    );
+    let room = RoomId::new(1).unwrap();
+    let source = CanonicalSpatialSource {
+        id: "singleton".into(),
+        members: vec![RegionId(0)],
+        rooms: BTreeMap::from([(room, vec![p(1)])]),
+        passages: vec![],
+        doorways: BTreeMap::from([(p(2), room)]),
+        closure_faces: BTreeSet::new(),
+    };
+    let output = compile(&world, &source, &budget(), &work_budget())
+        .expect("canonical singleton doorway, no invented degree minimum");
+    assert_eq!(
+        output
+            .primary
+            .iter()
+            .find(|r| r.cells.contains(p(2)))
+            .unwrap()
+            .membership,
+        Membership::new(PrimarySpace::Room(room), Some(PassageId::new(1).unwrap())).unwrap()
+    );
+    assert_eq!(output.validate(&budget()).unwrap().passages, 1);
+}
+
+fn generated_variant(secret_chance: Option<u32>, maze: bool) -> Package {
+    use crate::generation_recipe::{MazeRooms, Operation, SecretEntrances, Stage};
+    let baseline = generated_pair_package();
+    let mut manifest = baseline.manifest.clone();
+    let recipe = manifest.generation_recipes.get_mut("exploration").unwrap();
+    if maze {
+        recipe.version = 5;
+        let lighting = recipe
+            .stages
+            .iter_mut()
+            .find(|s| matches!(s.operation, Operation::RoomLighting { .. }))
+            .unwrap();
+        lighting.operation = Operation::RoomLighting {
+            darkness_roll: 1,
+            darkness_start: 0,
+        };
+        recipe.stages.insert(
+            6,
+            Stage {
+                id: "maze_rooms".into(),
+                version: 1,
+                operation: Operation::MazeRooms {
+                    config: MazeRooms { one_in: 1 },
+                },
+            },
+        );
+    }
+    if let Some(chance) = secret_chance {
+        if !maze {
+            recipe.version = 3;
+        }
+        recipe.stages.push(Stage {
+            id: "secret_entrances".into(),
+            version: 1,
+            operation: Operation::SecretEntrances {
+                config: SecretEntrances {
+                    chance_per_mille: chance,
+                    maximum: 64,
+                    dc: 10,
+                },
+            },
+        });
+    }
+    crate::generation_recipe::check_layout(recipe, [32, 32, 2]).unwrap();
+    let result = Package::from_parts(manifest, vec![], &baseline.rules_source).unwrap();
+    result.check().unwrap();
+    result
+}
+
+#[test]
+fn generated_chance_zero_mouth_ownership_matches_real_secret_closures_without_repartition() {
+    let none = generated_variant(Some(0), false);
+    let all = generated_variant(Some(1000), false);
+    let geometry_none = none.generated_group("dungeon/1", 42).unwrap();
+    let geometry_all = all.generated_group("dungeon/1", 42).unwrap();
+    assert!(geometry_none.regions.values().all(|r| r.doors.is_empty()));
+    let doors: Vec<_> = geometry_all
+        .regions
+        .values()
+        .flat_map(|r| r.doors.iter().map(move |d| (r.id, d)))
+        .collect();
+    // Exactly the generator's reservation domain: boundary anchors do not
+    // reserve secret entrances; all other anchors remain in actual interiors.
+    for r in geometry_all.regions.values() {
+        let boundary = &r.generate.as_ref().unwrap().boundary_anchors;
+        for (name, p) in &r.anchors {
+            if !boundary.contains(name) {
+                assert!((1..=30).contains(&p[0]) && (1..=30).contains(&p[1]));
+                assert!(r.doors.iter().all(|d| d.at != *p));
+            }
+        }
+    }
+    assert_eq!(
+        doors.len(),
+        2,
+        "both actual narrow outer mouths have closures"
+    );
+    for id in [1, 2] {
+        assert_eq!(
+            geometry_none.regions[&id].walls,
+            geometry_all.regions[&id].walls
+        );
+        assert_eq!(
+            geometry_none.regions[&id].anchors,
+            geometry_all.regions[&id].anchors
+        );
+    }
+    assert_eq!(geometry_none.rooms, geometry_all.rooms);
+    let open = generated_source(&none, "dungeon/1", 42, &budget(), &work_budget())
+        .expect("chance-zero still owns ordinary mouths");
+    let closed = generated_source(&all, "dungeon/1", 42, &budget(), &work_budget()).unwrap();
+    assert_eq!(open.rooms, closed.rooms);
+    assert_eq!(open.passages, closed.passages);
+    assert_eq!(open.doorways, closed.doorways);
+    assert_eq!(open.doorways.len(), 4);
+    assert!(open.closure_faces.is_empty());
+    let expected: BTreeSet<_> = doors
+        .into_iter()
+        .flat_map(|(region, d)| {
+            assert!(!d.open && d.height == 2 && d.concealment.is_some());
+            (0..2).map(move |z| Location {
+                region: RegionId(region),
+                position: Position {
+                    x: d.at[0],
+                    y: d.at[1],
+                    z,
+                },
+            })
+        })
+        .collect();
+    assert_eq!(closed.closure_faces, expected);
+    for (p, owner) in &closed.doorways {
+        assert!(!closed.rooms[owner].contains(p));
+    }
+}
+
+#[test]
+fn generated_selected_maze_uses_final_open_cells_as_passages_not_population_room_ids() {
+    let package = generated_variant(None, true);
+    let generated = package.generated_group("dungeon/1", 42).unwrap();
+    // Valid recipe has guaranteed darkness/trial and no trap reservation to
+    // exempt rooms. Population metadata deliberately still carries room IDs.
+    assert_eq!(generated.rooms.len(), 2);
+    assert!(generated
+        .rooms
+        .iter()
+        .all(|r| !r.cells.is_empty() && r.cells.len() < 900));
+    assert!(generated
+        .regions
+        .values()
+        .all(|r| r.lighting.is_empty() && !r.lit));
+    let mut expected = BTreeSet::new();
+    for (id, r) in &generated.regions {
+        let walls: BTreeSet<_> = r.walls.iter().copied().collect();
+        for z in 0..2 {
+            for y in 0..32 {
+                for x in 0..32 {
+                    if !walls.contains(&[x, y, z]) {
+                        expected.insert(Location {
+                            region: RegionId(*id),
+                            position: Position { x, y, z },
+                        });
+                    }
+                }
+            }
+        }
+    }
+    assert!(expected.len() > 4 && expected.len() < 3604);
+    let source = generated_source(&package, "dungeon/1", 42, &budget(), &work_budget())
+        .expect("actual selected maze provenance excludes ordinary Room primary");
+    assert!(source.rooms.is_empty());
+    assert!(source.doorways.is_empty());
+    assert_eq!(
+        source.passages.iter().copied().collect::<BTreeSet<_>>(),
+        expected
+    );
+    assert_eq!(source.passages.len(), expected.len());
 }

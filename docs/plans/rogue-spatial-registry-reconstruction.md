@@ -102,7 +102,7 @@ are required at each coherent stage. No unimplemented proposal receives test cre
 The first API checkpoint deliberately has no codec, Game field or default global
 limit. `spatial_scope::registry` exposes constructible `CellRun`, `PrimaryRun`,
 `RoomSurfaces` and `Scope` values for trusted compiler inputs. A caller supplies
-`Budget { scopes, members, rooms, runs, expanded_refs, label_bytes }`; checked
+`Budget { scopes, members, rooms, passages, runs, expanded_refs, label_bytes }`; checked
 `Usage` counts each surface owner's references, including shared geometry twice.
 `Scope::validate` checks structure and usage. `Registry::register` must validate
 whole-registry aggregate usage before mutation, reject conflicting IDs or region
@@ -145,7 +145,9 @@ metadata is a named `spatial_scopes` collection. Each entry would contain:
   cells **and explicit doorway cells**, without bridging through ordinary room
   interiors.
 - `doorways`: room-owned row runs, each naming its room ID and locations. They
-  must lie in that room's primary volume. They participate in passage-component
+  may lie outside that room's interior/illumination volume, but must have
+  validated room ownership. Keep this provenance separate from the interior;
+  never substitute an inward neighbor. They participate in passage-component
   connectivity while retaining room-first primary lookup. A legitimate doorway
   junction can join several passage arms; derive its one affiliation only after
   that component union, not by rejecting its initially separate neighbors. The
@@ -162,11 +164,17 @@ The server compiler owns source completeness and geometry certification: validat
 region membership and physical bounds, complete primary volumes, disjoint room
 and passage ownership, doorway provenance, maximal physical passage components,
 and the exact room illumination surface rule. It derives illumination from room
-volume and physical open/wall geometry, excluding open corridor mouths and
-outside diagonals. It does not save a second portal transform graph, change
+interior volume and physical open/wall geometry, excluding open corridor mouths
+and outside diagonals. Actual exterior closure faces are included for their
+source-owned room without growing a second shell around the doorway. Doorway
+ownership uses the agreed planar mouth semantics; physical components and
+illumination use World face neighbors, including vertical faces. It does not save a second portal transform graph, change
 mutable doors, activate a floor or enter population. Bounds must cover input
 volume expansion and adjacency work as well as compact output, before allocation
-or append; output compression is not a substitute for a work bound.
+or append; output compression is not a substitute for a work bound. Explicit
+compiler work limits count source entries and scanned terrain separately from
+exact output references. Repeated source doorway/closure entries are not extra
+output membership. No production default limits are selected here.
 
 Simulation owns strict compact representation and atomic registry insertion.
 Server source-free validation reconstructs canonical classifications from the
@@ -185,10 +193,52 @@ connectivity/illumination, bounded strict decoding and all-root source-free chec
 remain mandatory; metadata absence stays valid when relevant effects are not
 reachable. Public authoring fields are still not implemented here.
 
-The first trusted-input registry and internal/generated compiler scaffolds are
-tracked with independent positive fixtures and intended missing-implementation
-regressions. Freshly reinstalled tooling passes workspace all-target compilation
-on this source after canonical formatting. Runtime first-red collection has not
-yet run at this checkpoint. The registry has explicit caller budgets only, no
-serialization or Game integration; compiler stubs return an explicit unsupported
-error. These scaffolds do not qualify completed geometry or gameplay behavior.
+The first frozen trusted-input cohort compiled successfully. Four spatial controls
+passed and six registry tests reached their intended missing-enforcement or
+missing-insertion failures; three appearance controls also passed. Two server
+fixtures reached the unsupported compiler/source stubs. The third junction
+fixture had an inverted positive prerequisite (asserting a deliberately open cell
+was blocked); that is fixture failure, not behavioral evidence. Its correction
+keeps all three open-cell and physical-neighbor prerequisites. These focused
+receipts are not verification gates or geometry integration qualification.
+
+The next source-first cohort adds exterior doorway ownership, closure-only
+illumination, independent source-work/output bounds, valid singleton and
+all-doorway passage components, and actual generated secret/maze contrasts.
+Runtime results for those revised contracts remain pending. The registry still
+has no serialization or Game integration, and the compiler remains an explicit
+unsupported stub until green implementation is separately tested.
+
+## Derived passage namespace and source provenance
+
+A passage component need not contain a passage-primary cell. Two maximum-sized
+neighboring generated rooms can own both cells of their intervening corridor as
+exterior doorways; a valid authored component can also contain one cell. Do not
+invent a degree minimum or a passage-primary representative. Count distinct IDs
+from primary passage and doorway references together. There is no duplicate
+passage-ID directory: no consumer needs one, and self-consistent declarations
+would not prove canonical connectivity. Count the same local ID in separate
+scopes separately in aggregate usage. Structural validity does not certify a
+partition; immutable-source reconstruction does.
+
+Retain ordinary room ownership when generated mouths are discovered, before a
+coordinate set discards their owners. Reject competing ownership rather than
+choosing by distance or iteration order. Closure-placement chance, maximum,
+reserved-cell and narrow-mouth filters must not silently become the immutable
+classification rule. Preserve existing placement order and RNG. Actual maze
+slots remain passage-primary even though population metadata groups their carved
+floor cells under room IDs. Reserved/wide-mouth and omitted-slot coverage remain
+explicit additional acceptance work, not implied by the narrow generated tests.
+
+## Retained registry integration seam (not implemented)
+
+Reuse the existing checkpoint shared-payload/directory pattern: pool immutable
+scope payloads, then reference them from immutable registry directories and
+snapshot roots. Pooling only whole registries would duplicate unchanged floors
+when later floors register. Detached region records must not own another mutable
+topology copy. One restore context validates indices and preserves sharing;
+server canonical verification covers every distinct current/historical registry
+root, not just the current game. A shared decoder budget must charge nested
+runs/labels and every directory/root reference before allocation. Per-list bounds
+alone are insufficient. Keep the outer 64 MiB archive limit unchanged; final
+encoded-byte, run and root limits still require measured proof.

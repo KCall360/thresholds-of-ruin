@@ -50,6 +50,7 @@ fn budget() -> Budget {
         scopes: 4,
         members: 8,
         rooms: 8,
+        passages: 8,
         runs: 64,
         expanded_refs: 256,
         label_bytes: 128,
@@ -74,6 +75,7 @@ fn exact_reference_budget_counts_both_volume_and_surface_ownership() {
         scopes: 1,
         members: 2,
         rooms: 1,
+        passages: 0,
         runs: 7,
         expanded_refs: 21,
         label_bytes: scope.id.len(),
@@ -84,6 +86,7 @@ fn exact_reference_budget_counts_both_volume_and_surface_ownership() {
             scopes: 1,
             members: 2,
             rooms: 1,
+            passages: 0,
             runs: 7,
             expanded_refs: 21,
             label_bytes: scope.id.len()
@@ -280,4 +283,150 @@ fn disjoint_scopes_reuse_local_ids_but_share_one_aggregate_budget() {
     );
     assert_eq!(registry.lookup("fixture/floor1", at(3, 0, 0)), None);
     assert_eq!(registry.lookup("fixture/floor2", at(1, 0, 0)), None);
+}
+
+fn doorway_only_scope() -> Scope {
+    let passage = PassageId::new(1).unwrap();
+    Scope {
+        id: "doorways".into(),
+        members: vec![RegionId(1), RegionId(2)],
+        primary: vec![
+            PrimaryRun {
+                cells: run(1, 0, 0, 0),
+                membership: Membership::new(PrimarySpace::Room(room(1)), Some(passage)).unwrap(),
+            },
+            PrimaryRun {
+                cells: run(2, 0, 0, 0),
+                membership: Membership::new(PrimarySpace::Room(room(2)), Some(passage)).unwrap(),
+            },
+        ],
+        rooms: vec![
+            RoomSurfaces {
+                room: room(1),
+                runs: vec![run(1, 0, 0, 0)],
+            },
+            RoomSurfaces {
+                room: room(2),
+                runs: vec![run(2, 0, 0, 0)],
+            },
+        ],
+    }
+}
+#[test]
+fn doorway_only_component_has_one_derived_passage_and_no_primary_requirement() {
+    let source = doorway_only_scope();
+    assert!(source
+        .primary
+        .iter()
+        .all(|r| matches!(r.membership.primary, PrimarySpace::Room(_))));
+    let limit = Budget {
+        passages: 1,
+        runs: 4,
+        expanded_refs: 4,
+        ..budget()
+    };
+    let usage = source.validate(&limit).unwrap();
+    assert_eq!((usage.passages, usage.runs, usage.expanded_refs), (1, 4, 4));
+    assert_eq!(
+        source.validate(&Budget {
+            passages: 0,
+            ..limit
+        }),
+        Err(Error::Capacity)
+    );
+    let mut distinct = source;
+    distinct.primary[1].membership = Membership::new(
+        PrimarySpace::Room(room(2)),
+        Some(PassageId::new(2).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(
+        distinct
+            .validate(&Budget {
+                passages: 2,
+                ..limit
+            })
+            .unwrap()
+            .passages,
+        2
+    );
+    assert_eq!(distinct.validate(&limit), Err(Error::Capacity));
+}
+#[test]
+fn primary_passage_and_empty_member_scope_are_structurally_independent() {
+    let mut source = Scope {
+        id: "passage".into(),
+        members: vec![RegionId(0)],
+        primary: vec![],
+        rooms: vec![],
+    };
+    let empty = source.validate(&budget()).unwrap();
+    assert_eq!(
+        (empty.runs, empty.expanded_refs, empty.passages, empty.rooms),
+        (0, 0, 0, 0)
+    );
+    source.primary.push(PrimaryRun {
+        cells: run(0, 0, 0, 0),
+        membership: Membership::new(PrimarySpace::Passage(PassageId::new(1).unwrap()), None)
+            .unwrap(),
+    });
+    assert_eq!(source.validate(&budget()).unwrap().passages, 1);
+}
+#[test]
+fn passage_budget_counts_scopes_and_rechecks_idempotent_registration() {
+    let first = doorway_only_scope();
+    let mut second = first.clone();
+    second.id = "other".into();
+    for r in &mut second.members {
+        r.0 += 2;
+    }
+    for r in &mut second.primary {
+        r.cells.region.0 += 2;
+    }
+    for room in &mut second.rooms {
+        for r in &mut room.runs {
+            r.region.0 += 2;
+        }
+    }
+    assert_eq!(first.validate(&budget()).unwrap().passages, 1);
+    assert_eq!(second.validate(&budget()).unwrap().passages, 1);
+    let mut registry = Registry::default();
+    registry.register(first.clone(), &budget()).unwrap();
+    assert_eq!(
+        registry.lookup(&first.id, at(1, 0, 0)),
+        Some(first.primary[0].membership)
+    );
+    let original = registry.clone();
+    assert_eq!(
+        registry.register(
+            second.clone(),
+            &Budget {
+                passages: 1,
+                ..budget()
+            }
+        ),
+        Err(Error::Capacity)
+    );
+    assert_eq!(registry, original);
+    registry
+        .register(
+            second,
+            &Budget {
+                passages: 2,
+                ..budget()
+            },
+        )
+        .unwrap();
+    let both = registry.clone();
+    assert_eq!(
+        registry.register(
+            first,
+            &Budget {
+                passages: 1,
+                ..budget()
+            }
+        ),
+        Err(Error::Capacity)
+    );
+    assert_eq!(registry, both);
 }

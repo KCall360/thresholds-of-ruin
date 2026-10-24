@@ -444,3 +444,37 @@ cross-platform checks. Preserve these distinct boundaries:
 - Actual Text/ASCII ordinary selection, preview/confirmation and use; owner-only
   choices and spectator privacy. Synthetic fixtures alone do not close runtime
   or platform acceptance. No complete-run survival or balance claim is implied.
+
+## Recovered hallucination integration seams (not implemented)
+
+Current-source inspection distinguishes genuine eye visibility from generic
+`ActorDisclosure::Creature`: Awareness and scene contacts can disclose a creature
+without visual provenance. Apply cosmetic projection only at genuine visual
+acquisition, with the approved monster-sense glyph exception. Preserve anonymous
+contacts, authoritative entity handles, action capabilities and private identity.
+Unknown guises need their own apparent-object visual witness. Saved public-plan
+`subject_name` is an additional acquisition channel; project it when sampled,
+then retain that historical name across later phase changes, cure and reopening.
+
+The saved game seed is separate from combat RNG and can anchor deterministic
+selection. Frozen actors must retain their presentation phase: raw global tick
+would advance them, while `active_since` resets on thaw and is not a cumulative
+active clock. Define the saved active-phase seam explicitly, without query-time
+mutation. Phase/cure publication must include stationary observers when a peer
+advances time; existing physics-only Wait invalidation is not sufficient.
+
+Map acquisition and navigation remain separate. The server records explored
+appearance transactionally; hydration reads saved facts rather than refreshing
+unseen terrain. Navigation uses actual World adjacency/stairs, not cosmetic map
+artwork. False stairs must not create exits or unlock route metadata, and genuine
+prior stair knowledge must remain distinguishable. Add only a semantic appearance
+witness to map invalidation rather than rescanning or cloning all retained memory
+on every Wait. The required borrowed-memory ASCII rendering fix and exact-output
+oracle remain part of this reconstruction, not an optional late optimization.
+
+First-red integration must cover visual versus Awareness/invisible contact,
+independent observers, frozen phase and source-free reopen, query/RNG neutrality,
+historical plan names, guise/ground identity, real versus false stair knowledge,
+retained hydration, unsolicited owner/follower updates and malformed DTO rejection.
+Coordinate strict simulation/server/protocol/map/common/Text/ASCII/pure-3D shapes;
+no current schema implementation or native qualification follows from this plan.

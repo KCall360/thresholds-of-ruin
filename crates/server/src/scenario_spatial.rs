@@ -2,7 +2,7 @@
 //! no public authored schema, saved registry or gameplay integration yet.
 use super::Package;
 use crate::Failure;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use tor_protocol::ErrorCode;
 use tor_simulation::spatial_scope::{
     registry::{Budget, Scope},
@@ -16,14 +16,23 @@ pub(super) struct CanonicalSpatialSource {
     pub members: Vec<RegionId>,
     pub rooms: BTreeMap<RoomId, Vec<Location>>,
     pub passages: Vec<Location>,
-    /// Room-primary locations; passage affiliation is derived, never supplied.
-    pub doorways: Vec<Location>,
+    /// Explicit ordinary room ownership, separate from true interior volume.
+    pub doorways: BTreeMap<Location, RoomId>,
+    /// Exact retained closure face cells, never an extra six-face dilation basis.
+    pub closure_faces: BTreeSet<Location>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct CompilerWorkBudget {
+    pub source_entries: u64,
+    pub terrain_cells: u64,
 }
 
 pub(super) fn compile(
     world: &World,
     source: &CanonicalSpatialSource,
     budget: &Budget,
+    work: &CompilerWorkBudget,
 ) -> Result<Scope, Failure> {
     // Honest first-red boundary. Green must bound input work before expansion,
     // derive components over passage-primary PLUS doorway cells (not ordinary
@@ -36,6 +45,9 @@ pub(super) fn compile(
         &source.passages,
         &source.doorways,
         budget,
+        &source.closure_faces,
+        work.source_entries,
+        work.terrain_cells,
     );
     Err(Failure::new(
         ErrorCode::InvalidAction,
@@ -48,10 +60,18 @@ pub(super) fn generated_source(
     identity: &str,
     seed: u64,
     budget: &Budget,
+    work: &CompilerWorkBudget,
 ) -> Result<CanonicalSpatialSource, Failure> {
     // Must eventually use final recipe labels, including maze F_PASS, not
     // population's floor-only PreparedRoomGroup as a room-volume substitute.
-    let _ = (package, identity, seed, budget);
+    let _ = (
+        package,
+        identity,
+        seed,
+        budget,
+        work.source_entries,
+        work.terrain_cells,
+    );
     Err(Failure::new(
         ErrorCode::InvalidAction,
         "Generated spatial source is not implemented",
