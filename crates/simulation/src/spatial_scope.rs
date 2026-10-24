@@ -46,9 +46,13 @@ impl Membership {
     /// Directional Drain membership, not a symmetric affiliation intersection.
     /// Caller separately excludes self, dead actors and actors without Health;
     /// undead creatures with Health remain eligible.
-    pub fn includes_drain_target(self, _target: Self) -> bool {
-        // First-red scaffold: no membership selection implemented yet.
-        false
+    pub fn includes_drain_target(self, target: Self) -> bool {
+        self.primary == target.primary
+            || self
+                .doorway
+                .is_some_and(|passage| target.primary == PrimarySpace::Passage(passage))
+            || matches!(self.primary, PrimarySpace::Passage(passage)
+                if target.doorway == Some(passage))
     }
 }
 

@@ -929,10 +929,7 @@ impl Game {
         }
         let preparation = self.item_work_duration(actor, work.clone())?;
         if let Work::Zap { item, aim } = work {
-            let crate::DeviceAim::Direction { direction } = aim else {
-                return Err(GameError::ItemUnavailable);
-            };
-            let ray = self.compile_device_ray_plan(actor, item, direction, preparation)?;
+            let ray = self.compile_device_plan(actor, item, aim, preparation)?;
             self.item_allocation(&ray)?;
             return Ok(ray);
         }
@@ -1505,7 +1502,7 @@ impl Game {
                     && p.plan.actor() == actor
                     && match p.plan.work() {
                         Work::Read {item}=>self.items.get(&item).and_then(|i|i.spec.readable.as_ref()).is_some_and(|s|matches!(&p.plan,crate::abilities::Plan::Read {control,effects,identify,discovery,descriptors,..} if *control==s.control&&*descriptors==s.descriptors&&*identify==s.identify&&*discovery==s.discovery&&crate::abilities::item_effects_match_definition(&s.effects,effects))),
-                        Work::Zap {item,..}=>self.items.get(&item).is_some_and(|i|matches!(&p.plan,crate::abilities::Plan::Zap {charges,ray,discovery,..} if i.charges==Some(*charges)&&i.spec.device.as_ref().is_some_and(|d|d.ability==ray.ability && d.discovery == *discovery))),
+                        Work::Zap {item,..}=>self.items.get(&item).is_some_and(|i|matches!(&p.plan,crate::abilities::Plan::Zap {charges,delivery,discovery,..} if i.charges==Some(*charges)&&i.spec.device.as_ref().is_some_and(|d|&d.ability==delivery.ability() && d.discovery == *discovery))),
                         Work::Eat { item } => self
                             .items
                             .get(&item)

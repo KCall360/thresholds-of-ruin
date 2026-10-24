@@ -341,6 +341,71 @@ impl Game {
     ) -> Result<Plan, GameError> {
         self.compile_ray_source(actor, ability, direction, supplies, None)
     }
+
+    pub(crate) fn compile_device_plan(
+        &self,
+        actor: ActorId,
+        item: crate::ItemId,
+        aim: crate::DeviceAim,
+        preparation: u64,
+    ) -> Result<Plan, GameError> {
+        let source = self
+            .items
+            .get(&item)
+            .filter(|i| i.location == crate::ItemLocation::Carried(actor))
+            .ok_or(GameError::ItemUnavailable)?;
+        let device = source
+            .spec
+            .device
+            .as_ref()
+            .ok_or(GameError::ItemUnavailable)?;
+        let definition = self
+            .content
+            .rules
+            .ability(&device.ability)
+            .ok_or_else(invalid)?;
+        let is_self = super::self_device_definition_valid(definition);
+        // Knowledge gates only the submitted convenience aim. Once captured,
+        // neither later identification nor its absence can change delivery.
+        if matches!(aim, crate::DeviceAim::SelfTarget {}) {
+            let known = !source.spec.concealed
+                || self
+                    .actors
+                    .get(&actor)
+                    .is_some_and(|a| a.knowledge.contains(&source.spec.identity));
+            if !known || !is_self {
+                return Err(GameError::ItemUnavailable);
+            }
+        }
+        if !is_self {
+            let crate::DeviceAim::Direction { direction } = aim else {
+                return Err(GameError::ItemUnavailable);
+            };
+            return self.compile_device_ray_plan(actor, item, direction, preparation);
+        }
+        let crate::rules::StrikeSource::Authored { strikes } = &definition.strikes else {
+            return Err(invalid());
+        };
+        let plan = Plan::Zap {
+            item,
+            charges: source.charges.ok_or(GameError::ItemUnavailable)?,
+            discovery: device.discovery,
+            aim,
+            delivery: super::DeviceDeliveryPlan::SelfEffect {
+                plan: tor_world::Shared::new(super::SelfDevicePlan {
+                    actor,
+                    ability: device.ability.clone(),
+                    preparation,
+                    descriptors: strikes[0].descriptors.clone(),
+                    effects: self.effect_plan(actor, &strikes[0].on_success)?,
+                }),
+            },
+        };
+        if !plan.valid(&self.content.rules) {
+            return Err(invalid());
+        }
+        Ok(plan)
+    }
     pub(crate) fn compile_device_ray_plan(
         &self,
         actor: ActorId,
@@ -373,7 +438,8 @@ impl Game {
             item,
             charges,
             discovery: device.discovery,
-            ray,
+            aim: crate::DeviceAim::Direction { direction },
+            delivery: super::DeviceDeliveryPlan::Ray { plan: ray },
         })
     }
     fn compile_ray_source(

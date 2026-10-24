@@ -221,6 +221,13 @@ impl Game {
                         };
                         let launched = *charges > 0;
                         if launched {
+                            // Execution-first-red scaffold: legal captured self payloads
+                            // must not masquerade as successfully applied Nothing.
+                            if resolved.plan.as_ray().is_none() {
+                                return Err(GameError::Rule(
+                                    crate::abilities::RuleError::InvalidPlan,
+                                ));
+                            }
                             self.resolve_prepared_ray(&resolved)?;
                         }
                         self.finish_item_work(

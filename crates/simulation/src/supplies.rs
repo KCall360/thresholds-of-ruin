@@ -373,13 +373,13 @@ impl Game {
                         }),
                         Plan::Zap {
                             charges,
-                            ray,
+                            delivery,
                             discovery,
                             ..
                         } => {
                             item.charges == Some(*charges)
                                 && item.spec.device.as_ref().is_some_and(|d| {
-                                    d.ability == ray.ability && d.discovery == *discovery
+                                    &d.ability == delivery.ability() && d.discovery == *discovery
                                 })
                         }
                         Plan::Eat { .. } => item.spec.edible.is_some(),

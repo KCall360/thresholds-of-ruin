@@ -2743,3 +2743,208 @@ fn device_aim_is_closed_named_and_unknown_self_request_is_free() {
         "unknown self request must not reserve, pay, learn or consume RNG"
     );
 }
+
+fn self_device_fixture() -> Game {
+    super::ray_tests::fixture_with(|_, ability, species| {
+        ability.invocation = InvocationKind::ActorTarget;
+        ability.reach = crate::rules::Reach::SelfOnly;
+        ability.interaction = crate::rules::Interaction::NonHostile;
+        ability.supply_costs.clear();
+        let crate::rules::StrikeSource::Authored { strikes } = &mut ability.strikes else {
+            unreachable!()
+        };
+        strikes[0].check = None;
+        strikes[0].on_success.clear();
+        strikes[0].on_failure.clear();
+        strikes[0].riders.clear();
+        species.modifiers.retain(|m| !matches!(&m.op, crate::rules::ModifierOp::GrantAbility { ability: id } if id == &ability.id));
+    })
+}
+
+#[test]
+fn self_device_capture_is_named_bounded_and_distinct_from_requested_direction() {
+    let mut game = self_device_fixture();
+    let item = device_with_discovery(&mut game, 10, 3, ItemDiscovery::Never);
+    let work = Work::Zap {
+        item,
+        aim: crate::DeviceAim::Direction {
+            direction: StepDirection::West,
+        },
+    };
+    let plan = game.plan_work(ActorId(1), work.clone()).unwrap();
+    assert!(plan.valid(&game.content.rules));
+    assert_eq!(plan.work(), work);
+    assert_eq!(plan.actor(), ActorId(1));
+    assert_eq!(plan.target(), ActorId(1));
+    assert!(plan.as_ray().is_none() && plan.as_ability().is_none());
+    assert_eq!(plan.tokens().len(), 0);
+    assert_eq!(plan.cost(), None);
+    assert_eq!(plan.recovery(), 0);
+    assert!(game.item_allocation(&plan).is_ok());
+    let Plan::Zap {
+        delivery: DeviceDeliveryPlan::SelfEffect { plan: payload },
+        ..
+    } = &plan
+    else {
+        panic!("self payload, not a ray")
+    };
+    assert_eq!(payload.ability.as_str(), "fixture_ray");
+    assert!(payload.effects.is_empty());
+    let encoded = serde_json::to_value(&plan).unwrap();
+    assert_eq!(
+        serde_json::from_value::<Plan>(encoded.clone()).unwrap(),
+        plan
+    );
+    for malformed in [
+        serde_json::json!([
+            payload.actor,
+            payload.ability,
+            payload.preparation,
+            payload.descriptors,
+            payload.effects
+        ]),
+        {
+            let mut value = serde_json::to_value(payload).unwrap();
+            value["direction"] = serde_json::json!("west");
+            value
+        },
+    ] {
+        assert!(serde_json::from_value::<SelfDevicePlan>(malformed).is_err());
+    }
+    let mut wrong_effects = encoded.clone();
+    wrong_effects["delivery"]["plan"]["effects"] = serde_json::json!([{"kind":"restore_hit_die"}]);
+    let wrong_effects: Plan = serde_json::from_value(wrong_effects).unwrap();
+    assert!(!wrong_effects.valid(&game.content.rules));
+    let mut wrong_delivery = encoded.clone();
+    wrong_delivery["delivery"]["kind"] = serde_json::json!("ray");
+    assert!(serde_json::from_value::<Plan>(wrong_delivery).is_err());
+    let mut forged = encoded.clone();
+    forged["delivery"]["plan"]["ability"] = serde_json::json!("unknown_ability");
+    let forged: Plan = serde_json::from_value(forged).unwrap();
+    assert!(!forged.valid(&game.content.rules));
+    assert!(game.item_allocation(&forged).is_err());
+    let mut ray_game = fixture();
+    let ray_item = device_with_discovery(&mut ray_game, 10, 3, ItemDiscovery::Never);
+    let ray = ray_game
+        .plan_work(
+            ActorId(1),
+            Work::Zap {
+                item: ray_item,
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::West,
+                },
+            },
+        )
+        .unwrap();
+    assert!(ray.valid(&ray_game.content.rules));
+    let mut wrong_aim = ray.clone();
+    let Plan::Zap { aim, .. } = &mut wrong_aim else {
+        unreachable!()
+    };
+    *aim = crate::DeviceAim::SelfTarget {};
+    assert!(!wrong_aim.valid(&ray_game.content.rules));
+    assert!(game
+        .admit_intention(
+            ActorId(1),
+            Action::Zap {
+                item,
+                aim: crate::DeviceAim::SelfTarget {}
+            },
+            IntentionOrigin::Human
+        )
+        .is_err());
+}
+
+#[test]
+fn admitted_nothing_device_completes_paid_without_rng_or_learning() {
+    let mut game = self_device_fixture();
+    let item = device_with_discovery(&mut game, 10, 3, ItemDiscovery::Never);
+    let before_tick = game.tick;
+    let before_rng = game.rules_rng;
+    let issued = game
+        .admit_intention(
+            ActorId(1),
+            Action::Zap {
+                item,
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::West,
+                },
+            },
+            IntentionOrigin::Human,
+        )
+        .unwrap();
+    let done = game.execute_next_intention().unwrap();
+    assert_eq!(done.intention.id, issued);
+    done.outcome
+        .expect("legal admitted self device must execute its captured item payload");
+    assert_eq!(game.tick, before_tick + 100);
+    assert_eq!(game.items[&item].charges, Some(2));
+    assert_eq!(game.rules_rng, before_rng);
+    assert!(!game.actors[&ActorId(1)]
+        .knowledge
+        .contains("fixture.elemental_device"));
+    assert_eq!(game, roundtrip(&game));
+}
+
+#[test]
+fn admitted_empty_self_device_has_no_payload_and_does_not_underflow_charge() {
+    let mut game = self_device_fixture();
+    let item = device_with_discovery(&mut game, 10, 0, ItemDiscovery::Never);
+    let before_rng = game.rules_rng;
+    let before_tick = game.tick;
+    execute(
+        &mut game,
+        Action::Zap {
+            item,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::West,
+            },
+        },
+    );
+    assert_eq!(game.items[&item].charges, Some(0));
+    assert_eq!(game.tick, before_tick + 100);
+    assert_eq!(game.rules_rng, before_rng);
+    assert!(!game.actors[&ActorId(1)]
+        .knowledge
+        .contains("fixture.elemental_device"));
+    assert_eq!(game, roundtrip(&game));
+}
+
+#[test]
+fn self_device_source_shape_rejects_actor_ability_only_operands() {
+    let game = self_device_fixture();
+    let id = crate::content_ids::AbilityId::new("fixture_ray").unwrap();
+    let valid = game.content.rules.ability(&id).unwrap().clone();
+    assert!(super::self_device_definition_valid(&valid));
+    let ray = fixture();
+    let crate::rules::StrikeSource::Authored {
+        strikes: ray_strikes,
+    } = &ray.content.rules.ability(&id).unwrap().strikes
+    else {
+        unreachable!()
+    };
+    for mutation in 0..7 {
+        let mut bad = valid.clone();
+        match mutation {
+            0 => bad.interaction = crate::rules::Interaction::HostileToTarget,
+            1 => bad.basic_attack = true,
+            2 => bad.cooldown = std::num::NonZeroU64::new(1),
+            3 => bad.reach = crate::rules::Reach::Sight { range: 1 },
+            _ => {
+                let crate::rules::StrikeSource::Authored { strikes } = &mut bad.strikes else {
+                    unreachable!()
+                };
+                match mutation {
+                    4 => strikes[0].check = ray_strikes[0].check.clone(),
+                    5 => strikes[0].offset = 1,
+                    6 => strikes.push(strikes[0].clone()),
+                    _ => unreachable!(),
+                }
+            }
+        }
+        assert!(
+            !super::self_device_definition_valid(&bad),
+            "mutation {mutation}"
+        );
+    }
+}

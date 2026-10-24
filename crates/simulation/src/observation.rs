@@ -397,11 +397,19 @@ impl Game {
                             drinkable: item.spec.consumable.is_some(),
                             readable: item.spec.readable.is_some(),
                             zappable: item.spec.device.is_some(),
-                            device_activation: item
-                                .spec
-                                .device
-                                .as_ref()
-                                .map(|_| crate::DeviceActivation::Direction),
+                            device_activation: item.spec.device.as_ref().map(|device| {
+                                if identified
+                                    && self
+                                        .content
+                                        .rules
+                                        .ability(&device.ability)
+                                        .is_some_and(crate::abilities::self_device_definition_valid)
+                                {
+                                    crate::DeviceActivation::SelfTarget
+                                } else {
+                                    crate::DeviceActivation::Direction
+                                }
+                            }),
                             charges: actor.known_charges.observed(item_id, item.charges),
                             edible: item.spec.edible.is_some(),
                         });

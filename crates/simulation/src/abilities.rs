@@ -37,7 +37,8 @@ pub use participation::{
 };
 pub(crate) use plan::item_effects_match_definition;
 pub use plan::{
-    AbilityPlan, CheckThreshold, Plan, PlannedAmount, PlannedCheck, PlannedEffect, RuleError,
+    AbilityPlan, CheckThreshold, DeviceDeliveryPlan, Plan, PlannedAmount, PlannedCheck,
+    PlannedEffect, RuleError, SelfDevicePlan,
 };
 pub use resolve::{
     resolve, ApplicationSnapshot, EffectApplicationError, EffectRecipient, HoldDamageExecution,
@@ -97,12 +98,40 @@ pub(crate) fn device_definition_valid(
     id: &crate::content_ids::AbilityId,
 ) -> bool {
     rules.ability(id).is_some_and(|d| {
-        d.invocation.is_directional_ray()
-            && ray::definition_shape_valid(d)
+        ((d.invocation.is_directional_ray() && ray::definition_shape_valid(d))
+            || self_device_definition_valid(d))
             && d.cost.is_none()
             && d.cooldown.is_none()
             && d.supply_costs.is_empty()
     })
+}
+
+/// Self devices use one checkless, cost-free item payload, never a granted ability.
+pub(crate) fn self_device_definition_valid(d: &crate::rules::AbilityDef) -> bool {
+    let crate::rules::StrikeSource::Authored { strikes } = &d.strikes else {
+        return false;
+    };
+    let [strike] = strikes.as_slice() else {
+        return false;
+    };
+    d.invocation == InvocationKind::ActorTarget
+        && d.reach == crate::rules::Reach::SelfOnly
+        && d.interaction == crate::rules::Interaction::NonHostile
+        && !d.basic_attack
+        && d.cost.is_none()
+        && d.cooldown.is_none()
+        && d.supply_costs.is_empty()
+        && strike.offset == 0
+        && strike.unlock.is_none()
+        && strike.check.is_none()
+        && strike.riders.is_empty()
+        && strike.on_failure.is_empty()
+        && crate::magic_items::valid_payload_descriptor_shape(&strike.descriptors)
+        && strike.on_success.len() <= crate::limits::CONSUMABLE_EFFECTS
+        && strike
+            .on_success
+            .iter()
+            .all(|effect| effect.valid_shape() && !effect.spatial())
 }
 
 #[cfg(test)]

@@ -6,6 +6,27 @@ maintainer directed a redo on 2026-10-24. This checkout starts from published ma
 `511ea466e14892075af030a78d254f1101e7c813`; no lost commit or historical test receipt
 qualifies this source. [Current status](../status.md) owns implemented scope.
 
+## Fresh captured-device checkpoint (2026-10-24)
+
+Workspace all-target compilation passed after canonical formatting. Focused
+core device tests have 41 passes and one intended failure: an actually admitted,
+charged self device reaches the explicitly unsupported executor. Empty-charge,
+source-shape, captured-plan provenance and existing ray controls pass. Pure
+appearance and room/passage predicate tests pass three each; integration remains
+unfinished. Common item tests pass eight, Text command tests 19, ASCII magic-item
+model tests ten and protocol magic-item tests seven. These are focused receipts,
+not quick/full/native qualification.
+
+The Service group has seven passes and three failures. Two self-completion tests
+report nonresolution; the core test independently establishes the missing release
+implementation. The paused source-deleted reopen test instead encountered a
+client-driver request-counter reset and durable request-ID conflict. That is a
+fixture failure, not behavioral first-red evidence; preserve request history and
+carry the client counter across reopen rather than weakening server replay rules.
+The legal self-device package source test passes. Execution, the corrected paused
+flow, OnUse discovery and further observer/strict-DTO contrasts remain next work.
+No production content or live weighted distribution has been enabled.
+
 ## Reconstruction decisions and safeguards
 
 The following later maintainer decisions supersede the historical unapproved

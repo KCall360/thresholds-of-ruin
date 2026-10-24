@@ -34,6 +34,17 @@ damage enchantment and explicit Psychic damage, and owned-HD Health improvements
 acquisition witnesses and bounded dormant drain records. Prior payload identities
 remain rejection-only. Physical framing remains unchanged.
 
+The approved [missing-consumables batch](plans/rogue-missing-consumables.md) is
+being reconstructed from published source after its previous local implementation
+became unavailable. Strict device aim, captured self-device planning and
+knowledge-gated common/Text/ASCII prompts now have fresh focused coverage. The
+pure room/passage predicate and appearance selector also pass their fresh tests;
+neither is integrated into gameplay yet. Charged self-device execution remains
+explicitly unsupported at this checkpoint, with an admitted-action regression
+failing at that resolver boundary. Remaining mechanics and broader qualification
+are unfinished. Historical local results do not qualify this tree.
+Existing live item distributions remain unchanged and polymorph remains separate.
+
 Characters retain last-seen terrain, doors, stairs and item appearances in the
 saved game. Returning to an explored neighborhood or opening a fresh client
 hydrates a bounded complete map window. Trusted movement retains certified
@@ -591,8 +602,9 @@ The earlier all-dark discovery failure motivated the approved tactile rule, not 
 weaker fixture, private route oracle or larger navigation cap.
 
 Live maze and omission policies remain disabled; numerical enablement is separate
-work. Development is paused at this completed batch. Further implementation or
-tuning requires a new go-ahead. Remaining work includes shared survival, items and
+work. The separately approved missing-consumables reconstruction is in progress;
+balance tuning and unrelated milestones remain deferred. Remaining work includes
+shared survival, items and
 species behavior, the complete 26-species roster's integrated acceptance and
 pressured runs. Topology/persistence witnesses do not establish survival balance.
 Local graphical waivers were not passes; they did not remove required CI coverage.

@@ -148,16 +148,27 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
                 })
             });
         }
-        let (noun, direction) = if verb == "zap" {
-            let (noun, direction) = rest
+        // Resolve a complete disclosed noun before interpreting its last word
+        // as a direction: a device may itself have a directional name.
+        let whole = rest.to_ascii_lowercase();
+        let whole = whole
+            .strip_prefix("the ")
+            .or_else(|| whole.strip_prefix("my "))
+            .unwrap_or(&whole);
+        let full_noun = view.inventory.iter().any(|item| item_matches(whole, item));
+        let (noun, direction) = if verb == "zap" && !full_noun {
+            match rest
                 .rsplit_once(char::is_whitespace)
-                .ok_or("Use zap <item> <direction>.")?;
-            let direction = parser::lexicon::parse_direction(&direction.to_ascii_lowercase())
-                .ok_or("Choose a direction to zap.")?;
-            (
-                noun.trim_end_matches(" toward").trim_end_matches(" to"),
-                Some(direction),
-            )
+                .and_then(|(noun, tail)| {
+                    parser::lexicon::parse_direction(&tail.to_ascii_lowercase())
+                        .map(|direction| (noun, direction))
+                }) {
+                Some((noun, direction)) => (
+                    noun.trim_end_matches(" toward").trim_end_matches(" to"),
+                    Some(direction),
+                ),
+                None => (rest, None),
+            }
         } else {
             (rest, None)
         };
@@ -195,6 +206,11 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
         };
         let action = match direction {
             Some(direction) => tor_client_common::items::zap_action(view, item, direction)?,
+            None if verb == "zap" => tor_client_common::items::item_action(
+                view,
+                item,
+                tor_client_common::items::ItemOperation::Zap,
+            )?,
             None => tor_client_common::items::identification_action(view, Some(item))?,
         };
         Ok(Input::Command(Command::Act {

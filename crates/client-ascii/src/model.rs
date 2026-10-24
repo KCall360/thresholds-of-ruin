@@ -2326,6 +2326,13 @@ impl App {
                                 self.status = "That device selection is no longer current.".into();
                                 return Effect::None;
                             }
+                            if let Ok(action) =
+                                item_action(&state.state().observation, item, operation)
+                            {
+                                self.pickup.clear();
+                                self.zap_selection = None;
+                                return self.act(action);
+                            }
                             self.zap_selection = Some((item, state.snapshot().reply_context()));
                             self.pickup.clear();
                             self.status =

@@ -236,6 +236,102 @@ impl PlannedAmount {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DeviceDeliveryPlan {
+    Ray {
+        plan: tor_world::Shared<super::RayPlan>,
+    },
+    SelfEffect {
+        plan: tor_world::Shared<SelfDevicePlan>,
+    },
+}
+impl<'de> Deserialize<'de> for DeviceDeliveryPlan {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Ray {
+                plan: tor_world::Shared<super::RayPlan>,
+            },
+            SelfEffect {
+                plan: tor_world::Shared<SelfDevicePlan>,
+            },
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::Ray { plan } => Self::Ray { plan },
+            Fields::SelfEffect { plan } => Self::SelfEffect { plan },
+        })
+    }
+}
+impl DeviceDeliveryPlan {
+    pub fn ability(&self) -> &AbilityId {
+        match self {
+            Self::Ray { plan } => &plan.ability,
+            Self::SelfEffect { plan } => &plan.ability,
+        }
+    }
+    fn actor(&self) -> ActorId {
+        match self {
+            Self::Ray { plan } => plan.actor,
+            Self::SelfEffect { plan } => plan.actor,
+        }
+    }
+    fn preparation(&self) -> u64 {
+        match self {
+            Self::Ray { plan } => plan.preparation,
+            Self::SelfEffect { plan } => plan.preparation,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelfDevicePlan {
+    pub actor: ActorId,
+    pub ability: AbilityId,
+    pub preparation: u64,
+    pub descriptors: Vec<crate::content_ids::DescriptorId>,
+    pub effects: Vec<PlannedEffect>,
+}
+impl<'de> Deserialize<'de> for SelfDevicePlan {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            actor: ActorId,
+            ability: AbilityId,
+            preparation: u64,
+            #[serde(deserialize_with = "crate::magic_items::read_payload_descriptors")]
+            descriptors: Vec<crate::content_ids::DescriptorId>,
+            #[serde(deserialize_with = "read_item_effects")]
+            effects: Vec<PlannedEffect>,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            actor: f.actor,
+            ability: f.ability,
+            preparation: f.preparation,
+            descriptors: f.descriptors,
+            effects: f.effects,
+        })
+    }
+}
+impl SelfDevicePlan {
+    fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
+        rules.ability(&self.ability).is_some_and(|d| {
+            if !super::self_device_definition_valid(d) {
+                return false;
+            }
+            let crate::rules::StrikeSource::Authored { strikes } = &d.strikes else {
+                return false;
+            };
+            self.descriptors == strikes[0].descriptors
+                && item_effects_match_definition(&strikes[0].on_success, &self.effects)
+                && effects_valid(&self.effects, rules)
+        })
+    }
+}
 /// A prepared action carries only the data its action kind can use.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -248,7 +344,8 @@ pub enum Plan {
         item: ItemId,
         charges: u16,
         discovery: crate::ItemDiscovery,
-        ray: tor_world::Shared<super::RayPlan>,
+        aim: crate::DeviceAim,
+        delivery: DeviceDeliveryPlan,
     },
     Respec(tor_world::Shared<crate::player_respec::RespecPlan>),
     Equip {
@@ -387,7 +484,11 @@ impl Plan {
     ) -> impl ExactSizeIterator<Item = &crate::conditions::TokenReservation> + Clone {
         match self {
             Self::Ability(plan) => plan.tokens.as_slice(),
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.tokens.as_slice(),
+            Self::Ray(plan)
+            | Self::Zap {
+                delivery: DeviceDeliveryPlan::Ray { plan },
+                ..
+            } => plan.tokens.as_slice(),
             Self::Projectile(plan) => plan.tokens.as_slice(),
             Self::Escape(plan) => plan.tokens.as_slice(),
             _ => &[],
@@ -399,7 +500,8 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.actor,
             Self::Ability(plan) => plan.actor,
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.actor,
+            Self::Ray(plan) => plan.actor,
+            Self::Zap { delivery, .. } => delivery.actor(),
             Self::Projectile(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
@@ -414,7 +516,8 @@ impl Plan {
             Self::Escape(plan) => plan.holder,
             Self::Ability(plan) => plan.target,
             // Legacy actor-local bookkeeping only; a ray has no persisted target.
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.actor,
+            Self::Ray(plan) => plan.actor,
+            Self::Zap { delivery, .. } => delivery.actor(),
             Self::Projectile(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
@@ -432,11 +535,9 @@ impl Plan {
                 replacement: plan.replacement.clone(),
                 supplies: plan.supplies.clone(),
             },
-            Self::Zap { item, ray, .. } => Work::Zap {
+            Self::Zap { item, aim, .. } => Work::Zap {
                 item: *item,
-                aim: crate::DeviceAim::Direction {
-                    direction: ray.direction,
-                },
+                aim: *aim,
             },
             Self::Projectile(plan) => Work::UseAbility {
                 id: plan.ability.clone(),
@@ -470,7 +571,8 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.preparation,
             Self::Ability(plan) => plan.preparation,
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.preparation,
+            Self::Ray(plan) => plan.preparation,
+            Self::Zap { delivery, .. } => delivery.preparation(),
             Self::Projectile(plan) => plan.preparation,
             Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
@@ -484,7 +586,8 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.recovery,
             Self::Ability(plan) => plan.recovery + plan.step.map_or(0, |step| step.duration),
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.recovery,
+            Self::Ray(plan) => plan.recovery,
+            Self::Zap { .. } => 0,
             Self::Projectile(plan) => plan.recovery,
             Self::Respec(plan) => plan.recovery,
             Self::Equip { .. }
@@ -497,7 +600,8 @@ impl Plan {
     pub fn cost(&self) -> Option<CostBundle> {
         match self {
             Self::Ability(plan) => plan.cost,
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.cost,
+            Self::Ray(plan) => plan.cost,
+            Self::Zap { .. } => None,
             Self::Projectile(plan) => plan.cost,
             Self::Escape(_) | Self::Respec(_) => None,
             Self::Equip { .. }
@@ -516,6 +620,10 @@ impl Plan {
             Self::Read { effects, .. }
             | Self::Drink { effects, .. }
             | Self::Eat { effects, .. } => effects,
+            Self::Zap {
+                delivery: DeviceDeliveryPlan::SelfEffect { plan },
+                ..
+            } => &plan.effects,
             Self::Projectile(_)
             | Self::Ray(_)
             | Self::Zap { .. }
@@ -548,7 +656,11 @@ impl Plan {
     }
     pub fn as_ray(&self) -> Option<&super::RayPlan> {
         match self {
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => Some(plan),
+            Self::Ray(plan)
+            | Self::Zap {
+                delivery: DeviceDeliveryPlan::Ray { plan },
+                ..
+            } => Some(plan),
             _ => None,
         }
     }
@@ -615,7 +727,8 @@ impl Plan {
                 Self::Projectile(plan) => plan.valid(rules),
                 Self::Zap {
                     item,
-                    ray,
+                    delivery,
+                    aim,
                     discovery,
                     ..
                 } => {
@@ -624,10 +737,16 @@ impl Plan {
                             discovery,
                             crate::ItemDiscovery::OnUse | crate::ItemDiscovery::Never
                         )
-                        && ray.valid(rules)
-                        && ray.cost.is_none()
-                        && ray.cooldown.is_none()
-                        && ray.supply_costs.is_empty()
+                        && match delivery {
+                            DeviceDeliveryPlan::Ray { plan } => {
+                                matches!(aim, crate::DeviceAim::Direction {direction} if *direction == plan.direction)
+                                    && plan.valid(rules)
+                                    && plan.cost.is_none()
+                                    && plan.cooldown.is_none()
+                                    && plan.supply_costs.is_empty()
+                            }
+                            DeviceDeliveryPlan::SelfEffect { plan } => plan.valid(rules),
+                        }
                 }
                 Self::Respec(plan) => plan.valid(rules),
                 Self::Equip {

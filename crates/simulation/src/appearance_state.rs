@@ -30,12 +30,28 @@ pub struct AppearanceKey {
 /// then returns x XOR (x >> 31). Addition/multiplication wrap at 64 bits.
 /// Reduce the final unsigned value modulo count. Catalog order is authority;
 /// this deterministic presentation choice is not a cryptographic primitive.
-pub fn presentation_index(_key: AppearanceKey, count: usize) -> Option<usize> {
+pub fn presentation_index(key: AppearanceKey, count: usize) -> Option<usize> {
     if !(1..=MAX_PRESENTATION_CHOICES).contains(&count) {
         return None;
     }
-    // First-red scaffold: domain-separated deterministic selection is pending.
-    Some(0)
+    let mut mixed = 0x6170706561727631;
+    for operand in [
+        key.seed,
+        key.observer,
+        key.subject,
+        key.channel as u64,
+        key.phase,
+    ] {
+        mixed = mix(mixed ^ operand);
+    }
+    Some((mixed % count as u64) as usize)
+}
+
+fn mix(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e3779b97f4a7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
+    value ^ (value >> 31)
 }
 
 #[cfg(test)]

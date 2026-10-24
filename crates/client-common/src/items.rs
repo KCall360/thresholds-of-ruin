@@ -82,7 +82,16 @@ pub fn item_action(
         }
         ItemOperation::Read => Err("You can't read that item.".into()),
         ItemOperation::Zap if affordance.zappable && view.combat.is_some() => {
-            Err("Choose a direction to zap.".into())
+            match affordance.device_activation {
+                Some(tor_protocol::DeviceActivation::SelfTarget) => Ok(Action::Zap {
+                    item,
+                    aim: tor_protocol::DeviceAim::SelfTarget {},
+                }),
+                Some(tor_protocol::DeviceActivation::Direction) => {
+                    Err("Choose a direction to zap.".into())
+                }
+                None => Err("You can't zap that item.".into()),
+            }
         }
         ItemOperation::Zap => Err("You can't zap that item.".into()),
         ItemOperation::Unequip if affordance.equipped_slot.is_some() => {
