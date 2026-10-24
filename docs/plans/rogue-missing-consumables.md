@@ -72,6 +72,12 @@ The legal self-device package source test passes. Execution, the corrected pause
 flow, OnUse discovery and further observer/strict-DTO contrasts remain next work.
 No production content or live weighted distribution has been enabled.
 
+## Retained next-phase design
+
+The [spatial registry proposal](rogue-spatial-registry-reconstruction.md) preserves
+reviewed ownership, capacity evidence and pending strict-decoder acceptance. It is
+not implemented registry support or a finalized resource limit.
+
 ## Reconstruction decisions and safeguards
 
 The following later maintainer decisions supersede the historical unapproved
