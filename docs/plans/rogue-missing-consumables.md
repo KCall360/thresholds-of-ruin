@@ -20,7 +20,14 @@ three-test content owner and nine existing catalog/inventory tests now pass.
 Fresh ordinary applications compile successfully. The actual compiler validates
 the imported process fixture and production catalog, and the refreshed certificate
 passes the repository source-byte check. Imported-catalog Service and actual
-Text/process witnesses are present but their runtime results remain pending.
+Text/process acceptance now passes: unknown prompting is free, paid use consumes
+one charge and one base turn without RNG or identification, paid Identify enables
+directionless use, and follower affordances agree. The imported Service witness
+also passes exact retry and source-deleted reopen. The full server run recorded
+1,033 passes and one existing class-pool fixture failure: its positive control
+converted only the previous eight wands to Tool, leaving the ninth as Wand.
+Correcting that fixture must retain both stackable and mixed-capability negatives;
+the full-library rerun remains pending.
 No lost application binary or previous executor receipt qualifies this content.
 
 ## Fresh device foundation acceptance checkpoint (2026-10-24)

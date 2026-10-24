@@ -344,3 +344,27 @@ Keep request IDs monotonic across reconnects. A source-free codec roundtrip alon
 is not the deleted-scenario Service witness. Production source integration,
 rotated portals, nonmonotonic generator member order, reserved/wide mouths,
 omitted rooms, actual encoded-capacity proof and Room Light remain unfinished.
+
+
+### Reviewed next codec experiment (not production admission)
+
+Stage a standalone strict pooled codec before Game/Snapshot installation. Candidate
+maximum-width JSON charges are 107 bytes per surface run, 195 per primary run,
+21 per member, 30 plus surface charges per room, and 47 plus six times decoded
+label bytes plus members/primary/rooms per scope. A directory charges 3 plus
+11 per u32 payload binding; the pool header charges 30 and each snapshot root
+reserves 21. These are conservative closed-schema calculations, not yet Rust
+serializer proofs or accepted constants. Prepaid nested leaves must not be charged
+twice. Use checked arithmetic and one shared allowance, not independent per-list
+limits; retain the existing whole-archive 64 MiB ceiling rather than adding a
+second allowance. No authored 64-member cap follows from these calculations.
+
+The first matrix must compare actual maximum-width/escaped serialization, admit
+more than 64 members, reject positional/missing/duplicate/unknown fields and
+unread excess tails, preserve required-nullable doorway fields, and prove pooled
+payload identity plus directory/index/reference integrity. Decode must not expand
+hostile coordinate intervals into cells. Canonical comparison still needs the
+existing source-work bounds. A proposed 257-root reserve is valid only after the
+history reader enforces its 256 retained-boundary limit before allocation; its
+current post-decode check is not such protection. Actual encoded fixtures,
+whole-game headroom and bounded history integration remain prerequisites.
