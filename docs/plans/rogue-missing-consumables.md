@@ -1,10 +1,97 @@
 # Rogue missing consumables, devices and portable light
 
-**Status: selected next feature scope; implementation not started and development
-paused.** The accepted concepts below do not approve the proposed numerical
-profile, unresolved adaptations or compatibility changes. This is a plan, not a
-claim that the items are available in ordinary play. [Current status](../status.md)
-owns implemented scope; the [Rogue plan](rogue.md) owns the larger adaptation.
+**Status: reconstruction authorized; fresh implementation and qualification pending.**
+The previous local implementation and its test artifacts are unavailable. The
+maintainer directed a redo on 2026-10-24. This checkout starts from published main
+`511ea466e14892075af030a78d254f1101e7c813`; no lost commit or historical test receipt
+qualifies this source. [Current status](../status.md) owns implemented scope.
+
+## Reconstruction decisions and safeguards
+
+The following later maintainer decisions supersede the historical unapproved
+candidate profile below. They are preserved decisions, not recovered code or
+new test evidence. Recheck pinned source branches while writing original code.
+
+- Keep Rogue 5.4.4 behavior by default, translating existing TOR progression,
+  timing, privacy and persistence rather than inventing a second combat system.
+  Polymorph is separate. Do not retune or append to existing live weighted pools.
+- Unknown devices always request direction. Identified non-directional devices
+  skip that prompt; directional devices still require aim. Public affordances
+  use the same observer knowledge as item names.
+- Room Light is a wand/staff effect, permanent in the actual authored room;
+  passage and maze use identifies and spends without illuminating a room.
+  Portable torches are a separate addition: one hand, four-cell configurable
+  radius, 100,000 active simulation ticks of configurable fuel (1,000 standard
+  base turns). Drop preserves flame, stow extinguishes, no frozen catch-up.
+  Ignite/extinguish use ordinary paid item work, not automatic equip ignition.
+- Cancellation has no save when its contact ray reaches a target. Explicitly
+  marked abilities/contributions remain suppressed without deleting ownership,
+  purchases or HD; remove invisibility, disguise and exact relevant hold links.
+  Later independent invisibility can apply; another cancellation clears it again.
+  No new restoration mechanic or global undo of previous conditions.
+- Drain Life uses original room/passage/doorway membership and direct Health
+  loss, without resistance, armor, LOS or an arbitrary corridor radius. Below
+  two Health is a paid refused attempt without charge; no recipients spends a
+  charge without Health. Otherwise caster remaining Health is floor(H/2), each
+  recipient loses floor(remaining/count). Snapshot recipients before kills.
+  Preserve wide Health arithmetic and ordinary hostility/lifecycle contracts.
+- Magic Missile uses one Lore-versus-Agility check, 1d4+1 plus the ordinary
+  universal attack-damage bonus, no second hit roll, no bounce or fixed short
+  ray cap. Nothing spends ordinary time/charge without identification or RNG.
+- Gain Strength restores one existing deficit before granting a permanent point
+  beyond the unringed remembered maximum, within the normal cap of five.
+  No latent boon through poison, refundable acquisition, or new respec UI.
+  Raise Level funds only the normal current progression obligation; do not skip
+  funded-but-blocked tiers, reduce banked XP or bypass drained-HD regrowth rules.
+- Haste uses the shared hasted condition. A potion while hasted clears all its
+  actual condition sources and causes the original forced rest; no potion-only
+  exception. Persistent wand and finite potion lifetimes need explicit strict
+  support, not globally relaxed condition validation.
+- Hallucination uses stable observer-specific identities and saved periodic
+  shifts (one base turn), not query/redraw RNG. Distort genuine visual appearance
+  and the explicit monster-sense presentation exception, not nonvisual Awareness.
+  Preserve genuinely recognized stairs and true interaction authority. Extra
+  healing cures; no additional poison-cure adaptation is approved here.
+- Monster detection refreshes one expiry to 20 base turns per dose, without
+  stacking or stale timers. It identifies only if the actual bounded chart is
+  available and nonempty at drinking completion. Empty/unavailable results do
+  not identify; later revelation never retroactively identifies. Page queries
+  remain pure. This intentionally differs from Rogue's never-identify behavior.
+- Food and Magic detection are positive-only historical snapshots. Include
+  monster-carried magic independently of ground stock; exclude corrosion alone,
+  preserve magical contributions even if their numeric effects offset. No
+  universal redefinition of magical/theft flags. No live carrier tracking.
+- Mapping discloses private topology, stairs, secrets and trap presence, not
+  trap family, occupants, items or material. Ordinary room interiors and
+  floor/ceiling shells are not magically explored. Preserve richer memory.
+  Disconnected or ambiguous components must not acquire fabricated alignment.
+- Historical and live charts use bounded ordinary protocol delivery without
+  granting sight, navigation or targeting handles. Presentation overflow is
+  explicit unavailable, not a truncated or stale chart labelled current.
+  Scope metadata and source-free validation must support actual reachable maps;
+  never substitute region identity or LOS for a room.
+
+Current-only protocol/save changes and gameplay PR publication/description updates
+are authorized; merging still requires the repository's exact-head gates. Local
+graphical deferrals are task-specific only, must be re-audited against actual
+methods, and do not waive hosted native tests or other local checks. Existing
+format numbers remain unchanged until corresponding implementation lands.
+
+Reconstruct in coherent phases: spatial/device/presentation foundations; paid
+mechanics and source provenance; observer disclosure and clients; content and
+real-caller/persistence acceptance; final performance and full qualification.
+Keep one build owner, source-first causal tests, positive fixture controls and
+whole affected older contract suites. No historical passing count substitutes
+for a fresh result. Preserve release/debug, native/headless and unit/Service/
+actual-process distinctions.
+
+Before substantive implementation, establish a verified off-machine checkpoint
+containing a Git bundle, decision notes, explicit validation status and a restore
+recipe. Private backup authorization does not waive push gates or make an
+unfinished checkpoint PR-ready. Never include credentials, saves, caches or
+binaries. Back up each coherent local checkpoint and verify restoration identity.
+The obsolete cleanup proposals targeted the unavailable environment and must not
+be executed against this reconstruction.
 
 ## Preservation and evidence
 
@@ -148,7 +235,7 @@ Source flytrap miss damage outside the gate is a historical artifact, not an
 intended exception to TOR cancellation. Source regeneration flags alone do not
 establish a cancellation rule for TOR's implemented recovery.
 
-## Proposed rules profile — unapproved
+## Historical proposed rules profile — superseded where specified above
 
 Every value and adaptation in this section is a **candidate for review**, not
 approved production tuning or an implemented field. Freeze the selected profile
