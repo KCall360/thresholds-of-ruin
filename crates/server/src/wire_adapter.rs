@@ -216,9 +216,9 @@ pub fn decode_action(
                 p::Action::Drink { .. } => a::Action::Drink { item: identity },
                 p::Action::Eat { .. } => a::Action::Eat { item: identity },
                 p::Action::Read { .. } => a::Action::Read { item: identity },
-                p::Action::Zap { direction, .. } => a::Action::Zap {
+                p::Action::Zap { aim, .. } => a::Action::Zap {
                     item: identity,
-                    direction: crate::adapt::requested_direction(*direction),
+                    aim: crate::adapt::requested_device_aim(*aim),
                 },
                 _ => unreachable!(),
             }
@@ -486,9 +486,9 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
         a::Action::Read { item } => p::Action::Read {
             item: scope.item(s::ItemId(*item)),
         },
-        a::Action::Zap { item, direction } => p::Action::Zap {
+        a::Action::Zap { item, aim } => p::Action::Zap {
             item: scope.item(s::ItemId(*item)),
-            direction: crate::adapt::wire_direction(*direction),
+            aim: crate::adapt::wire_device_aim(*aim),
         },
         a::Action::Identify { choice, item } => p::Action::Identify {
             choice: scope.identification_choice(*choice),

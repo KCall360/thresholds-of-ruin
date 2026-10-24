@@ -55,6 +55,7 @@ fn state() -> ClientState {
                 edible: false,
                 readable: false,
                 zappable: false,
+                device_activation: None,
                 charges: None,
             })
             .collect(),

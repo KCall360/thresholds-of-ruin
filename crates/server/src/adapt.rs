@@ -306,9 +306,9 @@ pub fn action(action: &a::Action) -> s::Action {
         a::Action::Read { item } => s::Action::Read {
             item: s::ItemId(*item),
         },
-        a::Action::Zap { item, direction } => s::Action::Zap {
+        a::Action::Zap { item, aim } => s::Action::Zap {
             item: s::ItemId(*item),
-            direction: step_direction(*direction),
+            aim: device_aim(*aim),
         },
         a::Action::Identify { choice, item } => s::Action::Identify {
             choice: *choice,
@@ -364,9 +364,9 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
         a::Action::Read { item } => s::Work::Read {
             item: s::ItemId(*item),
         },
-        a::Action::Zap { item, direction } => s::Work::Zap {
+        a::Action::Zap { item, aim } => s::Work::Zap {
             item: s::ItemId(*item),
-            direction: step_direction(*direction),
+            aim: device_aim(*aim),
         },
         a::Action::Identify { .. }
         | a::Action::ExamineTrap { .. }
@@ -523,9 +523,9 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
         s::Action::Drink { item } => a::Action::Drink { item: item.0 },
         s::Action::Eat { item } => a::Action::Eat { item: item.0 },
         s::Action::Read { item } => a::Action::Read { item: item.0 },
-        s::Action::Zap { item, direction } => a::Action::Zap {
+        s::Action::Zap { item, aim } => a::Action::Zap {
             item: item.0,
-            direction: recorded_step_direction(direction),
+            aim: recorded_device_aim(aim),
         },
         s::Action::Identify { choice, item } => a::Action::Identify {
             choice,
@@ -874,6 +874,10 @@ pub fn observation(
                     edible: item.edible,
                     readable: item.readable,
                     zappable: item.zappable,
+                    device_activation: item.device_activation.map(|activation| match activation {
+                        s::DeviceActivation::Direction => p::DeviceActivation::Direction,
+                        s::DeviceActivation::SelfTarget => p::DeviceActivation::SelfTarget,
+                    }),
                     charges: item.charges,
                 })
                 .collect(),
@@ -1212,5 +1216,38 @@ fn recorded_step_direction(direction: s::abilities::StepDirection) -> a::Directi
         s::abilities::StepDirection::NorthWest => a::Direction::NorthWest,
         s::abilities::StepDirection::Up => a::Direction::Up,
         s::abilities::StepDirection::Down => a::Direction::Down,
+    }
+}
+
+pub fn device_aim(aim: a::DeviceAim) -> s::DeviceAim {
+    match aim {
+        a::DeviceAim::Direction { direction } => s::DeviceAim::Direction {
+            direction: step_direction(direction),
+        },
+        a::DeviceAim::SelfTarget {} => s::DeviceAim::SelfTarget {},
+    }
+}
+pub fn recorded_device_aim(aim: s::DeviceAim) -> a::DeviceAim {
+    match aim {
+        s::DeviceAim::Direction { direction } => a::DeviceAim::Direction {
+            direction: recorded_step_direction(direction),
+        },
+        s::DeviceAim::SelfTarget {} => a::DeviceAim::SelfTarget {},
+    }
+}
+pub fn requested_device_aim(aim: p::DeviceAim) -> a::DeviceAim {
+    match aim {
+        p::DeviceAim::Direction { direction } => a::DeviceAim::Direction {
+            direction: requested_direction(direction),
+        },
+        p::DeviceAim::SelfTarget {} => a::DeviceAim::SelfTarget {},
+    }
+}
+pub fn wire_device_aim(aim: a::DeviceAim) -> p::DeviceAim {
+    match aim {
+        a::DeviceAim::Direction { direction } => p::DeviceAim::Direction {
+            direction: wire_direction(direction),
+        },
+        a::DeviceAim::SelfTarget {} => p::DeviceAim::SelfTarget {},
     }
 }

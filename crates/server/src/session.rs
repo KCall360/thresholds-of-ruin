@@ -3453,7 +3453,9 @@ mod tests {
             preparation: Some(PreparationView {
                 action: Action::Zap {
                     item,
-                    direction: Direction::North,
+                    aim: tor_protocol::DeviceAim::Direction {
+                        direction: Direction::North,
+                    },
                 },
                 remaining: 1,
                 active: true,
@@ -3475,6 +3477,7 @@ mod tests {
                 edible: false,
                 readable: false,
                 zappable: true,
+                device_activation: Some(tor_protocol::DeviceActivation::Direction),
                 charges: Some(7),
             }],
         });
@@ -3619,6 +3622,7 @@ mod tests {
                 edible: false,
                 readable: false,
                 zappable: false,
+                device_activation: None,
                 charges: None,
             }],
         });

@@ -70,7 +70,9 @@ fn captured_zap_discovery_policy_rejects_source_mismatch_before_payment_and_rest
                 ActorId(1),
                 Work::Zap {
                     item,
-                    direction: StepDirection::North,
+                    aim: crate::DeviceAim::Direction {
+                        direction: StepDirection::North,
+                    },
                 },
             )
             .unwrap();
@@ -94,7 +96,9 @@ fn captured_zap_discovery_policy_rejects_source_mismatch_before_payment_and_rest
             &mut game,
             Action::Zap {
                 item,
-                direction: StepDirection::North,
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::North,
+                },
             },
         );
         assert_eq!(game.preparation(ActorId(1)).unwrap().plan, captured);
@@ -127,7 +131,9 @@ fn device_never_discovery_spends_charge_without_disclosing_identity_or_count() {
             ActorId(1),
             Work::Zap {
                 item,
-                direction: StepDirection::North,
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::North,
+                },
             },
         )
         .unwrap();
@@ -145,7 +151,9 @@ fn device_never_discovery_spends_charge_without_disclosing_identity_or_count() {
         &mut game,
         Action::Zap {
             item,
-            direction: StepDirection::North,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::North,
+            },
         },
     );
     assert_eq!(game.items[&item].charges, Some(2));
@@ -191,7 +199,7 @@ fn start_owned_item_work(game: &mut Game, plan: Plan) -> crate::IntentionId {
     let action = match plan.work() {
         Work::Read { item } => Action::Read { item },
         Work::Drink { item } => Action::Drink { item },
-        Work::Zap { item, direction } => Action::Zap { item, direction },
+        Work::Zap { item, aim } => Action::Zap { item, aim },
         _ => panic!("finite item work fixture"),
     };
     let intention = execute(game, action);
@@ -408,7 +416,9 @@ fn teleport_to_uses_frozen_launch_but_live_interceptor_and_restores_paid_prepara
     let item = device_with_discovery(&mut game, 10, 3, ItemDiscovery::Never);
     let work = Work::Zap {
         item,
-        direction: StepDirection::East,
+        aim: crate::DeviceAim::Direction {
+            direction: StepDirection::East,
+        },
     };
     let captured = game.plan_work(ActorId(1), work).unwrap();
     let frozen = captured.as_ray().unwrap().clone();
@@ -533,7 +543,9 @@ fn teleport_to_endpoint_uses_all_frozen_launch_frames_not_casters_current_placem
                 ActorId(1),
                 Work::Zap {
                     item,
-                    direction: StepDirection::East,
+                    aim: crate::DeviceAim::Direction {
+                        direction: StepDirection::East,
+                    },
                 },
             )
             .unwrap();
@@ -596,7 +608,9 @@ fn teleport_wand_dodge_or_blocked_live_body_fit_spends_charge_without_identifica
                 ActorId(1),
                 Work::Zap {
                     item,
-                    direction: StepDirection::East,
+                    aim: crate::DeviceAim::Direction {
+                        direction: StepDirection::East,
+                    },
                 },
             )
             .unwrap();
@@ -666,7 +680,9 @@ fn forced_caster_relocation_retires_uncompleted_zap_without_spending_a_charge() 
             ActorId(1),
             Work::Zap {
                 item,
-                direction: StepDirection::East,
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::East,
+                },
             },
         )
         .unwrap();
@@ -1059,7 +1075,7 @@ fn private_utility_views(
     // Reuse the host's actual event-time observation boundary so a bystander
     // gets a witnessed receipt, rather than reconstructing history on a read.
     game.host_region_continuation = true;
-    execute(game, Action::Zap { item, direction });
+    execute(game, Action::Zap { item, aim });
     let witness = game.event_observation_witness();
     let mut views = Vec::new();
     for observer in [ActorId(1), ActorId(2), ActorId(3)] {
@@ -1254,7 +1270,9 @@ fn unknown_never_device_pending_zap_has_no_public_plan_or_identity_preview() {
             game,
             Action::Zap {
                 item,
-                direction: StepDirection::East,
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::East,
+                },
             },
         );
         assert!(game.preparation(ActorId(1)).is_some());
@@ -1390,7 +1408,9 @@ fn charged_item_uses_rank_zero_compiled_lore_without_grant_or_quantity_payment()
             ActorId(1),
             Work::Zap {
                 item,
-                direction: StepDirection::North,
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::North,
+                },
             },
         )
         .unwrap();
@@ -1406,7 +1426,9 @@ fn charged_item_uses_rank_zero_compiled_lore_without_grant_or_quantity_payment()
         &mut game,
         Action::Zap {
             item,
-            direction: StepDirection::North,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::North,
+            },
         },
     );
     assert_eq!(game.items[&item].charges, Some(2));
@@ -1442,7 +1464,9 @@ fn unknown_empty_device_keeps_same_affordance_and_pays_time_without_rng_or_learn
         &mut game,
         Action::Zap {
             item,
-            direction: StepDirection::North,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::North,
+            },
         },
     );
     assert!(game.tick > tick);
@@ -1548,7 +1572,9 @@ fn pending_zap_reserves_exact_device_and_replays_payment_once_after_pause() {
         &mut game,
         Action::Zap {
             item,
-            direction: StepDirection::North,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::North,
+            },
         },
     );
     assert_eq!(game.tick, 0);
@@ -1559,7 +1585,9 @@ fn pending_zap_reserves_exact_device_and_replays_payment_once_after_pause() {
         game.pause_preparation(ActorId(1)),
         Some(Work::Zap {
             item,
-            direction: StepDirection::North
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::North
+            }
         })
     );
     let mut restored = roundtrip(&game);
@@ -1582,7 +1610,9 @@ fn pending_zap_reserves_exact_device_and_replays_payment_once_after_pause() {
             work,
             Work::Zap {
                 item,
-                direction: StepDirection::North
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::North
+                }
             }
         );
     }
@@ -1598,7 +1628,9 @@ fn failed_release_rolls_back_charge_effect_rng_knowledge_and_choice_together() {
         &mut game,
         Action::Zap {
             item,
-            direction: StepDirection::East,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::East,
+            },
         },
     );
     let before = game.clone();
@@ -1671,7 +1703,9 @@ fn exact_charge_facts_follow_only_observed_owner_payments_not_other_actors() {
         &mut game,
         Action::Zap {
             item,
-            direction: StepDirection::North,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::North,
+            },
         },
     );
     assert_eq!(
@@ -1717,7 +1751,9 @@ fn exact_charge_facts_follow_only_observed_owner_payments_not_other_actors() {
     game.actors.get_mut(&ActorId(2)).unwrap().ready_at = game.tick;
     let action = Action::Zap {
         item,
-        direction: StepDirection::South,
+        aim: crate::DeviceAim::Direction {
+            direction: StepDirection::South,
+        },
     };
     let origin = game
         .admit_intention(ActorId(2), action, IntentionOrigin::Human)
@@ -1799,7 +1835,9 @@ fn ordinary_ai_uses_known_instance_device_without_a_build_grant_or_hidden_previe
         selected,
         Action::Zap {
             item,
-            direction: StepDirection::East
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::East
+            }
         }
     );
     assert_eq!(
@@ -1854,7 +1892,9 @@ fn magic_item_regression_hostile_device_reveals_guise_without_ability_grant() {
         &mut game,
         Action::Zap {
             item,
-            direction: StepDirection::North,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::North,
+            },
         },
     );
     assert!(
@@ -1902,7 +1942,9 @@ fn charged_dodge_and_immunity_pay_once_and_death_releases_unpaid_device() {
             &mut game,
             Action::Zap {
                 item,
-                direction: StepDirection::East,
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::East,
+                },
             },
         );
         assert_eq!(game.items[&item].charges, Some(2));
@@ -1917,7 +1959,9 @@ fn charged_dodge_and_immunity_pay_once_and_death_releases_unpaid_device() {
         &mut game,
         Action::Zap {
             item,
-            direction: StepDirection::East,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::East,
+            },
         },
     );
     assert_eq!(game.items[&item].holds.len(), 1);
@@ -1967,7 +2011,9 @@ fn paid_choice_death_and_corrupt_restored_device_claims_cannot_duplicate_payment
         ActorId(2),
         Action::Zap {
             item: attacker_device,
-            direction: StepDirection::West,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::West,
+            },
         },
         IntentionOrigin::Human,
     )
@@ -1987,7 +2033,9 @@ fn paid_choice_death_and_corrupt_restored_device_claims_cannot_duplicate_payment
         &mut pending,
         Action::Zap {
             item,
-            direction: StepDirection::East,
+            aim: crate::DeviceAim::Direction {
+                direction: StepDirection::East,
+            },
         },
     );
     for change in 0..3 {
@@ -2556,7 +2604,9 @@ fn ray_and_device_capture_attack_bonus_once_per_pool_not_fixed_damage() {
             ActorId(1),
             Work::Zap {
                 item,
-                direction: StepDirection::East,
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::East,
+                },
             },
         )
         .unwrap();
@@ -2581,4 +2631,109 @@ fn ray_and_device_capture_attack_bonus_once_per_pool_not_fixed_damage() {
         }
         assert_eq!((rolled, fixed), (1, 1));
     }
+}
+
+#[test]
+fn empty_self_ability_is_valid_but_device_delivery_requires_self_support() {
+    let game = super::ray_tests::fixture_with(|_, ability, species| {
+        ability.invocation = InvocationKind::ActorTarget;
+        ability.reach = crate::rules::Reach::SelfOnly;
+        ability.interaction = crate::rules::Interaction::NonHostile;
+        ability.supply_costs.clear();
+        let crate::rules::StrikeSource::Authored { strikes } = &mut ability.strikes else {
+            unreachable!()
+        };
+        assert_eq!(strikes.len(), 1);
+        strikes[0].check = None;
+        strikes[0].on_success.clear();
+        strikes[0].on_failure.clear();
+        strikes[0].riders.clear();
+        species.modifiers.retain(|modifier| {
+            !matches!(
+                &modifier.op, crate::rules::ModifierOp::GrantAbility { ability: granted }
+                    if granted == &ability.id
+            )
+        });
+    });
+    // The fixture compiles ordinary rules and real creature builds before this
+    // device-source assertion. Nothing uses no fake check, damage or ray.
+    let ability = game
+        .content
+        .rules
+        .ability(&crate::content_ids::AbilityId::new("fixture_ray").unwrap())
+        .unwrap();
+    assert_eq!(ability.reach, crate::rules::Reach::SelfOnly);
+    assert_eq!(ability.interaction, crate::rules::Interaction::NonHostile);
+    let crate::rules::StrikeSource::Authored { strikes } = &ability.strikes else {
+        unreachable!()
+    };
+    assert!(strikes[0].check.is_none());
+    assert!(strikes[0].on_success.is_empty() && strikes[0].on_failure.is_empty());
+    let source = DeviceSpec {
+        ability: ability.id.clone(),
+        initial_charges: ChargeRange {
+            minimum: 3,
+            maximum: 3,
+        },
+        discovery: ItemDiscovery::Never,
+    };
+    assert!(source.valid());
+    assert!(
+        source.validate_rules(&game.content.rules).is_ok(),
+        "valid empty self ability must be accepted as an item-owned device source"
+    );
+}
+
+#[test]
+fn device_aim_is_closed_named_and_unknown_self_request_is_free() {
+    for aim in [
+        crate::DeviceAim::Direction {
+            direction: StepDirection::North,
+        },
+        crate::DeviceAim::SelfTarget {},
+    ] {
+        let encoded = serde_json::to_value(aim).unwrap();
+        assert_eq!(
+            serde_json::from_value::<crate::DeviceAim>(encoded).unwrap(),
+            aim
+        );
+    }
+    for malformed in [
+        serde_json::json!(["self_target"]),
+        serde_json::json!({"kind":"self_target", "direction":"north"}),
+        serde_json::json!({"kind":"direction"}),
+        serde_json::json!({"kind":"direction", "direction":"north", "target":2}),
+    ] {
+        assert!(serde_json::from_value::<crate::DeviceAim>(malformed).is_err());
+    }
+    let mut game = fixture();
+    let item = device_with_discovery(&mut game, 10, 3, ItemDiscovery::Never);
+    assert!(
+        game.plan_work(
+            ActorId(1),
+            Work::Zap {
+                item,
+                aim: crate::DeviceAim::Direction {
+                    direction: StepDirection::North
+                },
+            }
+        )
+        .is_ok(),
+        "existing directional source is a valid positive control"
+    );
+    let before = game.clone();
+    assert!(game
+        .admit_intention(
+            ActorId(1),
+            Action::Zap {
+                item,
+                aim: crate::DeviceAim::SelfTarget {},
+            },
+            IntentionOrigin::Human
+        )
+        .is_err());
+    assert_eq!(
+        game, before,
+        "unknown self request must not reserve, pay, learn or consume RNG"
+    );
 }

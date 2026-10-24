@@ -85,11 +85,15 @@ whole affected older contract suites. No historical passing count substitutes
 for a fresh result. Preserve release/debug, native/headless and unit/Service/
 actual-process distinctions.
 
-Before substantive implementation, establish a verified off-machine checkpoint
-containing a Git bundle, decision notes, explicit validation status and a restore
-recipe. Private backup authorization does not waive push gates or make an
-unfinished checkpoint PR-ready. Never include credentials, saves, caches or
-binaries. Back up each coherent local checkpoint and verify restoration identity.
+The maintainer explicitly chose a separate remote backup branch with no PR.
+Publish each meaningful coherent checkpoint there under the task-scoped backup
+exception, using normal fast-forward updates and verifying the remote tree/ref.
+This does not waive normal eventual PR gates or make an unfinished checkpoint
+PR-ready. Never include credentials, saves, caches or binaries. The initial
+checkpoint was independently fetched and its parent/tree verified; both existing
+Actions workflows trigger pushes only on main, so this no-PR branch does not
+match those push workflows. Do not change CI triggers or infer anything about
+unknown external integrations.
 The obsolete cleanup proposals targeted the unavailable environment and must not
 be executed against this reconstruction.
 
@@ -98,7 +102,8 @@ be executed against this reconstruction.
 This note was reconstructed on 2026-10-22 from retained design discussion and
 source-research findings after the earlier local planning file became unavailable.
 It is **conversation-backed reconstruction, not byte-identical file recovery**.
-The numeric suggestions were proposed for review, not accepted by the maintainer.
+The original numeric suggestions were proposed for review; later accepted choices
+are explicitly recorded in the reconstruction decisions above.
 No implementation, build or behavior qualification is established by preserving
 this note. References to shared code below were checked against the preservation
 checkout; source-behavior findings retain their pinned upstream attribution.
@@ -136,10 +141,9 @@ The maintainer accepted these specific concepts on 2026-10-21:
    invisibility/disguise as in Rogue. Preserve the shared rules and existing
    ownership/advancement boundaries, rather than deleting HD or purchases.
 
-Cancellation was presented as lasting rather than a short stun. Its exact
-delivery, resistance, lifetime/removal and reapplication contracts still need a
-frozen decision; do not infer the full profile below from agreement to marked
-abilities. **No numerical profile approval was received.**
+The later reconstruction decisions above freeze cancellation delivery and lifetime,
+portable-light defaults and the other selected adaptations. The original concept
+approvals alone did not approve the historical candidate tables.
 
 ### Scenario availability
 
@@ -235,123 +239,14 @@ Source flytrap miss damage outside the gate is a historical artifact, not an
 intended exception to TOR cancellation. Source regeneration flags alone do not
 establish a cancellation rule for TOR's implemented recovery.
 
-## Historical proposed rules profile — superseded where specified above
+## Withdrawn alternatives
 
-Every value and adaptation in this section is a **candidate for review**, not
-approved production tuning or an implemented field. Freeze the selected profile
-before implementation. Low-level reversible representation choices can remain
-with the implementer; the gameplay choices below cannot be silently inferred.
-
-### Light and perception candidates
-
-| Feature | Candidate profile | Basis |
-| --- | --- | --- |
-| Portable torch | 20-foot/four-cell bounded, occluded radius; 100,000 active ticks of fuel; one grip; one ordinary action to ignite/extinguish | New TOR proposal, not Rogue source behavior |
-| Torch movement/storage | Dropping leaves it burning; stowing extinguishes while retaining fuel; no refilling/container simulation in this batch | New TOR proposal |
-| Torch clocks | Burns while its location is active, including owner sleep; no frozen catch-up; no haste scaling | Shared active-time adaptation; exact ownership/location handoff must be defined |
-| Room Light | Permanent authored-room-cell illumination, 10–19 charges, recognition on use; corridor/already-lit use still spends | Source-inspired, with TOR room metadata and LOS |
-| Hallucination | 808–892 base turns; repeats extend; shifts every 500 actor-active ticks | Source duration; shift interval is an unapproved TOR proposal |
-| False appearances | Scenario creature pool for creatures, scenario item pool for ground items; no cross-class creature/item substitutions | Unapproved conservative presentation choice |
-| Hallucination scope | Distort world names/assets/descriptions, including detected creatures; retain terrain/stairs, usable owner inventory controls and true knowledge | Unapproved scope choice, narrower than source presentation |
-| Monster detection | 20 base turns, repeated doses extend, follows observer's current floor, species/location through separate disclosure; no on-use identification | Source duration/identity intent; repeat/floor/channel rules are adaptations |
-| Magic/food detection | One-shot snapshots; positive-result recognition; carried magic without ground-item bug, ground food only | Source-inspired with explicit bug correction |
-| Mapping | Actor-owned topology/secrets/traps, not occupants/current sight | Source intent with shared knowledge adaptation |
-
-Radius geometry/falloff, equipment placement, dropped-light origin, fuel expiry
-and ignition timing are material choices, not implied by the word “torch.”
-Current ambient lighting must compose with emitters; moving a torch must not
-permanently paint cells. Overlapping emitters, room Light, portal joins, heights
-and extinguishing must invalidate the correct sight caches without hidden-state
-leaks. Physical illumination may help any observer, not just its owner.
-
-False identities must be stable across queries, redraws, clients and reopening
-until an active-time shift. Queries, spectator count and frozen time sample no
-randomness. Preserve saved identity/schedule state and bounded work. False
-appearances must not leak true names through descriptions, assets, menus, errors,
-targeting metadata or renamed history; neither invent hostility nor change
-physical action authority. Cure reconciles currently observable information,
-not all unseen subjects or stale memory globally.
-
-Proposed cure adaptation: extra healing always clears hallucination; poison
-clears it after accepted unsustained exposure, even if further loss is bounded.
-Resisted, immune or sustained poison does not. This is not yet approved.
-
-### Cancellation and device candidates
-
-- **Cancellation delivery:** six-cell first-contact ray, Intellect + Lore versus
-  Speed + Agility, ties dodge; 100/100 preparation/recovery, one charge, no
-  automatic identification. This adopts existing utility-device conventions
-  rather than source no-save delivery.
-- **Marked abilities:** cancel until explicitly restored, without an automatic
-  timer. The mark must cover that ability's rider, passive-trigger and hold
-  maintenance paths as well as explicit invocation. Use shared capability
-  identity, not species-only rules or a blanket voluntary-action prohibition.
-  The same marked capability behaves identically on PCs and NPCs.
-- **Reapplication:** reacquiring/reapplying the same canceled ability does not
-  bypass suppression. Proposed distinction: remove current invisibility/guise
-  sources, but allow a genuinely new independent application later. An ongoing
-  veto and one-time removal are different contracts; this candidate distinction
-  still requires selection and precise saved source identity.
-- **Paid work:** interrupt a wholly canceled pending ability, retaining spent
-  costs and releasing unspent reservations. If only a rider is canceled, retain
-  ordinary attack damage without that rider. Release exact dependent holds, not
-  another holder's link. Never undo previous poison, drains or theft.
-- **Preservation:** keep owned grants, HD, purchases, ordinary damage/movement,
-  flight and regeneration unless explicitly selected as cancellable. Do not
-  destroy progression sources to simulate suppression.
-- **Magic missile:** six-cell first-contact Lore/Agility delivery, 1d4+1 Energy
-  damage, no bounce, ends on dodge, identifies on use. Payload/check/type are
-  proposed TOR adaptations, not approved combat tuning.
-- **Nothing:** ordinary paid charge-consuming no-op with no recognition. Do not
-  optimize away timing/holds or rewrite existing empty-device admission merely
-  to copy another source branch.
-
-**Drain Life candidate:** same authored room plus unobstructed physical line,
-independent of illumination; in corridors, two-cell range with obstruction.
-Select all other eligible creatures, not just foes. “Living” eligibility must be
-defined explicitly rather than silently excluding an undead creature that still
-owns Health. Doorway ownership and maze membership need concrete witnesses.
-This spatial policy is an adaptation of source room/passage selection.
-
-Retain source half-Health/equal-share rounding, with sacrifice as an unresisted
-cost and recipients taking ordinary **Vital** damage with resistance/immunity,
-no extra save. Snapshot live Health and targets at atomic resolution. Proposed
-100/100 timing, no recognition; no targets spends charge without Health, and
-below 2 Health spends neither charge nor Health while elapsed preparation is
-not refunded. At admission and at completion, define this consistently without
-exposing hidden target counts. Charge, cost, damage, RNG, deaths, growth and hold
-cleanup share rollback and ordinary causal XP attribution. More targets than
-half-Health correctly produce zero shares. Geometry, Vital resistance and these
-paid-resolution details remain unapproved.
-
-### Permanent growth and haste candidates
-
-**Gain strength:** +1 permanent Strength through a provenance-backed acquisition,
-not an edit to birth stats or a condition masquerading as permanent ownership.
-Candidate cap is the ruleset's permanent attribute cap, currently 5, not its
-1,000 derived-value guard. Temporary/ring bonuses do not consume the proposed
-allowance; existing poison deficit remains independent. At cap, the proposed
-completed dose consumes/identifies but grants nothing. Preserve prior HD choices,
-seeds and ordinary blocked-growth rules; define interaction with later purchases,
-drain/regrowth and respec before implementing. Cap and paid-no-op are proposals.
-
-**Raise level:** at resolution credit only the positive XP shortfall to the next
-ordinary threshold, then use normal Game-owned growth finalization. Preserve
-selected future source, seeded Health, owned purchase entitlement and restoration
-policy; do not insert an HD or replace earned XP. Candidate: bank credited XP if
-growth is blocked; when already funded, credit zero rather than letting repeated
-blocked doses stockpile thresholds. Completed use consumes/identifies even at cap
-or when blocked. Account for intervening earned XP during preparation and checked
-wide arithmetic. These payment/threshold/cap choices are not approved.
-
-**Haste self:** 4–7 base turns, ordinary paid drink and existing nonstacking
-action-duration rules. Candidate repetition policy: while this potion's haste
-remains active, another dose removes that potion haste and imposes 0–7 base turns
-of forced rest; unrelated haste sources remain owned. This source-specific repeat
-policy deliberately differs from source's general hasted flag. Settle slow
-interaction, zero exhaustion, expiry during paid work and condition identity.
-Already-captured action timing remains captured; nutrition, light fuel and expiry
-clocks do not accelerate.
+The earlier unapproved candidate tables are intentionally removed to prevent
+accidental implementation. In particular, do not reintroduce a cancellation save,
+a short Drain corridor radius or resistance, a restoration mechanic, potion-only
+haste overdose, duration stacking for Monster detection, blanket never-identify
+Monster detection, blanket undistorted stairs, or a six-cell Missile cap. The
+reconstruction decisions above and pinned source findings own the accepted scope.
 
 ## Shared implementation anchors and boundaries
 
@@ -381,17 +276,15 @@ These are reuse points, not claims that the new capabilities already exist:
   lifecycle cleanup, not permission to release all holds.
 - The [default rules](../../crates/simulation/data/default-ruleset.toml) provide
   attribute cap 5, derived guard 1,000, one-turn consumption and two grip units.
-  Current Rogue actors use 100 ticks per base turn. These explain the candidate
-  profile's units; they do not approve its values. Existing weapon sockets
+  Current Rogue actors use 100 ticks per base turn. These anchor the accepted translation's units. Existing weapon sockets
   require a weapon attack, so ordinary held-tool compatibility needs real support
   without inventing a free hand or fake attack.
 
 ## Implementation sequence after resumption and decisions
 
-1. Review one concise rules profile, freeze material choices and independent
-   acceptance cases. Request any compatibility decisions explicitly; do not
-   invent version numbers. Begin later in an isolated branch based on the
-   qualified dependency state, not frozen inputs of another qualification run.
+1. Preserve the accepted rules profile and independent acceptance cases in
+   remotely verified checkpoint commits. Coordinate authorized current-only
+   schema changes and all callers; historical evidence does not qualify new code.
 2. Implement room Light and portable emitter composition, item activation,
    equipment/fuel and persistence under one geometry/lighting owner.
 3. Implement mapping/detection authority, then hallucination/cures and shared

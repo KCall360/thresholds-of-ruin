@@ -5,7 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 60;
+pub const PROTOCOL_VERSION: u32 = 61;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -224,6 +224,38 @@ pub enum Direction {
     Down,
 }
 
+/// Permitted public input mode, not the hidden device effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceActivation {
+    Direction,
+    SelfTarget,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DeviceAim {
+    Direction { direction: Direction },
+    SelfTarget {},
+}
+impl<'de> Deserialize<'de> for DeviceAim {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Direction {
+                #[serde(deserialize_with = "read_direction_token")]
+                direction: Direction,
+            },
+            SelfTarget {},
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::Direction { direction } => Self::Direction { direction },
+            Fields::SelfTarget {} => Self::SelfTarget {},
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
@@ -270,7 +302,7 @@ pub enum Action {
     },
     Zap {
         item: ItemTarget,
-        direction: Direction,
+        aim: DeviceAim,
     },
     Identify {
         choice: IntentionId,
@@ -346,8 +378,7 @@ impl<'de> Deserialize<'de> for Action {
             },
             Zap {
                 item: ItemTarget,
-                #[serde(deserialize_with = "read_direction_token")]
-                direction: Direction,
+                aim: DeviceAim,
             },
             Identify {
                 choice: IntentionId,
@@ -415,7 +446,7 @@ impl<'de> Deserialize<'de> for Action {
             Fields::Drink { item } => Self::Drink { item },
             Fields::Eat { item } => Self::Eat { item },
             Fields::Read { item } => Self::Read { item },
-            Fields::Zap { item, direction } => Self::Zap { item, direction },
+            Fields::Zap { item, aim } => Self::Zap { item, aim },
             Fields::Identify { choice, item } => Self::Identify { choice, item },
             Fields::ExamineTrap { trap } => Self::ExamineTrap { trap },
             Fields::SetDoor { door, open } => Self::SetDoor { door, open },
@@ -758,6 +789,7 @@ pub struct ItemInteractionView {
     pub edible: bool,
     pub readable: bool,
     pub zappable: bool,
+    pub device_activation: Option<DeviceActivation>,
     pub charges: Option<u16>,
 }
 impl<'de> Deserialize<'de> for ItemInteractionView {
@@ -780,6 +812,8 @@ impl<'de> Deserialize<'de> for ItemInteractionView {
             readable: bool,
             zappable: bool,
             #[serde(deserialize_with = "required_nullable")]
+            device_activation: Option<DeviceActivation>,
+            #[serde(deserialize_with = "required_nullable")]
             charges: Option<u16>,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
@@ -795,6 +829,7 @@ impl<'de> Deserialize<'de> for ItemInteractionView {
             edible: fields.edible,
             readable: fields.readable,
             zappable: fields.zappable,
+            device_activation: fields.device_activation,
             charges: fields.charges,
         })
     }

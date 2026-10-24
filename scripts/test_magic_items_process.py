@@ -378,7 +378,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         subject, initial = self.client()
         carried = self.collect(subject, initial, [peer])
         wand = items(carried, "wand")[0]
-        started = self.act(subject, {"type": "zap", "item": wand["id"], "direction": "east"})
+        started = self.act(subject, {"type": "zap", "item": wand["id"], "aim": {"kind": "direction", "direction": "east"}})
         self.assertIsNone(started["error"])
         self.assertIsNotNone(observation(started)["interactions"]["preparation"])
         self.assertIsNone(self.request(subject, {"type": "release_control"})["error"])

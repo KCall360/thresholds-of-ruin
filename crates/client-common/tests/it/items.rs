@@ -43,6 +43,7 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 edible: false,
                 readable: false,
                 zappable: false,
+                device_activation: None,
                 charges: None,
             },
             ItemInteractionView {
@@ -57,6 +58,7 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 edible: false,
                 readable: false,
                 zappable: false,
+                device_activation: None,
                 charges: None,
             },
         ],
@@ -177,7 +179,9 @@ fn magic_items_use_only_disclosed_affordances_and_never_test_unknown_charges() {
             zap_action(&view, target(2), Direction::North).unwrap(),
             Action::Zap {
                 item: target(2),
-                direction: Direction::North
+                aim: DeviceAim::Direction {
+                    direction: Direction::North
+                }
             }
         );
         assert_eq!(
@@ -246,4 +250,50 @@ fn projectile_details_label_remembered_bonuses_without_inventing_attack() {
     );
     view.interactions.as_mut().unwrap().inventory[0].known_projectile_bonus = None;
     assert!(tor_client_common::items::equipment_details(&view, target(1)).is_none());
+}
+
+#[test]
+fn identified_self_device_uses_disclosed_mode_without_direction_prompt() {
+    let source = paired_equipment(equipment_slot("ring", "on a finger", false));
+    let mut view = tor_client_common::test_support::observation();
+    view.inventory = source.inventory;
+    view.interactions = source.interactions;
+    view.interactions.as_mut().unwrap().slots.clear();
+    for row in &mut view.interactions.as_mut().unwrap().inventory {
+        row.slot = None;
+        row.equipped_slot = None;
+    }
+    view.inventory[1].class = ItemClass::Wand;
+    view.inventory[1].identified = true;
+    let device = &mut view.interactions.as_mut().unwrap().inventory[1];
+    device.zappable = true;
+    device.device_activation = Some(DeviceActivation::SelfTarget);
+    let valid = StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: view.clone(),
+    };
+    assert!(
+        valid.validate().is_ok(),
+        "valid disclosed self device premise"
+    );
+    let mut unknown = valid.clone();
+    unknown.observation.inventory[1].identified = false;
+    assert!(
+        unknown.validate().is_err(),
+        "unknown family must not expose self aim"
+    );
+    unknown.observation.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::Direction);
+    assert!(
+        unknown.validate().is_ok(),
+        "unknown directional input mode positive control"
+    );
+    assert_eq!(
+        item_action(&view, target(2), ItemOperation::Zap).unwrap(),
+        Action::Zap {
+            item: target(2),
+            aim: DeviceAim::SelfTarget {}
+        }
+    );
 }

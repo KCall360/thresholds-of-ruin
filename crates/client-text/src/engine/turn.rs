@@ -627,7 +627,10 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
         Goal::MagicItem { action } => {
             let view = &scene.state.observation;
             let current = match action {
-                Action::Zap { item, direction } => tor_client_common::items::zap_action(view, *item, *direction),
+                Action::Zap { item, aim } => match aim {
+                    tor_protocol::DeviceAim::Direction { direction } => tor_client_common::items::zap_action(view, *item, *direction),
+                    tor_protocol::DeviceAim::SelfTarget {} => tor_client_common::items::item_action(view, *item, tor_client_common::items::ItemOperation::Zap),
+                },
                 Action::Identify { choice, item } => tor_client_common::items::identification_action(view, *item).and_then(|current| {
                     if matches!(&current, Action::Identify { choice: active, .. } if active == choice) { Ok(current) } else { Err("That identification choice is no longer available.".into()) }
                 }),

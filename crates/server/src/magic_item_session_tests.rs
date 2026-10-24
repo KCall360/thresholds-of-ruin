@@ -384,7 +384,9 @@ fn late_store_rejection_rolls_back_magic_charge_and_paid_selection_then_retries(
                 );
                 Action::Zap {
                     item: wand,
-                    direction: Direction::East,
+                    aim: tor_protocol::DeviceAim::Direction {
+                        direction: Direction::East,
+                    },
                 }
             }
             "read" => Action::Read { item: scroll },
@@ -856,4 +858,118 @@ fn encoded_control_reads_pay_once_and_restore_armed_charge_from_stored_package()
     drop(wire);
     let reopened = Wire::new(Engine::open(&path, crate::Scenario::two_room(999)).unwrap());
     assert_eq!(reopened.checkpoint(), expected);
+}
+
+#[test]
+fn encoded_unknown_ray_self_aim_rejects_without_payment_and_direction_retries_once() {
+    let mut wire = Wire::new(Engine::memory(scenario(false)).unwrap());
+    let wand = wire.take(ItemClass::Wand);
+    let snapshot = wire.snapshot(OWNER);
+    let item = snapshot
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|row| row.id == wand)
+        .unwrap();
+    assert!(!item.identified);
+    let affordance = snapshot
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory
+        .iter()
+        .find(|row| row.item == wand)
+        .unwrap();
+    assert!(affordance.zappable);
+    assert_eq!(
+        affordance.device_activation,
+        Some(DeviceActivation::Direction)
+    );
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::SelfTarget {},
+        },
+    );
+    let before = wire.checkpoint();
+    rejected(wire.send(OWNER, "unknown-self", request));
+    assert_eq!(
+        wire.checkpoint(),
+        before,
+        "rejection must not admit, spend, learn or roll"
+    );
+    // Exact balances require the ordinary paid identification path; merely
+    // firing an unknown device must not manufacture charge knowledge.
+    let scroll = wire.take(ItemClass::Scroll);
+    wire.act("identify-scroll", Action::Read { item: scroll });
+    let pending = choice(&wire.snapshot(OWNER));
+    wire.act(
+        "identify-ray",
+        Action::Identify {
+            choice: pending.choice,
+            item: Some(wand),
+        },
+    );
+    let known = wire.snapshot(OWNER);
+    let row = known
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory
+        .iter()
+        .find(|row| row.item == wand)
+        .unwrap();
+    assert_eq!(row.charges, Some(3));
+    assert_eq!(row.device_activation, Some(DeviceActivation::Direction));
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::SelfTarget {},
+        },
+    );
+    let before = wire.checkpoint();
+    rejected(wire.send(OWNER, "known-ray-self", request));
+    assert_eq!(wire.checkpoint(), before);
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::East,
+            },
+        },
+    );
+    let admitted = ack(wire.send(OWNER, "ordinary-ray", request.clone()));
+    let resolved = wire.finish(OWNER, "ordinary-ray", &request);
+    assert_eq!(resolved.entry_id(), admitted.entry_id());
+    let snapshot = wire.snapshot(OWNER);
+    let affordance = snapshot
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory
+        .iter()
+        .find(|row| row.item == wand)
+        .unwrap();
+    assert_eq!(affordance.charges, Some(2));
+    assert_eq!(
+        affordance.device_activation,
+        Some(DeviceActivation::Direction)
+    );
+    let after = wire.checkpoint();
+    assert_eq!(ack(wire.send(OWNER, "ordinary-ray", request)), resolved);
+    assert_eq!(
+        wire.checkpoint(),
+        after,
+        "receipt retry spends no second charge"
+    );
 }

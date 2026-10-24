@@ -354,6 +354,7 @@ pub struct ItemInteractionView {
     pub drinkable: bool,
     pub readable: bool,
     pub zappable: bool,
+    pub device_activation: Option<crate::DeviceActivation>,
     pub charges: Option<u16>,
     pub edible: bool,
 }
@@ -400,7 +401,7 @@ pub enum Work {
     },
     Zap {
         item: ItemId,
-        direction: crate::abilities::StepDirection,
+        aim: crate::DeviceAim,
     },
     Eat {
         item: ItemId,
@@ -439,7 +440,7 @@ impl<'de> serde::Deserialize<'de> for Work {
             },
             Zap {
                 item: ItemId,
-                direction: crate::abilities::StepDirection,
+                aim: crate::DeviceAim,
             },
             Eat {
                 item: ItemId,
@@ -469,7 +470,7 @@ impl<'de> serde::Deserialize<'de> for Work {
             Fields::Unequip { item } => Self::Unequip { item },
             Fields::Drink { item } => Self::Drink { item },
             Fields::Read { item } => Self::Read { item },
-            Fields::Zap { item, direction } => Self::Zap { item, direction },
+            Fields::Zap { item, aim } => Self::Zap { item, aim },
             Fields::Eat { item } => Self::Eat { item },
         })
     }
@@ -504,9 +505,9 @@ impl Work {
             Self::Unequip { item } => Action::Unequip { item: *item },
             Self::Drink { item } => Action::Drink { item: *item },
             Self::Read { item } => Action::Read { item: *item },
-            Self::Zap { item, direction } => Action::Zap {
+            Self::Zap { item, aim } => Action::Zap {
                 item: *item,
-                direction: *direction,
+                aim: *aim,
             },
             Self::Eat { item } => Action::Eat { item: *item },
         }
@@ -927,7 +928,10 @@ impl Game {
             return self.respec_plan(actor, basis, replacement, supplies);
         }
         let preparation = self.item_work_duration(actor, work.clone())?;
-        if let Work::Zap { item, direction } = work {
+        if let Work::Zap { item, aim } = work {
+            let crate::DeviceAim::Direction { direction } = aim else {
+                return Err(GameError::ItemUnavailable);
+            };
             let ray = self.compile_device_ray_plan(actor, item, direction, preparation)?;
             self.item_allocation(&ray)?;
             return Ok(ray);

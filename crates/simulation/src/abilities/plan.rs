@@ -434,7 +434,9 @@ impl Plan {
             },
             Self::Zap { item, ray, .. } => Work::Zap {
                 item: *item,
-                direction: ray.direction,
+                aim: crate::DeviceAim::Direction {
+                    direction: ray.direction,
+                },
             },
             Self::Projectile(plan) => Work::UseAbility {
                 id: plan.ability.clone(),

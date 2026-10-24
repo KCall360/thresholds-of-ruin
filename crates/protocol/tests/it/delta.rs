@@ -105,6 +105,7 @@ fn equipped_state(requires_attack: bool) -> StateView {
             edible: false,
             readable: false,
             zappable: false,
+            device_activation: None,
             charges: None,
         }],
     });
@@ -1518,6 +1519,7 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
             edible: false,
             readable: false,
             zappable: true,
+            device_activation: Some(tor_protocol::DeviceActivation::Direction),
             charges: None,
         }],
     });

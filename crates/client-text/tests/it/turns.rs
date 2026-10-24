@@ -587,6 +587,7 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
             edible: false,
             readable: false,
             zappable: false,
+            device_activation: None,
             charges: None,
         }],
     });
@@ -3637,6 +3638,7 @@ fn magic_turn_state() -> StateView {
                 edible: false,
                 readable: true,
                 zappable: false,
+                device_activation: None,
                 charges: None,
             },
             ItemInteractionView {
@@ -3651,6 +3653,7 @@ fn magic_turn_state() -> StateView {
                 edible: false,
                 readable: false,
                 zappable: true,
+                device_activation: Some(tor_protocol::DeviceActivation::Direction),
                 charges: None,
             },
         ],
@@ -3759,7 +3762,9 @@ async fn ordinary_zap_and_paid_abort_use_current_authority_and_no_hidden_names()
         } else {
             let action = Action::Zap {
                 item: wand,
-                direction: Direction::East,
+                aim: DeviceAim::Direction {
+                    direction: Direction::East,
+                },
             };
             assert!(is_act(request, &action));
             after.observation.tick += 10;
@@ -3814,6 +3819,7 @@ fn weapon_preview_state() -> StateView {
             edible: false,
             readable: false,
             zappable: false,
+            device_activation: None,
             charges: None,
         }],
     });

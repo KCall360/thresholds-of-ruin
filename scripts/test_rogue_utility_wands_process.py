@@ -66,7 +66,7 @@ class RogueUtilityWandsProcesses(ProcessTestCase):
 
     def zap(self, clients, identity):
         player, *peers = clients
-        self.assertIsNone(self.act(player, {"type": "zap", "item": identity, "direction": "east"})["error"])
+        self.assertIsNone(self.act(player, {"type": "zap", "item": identity, "aim": {"kind": "direction", "direction": "east"}})["error"])
         for _ in range(64):
             current = self.snapshot(player)
             combat = observation(current)["combat"]

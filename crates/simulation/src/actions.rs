@@ -635,7 +635,7 @@ impl Game {
                     Action::Unequip { item } => crate::Work::Unequip { item },
                     Action::Drink { item } => crate::Work::Drink { item },
                     Action::Read { item } => crate::Work::Read { item },
-                    Action::Zap { item, direction } => crate::Work::Zap { item, direction },
+                    Action::Zap { item, aim } => crate::Work::Zap { item, aim },
                     Action::Eat { item } => crate::Work::Eat { item },
                     _ => return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention)),
                 };

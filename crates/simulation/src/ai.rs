@@ -856,7 +856,10 @@ impl Game {
         }
         candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
         for (_, item, direction) in candidates {
-            let work = crate::Work::Zap { item, direction };
+            let work = crate::Work::Zap {
+                item,
+                aim: crate::DeviceAim::Direction { direction },
+            };
             if let Some(pending) = self.preparation(actor).filter(|pending| {
                 !pending.active
                     && pending.plan.work() == work

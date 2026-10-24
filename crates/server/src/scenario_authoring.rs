@@ -1833,6 +1833,48 @@ mod tests {
     }
 
     #[test]
+    fn empty_effect_self_ability_is_valid_and_legal_as_a_nothing_device() {
+        use tor_simulation::rules::{AbilityDef, Ruleset, StrikeSource};
+        // One canonical checkless strike with no outcomes, not an invented
+        // Nothing effect or an invalid empty strike sequence.
+        let ability: AbilityDef = toml::from_str(r#"
+            id = "fixture.nothing"
+            name = "Nothing"
+            interaction = "non_hostile"
+            tags = []
+            basic_attack = false
+            invocation = "actor_target"
+            timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }
+            reach = { kind = "self_only" }
+            strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [], on_failure = [], descriptors = [], riders = [] }] }
+            ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" }
+        "#).unwrap();
+        let StrikeSource::Authored { strikes } = &ability.strikes else {
+            panic!("authored source")
+        };
+        assert_eq!(strikes.len(), 1);
+        assert!(strikes[0].check.is_none());
+        assert!(strikes[0].on_success.is_empty() && strikes[0].on_failure.is_empty());
+        let mut document = rules().document().clone();
+        document.abilities.push(ability);
+        let rules = Ruleset::validate(document)
+            .expect("ordinary self no-op is legal before device validation");
+        let device = DeviceSpec {
+            ability: "fixture.nothing".into(),
+            initial_charges: ChargeRange {
+                minimum: 3,
+                maximum: 3,
+            },
+            discovery: ItemDiscovery::Never,
+        };
+        let compiled = device
+            .compile(&rules)
+            .expect("a legal self no-op must be usable as a device");
+        assert_eq!(compiled.ability.as_str(), "fixture.nothing");
+        assert_eq!(compiled.initial_charges.minimum, 3);
+    }
+
+    #[test]
     fn authored_consumable_discovery_omission_preserves_self_effect_policy() {
         let spec: ConsumableSpec = toml::from_str(
             r#"effects = [{ kind = "heal", amount = { kind = "fixed", amount = 5 } }]"#,

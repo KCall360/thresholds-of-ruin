@@ -30,6 +30,7 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
             edible: false,
             readable: false,
             zappable: false,
+            device_activation: None,
             charges: None,
         }],
     });
@@ -75,6 +76,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 edible: false,
                 readable: false,
                 zappable: false,
+                device_activation: None,
                 charges: None,
             },
             ItemInteractionView {
@@ -89,6 +91,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 edible: false,
                 readable: false,
                 zappable: false,
+                device_activation: None,
                 charges: None,
             },
         ],
@@ -356,6 +359,7 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
             edible: false,
             readable: false,
             zappable: false,
+            device_activation: None,
             charges: None,
         }],
     });
@@ -444,6 +448,7 @@ fn magic_state() -> StateView {
                 edible: false,
                 readable: true,
                 zappable: false,
+                device_activation: None,
                 charges: None,
             },
             ItemInteractionView {
@@ -458,6 +463,7 @@ fn magic_state() -> StateView {
                 edible: false,
                 readable: false,
                 zappable: true,
+                device_activation: Some(tor_protocol::DeviceActivation::Direction),
                 charges: None,
             },
         ],
@@ -480,14 +486,18 @@ fn ordinary_magic_commands_select_one_disclosed_item_and_direction() {
             "zap the ivory wand northeast".to_owned(),
             Action::Zap {
                 item: wand,
-                direction: Direction::NorthEast,
+                aim: DeviceAim::Direction {
+                    direction: Direction::NorthEast,
+                },
             },
         ),
         (
             format!("zap #{wand} down"),
             Action::Zap {
                 item: wand,
-                direction: Direction::Down,
+                aim: DeviceAim::Direction {
+                    direction: Direction::Down,
+                },
             },
         ),
     ] {
@@ -652,4 +662,28 @@ fn projectile_commands_open_source_picker_without_actor_ray_or_step_fallback() {
         );
     }
     assert_eq!(state, before);
+}
+
+#[test]
+fn identified_self_device_command_needs_no_direction() {
+    let mut view = magic_state();
+    view.observation.ground_items.clear();
+    view.observation.inventory[1].identified = true;
+    view.observation.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::SelfTarget);
+    assert!(
+        view.validate().is_ok(),
+        "valid disclosed self device premise"
+    );
+    let item = view.observation.inventory[1].id;
+    assert_eq!(
+        parse(&format!("zap #{item}"), &view).unwrap(),
+        Input::Command(Command::Act {
+            expected_revision: view.revision,
+            action: Action::Zap {
+                item,
+                aim: DeviceAim::SelfTarget {}
+            }
+        })
+    );
 }

@@ -806,7 +806,9 @@ fn magic_choices_resolve_exact_owner_tokens_category_and_carried_incarnation() {
         },
         p::Action::Zap {
             item: scope.item(item),
-            direction: p::Direction::SouthWest,
+            aim: p::DeviceAim::Direction {
+                direction: p::Direction::SouthWest,
+            },
         },
     ] {
         let resolved = decode_action(&action, &scope, &view).unwrap();
@@ -902,6 +904,7 @@ fn equipped_weapon_selection_keeps_item_scope_socket_and_contact_authority_indep
             drinkable: false,
             readable: false,
             zappable: false,
+            device_activation: None,
             charges: None,
             edible: false,
         }],
@@ -1042,6 +1045,7 @@ fn projectile_delivery_preserves_exact_owned_operands_without_hidden_profile_aut
                 drinkable: false,
                 readable: false,
                 zappable: false,
+                device_activation: None,
                 charges: None,
                 edible: false,
             }

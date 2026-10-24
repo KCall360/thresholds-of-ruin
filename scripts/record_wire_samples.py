@@ -162,7 +162,7 @@ CLIENT = [
                 {"type": "unequip", "item": "i_" + "04" * 32},
                 {"type": "drink", "item": "i_" + "04" * 32},
                 {"type": "read", "item": "i_" + "04" * 32},
-                {"type": "zap", "item": "i_" + "04" * 32, "direction": "east"},
+                {"type": "zap", "item": "i_" + "04" * 32, "aim": {"kind": "direction", "direction": "east"}},
                 {"type": "identify", "choice": "choice-sample", "item": "i_" + "04" * 32},
                 {"type": "identify", "choice": "choice-sample", "item": None},
                 {"type": "eat", "item": "i_" + "04" * 32},
@@ -320,7 +320,7 @@ class Recorder(ProcessTestCase):
             if message and message["type"] == "snapshot")
         current = self.act(player, {"type": "identify", "choice": pending["choice"], "item": wand})
         self.assertIsNone(current["error"])
-        current = self.act(player, {"type": "zap", "item": wand, "direction": "east"})
+        current = self.act(player, {"type": "zap", "item": wand, "aim": {"kind": "direction", "direction": "east"}})
         self.assertIsNone(current["error"])
         rows = current["state"]["observation"]["interactions"]["inventory"]
         self.assertEqual(next(row["charges"] for row in rows if row["item"] == wand), 2)

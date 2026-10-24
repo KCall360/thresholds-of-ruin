@@ -116,7 +116,7 @@ pub(crate) enum Action {
     },
     Zap {
         item: u64,
-        direction: Direction,
+        aim: DeviceAim,
     },
     Identify {
         choice: tor_simulation::IntentionId,
@@ -450,9 +450,9 @@ impl From<&crate::actions::Action> for Action {
             Backend::Unequip { item } => Self::Unequip { item: *item },
             Backend::Drink { item } => Self::Drink { item: *item },
             Backend::Read { item } => Self::Read { item: *item },
-            Backend::Zap { item, direction } => Self::Zap {
+            Backend::Zap { item, aim } => Self::Zap {
                 item: *item,
-                direction: (*direction).into(),
+                aim: (*aim).into(),
             },
             Backend::Identify { choice, item } => Self::Identify {
                 choice: *choice,
@@ -507,9 +507,9 @@ impl From<Action> for crate::actions::Action {
             Action::Unequip { item } => Self::Unequip { item },
             Action::Drink { item } => Self::Drink { item },
             Action::Read { item } => Self::Read { item },
-            Action::Zap { item, direction } => Self::Zap {
+            Action::Zap { item, aim } => Self::Zap {
                 item,
-                direction: direction.into(),
+                aim: aim.into(),
             },
             Action::Identify { choice, item } => Self::Identify { choice, item },
             Action::Eat { item } => Self::Eat { item },
@@ -1514,6 +1514,49 @@ mod tests {
         }
     }
     #[test]
+    fn stored_device_aim_is_closed_named_and_independent_of_transport() {
+        use crate::actions::DeviceAim;
+        for aim in [
+            DeviceAim::Direction {
+                direction: Direction::NorthWest,
+            },
+            DeviceAim::SelfTarget {},
+        ] {
+            let stored = Stored {
+                action: Action::Zap { item: 71, aim },
+            };
+            let encoded = serde_json::to_vec(&stored).unwrap();
+            assert_eq!(
+                crate::storage::codec::strict::<Stored>(&encoded).unwrap(),
+                stored
+            );
+            let value: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+            assert!(value["action"].get("direction").is_none());
+            assert!(value["action"]["aim"].is_object());
+        }
+        for aim in [
+            r#""self_target""#,
+            r#"["self_target"]"#,
+            r#"{"kind":"self_target","direction":"east"}"#,
+            r#"{"kind":"self_target","target":1}"#,
+            r#"{"kind":"direction"}"#,
+            r#"{"kind":"direction","direction":"east","target":1}"#,
+            r#"{"kind":"direction","direction":null}"#,
+            r#"{"kind":"self_target","kind":"self_target"}"#,
+        ] {
+            let encoded = format!(r#"{{"action":{{"type":"zap","item":71,"aim":{aim}}}}}"#);
+            assert!(
+                crate::storage::codec::strict::<Stored>(encoded.as_bytes()).is_err(),
+                "{encoded}"
+            );
+        }
+        assert!(crate::storage::codec::strict::<Stored>(
+            br#"{"action":{"type":"zap","item":71,"direction":"east"}}"#
+        )
+        .is_err());
+    }
+
+    #[test]
     fn stored_action_rejects_unknown_fields_and_lossy_or_string_numbers() {
         for value in [
             r#"{"action":{"type":"use_ability","ability":"basic_melee","target":1}}"#,
@@ -1791,6 +1834,47 @@ mod tests {
                     .is_err(),
                 "{encoded}"
             );
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum DeviceAim {
+    Direction { direction: Direction },
+    SelfTarget {},
+}
+impl<'de> Deserialize<'de> for DeviceAim {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Direction { direction: Direction },
+            SelfTarget {},
+        }
+        Ok(match named_map(d)? {
+            Fields::Direction { direction } => Self::Direction { direction },
+            Fields::SelfTarget {} => Self::SelfTarget {},
+        })
+    }
+}
+impl From<crate::actions::DeviceAim> for DeviceAim {
+    fn from(value: crate::actions::DeviceAim) -> Self {
+        match value {
+            crate::actions::DeviceAim::Direction { direction } => Self::Direction {
+                direction: direction.into(),
+            },
+            crate::actions::DeviceAim::SelfTarget {} => Self::SelfTarget {},
+        }
+    }
+}
+impl From<DeviceAim> for crate::actions::DeviceAim {
+    fn from(value: DeviceAim) -> Self {
+        match value {
+            DeviceAim::Direction { direction } => Self::Direction {
+                direction: direction.into(),
+            },
+            DeviceAim::SelfTarget {} => Self::SelfTarget {},
         }
     }
 }

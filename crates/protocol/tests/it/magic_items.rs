@@ -7,7 +7,7 @@ fn item() -> ItemTarget {
 fn magic_commands_round_trip_only_current_named_opaque_operands() {
     for value in [
         json!({"type":"read","item":item()}),
-        json!({"type":"zap","item":item(),"direction":"north_east"}),
+        json!({"type":"zap","item":item(),"aim":{"kind":"direction","direction":"north_east"}}),
         json!({"type":"identify","choice":"opaque-choice","item":item()}),
         json!({"type":"identify","choice":"opaque-choice","item":null}),
     ] {
@@ -37,7 +37,7 @@ fn magic_commands_round_trip_only_current_named_opaque_operands() {
     assert!(serde_json::from_str::<Action>(&raw).is_err());
 }
 fn affordance() -> Value {
-    json!({"item":item(),"slot":null,"equipped_slot":null,"known_equipment":null,"known_projectile_bonus":null,"known_cursed":null,"known_protected":null,"drinkable":false,"edible":false,"readable":false,"zappable":true,"charges":null})
+    json!({"item":item(),"slot":null,"equipped_slot":null,"known_equipment":null,"known_projectile_bonus":null,"known_cursed":null,"known_protected":null,"drinkable":false,"edible":false,"readable":false,"zappable":true,"device_activation":"direction","charges":null})
 }
 #[test]
 fn magic_affordances_require_explicit_flags_and_instance_count_and_reject_private_fields() {
@@ -50,6 +50,7 @@ fn magic_affordances_require_explicit_flags_and_instance_count_and_reject_privat
     for field in [
         "readable",
         "zappable",
+        "device_activation",
         "charges",
         "known_cursed",
         "known_protected",
@@ -165,4 +166,31 @@ fn crumbled_event_uses_only_opaque_source_and_exact_requested_quantity() {
     ] {
         assert!(serde_json::from_value::<Event>(malformed).is_err());
     }
+}
+
+#[test]
+fn device_aim_is_closed_named_and_rejects_legacy_or_foreign_operands() {
+    for value in [
+        json!({"kind":"self_target"}),
+        json!({"kind":"direction","direction":"east"}),
+    ] {
+        let decoded: DeviceAim = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+    }
+    for value in [
+        json!({"kind":"self_target","target":"forged"}),
+        json!({"kind":"self_target","direction":"east"}),
+        json!({"kind":"direction"}),
+        json!({"kind":"direction","direction":{"east":null}}),
+        json!(["self_target"]),
+    ] {
+        assert!(
+            serde_json::from_value::<DeviceAim>(value.clone()).is_err(),
+            "{value}"
+        );
+    }
+    assert!(serde_json::from_value::<Action>(
+        json!({"type":"zap","item":item(),"direction":"east"})
+    )
+    .is_err());
 }

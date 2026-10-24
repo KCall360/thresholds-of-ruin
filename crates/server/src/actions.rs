@@ -46,7 +46,7 @@ pub enum Action {
     },
     Zap {
         item: u64,
-        direction: Direction,
+        aim: DeviceAim,
     },
     Identify {
         choice: tor_simulation::IntentionId,
@@ -734,7 +734,13 @@ mod magic_item_adapter_tests {
             Action::Read { item: u64::MAX },
             Action::Zap {
                 item: 71,
-                direction: Direction::NorthWest,
+                aim: DeviceAim::Direction {
+                    direction: Direction::NorthWest,
+                },
+            },
+            Action::Zap {
+                item: 71,
+                aim: DeviceAim::SelfTarget {},
             },
             Action::Identify {
                 choice: sim::IntentionId(17),
@@ -760,4 +766,11 @@ mod magic_item_adapter_tests {
             );
         }
     }
+}
+
+/// Captured caller aim, independent of hidden device delivery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeviceAim {
+    Direction { direction: Direction },
+    SelfTarget {},
 }

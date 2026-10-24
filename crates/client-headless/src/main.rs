@@ -636,7 +636,7 @@ mod magic_item_tests {
         let item = ItemTarget::from_digest([74; 32]);
         for value in [
             serde_json::json!({"type":"read","item":item}),
-            serde_json::json!({"type":"zap","item":item,"direction":"north"}),
+            serde_json::json!({"type":"zap","item":item,"aim":{"kind":"direction","direction":"north"}}),
             serde_json::json!({"type":"identify","choice":"paid-choice","item":item}),
             serde_json::json!({"type":"identify","choice":"paid-choice","item":null}),
         ] {

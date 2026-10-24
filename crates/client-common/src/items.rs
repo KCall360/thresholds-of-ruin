@@ -128,7 +128,10 @@ pub fn zap_action(
     {
         return Err("You can't zap that item.".into());
     }
-    Ok(Action::Zap { item, direction })
+    Ok(Action::Zap {
+        item,
+        aim: tor_protocol::DeviceAim::Direction { direction },
+    })
 }
 
 /// Resolve or abandon the current paid owner choice using its exact opaque token.

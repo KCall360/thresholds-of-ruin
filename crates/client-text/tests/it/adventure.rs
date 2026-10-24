@@ -251,6 +251,7 @@ fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() 
             edible: false,
             readable: false,
             zappable: false,
+            device_activation: None,
             charges: None,
         }],
     });
@@ -2003,6 +2004,7 @@ fn explicit_weapons_use_observed_equipped_pairs_in_both_text_modes() {
             edible: false,
             readable: false,
             zappable: false,
+            device_activation: None,
             charges: None,
         }],
     });
@@ -2125,6 +2127,7 @@ fn text_weapon_clause_stays_exact_through_explicit_supply_selection() {
             edible: false,
             readable: false,
             zappable: false,
+            device_activation: None,
             charges: None,
         }],
     });

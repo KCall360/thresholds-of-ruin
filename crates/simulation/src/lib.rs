@@ -9,6 +9,7 @@ mod actions;
 mod actor_creatures;
 mod actor_record;
 mod actor_store;
+pub mod appearance_state;
 pub mod arena;
 mod awareness;
 pub mod content_ids;
@@ -23,6 +24,7 @@ mod lifecycle;
 pub mod linked_hold;
 pub mod projectile_profiles;
 mod search_clock;
+pub mod spatial_scope;
 mod traps;
 pub use traps::{trap_kind_valid, TrapRegionBoundary};
 pub mod weapon_profiles;
@@ -90,7 +92,8 @@ mod equipment_knowledge;
 mod magic_items;
 pub use items::{CurrencyKind, ItemClass, ItemSpec};
 pub use magic_items::{
-    ChargeRange, DeviceSpec, IdentificationChoiceView, ItemDiscovery, ReadableSpec,
+    ChargeRange, DeviceActivation, DeviceAim, DeviceSpec, IdentificationChoiceView, ItemDiscovery,
+    ReadableSpec,
 };
 mod interactions;
 pub use interactions::{
@@ -195,7 +198,7 @@ pub enum Action {
     },
     Zap {
         item: ItemId,
-        direction: abilities::StepDirection,
+        aim: DeviceAim,
     },
     Identify {
         choice: IntentionId,
@@ -280,7 +283,7 @@ impl<'de> serde::Deserialize<'de> for Action {
             },
             Zap {
                 item: ItemId,
-                direction: abilities::StepDirection,
+                aim: DeviceAim,
             },
             Identify {
                 choice: IntentionId,
@@ -340,7 +343,7 @@ impl<'de> serde::Deserialize<'de> for Action {
             Fields::Unequip { item } => Self::Unequip { item },
             Fields::Drink { item } => Self::Drink { item },
             Fields::Read { item } => Self::Read { item },
-            Fields::Zap { item, direction } => Self::Zap { item, direction },
+            Fields::Zap { item, aim } => Self::Zap { item, aim },
             Fields::Identify { choice, item } => Self::Identify { choice, item },
             Fields::Eat { item } => Self::Eat { item },
             Fields::UseAbility {

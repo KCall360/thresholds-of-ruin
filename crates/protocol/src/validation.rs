@@ -202,9 +202,13 @@ impl StateView {
                     let Some(item) = inventory.get(&interaction.item) else {
                         return true;
                     };
-                    (!item.identified
-                        && (interaction.known_equipment.is_some()
-                            || interaction.known_projectile_bonus.is_some()))
+                    (interaction.zappable != interaction.device_activation.is_some())
+                        || (!item.identified
+                            && interaction.device_activation
+                                == Some(crate::DeviceActivation::SelfTarget))
+                        || (!item.identified
+                            && (interaction.known_equipment.is_some()
+                                || interaction.known_projectile_bonus.is_some()))
                         || interaction
                             .known_projectile_bonus
                             .as_ref()
