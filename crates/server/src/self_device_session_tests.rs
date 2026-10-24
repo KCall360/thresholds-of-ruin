@@ -362,6 +362,7 @@ fn paused_nothing_preserves_direction_and_payload_across_identification_and_dele
             Some(DeviceActivation::SelfTarget)
         );
         wire.service.engine.flush().unwrap();
+        let clock_watermark = wire.serial;
         drop(wire);
         std::fs::remove_dir_all(&root).unwrap();
         assert!(!root.exists());
@@ -376,6 +377,10 @@ fn paused_nothing_preserves_direction_and_payload_across_identification_and_dele
             assert!(engine.recovery_profile().records_replayed > 0);
         }
         let mut wire = Wire::new(engine); // exactly two real external owners, no AI conversion
+                                          // Request receipts are durable across reconnect; keep the existing
+                                          // caller's sequence instead of reusing clock-1 for different work.
+        wire.serial = clock_watermark;
+        assert!(wire.serial.checked_add(1).unwrap() > clock_watermark);
         let snapshot = wire.snapshot(OWNER);
         assert_eq!(snapshot.readiness.resume.len(), 1);
         let resume = Request::Command {
@@ -543,5 +548,219 @@ fn paid_self_device_applies_nonempty_captured_condition_to_user_not_direction_re
         "Never discovery remains independent of an observable condition"
     );
     assert_eq!(ack(wire.send(OWNER, "self-condition", request)), completed);
+    assert_eq!(wire.checkpoint(), after);
+}
+// OnUse discovery is completion-owned, while another actor retains independent
+// knowledge of its own device with the same identity.
+#[test]
+fn on_use_self_condition_identifies_only_on_completion_and_other_owner_remains_unknown() {
+    let root = tempfile::tempdir().unwrap();
+    let base = self_device_source(root.path(), true, true);
+    let package = base.package.as_ref().unwrap();
+    let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    manifest["archetypes"]["ember"]["device"]["discovery"] = json!("on_use");
+    let mut regions = package.region_defs().unwrap();
+    let mut region = serde_json::to_value(&regions[0]).unwrap();
+    // Existing second device, same actual identity, another independently
+    // controlled actor. Use supported authored carriage, not inventory injection.
+    let peer_item = region["items"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["id"] == 31)
+        .unwrap();
+    peer_item["carried_by"] = json!(OTHER.0);
+    peer_item["at"] = json!([5, 2, 0]);
+    regions[0] = serde_json::from_value(region).unwrap();
+    let rules = toml::to_string(package.rules().unwrap().document()).unwrap();
+    let package =
+        Package::from_parts(serde_json::from_value(manifest).unwrap(), regions, &rules).unwrap();
+    package.check().unwrap();
+    crate::scenario_package::write_package(
+        root.path(),
+        &package.manifest,
+        &package.region_defs().unwrap(),
+        &rules,
+    )
+    .unwrap();
+    crate::scenario_package::check(root.path()).unwrap();
+    let scenario = crate::scenario_package::load(root.path(), 42, None, true).unwrap();
+    let mut wire = Wire::new(Engine::memory(scenario).unwrap());
+    let wand = wire.take(ItemClass::Wand);
+    let physical = nothing_wand_id(&wire, wand);
+    let peer = wire.snapshot(OTHER);
+    let peer_wand = peer
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|row| row.class == ItemClass::Wand)
+        .unwrap()
+        .id;
+    for (actor, item) in [(OWNER, wand), (OTHER, peer_wand)] {
+        let snapshot = wire.snapshot(actor);
+        assert!(!nothing_identified(&snapshot, item));
+        assert_eq!(
+            nothing_affordance(&snapshot, item).device_activation,
+            Some(DeviceActivation::Direction)
+        );
+    }
+    let mut follower = wire
+        .service
+        .connect(
+            &Account {
+                user: "on-use-follower".into(),
+                token: "fixture".into(),
+                role: AccessRole::Spectator,
+                actors: BTreeSet::from([OWNER]),
+            },
+            "on-use-follower".into(),
+        )
+        .unwrap();
+    follower.messages.try_recv_frame().unwrap();
+    wire.service.handle(
+        follower.id,
+        "follow".into(),
+        Request::Attach { actor: OWNER },
+    );
+    let response = decode_response(&follower.messages.try_recv_frame().unwrap().text).unwrap();
+    let ServerMessage::Snapshot { snapshot, .. } = response else {
+        panic!("follow snapshot")
+    };
+    assert!(!nothing_identified(&snapshot, wand));
+    assert_eq!(
+        nothing_affordance(&snapshot, wand).device_activation,
+        Some(DeviceActivation::Direction)
+    );
+
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::East,
+            },
+        },
+    );
+    let before = wire.checkpoint();
+    assert_eq!(
+        nothing_items(&before)[&physical]["spec"]["identity"],
+        "fixture.nothing"
+    );
+    assert_eq!(
+        nothing_items(&before)["31"]["spec"]["identity"],
+        "fixture.nothing"
+    );
+    assert_eq!(
+        nothing_items(&before)["31"]["location"],
+        json!({"Carried": OTHER.0})
+    );
+    assert_eq!(nothing_items(&before)["31"]["charges"], 3);
+    let admitted = ack(wire.send(OWNER, "on-use-self", request.clone()));
+    assert!(
+        !nothing_identified(&wire.snapshot(OWNER), wand),
+        "admission cannot identify"
+    );
+    wire.service.run_until_blocked();
+    wire.drain(OWNER);
+    wire.drain(OTHER);
+    let started = ack(wire.send(OWNER, "on-use-self", request.clone()));
+    assert!(matches!(
+        started,
+        RequestReceipt::Admitted {
+            phase: IntentionPhase::Started,
+            ..
+        }
+    ));
+    assert_eq!(started.entry_id(), admitted.entry_id());
+    let pending = wire.checkpoint();
+    assert_eq!(nothing_items(&pending)[&physical]["charges"], 3);
+    let snapshot = wire.snapshot(OWNER);
+    assert!(
+        snapshot
+            .state
+            .observation
+            .interactions
+            .as_ref()
+            .unwrap()
+            .preparation
+            .as_ref()
+            .unwrap()
+            .remaining
+            > 0
+    );
+    assert!(
+        !nothing_identified(&snapshot, wand),
+        "preparation cannot identify"
+    );
+    assert!(!snapshot
+        .state
+        .observation
+        .combat
+        .as_ref()
+        .unwrap()
+        .own_stats
+        .as_ref()
+        .unwrap()
+        .conditions
+        .iter()
+        .any(|c| c.condition.id == "fixture.self_device"));
+    let completed = wire.finish(OWNER, "on-use-self", &request);
+    assert_eq!(completed.entry_id(), admitted.entry_id());
+    let after = wire.checkpoint();
+    assert_eq!(nothing_items(&after)[&physical]["charges"], 2);
+    assert_eq!(after["game"]["rules_rng"], before["game"]["rules_rng"]);
+    assert_eq!(
+        after["game"]["tick"].as_u64().unwrap(),
+        before["game"]["tick"].as_u64().unwrap() + 100
+    );
+    let owner = wire.snapshot(OWNER);
+    assert!(nothing_identified(&owner, wand));
+    assert_eq!(
+        nothing_affordance(&owner, wand).device_activation,
+        Some(DeviceActivation::SelfTarget)
+    );
+    assert_eq!(
+        nothing_affordance(&owner, wand).charges,
+        None,
+        "identity is not exact balance knowledge"
+    );
+    let condition = owner
+        .state
+        .observation
+        .combat
+        .as_ref()
+        .unwrap()
+        .own_stats
+        .as_ref()
+        .unwrap()
+        .conditions
+        .iter()
+        .find(|c| c.condition.id == "fixture.self_device")
+        .unwrap();
+    assert_eq!(condition.remaining_ticks, Some(2000));
+    let peer = wire.snapshot(OTHER);
+    assert!(!nothing_identified(&peer, peer_wand));
+    assert_eq!(
+        nothing_affordance(&peer, peer_wand).device_activation,
+        Some(DeviceActivation::Direction)
+    );
+    assert_eq!(nothing_affordance(&peer, peer_wand).charges, None);
+    assert_eq!(nothing_items(&after)["31"]["charges"], 3);
+    while follower.messages.try_recv_frame().is_ok() {}
+    wire.service
+        .handle(follower.id, "completed-follow".into(), Request::Snapshot);
+    let response = decode_response(&follower.messages.try_recv_frame().unwrap().text).unwrap();
+    let ServerMessage::Snapshot { snapshot, .. } = response else {
+        panic!("follow snapshot")
+    };
+    assert!(nothing_identified(&snapshot, wand));
+    assert_eq!(
+        nothing_affordance(&snapshot, wand).device_activation,
+        Some(DeviceActivation::SelfTarget)
+    );
+    assert_eq!(nothing_affordance(&snapshot, wand).charges, None);
+    assert!(!snapshot.has_control);
+    assert_eq!(ack(wire.send(OWNER, "on-use-self", request)), completed);
     assert_eq!(wire.checkpoint(), after);
 }

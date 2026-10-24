@@ -684,6 +684,15 @@ impl Plan {
     pub fn resolution(&self) -> Option<ResolutionPlan<'_>> {
         match self {
             Self::Ability(plan) => Some(ResolutionPlan::Ability(plan)),
+            Self::Zap {
+                delivery: DeviceDeliveryPlan::SelfEffect { plan },
+                ..
+            } => Some(ResolutionPlan::Exposure {
+                actor: plan.actor,
+                target: plan.actor,
+                effects: &plan.effects,
+                descriptors: &plan.descriptors,
+            }),
             Self::Read {
                 actor,
                 effects,

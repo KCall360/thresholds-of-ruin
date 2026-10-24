@@ -6,6 +6,25 @@ maintainer directed a redo on 2026-10-24. This checkout starts from published ma
 `511ea466e14892075af030a78d254f1101e7c813`; no lost commit or historical test receipt
 qualifies this source. [Current status](../status.md) owns implemented scope.
 
+## Fresh self-device execution checkpoint (2026-10-24)
+
+The admitted charged self-device regression is now green through the existing
+settled-item resolver and Exposure lifecycle, not a fabricated ray or generic
+ability grant. The full simulation library passes 1,773 tests. All four initial
+Service self-device tests pass: paid Nothing, a nonempty condition applied only
+to the user, observer-knowledge prompting, and paused direction-use across paid
+identification and source-deleted reopen. Existing ray behavior remains covered.
+Strict protocol delta tests pass 43 and magic-item tests seven.
+
+The full server library has 1,013 passes and ten failures: nine require genuine
+current save/wire fixture regeneration; one newly added OnUse observer test fails
+its expected Started-phase prerequisite and requires diagnosis. Do not label that
+fixture failure an identification defect or relax readiness. Workspace all-target
+preflight passed before runtime. Actual Text/process acceptance, exact writer and
+traffic recording, further rollback coverage and full/native gates remain pending.
+This checkpoint supersedes the unsupported-executor status below without claiming
+the whole consumables batch is implemented. Formatting preceded these receipts.
+
 ## Fresh captured-device checkpoint (2026-10-24)
 
 Workspace all-target compilation passed after canonical formatting. Focused

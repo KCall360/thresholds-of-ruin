@@ -1767,3 +1767,112 @@ fn trap_presence_family_and_reach_are_exact_delta_fields_without_hidden_operands
     cell.as_object_mut().unwrap().remove("trap");
     assert!(serde_json::from_value::<CellView>(cell).is_err());
 }
+
+#[test]
+fn device_activation_is_knowledge_gated_and_exactly_matches_zappable() {
+    let base = room(5, 5, 1);
+    let mut next = base.clone();
+    next.revision += 1;
+    let item = ItemTarget::from_digest([75; 32]);
+    next.observation.inventory.push(ItemView {
+        id: item,
+        class: ItemClass::Wand,
+        quantity: 1,
+        name: "ivory wand".into(),
+        appearance: "ivory wand".into(),
+        identified: false,
+        corpse: None,
+        description: String::new(),
+        asset: None,
+        known_currency: None,
+        known_supply: None,
+    });
+    next.observation.interactions = Some(InteractionView {
+        curse_blocked: vec![],
+        identification: Some(IdentificationChoiceView {
+            choice: IntentionId("opaque-paid-choice".into()),
+            classes: vec![ItemClass::Wand],
+            items: vec![item],
+        }),
+        completed: vec![Action::Read {
+            item: ItemTarget::from_digest([76; 32]),
+        }],
+        slots: vec![],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item,
+            slot: None,
+            equipped_slot: None,
+            known_cursed: None,
+            known_protected: None,
+            known_projectile_bonus: None,
+            known_equipment: None,
+            drinkable: false,
+            edible: false,
+            readable: false,
+            zappable: true,
+            device_activation: Some(tor_protocol::DeviceActivation::Direction),
+            charges: None,
+        }],
+    });
+    next.observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .identification = None;
+    next.observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .completed
+        .clear();
+    assert!(
+        next.validate().is_ok(),
+        "unknown Direction is a valid disclosed mode"
+    );
+    round_trip(&base, &next);
+    let mut known_self = next.clone();
+    known_self.observation.inventory[0].identified = true;
+    known_self
+        .observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .inventory[0]
+        .device_activation = Some(DeviceActivation::SelfTarget);
+    assert!(
+        known_self.validate().is_ok(),
+        "identified self-device positive control"
+    );
+    round_trip(&base, &known_self);
+    let mut nondevice = next.clone();
+    nondevice.observation.inventory[0].class = ItemClass::Misc;
+    let row = &mut nondevice
+        .observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .inventory[0];
+    row.zappable = false;
+    row.device_activation = None;
+    assert!(
+        nondevice.validate().is_ok(),
+        "nondevice absent activation positive control"
+    );
+    round_trip(&base, &nondevice);
+    for (zappable, activation) in [
+        (false, Some(DeviceActivation::Direction)),
+        (false, Some(DeviceActivation::SelfTarget)),
+        (true, None),
+        (true, Some(DeviceActivation::SelfTarget)),
+    ] {
+        let mut invalid = next.clone();
+        let row = &mut invalid.observation.interactions.as_mut().unwrap().inventory[0];
+        row.zappable = zappable;
+        row.device_activation = activation;
+        assert!(
+            invalid.validate().is_err(),
+            "invalid unknown mode: {zappable:?} {activation:?}"
+        );
+    }
+}

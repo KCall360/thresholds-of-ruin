@@ -217,19 +217,22 @@ impl Game {
                             charges, discovery, ..
                         } = &resolved.plan
                         else {
-                            unreachable!("zap owns ray plan")
+                            unreachable!("zap owns captured device delivery")
                         };
                         let launched = *charges > 0;
-                        if launched {
-                            // Execution-first-red scaffold: legal captured self payloads
-                            // must not masquerade as successfully applied Nothing.
-                            if resolved.plan.as_ray().is_none() {
-                                return Err(GameError::Rule(
-                                    crate::abilities::RuleError::InvalidPlan,
-                                ));
+                        let self_outcome = if launched {
+                            if resolved.plan.as_ray().is_some() {
+                                self.resolve_prepared_ray(&resolved)?;
+                                None
+                            } else {
+                                // The shared charge transaction is already settled.
+                                // Resolve only the captured item payload, never a new
+                                // generic ability or a newly inferred target/aim.
+                                Some(self.resolve_consumed_item(&resolved)?)
                             }
-                            self.resolve_prepared_ray(&resolved)?;
-                        }
+                        } else {
+                            None
+                        };
                         self.finish_item_work(
                             id,
                             &resolved.plan,
@@ -237,6 +240,9 @@ impl Game {
                             launched && *discovery == crate::ItemDiscovery::OnUse,
                             consumed_identity,
                         )?;
+                        if let Some(outcome) = self_outcome {
+                            self.finish_combat_diagnostic(diagnostic, outcome);
+                        }
                     }
                     Work::Read { .. }
                         if matches!(

@@ -37,12 +37,13 @@ remain rejection-only. Physical framing remains unchanged.
 The approved [missing-consumables batch](plans/rogue-missing-consumables.md) is
 being reconstructed from published source after its previous local implementation
 became unavailable. Strict device aim, captured self-device planning and
-knowledge-gated common/Text/ASCII prompts now have fresh focused coverage. The
+knowledge-gated common/Text/ASCII prompts now have fresh focused coverage. Paid
+self-device execution passes Nothing and nonempty-effect Service contrasts,
+including charge/retry and paused identification with source-deleted reopen. The
 pure room/passage predicate and appearance selector also pass their fresh tests;
-neither is integrated into gameplay yet. Charged self-device execution remains
-explicitly unsupported at this checkpoint, with an admitted-action regression
-failing at that resolver boundary. Remaining mechanics and broader qualification
-are unfinished. Historical local results do not qualify this tree.
+neither is integrated into gameplay yet. A new OnUse timing fixture still needs
+correction, and genuine current-format corpus regeneration, actual-process checks,
+remaining mechanics and broader qualification are unfinished. Historical local results do not qualify this tree.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the

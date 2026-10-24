@@ -121,15 +121,28 @@ impl Wire {
     }
 
     fn finish(&mut self, actor: ActorId, id: &str, request: &Request) -> RequestReceipt {
+        let mut last_receipt = None;
         for _ in 0..64 {
             self.service.run_until_blocked();
             for other in self.clients.keys().copied().collect::<Vec<_>>() {
-                assert!(!self
+                let errors: Vec<_> = self
                     .drain(other)
-                    .iter()
-                    .any(|message| matches!(message, ServerMessage::Error { .. })));
+                    .into_iter()
+                    .filter(|message| matches!(message, ServerMessage::Error { .. }))
+                    .collect();
+                assert!(errors.is_empty(), "execution of {id}: {errors:?}");
             }
             let receipt = ack(self.send(actor, id, request.clone()));
+            assert!(
+                !matches!(
+                    &receipt,
+                    RequestReceipt::Admitted {
+                        phase: IntentionPhase::Failed | IntentionPhase::Cancelled,
+                        ..
+                    }
+                ),
+                "admitted work {id} terminated before successful completion: {receipt:?}"
+            );
             if matches!(
                 receipt,
                 RequestReceipt::Admitted {
@@ -139,12 +152,13 @@ impl Wire {
             ) {
                 return receipt;
             }
+            last_receipt = Some(receipt);
             let next = self.service.engine.next_actor().unwrap();
             self.serial += 1;
             let request = self.request(next, Action::Wait);
             ack(self.send(next, &format!("clock-{}", self.serial), request));
         }
-        panic!("ordinary magic-item work did not resolve")
+        panic!("ordinary magic-item work {id} did not resolve; last receipt: {last_receipt:?}")
     }
 
     fn act(&mut self, id: &str, action: Action) -> RequestReceipt {

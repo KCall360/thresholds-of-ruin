@@ -760,11 +760,19 @@ impl Game {
         let intention = preparation.intention;
         if !matches!(
             plan,
-            Plan::Read { .. } | Plan::Drink { .. } | Plan::Eat { .. }
-        ) || !matches!(
-            preparation.item_payment,
-            crate::supplies::ItemPayment::Settled
-        ) || !self.plan_actor_available(plan)
+            Plan::Read { .. }
+                | Plan::Drink { .. }
+                | Plan::Eat { .. }
+                | Plan::Zap {
+                    delivery: super::DeviceDeliveryPlan::SelfEffect { .. },
+                    ..
+                }
+        ) || matches!(plan, Plan::Zap { charges: 0, .. })
+            || !matches!(
+                preparation.item_payment,
+                crate::supplies::ItemPayment::Settled
+            )
+            || !self.plan_actor_available(plan)
         {
             return Err(GameError::Rule(RuleError::InvalidPlan));
         }
