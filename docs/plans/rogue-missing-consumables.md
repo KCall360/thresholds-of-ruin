@@ -26,8 +26,10 @@ directionless use, and follower affordances agree. The imported Service witness
 also passes exact retry and source-deleted reopen. The full server run recorded
 1,033 passes and one existing class-pool fixture failure: its positive control
 converted only the previous eight wands to Tool, leaving the ninth as Wand.
-Correcting that fixture must retain both stackable and mixed-capability negatives;
-the full-library rerun remains pending.
+The fixture now includes the ninth wand in the class conversion, retaining both
+stackable and mixed-capability negatives. The fresh full server-library rerun
+passes all 1,034 tests with none ignored or filtered. These focused receipts do
+not qualify quick, push, full or native gates.
 No lost application binary or previous executor receipt qualifies this content.
 
 ## Fresh device foundation acceptance checkpoint (2026-10-24)

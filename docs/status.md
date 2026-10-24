@@ -46,8 +46,8 @@ isolation and storage rollback; actual Text/process checks and genuine current
 save/wire fixtures pass. Remaining consumables, spatial integration and broader
 qualification are unfinished. The opt-in Nothing catalog definition now has pure
 content coverage, a freshly validated package certificate, and imported-catalog
-Text/Service acceptance including source-deleted reopen. An existing complete-pool
-fixture correction and full-library rerun remain pending. Live pools are unchanged. Historical local results do not qualify
+Text/Service acceptance including source-deleted reopen. The complete-pool test
+fixture is corrected and the fresh full server library passes. Live pools are unchanged. Historical local results do not qualify
 this tree.
 A bounded row-run registry and test-only explicit/generated spatial compiler now
 have fresh full-library coverage; they are not yet installed in Game or its saves.
