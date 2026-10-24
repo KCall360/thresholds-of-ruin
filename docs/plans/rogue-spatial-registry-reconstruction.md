@@ -379,7 +379,7 @@ a true interior marker retains its existing rule. This isolates physical-owner
 ambiguity from invalid geometry and preserves World equality. The frozen first-red ran all ten compiler tests: nine controls passed and the
 ambiguity negative failed because the compiler accepted the supplied matching
 owner despite a second physical owner. The narrow correction now checks unique
-planar ownership, with its green runtime still pending; this remains a test-only
+planar ownership; all ten compiler tests now pass. This remains a test-only
 compiler, not installed production source validation.
 
 
@@ -400,3 +400,33 @@ and root validation are deliberate error stubs until this first-red is observed;
 no bounded nested decoder or persistence acceptance is implied. Subsequent
 max-width actual-writer, nested-shape, allocation-tail, exact aggregate, sharing
 and source-free/current-history tests remain required.
+
+
+### Standalone codec green implementation cohort (runtime pending)
+
+The initial codec first-red produced one passing arithmetic control and two
+intended valid-decode stub failures. The next implementation replaces those stubs
+with strict named streaming seeds, a single checked precharge meter, borrowed
+serialization adapters and consuming root validation. Expanded witnesses cover
+actual writer bounds, nested required/unknown/duplicate/positional fields,
+required-nullable doorway and numeric domains, exact charge versus one byte less,
+shared historical subsets and rejecting oversized tails before reading them.
+These new tests have not yet run; they do not inherit a strictness pass from the
+initial missing-decoder failures.
+
+This pool explicitly represents immutable package-and-seed geometry: each scope
+identity and region ownership is assigned once, and historical roots select
+subsets rather than replacing or reassigning payloads. Global identity/member
+uniqueness is checked once before directory index/order/reference completeness,
+avoiding repeated full member scans for every history directory. A valid shared
+subset and a conflicting payload used only by another historical root are
+separate acceptance cases. This is not an assertion that the generic per-root
+registry previously enforced a global history invariant.
+
+The grouped server witness constructs and validates a modest 65-member authored
+package under the existing admission envelope, then compiles complete typed
+spatial volumes using the same real region structures. Its independent expected
+counts are 1,170 primary and 3,900 surface references, 1,430 runs, and 6,500 scanned
+terrain cells. It is not a public spatial metadata schema, loaded Game registry,
+maximum-world/archive-capacity proof or source-free restore witness. Those
+production integration boundaries remain next work after standalone codec green.

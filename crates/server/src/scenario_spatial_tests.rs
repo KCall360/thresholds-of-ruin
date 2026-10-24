@@ -788,3 +788,157 @@ fn exterior_doorway_rejects_two_physical_room_owners_even_when_declared_owner_ma
     source.doorways.insert(mouth, room1);
     compile(&world, &source, &budget(), &work_budget()).unwrap();
 }
+
+// Narrow source envelope + trusted typed compiler witness only.
+// No authored spatial metadata parser, automatic scope inference, Game registry
+// install, archive fit, production cap or maximum-world claim.
+#[test]
+fn validated_authored_package_supports_explicit_typed_scope_above_sixty_four_members() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/magic-items");
+    let resolved = super::super::resolve_source(&root).unwrap();
+    let rules = std::fs::read_to_string(root.join(&resolved.manifest.ruleset)).unwrap();
+    let rules = super::super::resolve_rules_source(&rules, "rules.toml")
+        .unwrap()
+        .source;
+    let mut manifest = serde_json::to_value(resolved.manifest).unwrap();
+    manifest["id"] = serde_json::json!("authored-sixty-five-members");
+    assert_eq!(manifest["characters"].as_array().unwrap().len(), 1);
+    manifest["characters"][0]["anchor"] = serde_json::json!("1/start");
+    let definitions: Vec<super::super::RegionDef> = (1..=65u64)
+        .map(|id| {
+            serde_json::from_value(serde_json::json!({
+                "id":id,"name":format!("Small authored room {id}"),
+                "size":[3,3,2],"chamber":true,"anchors":{"start":[1,1,0]}
+            }))
+            .unwrap()
+        })
+        .collect();
+    let package = Package::from_parts(
+        serde_json::from_value(manifest).unwrap(),
+        definitions,
+        &rules,
+    )
+    .unwrap();
+    package.check().unwrap(); // actual authored source validator, not count algebra
+    assert_eq!(package.manifest.characters.len(), 1);
+    let definitions = package.region_defs().unwrap();
+    assert_eq!(definitions.len(), 65);
+    // Actual ordinary source construction remains a separate prerequisite; no
+    // assumption that Package::start eagerly materializes every actor/region.
+    package.start(42).unwrap();
+
+    let mut world = World::new(vec![], vec![]).unwrap();
+    let mut rooms = BTreeMap::new();
+    let mut expected_primary = BTreeMap::new();
+    let mut expected_surfaces = BTreeMap::new();
+    for definition in &definitions {
+        assert!(
+            definition.chamber && definition.walls.is_empty() && definition.openings.is_empty()
+        );
+        assert!(
+            definition.portals.is_empty()
+                && definition.doors.is_empty()
+                && definition.traps.is_empty()
+        );
+        assert_eq!(definition.size, [3, 3, 2]);
+        // Same checked Region descriptor as Package::add_geometry. This fixture
+        // has no portals, overlays or mutable entities requiring a new adapter.
+        world
+            .add_chamber(
+                super::super::region_of(definition.id, &definition.name, definition.size).unwrap(),
+            )
+            .unwrap();
+        let region = RegionId(definition.id);
+        let room = RoomId::new(definition.id.try_into().unwrap()).unwrap();
+        let point = |x, y, z| Location {
+            region,
+            position: Position { x, y, z },
+        };
+        let mut interior = Vec::new();
+        for z in 0..2 {
+            for y in 0..3 {
+                for x in 0..3 {
+                    let p = point(x, y, z);
+                    assert!(world.walkable(p));
+                    interior.push(p);
+                    expected_primary
+                        .insert(p, Membership::new(PrimarySpace::Room(room), None).unwrap());
+                }
+            }
+        }
+        assert_eq!(interior.len(), 18);
+        rooms.insert(room, interior);
+        // Independent box+six-face oracle; no edge/corner dilation.
+        let mut surface = BTreeSet::new();
+        for z in -1..=2 {
+            for y in -1..=3 {
+                for x in -1..=3 {
+                    let outside = usize::from(!(0..3).contains(&x))
+                        + usize::from(!(0..3).contains(&y))
+                        + usize::from(!(0..2).contains(&z));
+                    if outside <= 1 {
+                        surface.insert(point(x, y, z));
+                    }
+                }
+            }
+        }
+        assert_eq!(surface.len(), 60);
+        expected_surfaces.insert(room, surface);
+    }
+    let members: Vec<_> = (1..=65).map(RegionId).collect();
+    let source = CanonicalSpatialSource {
+        id: "explicit-authored-test-scope".into(),
+        members: members.clone(),
+        rooms,
+        passages: vec![],
+        doorways: BTreeMap::new(),
+        closure_faces: BTreeSet::new(),
+    };
+    let budget = Budget {
+        scopes: 1,
+        members: 65,
+        rooms: 65,
+        passages: 0,
+        runs: 1430,
+        expanded_refs: 5070,
+        label_bytes: 64,
+    };
+    let work = CompilerWorkBudget {
+        source_entries: 1170,
+        terrain_cells: 6500,
+    };
+    let before = world.geometry_snapshot();
+    let scope = compile(&world, &source, &budget, &work).unwrap();
+    assert_eq!(world.geometry_snapshot(), before);
+    assert_eq!(scope.members, members);
+    let actual_primary: BTreeMap<_, _> = scope
+        .primary
+        .iter()
+        .flat_map(|run| {
+            expanded(&run.cells)
+                .into_iter()
+                .map(move |p| (p, run.membership))
+        })
+        .collect();
+    assert_eq!(actual_primary, expected_primary);
+    let actual_surfaces: BTreeMap<_, BTreeSet<_>> = scope
+        .rooms
+        .iter()
+        .map(|room| (room.room, room.runs.iter().flat_map(expanded).collect()))
+        .collect();
+    assert_eq!(actual_surfaces, expected_surfaces);
+    let usage = scope.validate(&budget).unwrap();
+    assert_eq!(usage.members, 65);
+    assert_eq!(usage.rooms, 65);
+    assert_eq!(usage.passages, 0);
+    assert_eq!(usage.runs, 1430);
+    assert_eq!(usage.expanded_refs, 5070);
+    let smaller = Budget {
+        members: 64,
+        ..budget
+    };
+    assert_eq!(
+        compile(&world, &source, &smaller, &work).unwrap_err().code,
+        ErrorCode::ResourceLimit
+    );
+}
