@@ -920,3 +920,62 @@ retains its independent weapon-slot and capacity checks. Both are test-only
 corrections, and their fresh grouped rerun remains pending. Fresh applications,
 actual torch processes, current generated artifacts and server acceptance are
 still the next qualification steps; this result is not a clean full-core pass.
+
+### Portable torch: genuine application and artifact checkpoint
+
+The five ordinary applications build successfully from the protected source.
+Their exact recorded executables regenerate all 44 live scenario certificates.
+The actual Text Adventure torch case passes with explicit equipment and paid
+ignite/extinguish controls, fuel publication, lit dropping, stowing and an
+interval-one source-deleted reopen. Its first attempt exposed a fixture selector
+error: Adventure's item verbs resolve disclosed noun phrases, not opaque
+raw-parser item selectors. The corrected case proves a unique torch
+and uses that name throughout; production parsing and behavioral assertions are
+unchanged. The original failed receipt is retained separately.
+
+The genuine recorder now writes 52 generated client request schema examples and
+55 captured server frames, including the paid torch's lit and extinguished
+states. These are not 52 captured client transmissions. The grouped pure
+recorder/catalog/documentation/certificate checks pass 80 cases. The two corrected
+core fixtures still await their grouped rerun, and the seven torch Service cases
+have not yet run. Native ASCII, independent 3D and final verification gates remain
+pending. This application checkpoint is bounded acceptance, not a full gate.
+
+### Next growth/provenance batch: design only
+
+Each Gain Strength dose must choose exactly one branch: restore one restorable
+Strength point through `CreatureState::restore_attribute` and finish, even when
+that exhausts the deficit; otherwise consider a dedicated permanent consumable
+contribution against the unringed remembered maximum and normal cap five. There
+is no restore-and-acquire or latent boon banking. Existing SourceId/BuildRecord
+have no such provenance; equipment, conditions, initial allocation changes and
+refundable purchase/talent ownership are not substitutes. The eventual bounded
+representation must survive permanent compilation/input equality, strict records,
+ordinary rebuild/respec, HD drain/regrowth and historical/source-free roots without
+new refund or respec UI.
+
+Raise Level should fund only the checked u64 shortfall of the current ordinary
+obligation (`next_threshold` against held XP), never append HD, lower banked XP,
+skip a funded blocked obligation or bypass drained-HD regrowth. Existing growth
+finalization retains actual-HD admission and original Health seeds. Pinned Rogue
+identifies Strength before `chg_str(1)` and Raise before threshold-plus-one and
+ordinary level checking; it has no TOR disabled/blocked-obligation model. Further
+outcomes in those cases require explicit resolution rather than inferred source
+authority. A u32 award input must not truncate a wider shortfall. Grouped controls
+must cover wide/cap/overflow bounds, repeated doses with intervening XP, blocked
+funding, drain/regrowth, unchanged purchase provenance, strict current/history
+restore and atomic refusal. No growth implementation or runtime is claimed.
+
+### Final qualification tooling gap
+
+A read-only AST inventory provisionally counts 98 graphical declared methods in
+the main process tests; this is neither canonical unittest discovery nor an
+executed manifest or fixed cap. The independent 3D source classification finds
+nine native cases and a pre-window rejection case that needs non-graphical
+classification. These counts establish no native execution or capability. Final
+exact discovered inventories are still required. The current 3D verifier is v2
+and lacks the exact task waiver; the lost v3/helper integration has not been
+restored. The task's local graphical deferral authority does not waive any
+non-graphical, debug/release or hosted-native requirement. That narrow tooling
+restoration belongs to a separate qualification checkpoint, not another torch
+compilation cycle.
