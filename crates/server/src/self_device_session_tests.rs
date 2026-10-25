@@ -1829,7 +1829,7 @@ fn drain_life_source(root: &Path, health: u64, caster: [i32; 3], targets: bool) 
         panic!("authored self source")
     };
     strikes[0].on_success = vec![tor_simulation::rules::Effect::DrainLife];
-    let rules = Arc::new(tor_simulation::rules::Ruleset::validate(document).unwrap());
+    let rules = tor_simulation::rules::Ruleset::validate(document).unwrap();
     let mut manifest = serde_json::to_value(&source.manifest).unwrap();
     manifest["archetypes"]["ember"]["device"]["discovery"] = json!("never");
     // Independent owner species; do not lower recipient Health with the caster.
