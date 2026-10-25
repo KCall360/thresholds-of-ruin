@@ -559,3 +559,15 @@ receipt outcome while preserving other batch metadata. Item Exposure remains
 anonymous, and ordinary granted abilities retain their original attribution.
 These corrections and an authentic refused-item recording hook join one next
 cohort; no success is inferred before runtime.
+
+The corrected core library now passes all 1,827 cases. The existing server
+executable passes 1,069 cases and reports six failures: five require regenerated
+current corpus/certificate artifacts, while the privacy fixture incorrectly
+attaches the same follower twice. The Service correctly rejects the second
+Attach as AlreadyAttached. Its fixture correction attaches once and requests a
+Snapshot thereafter, only after retaining the actual owner/follower completion
+Updates and deltas. The helper rejects uncollected frames and verifies response
+correlation rather than silently discarding publications. Full frame and final
+observation comparisons remain intact; snapshot equality alone is not evidence
+of intermediate-update privacy. The corrected privacy comparison, regenerated
+artifacts and actual Drain process acceptance remain pending.

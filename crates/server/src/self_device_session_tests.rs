@@ -2267,20 +2267,32 @@ fn drain_normalize_tokens(value: &mut Value, tokens: &mut BTreeMap<String, Strin
         _ => {}
     }
 }
-fn drain_follower_observation(wire: &mut Wire, follower: &mut Connection) -> Observation {
-    while follower.messages.try_recv_frame().is_ok() {}
-    wire.service.handle(
-        follower.id,
-        "drain-follow".into(),
-        Request::Attach { actor: OWNER },
+fn drain_follower_observation(
+    wire: &mut Wire,
+    follower: &mut Connection,
+    request: Request,
+) -> Observation {
+    // Initial Welcome or actual completion updates have already been consumed
+    // by their owning caller. Never discard a queued publication here.
+    assert!(
+        follower.messages.try_recv_frame().is_err(),
+        "uncollected follower frame"
     );
-    let ServerMessage::Snapshot { snapshot, .. } =
-        decode_response(&follower.messages.try_recv_frame().unwrap().text).unwrap()
-    else {
-        panic!("followed ordinary snapshot")
-    };
-    snapshot.state.observation.clone()
+    wire.service
+        .handle(follower.id, "drain-follow".into(), request);
+    let response = decode_response(&follower.messages.try_recv_frame().unwrap().text).unwrap();
+    match response {
+        ServerMessage::Snapshot {
+            request_id,
+            snapshot,
+        } => {
+            assert_eq!(request_id, "drain-follow");
+            snapshot.state.observation.clone()
+        }
+        other => panic!("drain-follow expected its requested snapshot, received {other:?}"),
+    }
 }
+
 fn drain_capture_observation_updates(messages: &[ServerMessage], updates: &mut Vec<StreamUpdate>) {
     for message in messages {
         assert!(
@@ -2401,9 +2413,11 @@ fn hidden_drain_observations(count: u64) -> (Value, Value, Value, Value) {
         )
         .unwrap();
     follower.messages.try_recv_frame().unwrap();
-    assert!(drain_follower_observation(&mut wire, &mut follower)
-        .visible_actors
-        .is_empty());
+    assert!(
+        drain_follower_observation(&mut wire, &mut follower, Request::Attach { actor: OWNER })
+            .visible_actors
+            .is_empty()
+    );
     let wand = before
         .state
         .observation
@@ -2492,7 +2506,7 @@ fn hidden_drain_observations(count: u64) -> (Value, Value, Value, Value) {
     let owner = wire.snapshot(OWNER);
     assert!(owner.state.observation.visible_actors.is_empty());
     assert!(!nothing_identified(&owner, wand));
-    let followed = drain_follower_observation(&mut wire, &mut follower);
+    let followed = drain_follower_observation(&mut wire, &mut follower, Request::Snapshot);
     assert!(followed.visible_actors.is_empty());
     let mut owner = serde_json::to_value(&owner.state.observation).unwrap();
     let mut followed = serde_json::to_value(followed).unwrap();
