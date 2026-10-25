@@ -1245,3 +1245,73 @@ moved a SavePolicy value before its second reopen. The exact test-only correctio
 supply the two fields and clone the first policy use. Production owners otherwise
 checked; no runtime ran. The causal-red manifest is refreshed for the corrected
 unchanged-behavior test input, while the green resolver bytes remain identical.
+The meaningful Haste first-red collection runs all eleven new core controls from
+the exact protected source with only the reviewed resolver seam disabled. Eight
+controls pass and three fail at the intended absent-effect boundaries: the two
+selected paid first-dose/overdose state checks and the late-rest allocation
+failure that cannot occur when rest is not applied. There are no fixture setup
+failures. Test bytes remain unchanged, and the exact green resolver is restored
+before its fresh full-library run. These causal red results are not successful
+Haste gameplay qualification; green and actual caller results remain separate.
+
+The restored green full simulation library subsequently passes all 1,879 tests
+with checked inputs unchanged. This closes the eleven new core controls in the
+full-library context; Service, saved-source, real applications and authentic
+recording still require their own fresh results. It does not establish a final
+verification, native or release gate.
+
+The first current server executable passes all seven selected Haste contracts:
+five admitted Service/source cases and two strict save/schema tests. Actual
+finite/persistent ordering, masked-condition overdose, pending source-deleted
+reopen and exact retry are now covered by that Service cohort. Genuine saved
+fixture generation, full same-binary regression and current applications remain
+separate pending stages, not inferred from this focused result.
+
+The same server executable's full regression records 1,099 passes and two stale
+scenario-certificate failures (large wandering prebirth and the all-package
+invariant). The genuine saved-scenario writer produces byte-identical current
+output. These failures remain failures until fresh compiler certificate checks
+and same-binary reruns; no production defect or clean full-server pass is inferred.
+
+Five current applications subsequently build and are hash-verified and preserved.
+Their compiler validates and checks all 44 live scenario certificates; only the
+Rogue certificate changes. Both stale-certificate server cases then pass on the
+same exact executable, closing the preceding 1,099-pass/two-failure collection as
+1,099 plus two focused reruns, not a new single full green run. The genuine saved
+writer remains byte-identical.
+
+Actual ordinary Haste Adventure use and source-deleted reopening pass. The
+separate granted-self-ability diagnostic fixture first fails source compilation
+because recovery zero is invalid; changing only that fixture to the established
+positive recovery fixes the prerequisite. Both actual processes then pass against
+the same applications without rebuilding. The genuine recorder produces 52 client
+request schema examples and 57 captured server frames, including actual Hasted and
+Overdose diagnostic outcomes from the granted ability. Those captures do not
+claim that generic potion Drink emits combat diagnostics. Protocol/common
+consumers of the regenerated corpus and final gates remain pending. Subsequent
+prose/fixture/artifact identity is recorded separately from the compiled source.
+
+### Proposed next presentation batch: design inventory only
+
+Visual hallucination can be integrated with explicit factual/nonvisual Awareness
+boundaries before any future Monster Sense consumer. No live Monster Sense
+consumer exists in this tree; its presentation exception remains reserved, not
+implemented or qualified. The existing deterministic selector is only a primitive.
+The proposed dose lasts 808–892 base turns and repeated doses extend it; observer
+samples should remain stable between actor-active base-turn shifts, with no
+query-time RNG draw or authoritative world mutation. Actual eye provenance must
+be distinguished from Awareness, tactile contact and invisibility before applying
+false visual creature, ground-item or guise identities.
+
+The eventual clock/DTO/source catalog need a shared bounded design, not a global
+tick shortcut or new per-query cache. Frozen observers must pause phase, stationary
+observers must receive due updates, and current map acquisition must preserve
+remembered appearances without rewriting out-of-view or historical samples.
+Public-plan names are sampled at acquisition and retained historically. Genuine
+known stairs, interaction handles, identified properties, targeting and navigation
+remain authoritative rather than inferred from false artwork. Extra healing cures
+even while blind; ordinary healing and see-invisible do not gain that cure, and
+poison cure remains outside approval. Required actual observer, source-deleted
+save, cure, memory and ordinary client witnesses belong to one later coherent
+batch. No hallucination code, new clock schema or runtime qualification is claimed
+by this inventory; Strength/Raise decisions remain separately pending.

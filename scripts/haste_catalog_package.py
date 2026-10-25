@@ -29,7 +29,7 @@ def prepare(test, *, diagnostic_ability=False):
         rules["overrides"].append({"op": "add", "path": ["abilities", "fixture.haste_dose"], "value": {
             "id": "fixture.haste_dose", "name": "Haste dose witness", "interaction": "non_hostile",
             "tags": [], "basic_attack": False, "invocation": "actor_target", "reach": {"kind": "self_only"},
-            "timing": {"source": {"kind": "fixed", "prepare": 100, "recover": 0}},
+            "timing": {"source": {"kind": "fixed", "prepare": 100, "recover": 100}},
             "strikes": {"kind": "authored", "strikes": [{"offset": 0,
                 "on_success": [{"kind": "haste_dose", "condition": "rogue.hasted", "rest": "rogue.haste_exhaustion"}],
                 "on_failure": [], "descriptors": [], "riders": []}]},

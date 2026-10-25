@@ -101,6 +101,17 @@ A causal storage-pointer regression and independent materialized-output oracle
 pass, alongside all 150 ASCII integration tests. This establishes the exercised
 storage/rendering contract, not timing or broader performance parity; native and
 final verification obligations remain separate.
+The opt-in Haste potion now uses finite actor-active haste and named-condition
+overdose with forced rest, interoperating with the persistent wand through explicit
+mixed-lifetime Keep semantics. Slow-masked applications still count; unrelated
+innate/equipment speed sources are not stripped. Fresh core 1,879 and seven focused
+Service/save controls pass. The full server collection's 1,099 passes plus two
+stale-certificate failures is closed by both exact-binary reruns after genuine
+certificate refresh, not reported as a new full run. Actual ordinary Adventure
+use/source-deleted reopening and a separate granted-ability diagnostic process
+pass. Genuine recording now has 52 generated client examples and 57 captured
+server frames. Updated protocol/common consumers and final/native/release gates
+remain pending; live weighted pools and kits remain unchanged.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
