@@ -1096,6 +1096,9 @@ fn population_checkpoint_pool_preserves_complete_nutrition_recipes() {
     let (snapshots, shared): (Vec<Snapshot>, SharedState) =
         serde_json::from_value(encoded).unwrap();
     let mut context = RestoreContext::new(&shared, required_game.content().clone());
+    context
+        .bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>())
+        .unwrap();
     let mut restored: Vec<_> = snapshots
         .into_iter()
         .map(|snapshot| context.restore(snapshot).unwrap())

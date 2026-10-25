@@ -1,5 +1,7 @@
-//! Canonical spatial compilation boundary. Internal trusted source inputs only;
-//! no public authored schema, saved registry or gameplay integration yet.
+//! Canonical spatial compilation from validated source geometry and World links.
+//! Source decoding, lazy installation and restored-root certification are owned
+//! by the adjacent authoring/runtime adapters, not by this typed compiler.
+#[cfg(test)]
 use super::Package;
 use crate::Failure;
 use std::collections::{BTreeMap, BTreeSet};
@@ -347,6 +349,7 @@ pub(super) fn compile(
     Ok(scope)
 }
 
+#[cfg(test)]
 pub(super) fn generated_source(
     package: &Package,
     identity: &str,
@@ -387,7 +390,7 @@ pub(super) fn generated_source(
     source_from_generated(identity, &group, &generated, budget, work)
 }
 
-fn source_from_generated(
+pub(super) fn source_from_generated(
     identity: &str,
     group: &crate::generation_recipe::GenerationGroup,
     generated: &crate::generation_recipe::GeneratedGroup,
@@ -421,10 +424,10 @@ fn source_from_generated(
                 .regions
                 .get(&floor.region.0)
                 .ok_or_else(|| super::fail("Room member"))?;
-            if floor.position.z != 0 || def.size[2] != 2 {
+            if floor.position.z != 0 || def.size[2] < 2 {
                 return Err(super::fail("Generated clearance convention"));
             }
-            for z in 0..def.size[2] {
+            for z in 0..2 {
                 charge()?;
                 let p = Location {
                     position: tor_world::Position {
@@ -504,5 +507,6 @@ fn source_from_generated(
     })
 }
 
+#[cfg(test)]
 #[path = "scenario_spatial_tests.rs"]
 mod tests;

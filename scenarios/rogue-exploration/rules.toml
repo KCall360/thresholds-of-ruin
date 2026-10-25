@@ -334,3 +334,9 @@ value = { id = "rogue.scared", family = "rogue.scared", lifecycle = "timed", nam
 op = "add"
 path = ["abilities", "rogue.wand_nothing"]
 value = { id = "rogue.wand_nothing", name = "Nothing", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "self_only" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }
+
+# Original paid room illumination; passage/already-lit outcomes still identify.
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_light"]
+value = { id = "rogue.wand_light", name = "Room Light", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "self_only" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "room_light" }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }

@@ -416,6 +416,7 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 },
                 Effect::DrainLatestHitDie => s::rules::Effect::DrainLatestHitDie,
                 Effect::RestoreHitDie => s::rules::Effect::RestoreHitDie,
+                Effect::RoomLight => s::rules::Effect::RoomLight,
                 Effect::StepSelfOneCell => s::rules::Effect::StepSelfOneCell,
                 Effect::TeleportRandom => s::rules::Effect::TeleportRandom,
                 Effect::TeleportToRayOrigin => s::rules::Effect::TeleportToRayOrigin,

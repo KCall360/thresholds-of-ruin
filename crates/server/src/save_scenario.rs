@@ -287,8 +287,52 @@ struct Streaming {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::spatial_authoring::AuthoredSpatialScope",
+    deny_unknown_fields
+)]
+struct SpatialScopeSource {
+    #[serde(with = "mapped")]
+    members: Vec<u64>,
+    #[serde(with = "mapped")]
+    rooms: BTreeMap<u32, Vec<source::spatial_authoring::RoomVolume>>,
+    #[serde(with = "mapped")]
+    passages: Vec<source::spatial_authoring::SourceRun>,
+    #[serde(with = "mapped")]
+    doorways: Vec<source::spatial_authoring::OwnedRun>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::spatial_authoring::RoomVolume", deny_unknown_fields)]
+struct SpatialRoomVolume {
+    region: u64,
+    min: [i32; 3],
+    max: [i32; 3],
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::spatial_authoring::SourceRun", deny_unknown_fields)]
+struct SpatialSourceRun {
+    region: u64,
+    z: i32,
+    y: i32,
+    first_x: i32,
+    last_x: i32,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::spatial_authoring::OwnedRun", deny_unknown_fields)]
+struct SpatialOwnedRun {
+    room: u32,
+    region: u64,
+    z: i32,
+    y: i32,
+    first_x: i32,
+    last_x: i32,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Manifest", deny_unknown_fields)]
 struct Manifest {
+    #[serde(with = "mapped")]
+    spatial_scopes: BTreeMap<String, source::spatial_authoring::AuthoredSpatialScope>,
     #[serde(with = "mapped")]
     unique_retrieval: Option<source::UniqueRetrieval>,
     #[serde(with = "mapped")]
@@ -1322,6 +1366,7 @@ enum Effect {
     },
     DrainLatestHitDie,
     RestoreHitDie,
+    RoomLight,
     StepSelfOneCell,
     TeleportRandom,
     TeleportToRayOrigin,
@@ -3912,6 +3957,10 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    SpatialScopeSource => source::spatial_authoring::AuthoredSpatialScope,
+    SpatialRoomVolume => source::spatial_authoring::RoomVolume,
+    SpatialSourceRun => source::spatial_authoring::SourceRun,
+    SpatialOwnedRun => source::spatial_authoring::OwnedRun,
     TrapKind => source::TrapKind,
     NamedDescriptor => tor_simulation::rules::NamedDescriptor,
     DescriptorResistance => tor_simulation::rules::DescriptorResistance,
@@ -6654,6 +6703,7 @@ impl Effect {
             },
             DrainLatestHitDie {},
             RestoreHitDie {},
+            RoomLight {},
             StepSelfOneCell {},
             TeleportRandom {},
             TeleportToRayOrigin {},
@@ -6754,6 +6804,7 @@ impl Effect {
             },
             Fields::DrainLatestHitDie {} => source::Effect::DrainLatestHitDie,
             Fields::RestoreHitDie {} => source::Effect::RestoreHitDie,
+            Fields::RoomLight {} => source::Effect::RoomLight,
             Fields::StepSelfOneCell {} => source::Effect::StepSelfOneCell,
             Fields::TeleportRandom {} => source::Effect::TeleportRandom,
             Fields::TeleportToRayOrigin {} => source::Effect::TeleportToRayOrigin,
@@ -9562,6 +9613,37 @@ mod awareness_schema_tests {
             assert!(
                 serde_json::from_value::<Owned<crate::creature_authoring::Perception>>(positional)
                     .is_err()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod room_light_effect_tests {
+    use super::*;
+
+    #[test]
+    fn room_light_source_and_independent_save_are_strict_unit_effects() {
+        let raw = br#"{"kind":"room_light"}"#;
+        let authored: source::Effect = serde_json::from_slice(raw).unwrap();
+        assert_eq!(authored, source::Effect::RoomLight);
+        let saved: Owned<source::Effect> = crate::storage::codec::strict(raw).unwrap();
+        assert_eq!(saved.0, authored);
+        assert_eq!(serde_json::to_vec(&Borrowed(&authored)).unwrap(), raw);
+        for malformed in [
+            r#"["room_light"]"#,
+            r#"{"kind":"room_light","changed":true}"#,
+            r#"{"kind":"room_light","room":1}"#,
+            r#"{"kind":"room_light","kind":"room_light"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<source::Effect>(malformed).is_err(),
+                "{malformed}"
+            );
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(malformed.as_bytes())
+                    .is_err(),
+                "{malformed}"
             );
         }
     }

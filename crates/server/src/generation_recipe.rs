@@ -671,13 +671,11 @@ fn validate_carving(open: &BTreeSet<(i32, i32)>, size: [i32; 3]) -> Result<(), F
 pub struct GeneratedGroup {
     pub regions: BTreeMap<u64, RegionDef>,
     pub rooms: Vec<tor_simulation::floor_activation::PreparedRoomGroup>,
-    #[cfg(test)]
     pub(crate) spatial: GeneratedSpatialProvenance,
 }
 
 /// Ephemeral labels from the SAME completed generation pass as regions/rooms.
 /// No saved graph, RNG replay, population change or public authored format.
-#[cfg(test)]
 #[derive(Default)]
 pub(crate) struct GeneratedSpatialProvenance {
     pub ordinary_room_ids: BTreeSet<u32>,
@@ -685,7 +683,6 @@ pub(crate) struct GeneratedSpatialProvenance {
     pub closure_faces: BTreeSet<tor_world::Location>,
 }
 
-#[cfg(test)]
 fn retain_spatial_provenance(
     group: &GenerationGroup,
     size: [i32; 3],
@@ -748,7 +745,7 @@ fn retain_spatial_provenance(
             .members
             .get(slot)
             .ok_or_else(|| fail("Generated doorway outside group"))?;
-        for z in 0..size[2] {
+        for z in 0..2 {
             result.doorway_owners.insert(
                 tor_world::Location {
                     region: tor_world::RegionId(region),
@@ -1003,7 +1000,6 @@ pub fn materialize_with_feature_bases(
         &mut definitions,
         size,
     )?;
-    #[cfg(test)]
     let mut spatial =
         retain_spatial_provenance(group, size, &present, &maze_slots, &room_cells, &open)?;
     place_concealed_features(
@@ -1018,7 +1014,6 @@ pub fn materialize_with_feature_bases(
     // Retain the already-placed physical closures, without repeating decisions.
     // A maze/passage closure without ordinary-room ownership stays a closure,
     // but does not fabricate a Room illumination owner.
-    #[cfg(test)]
     for (region, def) in &definitions {
         for door in &def.doors {
             for dz in 0..i32::from(door.height) {
@@ -1064,7 +1059,6 @@ pub fn materialize_with_feature_bases(
     Ok(GeneratedGroup {
         regions: definitions,
         rooms,
-        #[cfg(test)]
         spatial,
     })
 }

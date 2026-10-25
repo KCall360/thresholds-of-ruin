@@ -5,7 +5,7 @@ use flate2::{write::ZlibEncoder, Compression, Decompress, FlushDecompress, Statu
 use serde::Serialize;
 use std::io::{self, Write};
 
-pub(crate) const LIMIT: usize = 64 * 1024 * 1024;
+pub(crate) const LIMIT: usize = tor_simulation::checkpoint::ARCHIVE_BYTE_LIMIT;
 const HEADER: &[u8; 8] = b"TORC\x01\x00\x00\x00";
 const OVERHEAD: usize = 12;
 

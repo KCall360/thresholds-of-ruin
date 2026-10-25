@@ -386,6 +386,9 @@ pub enum ResolvedEffect {
         mode: super::MovementMode,
         result: super::MovementResult,
     },
+    RoomLight {
+        changed: bool,
+    },
     ArrestDescent,
     Damage {
         amount: u32,
@@ -472,7 +475,8 @@ fn read_health_improvements<'de, D: serde::Deserializer<'de>>(
 impl ResolvedEffect {
     pub(crate) fn recipient(&self) -> EffectRecipient {
         match self {
-            Self::AlterEquipment { .. }
+            Self::RoomLight { .. }
+            | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises { .. }
             | Self::ObservePublicPlan { .. }
             | Self::ApplyQualifiedConditionToSource { .. } => EffectRecipient::Source,
@@ -488,6 +492,7 @@ impl ResolvedEffect {
             }
             Self::Theft { quantity, .. } => *quantity > 0,
             Self::Translate { result, .. } | Self::Relocate { result, .. } => result.changed(),
+            Self::RoomLight { changed } => *changed,
             Self::ArrestDescent => false,
             Self::CorrodeArmor { amount, .. }
             | Self::Damage { amount }
@@ -527,6 +532,7 @@ impl ResolvedEffect {
             | Self::ApplyLinkedHold { .. }
             | Self::CorrodeArmor { .. }
             | Self::AlterEquipment { .. } => self.clone(),
+            Self::RoomLight { .. } => self.clone(),
             Self::ArrestDescent => {
                 if !creature.derived().locomotion.levitating {
                     return Ok(None);
@@ -1288,6 +1294,7 @@ pub(super) fn resolve_batch<'a>(
                 });
                 ResolvedEffect::Relocate { mode, result }
             }
+            PlannedEffect::RoomLight => ResolvedEffect::RoomLight { changed: false },
             PlannedEffect::ArrestDescent => {
                 // A rejected extension must not turn a failed paid drink into
                 // an emergency brake. Checked item resolution rejects it atomically.
@@ -1588,6 +1595,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 mode: super::MovementMode,
                 result: super::MovementResult,
             },
+            RoomLight {
+                changed: bool,
+            },
             ArrestDescent {},
             Damage {
                 amount: u32,
@@ -1663,6 +1673,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Relocate { mode, result } => Self::Relocate { mode, result },
+            Fields::RoomLight { changed } => Self::RoomLight { changed },
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::Damage { amount } => Self::Damage { amount },
             Fields::Heal { amount } => Self::Heal { amount },

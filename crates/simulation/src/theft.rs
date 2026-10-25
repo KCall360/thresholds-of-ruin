@@ -557,11 +557,32 @@ impl Game {
             })
     }
 
-    fn relocation_members(
+    fn preparation_required_regions(
         &self,
         plan: &crate::abilities::Plan,
     ) -> Result<BTreeSet<RegionId>, GameError> {
         let mut members = BTreeSet::new();
+        let room_light = plan
+            .on_success()
+            .iter()
+            .any(|effect| matches!(effect, crate::abilities::PlannedEffect::RoomLight))
+            || plan.as_ability().is_some_and(|ability| {
+                ability.strikes.iter().any(|strike| {
+                    strike
+                        .on_success
+                        .iter()
+                        .chain(&strike.on_failure)
+                        .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                        .any(|effect| matches!(effect, crate::abilities::PlannedEffect::RoomLight))
+                })
+            });
+        if room_light && !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. }) {
+            let actor = self
+                .actors
+                .get(&plan.actor())
+                .ok_or(GameError::UnknownActor)?;
+            members.extend(self.room_light_regions(actor.location)?);
+        }
         if let Some(ability) = plan.as_ability() {
             for theft in ability
                 .strikes
@@ -608,7 +629,7 @@ impl Game {
             origin: preparation.origin,
             intention: preparation.intention,
             started: preparation.started,
-            members: self.relocation_members(&preparation.plan)?,
+            members: self.preparation_required_regions(&preparation.plan)?,
         };
         if self.preparation_missing_regions(&boundary).is_empty() {
             return Ok(());
@@ -628,7 +649,8 @@ impl Game {
     }
 
     /// Roots are snapshotted from the complete ordinary ACTIVE closure before
-    /// any supplemental floor is added. Loaded frozen thieves never root floors.
+    /// any supplemental floor is added. Loaded frozen actors never root floors.
+    /// Room illumination dependencies load geometry without activating residents.
     pub(crate) fn relocation_loaded_closure(
         &self,
         active: &BTreeSet<RegionId>,
@@ -644,7 +666,7 @@ impl Game {
                 .as_ref()
                 .filter(|preparation| preparation.active)
             {
-                if let Ok(members) = self.relocation_members(&preparation.plan) {
+                if let Ok(members) = self.preparation_required_regions(&preparation.plan) {
                     loaded.extend(members);
                 }
             }

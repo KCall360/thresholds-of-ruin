@@ -18,6 +18,7 @@ pub struct DecodedPool {
     scopes: Vec<Shared<Scope>>,
     directories: Vec<Vec<u32>>,
     limits: DecodeLimits,
+    consumed_charge: u64,
 }
 #[derive(Debug)]
 pub struct ValidatedPool {
@@ -63,6 +64,17 @@ impl Meter {
             expanded_refs: (self.limit / 107).saturating_mul(1_u64 << 32),
         })
     }
+}
+
+/// Structural count envelope derived from the unchanged archive allowance.
+/// This is not a source geometry/expanded-work certificate.
+pub fn archive_structural_budget() -> Result<Budget, PoolError> {
+    Meter {
+        used: 0,
+        limit: crate::checkpoint::ARCHIVE_BYTE_LIMIT as u64,
+    }
+    .structural_budget::<serde::de::value::Error>()
+    .map_err(|_| PoolError::Capacity)
 }
 
 // Local entry seeds share one allowance. No size_hint allocation, Value tree or
@@ -455,6 +467,7 @@ impl<'de> DeserializeSeed<'de> for PoolSeed {
                     directories: directories
                         .ok_or_else(|| A::Error::missing_field("directories"))?,
                     limits: self.limits,
+                    consumed_charge: self.meter.used,
                 })
             }
         }
@@ -472,6 +485,8 @@ impl DecodedPool {
         }
         // Immutable source scope ownership is global across retained roots. Check
         // once, avoiding repeated payload-member walks per directory reference.
+        // Surface-only foreign-region dependencies do not grant membership and
+        // deliberately do not participate in exclusive primary ownership.
         let mut ids = BTreeSet::new();
         let mut regions = BTreeSet::new();
         for scope in &self.scopes {
@@ -683,6 +698,177 @@ impl<'de> Visitor<'de> for LabelSeed<'_> {
                 .ok_or_else(|| E::custom("label charge overflow"))?,
         )?;
         Ok(s)
+    }
+}
+
+use super::registry::Registry;
+
+pub(crate) fn capture_pool(
+    directories: &[Shared<Registry>],
+    references: impl ExactSizeIterator<Item = usize>,
+) -> Result<ValidatedPool, PoolError> {
+    use std::collections::BTreeMap;
+    let max = crate::checkpoint::MAX_CHECKPOINT_ROOTS;
+    if directories.len() > max || references.len() > max {
+        return Err(PoolError::Capacity);
+    }
+    let limits = DecodeLimits {
+        charge_bytes: crate::checkpoint::ARCHIVE_BYTE_LIMIT as u64,
+        root_references: u32::try_from(references.len()).map_err(|_| PoolError::Capacity)?,
+        directories: u32::try_from(max).map_err(|_| PoolError::Capacity)?,
+    };
+    let mut meter = Meter {
+        used: 0,
+        limit: limits.charge_bytes,
+    };
+    let pay = |m: &mut Meter, n| {
+        m.charge::<serde::de::value::Error>(n)
+            .map_err(|_| PoolError::Capacity)
+    };
+    pay(&mut meter, 30 + 21 * u64::from(limits.root_references))?;
+    let mut scopes = Vec::new();
+    let mut saved_directories = Vec::new();
+    let mut scope_ids = BTreeMap::<&str, u32>::new();
+    for registry in directories {
+        let count = registry.payloads().count();
+        let charge = u64::try_from(count)
+            .ok()
+            .and_then(|n| n.checked_mul(11))
+            .and_then(|n| n.checked_add(3))
+            .ok_or(PoolError::Capacity)?;
+        pay(&mut meter, charge)?;
+        let mut directory = Vec::new();
+        for scope in registry.payloads() {
+            let index = if let Some(&index) = scope_ids.get(scope.id.as_str()) {
+                if scopes.get(index as usize) != Some(scope) {
+                    return Err(PoolError::Structure);
+                }
+                index
+            } else {
+                let charge = scope_charge(scope)?;
+                pay(&mut meter, charge)?;
+                scope
+                    .validate(
+                        &meter
+                            .structural_budget::<serde::de::value::Error>()
+                            .map_err(|_| PoolError::Capacity)?,
+                    )
+                    .map_err(|_| PoolError::Structure)?;
+                let index = u32::try_from(scopes.len()).map_err(|_| PoolError::Capacity)?;
+                scopes.push(scope.clone());
+                scope_ids.insert(scope.id.as_str(), index);
+                index
+            };
+            directory.push(index);
+        }
+        saved_directories.push(directory);
+    }
+    // Root memory is bounded/reserved before this copy. Internal usize never
+    // silently truncates to the current u32 wire-index domain.
+    let roots = references
+        .map(|r| u32::try_from(r).map_err(|_| PoolError::Capacity))
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(scope_ids);
+    DecodedPool {
+        scopes,
+        directories: saved_directories,
+        limits,
+        consumed_charge: meter.used,
+    }
+    .validate_roots(&roots)
+}
+fn scope_charge(scope: &Scope) -> Result<u64, PoolError> {
+    let mul = |n: usize, k: u64| {
+        u64::try_from(n)
+            .ok()
+            .and_then(|n| n.checked_mul(k))
+            .ok_or(PoolError::Capacity)
+    };
+    let mut charge = 47_u64;
+    for cost in [
+        mul(scope.id.len(), 6)?,
+        mul(scope.members.len(), 21)?,
+        mul(scope.primary.len(), 195)?,
+    ] {
+        charge = charge.checked_add(cost).ok_or(PoolError::Capacity)?;
+    }
+    for room in &scope.rooms {
+        charge = charge
+            .checked_add(30)
+            .and_then(|c| c.checked_add(mul(room.runs.len(), 107).ok()?))
+            .ok_or(PoolError::Capacity)?;
+    }
+    Ok(charge)
+}
+
+// Exact-reserve public PoolSeed/DecodedPool remain unchanged. Only private seed
+// can construct DeferredPool, with reserve0 and consumed_charge retained.
+pub(crate) struct DeferredPool {
+    decoded: DecodedPool,
+}
+pub(crate) struct DeferredCandidate<'a> {
+    pool: &'a DeferredPool,
+}
+impl DeferredPool {
+    pub(crate) fn candidate(&self) -> DeferredCandidate<'_> {
+        DeferredCandidate { pool: self }
+    }
+}
+impl DeferredCandidate<'_> {
+    pub(crate) fn finalize(
+        self,
+        roots: impl ExactSizeIterator<Item = usize>,
+    ) -> Result<ValidatedPool, PoolError> {
+        if roots.len() > crate::checkpoint::MAX_CHECKPOINT_ROOTS {
+            return Err(PoolError::Capacity);
+        }
+        let count = u32::try_from(roots.len()).map_err(|_| PoolError::Capacity)?;
+        let decoded = &self.pool.decoded;
+        let charged = decoded
+            .consumed_charge
+            .checked_add(21 * u64::from(count))
+            .ok_or(PoolError::Capacity)?;
+        if charged > decoded.limits.charge_bytes {
+            return Err(PoolError::Capacity);
+        }
+        let roots = roots
+            .map(|r| u32::try_from(r).map_err(|_| PoolError::Capacity))
+            .collect::<Result<Vec<_>, _>>()?;
+        // Context owns one bounded directory copy; Scope payloads remain shared.
+        // This consumed private handle supplies no zero-reserve install path.
+        DecodedPool {
+            scopes: decoded.scopes.clone(),
+            directories: decoded.directories.clone(),
+            limits: DecodeLimits {
+                root_references: count,
+                ..decoded.limits
+            },
+            consumed_charge: charged,
+        }
+        .validate_roots(&roots)
+    }
+}
+
+pub(crate) struct DeferredSeed;
+impl<'de> DeserializeSeed<'de> for DeferredSeed {
+    type Value = DeferredPool;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<DeferredPool, D::Error> {
+        let limits = DecodeLimits {
+            charge_bytes: crate::checkpoint::ARCHIVE_BYTE_LIMIT as u64,
+            root_references: 0,
+            directories: crate::checkpoint::MAX_CHECKPOINT_ROOTS as u32,
+        };
+        PoolSeed(limits)
+            .deserialize(d)
+            .map(|decoded| DeferredPool { decoded })
+    }
+}
+impl ValidatedPool {
+    pub(crate) fn registry(&self, index: usize) -> Option<Shared<Registry>> {
+        let refs = self.directories.get(index)?;
+        Some(Shared::new(Registry::from_validated_payloads(
+            refs.iter().map(|i| self.scopes[*i as usize].clone()),
+        )))
     }
 }
 

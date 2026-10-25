@@ -647,6 +647,15 @@ impl Game {
         let mut created_hold = None;
         for index in 0..outcome.effects.len() {
             let effect = &outcome.effects[index];
+            if matches!(effect, ResolvedEffect::RoomLight { .. }) {
+                if recipient_id != outcome.actor || outcome.actor != outcome.target {
+                    return Err(GameError::Rule(RuleError::InvalidPlan));
+                }
+                let changed = self.apply_room_light(placement.location)?;
+                outcome.effects[applied_count] = ResolvedEffect::RoomLight { changed };
+                applied_count += 1;
+                continue;
+            }
             if let ResolvedEffect::SearchAdjacentGuises { roll } = effect {
                 if recipient_id != outcome.actor || outcome.actor != outcome.target {
                     return Err(GameError::Rule(RuleError::InvalidPlan));
@@ -983,7 +992,10 @@ impl Game {
         Ok(receipt.event)
     }
 
-    fn published_resolution(&self, receipt: PublishedResolution) -> Result<&Outcome, GameError> {
+    pub(crate) fn published_resolution(
+        &self,
+        receipt: PublishedResolution,
+    ) -> Result<&Outcome, GameError> {
         let Some(CombatEvent::Resolved {
             outcome, strike, ..
         }) = self.event_log.get(receipt.event)

@@ -618,6 +618,7 @@ impl Regions {
                 );
                 group_files.extend(batch.files);
                 let activation = batch.activation;
+                let spatial = batch.spatial;
                 let mut store = Pending {
                     regions: self,
                     made: &mut staged,
@@ -628,6 +629,7 @@ impl Regions {
                 {
                     return Err(storage_failure());
                 }
+                self.package.install_spatial_scope(&mut next, spatial)?;
                 if let Some(scope) = activation {
                     next.register_activation_scope(scope)
                         .map_err(|_| storage_failure())?;
@@ -654,6 +656,7 @@ impl Regions {
                 return Err(failure.unwrap_or_else(storage_failure));
             }
         };
+        self.package.install_authored_spatial(&mut next)?;
         *game = next;
         *made = staged;
         self.need_files(group_files);

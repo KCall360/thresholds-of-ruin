@@ -145,3 +145,113 @@ fn archive_root_envelope_accepts_257_and_serialization_rejects_258() {
     let _extra = game.checkpoint(&mut shared);
     assert!(serde_json::to_vec(&shared).is_err());
 }
+
+#[test]
+fn required_spatial_root_and_dangling_payload_fail_before_game_restore() {
+    let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
+    game.register_spatial_scope(scope(1), &budget()).unwrap();
+    let mut shared = SharedState::default();
+    let snapshot = game.checkpoint(&mut shared);
+    let named = serde_json::to_value(&snapshot).unwrap();
+    let pooled = serde_json::to_value(&shared).unwrap();
+    let mut good = RestoreContext::new(&shared, game.content().clone());
+    good.bind_spatial_roots(&[&snapshot]).unwrap();
+    assert_eq!(good.restore(snapshot).unwrap(), game);
+    let mut missing = named.clone();
+    missing.as_object_mut().unwrap().remove("spatial");
+    assert!(serde_json::from_value::<crate::checkpoint::Snapshot>(missing).is_err());
+    for invalid in [
+        serde_json::json!([]),
+        serde_json::json!("0"),
+        serde_json::json!(u64::MAX),
+    ] {
+        let mut bad = named.clone();
+        bad["spatial"] = invalid;
+        assert!(serde_json::from_value::<crate::checkpoint::Snapshot>(bad).is_err());
+    }
+    let mut dangling = named.clone();
+    dangling["spatial"] = serde_json::json!(u32::MAX);
+    let bad = serde_json::from_value(dangling).unwrap();
+    let mut context = RestoreContext::new(&shared, game.content().clone());
+    assert!(context.bind_spatial_roots(&[&bad]).is_err());
+    let mut missing_payload = pooled;
+    missing_payload["spatial"]["scopes"] = serde_json::json!([]);
+    let bad_shared: SharedState = serde_json::from_value(missing_payload).unwrap();
+    let snapshot = serde_json::from_value(named).unwrap();
+    let mut context = RestoreContext::new(&bad_shared, game.content().clone());
+    assert!(context.bind_spatial_roots(&[&snapshot]).is_err());
+}
+#[test]
+fn empty_decoded_pool_has_no_unbound_restore_or_encoding_exemption() {
+    let game = Game::two_room_in_stone(42, crate::test_creatures::content());
+    let mut shared = SharedState::default();
+    let snapshot = game.checkpoint(&mut shared);
+    let decoded: SharedState =
+        serde_json::from_value(serde_json::to_value(&shared).unwrap()).unwrap();
+    let named = serde_json::to_value(snapshot).unwrap();
+    let mut unbound = RestoreContext::new(&decoded, game.content().clone());
+    assert!(unbound
+        .restore(serde_json::from_value(named.clone()).unwrap())
+        .is_err());
+    assert!(serde_json::to_vec(&decoded).is_err());
+    let snapshot = serde_json::from_value(named).unwrap();
+    let mut bound = RestoreContext::new(&decoded, game.content().clone());
+    bound.bind_spatial_roots(&[&snapshot]).unwrap();
+    assert_eq!(bound.restore(snapshot).unwrap(), game);
+}
+#[test]
+fn conflicting_historical_capture_is_a_serializer_failure_not_partial_authority() {
+    let mut first = Game::two_room_in_stone(42, crate::test_creatures::content());
+    let mut second = first.clone();
+    first.register_spatial_scope(scope(1), &budget()).unwrap();
+    let mut alternative = scope(1);
+    alternative.id = "alternative".into();
+    second
+        .register_spatial_scope(alternative, &budget())
+        .unwrap();
+    assert!(first
+        .spatial_registry()
+        .lookup("fixture/1", at(1))
+        .is_some());
+    assert!(second
+        .spatial_registry()
+        .lookup("alternative", at(1))
+        .is_some());
+    let original = (first.clone(), second.clone());
+    let mut shared = SharedState::default();
+    let _before = first.checkpoint(&mut shared);
+    let _after = second.checkpoint(&mut shared);
+    assert!(serde_json::to_vec(&shared).is_err());
+    assert_eq!((first, second), original);
+}
+#[test]
+fn append_to_decoded_capture_poison_blocks_the_complete_archive() {
+    let game = Game::two_room_in_stone(42, crate::test_creatures::content());
+    let mut original = SharedState::default();
+    let before = game.checkpoint(&mut original);
+    let encoded = serde_json::to_vec(&(before, &original)).unwrap();
+    let (_before, mut decoded): (crate::checkpoint::Snapshot, SharedState) =
+        serde_json::from_slice(&encoded).unwrap();
+    // Decoded pools require explicit root binding for restore, not capture append.
+    // No reliance on whether a standalone placeholder scalar fits u32 on32-bit.
+    let after = game.checkpoint(&mut decoded);
+    assert!(serde_json::to_vec(&(after, &decoded)).is_err());
+    let repeated = game.checkpoint(&mut decoded);
+    assert!(serde_json::to_vec(&(repeated, &decoded)).is_err());
+}
+#[test]
+fn over_envelope_capture_poison_does_not_retain_more_root_references() {
+    let mut state = super::PoolState::default();
+    let root = tor_world::Shared::new(crate::spatial_scope::registry::Registry::default());
+    for _ in 0..257 {
+        assert_eq!(state.capture(&root), 0);
+    }
+    assert!(serde_json::to_vec(&state).is_ok());
+    state.capture(&root);
+    assert!(matches!(&state, super::PoolState::InvalidCapture));
+    for _ in 0..1000 {
+        state.capture(&root);
+    }
+    assert!(matches!(&state, super::PoolState::InvalidCapture));
+    assert!(serde_json::to_vec(&state).is_err());
+}

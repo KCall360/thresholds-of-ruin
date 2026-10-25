@@ -430,3 +430,113 @@ fn passage_budget_counts_scopes_and_rechecks_idempotent_registration() {
     );
     assert_eq!(registry, both);
 }
+
+#[test]
+fn archive_checked_registration_uses_shared_writer_and_is_atomic() {
+    let mut registry = Registry::default();
+    registry.validate_archive_capacity().unwrap();
+    registry.register_archive_checked(scope()).unwrap();
+    registry.validate_archive_capacity().unwrap();
+    let before = registry.clone();
+    registry.register_archive_checked(scope()).unwrap();
+    assert_eq!(registry, before);
+    let mut conflict = scope();
+    conflict.primary[0].cells.first_x = 1;
+    conflict.validate(&budget()).unwrap();
+    assert_eq!(
+        registry.register_archive_checked(conflict),
+        Err(Error::Conflict)
+    );
+    assert_eq!(registry, before);
+}
+
+#[test]
+fn archive_checked_registration_rejects_combined_bytes_not_individual_type_limits() {
+    // Trusted typed structural stress case, not legal authored geometry. The
+    // independent label and primary-run allowances each fit; their combined
+    // shared archive charge does not. No encoded payload buffer is produced.
+    let mut first = scope();
+    first.id = "a".repeat(4_000_000);
+    let second = Scope {
+        id: "z".into(),
+        members: vec![RegionId(3)],
+        primary: (0..225_000)
+            .map(|z| PrimaryRun {
+                cells: run(3, z, 0, 0),
+                membership: member(1),
+            })
+            .collect(),
+        rooms: vec![RoomSurfaces {
+            room: room(1),
+            runs: vec![run(3, 0, 0, 0)],
+        }],
+    };
+    let bounds = super::super::codec::archive_structural_budget().unwrap();
+    first.validate(&bounds).unwrap();
+    second.validate(&bounds).unwrap();
+    let mut independent = Registry::default();
+    independent
+        .register_archive_checked(second.clone())
+        .unwrap();
+    let mut registry = Registry::default();
+    registry.register_archive_checked(first).unwrap();
+    let before = registry.clone();
+    let mut structural = registry.clone();
+    structural.register(second.clone(), &bounds).unwrap();
+    assert_eq!(
+        structural.validate_archive_capacity(),
+        Err(super::super::codec::PoolError::Capacity)
+    );
+    assert_eq!(
+        registry.register_archive_checked(second),
+        Err(Error::Capacity)
+    );
+    assert_eq!(registry, before);
+}
+
+#[test]
+fn shared_foreign_surface_dependencies_never_grant_primary_membership() {
+    let first = Scope {
+        id: "first".into(),
+        members: vec![RegionId(1)],
+        primary: vec![PrimaryRun {
+            cells: run(1, 0, 1, 1),
+            membership: member(1),
+        }],
+        rooms: vec![RoomSurfaces {
+            room: room(1),
+            runs: vec![run(2, 0, 0, 0)],
+        }],
+    };
+    let mut second = first.clone();
+    second.id = "second".into();
+    second.members = vec![RegionId(2)];
+    second.primary[0].cells.region = RegionId(2);
+    // Both owners name one surface; only the second owns region2's primary space.
+    first.validate(&budget()).unwrap();
+    second.validate(&budget()).unwrap();
+    let mut registry = Registry::default();
+    registry.register_archive_checked(first.clone()).unwrap();
+    registry.register_archive_checked(second).unwrap();
+    assert_eq!(registry.lookup("first", at(1, 1, 0)), Some(member(1)));
+    assert_eq!(registry.lookup("first", at(2, 1, 0)), None);
+    assert_eq!(registry.lookup("first", at(2, 0, 0)), None);
+    assert_eq!(registry.lookup("second", at(2, 1, 0)), Some(member(1)));
+    registry.validate_archive_capacity().unwrap();
+    let mut escaped = first.clone();
+    escaped.primary[0].cells.region = RegionId(2);
+    assert_eq!(escaped.validate(&budget()), Err(Error::Structure));
+    let mut reversed = first.clone();
+    reversed.rooms[0].runs[0].first_x = 1;
+    assert_eq!(reversed.validate(&budget()), Err(Error::Structure));
+    let mut duplicated = first.clone();
+    duplicated.rooms[0].runs.push(run(2, 0, 0, 0));
+    assert_eq!(duplicated.validate(&budget()), Err(Error::Structure));
+    assert_eq!(
+        first.validate(&Budget {
+            expanded_refs: 1,
+            ..budget()
+        }),
+        Err(Error::Capacity)
+    );
+}

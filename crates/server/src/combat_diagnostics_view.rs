@@ -240,6 +240,12 @@ fn record(
                                 amount: *amount,
                             }
                         }
+                        s::abilities::ResolvedEffect::RoomLight { changed } => {
+                            p::DiagnosticEffect::RoomLight {
+                                target: p::ActorId(value.outcome.actor.0),
+                                changed: *changed,
+                            }
+                        }
                         s::abilities::ResolvedEffect::RestoreHitDie { amount } => {
                             p::DiagnosticEffect::RestoreHitDie {
                                 target,
@@ -514,6 +520,23 @@ mod restorable_loss_diagnostic_tests {
             assert!(
                 !encoded.contains(private),
                 "private effect operand leaked {private}"
+            );
+        }
+    }
+
+    #[test]
+    fn room_light_diagnostic_projects_only_actual_change_and_source_recipient() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        for changed in [false, true] {
+            let source = diagnostic(vec![s::abilities::ResolvedEffect::RoomLight { changed }]);
+            let view = record(&source, 1, &rules).unwrap();
+            let value = serde_json::to_value(&view.outcome).unwrap();
+            assert_eq!(
+                value["effects"],
+                serde_json::json!([
+                    {"type":"room_light", "target":"1", "changed":changed}
+                ])
             );
         }
     }

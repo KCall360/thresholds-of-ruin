@@ -825,7 +825,12 @@ impl Game {
         outcome.intention = intention;
         self.rules_rng = rng;
         self.consume_resistance_tokens(&resolved.resistance_tokens)?;
-        self.apply_outcome(outcome.clone())?;
+        let receipt = self.apply_resolved_outcome(
+            outcome,
+            crate::lifecycle::ResolutionPublication::Standalone,
+            &mut crate::lifecycle::DamageActivityGuard::default(),
+        )?;
+        let outcome = self.published_resolution(receipt)?.clone();
         self.record_survival(plan.target(), &flow);
         Ok(outcome)
     }

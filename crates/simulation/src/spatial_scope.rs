@@ -6,7 +6,8 @@
 
 pub mod codec;
 pub mod registry;
-mod retention;
+pub(crate) mod retention;
+mod room_light;
 
 use std::num::NonZeroU32;
 

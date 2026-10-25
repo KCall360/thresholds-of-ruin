@@ -19,12 +19,16 @@ mod diagnostics;
 mod instantiation;
 #[path = "scenario_population.rs"]
 mod population;
-// Compiler first-red boundary only; no public authored schema or runtime integration.
 #[path = "scenario_retrieval.rs"]
 mod retrieval;
-#[cfg(test)]
 #[path = "scenario_spatial.rs"]
-mod spatial;
+pub(crate) mod spatial;
+#[path = "scenario_spatial_authoring.rs"]
+pub mod spatial_authoring;
+#[path = "scenario_spatial_runtime.rs"]
+mod spatial_runtime;
+#[path = "scenario_spatial_sources.rs"]
+mod spatial_sources;
 pub use population::{
     ActorPopulationBand, ActorPopulationChoice, CarriedItemChoice, CarriedItemPool, CarriedLoot,
     CarryChance, CharacterLoadout, FloorActivation, PopulationAdvancement, PopulationBand,
@@ -32,6 +36,9 @@ pub use population::{
     PopulationQuantityExpr, PopulationStage, Protagonist, QuantityExpression, ScenarioCapabilities,
 };
 pub use retrieval::UniqueRetrieval;
+#[cfg(test)]
+pub(crate) use spatial_runtime::tests::package as spatial_audit_test_package;
+pub(crate) use spatial_runtime::SpatialAudit;
 #[path = "scenario_rules.rs"]
 mod rules_source;
 pub use artifact::export;
@@ -70,6 +77,7 @@ pub const MAX_REGIONS: usize = 65_536;
 pub(crate) const MAX_REGION_BYTES: u64 = 1024 * 1024;
 /// The index is bounded to this, which holds the largest package.
 pub(crate) const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_VALIDATION_CELL_WORK: u64 = 67_108_864;
 
 fn fail(message: impl AsRef<str>) -> Failure {
     Failure::new(tor_protocol::ErrorCode::InvalidAction, message.as_ref())
@@ -118,6 +126,12 @@ fn label(s: &str) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "spatial_authoring::unique_map"
+    )]
+    pub spatial_scopes: BTreeMap<String, spatial_authoring::AuthoredSpatialScope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unique_retrieval: Option<UniqueRetrieval>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1752,6 +1766,7 @@ impl Package {
             .ok_or_else(|| fail("Missing generation group owner"))?;
         let group = self.generation_group(&identity, seed)?;
         let generated = self.generated_group(&identity, seed)?;
+        let spatial = self.canonical_generated_spatial(&identity, seed, &generated)?;
         let rooms = generated.rooms;
         let definitions = generated.regions;
         let shell: BTreeMap<u64, Arc<RegionDef>> = definitions
@@ -1829,6 +1844,7 @@ impl Package {
             records,
             files,
             activation,
+            spatial,
         })
     }
 
@@ -2139,7 +2155,6 @@ pub fn write_package(
 pub(crate) fn checked_package(root: &Path) -> Result<Package, Failure> {
     let mut package = read_package(root)?;
     package.check()?;
-    const MAX_VALIDATION_CELL_WORK: u64 = 67_108_864;
     let volume = |size: [i32; 3], chamber: bool| -> Result<u64, Failure> {
         size.into_iter().try_fold(1u64, |product, side| {
             let side = u64::try_from(side).map_err(|_| fail("Invalid validation volume"))?;
@@ -3116,6 +3131,7 @@ impl Package {
                 )?;
             }
         }
+        self.validate_spatial_sources()?;
         Ok(())
     }
     /// Acquire diagnostic text only after a reference check fails. Unavailable
@@ -3576,12 +3592,18 @@ impl Package {
         // temporary batch into definitions; it is never a terrain baseline.
         let mut generated = BTreeMap::new();
         let mut generated_rooms = BTreeMap::new();
+        let mut generated_spatial = tor_simulation::spatial_scope::registry::Registry::default();
         let mut defs = Vec::new();
         for entry in &self.index.regions {
             if let Some(owner) = index.group_owners.get(&entry.id) {
                 if !generated.contains_key(&entry.id) {
                     let identity = &index.groups[owner];
                     let group = self.generated_group(identity, seed)?;
+                    generated_spatial
+                        .register_archive_checked(
+                            self.canonical_generated_spatial(identity, seed, &group)?,
+                        )
+                        .map_err(|e| fail(format!("Generated spatial capacity: {e:?}")))?;
                     generated_rooms.insert(identity.clone(), group.rooms);
                     generated.extend(group.regions);
                 }
@@ -3596,6 +3618,11 @@ impl Package {
         // without a spawned root retain one representative validation group.
         for identity in self.initial_procedural_groups(index.homes.values().map(|at| at.region.0)) {
             let group = self.generated_group(&identity, seed)?;
+            generated_spatial
+                .register_archive_checked(
+                    self.canonical_generated_spatial(&identity, seed, &group)?,
+                )
+                .map_err(|e| fail(format!("Generated spatial capacity: {e:?}")))?;
             generated_rooms.insert(identity, group.rooms);
             defs.extend(group.regions.into_values().map(Arc::new));
         }
@@ -3632,6 +3659,10 @@ impl Package {
                 self.boundary_anchor(name) || game.authored_cell_valid(*position),
                 format!("Anchor {name}: outside traversable geometry"),
             )?;
+        }
+        self.install_authored_spatial(&mut game)?;
+        for scope in generated_spatial.scopes() {
+            self.install_spatial_scope(&mut game, scope.clone())?;
         }
         self.add_entities(&mut game, seed, &index, &all)?;
         self.configure_population(&mut game, &index)?;
@@ -4328,17 +4359,12 @@ impl Package {
         Ok(())
     }
 
-    /// A region's gravity, outgoing links, place hints and gravity overrides.
-    fn add_structure(
+    fn spatial_joins(
         &self,
-        game: &mut Game,
         r: &RegionDef,
         anchors: &BTreeMap<String, Location>,
-    ) -> Result<(), Failure> {
-        if let Some(gravity) = r.gravity {
-            game.set_gravity(RegionId(r.id), gravity)
-                .map_err(|_| fail("Invalid region gravity"))?;
-        }
+    ) -> Result<Vec<spatial_runtime::SourceJoin>, Failure> {
+        let mut joins = Vec::new();
         for (index, p) in r.portals.iter().enumerate() {
             let direction = match p.direction.as_str() {
                 "north" => Direction::North,
@@ -4377,24 +4403,41 @@ impl Package {
                     || matches!(direction, Direction::Up | Direction::Down),
                 "Stairs require an up/down direction",
             )?;
-            let connect = match p.kind.as_deref() {
-                Some("boundary") => Game::connect_boundary_area,
-                Some("portal") => Game::connect_portal_area,
-                None | Some("stairs") => Game::connect_area,
+            let kind = match p.kind.as_deref() {
+                Some("boundary") => spatial_runtime::JoinKind::Boundary,
+                Some("portal") => spatial_runtime::JoinKind::Portal,
+                None | Some("stairs") => spatial_runtime::JoinKind::Transport,
                 _ => return Err(fail("Invalid connection kind")),
             };
-            connect(
-                game,
-                Passage {
+            joins.push(spatial_runtime::SourceJoin {
+                passage: Passage {
                     from: loc(r.id, p.at),
                     direction,
                     to,
                 },
                 rotation,
-                p.width,
-                p.height,
-            )
-            .map_err(|e| fail(format!("Region {} portal to {}: {e:?}", r.id, p.to)))?;
+                width: p.width,
+                height: p.height,
+                kind,
+            });
+        }
+        Ok(joins)
+    }
+
+    /// A region's gravity, outgoing links, place hints and gravity overrides.
+    fn add_structure(
+        &self,
+        game: &mut Game,
+        r: &RegionDef,
+        anchors: &BTreeMap<String, Location>,
+    ) -> Result<(), Failure> {
+        if let Some(gravity) = r.gravity {
+            game.set_gravity(RegionId(r.id), gravity)
+                .map_err(|_| fail("Invalid region gravity"))?;
+        }
+        for join in self.spatial_joins(r, anchors)? {
+            join.apply_game(game)
+                .map_err(|e| fail(format!("Region {} portal: {e:?}", r.id)))?;
         }
         for p in &r.places {
             match p {
@@ -4717,6 +4760,7 @@ pub(crate) struct PackageIndex {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PreparedGroup {
+    pub(crate) spatial: tor_simulation::spatial_scope::registry::Scope,
     /// Immutable geometry-only input; preparing it never chooses population.
     pub(crate) activation: Option<tor_simulation::floor_activation::PreparedScope>,
     pub(crate) records: Vec<(tor_simulation::UnbuiltRegion, tor_simulation::RegionRecord)>,
@@ -5406,6 +5450,7 @@ mod tests {
             "rogue.wand_teleport_away",
             "rogue.wand_teleport_to",
             "rogue.wand_nothing",
+            "rogue.wand_light",
         ] {
             package.manifest.archetypes.get_mut(id).unwrap().class = ItemClass::Tool;
         }

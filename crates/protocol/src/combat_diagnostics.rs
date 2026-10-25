@@ -102,6 +102,10 @@ impl<'de> Deserialize<'de> for DiagnosticCostBundle {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
+    RoomLight {
+        target: ActorId,
+        changed: bool,
+    },
     ConditionRemoved {
         target: ActorId,
         condition: ContentRef,
@@ -304,6 +308,7 @@ impl CombatDiagnosticRecord {
                 DiagnosticEffect::ConditionRemoved { target, condition } => {
                     *target == self.target && condition.valid()
                 }
+                DiagnosticEffect::RoomLight { target, .. } => *target == self.actor,
                 DiagnosticEffect::Translate { target, .. }
                 | DiagnosticEffect::Relocate { target, .. }
                 | DiagnosticEffect::ArrestDescent { target } => *target == self.target,
@@ -406,6 +411,10 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            RoomLight {
+                target: ActorId,
+                changed: bool,
+            },
             ConditionRemoved {
                 target: ActorId,
                 #[serde(deserialize_with = "crate::bounded::named_map")]
@@ -494,6 +503,7 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::RoomLight { target, changed } => Self::RoomLight { target, changed },
             Fields::ConditionRemoved { target, condition } => {
                 Self::ConditionRemoved { target, condition }
             }
@@ -597,4 +607,24 @@ pub enum DiagnosticMovementResult {
     Ineligible,
     Stale,
     Ambiguous,
+}
+
+#[cfg(test)]
+mod room_light_diagnostic_tests {
+    use super::*;
+    #[test]
+    fn room_light_requires_exact_target_and_changed_result() {
+        for changed in [false, true] {
+            let value = serde_json::json!({"type":"room_light","target":"1","changed":changed});
+            let decoded: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        }
+        for value in [
+            serde_json::json!({"type":"room_light","target":"1"}),
+            serde_json::json!({"type":"room_light","target":"1","changed":true,"room":9}),
+            serde_json::json!(["room_light", "1", true]),
+        ] {
+            assert!(serde_json::from_value::<DiagnosticEffect>(value).is_err());
+        }
+    }
 }

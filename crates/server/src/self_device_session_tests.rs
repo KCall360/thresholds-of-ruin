@@ -1150,3 +1150,464 @@ fn imported_nothing_paid_unknown_then_identified_self_survives_source_deleted_re
     );
     assert_eq!(wire.checkpoint(), retry_before);
 }
+
+fn authored_room_light_source(root: &Path, passage: bool) -> crate::Scenario {
+    let baseline = self_device_source(root, false, false);
+    let source = baseline.package.as_ref().unwrap();
+    let mut document = source.rules().unwrap().document().clone();
+    let ability = document
+        .abilities
+        .iter_mut()
+        .find(|a| a.id.as_str() == "magic.ember_ray")
+        .unwrap();
+    let tor_simulation::rules::StrikeSource::Authored { strikes } = &mut ability.strikes else {
+        panic!("authored self ability")
+    };
+    strikes[0].on_success = vec![tor_simulation::rules::Effect::RoomLight];
+    let rules = toml::to_string(&document).unwrap();
+    let mut manifest = serde_json::to_value(&source.manifest).unwrap();
+    manifest["archetypes"]["ember"]["device"]["discovery"] = json!("on_use");
+    manifest["spatial_scopes"] = json!({"study":{
+        "members":[1],"rooms":if passage {json!({})}else{json!({"1":[{"region":1,"min":[0,0,0],"max":[6,4,1]}]})},
+        "passages":if passage {(0..2).flat_map(|z|(0..5).map(move|y|json!({"region":1,"z":z,"y":y,"first_x":0,"last_x":6}))).collect::<Vec<_>>()}else{vec![]},"doorways":[]
+    }});
+    let mut regions = source.region_defs().unwrap();
+    let mut region = serde_json::to_value(&regions[0]).unwrap();
+    region["lit"] = json!(false);
+    region["lighting"] = json!([]);
+    // Ordinary authored inventory avoids relying on visibility of a dark floor
+    // item before testing the actual paid device. No synthetic item injection.
+    region["items"] = json!([{"id":30,"at":[1,2,0],"archetype":"ember","carried_by":1}]);
+    regions[0] = serde_json::from_value(region).unwrap();
+    let checked =
+        Package::from_parts(serde_json::from_value(manifest).unwrap(), regions, &rules).unwrap();
+    checked.check().unwrap();
+    crate::scenario_package::write_package(
+        root,
+        &checked.manifest,
+        &checked.region_defs().unwrap(),
+        &rules,
+    )
+    .unwrap();
+    crate::scenario_package::check(root).unwrap();
+    crate::scenario_package::load(root, 42, None, true).unwrap()
+}
+fn room_light_world(saved: &Value) -> tor_world::World {
+    #[derive(serde::Deserialize)]
+    struct Worlds(#[serde(with = "tor_world::checkpoint_worlds")] Vec<tor_world::World>);
+    let worlds: Worlds = serde_json::from_value(saved["shared"]["worlds"].clone()).unwrap();
+    worlds.0[saved["game"]["world"].as_u64().unwrap() as usize].clone()
+}
+fn paid_authored_room_light(passage: bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("source");
+    let path = directory.path().join("light.db");
+    let mut wire =
+        Wire::new(Engine::open(&path, authored_room_light_source(&root, passage)).unwrap());
+    let snapshot = wire.snapshot(OWNER);
+    let wand = snapshot
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|i| i.class == ItemClass::Wand)
+        .unwrap()
+        .id;
+    assert!(!nothing_identified(&snapshot, wand));
+    assert_eq!(
+        nothing_affordance(&snapshot, wand).device_activation,
+        Some(DeviceActivation::Direction)
+    );
+    assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
+    let physical = nothing_wand_id(&wire, wand);
+    let before = wire.checkpoint();
+    let at = tor_world::Location {
+        region: tor_world::RegionId(1),
+        position: tor_world::Position { x: 5, y: 3, z: 1 },
+    };
+    assert_eq!(room_light_world(&before).is_lit(at), Some(false));
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::West,
+            },
+        },
+    );
+    ack(wire.send(OWNER, "room-light-once", request.clone()));
+    let receipt = wire.finish(OWNER, "room-light-once", &request);
+    let after = wire.checkpoint();
+    assert_eq!(nothing_items(&after)[&physical]["charges"], 2);
+    assert_eq!(
+        after["game"]["tick"].as_u64().unwrap(),
+        before["game"]["tick"].as_u64().unwrap() + 100
+    );
+    assert_eq!(after["game"]["rules_rng"], before["game"]["rules_rng"]);
+    let known = wire.snapshot(OWNER);
+    assert!(nothing_identified(&known, wand));
+    assert_eq!(
+        nothing_affordance(&known, wand).device_activation,
+        Some(DeviceActivation::SelfTarget)
+    );
+    assert_eq!(nothing_affordance(&known, wand).charges, None);
+    assert_eq!(
+        room_light_world(&after).is_lit(at),
+        Some(!passage),
+        "paid RoomLight must use canonical Room versus Passage membership"
+    );
+    assert_eq!(ack(wire.send(OWNER, "room-light-once", request)), receipt);
+    assert_eq!(wire.checkpoint(), after);
+    wire.act(
+        "room-light-repeat",
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::SelfTarget {},
+        },
+    );
+    let repeated = wire.checkpoint();
+    assert_eq!(nothing_items(&repeated)[&physical]["charges"], 1);
+    assert_eq!(repeated["game"]["rules_rng"], after["game"]["rules_rng"]);
+    assert_eq!(room_light_world(&repeated).is_lit(at), Some(!passage));
+    wire.service.engine.flush().unwrap();
+    drop(wire);
+    std::fs::remove_dir_all(&root).unwrap();
+    let reopened = Engine::open(&path, crate::Scenario::two_room(999)).unwrap();
+    assert_eq!(checkpoint(&reopened), repeated);
+}
+#[test]
+fn actual_paid_room_light_uses_canonical_room_and_survives_source_deleted_reopen() {
+    paid_authored_room_light(false);
+}
+#[test]
+fn actual_paid_room_light_in_explicit_passage_is_identified_paid_noop() {
+    paid_authored_room_light(true);
+}
+
+#[test]
+fn enabled_room_light_requires_metadata_but_unused_import_does_not() {
+    let directory = tempfile::tempdir().unwrap();
+    let scenario = authored_room_light_source(directory.path(), false);
+    let source = scenario.package.as_ref().unwrap();
+    source.check().unwrap();
+    let rules = toml::to_string(source.rules().unwrap().document()).unwrap();
+    let mut manifest = source.manifest.clone();
+    manifest.spatial_scopes.clear();
+    let regions = source.region_defs().unwrap();
+    let enabled = Package::from_parts(manifest.clone(), regions.clone(), &rules).unwrap();
+    assert!(
+        enabled.check().is_err(),
+        "actually reachable RoomLight needs canonical metadata"
+    );
+    let mut unused_regions = regions;
+    unused_regions[0].items.clear();
+    let unused = Package::from_parts(manifest, unused_regions, &rules).unwrap();
+    unused.check().unwrap();
+    assert!(unused
+        .manifest
+        .archetypes
+        .get("ember")
+        .unwrap()
+        .device
+        .is_some());
+}
+
+fn managed_remote_room_light(foreign_face: bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("source");
+    let path = directory.path().join("remote-light.db");
+    let base = authored_room_light_source(&root, false);
+    let source = base.package.as_ref().unwrap();
+    let rules = toml::to_string(source.rules().unwrap().document()).unwrap();
+    let mut manifest = serde_json::to_value(&source.manifest).unwrap();
+    if foreign_face {
+        manifest["spatial_scopes"]["study"]["rooms"]["1"][0]["max"] = json!([31, 4, 1]);
+        let passages: Vec<_> = (0..2)
+            .flat_map(|z| {
+                (0..3).flat_map(move |y| {
+                    let spans = if z == 1 && y == 1 {
+                        vec![(0, 0), (2, 2)]
+                    } else {
+                        vec![(0, 2)]
+                    };
+                    spans
+                        .into_iter()
+                        .map(move |(a, b)| json!({"region":2,"z":z,"y":y,"first_x":a,"last_x":b}))
+                })
+            })
+            .collect();
+        manifest["spatial_scopes"]["neighbor"] =
+            json!({"members":[2],"rooms":{},"passages":passages,"doorways":[]});
+    } else {
+        manifest["spatial_scopes"]["study"]["members"] = json!([1, 2]);
+        manifest["spatial_scopes"]["study"]["rooms"]["1"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"region":2,"min":[0,0,0],"max":[2,2,1]}));
+    }
+    let creature = manifest["characters"][0]["creature"].clone();
+    let mut definitions = source.region_defs().unwrap();
+    let mut local = serde_json::to_value(&definitions[0]).unwrap();
+    local["actors"] =
+        json!([{"id":2,"at":[5,2,0],"turn_ticks":100,"controller":"external","creature":creature}]);
+    if foreign_face {
+        // Both actual observers are more than the core's sixteen-cell maximum
+        // sight range from this mouth; darkness is not the residency premise.
+        local["size"] = json!([32, 5, 2]);
+        local["portals"] = json!([{"at":[31,1,1],"direction":"east","to":"2/entry","kind":"boundary","width":2,"turns":1}]);
+        let mouth_x = local["portals"][0]["at"][0].as_i64().unwrap();
+        let peer_x = local["actors"][0]["at"][0].as_i64().unwrap();
+        let owner_x = local["anchors"]["start"][0].as_i64().unwrap();
+        assert!(mouth_x - peer_x > 16 && mouth_x - owner_x > 16);
+    }
+    definitions[0] = serde_json::from_value(local).unwrap();
+    let mut remote_definition = json!({"id":2,"name":"Remote surface","size":[3,3,2],"chamber":true,"lit":false,
+        "actors":[{"id":3,"at":[0,0,0],"turn_ticks":100,"controller":"ai","creature":creature}]});
+    if foreign_face {
+        remote_definition["walls"] = json!([[1, 1, 1]]);
+        remote_definition["anchors"] = json!({"entry":[2,1,1]});
+    }
+    definitions.push(serde_json::from_value(remote_definition).unwrap());
+    let package = Package::from_parts(
+        serde_json::from_value(manifest).unwrap(),
+        definitions,
+        &rules,
+    )
+    .unwrap();
+    package.check().unwrap();
+    assert!(package.manifest.floor_activation.is_none());
+    crate::scenario_package::write_package(
+        &root,
+        &package.manifest,
+        &package.region_defs().unwrap(),
+        &rules,
+    )
+    .unwrap();
+    crate::scenario_package::check(&root).unwrap();
+    let mut scenario = crate::scenario_package::load(&root, 42, None, true).unwrap();
+    scenario.streaming = Some(crate::Streaming {
+        active_radius: 0,
+        load_radius: 0,
+    });
+    let policy = crate::SavePolicy {
+        checkpoint_interval: 4096,
+        ..Default::default()
+    };
+    let mut wire = Wire::new(Engine::open_with_policy(&path, scenario, policy).unwrap());
+    assert_eq!(
+        wire.clients.keys().copied().collect::<Vec<_>>(),
+        vec![OWNER, OTHER],
+        "never acquire control of cold AI"
+    );
+    let initial = wire.checkpoint();
+    assert!(nothing_actor(&initial, ActorId(3)).is_null());
+    if foreign_face {
+        let scopes = initial["shared"]["spatial"]["scopes"].as_array().unwrap();
+        let study = scopes.iter().find(|s| s["id"] == "study").unwrap();
+        assert_eq!(study["members"], json!([1]));
+        assert!(study["primary"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["cells"]["region"] == 1));
+        assert!(study["rooms"][0]["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["region"] == 2));
+        assert!(
+            scopes.iter().all(|s| s["id"] != "neighbor"),
+            "a surface reference is not preparation"
+        );
+    }
+    let remote = tor_world::Location {
+        region: tor_world::RegionId(2),
+        position: tor_world::Position { x: 1, y: 1, z: 1 },
+    };
+    assert_eq!(room_light_world(&initial).is_lit(remote), None);
+    let snapshot = wire.snapshot(OWNER);
+    let wand = snapshot
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|i| i.class == ItemClass::Wand)
+        .unwrap()
+        .id;
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::East,
+            },
+        },
+    );
+    ack(wire.send(OWNER, "cold-room-light", request.clone()));
+    wire.service.run_until_blocked();
+    wire.drain(OWNER);
+    wire.drain(OTHER);
+    let started = ack(wire.send(OWNER, "cold-room-light", request.clone()));
+    assert!(matches!(
+        started,
+        RequestReceipt::Admitted {
+            phase: IntentionPhase::Started,
+            ..
+        }
+    ));
+    let paused = wire.checkpoint();
+    assert_eq!(paused["game"]["tick"], initial["game"]["tick"]);
+    assert_eq!(room_light_world(&paused).is_lit(remote), Some(false));
+    let actor = nothing_actor(&paused, ActorId(3)).clone();
+    assert!(actor.is_object());
+    assert_eq!(actor["ready_at"], 0);
+    assert_eq!(actor["active_since"], 0);
+    let lifecycle = paused["game"]["lifecycle"].as_u64().unwrap() as usize;
+    assert_eq!(paused["shared"]["lifecycles"][lifecycle]["stamps"]["3"], 0);
+    assert!(paused["game"]["floor_activation"].is_null());
+    wire.finish(OWNER, "cold-room-light", &request);
+    let after = wire.checkpoint();
+    assert_eq!(after["game"]["tick"].as_u64().unwrap(), 100);
+    assert_eq!(after["game"]["rules_rng"], paused["game"]["rules_rng"]);
+    let mut world = room_light_world(&after);
+    if world.is_lit(remote).is_none() {
+        // Read the real unpublished-to-disk immutable record carried by the
+        // ordinary checkpoint. No private Game access or invented region state.
+        let capture = crate::engine::Checkpoint::capture(&wire.service.engine);
+        let record = capture
+            .records
+            .values()
+            .map(|record| {
+                serde_json::to_value(tor_simulation::RegionRecordData::capture(record)).unwrap()
+            })
+            .find(|record| record["world"]["region"]["id"] == 2)
+            .expect("new detached remote record before4096-entry checkpoint interval");
+        assert_eq!(record["actors"]["3"], actor);
+        assert_eq!(record["stamps"]["3"], 0);
+        let slice: tor_world::RegionSlice =
+            serde_json::from_value(record["world"].clone()).unwrap();
+        world.attach_region(slice).unwrap();
+    } else {
+        assert_eq!(nothing_actor(&after, ActorId(3)), &actor);
+        let lifecycle = after["game"]["lifecycle"].as_u64().unwrap() as usize;
+        assert_eq!(after["shared"]["lifecycles"][lifecycle]["stamps"]["3"], 0);
+    }
+    assert_eq!(
+        world.is_lit(remote),
+        Some(true),
+        "remote frozen surface must receive paid light"
+    );
+    if foreign_face {
+        assert!(world.is_wall(remote));
+        assert_eq!(
+            world.is_lit(tor_world::Location {
+                position: tor_world::Position { x: 0, y: 1, z: 1 },
+                ..remote
+            }),
+            Some(false),
+            "no illumination grant to foreign traversable primary"
+        );
+    }
+    assert!(after["game"]["floor_activation"].is_null());
+    wire.service.engine.flush().unwrap();
+    drop(wire);
+    std::fs::remove_dir_all(&root).unwrap();
+    let reopened = Engine::open(&path, crate::Scenario::two_room(999)).unwrap();
+    assert_eq!(checkpoint(&reopened), after);
+}
+
+#[test]
+fn managed_room_light_loads_remote_same_room_surface_without_activating_actor() {
+    managed_remote_room_light(false);
+}
+#[test]
+fn managed_room_light_loads_foreign_solid_surface_without_claiming_primary_or_waking_ai() {
+    managed_remote_room_light(true);
+}
+
+fn paid_generated_room_light(maze: bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("source");
+    let path = directory.path().join("generated-light.db");
+    let base = authored_room_light_source(&root, false);
+    let source = base.package.as_ref().unwrap();
+    let mut manifest = serde_json::to_value(&source.manifest).unwrap();
+    manifest["spatial_scopes"] = json!({});
+    manifest["characters"][0]["anchor"] = json!("dungeon/1/start");
+    manifest["characters"][0]["loadout"] = json!([{"archetype":"ember","quantity":1}]);
+    let recipe = crate::generation_recipe::GridRoomsPreset {
+        version: 1,
+        room_width: [30, 30],
+        room_height: [30, 30],
+        extra_connections: [0, 0],
+        room_omissions: None,
+        maze_rooms: maze.then_some(crate::generation_recipe::MazeRooms { one_in: 1 }),
+        lighting: Some(crate::generation_recipe::RoomLighting {
+            darkness_roll: 1,
+            darkness_start: 0,
+        }),
+        secret_entrances: None,
+        hidden_traps: None,
+    }
+    .to_recipe()
+    .unwrap();
+    manifest["generation_recipes"] = json!({"room":recipe});
+    manifest["procedural_worlds"] = json!({"dungeon":{"kind":"grid_chain","version":1,"base_region":1,"grid":[2,1],"size":[32,32,2],"recipe":"room","domain":{"kind":"open","max_depth":2}}});
+    let rules = toml::to_string(source.rules().unwrap().document()).unwrap();
+    let package =
+        Package::from_parts(serde_json::from_value(manifest).unwrap(), vec![], &rules).unwrap();
+    package.check().unwrap();
+    // The baseline wrote an authored region file. Do not let that stale file
+    // collide with the genuine procedural family in the on-disk validator.
+    std::fs::remove_dir_all(&root).unwrap();
+    crate::scenario_package::write_package(&root, &package.manifest, &[], &rules).unwrap();
+    crate::scenario_package::check(&root).unwrap();
+    let scenario = crate::scenario_package::load(&root, 42, None, true).unwrap();
+    let mut wire = Wire::new(Engine::open(&path, scenario).unwrap());
+    let snapshot = wire.snapshot(OWNER);
+    let wand = snapshot
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|i| i.class == ItemClass::Wand)
+        .unwrap()
+        .id;
+    let physical = nothing_wand_id(&wire, wand);
+    let before = wire.checkpoint();
+    let at: tor_world::Location =
+        serde_json::from_value(nothing_actor(&before, OWNER)["location"].clone()).unwrap();
+    assert_eq!(room_light_world(&before).is_lit(at), Some(false));
+    assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
+    wire.act(
+        "generated-room-light",
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::West,
+            },
+        },
+    );
+    let after = wire.checkpoint();
+    assert_eq!(nothing_items(&after)[&physical]["charges"], 2);
+    assert_eq!(
+        after["game"]["tick"].as_u64().unwrap(),
+        before["game"]["tick"].as_u64().unwrap() + 100
+    );
+    assert_eq!(after["game"]["rules_rng"], before["game"]["rules_rng"]);
+    assert_eq!(room_light_world(&after).is_lit(at), Some(!maze));
+    assert!(nothing_identified(&wire.snapshot(OWNER), wand));
+    wire.service.engine.flush().unwrap();
+    drop(wire);
+    std::fs::remove_dir_all(root).unwrap();
+    let reopened = Engine::open(&path, crate::Scenario::two_room(999)).unwrap();
+    assert_eq!(checkpoint(&reopened), after);
+}
+#[test]
+fn actual_paid_generated_room_light_uses_retained_room_geometry() {
+    paid_generated_room_light(false);
+}
+#[test]
+fn actual_paid_generated_maze_room_light_is_paid_identified_noop() {
+    paid_generated_room_light(true);
+}

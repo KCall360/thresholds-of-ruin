@@ -168,6 +168,7 @@ impl Ruleset {
                     }
                     PlannedEffect::AlterEquipment { .. }
                     | PlannedEffect::StepSelfOneCell
+                    | PlannedEffect::RoomLight
                     | PlannedEffect::ArrestDescent
                     | PlannedEffect::RestoreHitDie
                     | PlannedEffect::Heal { .. }
@@ -240,6 +241,7 @@ impl Ruleset {
             // Future consequences and source-only benefits do not imply intent.
             Effect::AlterEquipment { .. }
             | Effect::StepSelfOneCell
+            | Effect::RoomLight
             | Effect::ArrestDescent
             | Effect::RestoreHitDie
             | Effect::Heal { .. }

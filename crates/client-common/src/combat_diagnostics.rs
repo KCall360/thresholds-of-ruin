@@ -112,6 +112,7 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                     result,
                 } => format!("  Actor {}: {:?} movement, {:?}", target.0, mode, result),
                 DiagnosticEffect::Relocate { target, mode, result } => format!("  Actor {}: {:?} relocation, {:?}", target.0, mode, result),
+                DiagnosticEffect::RoomLight { target, changed } => format!("  Actor {}: room light {}", target.0, if *changed { "changed" } else { "unchanged" }),
                 DiagnosticEffect::ArrestDescent { target } => format!("  Actor {}: descent arrested", target.0),
                 DiagnosticEffect::CorrodeArmor { target, amount } => {
                     format!("  Actor {}: armor protection reduced by {amount}", target.0)
@@ -335,6 +336,27 @@ pub(crate) mod tests {
             assert!(rows
                 .iter()
                 .any(|row| row.contains("preparation 5, started 5, remaining 5, recovery 2")));
+        }
+    }
+
+    #[test]
+    fn room_light_diagnostics_distinguish_changed_from_paid_noop() {
+        for (changed, expected) in [(true, "changed"), (false, "unchanged")] {
+            let report = report_with_effects(vec![DiagnosticEffect::RoomLight {
+                target: ActorId(1),
+                changed,
+            }]);
+            let rows = lines(&report).unwrap();
+            assert!(rows.contains(&format!("  Actor 1: room light {expected}")));
+            let mut forged = report.clone();
+            forged.records[0].outcome.effects = vec![DiagnosticEffect::RoomLight {
+                target: ActorId(2),
+                changed,
+            }];
+            assert!(
+                lines(&forged).is_err(),
+                "room light cannot claim a nominal recipient instead of its source"
+            );
         }
     }
 

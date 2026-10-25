@@ -1050,6 +1050,7 @@ pub enum Effect {
     RestoreHitDie,
     TeleportRandom,
     TeleportToRayOrigin,
+    RoomLight,
     ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
@@ -1118,7 +1119,8 @@ pub enum Effect {
 impl Effect {
     pub fn recipient(&self) -> EffectRecipient {
         match self {
-            Self::AlterEquipment { .. }
+            Self::RoomLight
+            | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises
             | Self::ObservePublicPlan
             | Self::ApplyQualifiedConditionToSource { .. } => EffectRecipient::Source,
@@ -1156,6 +1158,7 @@ impl<'de> Deserialize<'de> for Effect {
             RestoreHitDie {},
             TeleportRandom {},
             TeleportToRayOrigin {},
+            RoomLight {},
             ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
@@ -1245,6 +1248,7 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::TeleportRandom {} => Self::TeleportRandom,
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
+            Fields::RoomLight {} => Self::RoomLight,
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
@@ -2111,6 +2115,35 @@ impl Ruleset {
         )?;
         for d in &mut document.abilities {
             bound(d.spatial_shape_valid(), "ability_spatial_shape")?;
+            let lights = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes.iter().any(|strike| {
+                    strike
+                        .on_success
+                        .iter()
+                        .chain(&strike.on_failure)
+                        .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                        .any(|effect| matches!(effect, Effect::RoomLight))
+                }),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|rider| &rider.effects)
+                    .any(|effect| matches!(effect, Effect::RoomLight)),
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => false,
+            };
+            bound(
+                !lights
+                    || (d.invocation == crate::abilities::InvocationKind::ActorTarget
+                        && d.reach == Reach::SelfOnly
+                        && d.interaction == Interaction::NonHostile),
+                "room_light_self_only",
+            )?;
+            bound(
+                !lights
+                    || matches!(&d.strikes, StrikeSource::Authored { strikes }
+                if matches!(strikes.as_slice(), [StrikeDef { offset: 0, unlock: None, check: None, on_failure, riders, .. }]
+                    if on_failure.is_empty() && riders.is_empty())),
+                "room_light_checkless",
+            )?;
             let searches = match &d.strikes {
                 StrikeSource::Authored { strikes } => strikes.iter().any(|strike| {
                     strike
@@ -2799,6 +2832,7 @@ impl References<'_> {
                 | Effect::RestoreHitDie
                 | Effect::TeleportRandom
                 | Effect::TeleportToRayOrigin
+                | Effect::RoomLight
                 | Effect::ArrestDescent => {}
             }
             if let Effect::ApplyQualifiedConditionToSource {
@@ -3436,6 +3470,7 @@ impl Effect {
             | Self::RestoreHitDie
             | Self::TeleportRandom
             | Self::TeleportToRayOrigin
+            | Self::RoomLight
             | Self::ArrestDescent => true,
             Self::HealPerHitDie { sides, bonus, .. } => DicePool::new(1, *sides, *bonus).is_ok(),
             Self::ApplyConditionForTurns { duration, .. } => positive_duration_shape(duration),

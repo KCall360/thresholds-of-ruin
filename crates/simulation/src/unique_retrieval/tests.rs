@@ -415,6 +415,7 @@ fn checkpoint_preserves_small_objective_state_and_ordinary_identity() {
     let mut shared = SharedState::default();
     let snapshot = game.checkpoint(&mut shared);
     let mut context = RestoreContext::new(&shared, game.content.clone());
+    context.bind_spatial_roots(&[&snapshot]).unwrap();
     assert_eq!(context.restore(snapshot).unwrap(), game);
 }
 #[test]
@@ -470,6 +471,9 @@ fn checkpoint_objective_validation_is_specific_to_each_boundary() {
         let mut bad = encoded.clone();
         bad[field] = serde_json::json!(0);
         let mut context = RestoreContext::new(&shared, game.content.clone());
+        let spatial_binding: crate::checkpoint::Snapshot =
+            serde_json::from_value(encoded.clone()).unwrap();
+        context.bind_spatial_roots(&[&spatial_binding]).unwrap();
         assert!(
             context
                 .restore(serde_json::from_value::<Snapshot>(bad).unwrap())
@@ -481,6 +485,9 @@ fn checkpoint_objective_validation_is_specific_to_each_boundary() {
         let mut bad = encoded.clone();
         bad["unique_retrieval"][field] = serde_json::json!(value);
         let mut context = RestoreContext::new(&shared, game.content.clone());
+        let spatial_binding: crate::checkpoint::Snapshot =
+            serde_json::from_value(encoded.clone()).unwrap();
+        context.bind_spatial_roots(&[&spatial_binding]).unwrap();
         assert!(
             context
                 .restore(serde_json::from_value::<Snapshot>(bad).unwrap())
@@ -791,6 +798,7 @@ fn rewind_restores_branch_state_without_reusing_abandoned_item_identity() {
     let created_game = game.clone();
     game.teleport(ActorId(1), at(3, 0, 1)).unwrap();
     let mut context = RestoreContext::new(&shared, game.content.clone());
+    context.bind_spatial_roots(&[&uncreated, &created]).unwrap();
     let mut before = context.restore(uncreated).unwrap();
     before.continue_identities(&game);
     assert_eq!(before.unique_retrieval_state().unwrap().item, None);

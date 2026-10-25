@@ -366,3 +366,66 @@ fn sequence_size_hint_never_allocates_and_exhausted_seed_never_reads_scalar() {
     .unwrap_err();
     assert!(error.to_string().contains("spatial charge exceeds limit"));
 }
+
+#[test]
+fn deferred_actual_root_charge_uses_remaining_allowance_before_authority() {
+    let value = source_json();
+    // 30pool+47scope+6*13label+21*65members+3dir+11index =1534.
+    let body = 1534;
+    for (ceiling, succeeds) in [(body + 21, true), (body + 20, false)] {
+        let decoded = decode_with(
+            &value,
+            DecodeLimits {
+                charge_bytes: ceiling,
+                root_references: 0,
+                directories: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(decoded.consumed_charge, body);
+        let deferred = DeferredPool { decoded };
+        let result = deferred.candidate().finalize([0_usize].into_iter());
+        assert_eq!(result.is_ok(), succeeds);
+        // A new private consumed handle may independently validate an immutable
+        // pool in another RestoreContext; this is not a global one-shot token.
+        assert_eq!(
+            deferred.candidate().finalize([0_usize].into_iter()).is_ok(),
+            succeeds
+        );
+    }
+}
+
+#[test]
+fn codec_foreign_surface_references_share_without_aliasing_primary_ownership() {
+    let mut value = rich_json("first");
+    value["scopes"][0]["members"] = json!([1]);
+    value["scopes"][0]["primary"][0]["cells"]["region"] = json!(1);
+    value["scopes"][0]["rooms"][0]["runs"][0]["region"] = json!(2);
+    let mut second = value["scopes"][0].clone();
+    second["id"] = json!("second");
+    second["members"] = json!([2]);
+    second["primary"][0]["cells"]["region"] = json!(2);
+    value["scopes"].as_array_mut().unwrap().push(second);
+    value["directories"] = json!([[0, 1]]);
+    let pool = decode(&value).unwrap().validate_roots(&[0]).unwrap();
+    assert_eq!(serde_json::to_value(EncodedPool(&pool)).unwrap(), value);
+    let mut escaped = value.clone();
+    escaped["scopes"][0]["primary"][0]["cells"]["region"] = json!(2);
+    assert!(decode(&escaped).is_err());
+    let mut malformed = value.clone();
+    malformed["scopes"][0]["rooms"][0]["runs"][0]["first_x"] = json!(0);
+    assert!(decode(&malformed).is_err());
+    let mut alias = value.clone();
+    alias["scopes"][1]["members"] = json!([1]);
+    alias["scopes"][1]["primary"][0]["cells"]["region"] = json!(1);
+    assert_eq!(
+        decode(&alias).unwrap().validate_roots(&[0]).unwrap_err(),
+        PoolError::Structure
+    );
+    let mut undeclared = value;
+    undeclared["scopes"][0]["dependencies"] = json!([2]);
+    assert!(
+        decode(&undeclared).is_err(),
+        "no second mutable dependency directory"
+    );
+}

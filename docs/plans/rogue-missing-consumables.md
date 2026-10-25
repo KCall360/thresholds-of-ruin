@@ -101,8 +101,9 @@ No production content or live weighted distribution has been enabled.
 ## Retained next-phase design
 
 The [spatial registry proposal](rogue-spatial-registry-reconstruction.md) preserves
-reviewed ownership, capacity evidence and pending strict-decoder acceptance. It is
-not implemented registry support or a finalized resource limit.
+reviewed ownership, capacity evidence and remaining production integration. The
+pure registry and standalone strict codec have focused coverage; complete saved
+gameplay and canonical source validation join the paid Room Light feature batch.
 
 ## Reconstruction decisions and safeguards
 

@@ -465,4 +465,82 @@ yet implemented. Four server witnesses independently establish genuine captured
 checkpoint prerequisites, the decode-only 256-boundary envelope, rejection before
 an oversized 257th subtree, and the closed nonempty-registry audit seam. These
 are missing-behavior tests, not valid-history or source-canonical acceptance.
-The reviewed green wiring remains separate until these failures are observed.
+The standalone runtime was not run. After the maintainer requested fewer testing
+and recompilation cycles, this scaffold joins one coherent Room Light feature
+batch rather than requiring a separate retention-only link. Strict all-target
+Clippy passed after an equivalent comparison cleanup; that is not runtime proof
+of these retention cases.
+
+### Combined Room Light implementation checkpoint
+
+Complete shared Game/save retention, bounded history/root binding, canonical
+source installation and all-root source-free verification together with the paid
+Room Light effect. The production verifier must replace the interim closed
+nonempty-registry guard in this batch. Authored/generated spatial metadata stays
+independent of population, and real World topology remains the physical
+adjacency authority.
+
+The user-visible acceptance is an ordinary paid Light device illuminating the
+actual room volume and surfaces, including a nonresident portion of the same
+room, with exact payment and source-free persistence. Passage/maze no-op,
+true-height membership, missing-region staging, malformed history and canonical
+source mismatches remain distinct assertions in the combined matrix. Validate
+fixture prerequisites together, collect the intended missing-effect failure at
+the paid Room Light seam, then run focused green tests from the same owning
+binaries. The unexecuted retention scaffold must not be reported as an observed
+first-red result.
+
+Batch related implementation before compilation, reuse qualified binaries, and
+reserve broad suites for meaningful completed behavior checkpoints and required
+final gates. This changes cadence, not correctness or gate requirements. Back up
+coherent source and recovery notes to the authorized PR-free remote branch
+without requiring an expensive build for each backup.
+
+
+The first combined source checkpoint promotes the reviewed retention wiring and
+strict Room Light adapters without another standalone build. It includes staged
+one-root archive admission, shared structural limits derived from the unchanged
+codec ceiling, bounded history decoding and all-root binding. One-root admission
+does not prove full history or whole-game capacity; final serialization remains
+checked and failures remain transactional. Source-side geometry work limits are
+separate from arithmetic expanded-reference safety bounds.
+
+The Room Light application seam deliberately remains a no-op while its paid-room
+and passage/already-lit controls are staged. Canonical production installation,
+all-root source verification and imported Light acceptance are still being
+completed. These newly promoted tests have not been compiled or run; the last
+successful library results above do not qualify this new source. The interim
+server nonempty-registry restore guard is not the final canonical verifier.
+
+
+This backup also retains the in-progress optional authored `spatial_scopes`
+source type and production generated provenance. Its saved source mirror,
+installation and canonical restore verifier are not yet wired. Consequently
+this is explicitly an uncompiled work-in-progress backup, not a compile-ready
+or playable Room Light checkpoint. New pure catalog assertions are staged before
+the opt-in content definition; no live pool changes are included.
+
+The consolidated next source backup includes production authored/generated
+installation, seed-resolved one-hop physical neighbor geometry, enabled-source
+metadata admission and all-root canonical restore checks, plus actual paid
+Room Light Service fixtures. These inputs are frozen for grouped preflight;
+no new compilation or runtime result is claimed. Room illumination itself still
+remains the deliberate missing-effect seam. The pure Light catalog test also
+precedes its content definition.
+
+One explicit authored-geometry issue remains unresolved: a real boundary link
+can expose a solid illumination face stored in another scope's region. Canonical
+World geometry must not silently lose that face, but exclusive primary-region
+membership must not be inferred merely from a surface dependency. The current
+representation rejects that case; resolving it is required before claiming
+general cross-scope support. This backup protects the exact incomplete state.
+
+
+The foreign-face disposition is now implemented in the staged source: existing
+surface runs encode bounded dependencies independently of exclusive primary
+members, without a new serialized field. Canonical source checks certify the
+actual solid faces; structural registry and codec checks alone do not. New
+positive/negative and managed no-wake fixtures are present but unrun. The opt-in
+Light content is also promoted after the pure missing-definition failure with an
+unchanged-live-stock positive control. Actual illumination remains the intended
+core first-red seam, and all combined Rust/process qualification is still pending.

@@ -40,11 +40,15 @@ pub struct PrimaryRun {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RoomSurfaces {
     pub room: RoomId,
+    /// Surface-only load/light dependencies may address foreign regions. They
+    /// never establish primary membership; canonical source geometry certifies
+    /// physical boundary faces. Runs retain the same aggregate bounds.
     pub runs: Vec<CellRun>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scope {
     pub id: String,
+    /// Exclusive primary-region ownership, not the illumination dependency set.
     pub members: Vec<RegionId>,
     pub primary: Vec<PrimaryRun>,
     pub rooms: Vec<RoomSurfaces>,
@@ -216,10 +220,6 @@ impl Scope {
             if room.runs.is_empty()
                 || room
                     .runs
-                    .iter()
-                    .any(|r| self.members.binary_search(&r.region).is_err())
-                || room
-                    .runs
                     .windows(2)
                     .any(|w| !ordered_runs(w[0], w[1], true))
             {
@@ -235,6 +235,34 @@ pub struct Registry {
     scopes: BTreeMap<String, Shared<Scope>>,
 }
 impl Registry {
+    /// Check this one root against the shared archive encoder's exact conservative
+    /// charge. Full Game/history serialization still owns its aggregate budget.
+    pub fn validate_archive_capacity(&self) -> Result<(), super::codec::PoolError> {
+        let root = Shared::new(self.clone());
+        super::codec::capture_pool(std::slice::from_ref(&root), std::iter::once(0)).map(|_| ())
+    }
+
+    /// Incremental canonical compiler accumulation. Failure never publishes a
+    /// partially accepted scope or grants a separate per-scope byte allowance.
+    pub fn register_archive_checked(&mut self, scope: Scope) -> Result<(), Error> {
+        let convert = |error| match error {
+            super::codec::PoolError::Structure => Error::Structure,
+            super::codec::PoolError::Capacity => Error::Capacity,
+        };
+        let budget = super::codec::archive_structural_budget().map_err(convert)?;
+        let mut next = self.clone();
+        next.register(scope, &budget)?;
+        next.validate_archive_capacity().map_err(convert)?;
+        *self = next;
+        Ok(())
+    }
+
+    pub(crate) fn from_validated_payloads(payloads: impl Iterator<Item = Shared<Scope>>) -> Self {
+        Self {
+            scopes: payloads.map(|s| (s.id.clone(), s)).collect(),
+        }
+    }
+
     pub fn scopes(&self) -> impl Iterator<Item = &Scope> {
         self.payloads().map(|s| &**s)
     }
@@ -246,7 +274,7 @@ impl Registry {
     pub fn register(&mut self, scope: Scope, budget: &Budget) -> Result<(), Error> {
         let incoming = scope.validate(budget)?;
         if let Some(existing) = self.scopes.get(&scope.id) {
-            if &**existing != &scope {
+            if **existing != scope {
                 return Err(Error::Conflict);
             }
         }

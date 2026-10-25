@@ -219,6 +219,23 @@ fn retained_generated_recipe_supplies_full_volume_not_population_floor_only() {
         "actual two-cell gap is entirely room-owned doorways"
     );
     assert!(source.closure_faces.is_empty());
+    let compiled = package
+        .canonical_generated_spatial("dungeon/1", 42, &generated)
+        .unwrap();
+    assert_eq!(compiled.members, source.members);
+    assert_eq!(compiled.rooms.len(), 2);
+    for (at, room) in &source.doorways {
+        let membership = compiled
+            .primary
+            .iter()
+            .find(|run| run.cells.contains(*at))
+            .unwrap()
+            .membership;
+        assert_eq!(
+            membership,
+            Membership::new(PrimarySpace::Room(*room), Some(PassageId::new(1).unwrap())).unwrap()
+        );
+    }
 }
 
 #[test]
@@ -671,6 +688,25 @@ fn generated_selected_maze_uses_final_open_cells_as_passages_not_population_room
         expected
     );
     assert_eq!(source.passages.len(), expected.len());
+    let compiled = package
+        .canonical_generated_spatial("dungeon/1", 42, &generated)
+        .unwrap();
+    assert!(compiled.rooms.is_empty());
+    let actual: BTreeSet<_> = compiled
+        .primary
+        .iter()
+        .flat_map(|run| {
+            (run.cells.first_x..=run.cells.last_x).map(move |x| Location {
+                region: run.cells.region,
+                position: Position {
+                    x,
+                    y: run.cells.y,
+                    z: run.cells.z,
+                },
+            })
+        })
+        .collect();
+    assert_eq!(actual, expected);
 }
 
 fn exterior_owner_fixture() -> (World, CanonicalSpatialSource) {

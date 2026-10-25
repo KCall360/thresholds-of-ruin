@@ -15,6 +15,7 @@ from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, non_graphica
 from status_condition_package import checkpoint
 from self_device_package import prepare as prepare_self_device
 from nothing_catalog_package import prepare as prepare_imported_nothing
+from light_catalog_package import prepare as prepare_imported_light
 
 
 def observation(frame):
@@ -555,6 +556,86 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertIsNone(charges(final, second["id"]))
         self.assertFalse(final["state"]["wizard_game"])
 
+
+
+    def exercise_imported_light(self, *, passage):
+        package = prepare_imported_light(self, passage=passage)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        probe, initial = self.client(observe=True)
+        text, _ = self.text_client()
+        self.assertEqual(len(observation(initial)["ground_items"]), 1)
+        wand = observation(initial)["ground_items"][0]["item"]["id"]
+        self.assertIn("Taken", text.command("take #" + wand))
+        carried = self.snapshot(probe)
+        self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0)
+        self.assertFalse(items(carried, "wand")[0]["identified"])
+        before = checkpoint(self, probe)
+        count = before["items"]["30"]["charges"]
+        self.assertTrue(10 <= count <= 19)
+        self.assertEqual(before["actors"]["1"]["turn_ticks"], 100)
+        initial_cells = {cell["key"]: cell for cell in observation(carried)["visible_cells"]}
+        self.assertTrue(initial_cells)
+        self.assertEqual(observation(carried)["position"], {"x": 0, "y": 0, "z": 0})
+        # Wire cell positions are observer-frame offsets, not source coordinates
+        # (server adapt::offset(cell.offset)). This stationary, unrotated chamber
+        # starts at the asserted source anchor [1, 2, 0].
+        def is_room_surface(cell):
+            offset = cell["position"]
+            x, y, z = offset["x"] + 1, offset["y"] + 2, offset["z"]
+            interior = 0 <= x <= 6 and 0 <= y <= 4 and 0 <= z <= 1
+            x_face = x in (-1, 7) and 0 <= y <= 4 and 0 <= z <= 1
+            y_face = y in (-1, 5) and 0 <= x <= 6 and 0 <= z <= 1
+            z_face = z in (-1, 2) and 0 <= x <= 6 and 0 <= y <= 4
+            return interior or x_face or y_face or z_face
+        self.assertTrue(any(is_room_surface(cell) for cell in initial_cells.values()))
+        self.assertTrue(all(not cell["lit"] for cell in initial_cells.values()))
+        text.command("zap #" + wand + " east")
+        first = self.snapshot(probe)
+        saved = checkpoint(self, probe)
+        self.assertEqual(saved["items"]["30"]["charges"], count - 1)
+        self.assertEqual(saved["rules_rng"], before["rules_rng"])
+        self.assertEqual(int(observation(first)["tick"]), int(observation(carried)["tick"]) + 100)
+        self.assertTrue(items(first, "wand")[0]["identified"], "OnUse identifies even when no room changes")
+        offer = next(row for row in interactions(first)["inventory"] if row["item"] == wand)
+        self.assertEqual(offer["device_activation"], "self_target")
+        self.assertIsNone(offer["charges"], "OnUse identity is not paid exact-instance identification")
+        first_cells = {cell["key"]: cell for cell in observation(first)["visible_cells"]}
+        self.assertTrue(initial_cells.keys() <= first_cells.keys())
+        # Interior and six face shells only: an observed diagonal shell corner
+        # is explicitly excluded, rather than broadening canonical illumination.
+        for cell in first_cells.values():
+            expected_lit = not passage and is_room_surface(cell)
+            self.assertEqual(cell["lit"], expected_lit, cell["position"])
+        for key, cell in initial_cells.items():
+            if not is_room_surface(cell):
+                self.assertFalse(first_cells[key]["lit"], "diagonal shell must stay dark")
+        text.command("zap #" + wand)
+        second = self.snapshot(probe)
+        second_saved = checkpoint(self, probe)
+        self.assertEqual(second_saved["items"]["30"]["charges"], count - 2)
+        self.assertEqual(int(observation(second)["tick"]), int(observation(first)["tick"]) + 100)
+        self.assertEqual(second_saved["rules_rng"], saved["rules_rng"])
+        self.assertEqual(observation(second)["visible_cells"], observation(first)["visible_cells"],
+                         "already-lit room and passage are paid illumination no-ops")
+        self.assertIsNone(charges(second, wand))
+        self.assertFalse(second["state"]["wizard_game"])
+        text.stop(save=False)
+        probe.stop(save=False)
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        reopened, restored = self.client(observe=True)
+        self.assertEqual(checkpoint(self, reopened), second_saved)
+        self.assertEqual(observation(restored)["visible_cells"], observation(second)["visible_cells"])
+        self.assertTrue(items(restored, "wand")[0]["identified"])
+
+    @non_graphical
+    def test_imported_room_light_identifies_illuminates_and_persists_without_sources(self):
+        self.exercise_imported_light(passage=False)
+
+    @non_graphical
+    def test_imported_passage_light_identifies_and_spends_without_illumination(self):
+        self.exercise_imported_light(passage=True)
 
 
 if __name__ == "__main__":
