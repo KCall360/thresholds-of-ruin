@@ -813,10 +813,6 @@ mod borrowed_map_tests {
             [position(2, 0), position(4, 1)]
         );
         for row in &prepared {
-            assert!(
-                matches!(&row.appearance, Cow::Borrowed(_)),
-                "retained cells must borrow their original payload"
-            );
             assert!(std::ptr::eq(row.appearance.as_ref(), &saved.appearance));
             assert_eq!(row.material.as_ptr(), saved.material.as_ptr());
             assert_eq!(row.ground_items.as_ptr(), saved.ground_items.as_ptr());
