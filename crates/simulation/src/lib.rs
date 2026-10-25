@@ -98,7 +98,8 @@ pub use magic_items::{
 mod interactions;
 pub use interactions::{
     AnatomySpec, ConsumableSpec, EdibleSpec, EquipmentSlot, EquipmentSlotId, EquipmentSlotView,
-    EquipmentSpec, InteractionView, ItemInteractionView, PreparationView, Work,
+    EquipmentSpec, InteractionView, ItemInteractionView, ItemRefusal, ItemRefusalView,
+    PreparationView, Work,
 };
 pub mod checkpoint;
 pub use checkpoint::PersistError;

@@ -3449,6 +3449,7 @@ mod tests {
         state.observation.interactions = Some(InteractionView {
             curse_blocked: vec![],
             completed: vec![],
+            refused: vec![],
             slots: vec![],
             preparation: Some(PreparationView {
                 action: Action::Zap {
@@ -3602,6 +3603,7 @@ mod tests {
         public.observation.interactions = Some(InteractionView {
             curse_blocked: vec![],
             completed: vec![],
+            refused: vec![],
             slots: vec![],
             preparation: None,
             identification: None,

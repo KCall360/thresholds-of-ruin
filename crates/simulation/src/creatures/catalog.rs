@@ -45,7 +45,13 @@ impl Species {
                 .into_iter()
                 .chain(strike.riders.iter().map(|rider| &rider.effects))
                 .flatten()
-                .any(|effect| effect.spatial() || matches!(effect, crate::rules::Effect::RoomLight))
+                .any(|effect| {
+                    effect.spatial()
+                        || matches!(
+                            effect,
+                            crate::rules::Effect::RoomLight | crate::rules::Effect::DrainLife
+                        )
+                })
         }) {
             return Err(BuildError::InvalidDefinition);
         }

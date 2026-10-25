@@ -240,6 +240,18 @@ fn record(
                                 amount: *amount,
                             }
                         }
+                        s::abilities::ResolvedEffect::DrainLife { changed } => {
+                            p::DiagnosticEffect::DrainLife {
+                                target: p::ActorId(value.outcome.actor.0),
+                                changed: *changed,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::DirectHealthLoss { amount } => {
+                            p::DiagnosticEffect::DirectHealthLoss {
+                                target,
+                                amount: *amount,
+                            }
+                        }
                         s::abilities::ResolvedEffect::RoomLight { changed } => {
                             p::DiagnosticEffect::RoomLight {
                                 target: p::ActorId(value.outcome.actor.0),
@@ -520,6 +532,29 @@ mod restorable_loss_diagnostic_tests {
             assert!(
                 !encoded.contains(private),
                 "private effect operand leaked {private}"
+            );
+        }
+    }
+
+    #[test]
+    fn drain_life_diagnostic_preserves_full_width_loss_without_target_count() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        for amount in [0, u64::MAX] {
+            let source = diagnostic(vec![
+                s::abilities::ResolvedEffect::DrainLife {
+                    changed: amount != 0,
+                },
+                s::abilities::ResolvedEffect::DirectHealthLoss { amount },
+            ]);
+            let view = record(&source, 1, &rules).unwrap();
+            let value = serde_json::to_value(&view.outcome).unwrap();
+            assert_eq!(
+                value["effects"],
+                serde_json::json!([
+                    {"type":"drain_life","target":"1","changed":amount != 0},
+                    {"type":"direct_health_loss","target":"2","amount":amount.to_string()}
+                ])
             );
         }
     }

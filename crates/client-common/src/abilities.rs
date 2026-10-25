@@ -474,6 +474,7 @@ mod tests {
         view.interactions = Some(tor_protocol::InteractionView {
             identification: None,
             completed: vec![],
+            refused: vec![],
             curse_blocked: vec![],
             slots: vec![slot.clone()],
             preparation: None,

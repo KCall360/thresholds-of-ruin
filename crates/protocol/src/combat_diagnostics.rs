@@ -102,6 +102,15 @@ impl<'de> Deserialize<'de> for DiagnosticCostBundle {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
+    DrainLife {
+        target: ActorId,
+        changed: bool,
+    },
+    DirectHealthLoss {
+        target: ActorId,
+        #[serde(with = "crate::integers::unsigned")]
+        amount: u64,
+    },
     RoomLight {
         target: ActorId,
         changed: bool,
@@ -308,7 +317,9 @@ impl CombatDiagnosticRecord {
                 DiagnosticEffect::ConditionRemoved { target, condition } => {
                     *target == self.target && condition.valid()
                 }
-                DiagnosticEffect::RoomLight { target, .. } => *target == self.actor,
+                DiagnosticEffect::RoomLight { target, .. }
+                | DiagnosticEffect::DrainLife { target, .. } => *target == self.actor,
+                DiagnosticEffect::DirectHealthLoss { target, .. } => *target == self.target,
                 DiagnosticEffect::Translate { target, .. }
                 | DiagnosticEffect::Relocate { target, .. }
                 | DiagnosticEffect::ArrestDescent { target } => *target == self.target,
@@ -411,6 +422,15 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            DrainLife {
+                target: ActorId,
+                changed: bool,
+            },
+            DirectHealthLoss {
+                target: ActorId,
+                #[serde(with = "crate::integers::unsigned")]
+                amount: u64,
+            },
             RoomLight {
                 target: ActorId,
                 changed: bool,
@@ -503,6 +523,10 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::DrainLife { target, changed } => Self::DrainLife { target, changed },
+            Fields::DirectHealthLoss { target, amount } => {
+                Self::DirectHealthLoss { target, amount }
+            }
             Fields::RoomLight { target, changed } => Self::RoomLight { target, changed },
             Fields::ConditionRemoved { target, condition } => {
                 Self::ConditionRemoved { target, condition }
@@ -623,6 +647,27 @@ mod room_light_diagnostic_tests {
             serde_json::json!({"type":"room_light","target":"1"}),
             serde_json::json!({"type":"room_light","target":"1","changed":true,"room":9}),
             serde_json::json!(["room_light", "1", true]),
+        ] {
+            assert!(serde_json::from_value::<DiagnosticEffect>(value).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod direct_health_diagnostic_tests {
+    use super::*;
+    #[test]
+    fn direct_health_loss_is_exact_full_width_decimal_and_closed() {
+        for amount in [0, 9_007_199_254_740_993, u64::MAX] {
+            let value = serde_json::json!({"type":"direct_health_loss","target":"2","amount":amount.to_string()});
+            let decoded: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        }
+        for value in [
+            serde_json::json!({"type":"direct_health_loss","target":"2","amount":"18446744073709551616"}),
+            serde_json::json!({"type":"direct_health_loss","target":"2","amount":"1","recipients":2}),
+            serde_json::json!({"type":"drain_life","target":"1"}),
+            serde_json::json!(["drain_life", "1", false]),
         ] {
             assert!(serde_json::from_value::<DiagnosticEffect>(value).is_err());
         }

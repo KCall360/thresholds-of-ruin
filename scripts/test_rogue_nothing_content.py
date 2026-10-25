@@ -42,9 +42,9 @@ class RogueNothingContent(unittest.TestCase):
         identities = {identity for identity, item in catalog["items"].items()
                       if item.get("appearance_pool") == "rogue.wands"}
         self.assertEqual(identities, {"rogue.wand_" + kind for kind in
-            ("fire", "cold", "lightning", "invisibility", "haste", "slow", "teleport_away", "teleport_to", "nothing", "light")})
+            ("fire", "cold", "lightning", "invisibility", "haste", "slow", "teleport_away", "teleport_to", "nothing", "light", "drain_life")})
         appearances = catalog["appearance_pools"]["rogue.wands"]["appearances"]
         self.assertEqual(appearances, ["ash wand", "copper wand", "ivory wand", "obsidian wand",
-                                     "oak wand", "glass wand", "willow wand", "iron wand", "elm wand", "birch wand"])
-        self.assertEqual(len(appearances), 10)
+                                     "oak wand", "glass wand", "willow wand", "iron wand", "elm wand", "birch wand", "cedar wand"])
+        self.assertEqual(len(appearances), 11)
         self.assertEqual(len(set(appearances)), len(identities))

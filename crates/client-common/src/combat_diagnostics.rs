@@ -112,6 +112,8 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                     result,
                 } => format!("  Actor {}: {:?} movement, {:?}", target.0, mode, result),
                 DiagnosticEffect::Relocate { target, mode, result } => format!("  Actor {}: {:?} relocation, {:?}", target.0, mode, result),
+                DiagnosticEffect::DrainLife { target, changed } => format!("  Actor {}: drain life {}", target.0, if *changed { "changed" } else { "unchanged" }),
+                DiagnosticEffect::DirectHealthLoss { target, amount } => format!("  Actor {}: {amount} direct health loss", target.0),
                 DiagnosticEffect::RoomLight { target, changed } => format!("  Actor {}: room light {}", target.0, if *changed { "changed" } else { "unchanged" }),
                 DiagnosticEffect::ArrestDescent { target } => format!("  Actor {}: descent arrested", target.0),
                 DiagnosticEffect::CorrodeArmor { target, amount } => {
@@ -337,6 +339,33 @@ pub(crate) mod tests {
                 .iter()
                 .any(|row| row.contains("preparation 5, started 5, remaining 5, recovery 2")));
         }
+    }
+
+    #[test]
+    fn drain_diagnostics_keep_full_width_and_source_target_roles() {
+        let report = report_with_effects(vec![
+            DiagnosticEffect::DrainLife {
+                target: ActorId(1),
+                changed: true,
+            },
+            DiagnosticEffect::DirectHealthLoss {
+                target: ActorId(2),
+                amount: u64::MAX,
+            },
+        ]);
+        let rows = lines(&report).unwrap();
+        assert!(rows.contains(&"  Actor 2: 18446744073709551615 direct health loss".to_owned()));
+        let mut forged = report.clone();
+        forged.records[0].outcome.effects = vec![DiagnosticEffect::DrainLife {
+            target: ActorId(2),
+            changed: true,
+        }];
+        assert!(lines(&forged).is_err());
+        forged.records[0].outcome.effects = vec![DiagnosticEffect::DirectHealthLoss {
+            target: ActorId(1),
+            amount: 0,
+        }];
+        assert!(lines(&forged).is_err());
     }
 
     #[test]

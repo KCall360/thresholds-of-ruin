@@ -85,6 +85,7 @@ fn equipped_state(requires_attack: bool) -> StateView {
         known_supply: None,
     }];
     state.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],
@@ -226,6 +227,7 @@ fn prepared_ability_snapshots_validate_and_round_trip_deltas() {
         let mut next = base.clone();
         next.revision = 2;
         next.observation.interactions = Some(InteractionView {
+            refused: vec![],
             curse_blocked: vec![],
             identification: None,
             completed: vec![],
@@ -266,6 +268,7 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
     let mut next = base.clone();
     next.revision = 2;
     next.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![Action::Drink {
@@ -1424,6 +1427,7 @@ fn health_recovery_progress_validates_against_full_and_dead_combat_and_deltas() 
 fn phase5_preparation_supply_shape_is_validated_for_direct_values() {
     let mut state = room(5, 5, 1);
     state.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],
@@ -1496,6 +1500,7 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
         known_supply: None,
     });
     next.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: Some(IdentificationChoiceView {
             choice: IntentionId("opaque-paid-choice".into()),
@@ -1788,6 +1793,7 @@ fn device_activation_is_knowledge_gated_and_exactly_matches_zappable() {
         known_supply: None,
     });
     next.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: Some(IdentificationChoiceView {
             choice: IntentionId("opaque-paid-choice".into()),
@@ -1875,4 +1881,27 @@ fn device_activation_is_knowledge_gated_and_exactly_matches_zappable() {
             "invalid unknown mode: {zappable:?} {activation:?}"
         );
     }
+}
+
+#[test]
+fn paid_refusal_observation_rejects_forged_non_item_action() {
+    let mut state = room(5, 5, 1);
+    state.observation.interactions = Some(InteractionView {
+        identification: None,
+        completed: vec![],
+        curse_blocked: vec![],
+        slots: vec![],
+        preparation: None,
+        inventory: vec![],
+        refused: vec![ItemRefusalView {
+            action: Action::Zap {
+                item: ItemTarget::from_digest([71; 32]),
+                aim: DeviceAim::SelfTarget {},
+            },
+            reason: ItemRefusalReason::TooWeak,
+        }],
+    });
+    state.validate().unwrap();
+    state.observation.interactions.as_mut().unwrap().refused[0].action = Action::Wait;
+    assert_eq!(state.validate(), Err(InvalidState::InvalidInteraction));
 }

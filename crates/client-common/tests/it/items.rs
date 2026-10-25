@@ -25,6 +25,7 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
         ]
     })).unwrap();
     view.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),

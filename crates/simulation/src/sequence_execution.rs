@@ -45,6 +45,20 @@ impl Game {
                     if self.preparation(id) != Some(&preparation) {
                         continue;
                     }
+                    // Health recovery can cross Drain's weak threshold during
+                    // this paid interval. Recheck dependencies after settling,
+                    // before charge settlement or an area census.
+                    if preparation
+                        .plan
+                        .on_success()
+                        .iter()
+                        .any(|effect| matches!(effect, crate::abilities::PlannedEffect::DrainLife))
+                    {
+                        self.ensure_preparation_residency(id)?;
+                        if self.region_transition_pending() {
+                            return Ok(());
+                        }
+                    }
                 }
                 let available = self.preparation_still_available(&preparation, None);
                 if !available || self.physics.displaced.contains(&id) {
@@ -125,12 +139,24 @@ impl Game {
                     ),
                     _ => None,
                 };
+                let drain_refused = matches!(&resolved.plan, crate::abilities::Plan::Zap { charges, .. } if *charges > 0)
+                    && resolved
+                        .plan
+                        .on_success()
+                        .iter()
+                        .any(|effect| matches!(effect, crate::abilities::PlannedEffect::DrainLife))
+                    && self.health(id).is_some_and(|(health, _)| health < 2);
                 if matches!(
                     resolved.item_payment,
                     crate::supplies::ItemPayment::Held { .. }
                 ) {
                     completion.spent_items = resolved.item_lineage();
-                    self.spend_item_payment(&mut resolved)?;
+                    if drain_refused {
+                        self.release_item_payment(&resolved)?;
+                        resolved.item_payment = crate::supplies::ItemPayment::Settled;
+                    } else {
+                        self.spend_item_payment(&mut resolved)?;
+                    }
                 }
                 let next = resolved.next_strike().and_then(|index| {
                     resolved.plan.as_ability().and_then(|plan| {
@@ -157,7 +183,9 @@ impl Game {
                 resolved.hold = None;
                 self.apply_outcome(completion)?;
                 if let crate::abilities::Plan::Zap { item, charges, .. } = &resolved.plan {
-                    self.charge_payment_observed(id, *item, *charges);
+                    if !drain_refused {
+                        self.charge_payment_observed(id, *item, *charges);
+                    }
                 }
                 match resolved.plan.work() {
                     Work::Escape { .. } => unreachable!("Escape has a distinct atomic completion"),
@@ -213,6 +241,18 @@ impl Game {
                         }
                     }
                     Work::Zap { .. } => {
+                        if drain_refused {
+                            self.push_event(
+                                CombatEvent::ItemRefused {
+                                    actor: id,
+                                    work: resolved.plan.work(),
+                                    intention: resolved.intention,
+                                    reason: crate::ItemRefusal::TooWeak,
+                                },
+                                None,
+                            )?;
+                            break;
+                        }
                         let crate::abilities::Plan::Zap {
                             charges, discovery, ..
                         } = &resolved.plan

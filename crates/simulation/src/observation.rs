@@ -450,6 +450,25 @@ impl Game {
                 _ => None,
             })
             .collect();
+        let refused: Vec<_> = self
+            .event_log
+            .iter()
+            .enumerate()
+            .filter_map(|(index, event)| match event {
+                crate::combat::CombatEvent::ItemRefused {
+                    actor,
+                    work,
+                    reason,
+                    ..
+                } if *actor == id && self.owns_event_receipt(id, index) => {
+                    Some(crate::ItemRefusalView {
+                        work: work.clone(),
+                        reason: *reason,
+                    })
+                }
+                _ => None,
+            })
+            .collect();
         let curse_blocked: Vec<_> = self
             .event_log
             .iter()
@@ -484,11 +503,13 @@ impl Game {
                 || actor.identification.is_some()
                 || !item_interactions.is_empty()
                 || !completed.is_empty()
-                || !curse_blocked.is_empty())
+                || !curse_blocked.is_empty()
+                || !refused.is_empty())
             .then(|| crate::interactions::InteractionView {
                 identification: self.identification_view(id),
                 completed,
                 curse_blocked,
+                refused,
                 slots,
                 preparation: actor.pending.as_ref().map(|progress| {
                     crate::interactions::PreparationView {

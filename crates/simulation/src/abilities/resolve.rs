@@ -389,6 +389,12 @@ pub enum ResolvedEffect {
     RoomLight {
         changed: bool,
     },
+    DrainLife {
+        changed: bool,
+    },
+    DirectHealthLoss {
+        amount: u64,
+    },
     ArrestDescent,
     Damage {
         amount: u32,
@@ -476,6 +482,7 @@ impl ResolvedEffect {
     pub(crate) fn recipient(&self) -> EffectRecipient {
         match self {
             Self::RoomLight { .. }
+            | Self::DrainLife { .. }
             | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises { .. }
             | Self::ObservePublicPlan { .. }
@@ -492,7 +499,8 @@ impl ResolvedEffect {
             }
             Self::Theft { quantity, .. } => *quantity > 0,
             Self::Translate { result, .. } | Self::Relocate { result, .. } => result.changed(),
-            Self::RoomLight { changed } => *changed,
+            Self::RoomLight { changed } | Self::DrainLife { changed } => *changed,
+            Self::DirectHealthLoss { amount } => *amount > 0,
             Self::ArrestDescent => false,
             Self::CorrodeArmor { amount, .. }
             | Self::Damage { amount }
@@ -532,7 +540,10 @@ impl ResolvedEffect {
             | Self::ApplyLinkedHold { .. }
             | Self::CorrodeArmor { .. }
             | Self::AlterEquipment { .. } => self.clone(),
-            Self::RoomLight { .. } => self.clone(),
+            Self::RoomLight { .. } | Self::DrainLife { .. } => self.clone(),
+            Self::DirectHealthLoss { amount } => Self::DirectHealthLoss {
+                amount: creature.direct_loss_without_reset(*amount),
+            },
             Self::ArrestDescent => {
                 if !creature.derived().locomotion.levitating {
                     return Ok(None);
@@ -1295,6 +1306,7 @@ pub(super) fn resolve_batch<'a>(
                 ResolvedEffect::Relocate { mode, result }
             }
             PlannedEffect::RoomLight => ResolvedEffect::RoomLight { changed: false },
+            PlannedEffect::DrainLife => ResolvedEffect::DrainLife { changed: false },
             PlannedEffect::ArrestDescent => {
                 // A rejected extension must not turn a failed paid drink into
                 // an emergency brake. Checked item resolution rejects it atomically.
@@ -1598,6 +1610,12 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             RoomLight {
                 changed: bool,
             },
+            DrainLife {
+                changed: bool,
+            },
+            DirectHealthLoss {
+                amount: u64,
+            },
             ArrestDescent {},
             Damage {
                 amount: u32,
@@ -1674,6 +1692,8 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Relocate { mode, result } => Self::Relocate { mode, result },
             Fields::RoomLight { changed } => Self::RoomLight { changed },
+            Fields::DrainLife { changed } => Self::DrainLife { changed },
+            Fields::DirectHealthLoss { amount } => Self::DirectHealthLoss { amount },
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::Damage { amount } => Self::Damage { amount },
             Fields::Heal { amount } => Self::Heal { amount },

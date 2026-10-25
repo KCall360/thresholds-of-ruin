@@ -911,6 +911,44 @@ pub struct PreparationView {
     pub remaining: u64,
     pub active: bool,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemRefusalReason {
+    TooWeak,
+}
+impl<'de> Deserialize<'de> for ItemRefusalReason {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "too_weak" => Ok(Self::TooWeak),
+            _ => Err(serde::de::Error::custom("unknown item refusal reason")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ItemRefusalView {
+    pub action: Action,
+    pub reason: ItemRefusalReason,
+}
+impl<'de> Deserialize<'de> for ItemRefusalView {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            action: Action,
+            reason: ItemRefusalReason,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        if !matches!(fields.action, Action::Zap { .. }) {
+            return Err(serde::de::Error::custom("refusal requires a zap action"));
+        }
+        Ok(Self {
+            action: fields.action,
+            reason: fields.reason,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InteractionView {
@@ -918,6 +956,8 @@ pub struct InteractionView {
     pub identification: Option<IdentificationChoiceView>,
     /// This observer's completed item actions, including consumed final units.
     pub completed: Vec<Action>,
+    /// Paid completed attempts that refused their effect, never successful completion.
+    pub refused: Vec<ItemRefusalView>,
     pub curse_blocked: Vec<ItemTarget>,
     pub slots: Vec<EquipmentSlot>,
     pub preparation: Option<PreparationView>,

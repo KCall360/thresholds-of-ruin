@@ -567,6 +567,7 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
     let item = ring.id;
     initial.observation.inventory.push(ring);
     initial.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
@@ -3620,6 +3621,7 @@ fn magic_turn_state() -> StateView {
     wand.class = ItemClass::Wand;
     state.observation.inventory = vec![scroll.clone(), wand.clone()];
     state.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         completed: vec![],
         slots: vec![],
@@ -3804,6 +3806,7 @@ fn weapon_preview_state() -> StateView {
     state.observation.interactions = Some(InteractionView {
         identification: None,
         completed: vec![],
+        refused: vec![],
         curse_blocked: vec![],
         slots: vec![slot.clone(); 11],
         preparation: None,

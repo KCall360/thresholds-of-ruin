@@ -1401,6 +1401,15 @@ Clients resolve narration from their consecutive disclosed inventories. Other
 actors' equipment and consumption completions are not included. This also works
 for actors with anatomy and equipment but no combat state.
 
+A required `refused` list separately records paid item attempts that completed
+without consuming a charge or applying their effect. Each strict named row has
+`action` (the captured opaque-target Zap action) and the closed string `reason`,
+currently only `too_weak`. It is not an admission rejection, interruption or
+successful consumption. The owner or a follower observing that owner can narrate
+it, but unrelated observers receive no such row. It discloses no item family,
+ability identity, Health amount or recipient count. Exact retries do not append
+another refusal or pay again.
+
 Read and Zap take an opaque carried `item`; Zap also takes a closed string
 `direction`. Each item interaction row includes `readable`, `zappable`, and an
 explicit nullable `charges` count. Unknown loaded and empty devices have identical

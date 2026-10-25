@@ -10,6 +10,7 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
     item.name = "silver ring".into();
     s.observation.inventory = vec![item.clone()];
     s.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
@@ -58,6 +59,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
     let slot = equipment_slot("fixture_wing", "fastened to a wing", true);
     state.observation.inventory = vec![first.clone(), second.clone()];
     state.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],
@@ -342,6 +344,7 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
     item.name = "fixture meal".into();
     s.observation.inventory = vec![item.clone()];
     s.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],
@@ -430,6 +433,7 @@ fn magic_state() -> StateView {
     wand.identified = false;
     view.observation.inventory = vec![scroll.clone(), wand.clone()];
     view.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],

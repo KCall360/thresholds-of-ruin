@@ -429,6 +429,7 @@ fn contact_action_and_preparation_never_upgrade_when_current_disclosure_changes(
             curse_blocked: vec![],
             identification: None,
             completed: vec![],
+            refused: vec![],
             slots: vec![],
             inventory: vec![],
             preparation: Some(s::PreparationView {
@@ -764,6 +765,7 @@ fn magic_choices_resolve_exact_owner_tokens_category_and_carried_incarnation() {
     view.interactions = Some(s::InteractionView {
         curse_blocked: vec![],
         completed: vec![],
+        refused: vec![],
         slots: vec![],
         preparation: None,
         inventory: vec![],
@@ -885,6 +887,7 @@ fn equipped_weapon_selection_keeps_item_scope_socket_and_contact_authority_indep
     view.interactions = Some(s::InteractionView {
         identification: None,
         completed: Vec::new(),
+        refused: Vec::new(),
         curse_blocked: Vec::new(),
         slots: vec![s::EquipmentSlotView {
             id: s::content_ids::EquipmentSlot::new("hand").unwrap(),
@@ -1054,6 +1057,7 @@ fn projectile_delivery_preserves_exact_owned_operands_without_hidden_profile_aut
     view.interactions = Some(s::InteractionView {
         identification: None,
         completed: Vec::new(),
+        refused: Vec::new(),
         curse_blocked: Vec::new(),
         slots: vec![slot.clone(), slot],
         preparation: None,

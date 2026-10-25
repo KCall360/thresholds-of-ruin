@@ -35,7 +35,9 @@ impl NaturalAttack {
                     .into_iter()
                     .chain(strike.riders.iter().map(|rider| &rider.effects))
                     .flatten()
-                    .any(|effect| effect.spatial() || matches!(effect, Effect::RoomLight))
+                    .any(|effect| {
+                        effect.spatial() || matches!(effect, Effect::RoomLight | Effect::DrainLife)
+                    })
             })
         {
             return Err(AttackError::InvalidDefinition);

@@ -274,6 +274,7 @@ fn carried_rings() -> Snapshot {
     second.id = super::item_target(1);
     view.inventory = vec![first, second];
     view.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
@@ -2240,6 +2241,7 @@ fn eat_picker_and_hunger_status_use_only_disclosed_nutrition() {
     item.class = ItemClass::Food;
     view.inventory = vec![item.clone()];
     view.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         slots: vec![],

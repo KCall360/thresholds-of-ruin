@@ -229,6 +229,7 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
         s::rules::Effect::DrainLatestHitDie => ("drain_latest_hit_die", vec![]),
         s::rules::Effect::RestoreHitDie => ("restore_hit_die", vec![]),
         s::rules::Effect::RoomLight => ("room_light", vec![]),
+        s::rules::Effect::DrainLife => ("drain_life", vec![]),
         s::rules::Effect::StepSelfOneCell => ("step_self_one_cell", vec![]),
         s::rules::Effect::TeleportRandom => ("teleport_random", vec![]),
         s::rules::Effect::TeleportToRayOrigin => ("teleport_to_ray_origin", vec![]),

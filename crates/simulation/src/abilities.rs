@@ -138,6 +138,8 @@ pub(crate) fn self_device_definition_valid(d: &crate::rules::AbilityDef) -> bool
 mod consumable_effect_tests;
 
 #[cfg(test)]
+mod drain_life_tests;
+#[cfg(test)]
 mod magic_item_tests;
 #[cfg(test)]
 mod room_light_tests;

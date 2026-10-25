@@ -121,7 +121,7 @@ impl Sources<'_> {
     fn author_effects(&mut self, values: &[Effect]) {
         for value in values {
             match value {
-                Effect::RoomLight => self.light = true,
+                Effect::RoomLight | Effect::DrainLife => self.light = true,
                 Effect::ApplyCondition { condition, .. }
                 | Effect::ApplyPersistentCondition { condition, .. }
                 | Effect::ApplyConditionForTurns { condition, .. }
@@ -135,7 +135,7 @@ impl Sources<'_> {
     fn effects(&mut self, values: &[r::Effect]) {
         for value in values {
             match value {
-                r::Effect::RoomLight => self.light = true,
+                r::Effect::RoomLight | r::Effect::DrainLife => self.light = true,
                 r::Effect::ApplyCondition { condition, .. }
                 | r::Effect::ApplyPersistentCondition { condition, .. }
                 | r::Effect::ApplyConditionForTurns { condition, .. }
@@ -318,7 +318,7 @@ impl Sources<'_> {
     }
 }
 
-pub(super) fn room_light_enabled(package: &Package) -> Result<bool, Failure> {
+pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure> {
     let rules = package.rules()?;
     // Absence is an optimization only: check every current effect-owning
     // definition category before skipping the real source traversal. In
@@ -334,12 +334,12 @@ pub(super) fn room_light_enabled(package: &Package) -> Result<bool, Failure> {
                     .iter()
                     .chain(&strike.on_failure)
                     .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
-                    .any(|effect| matches!(effect, r::Effect::RoomLight))
+                    .any(|effect| matches!(effect, r::Effect::RoomLight | r::Effect::DrainLife))
             }),
             r::StrikeSource::NaturalMelee { additional_riders } => additional_riders
                 .iter()
                 .flat_map(|rider| &rider.effects)
-                .any(|effect| matches!(effect, r::Effect::RoomLight)),
+                .any(|effect| matches!(effect, r::Effect::RoomLight | r::Effect::DrainLife)),
             r::StrikeSource::SelectedMelee | r::StrikeSource::Projectile { .. } => false,
         });
     let item_light = package.manifest.archetypes.values().any(|item| {
@@ -347,7 +347,7 @@ pub(super) fn room_light_enabled(package: &Package) -> Result<bool, Failure> {
             .iter()
             .flat_map(|value| &value.effects)
             .chain(item.readable.iter().flat_map(|value| &value.effects))
-            .any(|effect| matches!(effect, Effect::RoomLight))
+            .any(|effect| matches!(effect, Effect::RoomLight | Effect::DrainLife))
     });
     let natural_light = package.manifest.creatures.species.values().any(|species| {
         species.melee.strikes.iter().any(|strike| {
@@ -356,7 +356,7 @@ pub(super) fn room_light_enabled(package: &Package) -> Result<bool, Failure> {
                 .iter()
                 .chain(&strike.on_failure)
                 .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
-                .any(|effect| matches!(effect, Effect::RoomLight))
+                .any(|effect| matches!(effect, Effect::RoomLight | Effect::DrainLife))
         })
     });
     if !rule_light && !item_light && !natural_light {
@@ -530,7 +530,7 @@ mod tests {
     #[test]
     fn unused_import_is_not_enabled_but_actual_starting_device_is() {
         let mut package = fixture();
-        assert!(!room_light_enabled(&package).unwrap());
+        assert!(!spatial_effect_enabled(&package).unwrap());
         package.manifest.characters[0]
             .loadout
             .push(CharacterLoadout {
@@ -538,13 +538,13 @@ mod tests {
                 quantity: 1,
                 equipped_slot: None,
             });
-        assert!(room_light_enabled(&package).unwrap());
+        assert!(spatial_effect_enabled(&package).unwrap());
     }
 
     #[test]
     fn reached_species_grant_requires_metadata_without_stock_identity_inference() {
         let mut package = fixture();
-        assert!(!room_light_enabled(&package).unwrap());
+        assert!(!spatial_effect_enabled(&package).unwrap());
         let species = package.manifest.characters[0]
             .creature
             .as_ref()
@@ -564,7 +564,7 @@ mod tests {
                     ability: "fixture.room_light".into(),
                 },
             });
-        assert!(room_light_enabled(&package).unwrap());
+        assert!(spatial_effect_enabled(&package).unwrap());
     }
 
     #[test]
@@ -601,7 +601,7 @@ mod tests {
             .manifest
             .archetypes
             .insert("fixture.light_equipment".into(), equipment);
-        assert!(!room_light_enabled(&package).unwrap());
+        assert!(!spatial_effect_enabled(&package).unwrap());
         package.manifest.characters[0]
             .loadout
             .push(CharacterLoadout {
@@ -609,7 +609,7 @@ mod tests {
                 quantity: 1,
                 equipped_slot: None,
             });
-        assert!(room_light_enabled(&package).unwrap());
+        assert!(spatial_effect_enabled(&package).unwrap());
 
         let mut document = rules.document().clone();
         let flag = tor_simulation::content_ids::FlagId::new("fixture.light_grant").unwrap();

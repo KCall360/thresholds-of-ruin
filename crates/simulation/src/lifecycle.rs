@@ -12,23 +12,23 @@ thread_local! {
     static TOKEN_PLAN_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// One strike has at most a source and a target; riders never retarget.
-/// This is transient publication state, never part of a frozen or saved plan.
+/// Transient once-per-publication damage activity, including area recipients.
+/// Entries are actual owned actors, never retained in a frozen or saved plan.
 #[derive(Default)]
 pub(crate) struct DamageActivityGuard {
     actors: [Option<ActorId>; 2],
+    overflow: std::collections::BTreeSet<ActorId>,
 }
 impl DamageActivityGuard {
     fn first(&mut self, actor: ActorId) -> bool {
         if self.actors.contains(&Some(actor)) {
             return false;
         }
-        let Some(slot) = self.actors.iter_mut().find(|slot| slot.is_none()) else {
-            // A bounded resolution unit never introduces a third participant.
-            return false;
-        };
-        *slot = Some(actor);
-        true
+        if let Some(slot) = self.actors.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(actor);
+            return true;
+        }
+        self.overflow.insert(actor)
     }
 }
 
@@ -607,6 +607,20 @@ impl Game {
             self.reveal_guise(outcome.target)?;
         }
 
+        if outcome
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, ResolvedEffect::DrainLife { .. }))
+        {
+            if outcome.actor != outcome.target || outcome.effects.len() != 1 {
+                return Err(GameError::Rule(RuleError::InvalidPlan));
+            }
+            // Snapshot/distribute before taking the outer actor candidate: nested
+            // ordinary damage/death/XP publication must never be overwritten.
+            let changed = self.apply_drain_life(&outcome, activity)?;
+            outcome.effects[0] = ResolvedEffect::DrainLife { changed };
+        }
+
         let strike = match role {
             PublishedRole::Primary { strike } => Some(strike),
             PublishedRole::Standalone | PublishedRole::Rider { .. } => None,
@@ -647,6 +661,11 @@ impl Game {
         let mut created_hold = None;
         for index in 0..outcome.effects.len() {
             let effect = &outcome.effects[index];
+            if matches!(effect, ResolvedEffect::DrainLife { .. }) {
+                outcome.effects[applied_count] = effect.clone();
+                applied_count += 1;
+                continue;
+            }
             if matches!(effect, ResolvedEffect::RoomLight { .. }) {
                 if recipient_id != outcome.actor || outcome.actor != outcome.target {
                     return Err(GameError::Rule(RuleError::InvalidPlan));
@@ -826,7 +845,9 @@ impl Game {
                     }),
                 });
             }
-            if matches!(applied, ResolvedEffect::Damage { amount } if amount > 0) {
+            if matches!(applied, ResolvedEffect::Damage { amount } if amount > 0)
+                || matches!(applied, ResolvedEffect::DirectHealthLoss { amount } if amount > 0)
+            {
                 // The policy at the first actual damage wins; a later
                 // effect cannot retroactively preserve earlier progress.
                 if !damaged && activity.first(recipient_id) {

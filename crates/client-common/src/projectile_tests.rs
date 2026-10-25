@@ -37,6 +37,7 @@ fn state() -> ClientState {
     view.interactions = Some(InteractionView {
         identification: None,
         completed: vec![],
+        refused: vec![],
         curse_blocked: vec![],
         slots: vec![slot.clone(); 2],
         preparation: None,

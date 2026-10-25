@@ -1333,6 +1333,25 @@ impl CreatureState {
             canceled,
         }
     }
+    /// Direct life loss shares injury/death cleanup and advancement bookkeeping,
+    /// while the lifecycle publication boundary owns its once-per-bundle reset.
+    pub(crate) fn direct_loss_without_reset(&mut self, amount: u64) -> u64 {
+        let alive = !self.health.dead();
+        let applied = self.health.direct_loss(amount);
+        if applied > 0 {
+            self.received_health_loss_remaining = self
+                .build
+                .ruleset()
+                .document()
+                .advancement
+                .received_loss_interval;
+        }
+        if alive && self.health.dead() {
+            let _ = self.clear_dead_state();
+        }
+        applied
+    }
+
     pub fn restore_resource(&mut self, resource: Resource, amount: u32) -> u32 {
         if self.health.dead() {
             0

@@ -106,6 +106,7 @@ pub enum PlannedEffect {
     TeleportRandom,
     TeleportToRayOrigin,
     RoomLight,
+    DrainLife,
     ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
@@ -174,6 +175,7 @@ impl PlannedEffect {
     pub(crate) fn recipient(&self) -> crate::rules::EffectRecipient {
         match self {
             Self::RoomLight
+            | Self::DrainLife
             | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises { .. }
             | Self::ObservePublicPlan
@@ -925,6 +927,7 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             | PlannedEffect::TeleportRandom
             | PlannedEffect::TeleportToRayOrigin
             | PlannedEffect::RoomLight
+            | PlannedEffect::DrainLife
             | PlannedEffect::ArrestDescent => true,
             PlannedEffect::ApplyLinkedHold { policy } => {
                 policy.valid() && rules.flag(&policy.sustaining).is_some()
@@ -1054,6 +1057,7 @@ pub(super) fn effects_match_definition_scoped(
                 (Effect::TeleportRandom, PlannedEffect::TeleportRandom)
                 | (Effect::TeleportToRayOrigin, PlannedEffect::TeleportToRayOrigin)
                 | (Effect::RoomLight, PlannedEffect::RoomLight)
+                | (Effect::DrainLife, PlannedEffect::DrainLife)
                 | (Effect::ArrestDescent, PlannedEffect::ArrestDescent) => true,
                 (
                     Effect::Theft {
@@ -1514,6 +1518,7 @@ impl Game {
                 Effect::TeleportRandom => Ok(PlannedEffect::TeleportRandom),
                 Effect::TeleportToRayOrigin => Ok(PlannedEffect::TeleportToRayOrigin),
                 Effect::RoomLight => Ok(PlannedEffect::RoomLight),
+                Effect::DrainLife => Ok(PlannedEffect::DrainLife),
                 Effect::ArrestDescent => Ok(PlannedEffect::ArrestDescent),
                 Effect::StepSelfOneCell => Ok(PlannedEffect::StepSelfOneCell),
                 Effect::PushTargetOneCell { direction } => Ok(PlannedEffect::PushTargetOneCell {
@@ -1728,6 +1733,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             TeleportRandom {},
             TeleportToRayOrigin {},
             RoomLight {},
+            DrainLife {},
             ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
@@ -1810,6 +1816,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::TeleportRandom {} => Self::TeleportRandom,
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
             Fields::RoomLight {} => Self::RoomLight,
+            Fields::DrainLife {} => Self::DrainLife,
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },

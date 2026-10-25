@@ -124,6 +124,7 @@ pub fn completed_items(before: &Observation, after: &Observation) -> Vec<String>
     if before.tick == after.tick
         && before.interactions.as_ref().is_some_and(|old| {
             old.completed == interactions.completed
+                && old.refused == interactions.refused
                 && old.curse_blocked == interactions.curse_blocked
         })
     {
@@ -150,6 +151,16 @@ pub fn completed_items(before: &Observation, after: &Observation) -> Vec<String>
                 .map_or_else(|| "item".into(), |candidate| label(&candidate.name, "item"));
             Some(format!("You finish {verb} the {name}."))
         })
+        .chain(
+            interactions
+                .refused
+                .iter()
+                .map(|refusal| match refusal.reason {
+                    tor_protocol::ItemRefusalReason::TooWeak => {
+                        "You are too weak to use it.".to_owned()
+                    }
+                }),
+        )
         .chain(interactions.curse_blocked.iter().map(|item| {
             let name = before
                 .inventory
@@ -667,6 +678,39 @@ mod tests {
     }
 
     #[test]
+    fn paid_weak_refusal_has_no_success_or_hidden_identity_and_deduplicates() {
+        let before = observation();
+        let mut after = before.clone();
+        after.tick += 100;
+        after.interactions = Some(tor_protocol::InteractionView {
+            identification: None,
+            completed: vec![],
+            curse_blocked: vec![],
+            slots: vec![],
+            preparation: None,
+            inventory: vec![],
+            refused: vec![tor_protocol::ItemRefusalView {
+                action: tor_protocol::Action::Zap {
+                    item: tor_protocol::ItemTarget::from_digest([19; 32]),
+                    aim: tor_protocol::DeviceAim::SelfTarget {},
+                },
+                reason: tor_protocol::ItemRefusalReason::TooWeak,
+            }],
+        });
+        assert_eq!(
+            completed_items(&before, &after),
+            ["You are too weak to use it."]
+        );
+        assert!(completed_items(&after, &after).is_empty());
+        let mut next = after.clone();
+        next.tick += 100;
+        assert_eq!(
+            completed_items(&after, &next),
+            ["You are too weak to use it."]
+        );
+    }
+
+    #[test]
     fn paid_curse_failure_is_narrated_without_success_or_hidden_item_name() {
         let before = observation();
         let mut after = before.clone();
@@ -674,6 +718,7 @@ mod tests {
         after.interactions = Some(tor_protocol::InteractionView {
             identification: None,
             completed: vec![],
+            refused: vec![],
             curse_blocked: vec![tor_protocol::ItemTarget::from_digest([19; 32])],
             slots: vec![],
             preparation: None,
@@ -712,6 +757,7 @@ mod tests {
         assert_eq!(action(&event, &view), "You begin to drink the item.");
         let before = view.clone();
         view.interactions = Some(tor_protocol::InteractionView {
+            refused: vec![],
             curse_blocked: vec![],
             identification: None,
             completed: vec![tor_protocol::Action::Drink { item }],

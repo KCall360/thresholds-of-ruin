@@ -1367,6 +1367,7 @@ enum Effect {
     DrainLatestHitDie,
     RestoreHitDie,
     RoomLight,
+    DrainLife,
     StepSelfOneCell,
     TeleportRandom,
     TeleportToRayOrigin,
@@ -6704,6 +6705,7 @@ impl Effect {
             DrainLatestHitDie {},
             RestoreHitDie {},
             RoomLight {},
+            DrainLife {},
             StepSelfOneCell {},
             TeleportRandom {},
             TeleportToRayOrigin {},
@@ -6805,6 +6807,7 @@ impl Effect {
             Fields::DrainLatestHitDie {} => source::Effect::DrainLatestHitDie,
             Fields::RestoreHitDie {} => source::Effect::RestoreHitDie,
             Fields::RoomLight {} => source::Effect::RoomLight,
+            Fields::DrainLife {} => source::Effect::DrainLife,
             Fields::StepSelfOneCell {} => source::Effect::StepSelfOneCell,
             Fields::TeleportRandom {} => source::Effect::TeleportRandom,
             Fields::TeleportToRayOrigin {} => source::Effect::TeleportToRayOrigin,
@@ -9635,6 +9638,37 @@ mod room_light_effect_tests {
             r#"{"kind":"room_light","changed":true}"#,
             r#"{"kind":"room_light","room":1}"#,
             r#"{"kind":"room_light","kind":"room_light"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<source::Effect>(malformed).is_err(),
+                "{malformed}"
+            );
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(malformed.as_bytes())
+                    .is_err(),
+                "{malformed}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod drain_life_effect_tests {
+    use super::*;
+
+    #[test]
+    fn drain_life_source_and_independent_save_are_strict_unit_effects() {
+        let raw = br#"{"kind":"drain_life"}"#;
+        let authored: source::Effect = serde_json::from_slice(raw).unwrap();
+        assert_eq!(authored, source::Effect::DrainLife);
+        let saved: Owned<source::Effect> = crate::storage::codec::strict(raw).unwrap();
+        assert_eq!(saved.0, authored);
+        assert_eq!(serde_json::to_vec(&Borrowed(&authored)).unwrap(), raw);
+        for malformed in [
+            r#"["drain_life"]"#,
+            r#"{"kind":"drain_life","changed":true}"#,
+            r#"{"kind":"drain_life","room":1}"#,
+            r#"{"kind":"drain_life","kind":"drain_life"}"#,
         ] {
             assert!(
                 serde_json::from_str::<source::Effect>(malformed).is_err(),

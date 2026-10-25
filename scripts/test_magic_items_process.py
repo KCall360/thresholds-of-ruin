@@ -12,10 +12,11 @@ import tomllib
 from arena_matrix import toml_source
 
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, non_graphical
-from status_condition_package import checkpoint
+from status_condition_package import checkpoint, actor_creature
 from self_device_package import prepare as prepare_self_device
 from nothing_catalog_package import prepare as prepare_imported_nothing
 from light_catalog_package import prepare as prepare_imported_light
+from drain_catalog_package import prepare as prepare_imported_drain
 
 
 def observation(frame):
@@ -636,6 +637,167 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
     @non_graphical
     def test_imported_passage_light_identifies_and_spends_without_illumination(self):
         self.exercise_imported_light(passage=True)
+
+
+    @non_graphical
+    def test_imported_drain_empty_unknown_identified_self_and_source_free_reopen(self):
+        package = prepare_imported_drain(self)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        probe, initial = self.client(observe=True)
+        text, _ = self.text_client()
+        for ground in observation(initial)["ground_items"]:
+            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+        carried = self.snapshot(probe)
+        self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0,
+                         "effective compiled speed must preserve exact base-turn timing")
+        self.assertEqual(int(observation(carried)["combat"]["hp"]), 21)
+        self.assertEqual(int(observation(carried)["combat"]["max_hp"]), 21)
+        first, second = items(carried, "wand")
+        scroll, = items(carried, "scroll")
+        self.assertTrue(all(not row["identified"] for row in items(carried, "wand")))
+        modes = {row["item"]: row["device_activation"] for row in interactions(carried)["inventory"]}
+        self.assertEqual(modes[first["id"]], "direction")
+        self.assertEqual(modes[second["id"]], "direction")
+        before = checkpoint(self, probe)
+        self.assertEqual(before["actors"]["1"]["turn_ticks"], 100)
+        initial_counts = {str(i): before["items"][str(i)]["charges"] for i in (30, 31)}
+        self.assertTrue(all(3 <= count <= 7 for count in initial_counts.values()))
+        self.assertIn("direction", text.command("zap #" + first["id"]).lower())
+        self.assertEqual(checkpoint(self, probe), before, "unsubmitted missing aim costs nothing")
+        text.command("zap #" + first["id"] + " east")
+        spent = self.snapshot(probe)
+        after = checkpoint(self, probe)
+        self.assertEqual(int(observation(spent)["tick"]), int(observation(carried)["tick"]) + 100)
+        spent_ids = [key for key in initial_counts if after["items"][key]["charges"] == initial_counts[key] - 1]
+        self.assertEqual(len(spent_ids), 1)
+        selected_physical = spent_ids[0]
+        for key in initial_counts:
+            self.assertEqual(after["items"][key]["charges"], initial_counts[key] - (key == selected_physical))
+        self.assertEqual(int(observation(spent)["combat"]["hp"]), 21, "empty scope charges without caster loss")
+        remaining = initial_counts[selected_physical] - 1
+        self.assertEqual(after["rules_rng"], before["rules_rng"])
+        self.assertEqual(observation(spent)["combat"]["own_stats"]["conditions"],
+                         observation(carried)["combat"]["own_stats"]["conditions"])
+        self.assertTrue(all(not row["identified"] for row in items(spent, "wand")))
+        self.assertIsNone(charges(spent, first["id"]))
+        text.command("read #" + scroll["id"])
+        self.assertIsNotNone(interactions(self.snapshot(probe))["identification"])
+        text.command("identify #" + first["id"])
+        learned = self.snapshot(probe)
+        self.assertEqual(charges(learned, first["id"]), remaining)
+        self.assertIsNone(charges(learned, second["id"]))
+        self.assertTrue(all(row["identified"] for row in items(learned, "wand")))
+        modes = {row["item"]: row["device_activation"] for row in interactions(learned)["inventory"]}
+        self.assertEqual(modes[first["id"]], "self_target")
+        self.assertEqual(modes[second["id"]], "self_target")
+        spectator, followed = self.client(SPECTATOR_TOKEN, observe=True)
+        followed_modes = {row["item"]: row["device_activation"] for row in interactions(followed)["inventory"]}
+        self.assertEqual(followed_modes, modes)
+        known_before = checkpoint(self, probe)
+        self.assertEqual(known_before["actors"]["1"]["turn_ticks"], 100)
+        text.command("zap #" + first["id"])
+        final = self.snapshot(probe)
+        self.assertEqual(int(observation(final)["tick"]), int(observation(learned)["tick"]) + 100)
+        self.assertEqual(charges(final, first["id"]), remaining - 1)
+        self.assertIsNone(charges(final, second["id"]))
+        self.assertFalse(final["state"]["wizard_game"])
+        self.assertEqual(int(observation(final)["combat"]["hp"]), 21)
+        final_saved = checkpoint(self, probe)
+        self.assertEqual(final_saved["rules_rng"], known_before["rules_rng"])
+        text.stop(save=False)
+        probe.stop(save=False)
+        spectator.stop(save=False)
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        reopened, restored = self.client(observe=True)
+        self.assertEqual(checkpoint(self, reopened), final_saved)
+        self.assertEqual(int(observation(restored)["combat"]["hp"]), 21)
+        self.assertEqual(charges(restored, first["id"]), remaining - 1)
+
+    @non_graphical
+    def test_imported_drain_weak_text_attempt_spends_time_not_charge_or_identity(self):
+        package = prepare_imported_drain(self, weak=True)
+        self.server("--checkpoint-interval", 1, scenario=package)
+        probe, initial = self.client(observe=True)
+        text, _ = self.text_client()
+        for ground in observation(initial)["ground_items"]:
+            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+        before = self.snapshot(probe)
+        wand = items(before, "wand")[0]
+        self.assertEqual(int(observation(before)["combat"]["hp"]), 1)
+        self.assertEqual(int(observation(before)["combat"]["max_hp"]), 1)
+        self.assertEqual(observation(before)["combat"]["own_stats"]["attributes"]["speed"], 0)
+        saved = checkpoint(self, probe)
+        self.assertEqual(saved["actors"]["1"]["turn_ticks"], 100)
+        self.assertTrue(all(3 <= saved["items"][key]["charges"] <= 7 for key in ("30", "31")))
+        for attempt in range(2):
+            reply = text.command("zap #" + wand["id"] + " east")
+            self.assertIn("too weak", reply.lower())
+            self.assertNotIn("You finish zapping", reply)
+            after = self.snapshot(probe)
+            after_saved = checkpoint(self, probe)
+            self.assertEqual(int(observation(after)["tick"]), int(observation(before)["tick"]) + 100 * (attempt + 1))
+            self.assertEqual(int(observation(after)["combat"]["hp"]), 1)
+            self.assertEqual(after_saved["rules_rng"], saved["rules_rng"])
+            for key in ("30", "31"):
+                self.assertEqual(after_saved["items"][key]["charges"], saved["items"][key]["charges"])
+            self.assertTrue(all(not item["identified"] for item in items(after, "wand")))
+            self.assertTrue(all(row["device_activation"] == "direction" for row in interactions(after)["inventory"] if row["zappable"]))
+            self.assertIsNone(charges(after, wand["id"]))
+            self.assertFalse(after["state"]["wizard_game"])
+
+
+
+    @non_graphical
+    def test_imported_drain_nonempty_odd_health_pays_once_and_reopens_without_sources(self):
+        package = prepare_imported_drain(self, target=True)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        peer, _ = self.client(actor=2)
+        subject, initial = self.client()
+        carried = self.collect(subject, initial, [peer])
+        self.assertTrue(settled(carried), "measured Zap begins at a settled ordinary decision")
+        target_before = self.snapshot(peer)
+        for frame in (carried, target_before):
+            self.assertEqual(int(observation(frame)["combat"]["hp"]), 21)
+            self.assertEqual(int(observation(frame)["combat"]["max_hp"]), 21)
+            self.assertEqual(observation(frame)["combat"]["own_stats"]["attributes"]["speed"], 0)
+            self.assertGreater(int(observation(frame)["combat"]["own_stats"]["health_recovery"]["period_ticks"]), 100)
+        wand = items(carried, "wand")[0]
+        before = checkpoint(self, subject)
+        self.assertEqual(set(before["actors"]), {"1", "2"})
+        for actor in (1, 2):
+            self.assertEqual(before["actors"][str(actor)]["turn_ticks"], 100)
+            self.assertEqual(actor_creature(before, actor)["injury"], 0)
+        counts = {key: before["items"][key]["charges"] for key in ("30", "31")}
+        self.assertTrue(all(3 <= count <= 7 for count in counts.values()))
+        accepted = self.act(subject, {"type": "zap", "item": wand["id"],
+                                     "aim": {"kind": "direction", "direction": "west"}})
+        self.assertIsNone(accepted["error"])
+        completed = self.advance(subject, [peer])
+        after = checkpoint(self, subject)
+        target_after = self.snapshot(peer)
+        self.assertEqual(int(observation(completed)["tick"]), int(observation(carried)["tick"]) + 100)
+        self.assertEqual(int(observation(completed)["combat"]["hp"]), 10)
+        self.assertEqual(int(observation(target_after)["combat"]["hp"]), 11)
+        self.assertEqual(actor_creature(after, 1)["injury"], 11)
+        self.assertEqual(actor_creature(after, 2)["injury"], 10)
+        changed = [key for key in counts if after["items"][key]["charges"] != counts[key]]
+        self.assertEqual(len(changed), 1)
+        self.assertEqual(after["items"][changed[0]]["charges"], counts[changed[0]] - 1)
+        self.assertEqual(after["rules_rng"], before["rules_rng"])
+        self.assertTrue(all(not item["identified"] for item in items(completed, "wand")))
+        self.assertIsNone(charges(completed, wand["id"]))
+        self.assertFalse(completed["state"]["wizard_game"])
+        subject.stop(save=False)
+        peer.stop(save=False)
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        reopened, restored = self.client(observe=True)
+        self.assertEqual(checkpoint(self, reopened), after)
+        self.assertEqual(int(observation(restored)["combat"]["hp"]), 10)
+        self.assertTrue(all(not item["identified"] for item in items(restored, "wand")))
 
 
 if __name__ == "__main__":

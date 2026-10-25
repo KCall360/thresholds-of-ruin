@@ -583,6 +583,29 @@ impl Game {
                 .ok_or(GameError::UnknownActor)?;
             members.extend(self.room_light_regions(actor.location)?);
         }
+        let drain =
+            plan.on_success()
+                .iter()
+                .any(|effect| matches!(effect, crate::abilities::PlannedEffect::DrainLife))
+                || plan.as_ability().is_some_and(|ability| {
+                    ability.strikes.iter().any(|strike| {
+                        strike.on_success.iter().any(|effect| {
+                            matches!(effect, crate::abilities::PlannedEffect::DrainLife)
+                        })
+                    })
+                });
+        if drain
+            && !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. })
+            && self
+                .health(plan.actor())
+                .is_some_and(|(health, _)| health >= 2)
+        {
+            let actor = self
+                .actors
+                .get(&plan.actor())
+                .ok_or(GameError::UnknownActor)?;
+            members.extend(self.drain_life_regions(actor.location)?);
+        }
         if let Some(ability) = plan.as_ability() {
             for theft in ability
                 .strikes

@@ -275,6 +275,7 @@ fn with_weapons(mut app: App, permitted: bool) -> App {
         });
     }
     view.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],

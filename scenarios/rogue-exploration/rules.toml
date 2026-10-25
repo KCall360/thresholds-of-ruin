@@ -340,3 +340,9 @@ value = { id = "rogue.wand_nothing", name = "Nothing", interaction = "non_hostil
 op = "add"
 path = ["abilities", "rogue.wand_light"]
 value = { id = "rogue.wand_light", name = "Room Light", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "self_only" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "room_light" }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }
+
+# Original fixed-health Drain Life; using it does not identify the device.
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_drain_life"]
+value = { id = "rogue.wand_drain_life", name = "Drain Life", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "self_only" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "drain_life" }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }

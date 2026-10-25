@@ -505,3 +505,32 @@ historical plan names, guise/ground identity, real versus false stair knowledge,
 retained hydration, unsolicited owner/follower updates and malformed DTO rejection.
 Coordinate strict simulation/server/protocol/map/common/Text/ASCII/pure-3D shapes;
 no current schema implementation or native qualification follows from this plan.
+
+### Drain Life reconstruction batch
+
+Reuse the Room Light batch's canonical spatial registry, but select living
+Health-bearing recipients rather than illumination surfaces. The pinned
+`sticks.c` drain branch uses this asymmetric predicate: same primary space;
+caster on a doorway to a target whose primary space is that passage; or caster
+in a passage to a target on an affiliated doorway. There is no sight, distance,
+faction or undead filter. Include other friendly, controlled and frozen
+creatures; bodies without actual Health do not acquire fabricated combat state.
+Capture the caster location and recipient set before loss, death or XP changes.
+
+The existing direct-loss lifecycle must accept wide Health without truncation,
+armor, resistance or repeated damage chunks. Its activity guard must cover more
+than two distinct recipients. Zero-share survivors still receive existing
+attack-contact/disguise cleanup and authored hostility memory, without inventing
+memory duration or activating frozen clocks. A below-two-Health device attempt
+completes paid time and releases its claim without charge or identification;
+represent that outcome explicitly as refusal, not consumption or interruption.
+Only the captured action and `TooWeak` reason may enter ordinary disclosure.
+
+Keep the new authored effect a sole checkless self payload without mixed effects,
+riders or failure effects, so completion-time refusal cannot be invalidated by
+preceding healing or damage. This restriction does not change unrelated content.
+Add the opt-in device with source charges and Never discovery; live pools remain
+unchanged. One coherent acceptance batch covers odd/wide Health, empty/multiple
+recipients, exact doorway asymmetry, frozen actors, three-or-more activity resets,
+paid refusal, observer privacy, retry and real compressed source-free reopening.
+These are implementation requirements, not completed or qualified behavior.

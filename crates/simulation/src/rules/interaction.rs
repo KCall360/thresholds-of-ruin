@@ -169,6 +169,7 @@ impl Ruleset {
                     PlannedEffect::AlterEquipment { .. }
                     | PlannedEffect::StepSelfOneCell
                     | PlannedEffect::RoomLight
+                    | PlannedEffect::DrainLife
                     | PlannedEffect::ArrestDescent
                     | PlannedEffect::RestoreHitDie
                     | PlannedEffect::Heal { .. }
@@ -242,6 +243,7 @@ impl Ruleset {
             Effect::AlterEquipment { .. }
             | Effect::StepSelfOneCell
             | Effect::RoomLight
+            | Effect::DrainLife
             | Effect::ArrestDescent
             | Effect::RestoreHitDie
             | Effect::Heal { .. }

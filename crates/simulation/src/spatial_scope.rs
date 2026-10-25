@@ -5,6 +5,7 @@
 //! adjacency and portal transforms. No classification creates a residency pin.
 
 pub mod codec;
+mod drain_life;
 pub mod registry;
 pub(crate) mod retention;
 mod room_light;

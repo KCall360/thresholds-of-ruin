@@ -1812,3 +1812,712 @@ fn actual_paid_generated_room_light_uses_retained_room_geometry() {
 fn actual_paid_generated_maze_room_light_is_paid_identified_noop() {
     paid_generated_room_light(true);
 }
+
+// Intended placement oracle: A interior -> actor2 only; A doorway -> actors2,3;
+// passage -> actors3,4. Actor4 is B doorway; actor5 is B interior.
+// No inferred adjacency radius: full explicit three-dimensional partition.
+fn drain_life_source(root: &Path, health: u64, caster: [i32; 3], targets: bool) -> crate::Scenario {
+    let baseline = self_device_source(root, false, false);
+    let source = baseline.package.as_ref().unwrap();
+    let mut document = source.rules().unwrap().document().clone();
+    let ability = document
+        .abilities
+        .iter_mut()
+        .find(|a| a.id.as_str() == "magic.ember_ray")
+        .unwrap();
+    let tor_simulation::rules::StrikeSource::Authored { strikes } = &mut ability.strikes else {
+        panic!("authored self source")
+    };
+    strikes[0].on_success = vec![tor_simulation::rules::Effect::DrainLife];
+    let rules = Arc::new(tor_simulation::rules::Ruleset::validate(document).unwrap());
+    let mut manifest = serde_json::to_value(&source.manifest).unwrap();
+    manifest["archetypes"]["ember"]["device"]["discovery"] = json!("never");
+    // Independent owner species; do not lower recipient Health with the caster.
+    manifest["creatures"]["species"]["drain_owner"] =
+        manifest["creatures"]["species"]["figure"].clone();
+    manifest["characters"][0]["creature"]["species"] = json!("drain_owner");
+    // Determine this fixed source's actual seeded maximum through the real catalog,
+    // then adjust only its authored additive Health contribution. No seed search,
+    // post-start Game mutation, or initial actor materialization assumption.
+    let prior: crate::scenario_package::Manifest =
+        serde_json::from_value(manifest.clone()).unwrap();
+    let build = prior
+        .creatures
+        .compile(rules.clone())
+        .unwrap()
+        .prepare(
+            prior.characters[0]
+                .creature
+                .as_ref()
+                .expect("ordinary caster build"),
+        )
+        .unwrap()
+        .instantiate(crate::creature_authoring::actor_health_seed(42, 1))
+        .unwrap();
+    let maximum = build.derive().unwrap().maximum_health;
+    let adjustment = i64::try_from(health).unwrap() - i64::try_from(maximum).unwrap();
+    manifest["creatures"]["species"]["drain_owner"]["modifiers"].as_array_mut().unwrap()
+        .push(json!({"scope":"always","op":{"kind":"add","stat":{"kind":"health"},"value":adjustment}}));
+    manifest["spatial_scopes"] = json!({"drain-study":{
+        "members":[1],
+        "rooms":{"1":[{"region":1,"min":[0,0,0],"max":[3,4,1]}],
+                 "2":[{"region":1,"min":[7,0,0],"max":[10,4,1]}]},
+        "passages":(0..2).flat_map(|z|(0..5).map(move|y|json!({"region":1,"z":z,"y":y,"first_x":4,"last_x":6}))).collect::<Vec<_>>(),
+        "doorways":[{"room":1,"region":1,"z":0,"y":2,"first_x":3,"last_x":3},
+                    {"room":2,"region":1,"z":0,"y":2,"first_x":7,"last_x":7}]
+    }});
+    let creature = serde_json::to_value(&source.manifest.characters[0].creature).unwrap();
+    let mut definitions = source.region_defs().unwrap();
+    let mut region = serde_json::to_value(&definitions[0]).unwrap();
+    region["size"] = json!([11, 5, 2]);
+    region["anchors"]["start"] = json!(caster);
+    region["items"] = json!([{"id":30,"at":caster,"archetype":"ember","carried_by":1}]);
+    region["actors"] = if targets {
+        json!([(2,[1,2,0]),(3,[5,2,0]),(4,[7,2,0]),(5,[9,2,0])].into_iter()
+            .map(|(id,at)|json!({"id":id,"at":at,"turn_ticks":100,"controller":"external","creature":creature})).collect::<Vec<_>>())
+    } else {
+        json!([])
+    };
+    definitions[0] = serde_json::from_value(region).unwrap();
+    let rules_text = toml::to_string(rules.document()).unwrap();
+    let checked = Package::from_parts(
+        serde_json::from_value(manifest).unwrap(),
+        definitions,
+        &rules_text,
+    )
+    .unwrap();
+    checked.check().unwrap();
+    crate::scenario_package::write_package(
+        root,
+        &checked.manifest,
+        &checked.region_defs().unwrap(),
+        &rules_text,
+    )
+    .unwrap();
+    crate::scenario_package::check(root).unwrap();
+    crate::scenario_package::load(root, 42, None, true).unwrap()
+}
+
+fn drain_health(wire: &mut Wire, actor: ActorId) -> (u64, u64) {
+    let snapshot = wire.snapshot(actor);
+    let combat = snapshot
+        .state
+        .observation
+        .combat
+        .as_ref()
+        .expect("ordinary actor combat");
+    (combat.hp, combat.max_hp)
+}
+
+fn paid_drain_life(health: u64, caster: [i32; 3], targets: bool, selected: &[u64]) {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("source");
+    let path = directory.path().join("drain.db");
+    let scenario = drain_life_source(&root, health, caster, targets);
+    let engine = Engine::open_with_policy(
+        &path,
+        scenario,
+        crate::SavePolicy {
+            checkpoint_interval: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let owners: Vec<_> = if targets {
+        (1..=5).map(ActorId).collect()
+    } else {
+        vec![OWNER]
+    };
+    let mut wire = Wire::for_actors(engine, owners);
+    assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
+    assert_eq!(drain_health(&mut wire, OWNER), (health, health));
+    let before_health: BTreeMap<_, _> = (2..=if targets { 5 } else { 1 })
+        .map(|id| (id, drain_health(&mut wire, ActorId(id))))
+        .collect();
+    let snapshot = wire.snapshot(OWNER);
+    let wand = snapshot
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|i| i.class == ItemClass::Wand)
+        .unwrap()
+        .id;
+    assert!(!nothing_identified(&snapshot, wand));
+    let recovery = snapshot
+        .state
+        .observation
+        .combat
+        .as_ref()
+        .unwrap()
+        .own_stats
+        .as_ref()
+        .unwrap()
+        .health_recovery;
+    assert!(
+        recovery.period_ticks - recovery.elapsed_ticks > 100,
+        "no recovery boundary during measured action"
+    );
+    let physical = nothing_wand_id(&wire, wand);
+    let before = wire.checkpoint();
+    assert_eq!(nothing_items(&before)[&physical]["charges"], 3);
+    let action = Action::Zap {
+        item: wand,
+        aim: DeviceAim::Direction {
+            direction: Direction::West,
+        },
+    };
+    let request = wire.request(OWNER, action.clone());
+    ack(wire.send(OWNER, "drain-once", request.clone()));
+    let receipt = wire.finish(OWNER, "drain-once", &request);
+    let after = wire.checkpoint();
+    assert_eq!(
+        after["game"]["tick"].as_u64().unwrap(),
+        before["game"]["tick"].as_u64().unwrap() + 100
+    );
+    assert_eq!(after["game"]["rules_rng"], before["game"]["rules_rng"]);
+    assert_eq!(
+        nothing_items(&after)[&physical]["charges"],
+        if health < 2 { 3 } else { 2 }
+    );
+    let applied = health >= 2 && !selected.is_empty();
+    assert_eq!(
+        drain_health(&mut wire, OWNER).0,
+        if applied { health / 2 } else { health }
+    );
+    let share = if applied {
+        health / 2 / u64::try_from(selected.len()).unwrap()
+    } else {
+        0
+    };
+    for (id, (old, maximum)) in before_health {
+        assert_eq!(
+            drain_health(&mut wire, ActorId(id)),
+            (
+                old - if selected.contains(&id) { share } else { 0 },
+                maximum
+            ),
+            "recipient {id}"
+        );
+    }
+    let snapshot = wire.snapshot(OWNER);
+    assert!(!nothing_identified(&snapshot, wand));
+    assert_eq!(
+        nothing_affordance(&snapshot, wand).device_activation,
+        Some(DeviceActivation::Direction)
+    );
+    assert_eq!(nothing_affordance(&snapshot, wand).charges, None);
+    let interactions = snapshot.state.observation.interactions.as_ref().unwrap();
+    if health < 2 {
+        assert_eq!(
+            interactions.refused,
+            vec![ItemRefusalView {
+                action,
+                reason: ItemRefusalReason::TooWeak
+            }]
+        );
+        assert!(interactions.completed.is_empty());
+    } else {
+        assert!(interactions.refused.is_empty());
+    }
+    if targets {
+        let other = wire.snapshot(OTHER);
+        assert!(other
+            .state
+            .observation
+            .interactions
+            .as_ref()
+            .is_none_or(|v| v.refused.is_empty()));
+    }
+    assert_eq!(ack(wire.send(OWNER, "drain-once", request)), receipt);
+    assert_eq!(wire.checkpoint(), after);
+    wire.service.engine.flush().unwrap();
+    assert_real_stored_checkpoint(&path, true);
+    drop(wire);
+    std::fs::remove_dir_all(root).unwrap();
+    let reopened = Engine::open(&path, crate::Scenario::two_room(999)).unwrap();
+    assert_eq!(checkpoint(&reopened), after);
+}
+
+#[test]
+fn actual_drain_life_too_weak_is_paid_completed_refusal_without_charge_or_identity() {
+    paid_drain_life(1, [2, 1, 0], true, &[]);
+}
+#[test]
+fn actual_drain_life_no_targets_spends_charge_but_no_health() {
+    paid_drain_life(9, [2, 1, 0], false, &[]);
+}
+#[test]
+fn actual_drain_life_room_doorway_and_passage_use_asymmetric_canonical_membership() {
+    paid_drain_life(9, [2, 1, 0], true, &[2]);
+    paid_drain_life(9, [3, 2, 0], true, &[2, 3]);
+    paid_drain_life(9, [4, 2, 0], true, &[3, 4]);
+}
+#[test]
+fn actual_drain_life_zero_share_still_sacrifices_odd_health_and_spends_once() {
+    paid_drain_life(3, [4, 2, 0], true, &[3, 4]);
+}
+
+// Managed zero-share contact: same declared room, no physical link or sight.
+#[test]
+fn managed_drain_life_zero_share_alerts_remote_frozen_actor_without_waking_or_disclosing_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("source");
+    let path = directory.path().join("remote-drain.db");
+    let base = drain_life_source(&root, 3, [2, 1, 0], false);
+    let source = base.package.as_ref().unwrap();
+    let rules = toml::to_string(source.rules().unwrap().document()).unwrap();
+    let mut manifest = serde_json::to_value(&source.manifest).unwrap();
+    manifest["spatial_scopes"]["drain-study"]["members"] = json!([1, 2]);
+    manifest["spatial_scopes"]["drain-study"]["rooms"]["1"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"region":2,"min":[0,0,0],"max":[2,2,1]}));
+    manifest["creatures"]["species"]["drain_remote"] =
+        manifest["creatures"]["species"]["figure"].clone();
+    manifest["creatures"]["species"]["drain_remote"]["behavior"]["memory_ticks"] = json!(37);
+    let mut creature = manifest["characters"][0]["creature"].clone();
+    creature["species"] = json!("figure");
+    let mut regions = source.region_defs().unwrap();
+    let mut local = serde_json::to_value(&regions[0]).unwrap();
+    local["actors"] =
+        json!([{"id":2,"at":[1,2,0],"turn_ticks":100,"controller":"external","creature":creature}]);
+    regions[0] = serde_json::from_value(local).unwrap();
+    creature["species"] = json!("drain_remote");
+    creature["name"] = json!("remote drain sentinel");
+    regions.push(
+        serde_json::from_value(
+            json!({"id":2,"name":"Remote drain recipient","size":[3,3,2],"chamber":true,"lit":false,
+        "actors":[{"id":3,"at":[0,0,0],"turn_ticks":100,"controller":"ai","creature":creature}]}),
+        )
+        .unwrap(),
+    );
+    let package =
+        Package::from_parts(serde_json::from_value(manifest).unwrap(), regions, &rules).unwrap();
+    package.check().unwrap();
+    assert!(package.manifest.floor_activation.is_none());
+    crate::scenario_package::write_package(
+        &root,
+        &package.manifest,
+        &package.region_defs().unwrap(),
+        &rules,
+    )
+    .unwrap();
+    crate::scenario_package::check(&root).unwrap();
+    let mut scenario = crate::scenario_package::load(&root, 42, None, true).unwrap();
+    scenario.streaming = Some(crate::Streaming {
+        active_radius: 0,
+        load_radius: 0,
+    });
+    // Existing managed fixture uses journal-only until explicit flush, retaining
+    // the real freshly detached RegionRecord for the no-clock-advance oracle.
+    let mut wire = Wire::for_actors(
+        Engine::open_with_policy(
+            &path,
+            scenario,
+            crate::SavePolicy {
+                checkpoint_interval: 4096,
+                ..Default::default()
+            },
+        )
+        .unwrap(),
+        [OWNER, OTHER],
+    );
+    assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
+    assert_eq!(drain_health(&mut wire, OWNER), (3, 3));
+    let initial = wire.checkpoint();
+    assert!(nothing_actor(&initial, ActorId(3)).is_null());
+    let remote = tor_world::Location {
+        region: tor_world::RegionId(2),
+        position: tor_world::Position { x: 0, y: 0, z: 0 },
+    };
+    assert_eq!(room_light_world(&initial).is_lit(remote), None);
+    let snapshot = wire.snapshot(OWNER);
+    let wand = snapshot
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|i| i.class == ItemClass::Wand)
+        .unwrap()
+        .id;
+    let physical = nothing_wand_id(&wire, wand);
+    assert_eq!(nothing_items(&initial)[&physical]["charges"], 3);
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::West,
+            },
+        },
+    );
+    ack(wire.send(OWNER, "remote-drain", request.clone()));
+    wire.service.run_until_blocked();
+    wire.drain(OWNER);
+    wire.drain(OTHER);
+    assert!(matches!(
+        ack(wire.send(OWNER, "remote-drain", request.clone())),
+        RequestReceipt::Admitted {
+            phase: IntentionPhase::Started,
+            ..
+        }
+    ));
+    let paused = wire.checkpoint();
+    assert_eq!(paused["game"]["tick"], initial["game"]["tick"]);
+    let actor = nothing_actor(&paused, ActorId(3)).clone();
+    assert!(actor.is_object());
+    assert_eq!(actor["ready_at"], 0);
+    assert_eq!(actor["active_since"], 0);
+    assert!(actor["awareness"]["alert"].is_null());
+    assert!(actor["behavior"]["engagement"].is_null());
+    let lifecycle = paused["game"]["lifecycle"].as_u64().unwrap() as usize;
+    assert_eq!(paused["shared"]["lifecycles"][lifecycle]["stamps"]["3"], 0);
+    assert!(paused["shared"]["lifecycles"][lifecycle]["frozen"]
+        .as_array()
+        .unwrap()
+        .contains(&json!(2)));
+    let receipt = wire.finish(OWNER, "remote-drain", &request);
+    let after = wire.checkpoint();
+    assert_eq!(after["game"]["tick"], 100);
+    assert_eq!(after["game"]["rules_rng"], paused["game"]["rules_rng"]);
+    assert_eq!(nothing_items(&after)[&physical]["charges"], 2);
+    assert_eq!(drain_health(&mut wire, OWNER), (1, 3));
+    let actual = if nothing_actor(&after, ActorId(3)).is_null() {
+        let capture = crate::engine::Checkpoint::capture(&wire.service.engine);
+        let record = capture
+            .records
+            .values()
+            .map(|r| serde_json::to_value(tor_simulation::RegionRecordData::capture(r)).unwrap())
+            .find(|r| r["world"]["region"]["id"] == 2)
+            .expect("real freshly detached remote record");
+        assert_eq!(record["stamps"]["3"], 0);
+        record["actors"]["3"].clone()
+    } else {
+        let lifecycle = after["game"]["lifecycle"].as_u64().unwrap() as usize;
+        assert_eq!(after["shared"]["lifecycles"][lifecycle]["stamps"]["3"], 0);
+        assert!(after["shared"]["lifecycles"][lifecycle]["frozen"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(2)));
+        nothing_actor(&after, ActorId(3)).clone()
+    };
+    for field in [
+        "ready_at",
+        "active_since",
+        "location",
+        "pending",
+        "combat",
+        "behavior",
+    ] {
+        assert_eq!(
+            actual[field], actor[field],
+            "zero-share remote {field} unchanged"
+        );
+    }
+    assert_eq!(
+        actual["awareness"]["alert"],
+        json!({"location":nothing_actor(&paused,OWNER)["location"],"expires":37})
+    );
+    let snapshot = wire.snapshot(OWNER);
+    assert!(!nothing_identified(&snapshot, wand));
+    // No direct-health event is generated for zero loss; no remote anonymous
+    // event may turn the private census/contact into a public target count.
+    assert!(snapshot
+        .state
+        .observation
+        .visible_actors
+        .iter()
+        .all(|v| v.name != "remote drain sentinel"));
+    let encoded = serde_json::to_value(&snapshot.state.observation.combat).unwrap();
+    assert!(!encoded.to_string().contains("remote drain sentinel"));
+    assert_eq!(ack(wire.send(OWNER, "remote-drain", request)), receipt);
+    assert_eq!(wire.checkpoint(), after);
+    wire.service.engine.flush().unwrap();
+    drop(wire);
+    std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(
+        checkpoint(&Engine::open(&path, crate::Scenario::two_room(999)).unwrap()),
+        after
+    );
+}
+
+// Only typed opaque identities are normalized; every field, row, event and
+// multiplicity remains in the compared ordinary observation.
+fn drain_normalize_tokens(value: &mut Value, tokens: &mut BTreeMap<String, String>) {
+    match value {
+        Value::String(text)
+            if text.parse::<ActorTarget>().is_ok()
+                || text.parse::<ItemTarget>().is_ok()
+                || text.parse::<AppearanceSeed>().is_ok() =>
+        {
+            let next = format!("opaque-{}-{}", &text[..1], tokens.len());
+            *text = tokens.entry(text.clone()).or_insert(next).clone();
+        }
+        Value::Array(values) => {
+            for value in values {
+                drain_normalize_tokens(value, tokens);
+            }
+        }
+        Value::Object(fields) => {
+            for value in fields.values_mut() {
+                drain_normalize_tokens(value, tokens);
+            }
+        }
+        _ => {}
+    }
+}
+fn drain_follower_observation(wire: &mut Wire, follower: &mut Connection) -> Observation {
+    while follower.messages.try_recv_frame().is_ok() {}
+    wire.service.handle(
+        follower.id,
+        "drain-follow".into(),
+        Request::Attach { actor: OWNER },
+    );
+    let ServerMessage::Snapshot { snapshot, .. } =
+        decode_response(&follower.messages.try_recv_frame().unwrap().text).unwrap()
+    else {
+        panic!("followed ordinary snapshot")
+    };
+    snapshot.state.observation.clone()
+}
+fn drain_capture_observation_updates(messages: &[ServerMessage], updates: &mut Vec<StreamUpdate>) {
+    for message in messages {
+        assert!(
+            !matches!(message, ServerMessage::Error { .. }),
+            "{message:?}"
+        );
+        if let ServerMessage::Update { update } = message {
+            if matches!(
+                update.body,
+                UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
+            ) {
+                updates.push((**update).clone());
+            }
+        }
+    }
+}
+fn drain_normalized_updates(mut updates: Vec<StreamUpdate>) -> Value {
+    assert!(
+        !updates.is_empty(),
+        "actual observation publication required"
+    );
+    assert!(
+        updates.iter().any(|u| u.cursor.tick == 100),
+        "paid completion publication required"
+    );
+    let mut identities = BTreeMap::<String, String>::new();
+    let mut identity = |kind: &str, original: &mut String| {
+        let next = format!("{kind}-{}", identities.len());
+        *original = identities
+            .entry(format!("{kind}:{original}"))
+            .or_insert(next)
+            .clone();
+    };
+    for update in &mut updates {
+        identity("stream", &mut update.context.stream.0);
+        identity("branch", &mut update.branch.0);
+        let event = match &mut update.body {
+            UpdateBody::Observation { event, .. } | UpdateBody::ObservationDelta { event, .. } => {
+                event
+            }
+            _ => unreachable!("only actual observation updates captured"),
+        };
+        if let Some(event) = event {
+            identity("entry", &mut event.id.0);
+            identity("branch", &mut event.branch.0);
+        }
+    }
+    let mut value = serde_json::to_value(updates).unwrap();
+    drain_normalize_tokens(&mut value, &mut BTreeMap::new());
+    value
+}
+fn hidden_drain_observations(count: u64) -> (Value, Value, Value, Value) {
+    assert!((1..=2).contains(&count));
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("source");
+    let base = drain_life_source(&root, 21, [1, 2, 0], false);
+    let source = base.package.as_ref().unwrap();
+    let rules = toml::to_string(source.rules().unwrap().document()).unwrap();
+    let mut manifest = serde_json::to_value(&source.manifest).unwrap();
+    manifest["spatial_scopes"] = json!({"hidden-room":{"members":[1],"rooms":{"1":[{"region":1,"min":[0,0,0],"max":[6,4,1]}]},"passages":[],"doorways":[]}});
+    let creature = manifest["characters"][0]["creature"].clone();
+    let mut regions = source.region_defs().unwrap();
+    let mut region = serde_json::to_value(&regions[0]).unwrap();
+    region["size"] = json!([7, 5, 2]);
+    region["lit"] = json!(false);
+    region["lighting"] = json!([]);
+    region["actors"]=json!((0..count).map(|i|json!({"id":i+2,"at":[5,if i==0 {1}else{3},0],"turn_ticks":100,"controller":"external","creature":creature})).collect::<Vec<_>>());
+    regions[0] = serde_json::from_value(region).unwrap();
+    let package =
+        Package::from_parts(serde_json::from_value(manifest).unwrap(), regions, &rules).unwrap();
+    package.check().unwrap();
+    crate::scenario_package::write_package(
+        &root,
+        &package.manifest,
+        &package.region_defs().unwrap(),
+        &rules,
+    )
+    .unwrap();
+    crate::scenario_package::check(&root).unwrap();
+    let scenario = crate::scenario_package::load(&root, 42, None, true).unwrap();
+    let mut wire = Wire::for_actors(
+        Engine::memory(scenario).unwrap(),
+        (1..=count + 1).map(ActorId),
+    );
+    assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
+    for id in 1..=count + 1 {
+        assert_eq!(drain_health(&mut wire, ActorId(id)), (21, 21));
+    }
+    let before = wire.snapshot(OWNER);
+    assert!(
+        before.state.observation.visible_actors.is_empty(),
+        "actual hidden-recipient prerequisite"
+    );
+    assert_eq!(
+        before
+            .state
+            .observation
+            .combat
+            .as_ref()
+            .unwrap()
+            .own_stats
+            .as_ref()
+            .unwrap()
+            .attributes
+            .awareness,
+        0
+    );
+    let mut follower = wire
+        .service
+        .connect(
+            &Account {
+                user: "drain-follower".into(),
+                token: "fixture".into(),
+                role: AccessRole::Spectator,
+                actors: BTreeSet::from([OWNER]),
+            },
+            "drain-follower".into(),
+        )
+        .unwrap();
+    follower.messages.try_recv_frame().unwrap();
+    assert!(drain_follower_observation(&mut wire, &mut follower)
+        .visible_actors
+        .is_empty());
+    let wand = before
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|i| i.class == ItemClass::Wand)
+        .unwrap()
+        .id;
+    let physical = nothing_wand_id(&wire, wand);
+    let initial = wire.checkpoint();
+    // Capture losslessly across admission and every scheduler drive. The ordinary
+    // Wire::finish intentionally drains frames, so this small fixture-local loop
+    // retains actual owner and followed observation/delta publications instead.
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::West,
+            },
+        },
+    );
+    let mut owner_updates = Vec::new();
+    let admitted = wire.send(OWNER, "hidden-drain", request.clone());
+    drain_capture_observation_updates(&admitted, &mut owner_updates);
+    ack(admitted);
+    let mut resolved = false;
+    for _ in 0..16 {
+        wire.service.run_until_blocked();
+        drain_capture_observation_updates(&wire.drain(OWNER), &mut owner_updates);
+        for id in 2..=count + 1 {
+            assert!(!wire
+                .drain(ActorId(id))
+                .iter()
+                .any(|m| matches!(m, ServerMessage::Error { .. })));
+        }
+        let response = wire.send(OWNER, "hidden-drain", request.clone());
+        drain_capture_observation_updates(&response, &mut owner_updates);
+        let receipt = ack(response);
+        if matches!(
+            receipt,
+            RequestReceipt::Admitted {
+                phase: IntentionPhase::Resolved,
+                ..
+            }
+        ) {
+            resolved = true;
+            break;
+        }
+        assert!(
+            matches!(
+                receipt,
+                RequestReceipt::Admitted {
+                    phase: IntentionPhase::Queued | IntentionPhase::Started,
+                    ..
+                }
+            ),
+            "{receipt:?}"
+        );
+        let next = wire.service.engine.next_actor().unwrap();
+        assert_ne!(
+            next, OWNER,
+            "fixture's other external owners advance this preparation"
+        );
+        wire.serial += 1;
+        let wait = wire.request(next, Action::Wait);
+        ack(wire.send(next, &format!("privacy-clock-{}", wire.serial), wait));
+    }
+    assert!(resolved, "actual admitted drain completion");
+    drain_capture_observation_updates(&wire.drain(OWNER), &mut owner_updates);
+    let follower_frames: Vec<_> = std::iter::from_fn(|| follower.messages.try_recv_frame().ok())
+        .map(|f| decode_response(&f.text).unwrap())
+        .collect();
+    let mut follower_updates = Vec::new();
+    drain_capture_observation_updates(&follower_frames, &mut follower_updates);
+    let owner_updates = drain_normalized_updates(owner_updates);
+    let follower_updates = drain_normalized_updates(follower_updates);
+    let after = wire.checkpoint();
+    assert_eq!(after["game"]["tick"], 100);
+    assert_eq!(after["game"]["rules_rng"], initial["game"]["rules_rng"]);
+    assert_eq!(nothing_items(&after)[&physical]["charges"], 2);
+    assert_eq!(drain_health(&mut wire, OWNER), (10, 21));
+    for id in 2..=count + 1 {
+        assert_eq!(drain_health(&mut wire, ActorId(id)), (21 - 10 / count, 21));
+    }
+    let owner = wire.snapshot(OWNER);
+    assert!(owner.state.observation.visible_actors.is_empty());
+    assert!(!nothing_identified(&owner, wand));
+    let followed = drain_follower_observation(&mut wire, &mut follower);
+    assert!(followed.visible_actors.is_empty());
+    let mut owner = serde_json::to_value(&owner.state.observation).unwrap();
+    let mut followed = serde_json::to_value(followed).unwrap();
+    drain_normalize_tokens(&mut owner, &mut BTreeMap::new());
+    drain_normalize_tokens(&mut followed, &mut BTreeMap::new());
+    (owner, followed, owner_updates, follower_updates)
+}
+#[test]
+fn actual_drain_life_hidden_recipient_count_does_not_change_owner_or_followed_observation() {
+    let one = hidden_drain_observations(1);
+    let two = hidden_drain_observations(2);
+    assert_eq!(
+        one.0, two.0,
+        "ordinary owner cannot learn hidden target count"
+    );
+    assert_eq!(
+        one.1, two.1,
+        "followed spectator cannot learn hidden target count"
+    );
+    assert_eq!(
+        one.2, two.2,
+        "actual owner observation/delta publications hide recipient count"
+    );
+    assert_eq!(
+        one.3, two.3,
+        "actual followed observation/delta publications hide recipient count"
+    );
+}

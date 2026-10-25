@@ -819,6 +819,19 @@ pub fn observation(
                 .into_iter()
                 .map(|item| targets.item(item))
                 .collect(),
+            refused: interaction
+                .refused
+                .into_iter()
+                .map(|refusal| p::ItemRefusalView {
+                    action: crate::wire_adapter::encode_action(
+                        &recorded_action(refusal.work.action()).expect("refused item action"),
+                        targets,
+                    ),
+                    reason: match refusal.reason {
+                        s::ItemRefusal::TooWeak => p::ItemRefusalReason::TooWeak,
+                    },
+                })
+                .collect(),
             completed: interaction
                 .completed
                 .into_iter()

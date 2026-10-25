@@ -194,3 +194,27 @@ fn device_aim_is_closed_named_and_rejects_legacy_or_foreign_operands() {
     )
     .is_err());
 }
+
+#[test]
+fn paid_refusal_is_required_closed_and_preserves_captured_zap() {
+    let refusal = json!({"action":{"type":"zap","item":item(),"aim":{"kind":"direction","direction":"east"}},"reason":"too_weak"});
+    let valid = json!({"identification":null,"completed":[],"refused":[refusal.clone()],"curse_blocked":[],"slots":[],"preparation":null,"inventory":[]});
+    let parsed: InteractionView = serde_json::from_value(valid.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), valid);
+    let mut empty = valid.clone();
+    empty["refused"] = json!([]);
+    assert!(serde_json::from_value::<InteractionView>(empty).is_ok());
+    let mut missing = valid;
+    missing.as_object_mut().unwrap().remove("refused");
+    assert!(serde_json::from_value::<InteractionView>(missing).is_err());
+    for bad in [
+        json!({"action":{"type":"wait"},"reason":"too_weak"}),
+        json!({"action":refusal["action"],"reason":"no_targets"}),
+        json!({"action":refusal["action"],"reason":{"too_weak":null}}),
+        json!({"action":refusal["action"],"reason":"too_weak","health":1}),
+        json!([refusal["action"], "too_weak"]),
+        json!({"action":refusal["action"]}),
+    ] {
+        assert!(serde_json::from_value::<ItemRefusalView>(bad).is_err());
+    }
+}

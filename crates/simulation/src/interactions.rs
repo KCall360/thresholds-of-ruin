@@ -319,12 +319,33 @@ impl From<&crate::rules::EquipmentSlotDef> for EquipmentSlotView {
     }
 }
 
+/// Closed paid device refusal; does not disclose identity, Health or recipients.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemRefusal {
+    TooWeak,
+}
+impl<'de> serde::Deserialize<'de> for ItemRefusal {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match <String as serde::Deserialize>::deserialize(d)?.as_str() {
+            "too_weak" => Ok(Self::TooWeak),
+            _ => Err(serde::de::Error::custom("unknown item refusal")),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemRefusalView {
+    pub work: Work,
+    pub reason: ItemRefusal,
+}
+
 /// Controlled actor's anatomy and carried-item affordances. Equipment statistics
 /// remain absent until that actor knows the item's identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InteractionView {
     pub identification: Option<crate::IdentificationChoiceView>,
     pub completed: Vec<Work>,
+    pub refused: Vec<ItemRefusalView>,
     pub curse_blocked: Vec<ItemId>,
     pub slots: Vec<EquipmentSlotView>,
     pub preparation: Option<PreparationView>,

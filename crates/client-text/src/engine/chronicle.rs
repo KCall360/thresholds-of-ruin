@@ -518,6 +518,7 @@ mod tests {
         );
         let slot = tor_client_common::test_support::equipment_slot("hand", "in hand", true);
         state.observation.interactions = Some(InteractionView {
+            refused: vec![],
             curse_blocked: vec![],
             identification: None,
             completed: vec![],

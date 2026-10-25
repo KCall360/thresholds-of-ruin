@@ -31,6 +31,7 @@ fn snapshot(identify: bool) -> Snapshot {
     })
     .collect();
     view.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: identify.then(|| IdentificationChoiceView {
             choice: IntentionId("paid-choice".into()),

@@ -170,7 +170,12 @@ impl StateView {
             let inventory: std::collections::HashMap<_, _> =
                 o.inventory.iter().map(|item| (item.id, item)).collect();
             let mut equipped = HashSet::new();
-            if interactions.curse_blocked.len() > 4096
+            if interactions.refused.len() > 4096
+                || interactions
+                    .refused
+                    .iter()
+                    .any(|refusal| !matches!(refusal.action, crate::Action::Zap { .. }))
+                || interactions.curse_blocked.len() > 4096
                 || interactions.slots.len() > crate::MAX_EQUIPMENT_SLOTS
                 || interactions.slots.iter().any(|slot| !slot.valid())
                 || interactions.completed.iter().any(|action| {

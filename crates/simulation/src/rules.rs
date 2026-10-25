@@ -1051,6 +1051,7 @@ pub enum Effect {
     TeleportRandom,
     TeleportToRayOrigin,
     RoomLight,
+    DrainLife,
     ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
@@ -1120,6 +1121,7 @@ impl Effect {
     pub fn recipient(&self) -> EffectRecipient {
         match self {
             Self::RoomLight
+            | Self::DrainLife
             | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises
             | Self::ObservePublicPlan
@@ -1159,6 +1161,7 @@ impl<'de> Deserialize<'de> for Effect {
             TeleportRandom {},
             TeleportToRayOrigin {},
             RoomLight {},
+            DrainLife {},
             ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
@@ -1249,6 +1252,7 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::TeleportRandom {} => Self::TeleportRandom,
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
             Fields::RoomLight {} => Self::RoomLight,
+            Fields::DrainLife {} => Self::DrainLife,
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
@@ -2144,6 +2148,32 @@ impl Ruleset {
                     if on_failure.is_empty() && riders.is_empty())),
                 "room_light_checkless",
             )?;
+            let drains = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes
+                    .iter()
+                    .flat_map(|s| {
+                        s.on_success
+                            .iter()
+                            .chain(&s.on_failure)
+                            .chain(s.riders.iter().flat_map(|r| &r.effects))
+                    })
+                    .any(|effect| matches!(effect, Effect::DrainLife)),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|r| &r.effects)
+                    .any(|effect| matches!(effect, Effect::DrainLife)),
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => false,
+            };
+            bound(
+                !drains
+                    || (d.invocation == crate::abilities::InvocationKind::ActorTarget
+                        && d.reach == Reach::SelfOnly
+                        && d.interaction == Interaction::NonHostile
+                        && matches!(&d.strikes, StrikeSource::Authored { strikes }
+                    if matches!(strikes.as_slice(), [StrikeDef { offset:0, unlock:None, check:None, on_success, on_failure, riders, .. }]
+                        if matches!(on_success.as_slice(), [Effect::DrainLife]) && on_failure.is_empty() && riders.is_empty()))),
+                "drain_life_self_only",
+            )?;
             let searches = match &d.strikes {
                 StrikeSource::Authored { strikes } => strikes.iter().any(|strike| {
                     strike
@@ -2833,6 +2863,7 @@ impl References<'_> {
                 | Effect::TeleportRandom
                 | Effect::TeleportToRayOrigin
                 | Effect::RoomLight
+                | Effect::DrainLife
                 | Effect::ArrestDescent => {}
             }
             if let Effect::ApplyQualifiedConditionToSource {
@@ -3471,6 +3502,7 @@ impl Effect {
             | Self::TeleportRandom
             | Self::TeleportToRayOrigin
             | Self::RoomLight
+            | Self::DrainLife
             | Self::ArrestDescent => true,
             Self::HealPerHitDie { sides, bonus, .. } => DicePool::new(1, *sides, *bonus).is_ok(),
             Self::ApplyConditionForTurns { duration, .. } => positive_duration_shape(duration),

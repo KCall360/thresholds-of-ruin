@@ -231,6 +231,7 @@ fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() 
     carrying(&mut s);
     let ring = super::item_target(12);
     s.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
@@ -1987,6 +1988,7 @@ fn explicit_weapons_use_observed_equipped_pairs_in_both_text_modes() {
     let sword = super::item_target(13);
     let slot = equipment_slot("fixture_wing", "fastened to a wing", true);
     s.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],
@@ -2110,6 +2112,7 @@ fn text_weapon_clause_stays_exact_through_explicit_supply_selection() {
     });
     let slot = equipment_slot("weapon", "in hand", true);
     s.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],

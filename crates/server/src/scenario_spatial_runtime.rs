@@ -275,7 +275,7 @@ impl Package {
             // unprepared scopes against a runtime archive directory.
             self.compile_authored_spatial(id, 0, &mut source_entries, &mut terrain)?;
         }
-        if spatial_sources::room_light_enabled(self)? {
+        if spatial_sources::spatial_effect_enabled(self)? {
             let generated: BTreeSet<_> = self
                 .manifest
                 .generation_groups
@@ -285,7 +285,7 @@ impl Package {
             for region in &self.index.regions {
                 require(
                     generated.contains(&region.id) || owners.contains(&region.id),
-                    "Enabled RoomLight requires canonical spatial scope for every authored region",
+                    "Enabled spatial effect requires canonical spatial scope for every authored region",
                 )?;
             }
         }

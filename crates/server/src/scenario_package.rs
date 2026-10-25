@@ -5451,6 +5451,7 @@ mod tests {
             "rogue.wand_teleport_to",
             "rogue.wand_nothing",
             "rogue.wand_light",
+            "rogue.wand_drain_life",
         ] {
             package.manifest.archetypes.get_mut(id).unwrap().class = ItemClass::Tool;
         }

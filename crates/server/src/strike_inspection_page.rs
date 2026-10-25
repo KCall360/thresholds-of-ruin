@@ -66,7 +66,8 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
         | s::rules::Effect::ArrestDescent
         | s::rules::Effect::DrainLatestHitDie
         | s::rules::Effect::RestoreHitDie
-        | s::rules::Effect::RoomLight => 0,
+        | s::rules::Effect::RoomLight
+        | s::rules::Effect::DrainLife => 0,
         s::rules::Effect::PushTargetOneCell { .. } => 1,
         s::rules::Effect::ApplyQualifiedConditionToSource { .. } => 3,
         _ => 2,
