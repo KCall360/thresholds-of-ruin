@@ -29,6 +29,7 @@ struct Sources<'a> {
     pending: Vec<Source>,
     seen: BTreeSet<Source>,
     light: bool,
+    cancellation: bool,
 }
 impl Sources<'_> {
     fn add(&mut self, source: Source) {
@@ -122,6 +123,7 @@ impl Sources<'_> {
         for value in values {
             match value {
                 Effect::RoomLight | Effect::DrainLife => self.light = true,
+                Effect::CancelSpecials => self.cancellation = true,
                 Effect::ApplyCondition { condition, .. }
                 | Effect::ApplyPersistentCondition { condition, .. }
                 | Effect::ApplyConditionForTurns { condition, .. }
@@ -136,6 +138,7 @@ impl Sources<'_> {
         for value in values {
             match value {
                 r::Effect::RoomLight | r::Effect::DrainLife => self.light = true,
+                r::Effect::CancelSpecials => self.cancellation = true,
                 r::Effect::ApplyCondition { condition, .. }
                 | r::Effect::ApplyPersistentCondition { condition, .. }
                 | r::Effect::ApplyConditionForTurns { condition, .. }
@@ -310,11 +313,8 @@ impl Sources<'_> {
                     }
                 }
             }
-            if self.light {
-                return Ok(true);
-            }
         }
-        Ok(false)
+        Ok(self.light)
     }
 }
 
@@ -334,12 +334,22 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
                     .iter()
                     .chain(&strike.on_failure)
                     .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
-                    .any(|effect| matches!(effect, r::Effect::RoomLight | r::Effect::DrainLife))
+                    .any(|effect| {
+                        matches!(
+                            effect,
+                            r::Effect::RoomLight | r::Effect::DrainLife | r::Effect::CancelSpecials
+                        )
+                    })
             }),
             r::StrikeSource::NaturalMelee { additional_riders } => additional_riders
                 .iter()
                 .flat_map(|rider| &rider.effects)
-                .any(|effect| matches!(effect, r::Effect::RoomLight | r::Effect::DrainLife)),
+                .any(|effect| {
+                    matches!(
+                        effect,
+                        r::Effect::RoomLight | r::Effect::DrainLife | r::Effect::CancelSpecials
+                    )
+                }),
             r::StrikeSource::SelectedMelee | r::StrikeSource::Projectile { .. } => false,
         });
     let item_light = package.manifest.archetypes.values().any(|item| {
@@ -347,7 +357,12 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
             .iter()
             .flat_map(|value| &value.effects)
             .chain(item.readable.iter().flat_map(|value| &value.effects))
-            .any(|effect| matches!(effect, Effect::RoomLight | Effect::DrainLife))
+            .any(|effect| {
+                matches!(
+                    effect,
+                    Effect::RoomLight | Effect::DrainLife | Effect::CancelSpecials
+                )
+            })
     });
     let natural_light = package.manifest.creatures.species.values().any(|species| {
         species.melee.strikes.iter().any(|strike| {
@@ -356,7 +371,12 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
                 .iter()
                 .chain(&strike.on_failure)
                 .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
-                .any(|effect| matches!(effect, Effect::RoomLight | Effect::DrainLife))
+                .any(|effect| {
+                    matches!(
+                        effect,
+                        Effect::RoomLight | Effect::DrainLife | Effect::CancelSpecials
+                    )
+                })
         })
     });
     if !rule_light && !item_light && !natural_light {
@@ -368,6 +388,7 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
         pending: Vec::new(),
         seen: BTreeSet::new(),
         light: false,
+        cancellation: false,
     };
     for ability in &rules.document().constants.default_abilities {
         sources.add(Source::Ability(ability.to_string()));
@@ -483,7 +504,28 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
             }
         }
     }
-    sources.finish()
+    let spatial = sources.finish()?;
+    // Run after the COMPLETE closure: discovering Light or Cancellation cannot
+    // hide a later reachable mixed condition. Imported definitions are not roots.
+    if sources.cancellation {
+        for source in &sources.seen {
+            let Source::Condition(id) = source else {
+                continue;
+            };
+            let condition = tor_simulation::content_ids::ConditionId::new(id.clone())
+                .map_err(|_| fail("Invalid reachable cancellation condition"))?;
+            let shape = rules
+                .cancellation_invisibility_shape(&condition)
+                .map_err(|_| fail("Invalid reachable cancellation condition"))?;
+            if shape == r::CancellationInvisibilityShape::Mixed {
+                return Err(fail(format!(
+                    "Cancellation source closure: conditions.{id} mixes invisibility with unrelated behavior"
+                )));
+            }
+        }
+    }
+    // Cancellation alone does not require room/passage metadata.
+    Ok(spatial)
 }
 
 #[cfg(test)]
@@ -636,6 +678,7 @@ mod tests {
             pending: vec![],
             seen: BTreeSet::new(),
             light: false,
+            cancellation: false,
         };
         assert!(!graph.finish().unwrap());
         graph.add(Source::Condition(condition_id));
@@ -674,6 +717,7 @@ mod tests {
             pending: vec![],
             seen: BTreeSet::new(),
             light: false,
+            cancellation: false,
         };
         assert!(!graph.finish().unwrap());
         graph.grants(&grants);

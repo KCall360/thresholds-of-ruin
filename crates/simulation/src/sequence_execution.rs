@@ -53,6 +53,9 @@ impl Game {
                         .on_success()
                         .iter()
                         .any(|effect| matches!(effect, crate::abilities::PlannedEffect::DrainLife))
+                        || preparation.plan.as_ray().is_some_and(|ray| {
+                            ray.traversal == crate::abilities::RayTraversal::FirstBody
+                        })
                     {
                         self.ensure_preparation_residency(id)?;
                         if self.region_transition_pending() {

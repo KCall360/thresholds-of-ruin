@@ -631,3 +631,45 @@ Required acceptance includes long initially-unloaded physical paths, complete
 cycles, frozen/noncombat interception, precise tagged cleanup, payment/privacy,
 rollback and source-free pending-plan reopening. This subsection proposes the
 next coherent batch; it does not claim implementation or qualification.
+
+### First-contact implementation candidate: pre-compilation checkpoint
+
+The next source checkpoint contains an incomplete, uncompiled implementation
+candidate, not working or qualified Cancellation/Missile content. Formatting
+parses it, but no type check, build, first-red or runtime result is claimed.
+The preceding Drain checkpoint remains separately identifiable in history.
+
+The candidate extends the existing ray ledger with closed bounded/first-body
+traversal and checkless/opposed resolution. It adds physical dependency reporting,
+full cycle-state tracking and an explicit 65,536-state operational work rejection,
+not a shortened successful range. Missing preparable geometry uses load-only
+preparation closure; examined diagonal side regions remain dependencies too.
+Geometry is settled before RNG: empty, obstructed, cyclic or noncombat-body
+termination consumes no contest/damage RNG; eligible contact alone uses the
+existing opposed resolution once. These contracts still require runtime proof.
+
+Cancellation uses a saved cancelled flag and explicitly tagged effective
+contributions without deleting permanent ownership. Flag implication paths use
+bounded least-restrictive classification so an independent unmarked path survives.
+Canonical natural source rows and rider ordinals remain intact; live payload
+projection must also reach current previews. Pure current invisibility conditions
+can be removed; mixed invisibility shapes are rejected only for reachable sources
+in cancellation-enabled content. Unused definitions remain unaffected. This
+avoids deleting unrelated benefits or adding a general suppression ledger, while
+allowing later independent invisibility applications.
+
+Before a grouped build, complete metadata constructor and old RayPlan consumer
+migration, current natural previews, exhaustive source/save mirrors and enabled-
+source validation controls. Remove obsolete draft helpers. The new native
+fixtures and DTO checks have not run. Actual admitted, initially-unloaded
+five-region paths longer than 100 cells, noncombat interception, frozen clocks,
+ordinary-ability payment, pending-plan/source-free reopening, rollback and
+owner/follower privacy still need complete executable fixtures and validation.
+
+Planned opt-in definitions are `rogue.wand_cancellation` (3–7 charges, never
+self-identifying) and `rogue.wand_magic_missile` (3–7 charges, OnUse discovery).
+Missile uses the approved one Lore-versus-Agility contest and 1d4+1 plus the
+universal attack-damage bonus. These catalog entries and their appearance slots
+are not installed by this candidate; retain unchanged live pools and kits.
+Finish the coherent source and independently valid fixture prerequisites before
+one meaningful resolver-disabled first-red and the reviewed green cohort.

@@ -1,6 +1,9 @@
 //! Validated immutable content. TOML parsing and content hashing belong to the host.
 use crate::HdCount;
 mod advancement;
+mod cancellation;
+pub(crate) use cancellation::expand_cancellable_source;
+pub use cancellation::CancellationInvisibilityShape;
 mod forms;
 mod growth;
 mod interaction;
@@ -623,6 +626,8 @@ pub enum Scope {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Modifier {
+    #[serde(default)]
+    pub cancellable: bool,
     pub scope: Scope,
     pub op: ModifierOp,
 }
@@ -635,6 +640,8 @@ pub struct AbilityTagDef {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbilityDef {
+    #[serde(default)]
+    pub cancellable: bool,
     pub interaction: Interaction,
     #[serde(default)]
     pub invocation: crate::abilities::InvocationKind,
@@ -662,6 +669,8 @@ impl<'de> serde::Deserialize<'de> for AbilityDef {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            cancellable: bool,
             interaction: Interaction,
             id: AbilityId,
             #[serde(default)]
@@ -683,6 +692,7 @@ impl<'de> serde::Deserialize<'de> for AbilityDef {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            cancellable: fields.cancellable,
             interaction: fields.interaction,
             invocation: fields.invocation,
             id: fields.id,
@@ -838,6 +848,8 @@ pub enum Reach {
     MutualSight {
         range: u16,
     },
+    /// Complete physical contact flight; independent of sight radius.
+    UntilObstruction,
     SelfOnly,
     SelfOrAlly {
         range: AllyRange,
@@ -852,6 +864,7 @@ impl<'de> Deserialize<'de> for Reach {
             Projectile {},
             Sight { range: u16 },
             MutualSight { range: u16 },
+            UntilObstruction {},
             SelfOnly,
             SelfOrAlly { range: AllyRange },
         }
@@ -860,6 +873,7 @@ impl<'de> Deserialize<'de> for Reach {
             Fields::Projectile {} => Self::Projectile,
             Fields::Sight { range } => Self::Sight { range },
             Fields::MutualSight { range } => Self::MutualSight { range },
+            Fields::UntilObstruction {} => Self::UntilObstruction,
             Fields::SelfOnly => Self::SelfOnly,
             Fields::SelfOrAlly { range } => Self::SelfOrAlly { range },
         })
@@ -1052,6 +1066,8 @@ pub enum Effect {
     TeleportToRayOrigin,
     RoomLight,
     DrainLife,
+    /// Target-only permanent special suppression and current concealment cleanup.
+    CancelSpecials,
     ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
@@ -1162,6 +1178,7 @@ impl<'de> Deserialize<'de> for Effect {
             TeleportToRayOrigin {},
             RoomLight {},
             DrainLife {},
+            CancelSpecials {},
             ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
@@ -1253,6 +1270,7 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
             Fields::RoomLight {} => Self::RoomLight,
             Fields::DrainLife {} => Self::DrainLife,
+            Fields::CancelSpecials {} => Self::CancelSpecials,
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
@@ -2225,6 +2243,33 @@ impl Ruleset {
                 )?;
             }
             bound(
+                d.reach != Reach::UntilObstruction
+                    || (d.invocation == crate::abilities::InvocationKind::DirectionalContactRay
+                        && crate::abilities::ray_definition_shape_valid(d)),
+                "until_obstruction_delivery",
+            )?;
+            let cancellation = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes.iter().any(|strike| {
+                    strike
+                        .on_success
+                        .iter()
+                        .chain(&strike.on_failure)
+                        .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                        .any(|effect| matches!(effect, Effect::CancelSpecials))
+                }),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|rider| &rider.effects)
+                    .any(|effect| matches!(effect, Effect::CancelSpecials)),
+                _ => false,
+            };
+            bound(
+                !cancellation
+                    || (d.reach == Reach::UntilObstruction
+                        && crate::abilities::ray_definition_shape_valid(d)),
+                "cancellation_contact_source",
+            )?;
+            bound(
                 d.tags.len() <= crate::limits::TAGS_PER_ABILITY,
                 "ability_tags",
             )?;
@@ -2864,6 +2909,7 @@ impl References<'_> {
                 | Effect::TeleportToRayOrigin
                 | Effect::RoomLight
                 | Effect::DrainLife
+                | Effect::CancelSpecials
                 | Effect::ArrestDescent => {}
             }
             if let Effect::ApplyQualifiedConditionToSource {
@@ -3503,6 +3549,7 @@ impl Effect {
             | Self::TeleportToRayOrigin
             | Self::RoomLight
             | Self::DrainLife
+            | Self::CancelSpecials
             | Self::ArrestDescent => true,
             Self::HealPerHitDie { sides, bonus, .. } => DicePool::new(1, *sides, *bonus).is_ok(),
             Self::ApplyConditionForTurns { duration, .. } => positive_duration_shape(duration),

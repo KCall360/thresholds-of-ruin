@@ -910,7 +910,7 @@ pub(crate) fn derive_with_losses(
     equipment: &[EquipmentSource],
     losses: super::RestorableLosses,
 ) -> Result<DerivedCreature, BuildError> {
-    PermanentCreature::compile(build)?.fold(build, extra, equipment, losses)
+    PermanentCreature::compile(build)?.fold(build, extra, equipment, losses, false)
 }
 
 /// Immutable permanent inputs, deliberately not a condition-free *effective*
@@ -938,6 +938,7 @@ impl PermanentCreature {
         extra: &BTreeMap<SourceId, Vec<Modifier>>,
         equipment: &[EquipmentSource],
         losses: super::RestorableLosses,
+        cancelled: bool,
     ) -> Result<DerivedCreature, BuildError> {
         if !losses.valid() {
             return Err(BuildError::InvalidDefinition);
@@ -1034,7 +1035,12 @@ impl PermanentCreature {
                 build.ruleset(),
             )?;
         }
-        fold(&mut derived, build, losses)?;
+        if cancelled {
+            for modifiers in derived.sources.values_mut() {
+                modifiers.retain(|modifier| !modifier.cancellable);
+            }
+        }
+        fold(&mut derived, build, losses, cancelled)?;
         if derived.total_hd() == HdCount::ZERO {
             derived.maximum_health = 0;
             derived.abilities.clear();
@@ -1324,21 +1330,8 @@ pub(super) fn add_source(
         rules.validate_modifiers(modifiers)
     })
     .map_err(|_| BuildError::InvalidDefinition)?;
-    let mut expanded = modifiers.to_vec();
-    let mut seen = BTreeSet::new();
-    let mut cursor = 0;
-    while cursor < expanded.len() {
-        if let ModifierOp::Flag { flag } = &expanded[cursor].op {
-            if seen.insert(flag.clone()) {
-                let implied = &rules
-                    .flag(flag)
-                    .ok_or(BuildError::InvalidDefinition)?
-                    .modifiers;
-                expanded.extend(implied.iter().cloned());
-            }
-        }
-        cursor += 1;
-    }
+    let expanded = crate::rules::expand_cancellable_source(modifiers, rules)
+        .map_err(|_| BuildError::InvalidDefinition)?;
     sources.insert(source, expanded);
     Ok(())
 }
@@ -1814,6 +1807,7 @@ fn fold(
     derived: &mut DerivedCreature,
     build: &CreatureBuild,
     losses: super::RestorableLosses,
+    cancelled: bool,
 ) -> Result<(), BuildError> {
     let rules = build.ruleset();
     let values = collect_stats(&derived.sources, rules)?;
@@ -2040,6 +2034,13 @@ fn fold(
         Some(DefenseKind::Spiritual),
     ] {
         derived.incoming_check_edge(rules, crate::ActorId(0), defense)?;
+    }
+    if cancelled {
+        derived.abilities.retain(|id| {
+            rules
+                .ability(id)
+                .is_some_and(|ability| !ability.cancellable)
+        });
     }
     derived.weapon_abilities.clear();
     for ability in &derived.abilities {

@@ -392,6 +392,9 @@ pub enum ResolvedEffect {
     DrainLife {
         changed: bool,
     },
+    CancelSpecials {
+        changed: bool,
+    },
     DirectHealthLoss {
         amount: u64,
     },
@@ -499,7 +502,9 @@ impl ResolvedEffect {
             }
             Self::Theft { quantity, .. } => *quantity > 0,
             Self::Translate { result, .. } | Self::Relocate { result, .. } => result.changed(),
-            Self::RoomLight { changed } | Self::DrainLife { changed } => *changed,
+            Self::RoomLight { changed }
+            | Self::DrainLife { changed }
+            | Self::CancelSpecials { changed } => *changed,
             Self::DirectHealthLoss { amount } => *amount > 0,
             Self::ArrestDescent => false,
             Self::CorrodeArmor { amount, .. }
@@ -541,6 +546,9 @@ impl ResolvedEffect {
             | Self::CorrodeArmor { .. }
             | Self::AlterEquipment { .. } => self.clone(),
             Self::RoomLight { .. } | Self::DrainLife { .. } => self.clone(),
+            Self::CancelSpecials { .. } => Self::CancelSpecials {
+                changed: creature.cancel_specials()?,
+            },
             Self::DirectHealthLoss { amount } => Self::DirectHealthLoss {
                 amount: creature.direct_loss_without_reset(*amount),
             },
@@ -859,14 +867,18 @@ impl StrikeBudget {
         }
     }
     pub(super) fn ray(ray: &super::RayPlan) -> Self {
-        let debit = ray.effect_edge.clamp(
+        let super::contact_policy::RayResolution::Opposed { effect_edge, .. } = &ray.resolution
+        else {
+            return Self::effects();
+        };
+        let debit = (*effect_edge).clamp(
             -i64::from(CHECK_EDGE_CAPACITY),
             i64::from(CHECK_EDGE_CAPACITY),
         );
         Self {
             check_debit: debit,
             owner: None,
-            remaining: edge(ray.effect_edge - debit),
+            remaining: edge(*effect_edge - debit),
         }
     }
     pub(super) fn effects() -> Self {
@@ -883,18 +895,26 @@ pub(super) fn resolve_ray_launch(
     rng: &mut u64,
     observer: &mut dyn ResolutionObserver,
 ) -> i64 {
-    let mut remaining = edge(ray.source_edge);
+    let super::contact_policy::RayResolution::Opposed {
+        source_edge,
+        source_bonus,
+        ..
+    } = &ray.resolution
+    else {
+        unreachable!("only opposed policy invokes launch resolution");
+    };
+    let mut remaining = edge(*source_edge);
     let allocated = remaining.take(CHECK_EDGE_CAPACITY);
     let before = *rng;
     let rolled = roll_check(rng, allocated);
-    let total = i64::from(rolled.kept) + ray.source_bonus;
+    let total = i64::from(rolled.kept) + *source_bonus;
     observer.record(ResolutionStep {
         id: "ray_launch_check",
         fields: &[
             dice("rolled", rolled.rolled()),
             dice("retained", rolled.retained()),
-            signed("bonus", ray.source_bonus),
-            signed("input_edge", ray.source_edge),
+            signed("bonus", *source_bonus),
+            signed("input_edge", *source_edge),
             signed("edge", allocated.balance()),
             signed("total", total),
             unsigned("rng_before", before),
@@ -1307,6 +1327,7 @@ pub(super) fn resolve_batch<'a>(
             }
             PlannedEffect::RoomLight => ResolvedEffect::RoomLight { changed: false },
             PlannedEffect::DrainLife => ResolvedEffect::DrainLife { changed: false },
+            PlannedEffect::CancelSpecials => ResolvedEffect::CancelSpecials { changed: false },
             PlannedEffect::ArrestDescent => {
                 // A rejected extension must not turn a failed paid drink into
                 // an emergency brake. Checked item resolution rejects it atomically.
@@ -1613,6 +1634,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             DrainLife {
                 changed: bool,
             },
+            CancelSpecials {
+                changed: bool,
+            },
             DirectHealthLoss {
                 amount: u64,
             },
@@ -1693,6 +1717,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::Relocate { mode, result } => Self::Relocate { mode, result },
             Fields::RoomLight { changed } => Self::RoomLight { changed },
             Fields::DrainLife { changed } => Self::DrainLife { changed },
+            Fields::CancelSpecials { changed } => Self::CancelSpecials { changed },
             Fields::DirectHealthLoss { amount } => Self::DirectHealthLoss { amount },
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::Damage { amount } => Self::Damage { amount },

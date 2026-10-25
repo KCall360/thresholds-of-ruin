@@ -777,7 +777,7 @@ impl Game {
                 .combat
                 .as_ref()
                 .map(|combat| combat.creature().nutrition());
-            let Some(applied) = transition
+            let Some(mut applied) = transition
                 .state
                 .combat
                 .as_mut()
@@ -792,6 +792,13 @@ impl Game {
             else {
                 continue;
             };
+            if let ResolvedEffect::CancelSpecials { changed } = &mut applied {
+                let before = transition.state.guise.clone();
+                transition.state.guise.reveal();
+                *changed |= transition.state.guise != before;
+                // Normal commit reconciles exactly those reciprocal linked
+                // holds whose explicitly tagged sustaining flag disappeared.
+            }
             if self.survival_diagnostics.is_some() {
                 transition.survival.effect(&applied, nutrition_before);
             }

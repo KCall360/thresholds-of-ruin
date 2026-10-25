@@ -63,6 +63,8 @@ impl<'de> Deserialize<'de> for StrikeSource {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct StrikeDef {
+    #[serde(default)]
+    pub cancellable: bool,
     pub offset: u64,
     pub unlock: Option<TalentId>,
     pub check: Option<CheckDef>,
@@ -78,6 +80,8 @@ pub struct StrikeDef {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RiderDef {
+    #[serde(default)]
+    pub cancellable: bool,
     pub trigger: RiderTrigger,
     pub condition: Option<RiderCondition>,
     pub check: Option<RiderCheckDef>,
@@ -91,6 +95,8 @@ impl<'de> Deserialize<'de> for StrikeDef {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            cancellable: bool,
             offset: u64,
             unlock: Option<TalentId>,
             check: Option<CheckDef>,
@@ -113,6 +119,7 @@ impl<'de> Deserialize<'de> for StrikeDef {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            cancellable: fields.cancellable,
             offset: fields.offset,
             unlock: fields.unlock,
             check: fields.check,
@@ -128,6 +135,8 @@ impl<'de> Deserialize<'de> for RiderDef {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            cancellable: bool,
             trigger: RiderTrigger,
             condition: Option<RiderCondition>,
             check: Option<RiderCheckDef>,
@@ -142,6 +151,7 @@ impl<'de> Deserialize<'de> for RiderDef {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            cancellable: fields.cancellable,
             trigger: fields.trigger,
             condition: fields.condition,
             check: fields.check,
@@ -167,6 +177,7 @@ pub fn append_natural_riders(
 }
 fn rider_shape(riders: &[RiderDef]) -> StrikeDef {
     StrikeDef {
+        cancellable: false,
         offset: 0,
         unlock: None,
         // A generic rider may depend on either primary branch. Its concrete

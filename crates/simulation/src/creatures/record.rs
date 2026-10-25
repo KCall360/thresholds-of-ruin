@@ -23,6 +23,7 @@ pub struct CreatureRecord {
     build_epoch: BuildEpoch,
     earned_progress: crate::earned_growth::EarnedProgress,
     restorable_losses: super::RestorableLosses,
+    cancelled: bool,
     injury: u64,
     dead: bool,
     #[serde(deserialize_with = "named_map")]
@@ -45,6 +46,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             build_epoch: BuildEpoch,
             earned_progress: crate::earned_growth::EarnedProgress,
             restorable_losses: super::RestorableLosses,
+            cancelled: bool,
             injury: u64,
             dead: bool,
             #[serde(deserialize_with = "named_map")]
@@ -63,6 +65,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             build_epoch: fields.build_epoch,
             earned_progress: fields.earned_progress,
             restorable_losses: fields.restorable_losses,
+            cancelled: fields.cancelled,
             injury: fields.injury,
             dead: fields.dead,
             health_recovery: fields.health_recovery,
@@ -256,6 +259,7 @@ impl CreatureRecord {
             build_epoch: creature.build_epoch(),
             earned_progress: creature.earned_progress().clone(),
             restorable_losses: creature.restorable_losses(),
+            cancelled: creature.cancelled(),
             injury: creature.health().injury(),
             dead: creature.health().dead(),
             health_recovery: HealthRecoveryRecord {
@@ -316,6 +320,7 @@ impl CreatureRecord {
             self.dead,
             conditions,
             equipment,
+            self.cancelled,
             |maxima, rules| {
                 let pools = ByResource {
                     stamina: &self.pools.stamina,

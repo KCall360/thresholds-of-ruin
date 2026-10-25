@@ -131,6 +131,8 @@ impl Game {
             .strikes
             .get(index)
             .ok_or(GameError::Rule(RuleError::InvalidPlan))?;
+        let effective = self.effective_cancelled_strike(ability, strike)?;
+        let strike = effective.strike.as_ref();
         crate::diagnostics::strike_resolution();
         let needs_contact = strike
             .on_success
@@ -270,6 +272,9 @@ impl Game {
                 },
             );
             for (ordinal, rider) in strike.riders.iter().enumerate() {
+                if effective.suppressed_riders.binary_search(&ordinal).is_ok() {
+                    continue;
+                }
                 if rider.trigger != branch {
                     continue;
                 }
@@ -449,6 +454,14 @@ impl Game {
         budget: &mut resolve::StrikeBudget,
         activity: &mut crate::lifecycle::DamageActivityGuard,
     ) -> Result<Outcome, GameError> {
+        let super::contact_policy::RayResolution::Opposed {
+            incoming,
+            target_skill,
+            ..
+        } = &ray.resolution
+        else {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        };
         crate::diagnostics::strike_resolution();
         if self
             .content
@@ -474,7 +487,7 @@ impl Game {
                 target,
                 ray.actor,
                 &ray.ability,
-                &ray.incoming,
+                incoming,
                 first_actual_check,
                 &selected,
             )
@@ -484,7 +497,7 @@ impl Game {
         let check = PlannedCheck {
             actor: crate::rules::CheckActor::Target,
             target_participates: true,
-            bonus: super::ray::named_bonus(creature.derived(), ray.target_skill),
+            bonus: super::ray::named_bonus(creature.derived(), *target_skill),
             threshold: CheckThreshold::Fixed { value: threshold },
             edge,
         };

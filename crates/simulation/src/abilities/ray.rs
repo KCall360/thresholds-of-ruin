@@ -1,5 +1,6 @@
 //! A directional release owns one frozen source and discovers recipients only
 //! at execution. No actor target or future collision path is a plan operand.
+use super::contact_policy::{RayResolution, RayTraversal};
 use super::{
     CheckPhase, CheckSide, CheckSite, Placement, Plan, PlannedEffect, RuleError, StepDirection,
     TokenClaim,
@@ -96,7 +97,7 @@ fn read_modifiers<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Modifier
         .0,
     )
 }
-fn read_incoming<'de, D: serde::Deserializer<'de>>(
+pub(super) fn read_incoming<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Vec<RayIncomingSource>, D::Error> {
     Ok(crate::bounded::Bounded::<RayIncomingSource, MAX_INCOMING_SOURCES>::deserialize(d)?.0)
@@ -124,16 +125,10 @@ pub struct RayPlan {
     pub origin: Placement,
     pub direction: StepDirection,
     pub launch_footprint: Vec<Location>,
-    pub clear_visits: u16,
-    pub source_skill: crate::attributes::Skill,
-    pub target_skill: crate::attributes::Skill,
-    pub source_bonus: i64,
-    pub source_edge: i64,
-    pub effect_edge: i64,
-    pub incoming: Vec<RayIncomingSource>,
+    pub traversal: RayTraversal,
+    pub resolution: RayResolution,
     pub effects: Vec<PlannedEffect>,
     pub descriptors: Vec<DescriptorId>,
-    pub tokens: Vec<TokenClaim>,
     pub preparation: u64,
     pub recovery: u64,
     pub cost: Option<crate::costs::CostBundle>,
@@ -153,20 +148,12 @@ impl<'de> Deserialize<'de> for RayPlan {
             direction: StepDirection,
             #[serde(deserialize_with = "read_footprint")]
             launch_footprint: Vec<Location>,
-            clear_visits: u16,
-            source_skill: crate::attributes::Skill,
-            target_skill: crate::attributes::Skill,
-            source_bonus: i64,
-            source_edge: i64,
-            effect_edge: i64,
-            #[serde(deserialize_with = "read_incoming")]
-            incoming: Vec<RayIncomingSource>,
+            traversal: RayTraversal,
+            resolution: RayResolution,
             #[serde(deserialize_with = "super::strikes::read_effects")]
             effects: Vec<PlannedEffect>,
             #[serde(deserialize_with = "super::strikes::read_descriptors")]
             descriptors: Vec<DescriptorId>,
-            #[serde(deserialize_with = "super::strikes::read_claims")]
-            tokens: Vec<TokenClaim>,
             preparation: u64,
             recovery: u64,
             #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -185,16 +172,10 @@ impl<'de> Deserialize<'de> for RayPlan {
             origin: f.origin,
             direction: f.direction,
             launch_footprint: f.launch_footprint,
-            clear_visits: f.clear_visits,
-            source_skill: f.source_skill,
-            target_skill: f.target_skill,
-            source_bonus: f.source_bonus,
-            source_edge: f.source_edge,
-            effect_edge: f.effect_edge,
-            incoming: f.incoming,
+            traversal: f.traversal,
+            resolution: f.resolution,
             effects: f.effects,
             descriptors: f.descriptors,
-            tokens: f.tokens,
             preparation: f.preparation,
             recovery: f.recovery,
             cost: f.cost,
@@ -205,7 +186,7 @@ impl<'de> Deserialize<'de> for RayPlan {
     }
 }
 
-pub(super) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> bool {
+pub(crate) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> bool {
     let Some(delivery) = RayDelivery::from_invocation(definition.invocation) else {
         return false;
     };
@@ -215,7 +196,40 @@ pub(super) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> b
     let [strike] = strikes.as_slice() else {
         return false;
     };
-    matches!(definition.reach, Reach::Sight { range } if (1..=MAX_RAY_VISITS).contains(&range))
+    let bounded =
+        matches!(definition.reach, Reach::Sight { range } if (1..=MAX_RAY_VISITS).contains(&range));
+    let until = definition.reach == Reach::UntilObstruction;
+    if until && delivery != RayDelivery::FirstContact {
+        return false;
+    }
+    if until && strike.check.is_none() {
+        return !definition.basic_attack
+            && strike.offset == 0
+            && strike.unlock.is_none()
+            && strike.riders.is_empty()
+            && strike.descriptors.is_empty()
+            && strike.on_failure.is_empty()
+            && strike.on_success == [Effect::CancelSpecials];
+    }
+    if until
+        && !matches!(
+            &strike.check,
+            Some(crate::rules::CheckDef {
+                actor: CheckActor::Target,
+                skill: SkillSelector::Named {
+                    skill: crate::attributes::Skill::Agility
+                },
+                against: Against::Opposed {
+                    skill: SkillSelector::Named {
+                        skill: crate::attributes::Skill::Lore
+                    }
+                },
+            })
+        )
+    {
+        return false;
+    }
+    (bounded || until)
         && !definition.basic_attack
         && strike.offset == 0
         && strike.unlock.is_none()
@@ -232,6 +246,11 @@ pub(super) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> b
         )
         && strike.on_success.is_empty()
         && !strike.on_failure.is_empty()
+        && (!until
+            || strike
+                .on_failure
+                .iter()
+                .all(|effect| matches!(effect, Effect::Damage { .. })))
         && strike.on_failure.iter().all(|effect| match effect {
             Effect::Damage {
                 damage: crate::rules::DamageExpr::Components { .. },
@@ -247,6 +266,9 @@ pub(super) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> b
         })
 }
 impl RayPlan {
+    pub fn tokens(&self) -> &[TokenClaim] {
+        self.resolution.tokens()
+    }
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
         let Some(definition) = rules.ability(&self.ability) else {
             return false;
@@ -260,38 +282,86 @@ impl RayPlan {
             return false;
         };
         let strike = &strikes[0];
+        let traversal = match (self.traversal, &definition.reach) {
+            (RayTraversal::FirstBody, Reach::UntilObstruction) => {
+                self.delivery == RayDelivery::FirstContact
+            }
+            (RayTraversal::Bounded { clear_visits }, Reach::Sight { .. }) => {
+                (1..=MAX_RAY_VISITS).contains(&clear_visits)
+            }
+            _ => false,
+        };
+        let payload = if matches!(self.resolution, RayResolution::Checkless) {
+            &strike.on_success
+        } else {
+            &strike.on_failure
+        };
+        traversal
+            && super::plan::valid_actor(self.actor)
+            && self.origin.orientation < 24
+            && self.origin.location.region.0 > 0
+            && !self.launch_footprint.is_empty()
+            && self.launch_footprint.len() <= 64
+            && self.launch_footprint.windows(2).all(|p| p[0] < p[1])
+            && self.launch_footprint.contains(&self.origin.location)
+            && (1..=crate::limits::NUMERIC as u64).contains(&self.preparation)
+            && self
+                .preparation
+                .checked_add(self.recovery)
+                .is_some_and(|v| v <= crate::limits::NUMERIC as u64)
+            && definition
+                .cost
+                .as_ref()
+                .map(crate::costs::CostBundle::try_from)
+                .transpose()
+                .is_ok_and(|cost| self.cost == cost)
+            && self.cooldown == definition.cooldown
+            && self.supply_costs == definition.supply_costs
+            && self.supplies.valid(self.supply_costs.len())
+            && super::plan::effects_valid(&self.effects, rules)
+            && super::plan::effects_match_definition(payload, &self.effects)
+            && self.descriptors == strike.descriptors
+            && self.resolution_valid(definition, strike, rules)
+    }
+    fn resolution_valid(
+        &self,
+        definition: &crate::rules::AbilityDef,
+        strike: &crate::rules::StrikeDef,
+        rules: &crate::rules::Ruleset,
+    ) -> bool {
+        let RayResolution::Opposed {
+            source_skill,
+            target_skill,
+            source_bonus,
+            source_edge,
+            effect_edge,
+            incoming,
+            tokens,
+        } = &self.resolution
+        else {
+            return self.traversal == RayTraversal::FirstBody
+                && strike.check.is_none()
+                && strike.on_success == [Effect::CancelSpecials]
+                && strike.on_failure.is_empty();
+        };
         let Some(crate::rules::CheckDef {
+            actor: CheckActor::Target,
             skill: SkillSelector::Named { skill: target },
             against:
                 Against::Opposed {
                     skill: SkillSelector::Named { skill: source },
                 },
-            ..
         }) = &strike.check
         else {
             return false;
         };
-        super::plan::valid_actor(self.actor)
-            && self.origin.orientation < 24 && self.origin.location.region.0 > 0
-            && !self.launch_footprint.is_empty() && self.launch_footprint.len() <= 64
-            && self.launch_footprint.windows(2).all(|p| p[0] < p[1])
-            && self.launch_footprint.contains(&self.origin.location)
-            && (1..=MAX_RAY_VISITS).contains(&self.clear_visits)
-            && self.source_skill == *source && self.target_skill == *target
-            && [self.source_bonus,self.source_edge,self.effect_edge].iter().all(|v| v.unsigned_abs() <= crate::limits::NUMERIC as u64)
-            && (1..=crate::limits::NUMERIC as u64).contains(&self.preparation)
-            && self.preparation.checked_add(self.recovery).is_some_and(|v| v <= crate::limits::NUMERIC as u64)
-            && definition.cost.as_ref().map(crate::costs::CostBundle::try_from).transpose().is_ok_and(|cost| self.cost == cost)
-            && self.cooldown == definition.cooldown && self.supply_costs == definition.supply_costs
-            && self.supplies.valid(self.supply_costs.len())
-            && super::plan::effects_valid(&self.effects, rules)
-            && super::plan::effects_match_definition(&strike.on_failure, &self.effects)
-            && self.descriptors == strike.descriptors
-            && self.incoming.len() <= MAX_INCOMING_SOURCES
-            && self.incoming.windows(2).all(|p| p[0].owner < p[1].owner)
-            && self.incoming.iter().all(|row| row.valid(rules))
-            && self.tokens.len() <= crate::limits::CONDITIONS
-            && self.tokens.iter().all(|claim| {
+        source_skill == source && target_skill == target
+            && [source_bonus,source_edge,effect_edge].iter().all(|v| v.unsigned_abs() <= crate::limits::NUMERIC as u64)
+            && incoming.len() <= MAX_INCOMING_SOURCES
+            && incoming.windows(2).all(|p| p[0].owner < p[1].owner)
+            && incoming.iter().all(|row| row.valid(rules))
+            && tokens.len() <= crate::limits::CONDITIONS
+            && tokens.iter().all(|claim| {
                 let token = &claim.reservation;
                 token.holder == self.actor && token.qualification.is_none() && claim.site.strike == 0
                     && super::plan::valid_actor(token.source)
@@ -300,11 +370,11 @@ impl RayPlan {
                             && definition.outgoing_edge_policy.selects_token(condition)
                             && condition.modifiers.iter().any(|m| m.scope == Scope::Always),
                         crate::rules::ConditionLifecycle::NextCheckAgainst => claim.site.check == (CheckPhase::Primary {side:CheckSide::Initiating})
-                            && self.incoming.iter().any(|row| matches!(&row.owner,RayIncomingOwner::Condition {condition,source} if condition == &token.condition && *source == token.source)),
+                            && incoming.iter().any(|row| matches!(&row.owner,RayIncomingOwner::Condition {condition,source} if condition == &token.condition && *source == token.source)),
                         crate::rules::ConditionLifecycle::Timed => false,
                     })
             })
-            && self.tokens.iter().enumerate().all(|(i,claim)| !self.tokens[..i].iter().any(|old| old.reservation == claim.reservation))
+            && tokens.iter().enumerate().all(|(i,claim)| !tokens[..i].iter().any(|old| old.reservation == claim.reservation))
     }
 }
 impl RayIncomingSource {
@@ -473,34 +543,32 @@ impl Game {
             return Err(invalid());
         };
         let strike = &strikes[0];
-        let Some(crate::rules::CheckDef {
-            skill: SkillSelector::Named {
-                skill: target_skill,
-            },
-            against:
-                Against::Opposed {
-                    skill:
-                        SkillSelector::Named {
-                            skill: source_skill,
-                        },
-                },
-            ..
-        }) = &strike.check
-        else {
-            return Err(invalid());
+        let source_check = match &strike.check {
+            Some(crate::rules::CheckDef {
+                actor: CheckActor::Target,
+                skill: SkillSelector::Named { skill: target },
+                against:
+                    Against::Opposed {
+                        skill: SkillSelector::Named { skill: source },
+                    },
+            }) => Some((*source, *target)),
+            None if definition.reach == Reach::UntilObstruction => None,
+            _ => return Err(invalid()),
         };
-        let Reach::Sight {
-            range: clear_visits,
-        } = (if item_preparation.is_some() {
+        let effective_reach = if item_preparation.is_some() {
             definition.reach.clone()
         } else {
             caster
                 .derived()
                 .ability_reach(ability)
                 .map_err(|_| invalid())?
-        })
-        else {
-            return Err(invalid());
+        };
+        let traversal = match effective_reach {
+            Reach::Sight { range } => RayTraversal::Bounded {
+                clear_visits: range,
+            },
+            Reach::UntilObstruction => RayTraversal::FirstBody,
+            _ => return Err(invalid()),
         };
         let origin = Placement::capture(self, actor).ok_or(GameError::UnknownActor)?;
         let mut launch_footprint: Vec<_> = self
@@ -515,68 +583,85 @@ impl Game {
             .collect();
         launch_footprint.sort();
         launch_footprint.dedup();
-        let mut selected = caster.conditions().qualifying_tokens(rules, actor, false);
-        selected.retain(|token| {
-            rules.condition(&token.condition).is_some_and(|def| {
-                definition.outgoing_edge_policy.selects_token(def)
-                    && def.modifiers.iter().any(|m| m.scope == Scope::Always)
-            })
-        });
-        let source_edge = caster
-            .derived()
-            .targetless_ray_edge(
-                rules,
-                actor,
-                ability,
-                definition.outgoing_edge_policy,
-                &selected,
-            )
-            .map_err(|_| invalid())?;
-        let effect_edge = caster
-            .derived()
-            .targetless_ray_effect_edge(rules, definition.outgoing_edge_policy)
-            .map_err(|_| invalid())?;
-        let mut incoming_tokens = caster.conditions().qualifying_tokens(rules, actor, true);
-        incoming_tokens.retain(|token| {
-            rules.condition(&token.condition).is_some_and(|def| {
-                def.modifiers.iter().any(|m| {
-                    matches!(
-                        m.op,
-                        ModifierOp::Add {
-                            stat: Stat::IncomingEdge { defense: None },
-                            ..
-                        } | ModifierOp::Set {
-                            stat: Stat::IncomingEdge { defense: None },
-                            ..
-                        }
-                    )
+        let modifiers = caster.derived().ability_values(ability);
+        let resolution = if let Some((source_skill, target_skill)) = source_check {
+            let mut selected = caster.conditions().qualifying_tokens(rules, actor, false);
+            selected.retain(|token| {
+                rules.condition(&token.condition).is_some_and(|def| {
+                    definition.outgoing_edge_policy.selects_token(def)
+                        && def.modifiers.iter().any(|m| m.scope == Scope::Always)
                 })
-            })
-        });
-        let incoming = caster
-            .derived()
-            .ray_incoming_sources(rules, &incoming_tokens);
-        let tokens = selected
-            .into_iter()
-            .map(|reservation| TokenClaim {
-                reservation,
-                site: CheckSite {
-                    strike: 0,
-                    check: CheckPhase::Primary {
-                        side: CheckSide::Opposing,
+            });
+            let source_edge = caster
+                .derived()
+                .targetless_ray_edge(
+                    rules,
+                    actor,
+                    ability,
+                    definition.outgoing_edge_policy,
+                    &selected,
+                )
+                .map_err(|_| invalid())?;
+            let effect_edge = caster
+                .derived()
+                .targetless_ray_effect_edge(rules, definition.outgoing_edge_policy)
+                .map_err(|_| invalid())?;
+            let mut incoming_tokens = caster.conditions().qualifying_tokens(rules, actor, true);
+            incoming_tokens.retain(|token| {
+                rules.condition(&token.condition).is_some_and(|def| {
+                    def.modifiers.iter().any(|m| {
+                        matches!(
+                            m.op,
+                            ModifierOp::Add {
+                                stat: Stat::IncomingEdge { defense: None },
+                                ..
+                            } | ModifierOp::Set {
+                                stat: Stat::IncomingEdge { defense: None },
+                                ..
+                            }
+                        )
+                    })
+                })
+            });
+            let incoming = caster
+                .derived()
+                .ray_incoming_sources(rules, &incoming_tokens);
+            let tokens = selected
+                .into_iter()
+                .map(|reservation| TokenClaim {
+                    reservation,
+                    site: CheckSite {
+                        strike: 0,
+                        check: CheckPhase::Primary {
+                            side: CheckSide::Opposing,
+                        },
                     },
-                },
-            })
-            .chain(incoming_tokens.into_iter().map(|reservation| TokenClaim {
-                reservation,
-                site: CheckSite {
-                    strike: 0,
-                    check: CheckPhase::Primary {
-                        side: CheckSide::Initiating,
+                })
+                .chain(incoming_tokens.into_iter().map(|reservation| TokenClaim {
+                    reservation,
+                    site: CheckSite {
+                        strike: 0,
+                        check: CheckPhase::Primary {
+                            side: CheckSide::Initiating,
+                        },
                     },
-                },
-            }))
-            .collect();
+                }))
+                .collect();
+            let source_bonus = named_bonus(caster.derived(), source_skill)
+                .checked_add(i64::from(modifiers.check_bonus))
+                .ok_or_else(invalid)?;
+            RayResolution::Opposed {
+                source_skill,
+                target_skill,
+                source_bonus,
+                source_edge,
+                effect_edge,
+                incoming,
+                tokens,
+            }
+        } else {
+            RayResolution::Checkless
+        };
         let timing = match item_preparation {
             Some(preparation) => crate::creatures::AbilityTiming {
                 preparation,
@@ -584,10 +669,6 @@ impl Game {
             },
             None => self.ability_timing(actor, ability)?,
         };
-        let modifiers = caster.derived().ability_values(ability);
-        let source_bonus = named_bonus(caster.derived(), *source_skill)
-            .checked_add(i64::from(modifiers.check_bonus))
-            .ok_or_else(invalid)?;
         let plan = RayPlan {
             actor,
             ability: ability.clone(),
@@ -595,16 +676,18 @@ impl Game {
             origin,
             direction,
             launch_footprint,
-            clear_visits,
-            source_skill: *source_skill,
-            target_skill: *target_skill,
-            source_bonus,
-            source_edge,
-            effect_edge,
-            incoming,
-            effects: self.compile_effects(actor, &strike.on_failure, &modifiers)?,
+            traversal,
+            resolution,
+            effects: self.compile_effects(
+                actor,
+                if source_check.is_none() {
+                    &strike.on_success
+                } else {
+                    &strike.on_failure
+                },
+                &modifiers,
+            )?,
             descriptors: strike.descriptors.clone(),
-            tokens,
             preparation: timing.preparation,
             recovery: timing.recovery,
             cost: self.ability_cost(ability)?,
@@ -727,6 +810,12 @@ impl Game {
         preparation: Option<&crate::combat::Preparation>,
         disclosure: crate::event_history::SourceAbilityDisclosure,
     ) -> Result<(), GameError> {
+        if ray.traversal == RayTraversal::FirstBody {
+            return self.resolve_contact_release(ray, intention, preparation, disclosure);
+        }
+        let RayTraversal::Bounded { clear_visits } = ray.traversal else {
+            return Err(invalid());
+        };
         let mut rng = self.rules_rng;
         // A launch has no actor recipient. Keep its optional receipt locally and
         // attach it only to diagnostics for real, live encounters.
@@ -749,7 +838,7 @@ impl Game {
         let mut budget = super::resolve::StrikeBudget::ray(ray);
         let mut activity = crate::lifecycle::DamageActivityGuard::default();
         for _ in 0..MAX_RAY_PROBES {
-            if visits == ray.clear_visits
+            if visits == clear_visits
                 || reversals == MAX_RAY_REVERSALS
                 || self.region_frozen(at.region)
             {

@@ -562,6 +562,22 @@ impl Game {
         plan: &crate::abilities::Plan,
     ) -> Result<BTreeSet<RegionId>, GameError> {
         let mut members = BTreeSet::new();
+        if let Some(ray) = plan
+            .as_ray()
+            .filter(|ray| ray.traversal == crate::abilities::RayTraversal::FirstBody)
+            .filter(|_| !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. }))
+        {
+            let trace = self
+                .trace_first_body(
+                    ray.actor,
+                    ray.origin.location,
+                    tor_world::Direction::from(ray.direction).rotated(ray.origin.orientation),
+                    &ray.launch_footprint,
+                    crate::abilities::MAX_CONTACT_STATES,
+                )
+                .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
+            members.extend(trace.regions);
+        }
         let room_light = plan
             .on_success()
             .iter()

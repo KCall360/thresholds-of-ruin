@@ -170,6 +170,7 @@ impl Ruleset {
                     | PlannedEffect::StepSelfOneCell
                     | PlannedEffect::RoomLight
                     | PlannedEffect::DrainLife
+                    | PlannedEffect::CancelSpecials
                     | PlannedEffect::ArrestDescent
                     | PlannedEffect::RestoreHitDie
                     | PlannedEffect::Heal { .. }
@@ -244,6 +245,7 @@ impl Ruleset {
             | Effect::StepSelfOneCell
             | Effect::RoomLight
             | Effect::DrainLife
+            | Effect::CancelSpecials
             | Effect::ArrestDescent
             | Effect::RestoreHitDie
             | Effect::Heal { .. }

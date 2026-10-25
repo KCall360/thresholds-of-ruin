@@ -114,6 +114,7 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                 DiagnosticEffect::Relocate { target, mode, result } => format!("  Actor {}: {:?} relocation, {:?}", target.0, mode, result),
                 DiagnosticEffect::DrainLife { target, changed } => format!("  Actor {}: drain life {}", target.0, if *changed { "changed" } else { "unchanged" }),
                 DiagnosticEffect::DirectHealthLoss { target, amount } => format!("  Actor {}: {amount} direct health loss", target.0),
+                DiagnosticEffect::CancelSpecials { target, changed } => format!("  Actor {}: special capabilities {}", target.0, if *changed { "cancelled" } else { "unchanged" }),
                 DiagnosticEffect::RoomLight { target, changed } => format!("  Actor {}: room light {}", target.0, if *changed { "changed" } else { "unchanged" }),
                 DiagnosticEffect::ArrestDescent { target } => format!("  Actor {}: descent arrested", target.0),
                 DiagnosticEffect::CorrodeArmor { target, amount } => {
@@ -338,6 +339,23 @@ pub(crate) mod tests {
             assert!(rows
                 .iter()
                 .any(|row| row.contains("preparation 5, started 5, remaining 5, recovery 2")));
+        }
+    }
+
+    #[test]
+    fn cancellation_diagnostic_targets_recipient_not_source() {
+        for changed in [false, true] {
+            let report = report_with_effects(vec![DiagnosticEffect::CancelSpecials {
+                target: ActorId(2),
+                changed,
+            }]);
+            assert!(lines(&report).is_ok());
+            let mut forged = report.clone();
+            forged.records[0].outcome.effects = vec![DiagnosticEffect::CancelSpecials {
+                target: ActorId(1),
+                changed,
+            }];
+            assert!(lines(&forged).is_err());
         }
     }
 

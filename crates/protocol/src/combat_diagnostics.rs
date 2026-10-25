@@ -102,6 +102,10 @@ impl<'de> Deserialize<'de> for DiagnosticCostBundle {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
+    CancelSpecials {
+        target: ActorId,
+        changed: bool,
+    },
     DrainLife {
         target: ActorId,
         changed: bool,
@@ -320,7 +324,8 @@ impl CombatDiagnosticRecord {
                 DiagnosticEffect::RoomLight { target, .. }
                 | DiagnosticEffect::DrainLife { target, .. } => *target == self.actor,
                 DiagnosticEffect::DirectHealthLoss { target, .. } => *target == self.target,
-                DiagnosticEffect::Translate { target, .. }
+                DiagnosticEffect::CancelSpecials { target, .. }
+                | DiagnosticEffect::Translate { target, .. }
                 | DiagnosticEffect::Relocate { target, .. }
                 | DiagnosticEffect::ArrestDescent { target } => *target == self.target,
                 DiagnosticEffect::LinkedHold { target, holder } => {
@@ -422,6 +427,10 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            CancelSpecials {
+                target: ActorId,
+                changed: bool,
+            },
             DrainLife {
                 target: ActorId,
                 changed: bool,
@@ -523,6 +532,7 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::CancelSpecials { target, changed } => Self::CancelSpecials { target, changed },
             Fields::DrainLife { target, changed } => Self::DrainLife { target, changed },
             Fields::DirectHealthLoss { target, amount } => {
                 Self::DirectHealthLoss { target, amount }

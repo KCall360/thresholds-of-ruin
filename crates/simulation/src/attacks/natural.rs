@@ -36,7 +36,11 @@ impl NaturalAttack {
                     .chain(strike.riders.iter().map(|rider| &rider.effects))
                     .flatten()
                     .any(|effect| {
-                        effect.spatial() || matches!(effect, Effect::RoomLight | Effect::DrainLife)
+                        effect.spatial()
+                            || matches!(
+                                effect,
+                                Effect::RoomLight | Effect::DrainLife | Effect::CancelSpecials
+                            )
                     })
             })
         {
@@ -49,6 +53,21 @@ impl NaturalAttack {
             recovery,
             strikes,
         })
+    }
+    /// Effective payload projection only; source identity, authored timing and
+    /// underlying ordinary strikes remain intact in the immutable definition.
+    pub(crate) fn without_cancelled_payloads(&self) -> Self {
+        let mut result = self.clone();
+        for strike in &mut result.strikes {
+            if strike.cancellable {
+                strike.on_success.clear();
+                strike.on_failure.clear();
+                strike.riders.clear();
+            } else {
+                strike.riders.retain(|rider| !rider.cancellable);
+            }
+        }
+        result
     }
     pub fn skill(&self) -> Skill {
         self.skill

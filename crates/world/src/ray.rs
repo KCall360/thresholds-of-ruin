@@ -1,6 +1,7 @@
 //! Bounded physical ray steps, independent of actors and effect resolution.
 
-use crate::{compose_rotation, Direction, Location, World};
+use crate::{compose_rotation, Direction, Location, RegionId, World};
+use std::collections::BTreeSet;
 
 /// The physical boundary encountered by one ray step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,10 +23,40 @@ impl World {
     ///
     /// A diagonal needs at least one clear component side. If both routes reach
     /// loaded destinations, their locations and rotations must agree, including
-    /// when a destination is solid. With no resolved route, missing geometry
+    /// when a destination is solid. With no resolved route, dependencies geometry
     /// takes precedence over an obstructed side. At most four cardinal edges
     /// are examined. Actors and the response to each boundary belong to callers.
     pub fn ray_step(&self, from: Location, direction: Direction) -> RayStep {
+        self.ray_step_recording_dependencies(from, direction, &mut None)
+    }
+
+    /// The same physical probe, plus exact known region dependencies examined
+    /// by its cardinal routes. A caller requiring complete geometry must load
+    /// any absent dependencies before accepting even a Clear result: the other diagonal route may
+    /// otherwise become contradictory. Retain loaded side regions too, because they
+    /// are real occlusion dependencies. This neither loads nor grants adjacency.
+    pub fn ray_step_dependencies(
+        &self,
+        from: Location,
+        direction: Direction,
+    ) -> (RayStep, BTreeSet<RegionId>) {
+        let mut dependencies = BTreeSet::new();
+        let step =
+            self.ray_step_recording_dependencies(from, direction, &mut Some(&mut dependencies));
+        (step, dependencies)
+    }
+
+    fn ray_step_recording_dependencies(
+        &self,
+        from: Location,
+        direction: Direction,
+        dependencies: &mut Option<&mut BTreeSet<RegionId>>,
+    ) -> RayStep {
+        if self.known_region(from.region).is_some() {
+            if let Some(dependencies) = dependencies.as_deref_mut() {
+                dependencies.insert(from.region);
+            }
+        }
         if !self.contains(from) {
             return RayStep::Unavailable;
         }
@@ -34,19 +65,20 @@ impl World {
         }
         let Some((a, b)) = direction.components() else {
             return self
-                .ray_neighbor(from, direction)
+                .ray_neighbor(from, direction, dependencies)
                 .map_or(RayStep::Unavailable, |(to, rotation)| {
                     self.ray_destination(to, rotation)
                 });
         };
-        let route = |first, second: Direction| {
-            let (side, first_rotation) =
-                self.ray_neighbor(from, first).ok_or(RayStep::Unavailable)?;
+        let mut route = |first, second: Direction| {
+            let (side, first_rotation) = self
+                .ray_neighbor(from, first, dependencies)
+                .ok_or(RayStep::Unavailable)?;
             if self.opaque(side) {
                 return Err(RayStep::Solid);
             }
             let (to, second_rotation) = self
-                .ray_neighbor(side, second.rotated(first_rotation))
+                .ray_neighbor(side, second.rotated(first_rotation), dependencies)
                 .ok_or(RayStep::Unavailable)?;
             Ok((to, compose_rotation(first_rotation, second_rotation)))
         };
@@ -58,8 +90,18 @@ impl World {
         }
     }
 
-    fn ray_neighbor(&self, from: Location, direction: Direction) -> Option<(Location, u8)> {
+    fn ray_neighbor(
+        &self,
+        from: Location,
+        direction: Direction,
+        dependencies: &mut Option<&mut BTreeSet<RegionId>>,
+    ) -> Option<(Location, u8)> {
         let (to, rotation) = self.physics_neighbor(from, direction)?;
+        if self.known_region(to.region).is_some() {
+            if let Some(dependencies) = dependencies.as_deref_mut() {
+                dependencies.insert(to.region);
+            }
+        }
         self.contains(to).then_some((to, rotation))
     }
 
@@ -463,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_diagonal_geometry_is_not_a_solid_boundary() {
+    fn dependencies_diagonal_geometry_is_not_a_solid_boundary() {
         let mut world = world();
         let from = cell(1, 2, 1, 1);
         assert_eq!(world.ray_step(from, Direction::East), RayStep::Unavailable);
@@ -479,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn one_resolved_diagonal_route_suffices_when_the_alternate_is_missing() {
+    fn one_resolved_diagonal_route_suffices_when_the_alternate_is_dependencies() {
         let mut world = world();
         let from = cell(1, 2, 1, 1);
         let to = cell(2, 1, 1, 1);

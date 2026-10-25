@@ -111,6 +111,7 @@ pub(super) fn equipment_sources(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreatureState {
+    cancelled: bool,
     build: Shared<CreatureBuild>,
     build_epoch: BuildEpoch,
     earned_progress: crate::earned_growth::EarnedProgress,
@@ -162,7 +163,13 @@ impl CreatureState {
             super::derive::PermanentCreature::compile(&build).map_err(CreatureStateError::Build)?,
         );
         let derived = permanent
-            .fold(&build, &BTreeMap::new(), &[], RestorableLosses::default())
+            .fold(
+                &build,
+                &BTreeMap::new(),
+                &[],
+                RestorableLosses::default(),
+                false,
+            )
             .map_err(CreatureStateError::Build)?;
         let health = Health::new(derived.maximum_health);
         let health_recovery = HealthRecovery::new(derived.quiet_health_recovery_period);
@@ -176,6 +183,7 @@ impl CreatureState {
             build_epoch: BuildEpoch::INITIAL,
             earned_progress,
             restorable_losses: RestorableLosses::default(),
+            cancelled: false,
             baseline: Shared::new(derived.clone()),
             derived: Shared::new(derived),
             extra_sources: BTreeMap::new(),
@@ -214,6 +222,7 @@ impl CreatureState {
             dead,
             conditions,
             equipment,
+            false,
             |_, _| Ok(costs),
         )
     }
@@ -229,6 +238,7 @@ impl CreatureState {
         dead: bool,
         conditions: ConditionState,
         equipment: Vec<EquipmentSource>,
+        cancelled: bool,
         restore_costs: impl FnOnce(
             crate::resources::ResourceMaxima,
             &crate::rules::Ruleset,
@@ -245,7 +255,13 @@ impl CreatureState {
             condition_sources(&build, &extra_sources, &ConditionState::default());
         let baseline = Shared::new(
             permanent
-                .fold(&build, &baseline_sources, &equipment, restorable_losses)
+                .fold(
+                    &build,
+                    &baseline_sources,
+                    &equipment,
+                    restorable_losses,
+                    cancelled,
+                )
                 .map_err(CreatureStateError::Build)?,
         );
         let extra_sources = condition_sources(&build, &extra_sources, &conditions);
@@ -254,7 +270,13 @@ impl CreatureState {
         } else {
             Shared::new(
                 permanent
-                    .fold(&build, &extra_sources, &equipment, restorable_losses)
+                    .fold(
+                        &build,
+                        &extra_sources,
+                        &equipment,
+                        restorable_losses,
+                        cancelled,
+                    )
                     .map_err(CreatureStateError::Build)?,
             )
         };
@@ -284,6 +306,7 @@ impl CreatureState {
             build_epoch,
             earned_progress,
             restorable_losses,
+            cancelled,
             derived,
             extra_sources,
             equipment,
@@ -299,6 +322,74 @@ impl CreatureState {
             conditions,
             cooldowns: Cooldowns::default(),
         })
+    }
+
+    pub fn cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    /// Exact candidate refold; caller publishes this through normal lifecycle.
+    /// No ownership, HD, purchase, or active condition is deleted here.
+    pub(crate) fn cancel_specials(&mut self) -> Result<bool, CreatureStateError> {
+        let mut invisible = std::collections::BTreeSet::new();
+        for entry in self.conditions.instances() {
+            match self
+                .build
+                .ruleset()
+                .cancellation_invisibility_shape(&entry.condition)
+                .map_err(|_| CreatureStateError::Inconsistent)?
+            {
+                crate::rules::CancellationInvisibilityShape::Absent => {}
+                crate::rules::CancellationInvisibilityShape::Pure => {
+                    invisible.insert(entry.condition.clone());
+                }
+                crate::rules::CancellationInvisibilityShape::Mixed => {
+                    return Err(CreatureStateError::Inconsistent)
+                }
+            }
+        }
+        if self.cancelled && invisible.is_empty() {
+            return Ok(false);
+        }
+        let mut candidate = self.clone();
+        candidate.cancelled = true;
+        for id in invisible {
+            candidate.conditions.remove(&id);
+        }
+        let baseline_sources = condition_sources(
+            &candidate.build,
+            &candidate.extra_sources,
+            &ConditionState::default(),
+        );
+        let baseline = candidate
+            .permanent
+            .fold(
+                &candidate.build,
+                &baseline_sources,
+                &candidate.equipment,
+                candidate.restorable_losses,
+                true,
+            )
+            .map_err(CreatureStateError::Build)?;
+        candidate.extra_sources = condition_sources(
+            &candidate.build,
+            &candidate.extra_sources,
+            &candidate.conditions,
+        );
+        let derived = candidate
+            .permanent
+            .fold(
+                &candidate.build,
+                &candidate.extra_sources,
+                &candidate.equipment,
+                candidate.restorable_losses,
+                true,
+            )
+            .map_err(CreatureStateError::Build)?;
+        candidate.baseline = Shared::new(baseline);
+        candidate.replace_derived(derived);
+        *self = candidate;
+        Ok(true)
     }
 
     pub fn build(&self) -> &CreatureBuild {
@@ -534,6 +625,7 @@ impl CreatureState {
                 &baseline_sources,
                 &candidate.equipment,
                 losses,
+                self.cancelled,
             )
             .map_err(CreatureStateError::Build)?;
         let derived = if candidate.conditions.is_empty() {
@@ -548,6 +640,7 @@ impl CreatureState {
                     &candidate.extra_sources,
                     &candidate.equipment,
                     losses,
+                    self.cancelled,
                 )
                 .map_err(CreatureStateError::Build)?
         };
@@ -1083,7 +1176,13 @@ impl CreatureState {
         );
         let sources = condition_sources(&build, &self.extra_sources, &ConditionState::default());
         let baseline = permanent
-            .fold(&build, &sources, &self.equipment, self.restorable_losses)
+            .fold(
+                &build,
+                &sources,
+                &self.equipment,
+                self.restorable_losses,
+                self.cancelled,
+            )
             .map_err(CreatureStateError::Build)?;
         let mut earned_progress = self.earned_progress.clone();
         let threat = permanent.threat_tier();
@@ -1151,6 +1250,7 @@ impl CreatureState {
                 &baseline_sources,
                 &equipment,
                 self.restorable_losses,
+                self.cancelled,
             )
             .map_err(CreatureStateError::Build)?;
         self.extra_sources = sources;
@@ -1192,6 +1292,7 @@ impl CreatureState {
                     &self.extra_sources,
                     &self.equipment,
                     self.restorable_losses,
+                    self.cancelled,
                 )
                 .map_err(CreatureStateError::Build)?;
             if !self
@@ -1236,6 +1337,7 @@ impl CreatureState {
                 &self.extra_sources,
                 &self.equipment,
                 self.restorable_losses,
+                self.cancelled,
             ) {
                 Ok(derived) => {
                     if !self
@@ -1483,6 +1585,7 @@ impl CreatureState {
                     &sources,
                     &self.equipment,
                     self.restorable_losses,
+                    self.cancelled,
                 )
                 .map_err(|_| ConditionError::InvalidModifiers)?;
             self.conditions = conditions;
@@ -1555,6 +1658,7 @@ impl CreatureState {
                 &sources,
                 &self.equipment,
                 self.restorable_losses,
+                self.cancelled,
             )
             .map_err(|_| ConditionError::InvalidModifiers)?;
         self.conditions = conditions;
@@ -1585,6 +1689,7 @@ impl CreatureState {
                     &sources,
                     &self.equipment,
                     self.restorable_losses,
+                    self.cancelled,
                 )
                 .map_err(|_| ConditionError::InvalidModifiers)?;
             self.conditions = conditions;

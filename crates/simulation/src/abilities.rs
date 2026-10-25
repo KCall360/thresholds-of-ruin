@@ -25,8 +25,17 @@ pub use invocation::{
 mod plan;
 mod plan_validation;
 pub(crate) use plan_validation::PlanSourceContext;
+mod cancelled_payload;
+mod contact_execution;
+mod contact_policy;
+mod contact_trace;
 mod ray;
+pub use contact_policy::{RayResolution, RayTraversal};
+pub(crate) use contact_trace::MAX_CONTACT_STATES;
+#[cfg(test)]
+mod contact_trace_tests;
 mod resolve;
+pub(crate) use ray::definition_shape_valid as ray_definition_shape_valid;
 pub use ray::{RayDelivery, RayIncomingOwner, RayIncomingSource, RayPlan};
 mod spatial;
 mod strikes;
@@ -152,3 +161,6 @@ mod weapon_selection_tests;
 
 #[cfg(test)]
 mod payload_resistance_tests;
+
+#[cfg(test)]
+mod cancellation_missile_tests;

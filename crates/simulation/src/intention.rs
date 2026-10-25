@@ -894,7 +894,7 @@ impl Game {
                                         return false;
                                     }
                                     match definition.reach {
-                                        crate::rules::Reach::Projectile => false,
+                                        crate::rules::Reach::Projectile | crate::rules::Reach::UntilObstruction => false,
                                         crate::rules::Reach::SelfOnly => target == *actor,
                                         crate::rules::Reach::SelfOrAlly { .. } => true,
                                         crate::rules::Reach::Melee

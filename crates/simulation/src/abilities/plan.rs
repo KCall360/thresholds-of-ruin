@@ -107,6 +107,7 @@ pub enum PlannedEffect {
     TeleportToRayOrigin,
     RoomLight,
     DrainLife,
+    CancelSpecials,
     ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
@@ -492,7 +493,7 @@ impl Plan {
             | Self::Zap {
                 delivery: DeviceDeliveryPlan::Ray { plan },
                 ..
-            } => plan.tokens.as_slice(),
+            } => plan.tokens(),
             Self::Projectile(plan) => plan.tokens.as_slice(),
             Self::Escape(plan) => plan.tokens.as_slice(),
             _ => &[],
@@ -928,6 +929,7 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             | PlannedEffect::TeleportToRayOrigin
             | PlannedEffect::RoomLight
             | PlannedEffect::DrainLife
+            | PlannedEffect::CancelSpecials
             | PlannedEffect::ArrestDescent => true,
             PlannedEffect::ApplyLinkedHold { policy } => {
                 policy.valid() && rules.flag(&policy.sustaining).is_some()
@@ -1058,6 +1060,7 @@ pub(super) fn effects_match_definition_scoped(
                 | (Effect::TeleportToRayOrigin, PlannedEffect::TeleportToRayOrigin)
                 | (Effect::RoomLight, PlannedEffect::RoomLight)
                 | (Effect::DrainLife, PlannedEffect::DrainLife)
+                | (Effect::CancelSpecials, PlannedEffect::CancelSpecials)
                 | (Effect::ArrestDescent, PlannedEffect::ArrestDescent) => true,
                 (
                     Effect::Theft {
@@ -1325,7 +1328,7 @@ impl Game {
         }
         match reach {
             // Physical projectile reach is resolved along its released flight.
-            Reach::Projectile => false,
+            Reach::Projectile | Reach::UntilObstruction => false,
             Reach::SelfOnly => actor == target,
             Reach::SelfOrAlly { range } => {
                 actor == target
@@ -1519,6 +1522,7 @@ impl Game {
                 Effect::TeleportToRayOrigin => Ok(PlannedEffect::TeleportToRayOrigin),
                 Effect::RoomLight => Ok(PlannedEffect::RoomLight),
                 Effect::DrainLife => Ok(PlannedEffect::DrainLife),
+                Effect::CancelSpecials => Ok(PlannedEffect::CancelSpecials),
                 Effect::ArrestDescent => Ok(PlannedEffect::ArrestDescent),
                 Effect::StepSelfOneCell => Ok(PlannedEffect::StepSelfOneCell),
                 Effect::PushTargetOneCell { direction } => Ok(PlannedEffect::PushTargetOneCell {
@@ -1734,6 +1738,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             TeleportToRayOrigin {},
             RoomLight {},
             DrainLife {},
+            CancelSpecials {},
             ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
@@ -1817,6 +1822,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
             Fields::RoomLight {} => Self::RoomLight,
             Fields::DrainLife {} => Self::DrainLife,
+            Fields::CancelSpecials {} => Self::CancelSpecials,
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
