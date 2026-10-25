@@ -365,6 +365,7 @@ pub struct ProjectileBonusView {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemInteractionView {
+    pub portable_light: Option<crate::PortableLightView>,
     pub item: ItemId,
     pub slot: Option<EquipmentSlotView>,
     pub equipped_slot: Option<EquipmentSlotId>,
@@ -414,6 +415,12 @@ pub enum Work {
     Unequip {
         item: ItemId,
     },
+    Ignite {
+        item: ItemId,
+    },
+    Extinguish {
+        item: ItemId,
+    },
     Drink {
         item: ItemId,
     },
@@ -453,6 +460,12 @@ impl<'de> serde::Deserialize<'de> for Work {
             Unequip {
                 item: ItemId,
             },
+            Ignite {
+                item: ItemId,
+            },
+            Extinguish {
+                item: ItemId,
+            },
             Drink {
                 item: ItemId,
             },
@@ -489,6 +502,8 @@ impl<'de> serde::Deserialize<'de> for Work {
             },
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
+            Fields::Ignite { item } => Self::Ignite { item },
+            Fields::Extinguish { item } => Self::Extinguish { item },
             Fields::Drink { item } => Self::Drink { item },
             Fields::Read { item } => Self::Read { item },
             Fields::Zap { item, aim } => Self::Zap { item, aim },
@@ -524,6 +539,8 @@ impl Work {
                 slot: *slot,
             },
             Self::Unequip { item } => Action::Unequip { item: *item },
+            Self::Ignite { item } => Action::Ignite { item: *item },
+            Self::Extinguish { item } => Action::Extinguish { item: *item },
             Self::Drink { item } => Action::Drink { item: *item },
             Self::Read { item } => Action::Read { item: *item },
             Self::Zap { item, aim } => Action::Zap {
@@ -544,6 +561,7 @@ impl Work {
             | Self::Respec { .. }
             | Self::Equip { .. }
             | Self::Unequip { .. }
+            | Self::Ignite { .. } | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Zap { .. }
             | Self::Drink { .. }
@@ -555,6 +573,7 @@ impl Work {
             Self::Escape { .. } | Self::UseAbility { .. } | Self::Respec { .. } => None,
             Self::Equip { item, .. }
             | Self::Unequip { item }
+            | Self::Ignite { item } | Self::Extinguish { item }
             | Self::Read { item }
             | Self::Zap { item, .. }
             | Self::Drink { item }
@@ -568,6 +587,8 @@ impl Work {
             Self::Respec { .. } => "replace advancement",
             Self::Equip { .. } => "equip",
             Self::Unequip { .. } => "remove",
+            Self::Ignite { .. } => "ignite",
+            Self::Extinguish { .. } => "extinguish",
             Self::Drink { .. } => "drink",
             Self::Read { .. } => "read",
             Self::Zap { .. } => "zap",
@@ -589,6 +610,7 @@ impl Work {
                 item.0 > 0 && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
             }
             Self::Unequip { item }
+            | Self::Ignite { item } | Self::Extinguish { item }
             | Self::Read { item }
             | Self::Zap { item, .. }
             | Self::Drink { item }
@@ -805,6 +827,8 @@ impl Game {
             Work::Unequip { .. } => {
                 i.spec.equipment.is_some() && a.equipment.values().any(|id| *id == item)
             }
+            Work::Ignite { .. } => self.light_work_available(actor, item, true),
+            Work::Extinguish { .. } => self.light_work_available(actor, item, false),
             Work::Drink { .. } => i.spec.consumable.is_some() && a.combat.is_some(),
             Work::Read { .. } => {
                 i.spec.readable.is_some() && a.combat.is_some() && a.identification.is_none()
@@ -877,6 +901,12 @@ impl Game {
                     )
                     .ok_or(GameError::ItemUnavailable)?
                     .unequip_turns
+            }
+            Work::Ignite { .. } | Work::Extinguish { .. } => {
+                if !self.light_work_available(actor, item, matches!(work, Work::Ignite { .. })) {
+                    return Err(GameError::ItemUnavailable);
+                }
+                timing.consume_turns
             }
             Work::Drink { .. } => {
                 if i.spec.consumable.is_none() || a.combat.is_none() {
@@ -972,6 +1002,8 @@ impl Game {
                     allocation,
                 }
             }
+            Work::Ignite { item } => crate::abilities::Plan::Ignite { actor, item, preparation },
+            Work::Extinguish { item } => crate::abilities::Plan::Extinguish { actor, item, preparation },
             Work::Unequip { item } => crate::abilities::Plan::Unequip {
                 actor,
                 item,
@@ -1431,7 +1463,17 @@ impl Game {
                     .equipment
                     .clone();
                 equipment.retain(|_, equipped| *equipped != item);
-                ItemChange::Equipment(self.equipment_candidate(actor, equipment)?)
+                let outcome = self.equipment_candidate(actor, equipment)?;
+                if self.items.get(&item).is_some_and(|item| item.fuel.is_some()) {
+                    ItemChange::PortableLight { item, lit: false, actor: outcome }
+                } else {
+                    ItemChange::Equipment(outcome)
+                }
+            }
+            Work::Ignite { .. } | Work::Extinguish { .. } => {
+                let lit = matches!(work, Work::Ignite { .. });
+                if !self.light_work_available(actor, item, lit) { return Err(GameError::ItemUnavailable); }
+                ItemChange::PortableLight { item, lit, actor: self.actor_outcome(actor)? }
             }
             Work::Drink { .. } | Work::Eat { .. } | Work::Read { .. } | Work::Zap { .. } => {
                 let mut outcome = self.actor_outcome(actor)?;

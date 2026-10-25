@@ -3494,6 +3494,7 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
                 })
                 .filter(|text| !text.is_empty());
             let mut parts: Vec<String> = stats.into_iter().collect();
+            if let Some(light) = tor_client_common::items::portable_light_details(o, item.id) { parts.push(light); }
             if let Some(cursed) = affordance.and_then(|value| value.known_cursed) {
                 parts.push(if cursed { "cursed" } else { "uncursed" }.into());
             }

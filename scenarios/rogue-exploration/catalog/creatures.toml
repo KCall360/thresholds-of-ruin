@@ -286,7 +286,7 @@ melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, st
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, flee_percent = 25 }
 kind = "undead"
 attributes = { strength = 2, speed = 2, intellect = 1, willpower = 2, awareness = 1, presence = 1 }
-anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
+anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon", "held_light"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
 displacement = { size = "medium", anchored = false }
 modifiers = [{ scope = "always", op = { kind = "flag", flag = "regenerative" } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 7 } }]
 
@@ -310,7 +310,7 @@ riders = []
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "undead"
 attributes = { strength = 2, speed = 2, intellect = 1, willpower = 2, awareness = 1, presence = 1 }
-anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
+anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon", "held_light"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
 displacement = { size = "medium", anchored = false }
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 3 } }]
 
@@ -466,7 +466,7 @@ behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors 
 kind = "monstrous_humanoid"
 subtypes = ["reptilian"]
 attributes = { strength = 2, speed = 1, intellect = 1, willpower = 2, awareness = 1, presence = 2 }
-anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
+anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon", "held_light"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
 displacement = { size = "medium", anchored = false }
 modifiers = [{ scope = "always", op = { kind = "flag", flag = "gaze_capable" } }, { scope = "always", op = { kind = "flag", flag = "natural_sequence" } }]
 [creatures.species."rogue.medusa".melee]

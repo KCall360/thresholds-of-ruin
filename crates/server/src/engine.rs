@@ -3201,6 +3201,8 @@ impl Engine {
             | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
+            | Action::Ignite { .. }
+            | Action::Extinguish { .. }
             | Action::Drink { .. }
             | Action::Eat { .. }
             | Action::Read { .. }

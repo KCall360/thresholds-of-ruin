@@ -223,7 +223,7 @@ impl Plan {
             | Self::Zap { item, .. }
             | Self::Drink { item, .. }
             | Self::Eat { item, .. } => ItemContract::ExactUnit { item: *item },
-            Self::Escape(_) | Self::Equip { .. } | Self::Unequip { .. } => ItemContract::None,
+            Self::Escape(_) | Self::Equip { .. } | Self::Unequip { .. } | Self::Ignite { .. } | Self::Extinguish { .. } => ItemContract::None,
         }
     }
     fn supply_selection(&self) -> Option<&SupplySelection> {

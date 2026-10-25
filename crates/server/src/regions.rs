@@ -56,10 +56,28 @@ type TrapLineage = (
 struct BoundaryProgress {
     preparations: BTreeMap<PreparationLineage, BTreeSet<RegionId>>,
     population_tick: Option<u64>,
+    lights: BTreeMap<(u64, BTreeSet<RegionId>), BTreeSet<RegionId>>,
     traps: BTreeMap<TrapLineage, BTreeSet<RegionId>>,
 }
 
 impl BoundaryProgress {
+    fn light(
+        &mut self,
+        boundary: &tor_simulation::LightRegionBoundary,
+        missing: BTreeSet<RegionId>,
+    ) -> Result<(), Failure> {
+        let key = (boundary.tick, boundary.required.clone());
+        if missing.is_empty()
+            || self.lights.get(&key).is_some_and(|previous| {
+                missing.len() >= previous.len() || !missing.is_subset(previous)
+            })
+        {
+            return Err(storage_failure());
+        }
+        self.lights.insert(key, missing);
+        Ok(())
+    }
+
     fn preparation(
         &mut self,
         boundary: &tor_simulation::theft::PreparationRegionBoundary,
@@ -498,6 +516,9 @@ impl Regions {
             }
             if game.population_entry_pending() {
                 progress.population(game.tick())?;
+            }
+            if let Some(boundary) = game.light_region_boundary().cloned() {
+                progress.light(&boundary, game.light_missing_regions(&boundary))?;
             }
             if let Some(boundary) = game.trap_region_boundary().cloned() {
                 progress.trap(&boundary, game.trap_missing_regions(&boundary))?;
@@ -952,6 +973,21 @@ mod boundary_progress_tests {
             .is_err());
         progress.preparation(&boundary, regions(&[2])).unwrap();
         assert!(progress.preparation(&boundary, BTreeSet::new()).is_err());
+    }
+
+    #[test]
+    fn portable_light_progress_distinguishes_same_tick_geometry_and_rejects_stalls() {
+        let mut progress = BoundaryProgress::default();
+        let mut boundary = tor_simulation::LightRegionBoundary { tick: 7, required: regions(&[1, 2, 3]) };
+        progress.light(&boundary, regions(&[2, 3])).unwrap();
+        progress.light(&boundary, regions(&[3])).unwrap();
+        assert!(progress.light(&boundary, regions(&[3])).is_err());
+        assert!(progress.light(&boundary, regions(&[2])).is_err());
+        assert!(progress.light(&boundary, BTreeSet::new()).is_err());
+        boundary.required = regions(&[1, 4]);
+        progress.light(&boundary, regions(&[4])).unwrap();
+        boundary.tick = 8;
+        progress.light(&boundary, regions(&[4])).unwrap();
     }
 
     #[test]

@@ -2183,3 +2183,22 @@ fn text_weapon_clause_stays_exact_through_explicit_supply_selection() {
     )
     .is_err());
 }
+
+#[test]
+fn portable_light_adventure_verbs_use_explicit_current_item_goals() {
+    let mut s = state();
+    s.observation = tor_client_common::test_support::portable_light_observation(false);
+    let item = s.observation.inventory[0].id;
+    for command in ["ignite torch", "light torch", "kindle torch"] {
+        assert_eq!(goals(command, &s), [Goal::UseItem { item,
+            operation: tor_client_common::items::ItemOperation::Ignite }]);
+    }
+    assert_eq!(said("extinguish torch", &s), "You can't extinguish that item now.");
+    s.observation = tor_client_common::test_support::portable_light_observation(true);
+    assert_eq!(goals("extinguish torch", &s), [Goal::UseItem { item,
+        operation: tor_client_common::items::ItemOperation::Extinguish }]);
+    assert_eq!(said("ignite torch", &s), "You can't ignite that item now.");
+    s.observation.interactions.as_mut().unwrap().inventory[0].portable_light = None;
+    assert_eq!(said("ignite torch", &s), "You can't ignite that item now.",
+               "a matching noun is not permission to operate an ordinary item");
+}

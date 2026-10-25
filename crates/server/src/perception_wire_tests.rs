@@ -202,6 +202,8 @@ fn apparent_tokens_never_become_inventory_supply_or_actor_authority() {
         p::Action::Unequip { item: token },
         p::Action::Eat { item: token },
         p::Action::Drink { item: token },
+        p::Action::Ignite { item: token },
+        p::Action::Extinguish { item: token },
         attack(scope.actor(SUBJECT)),
         attack(scope.contact(SUBJECT)),
         p::Action::UseAbility {

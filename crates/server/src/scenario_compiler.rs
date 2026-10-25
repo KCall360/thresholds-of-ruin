@@ -153,6 +153,7 @@ pub(super) struct PreparedArchetype {
     pub readable: Option<tor_simulation::ReadableSpec>,
     pub ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
     pub device: Option<tor_simulation::DeviceSpec>,
+    pub held_light: Option<tor_simulation::HeldLightSpec>,
     pub edible: Option<tor_simulation::EdibleSpec>,
     pub supply: Option<tor_simulation::content_ids::SupplyId>,
     pub magical: bool,
@@ -217,6 +218,7 @@ impl PreparedArchetype {
                 .as_ref()
                 .map(|device| device.compile(catalog.content().rules()))
                 .transpose()?,
+            held_light: author.held_light.map(super::HeldLightSpec::compile).transpose()?,
             edible: author.edible.clone(),
             supply: author
                 .supply
@@ -685,6 +687,7 @@ impl PreparedDefinitions {
             readable: inherited.readable.clone(),
             ground_scare: inherited.ground_scare.clone(),
             device: inherited.device.clone(),
+            held_light: inherited.held_light,
             edible: inherited.edible.clone(),
             supply: inherited.supply.clone(),
             magical: inherited.magical,
@@ -1463,6 +1466,7 @@ mod tests {
                 readable: None,
                 ground_scare: None,
                 device: None,
+                held_light: None,
                 edible: None,
                 supply: None,
                 magical: false,

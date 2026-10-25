@@ -35,6 +35,12 @@ pub enum Action {
     Unequip {
         item: u64,
     },
+    Ignite {
+        item: u64,
+    },
+    Extinguish {
+        item: u64,
+    },
     Drink {
         item: u64,
     },
@@ -114,6 +120,8 @@ impl Action {
                 | Self::UseAbility { .. }
                 | Self::Equip { .. }
                 | Self::Unequip { .. }
+                | Self::Ignite { .. }
+                | Self::Extinguish { .. }
                 | Self::Drink { .. }
                 | Self::Eat { .. }
                 | Self::Read { .. }
@@ -610,6 +618,18 @@ mod tests {
             (
                 Action::Unequip { item: u64::MAX },
                 sim::Action::Unequip {
+                    item: sim::ItemId(u64::MAX),
+                },
+            ),
+            (
+                Action::Ignite { item: u64::MAX },
+                sim::Action::Ignite {
+                    item: sim::ItemId(u64::MAX),
+                },
+            ),
+            (
+                Action::Extinguish { item: u64::MAX },
+                sim::Action::Extinguish {
                     item: sim::ItemId(u64::MAX),
                 },
             ),

@@ -297,6 +297,12 @@ pub fn action(action: &a::Action) -> s::Action {
         a::Action::Unequip { item } => s::Action::Unequip {
             item: s::ItemId(*item),
         },
+        a::Action::Ignite { item } => s::Action::Ignite {
+            item: s::ItemId(*item),
+        },
+        a::Action::Extinguish { item } => s::Action::Extinguish {
+            item: s::ItemId(*item),
+        },
         a::Action::Drink { item } => s::Action::Drink {
             item: s::ItemId(*item),
         },
@@ -353,6 +359,12 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
             slot: s::EquipmentSlotId(*slot),
         },
         a::Action::Unequip { item } => s::Work::Unequip {
+            item: s::ItemId(*item),
+        },
+        a::Action::Ignite { item } => s::Work::Ignite {
+            item: s::ItemId(*item),
+        },
+        a::Action::Extinguish { item } => s::Work::Extinguish {
             item: s::ItemId(*item),
         },
         a::Action::Drink { item } => s::Work::Drink {
@@ -520,6 +532,8 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
             slot: slot.0,
         },
         s::Action::Unequip { item } => a::Action::Unequip { item: item.0 },
+        s::Action::Ignite { item } => a::Action::Ignite { item: item.0 },
+        s::Action::Extinguish { item } => a::Action::Extinguish { item: item.0 },
         s::Action::Drink { item } => a::Action::Drink { item: item.0 },
         s::Action::Eat { item } => a::Action::Eat { item: item.0 },
         s::Action::Read { item } => a::Action::Read { item: item.0 },
@@ -882,6 +896,12 @@ pub fn observation(
                                 .map(|value| crate::creature_view::modifier(value, rules))
                                 .collect(),
                         })
+                    }),
+                    portable_light: item.portable_light.map(|light| p::PortableLightView {
+                        remaining: light.remaining,
+                        lit: light.lit,
+                        ignitable: light.ignitable,
+                        extinguishable: light.extinguishable,
                     }),
                     drinkable: item.drinkable,
                     edible: item.edible,

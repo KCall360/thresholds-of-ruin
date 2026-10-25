@@ -365,6 +365,16 @@ pub enum Plan {
         item: ItemId,
         preparation: u64,
     },
+    Ignite {
+        actor: ActorId,
+        item: ItemId,
+        preparation: u64,
+    },
+    Extinguish {
+        actor: ActorId,
+        item: ItemId,
+        preparation: u64,
+    },
     Read {
         #[serde(deserialize_with = "crate::bounded::required_option")]
         control: Option<crate::control_scrolls::ControlSpec>,
@@ -511,6 +521,7 @@ impl Plan {
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
+            | Self::Ignite { actor, .. } | Self::Extinguish { actor, .. }
             | Self::Read { actor, .. }
             | Self::Drink { actor, .. }
             | Self::Eat { actor, .. } => *actor,
@@ -527,6 +538,7 @@ impl Plan {
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
+            | Self::Ignite { actor, .. } | Self::Extinguish { actor, .. }
             | Self::Read { actor, .. }
             | Self::Drink { actor, .. }
             | Self::Eat { actor, .. } => *actor,
@@ -567,6 +579,8 @@ impl Plan {
                 slot: *slot,
             },
             Self::Unequip { item, .. } => Work::Unequip { item: *item },
+            Self::Ignite { item, .. } => Work::Ignite { item: *item },
+            Self::Extinguish { item, .. } => Work::Extinguish { item: *item },
             Self::Drink { item, .. } => Work::Drink { item: *item },
             Self::Read { item, .. } => Work::Read { item: *item },
             Self::Eat { item, .. } => Work::Eat { item: *item },
@@ -582,6 +596,7 @@ impl Plan {
             Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
             | Self::Unequip { preparation, .. }
+            | Self::Ignite { preparation, .. } | Self::Extinguish { preparation, .. }
             | Self::Read { preparation, .. }
             | Self::Drink { preparation, .. }
             | Self::Eat { preparation, .. } => *preparation,
@@ -597,6 +612,7 @@ impl Plan {
             Self::Respec(plan) => plan.recovery,
             Self::Equip { .. }
             | Self::Unequip { .. }
+            | Self::Ignite { .. } | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => 0,
@@ -611,6 +627,7 @@ impl Plan {
             Self::Escape(_) | Self::Respec(_) => None,
             Self::Equip { .. }
             | Self::Unequip { .. }
+            | Self::Ignite { .. } | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => None,
@@ -635,7 +652,8 @@ impl Plan {
             | Self::Escape(_)
             | Self::Respec(_)
             | Self::Equip { .. }
-            | Self::Unequip { .. } => &[],
+            | Self::Unequip { .. }
+            | Self::Ignite { .. } | Self::Extinguish { .. } => &[],
         }
     }
     pub fn as_ability(&self) -> Option<&AbilityPlan> {
@@ -648,6 +666,7 @@ impl Plan {
             | Self::Respec(_) => None,
             Self::Equip { .. }
             | Self::Unequip { .. }
+            | Self::Ignite { .. } | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => None,
@@ -726,7 +745,8 @@ impl Plan {
             | Self::Escape(_)
             | Self::Respec(_)
             | Self::Equip { .. }
-            | Self::Unequip { .. } => None,
+            | Self::Unequip { .. }
+            | Self::Ignite { .. } | Self::Extinguish { .. } => None,
         }
     }
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
@@ -774,7 +794,7 @@ impl Plan {
                         && allocation.valid_shape(rules, *item, *slot)
                         && allocation.quickdraw(rules) == (self.preparation() == 0)
                 }
-                Self::Unequip { item, .. } => valid_item(*item),
+                Self::Unequip { item, .. } | Self::Ignite { item, .. } | Self::Extinguish { item, .. } => valid_item(*item),
                 Self::Read {
                     control,
                     item,

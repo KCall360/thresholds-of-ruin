@@ -108,6 +108,12 @@ pub(crate) enum Action {
     Unequip {
         item: u64,
     },
+    Ignite {
+        item: u64,
+    },
+    Extinguish {
+        item: u64,
+    },
     Drink {
         item: u64,
     },
@@ -448,6 +454,8 @@ impl From<&crate::actions::Action> for Action {
                 slot: *slot,
             },
             Backend::Unequip { item } => Self::Unequip { item: *item },
+            Backend::Ignite { item } => Self::Ignite { item: *item },
+            Backend::Extinguish { item } => Self::Extinguish { item: *item },
             Backend::Drink { item } => Self::Drink { item: *item },
             Backend::Read { item } => Self::Read { item: *item },
             Backend::Zap { item, aim } => Self::Zap {
@@ -505,6 +513,8 @@ impl From<Action> for crate::actions::Action {
             Action::Drop { item, quantity } => Self::Drop { item, quantity },
             Action::Equip { item, slot } => Self::Equip { item, slot },
             Action::Unequip { item } => Self::Unequip { item },
+            Action::Ignite { item } => Self::Ignite { item: item },
+            Action::Extinguish { item } => Self::Extinguish { item: item },
             Action::Drink { item } => Self::Drink { item },
             Action::Read { item } => Self::Read { item },
             Action::Zap { item, aim } => Self::Zap {
@@ -1452,6 +1462,14 @@ mod tests {
             (
                 Action::Unequip { item: u64::MAX },
                 r#"{"type":"unequip","item":18446744073709551615}"#,
+            ),
+            (
+                Action::Ignite { item: u64::MAX },
+                r#"{"type":"ignite","item":18446744073709551615}"#,
+            ),
+            (
+                Action::Extinguish { item: u64::MAX },
+                r#"{"type":"extinguish","item":18446744073709551615}"#,
             ),
             (
                 Action::Drink { item: u64::MAX },

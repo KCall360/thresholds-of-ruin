@@ -18,6 +18,7 @@ from nothing_catalog_package import prepare as prepare_imported_nothing
 from light_catalog_package import prepare as prepare_imported_light
 from drain_catalog_package import prepare as prepare_imported_drain
 from first_contact_catalog_package import prepare as prepare_imported_first_contact
+from torch_catalog_package import prepare as prepare_imported_torch
 
 
 def observation(frame):
@@ -953,6 +954,84 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(str(effects[0]["target"]), "2")
         self.assertNotIn('"type":"combat_diagnostics"', "".join(owner.transcript).replace(" ", ""))
         self.first_contact_samples = {"reach": reach_sample, "effect": effect_sample}
+
+    @non_graphical
+    def test_imported_torch_text_explicit_control_fuel_drop_and_source_free_reopen(self):
+        package = prepare_imported_torch(self)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        probe, initial = self.client(observe=True)
+        text, _ = self.adventure()
+        self.say(text, "take all")
+        carried = self.snapshot(probe)
+        torch, = observation(carried)["inventory"]
+        target = torch["id"]
+        self.assertEqual(torch["class"], "tool")
+        self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0)
+        def light(frame):
+            return next(row for row in interactions(frame)["inventory"] if row["item"] == target)["portable_light"]
+        def ticks(frame):
+            return int(observation(frame)["tick"])
+        def lit_cell(frame):
+            return any(cell["position"] == {"x": 3, "y": 0, "z": 0} and cell["lit"]
+                       for cell in observation(frame)["visible_cells"])
+        self.assertEqual(light(carried), {"remaining": "100000", "lit": False,
+                                         "ignitable": False, "extinguishable": False})
+        self.assertFalse(lit_cell(carried))
+        self.assertEqual(checkpoint(self, probe)["actors"]["1"]["turn_ticks"], 100)
+        refused = self.say(text, "ignite #" + target)
+        self.assertIn("can't ignite", refused.lower())
+        self.assertEqual(ticks(self.snapshot(probe)), ticks(carried))
+        self.say(text, "wield #" + target)
+        held = self.snapshot(probe)
+        self.assertFalse(light(held)["lit"], "equipping never auto-ignites")
+        self.assertTrue(light(held)["ignitable"])
+        self.assertFalse(lit_cell(held))
+        self.assertIn("finish igniting", self.say(text, "ignite #" + target).lower())
+        burning = self.snapshot(probe)
+        self.assertEqual(ticks(burning), ticks(held) + 100)
+        self.assertTrue(light(burning)["lit"])
+        self.assertEqual(int(light(burning)["remaining"]), 100000)
+        self.assertTrue(lit_cell(burning))
+        self.assertIn("fuel:", self.say(text, "inventory").lower())
+        self.say(text, "wait")
+        elapsed = self.snapshot(probe)
+        self.assertEqual(ticks(elapsed), ticks(burning) + 100)
+        self.assertEqual(int(light(elapsed)["remaining"]), 99900)
+        self.assertIn("finish extinguishing", self.say(text, "extinguish #" + target).lower())
+        off = self.snapshot(probe)
+        self.assertEqual(ticks(off), ticks(elapsed) + 100)
+        self.assertFalse(light(off)["lit"])
+        self.assertEqual(int(light(off)["remaining"]), 99800)
+        self.assertFalse(lit_cell(off))
+        self.say(text, "ignite #" + target)
+        relit = self.snapshot(probe)
+        self.say(text, "remove #" + target)
+        stowed = self.snapshot(probe)
+        self.assertFalse(light(stowed)["lit"])
+        self.assertFalse(light(stowed)["ignitable"])
+        self.assertEqual(int(light(stowed)["remaining"]),
+                         int(light(relit)["remaining"]) - (ticks(stowed) - ticks(relit)))
+        self.say(text, "wield #" + target)
+        self.say(text, "ignite #" + target)
+        before_drop = self.snapshot(probe)
+        self.say(text, "drop #" + target)
+        dropped = self.snapshot(probe)
+        self.assertEqual(observation(dropped)["inventory"], [])
+        self.assertTrue(lit_cell(dropped), "dropped flame remains a ground light source")
+        saved = checkpoint(self, probe)
+        self.assertTrue(saved["items"]["30"]["fuel"]["lit"])
+        self.assertEqual(int(saved["items"]["30"]["fuel"]["remaining"]),
+                         int(light(before_drop)["remaining"]) - (ticks(dropped) - ticks(before_drop)))
+        self.assertFalse(dropped["state"]["wizard_game"])
+        text.stop(save=False)
+        probe.stop(save=False)
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        reopened, restored = self.client(observe=True)
+        self.assertEqual(checkpoint(self, reopened), saved)
+        self.assertTrue(lit_cell(restored))
+
 
 
 if __name__ == "__main__":

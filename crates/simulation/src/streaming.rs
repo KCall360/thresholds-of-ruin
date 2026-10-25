@@ -1038,7 +1038,7 @@ impl Game {
                     } else {
                         crate::observation::merge_perception(
                             self.world.neighborhood_scene(eye, frame),
-                            self.world.illuminated_eye_scene(eye, frame, SIGHT_RANGE),
+                            self.illuminated_scene(eye, frame, SIGHT_RANGE),
                         )
                     };
                     need.active
@@ -1220,6 +1220,7 @@ impl Game {
         let ordinary_loaded = t.loaded.clone();
         self.relocation_loaded_closure(&ordinary_active, &mut t.loaded);
         self.trap_loaded_closure(&ordinary_loaded, &mut t.loaded);
+        t.loaded.extend(self.light_required_regions());
         if let Some(source) = self.retrieval_source_region() {
             t.loaded.insert(source);
         }

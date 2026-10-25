@@ -855,6 +855,8 @@ struct Archetype {
     #[serde(with = "mapped")]
     device: Option<source::DeviceSpec>,
     #[serde(with = "mapped")]
+    held_light: Option<source::HeldLightSpec>,
+    #[serde(with = "mapped")]
     edible: Option<source::EdibleSpec>,
     #[serde(deserialize_with = "required_option")]
     supply: Option<String>,
@@ -1723,6 +1725,13 @@ struct ChargeRange {
     minimum: u16,
     maximum: u16,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::HeldLightSpec", deny_unknown_fields)]
+struct HeldLightSpec {
+    radius: u8,
+    fuel_ticks: u64,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::DeviceSpec", deny_unknown_fields)]
 struct DeviceSpec {
@@ -3994,6 +4003,7 @@ named_remote!(
     ControlSpec => tor_simulation::control_scrolls::ControlSpec,
     ConditionPayload => tor_simulation::control_scrolls::ConditionPayload,
     DeviceSpec => source::DeviceSpec,
+    HeldLightSpec => source::HeldLightSpec,
     ChargeRange => source::ChargeRange,
     EquipmentGeneration => source::EquipmentGeneration,
     PeriodicRelocation => source::PeriodicRelocation,
@@ -9855,5 +9865,32 @@ mod first_contact_schema_tests {
         ] {
             assert!(strict::<ReachOwner>(format!("{{\"reach\":{bad}}}").as_bytes()).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod held_light_schema_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn held_light_saved_policy_and_nullable_capability_are_required() {
+        let author: source::Archetype = serde_json::from_value(json!({"held_light": {}})).unwrap();
+        let original = serde_json::to_value(Borrowed(&author)).unwrap();
+        let bytes = serde_json::to_vec(&original).unwrap();
+        let restored: Owned<source::Archetype> = crate::storage::codec::strict(&bytes).unwrap();
+        assert_eq!(restored.0.held_light.unwrap().fuel_ticks, 100_000);
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), original);
+        for field in ["radius", "fuel_ticks"] {
+            let mut missing = original.clone();
+            missing["held_light"].as_object_mut().unwrap().remove(field);
+            assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(&serde_json::to_vec(&missing).unwrap()).is_err());
+        }
+        let plain = source::Archetype::default();
+        let mut plain = serde_json::to_value(Borrowed(&plain)).unwrap();
+        assert_eq!(plain["held_light"], serde_json::Value::Null);
+        assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(&serde_json::to_vec(&plain).unwrap()).is_ok());
+        plain.as_object_mut().unwrap().remove("held_light");
+        assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(&serde_json::to_vec(&plain).unwrap()).is_err());
     }
 }

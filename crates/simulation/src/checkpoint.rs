@@ -831,6 +831,7 @@ impl Game {
             population_entry_boundary: None,
             preparation_region_boundary: None,
             trap_region_boundary: None,
+            light_region_boundary: None,
             trap_resolution: None,
             host_region_continuation: false,
             lifecycle: match snapshot.lifecycle {
@@ -1140,6 +1141,7 @@ impl Game {
             && item.holds_valid()
             && (item.spec.stackable || item.quantity == 1)
             && item.spec.valid()
+            && crate::portable_light::valid_item(item)
             && item.corpse.as_ref().is_none_or(|corpse| {
                 item.spec.class == crate::ItemClass::Corpse
                     && !item.spec.stackable

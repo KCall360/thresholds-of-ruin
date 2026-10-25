@@ -245,3 +245,27 @@ fn visible_terrain_uses_explicit_illumination_instead_of_visibility() {
     assert!(cells[0].seen && !cells[0].lit);
     assert!(cells[1].seen && cells[1].lit);
 }
+
+#[test]
+fn portable_light_projection_and_real_commands_follow_disclosed_eligibility() {
+    use tor_client_3d_model::{request_from, Cmd};
+    use tor_client_common::items::ItemOperation;
+    use tor_protocol::{Action, Command, Request};
+    for lit in [false, true] {
+        let observed = tor_client_common::test_support::portable_light_observation(lit);
+        let item = observed.inventory[0].id;
+        let mut snapshot = from_observation(observed).snapshot();
+        snapshot.readiness.admission = true;
+        let state = ClientState::from_snapshot(snapshot).unwrap();
+        let projected = view(&state, &Palette::default());
+        let light = projected.inventory[0].portable_light.as_ref().unwrap();
+        assert_eq!((light.lit, light.ignitable, light.extinguishable), (lit, !lit, lit));
+        assert_eq!(light.remaining, 100_000);
+        let operation = if lit { ItemOperation::Extinguish } else { ItemOperation::Ignite };
+        let request = request_from(&state, &projected.shown, Cmd::Use(item, operation)).unwrap();
+        let Request::Command { command: Command::Act { action, .. }, .. } = request else { panic!("ordinary action") };
+        assert_eq!(action, if lit { Action::Extinguish { item } } else { Action::Ignite { item } });
+        let wrong = if lit { ItemOperation::Ignite } else { ItemOperation::Extinguish };
+        assert!(request_from(&state, &projected.shown, Cmd::Use(item, wrong)).is_err());
+    }
+}

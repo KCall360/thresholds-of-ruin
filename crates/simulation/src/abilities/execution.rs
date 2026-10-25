@@ -52,7 +52,7 @@ impl Game {
                 .is_some_and(|actor| actor.alive())
             && self.creature(plan.actor()).map_or_else(
                 || {
-                    matches!(plan, Plan::Equip { .. } | Plan::Unequip { .. })
+                    matches!(plan, Plan::Equip { .. } | Plan::Unequip { .. } | Plan::Ignite { .. } | Plan::Extinguish { .. })
                         || matches!(plan, Plan::Drink { effects, .. } if effects.is_empty())
                 },
                 |creature| {
@@ -80,7 +80,7 @@ impl Game {
                     sight,
                 ),
                 Plan::Equip { .. }
-                | Plan::Unequip { .. }
+                | Plan::Unequip { .. } | Plan::Ignite { .. } | Plan::Extinguish { .. }
                 | Plan::Read { .. }
                 | Plan::Zap { .. }
                 | Plan::Drink { .. }

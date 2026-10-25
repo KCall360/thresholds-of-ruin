@@ -977,6 +977,7 @@ impl Game {
                     .and_then(|interval| actor.active_since.checked_add(interval))
             })
             .chain(self.next_wandering_event_tick())
+            .chain(self.next_fuel_expiry())
             .min()
             .map_or(until, |deadline| until.min(deadline));
         if until <= self.tick {
@@ -986,11 +987,14 @@ impl Game {
         let moving = self.actors.values().any(|a| a.motion.velocity != [0; 3])
             || self.items.values().any(|i| i.motion.velocity != [0; 3]);
         if !self.world.has_gravity() && !moving {
+            self.burn_light_fuel(until - self.tick);
             self.tick = until;
             self.settle_creature_time()?;
+            self.refresh_light_boundary();
             return Ok(until);
         }
         for tick in self.tick + 1..=until {
+            self.burn_light_fuel(1);
             self.tick = tick;
             // Expiry, death and stochastic depletion are authoritative before
             // same-tick physical effects can materialize a pure actor snapshot.
@@ -1119,7 +1123,12 @@ impl Game {
                     })
                     .expect("scheduled item");
             }
+            self.refresh_light_boundary();
             if !active {
+                if self.region_transition_pending() {
+                    self.settle_creature_time()?;
+                    return Ok(tick);
+                }
                 break;
             }
             // Due conditions and capacity changes precede work completion on
@@ -1150,8 +1159,10 @@ impl Game {
         }
         // Resting physics can stop early. Settle once at the requested boundary;
         // lifecycle changes already settled before switching active clocks.
+        self.burn_light_fuel(until - self.tick);
         self.tick = until;
         self.settle_creature_time()?;
+        self.refresh_light_boundary();
         Ok(until)
     }
     fn needs_integration(

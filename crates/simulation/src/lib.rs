@@ -127,7 +127,7 @@ pub mod resources;
 pub mod survival_diagnostics;
 pub mod theft;
 pub use periodic_relocation::PeriodicRelocation;
-pub use portable_light::{HeldLightSpec, PortableLightView};
+pub use portable_light::{HeldLightSpec, LightRegionBoundary, PortableLightView};
 pub use places::{NameOrigin, PlaceName};
 mod streaming;
 pub use streaming::{
@@ -191,6 +191,12 @@ pub enum Action {
         slot: EquipmentSlotId,
     },
     Unequip {
+        item: ItemId,
+    },
+    Ignite {
+        item: ItemId,
+    },
+    Extinguish {
         item: ItemId,
     },
     Drink {
@@ -278,6 +284,12 @@ impl<'de> serde::Deserialize<'de> for Action {
             Unequip {
                 item: ItemId,
             },
+            Ignite {
+                item: ItemId,
+            },
+            Extinguish {
+                item: ItemId,
+            },
             Drink {
                 item: ItemId,
             },
@@ -344,6 +356,8 @@ impl<'de> serde::Deserialize<'de> for Action {
             Fields::Purchase { basis, purchase } => Self::Purchase { basis, purchase },
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
+            Fields::Ignite { item } => Self::Ignite { item },
+            Fields::Extinguish { item } => Self::Extinguish { item },
             Fields::Drink { item } => Self::Drink { item },
             Fields::Read { item } => Self::Read { item },
             Fields::Zap { item, aim } => Self::Zap { item, aim },
@@ -626,6 +640,7 @@ pub struct Game {
     population_entry_boundary: Option<u64>,
     preparation_region_boundary: Option<theft::PreparationRegionBoundary>,
     trap_region_boundary: Option<traps::TrapRegionBoundary>,
+    light_region_boundary: Option<portable_light::LightRegionBoundary>,
     trap_resolution: Option<traps::TrapResolution>,
     host_region_continuation: bool,
 }
@@ -663,6 +678,7 @@ impl Clone for Game {
             population_entry_boundary: self.population_entry_boundary,
             preparation_region_boundary: self.preparation_region_boundary.clone(),
             trap_region_boundary: self.trap_region_boundary.clone(),
+            light_region_boundary: self.light_region_boundary.clone(),
             trap_resolution: self.trap_resolution.clone(),
             host_region_continuation: self.host_region_continuation,
         }
@@ -836,6 +852,7 @@ impl Game {
             population_entry_boundary: None,
             preparation_region_boundary: None,
             trap_region_boundary: None,
+            light_region_boundary: None,
             trap_resolution: None,
             host_region_continuation: false,
         }
@@ -915,6 +932,7 @@ impl Game {
                 condition: crate::armor::ItemCondition::default(),
                 charges: None,
                 relocation_elapsed: None,
+                fuel: None,
                 corpse: None,
                 holds: vec![],
                 motion: MotionState::default(),

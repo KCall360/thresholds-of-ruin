@@ -3225,3 +3225,6 @@ fn cancellation_first_active_noncombat_body_blocks_later_cold_recipient() {
 fn ordinary_cancellation_grant_retains_resource_ledger_across_cold_frontiers() {
     paid_first_contact_chain(false, true);
 }
+
+#[path = "portable_torch_session_tests.rs"]
+mod portable_torch;

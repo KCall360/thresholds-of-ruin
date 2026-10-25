@@ -753,3 +753,11 @@ class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
 device = { ability = "rogue.wand_magic_missile", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
+
+# Opt-in physical light; not part of live floor stock or starting kits.
+[items."rogue.torch"]
+name = "torch"
+class = "tool"
+stackable = false
+held_light = { radius = 4, fuel_ticks = 100000 }
+equipment = { slot = "held_light", modifiers = [] }

@@ -196,6 +196,8 @@ pub fn decode_action(
         }
         p::Action::Equip { item, .. }
         | p::Action::Unequip { item }
+        | p::Action::Ignite { item }
+        | p::Action::Extinguish { item }
         | p::Action::Drink { item }
         | p::Action::Eat { item }
         | p::Action::Read { item }
@@ -213,6 +215,8 @@ pub fn decode_action(
                     slot: *slot,
                 },
                 p::Action::Unequip { .. } => a::Action::Unequip { item: identity },
+                p::Action::Ignite { .. } => a::Action::Ignite { item: identity },
+                p::Action::Extinguish { .. } => a::Action::Extinguish { item: identity },
                 p::Action::Drink { .. } => a::Action::Drink { item: identity },
                 p::Action::Eat { .. } => a::Action::Eat { item: identity },
                 p::Action::Read { .. } => a::Action::Read { item: identity },
@@ -475,6 +479,12 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
             slot: *slot,
         },
         a::Action::Unequip { item } => p::Action::Unequip {
+            item: scope.item(s::ItemId(*item)),
+        },
+        a::Action::Ignite { item } => p::Action::Ignite {
+            item: scope.item(s::ItemId(*item)),
+        },
+        a::Action::Extinguish { item } => p::Action::Extinguish {
             item: scope.item(s::ItemId(*item)),
         },
         a::Action::Drink { item } => p::Action::Drink {

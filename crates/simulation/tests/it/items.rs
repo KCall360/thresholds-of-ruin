@@ -18,6 +18,7 @@ fn setup() -> (Game, ActorId) {
             None,
             10,
             ItemSpec {
+                held_light: None,
                 ground_scare: None,
                 magical: false,
                 currency: None,
@@ -242,6 +243,7 @@ fn overflow_ownership_and_distinct_properties_cannot_corrupt_stacks() {
         position: Position { x: 1, y: 1, z: 0 },
     };
     let spec = ItemSpec {
+                held_light: None,
         ground_scare: None,
         magical: false,
         currency: None,

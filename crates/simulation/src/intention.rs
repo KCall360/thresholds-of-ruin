@@ -912,7 +912,7 @@ impl Game {
                             item.0 > 0 && slot.0 < 64
                         }
                         IntentionWork::Action(
-                            Action::Unequip { item }
+                            Action::Unequip { item } | Action::Ignite { item } | Action::Extinguish { item }
                             | Action::Read {item}
                             | Action::Zap {item,..}
                             | Action::Drink { item }

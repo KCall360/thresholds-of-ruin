@@ -202,6 +202,7 @@ pub(crate) struct ItemOutcome {
     pub change: ItemChange,
 }
 pub(crate) enum ItemChange {
+    PortableLight { item: crate::ItemId, lit: bool, actor: ActorOutcome },
     CurseBlocked(ActorOutcome),
     Equipment(ActorOutcome),
     Consumed { actor: ActorOutcome },
@@ -487,6 +488,10 @@ impl Game {
                         self.commit_actor_outcome(actor)?
                     }
                     ItemChange::Consumed { actor } => self.commit_actor_outcome(actor)?,
+                    ItemChange::PortableLight { item, lit, actor } => {
+                        self.set_item_light(item, lit)?;
+                        self.commit_actor_outcome(actor)?;
+                    }
                 }
             }
         }
@@ -1489,6 +1494,7 @@ impl Game {
             }
             self.reconcile_trap_contacts_after_entry(id, None, avoidable_traps)?;
         }
+        self.refresh_light_boundary();
         Ok(())
     }
 
@@ -1523,6 +1529,7 @@ impl Game {
         actor.motion.active_fall = None;
         let body = Item {
             relocation_elapsed: None,
+                fuel: None,
             condition: crate::armor::ItemCondition::default(),
             charges: None,
             corpse: Some(crate::CorpseAppearance {

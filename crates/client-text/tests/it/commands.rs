@@ -697,3 +697,22 @@ fn identified_self_device_command_needs_no_direction() {
         })
     );
 }
+
+#[test]
+fn portable_light_raw_commands_emit_explicit_actions_and_show_current_fuel() {
+    let mut s = state();
+    s.observation = tor_client_common::test_support::portable_light_observation(false);
+    let item = s.observation.inventory[0].id;
+    for command in ["ignite torch".to_owned(), "light torch".to_owned(), format!("ignite #{item}")] {
+        assert!(matches!(parse(&command, &s).unwrap(), Input::Command(Command::Act { action: Action::Ignite { item: actual }, .. }) if actual == item));
+    }
+    assert!(parse("extinguish torch", &s).is_err());
+    assert!(tor_client_text::inventory(&s).contains("unlit; fuel: 100000 ticks"));
+    s.observation = tor_client_common::test_support::portable_light_observation(true);
+    assert!(matches!(parse("extinguish torch", &s).unwrap(), Input::Command(Command::Act { action: Action::Extinguish { item: actual }, .. }) if actual == item));
+    assert!(parse("ignite torch", &s).is_err());
+    let offer = &mut s.observation.interactions.as_mut().unwrap().inventory[0];
+    offer.equipped_slot = None;
+    offer.portable_light = Some(PortableLightView { remaining: 100_000, lit: false, ignitable: false, extinguishable: false });
+    assert!(parse("ignite torch", &s).is_err(), "lighting never auto-equips");
+}

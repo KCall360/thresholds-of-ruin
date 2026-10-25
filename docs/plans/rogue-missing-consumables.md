@@ -848,3 +848,22 @@ strict public DTO, existing-literal and initial client-control migrations only.
 Constructor, work admission, clock/optical lifecycle integration and the new
 behavioral fixtures remain incomplete. This snapshot is uncompiled and has no
 portable-light runtime qualification.
+
+The next work-in-progress checkpoint adds source/save lowering, action bridges,
+managed light-boundary progress, core work/plan and fuel hooks, dynamic optical
+and lifecycle paths, opt-in torch content, and initial client controls including
+3D inventory buttons. Three real Service fixtures are present and statically
+reviewed; the new actual-process fixture is still under review. The implementation
+is uncompiled and unqualified. Remaining work includes exhaustive constructor and
+strict-fixture migration, same-tick/map fuel comparison controls, remote frozen
+optical acceptance, saved-plan negatives, actual native/recorder coverage, and
+removing the client-side blanket equipped-item drop rejection only for an
+authoritatively droppable portable light. No live weighted pool or kit changed.
+
+Dependency-only remote optical geometry remains load-only; newly visible cells
+retain the ordinary observer-driven activation policy. A no-wake witness must
+separately prove actual illumination rather than relying on an absent emitter.
+The interim documentation/reference check passes 27 cases; its remaining failure
+is the expected source-hash mismatch for the two changed Rogue catalog modules.
+Their certificates require genuine regeneration by the eventual new compiler,
+not hand-edited hashes. No compiler or runtime was run for this checkpoint.

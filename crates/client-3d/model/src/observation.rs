@@ -87,6 +87,7 @@ pub struct Carried {
     pub equipped: Option<String>,
     pub can_equip: bool,
     pub drinkable: bool,
+    pub portable_light: Option<PortableLightView>,
     pub edible: bool,
 }
 
@@ -206,6 +207,7 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
                         .is_some_and(|a| a.slot.is_some() && a.equipped_slot.is_none()),
                     equipped,
                     drinkable: affordance.is_some_and(|a| a.drinkable),
+                    portable_light: affordance.and_then(|a| a.portable_light.clone()),
                     edible: affordance.is_some_and(|a| a.edible),
                 }
             })

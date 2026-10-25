@@ -448,3 +448,31 @@ fn identified_self_device_selection_emits_without_direction_modal() {
     );
     assert!(app.zap_item().is_none());
 }
+
+#[test]
+fn portable_light_keys_choose_explicit_actions_cancel_and_show_fuel() {
+    for (lit, input, expected) in [(false, Key::Ignite, false), (true, Key::Extinguish, true)] {
+        let mut snap = snapshot(false);
+        Arc::make_mut(&mut snap.state).observation = test_support::portable_light_observation(lit);
+        let item = snap.state.observation.inventory[0].id;
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(ClientState::from_snapshot(snap).unwrap());
+        app.ready();
+        app.messages.skip();
+        let before = app.state.as_ref().unwrap().snapshot();
+        let entries = inventory_entries(&app, &before.state.observation);
+        assert!(entries[0].long().contains("fuel: 100000 ticks"));
+        assert_eq!(key(&mut app, input), Effect::None);
+        assert_eq!(app.pickup.len(), 1);
+        assert_eq!(key(&mut app, Key::Escape), Effect::None);
+        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        assert_eq!(key(&mut app, input), Effect::None);
+        let emitted = action(key(&mut app, Key::Enter));
+        assert_eq!(emitted, if expected { Action::Extinguish { item } } else { Action::Ignite { item } });
+    }
+    for (text, expected) in [("ignite", Key::Ignite), ("extinguish", Key::Extinguish)] {
+        let input: Input = serde_json::from_value(serde_json::json!({"type":"key","key":text})).unwrap();
+        assert!(matches!(input, Input::Key { key } if key == expected));
+    }
+}

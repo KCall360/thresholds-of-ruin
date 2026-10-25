@@ -300,3 +300,54 @@ fn identified_self_device_uses_disclosed_mode_without_direction_prompt() {
         }
     );
 }
+
+#[test]
+fn portable_light_actions_use_authoritative_affordances_without_auto_equipping() {
+    let mut view = paired_equipment(equipment_slot("held_light", "held", false));
+    view.inventory[0].class = ItemClass::Tool;
+    view.inventory[0].name = "torch".into();
+    view.interactions.as_mut().unwrap().inventory[0].portable_light = Some(PortableLightView {
+        remaining: 100_000, lit: false, ignitable: true, extinguishable: false,
+    });
+    assert!(view.validate().is_ok());
+    for invalid in 0..3 {
+        let mut forged = view.clone();
+        match invalid {
+            0 => forged.inventory[0].class = ItemClass::Ring,
+            1 => forged.inventory[0].quantity = 2,
+            _ => forged.interactions.as_mut().unwrap().inventory[0].slot.as_mut().unwrap().id = "ring".into(),
+        }
+        assert!(forged.validate().is_err());
+    }
+    assert_eq!(item_action(&view, target(1), ItemOperation::Ignite).unwrap(), Action::Ignite { item: target(1) });
+    assert!(item_action(&view, target(1), ItemOperation::Extinguish).is_err());
+    assert!(item_action(&view, target(2), ItemOperation::Ignite).is_err());
+    assert_eq!(item_choices(&view, ItemOperation::Ignite).map(|row| row.id).collect::<Vec<_>>(), vec![target(1)]);
+    assert_eq!(tor_client_common::items::portable_light_details(&view, target(1)).unwrap(), "unlit; fuel: 100000 ticks");
+    let offer = &mut view.interactions.as_mut().unwrap().inventory[0];
+    offer.portable_light = Some(PortableLightView { remaining: 99_900, lit: true, ignitable: false, extinguishable: true });
+    assert_eq!(item_action(&view, target(1), ItemOperation::Extinguish).unwrap(), Action::Extinguish { item: target(1) });
+    assert!(item_action(&view, target(1), ItemOperation::Ignite).is_err());
+    let offer = &mut view.interactions.as_mut().unwrap().inventory[0];
+    offer.equipped_slot = None;
+    offer.portable_light = Some(PortableLightView { remaining: 99_900, lit: false, ignitable: false, extinguishable: false });
+    assert!(view.validate().is_ok());
+    assert!(item_action(&view, target(1), ItemOperation::Ignite).is_err());
+    assert_eq!(item_action(&view, target(1), ItemOperation::Equip).unwrap(), Action::Equip { item: target(1), slot: 0 });
+    view.interactions.as_mut().unwrap().inventory[0].portable_light.as_mut().unwrap().ignitable = true;
+    assert!(view.validate().is_err(), "stowed action eligibility cannot contradict the enclosing observation");
+}
+
+#[test]
+fn portable_light_completion_narration_is_explicit_and_not_repeated_on_fuel_updates() {
+    let before = tor_client_common::test_support::portable_light_observation(false);
+    let item = before.inventory[0].id;
+    let mut after = tor_client_common::test_support::portable_light_observation(true);
+    after.interactions.as_mut().unwrap().completed = vec![Action::Ignite { item }];
+    assert_eq!(tor_client_common::narration::completed_items(&before, &after), ["You finish igniting the torch."]);
+    let mut elapsed = after.clone();
+    elapsed.interactions.as_mut().unwrap().inventory[0].portable_light.as_mut().unwrap().remaining -= 100;
+    assert!(tor_client_common::narration::completed_items(&after, &elapsed).is_empty());
+    elapsed.interactions.as_mut().unwrap().completed = vec![Action::Extinguish { item }];
+    assert_eq!(tor_client_common::narration::completed_items(&after, &elapsed), ["You finish extinguishing the torch."]);
+}

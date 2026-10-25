@@ -137,3 +137,31 @@ pub fn observation() -> Observation {
         ready: true,
     }
 }
+
+/// Valid carried-tool disclosure for actual caller tests, independent of identity.
+pub fn portable_light_observation(lit: bool) -> Observation {
+    let mut view = observation();
+    let item = ItemTarget::from_digest([83; 32]);
+    let slot = equipment_slot("held_light", "held in one hand", false);
+    view.inventory = vec![ItemView {
+        id: item, name: "torch".into(), class: ItemClass::Tool,
+        appearance: "torch".into(), identified: true, quantity: 1,
+        description: String::new(), corpse: None, asset: None,
+        known_currency: None, known_supply: None,
+    }];
+    view.interactions = Some(InteractionView {
+        slots: vec![slot.clone()], preparation: None, completed: vec![],
+        refused: vec![], curse_blocked: vec![], identification: None,
+        inventory: vec![ItemInteractionView {
+            item, slot: Some(slot), equipped_slot: Some(0), known_equipment: None,
+            known_projectile_bonus: None, known_cursed: None, known_protected: None,
+            drinkable: false, edible: false, readable: false, zappable: false,
+            device_activation: None, charges: None,
+            portable_light: Some(PortableLightView {
+                remaining: 100_000, lit, ignitable: !lit, extinguishable: lit,
+            }),
+        }],
+    });
+    view.validate().expect("valid physical portable-light disclosure");
+    view
+}

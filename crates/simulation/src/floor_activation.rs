@@ -1503,6 +1503,7 @@ impl Game {
         self.population_entry_pending()
             || self.preparation_region_boundary.is_some()
             || self.trap_region_boundary.is_some()
+            || self.light_region_boundary.is_some()
     }
     /// The host calls this only after successful no-time-advance horizon
     /// settlement. A subsequent entry may request another boundary; it is still
@@ -1518,12 +1519,18 @@ impl Game {
         {
             return Err(invalid());
         }
+        if self.light_region_boundary.as_ref().is_some_and(|boundary|
+            boundary.tick != self.tick || !self.light_missing_regions(boundary).is_empty()) {
+            return Err(invalid());
+        }
+        let light = self.light_region_boundary.take();
         let preparation = self.preparation_region_boundary.take();
         let pending = self.population_entry_boundary.take();
         if pending.is_some_and(|tick| tick != self.tick) {
             return Err(invalid());
         }
         if pending.is_some()
+            || light.is_some()
             || preparation.is_some()
             || self.trap_region_boundary.is_some()
             || !report.frozen.is_empty()

@@ -6,6 +6,7 @@ use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SceneWitness {
     world: tor_world::PerceptionSnapshot,
+    emitters: crate::portable_light::EmitterSignature,
     location: Location,
     orientation: u8,
     body: tor_world::Shared<crate::BodySpec>,
@@ -371,6 +372,7 @@ impl Game {
                         || item.spec.device.is_some()
                     {
                         item_interactions.push(crate::interactions::ItemInteractionView {
+                            portable_light: self.portable_light_view(id, item_id),
                             item: item_id,
                             slot: item
                                 .spec
@@ -496,6 +498,7 @@ impl Game {
                     ))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let portable_lit = self.portable_lit_cells();
         Ok(Observation {
             linked_holds: self.linked_holds(id),
             interactions: (!actor.anatomy.slots.is_empty()
@@ -565,7 +568,7 @@ impl Game {
             visible_cells: occurrences
                 .iter()
                 .map(|&(location, frame)| CellView {
-                    lit: self.world.is_lit(location) == Some(true),
+                    lit: self.world.is_lit(location) == Some(true) || portable_lit.contains(&location),
                     frame,
                     door: self.disclosed_door(id, location),
                     door_secret: self.disclosed_door(id, location).is_some()
@@ -869,6 +872,7 @@ impl Game {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         Ok(SceneWitness {
             world: self.world.perception_snapshot(),
+            emitters: self.emitter_signature(),
             location: actor.location,
             orientation: actor.orientation,
             body: actor.body.clone(),
@@ -1029,8 +1033,7 @@ impl Game {
         // eye-frame offsets are body-frame offsets from the eye cell.
         let [ex, ey, ez] = body.eye;
         let mut scene = if actor.perception().sight {
-            self.world
-                .illuminated_eye_scene(eye, eye_frame, SIGHT_RANGE)
+            self.illuminated_scene(eye, eye_frame, SIGHT_RANGE)
         } else {
             Vec::new()
         };
@@ -1143,11 +1146,12 @@ impl Game {
         let mut origins: Vec<_> = body.cells.iter().copied().zip(occupied).collect();
         origins.sort_by_key(|(offset, _)| *offset);
         let mut result = Vec::new();
+        let portable_lit = self.portable_lit_cells();
         for (offset, (at, frame)) in origins {
             for mut cell in self.world.eye_scene(at, frame, range) {
                 // Usable illuminated sight retains its normal eye-origin gate.
                 // Blindness uses this same range, not a second reduced layer.
-                if sight && self.world.is_lit(cell.location) == Some(true) {
+                if sight && (self.world.is_lit(cell.location) == Some(true) || portable_lit.contains(&cell.location)) {
                     continue;
                 }
                 cell.offset.x += offset[0];
@@ -1172,6 +1176,12 @@ impl Game {
                     .illuminated_eye_scene_regions(eye, frame, SIGHT_RANGE)
                     .unwrap_or_default(),
             );
+        }
+        if !self.emitter_signature().0.is_empty() {
+            regions.extend(self.light_required_regions());
+            if let Some((eye, frame)) = self.eye(id) {
+                regions.extend(self.world.eye_scene_regions(eye, frame, SIGHT_RANGE).unwrap_or_default());
+            }
         }
         let range = actor.nonvisual_range();
         if range > 1 {

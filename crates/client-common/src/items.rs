@@ -209,6 +209,13 @@ pub fn charges(view: &Observation, item: ItemTarget) -> Option<u16> {
         .charges
 }
 
+/// Physical fuel facts come only from the controlled carried-item disclosure.
+pub fn portable_light_details(view: &Observation, item: ItemTarget) -> Option<String> {
+    let light = view.interactions.as_ref()?.inventory.iter()
+        .find(|offer| offer.item == item)?.portable_light.as_ref()?;
+    Some(format!("{}; fuel: {} ticks", if light.lit { "lit" } else { "unlit" }, light.remaining))
+}
+
 /// Display only the owner's remembered instance facts, never inferred bonuses.
 pub fn equipment_details(view: &Observation, item: ItemTarget) -> Option<String> {
     let offer = view
@@ -218,6 +225,7 @@ pub fn equipment_details(view: &Observation, item: ItemTarget) -> Option<String>
         .iter()
         .find(|offer| offer.item == item)?;
     let mut parts = Vec::new();
+    if let Some(light) = portable_light_details(view, item) { parts.push(light); }
     if let Some(known) = &offer.known_equipment {
         if let Some(attack) = &known.attack {
             parts.push(format!(

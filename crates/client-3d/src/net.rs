@@ -335,6 +335,7 @@ mod tests {
                 equipped: None,
                 can_equip: false,
                 drinkable: false,
+                portable_light: None,
                 edible: false,
             });
             let game = crate::Game {
