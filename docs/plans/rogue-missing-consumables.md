@@ -1476,7 +1476,9 @@ Presentation must remain observer-specific and deterministic between bounded
 active-clock shifts without consuming query RNG or changing world identities.
 Sight-derived object and creature appearances may shift; ordinary terrain stays
 unchanged, including floors, walls, passages, doors and traps. Cosmetic false
-stairs may come only from object appearances; known stairs remain fixed.
+stairs may come only from object appearances; an unknown actual stair may also
+have distorted cosmetic artwork, while recognized real stairs remain fixed.
+Neither case fabricates or removes authoritative stair/navigation capability.
 Nonvisual Awareness remains factual or anonymous according to its actual evidence.
 Authoritative stairs, target handles,
 capabilities, known facts and navigation are not randomized. Retained map and
@@ -1488,3 +1490,24 @@ a consumer already exists. Ordinary healing and see-invisible do not gain a cure
 extra healing's exact-ID cure must work even while blind. Potion identification
 remains OnUse. No Hallucination gameplay code or runtime qualification is included
 in the preceding Growth outcome.
+
+### Growth Service collection and context-preserving fixture correction
+
+The first focused server run passed one of three Growth Service cases. The other
+two reached the owned advancement boundary, then failed with `StaleContext`: the
+fixture requested a fresh Snapshot between obtaining an advancement basis and
+submitting its preview or growth-source action. Snapshot resets the stream epoch
+to which that basis is bound. The reviewed test-only correction retains the
+actual correlated page reply context with its basis and submits the followup
+without an intervening reset. Ordinary admission, durable retry and completion,
+paid potion checks, full provenance, source-free reopening and normal growth
+unblocking assertions remain intact; no production context policy changes.
+
+The same compiled server executable passed both registered strict Growth saved
+effect controls and the authentic current saved-scenario writer. Its generated
+fixture is byte-identical to the existing corpus, so no saved fixture is changed.
+A full run of that same executable passed 1,102 tests and failed four: the two
+known epoch fixtures and two stale production Rogue certificate checks. No other
+failure was observed. The corrected Service rerun, final core fixture rerun,
+current application build, genuine certificates and Growth process/wire capture
+remain pending; this checkpoint is not full-suite or verification-gate success.

@@ -78,13 +78,26 @@ fn item(wire: &mut Wire, physical: u64) -> ItemTarget {
             Ok(crate::actions::Action::Drop { item, .. }) if item == physical)
     }).unwrap().id
 }
-fn advancement(wire: &mut Wire, query: Value) -> tor_protocol::AdvancementPage {
+fn advancement(
+    wire: &mut Wire,
+    query: Value,
+) -> (tor_protocol::ReplyContext, tor_protocol::AdvancementPage) {
     let snapshot = wire.snapshot(OWNER);
+    advancement_from(wire, snapshot.reply_context(), query)
+}
+
+// A Snapshot is a stream reset: followups must retain the actual page context
+// together with its basis instead of silently acquiring a new epoch.
+fn advancement_from(
+    wire: &mut Wire,
+    context: tor_protocol::ReplyContext,
+    query: Value,
+) -> (tor_protocol::ReplyContext, tor_protocol::AdvancementPage) {
     let request = Request::Command {
-        context: snapshot.reply_context().input,
-        branch: snapshot.branch.clone(),
+        context: context.input,
+        branch: context.branch,
         command: Command::Advancement {
-            expected_revision: snapshot.state.revision,
+            expected_revision: context.revision,
             query: serde_json::from_value(query).unwrap(),
         },
     };
@@ -98,13 +111,17 @@ fn advancement(wire: &mut Wire, query: Value) -> tor_protocol::AdvancementPage {
     messages
         .into_iter()
         .find_map(|message| match message {
-            ServerMessage::AdvancementPage { page, .. } => Some(*page),
+            ServerMessage::AdvancementPage {
+                context,
+                request_id,
+                page,
+            } if request_id == "growth-overview" => Some((context, *page)),
             _ => None,
         })
         .unwrap()
 }
 fn acquired_overview(wire: &mut Wire, expected: u8) {
-    let page = advancement(wire, json!({"kind":"overview"}));
+    let (_, page) = advancement(wire, json!({"kind":"overview"}));
     let [tor_protocol::AdvancementEntry::Overview { value }] = page.entries.as_slice() else {
         panic!("actual owner overview")
     };
@@ -202,10 +219,11 @@ fn imported_strength_restores_exclusively_then_reaches_combined_cap_independent_
     wire.act("remove-ring", Action::Unequip { item: ring });
     assert_eq!(strength(&mut wire), 7);
     acquired_overview(&mut wire, 4);
-    let page = advancement(&mut wire, json!({"kind":"overview"}));
+    let (context, page) = advancement(&mut wire, json!({"kind":"overview"}));
     let before_preview = wire.checkpoint();
-    let preview = advancement(
+    let (_, preview) = advancement_from(
         &mut wire,
+        context,
         json!({"kind":"preview", "basis":page.basis,
         "proposal":{"kind":"purchase","purchase":{"owner":"0","pool":"advancement","selection":{"kind":"skill_rank","skill":"lore"}}},
         "section":"summary","offset":0}),
@@ -284,14 +302,20 @@ fn imported_raise_repeated_blocked_doses_fund_successive_levels_and_reopen_witho
         total
     );
     // Spend the bank only through the existing player-owned growth-source action.
-    let page = advancement(&mut wire, json!({"kind":"overview"}));
-    wire.act(
-        "choose-normal-growth",
-        Action::ChooseGrowthSource {
-            basis: Box::new(page.basis),
-            source: serde_json::from_value(json!({"kind":"class","class":"warrior"})).unwrap(),
+    let (context, page) = advancement(&mut wire, json!({"kind":"overview"}));
+    let request = Request::Command {
+        context: context.input,
+        branch: context.branch,
+        command: Command::Act {
+            expected_revision: context.revision,
+            action: Action::ChooseGrowthSource {
+                basis: Box::new(page.basis),
+                source: serde_json::from_value(json!({"kind":"class","class":"warrior"})).unwrap(),
+            },
         },
-    );
+    };
+    ack(wire.send(OWNER, "choose-normal-growth", request.clone()));
+    wire.finish(OWNER, "choose-normal-growth", &request);
     let grown = wire.checkpoint();
     let hd = creature(&grown)["build"]["hd"].as_array().unwrap().len() as u64;
     assert!(
