@@ -40,6 +40,10 @@ struct Wire {
 impl Wire {
     fn new(engine: Engine) -> Self {
         let actors = engine.actors();
+        Self::for_actors(engine, actors)
+    }
+
+    fn for_actors(engine: Engine, actors: impl IntoIterator<Item = ActorId>) -> Self {
         let mut wire = Self {
             service: Service::new(engine),
             clients: BTreeMap::new(),

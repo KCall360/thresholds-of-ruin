@@ -44,9 +44,21 @@ fn at(region: u64) -> Location {
         position: Position { x: 1, y: 1, z: 0 },
     }
 }
+fn fixture() -> Game {
+    // A restorable Game requires a live or detached actor; the two-room helper
+    // supplies geometry only. Preserve the ordinary scheduler contract.
+    let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
+    assert!(game.world.walkable(at(1)));
+    let actor = game
+        .spawn_actor(at(1), std::num::NonZeroU64::new(100).unwrap())
+        .unwrap();
+    assert_eq!(game.next_actor(), Some(actor));
+    assert_eq!(game.actors[&actor].ready_at, game.tick);
+    game
+}
 #[test]
 fn immutable_spatial_game_roots_keep_old_subset_and_failed_install_unchanged() {
-    let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
+    let mut game = fixture();
     assert!(game.world.contains(at(1)));
     assert!(game.world.contains(at(2)));
     assert!(scope(1).validate(&budget()).is_ok());
@@ -79,7 +91,7 @@ fn immutable_spatial_game_roots_keep_old_subset_and_failed_install_unchanged() {
 }
 #[test]
 fn checkpoint_pools_shared_scope_payload_once_and_restores_all_subset_roots() {
-    let mut old = Game::two_room_in_stone(42, crate::test_creatures::content());
+    let mut old = fixture();
     assert!(old.world.contains(at(1)));
     assert!(old.world.contains(at(2)));
     old.register_spatial_scope(scope(1), &budget()).unwrap();
@@ -123,7 +135,7 @@ fn checkpoint_pools_shared_scope_payload_once_and_restores_all_subset_roots() {
 // checked serializer conflict/overflow and no complete archive publication.
 #[test]
 fn archive_root_envelope_accepts_257_and_serialization_rejects_258() {
-    let game = Game::two_room_in_stone(42, crate::test_creatures::content());
+    let game = fixture();
     let mut shared = SharedState::default();
     let snapshots = (0..257)
         .map(|_| game.checkpoint(&mut shared))
@@ -148,7 +160,7 @@ fn archive_root_envelope_accepts_257_and_serialization_rejects_258() {
 
 #[test]
 fn required_spatial_root_and_dangling_payload_fail_before_game_restore() {
-    let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
+    let mut game = fixture();
     game.register_spatial_scope(scope(1), &budget()).unwrap();
     let mut shared = SharedState::default();
     let snapshot = game.checkpoint(&mut shared);
@@ -183,7 +195,7 @@ fn required_spatial_root_and_dangling_payload_fail_before_game_restore() {
 }
 #[test]
 fn empty_decoded_pool_has_no_unbound_restore_or_encoding_exemption() {
-    let game = Game::two_room_in_stone(42, crate::test_creatures::content());
+    let game = fixture();
     let mut shared = SharedState::default();
     let snapshot = game.checkpoint(&mut shared);
     let decoded: SharedState =
@@ -201,7 +213,7 @@ fn empty_decoded_pool_has_no_unbound_restore_or_encoding_exemption() {
 }
 #[test]
 fn conflicting_historical_capture_is_a_serializer_failure_not_partial_authority() {
-    let mut first = Game::two_room_in_stone(42, crate::test_creatures::content());
+    let mut first = fixture();
     let mut second = first.clone();
     first.register_spatial_scope(scope(1), &budget()).unwrap();
     let mut alternative = scope(1);
@@ -226,7 +238,7 @@ fn conflicting_historical_capture_is_a_serializer_failure_not_partial_authority(
 }
 #[test]
 fn append_to_decoded_capture_poison_blocks_the_complete_archive() {
-    let game = Game::two_room_in_stone(42, crate::test_creatures::content());
+    let game = fixture();
     let mut original = SharedState::default();
     let before = game.checkpoint(&mut original);
     let encoded = serde_json::to_vec(&(before, &original)).unwrap();

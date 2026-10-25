@@ -1312,7 +1312,9 @@ fn enabled_room_light_requires_metadata_but_unused_import_does_not() {
         .is_some());
 }
 
-fn managed_remote_room_light(foreign_face: bool) {
+fn managed_remote_room_light(foreign_face: bool, connected: bool) {
+    assert!(!(foreign_face && connected));
+    let remote_region = if connected { 6 } else { 2 };
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("source");
     let path = directory.path().join("remote-light.db");
@@ -1338,6 +1340,11 @@ fn managed_remote_room_light(foreign_face: bool) {
             .collect();
         manifest["spatial_scopes"]["neighbor"] =
             json!({"members":[2],"rooms":{},"passages":passages,"doorways":[]});
+    } else if connected {
+        manifest["spatial_scopes"]["study"]["members"] = json!([1, 2, 3, 4, 5, 6]);
+        manifest["spatial_scopes"]["study"]["rooms"]["1"] = json!((1..=6)
+            .map(|region| json!({"region":region,"min":[0,0,0],"max":[31,4,1]}))
+            .collect::<Vec<_>>());
     } else {
         manifest["spatial_scopes"]["study"]["members"] = json!([1, 2]);
         manifest["spatial_scopes"]["study"]["rooms"]["1"]
@@ -1351,14 +1358,21 @@ fn managed_remote_room_light(foreign_face: bool) {
     local["actors"] =
         json!([{"id":2,"at":[5,2,0],"turn_ticks":100,"controller":"external","creature":creature}]);
     if foreign_face {
-        // Both actual observers are more than the core's sixteen-cell maximum
-        // sight range from this mouth; darkness is not the residency premise.
+        // Keep the linked target outside both observers' sight activation.
+        // Linked targets are nevertheless loaded by streaming requirements,
+        // so this branch proves preservation of an already-frozen source.
         local["size"] = json!([32, 5, 2]);
         local["portals"] = json!([{"at":[31,1,1],"direction":"east","to":"2/entry","kind":"boundary","width":2,"turns":1}]);
         let mouth_x = local["portals"][0]["at"][0].as_i64().unwrap();
         let peer_x = local["actors"][0]["at"][0].as_i64().unwrap();
         let owner_x = local["anchors"]["start"][0].as_i64().unwrap();
         assert!(mouth_x - peer_x > 16 && mouth_x - owner_x > 16);
+    }
+    if connected {
+        local["size"] = json!([32, 5, 2]);
+        local["anchors"]["east"] = json!([31, 2, 0]);
+        local["portals"] =
+            json!([{"at":[31,2,0],"direction":"east","to":"2/west","kind":"portal","height":2}]);
     }
     definitions[0] = serde_json::from_value(local).unwrap();
     let mut remote_definition = json!({"id":2,"name":"Remote surface","size":[3,3,2],"chamber":true,"lit":false,
@@ -1367,7 +1381,24 @@ fn managed_remote_room_light(foreign_face: bool) {
         remote_definition["walls"] = json!([[1, 1, 1]]);
         remote_definition["anchors"] = json!({"entry":[2,1,1]});
     }
-    definitions.push(serde_json::from_value(remote_definition).unwrap());
+    if connected {
+        for region in 2..=6 {
+            let mut portals = vec![
+                json!({"at":[0,2,0],"direction":"west","to":format!("{}/east",region-1),"kind":"portal","height":2}),
+            ];
+            if region < 6 {
+                portals.push(json!({"at":[31,2,0],"direction":"east","to":format!("{}/west",region+1),"kind":"portal","height":2}));
+            }
+            let mut definition = json!({"id":region,"name":format!("Connected room member {region}"),"size":[32,5,2],"chamber":true,"lit":false,
+                "anchors":{"west":[0,2,0],"east":[31,2,0]},"portals":portals});
+            if region == 6 {
+                definition["actors"] = remote_definition["actors"].clone();
+            }
+            definitions.push(serde_json::from_value(definition).unwrap());
+        }
+    } else {
+        definitions.push(serde_json::from_value(remote_definition).unwrap());
+    }
     let package = Package::from_parts(
         serde_json::from_value(manifest).unwrap(),
         definitions,
@@ -1393,15 +1424,30 @@ fn managed_remote_room_light(foreign_face: bool) {
         checkpoint_interval: 4096,
         ..Default::default()
     };
-    let mut wire = Wire::new(Engine::open_with_policy(&path, scenario, policy).unwrap());
+    // Revision identities are not playable-owner authority. Keep scenario AI
+    // outside client control, independently of its structural residency.
+    let mut wire = Wire::for_actors(
+        Engine::open_with_policy(&path, scenario, policy).unwrap(),
+        [OWNER, OTHER],
+    );
     assert_eq!(
         wire.clients.keys().copied().collect::<Vec<_>>(),
         vec![OWNER, OTHER],
-        "never acquire control of cold AI"
+        "never acquire control of scenario AI"
     );
     let initial = wire.checkpoint();
-    assert!(nothing_actor(&initial, ActorId(3)).is_null());
     if foreign_face {
+        let actor = nothing_actor(&initial, ActorId(3));
+        assert!(actor.is_object());
+        assert_eq!(actor["ready_at"], 0);
+        assert_eq!(actor["active_since"], 0);
+        let lifecycle = initial["game"]["lifecycle"].as_u64().unwrap() as usize;
+        let lifecycle = &initial["shared"]["lifecycles"][lifecycle];
+        assert!(lifecycle["frozen"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(remote_region)));
+        assert_eq!(lifecycle["stamps"]["3"], 0);
         let scopes = initial["shared"]["spatial"]["scopes"].as_array().unwrap();
         let study = scopes.iter().find(|s| s["id"] == "study").unwrap();
         assert_eq!(study["members"], json!([1]));
@@ -1415,16 +1461,47 @@ fn managed_remote_room_light(foreign_face: bool) {
             .unwrap()
             .iter()
             .any(|r| r["region"] == 2));
-        assert!(
-            scopes.iter().all(|s| s["id"] != "neighbor"),
-            "a surface reference is not preparation"
+        assert_eq!(
+            scopes.iter().find(|s| s["id"] == "neighbor").unwrap()["members"],
+            json!([2]),
+            "ordinary linked-region preparation installs its own primary scope"
         );
+    } else {
+        assert!(nothing_actor(&initial, ActorId(3)).is_null());
     }
     let remote = tor_world::Location {
-        region: tor_world::RegionId(2),
+        region: tor_world::RegionId(remote_region),
         position: tor_world::Position { x: 1, y: 1, z: 1 },
     };
-    assert_eq!(room_light_world(&initial).is_lit(remote), None);
+    assert_eq!(
+        room_light_world(&initial).is_lit(remote),
+        if foreign_face { Some(false) } else { None }
+    );
+    if connected {
+        let world = room_light_world(&initial);
+        let near = tor_world::Location {
+            region: tor_world::RegionId(2),
+            position: tor_world::Position { x: 1, y: 1, z: 1 },
+        };
+        assert_eq!(
+            world.is_lit(near),
+            Some(false),
+            "ordinary linked neighbor is loaded frozen"
+        );
+        assert_eq!(
+            world.is_lit(tor_world::Location {
+                region: tor_world::RegionId(3),
+                ..near
+            }),
+            None,
+            "a frozen linked neighbor is not an expansion root"
+        );
+        let scopes = initial["shared"]["spatial"]["scopes"].as_array().unwrap();
+        assert_eq!(
+            scopes.iter().find(|s| s["id"] == "study").unwrap()["members"],
+            json!([1, 2, 3, 4, 5, 6])
+        );
+    }
     let snapshot = wire.snapshot(OWNER);
     let wand = snapshot
         .state
@@ -1434,6 +1511,8 @@ fn managed_remote_room_light(foreign_face: bool) {
         .find(|i| i.class == ItemClass::Wand)
         .unwrap()
         .id;
+    let physical = nothing_wand_id(&wire, wand);
+    assert_eq!(nothing_items(&initial)[&physical]["charges"], 3);
     let request = wire.request(
         OWNER,
         Action::Zap {
@@ -1458,18 +1537,69 @@ fn managed_remote_room_light(foreign_face: bool) {
     let paused = wire.checkpoint();
     assert_eq!(paused["game"]["tick"], initial["game"]["tick"]);
     assert_eq!(room_light_world(&paused).is_lit(remote), Some(false));
+    if connected {
+        let world = room_light_world(&paused);
+        for region in 1..6 {
+            for z in 0..2 {
+                let east = tor_world::Location {
+                    region: tor_world::RegionId(region),
+                    position: tor_world::Position { x: 31, y: 2, z },
+                };
+                let west = tor_world::Location {
+                    region: tor_world::RegionId(region + 1),
+                    position: tor_world::Position { x: 0, y: 2, z },
+                };
+                assert_eq!(
+                    world
+                        .physics_neighbor(east, tor_world::Direction::East)
+                        .unwrap()
+                        .0,
+                    west
+                );
+                assert_eq!(
+                    world
+                        .physics_neighbor(west, tor_world::Direction::West)
+                        .unwrap()
+                        .0,
+                    east
+                );
+            }
+        }
+    }
     let actor = nothing_actor(&paused, ActorId(3)).clone();
     assert!(actor.is_object());
+    if foreign_face {
+        assert_eq!(&actor, nothing_actor(&initial, ActorId(3)));
+    }
     assert_eq!(actor["ready_at"], 0);
     assert_eq!(actor["active_since"], 0);
     let lifecycle = paused["game"]["lifecycle"].as_u64().unwrap() as usize;
     assert_eq!(paused["shared"]["lifecycles"][lifecycle]["stamps"]["3"], 0);
+    assert!(paused["shared"]["lifecycles"][lifecycle]["frozen"]
+        .as_array()
+        .unwrap()
+        .contains(&json!(remote_region)));
+    if connected {
+        for region in 2..=6 {
+            assert!(paused["shared"]["lifecycles"][lifecycle]["frozen"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(region)));
+        }
+    }
     assert!(paused["game"]["floor_activation"].is_null());
     wire.finish(OWNER, "cold-room-light", &request);
     let after = wire.checkpoint();
+    assert_eq!(nothing_items(&after)[&physical]["charges"], 2);
     assert_eq!(after["game"]["tick"].as_u64().unwrap(), 100);
     assert_eq!(after["game"]["rules_rng"], paused["game"]["rules_rng"]);
     let mut world = room_light_world(&after);
+    if foreign_face {
+        assert!(
+            world.is_lit(remote).is_some(),
+            "active source retains its linked target loaded"
+        );
+    }
     if world.is_lit(remote).is_none() {
         // Read the real unpublished-to-disk immutable record carried by the
         // ordinary checkpoint. No private Game access or invented region state.
@@ -1480,7 +1610,7 @@ fn managed_remote_room_light(foreign_face: bool) {
             .map(|record| {
                 serde_json::to_value(tor_simulation::RegionRecordData::capture(record)).unwrap()
             })
-            .find(|record| record["world"]["region"]["id"] == 2)
+            .find(|record| record["world"]["region"]["id"] == remote_region)
             .expect("new detached remote record before4096-entry checkpoint interval");
         assert_eq!(record["actors"]["3"], actor);
         assert_eq!(record["stamps"]["3"], 0);
@@ -1491,6 +1621,10 @@ fn managed_remote_room_light(foreign_face: bool) {
         assert_eq!(nothing_actor(&after, ActorId(3)), &actor);
         let lifecycle = after["game"]["lifecycle"].as_u64().unwrap() as usize;
         assert_eq!(after["shared"]["lifecycles"][lifecycle]["stamps"]["3"], 0);
+        assert!(after["shared"]["lifecycles"][lifecycle]["frozen"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(remote_region)));
     }
     assert_eq!(
         world.is_lit(remote),
@@ -1518,11 +1652,16 @@ fn managed_remote_room_light(foreign_face: bool) {
 
 #[test]
 fn managed_room_light_loads_remote_same_room_surface_without_activating_actor() {
-    managed_remote_room_light(false);
+    managed_remote_room_light(false, false);
 }
 #[test]
-fn managed_room_light_loads_foreign_solid_surface_without_claiming_primary_or_waking_ai() {
-    managed_remote_room_light(true);
+fn managed_room_light_preserves_frozen_foreign_surface_without_claiming_primary_or_waking_ai() {
+    managed_remote_room_light(true, false);
+}
+
+#[test]
+fn managed_room_light_loads_physically_connected_far_room_member_without_waking_ai() {
+    managed_remote_room_light(false, true);
 }
 
 fn paid_generated_room_light(maze: bool) {

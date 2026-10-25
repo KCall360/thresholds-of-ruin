@@ -544,3 +544,33 @@ positive/negative and managed no-wake fixtures are present but unrun. The opt-in
 Light content is also promoted after the pure missing-definition failure with an
 unchanged-live-stock positive control. Actual illumination remains the intended
 core first-red seam, and all combined Rust/process qualification is still pending.
+
+
+The grouped first-red run now establishes the paid missing-effect seam: six core
+controls pass and the paid-room illumination assertion fails; authored-room,
+remote same-room and generated-room Service uses likewise reach their expected
+false-light assertions. Passage/maze and strict/source controls pass. Sixteen
+additional server canonical, authoring, source-reachability and history checks
+pass using that same executable, without another link.
+
+Of 35 same-binary core spatial controls, 31 pass and four positive retention
+restores fail the existing scheduler guard because their geometry-only fixture
+has no actor. A shared ordinary spawned-actor fixture corrects setup rather than
+relaxing restore. The foreign-solid Service witness also has a driver error:
+it tries to acquire its deliberately AI-controlled remote actor. That failure
+is not light or residency evidence. Both setup corrections join the actual
+Room Light mutation for the next grouped green run. Strict all-target Clippy and
+90 pure catalog tests passed before these runtime tests; no final gate or green
+Room Light gameplay is claimed yet.
+
+
+The green source applies the prevalidated exact room surfaces and preserves the
+actual changed result in the existing publication receipt. The foreign-solid
+fixture now starts honestly loaded/Frozen: existing streaming loads physical
+neighbors of active regions even outside sight. It connects only the two real
+external owners and retains the complete remote AI record/clock assertions.
+The disconnected same-room case still proves unbuilt-to-load-only handling.
+An additional bounded six-member physically connected same-room fixture covers
+a far member beyond ordinary residency pins, with real reciprocal portals,
+exact payment and frozen-clock/source-free checks. All three boundaries remain
+separately named; these latest green assertions are not yet runtime-qualified.
