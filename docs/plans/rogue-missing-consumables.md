@@ -137,11 +137,14 @@ new test evidence. Recheck pinned source branches while writing original code.
 - Magic Missile uses one Lore-versus-Agility check, 1d4+1 plus the ordinary
   universal attack-damage bonus, no second hit roll, no bounce or fixed short
   ray cap. Nothing spends ordinary time/charge without identification or RNG.
-- Gain Strength restores one existing deficit before granting a permanent point
-  beyond the unringed remembered maximum, within the normal cap of five.
-  No latent boon through poison, refundable acquisition, or new respec UI.
-  Raise Level funds only the normal current progression obligation; do not skip
-  funded-but-blocked tiers, reduce banked XP or bypass drained-HD regrowth rules.
+- Gain Strength restores one existing deficit before granting a permanent point.
+  Ordinary allocation and purchases cap at five; ordinary plus permanent magical
+  acquisition caps at seven, with innate modifiers applied afterward. Acquired
+  points are not refundable, and refund/rebuy must respect both caps. No latent
+  boon through poison, remembered high-water ledger, or new respec UI.
+  Each Raise Level potion funds one additional level beyond all levels already
+  covered by banked XP, including funded-but-blocked tiers. Preserve existing XP
+  and ordinary drained-HD regrowth/admission rules; funding does not bypass them.
 - Haste uses the shared hasted condition. A potion while hasted clears all its
   actual condition sources and causes the original forced rest; no potion-only
   exception. Persistent wand and finite potion lifetimes need explicit strict
@@ -1569,3 +1572,22 @@ rejects impossible records without claiming historical authenticity. Expiry wins
 simultaneous shift and bounds the next executable timer; no phantom post-expiry
 shift is required. These details await integrated paid/peer-driven, frozen,
 source-free, strict, privacy, map and client runtime qualification.
+
+### Growth corrected regression and consumer checkpoint
+
+The corrected full simulation library passes 1,896 tests and the full server
+library passes 1,106 tests, with no ignored or filtered cases. These fresh runs
+close the invalid Growth-history fixture and the stale Service reply-context
+assumptions recorded above. Protocol library and integration suites pass 37 and
+284 tests respectively against the genuine current recording. All checked inputs
+remain unchanged during each owned run. The actual Growth process, source-free
+reopen, five preserved application hashes and 44 certificates remain the scoped
+receipts recorded in the preceding application checkpoint; no extra application
+build was needed merely to record these results.
+
+Client-common library passes all 148 tests, including permanent-acquisition
+labels and full-width diagnostic controls. ASCII integration passes all 150 tests,
+including advancement and retained-map consumer regressions. These close the
+pending Growth consumer checks without rebuilding the preserved process apps.
+No quick/push/full, release, native, hosted-CI or performance gate is claimed;
+Hallucination and the remaining accepted consumables remain unfinished.
