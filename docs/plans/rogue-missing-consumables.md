@@ -1221,3 +1221,20 @@ uncompiled and unrun; final whole-fixture review, source/forged-plan negatives a
 exhaustive consumer audit are still in progress. Certificates and captured wire
 samples remain pending genuine current applications. No live weighted pool or
 starting kit changes accompany the opt-in content.
+
+Pinned Rogue's Haste potion identifies the type before calling `add_haste(TRUE)`;
+the false overdose return suppresses the faster message, not identification.
+OnUse identification on both branches therefore preserves that source behavior.
+TOR's ordinary paid dose timing remains the approved adaptation of Rogue's
+`after = FALSE`, not a claim that the original action consumed identical time.
+
+The complete Haste source and fixture checkpoint is now frozen after static
+review: ten core behavior controls plus the closed-result codec, five admitted
+Service/source cases, strict save/source/diagnostic contrasts and both actual
+process fixtures are registered. The final lifetime guard independently requires
+Timed/Keep for mixed finite applications. The previously recorded 65 pure
+catalog/recorder passes remain the only executed Haste qualification so far.
+Rust compilation, meaningful disabled-effect first-red, green runtime and genuine
+current artifacts still await the grouped coordinator run. The complete green
+implementation is retained before that temporary causal-red substitution; no
+unobserved red, successful gameplay or final gate is inferred from static review.

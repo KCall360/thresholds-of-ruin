@@ -356,15 +356,15 @@ fn haste_mixed_lifetime_keep_preserves_deadline_and_remove_reapply_gets_fresh_ge
     game.apply_effects(OWNER, &[Effect::RemoveCondition { condition: haste() }])
         .unwrap();
     game.apply_condition(OWNER, &haste(), OWNER, 400).unwrap();
-    let entry = game
-        .creature(OWNER)
-        .unwrap()
+    let creature = game.creature(OWNER).unwrap();
+    let entry = creature
         .conditions()
         .instances()
         .find(|row| row.condition == haste())
         .unwrap();
     assert!(entry.generation > generation);
     assert_eq!(entry.remaining, Some(400));
+    drop(creature);
     game.apply_effects(
         OWNER,
         &[
@@ -509,7 +509,7 @@ fn haste_late_rest_allocation_failure_rolls_back_paid_completion_rng_and_all_sou
     // Valid exhaustion is an existing recorded condition-allocator boundary;
     // inject it after genuine admission, not as an invalid action prerequisite.
     let mut record = serde_json::to_value(crate::creatures::record::CreatureRecord::capture(
-        game.creature(OWNER).unwrap(),
+        &game.creature(OWNER).unwrap(),
     ))
     .unwrap();
     record["next_condition_generation"] = serde_json::json!(u64::MAX);
@@ -581,4 +581,167 @@ fn haste_finite_actor_clock_pauses_while_loaded_frozen_without_global_catchup() 
         .unwrap()
         .conditions()
         .has_active(&haste()));
+}
+
+#[test]
+fn haste_source_contract_is_checkless_self_only_with_explicit_condition_shapes() {
+    let (game, _) = fixture(vec![dose()]);
+    let mut valid = game.content.rules.document().clone();
+    let ability = valid
+        .abilities
+        .iter_mut()
+        .find(|row| row.id.as_str() == "fixture_ray")
+        .unwrap();
+    let original_check = match &ability.strikes {
+        StrikeSource::Authored { strikes } => strikes[0].check.clone(),
+        _ => unreachable!(),
+    };
+    ability.invocation = InvocationKind::ActorTarget;
+    ability.reach = Reach::SelfOnly;
+    ability.interaction = Interaction::NonHostile;
+    ability.ai.hostile = false;
+    let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+        unreachable!()
+    };
+    strikes[0].check = None;
+    strikes[0].on_success = vec![dose()];
+    strikes[0].on_failure.clear();
+    strikes[0].riders.clear();
+    Ruleset::validate(valid.clone()).unwrap();
+    for case in 0..8 {
+        let mut document = valid.clone();
+        let ability = document
+            .abilities
+            .iter_mut()
+            .find(|row| row.id.as_str() == "fixture_ray")
+            .unwrap();
+        match case {
+            0 => ability.reach = Reach::Sight { range: 6 },
+            1 => ability.interaction = Interaction::HostileToTarget,
+            2 => {
+                let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                    unreachable!()
+                };
+                strikes[0].check = original_check.clone();
+            }
+            3 => {
+                let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                    unreachable!()
+                };
+                strikes[0].on_success.clear();
+                strikes[0].riders.push(RiderDef {
+                    cancellable: false,
+                    trigger: RiderTrigger::Success,
+                    condition: None,
+                    effects: vec![dose()],
+                    descriptors: vec![],
+                });
+            }
+            4 => {
+                ability.strikes = StrikeSource::NaturalMelee {
+                    additional_riders: vec![RiderDef {
+                        cancellable: false,
+                        trigger: RiderTrigger::Success,
+                        condition: None,
+                        effects: vec![dose()],
+                        descriptors: vec![],
+                    }],
+                }
+            }
+            5 => {
+                document
+                    .conditions
+                    .iter_mut()
+                    .find(|row| row.id == haste())
+                    .unwrap()
+                    .timing = ConditionTiming::UntilRemoved
+            }
+            6 => {
+                document
+                    .conditions
+                    .iter_mut()
+                    .find(|row| row.id == haste())
+                    .unwrap()
+                    .stacking = Stacking::Refresh
+            }
+            7 => document
+                .conditions
+                .iter_mut()
+                .find(|row| row.id == rest())
+                .unwrap()
+                .restrictions
+                .clear(),
+            _ => unreachable!(),
+        }
+        assert!(Ruleset::validate(document).is_err(), "case {case}");
+    }
+    // Ordered self effects are not a second planner or a singleton restriction.
+    let ability = valid
+        .abilities
+        .iter_mut()
+        .find(|row| row.id.as_str() == "fixture_ray")
+        .unwrap();
+    let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+        unreachable!()
+    };
+    strikes[0]
+        .on_success
+        .insert(0, Effect::RemoveCondition { condition: haste() });
+    Ruleset::validate(valid).unwrap();
+    let natural = &game
+        .content
+        .catalog()
+        .species
+        .values()
+        .next()
+        .unwrap()
+        .melee;
+    let create = |strikes| {
+        crate::attacks::NaturalAttack::new(
+            natural.skill(),
+            natural.bonus(),
+            natural.wind_up(),
+            natural.recovery(),
+            strikes,
+        )
+    };
+    create(natural.strikes().to_vec()).unwrap();
+    let mut strikes = natural.strikes().to_vec();
+    strikes[0].on_success.push(dose());
+    assert!(create(strikes).is_err());
+}
+
+#[test]
+fn haste_captured_duration_operands_and_condition_references_are_strict() {
+    let (game, item) = fixture(vec![dose()]);
+    let plan = game.plan_work(OWNER, Work::Drink { item }).unwrap();
+    assert!(plan.valid(&game.content.rules));
+    let encoded = serde_json::to_value(plan.on_success().last().unwrap()).unwrap();
+    let positive: PlannedEffect = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(&positive, plan.on_success().last().unwrap());
+    for ticks in [0, 142_858, u64::MAX] {
+        let mut invalid = encoded.clone();
+        invalid["turn_ticks"] = serde_json::json!(ticks);
+        assert!(serde_json::from_value::<PlannedEffect>(invalid).is_err());
+    }
+    let mut limit = encoded.clone();
+    limit["turn_ticks"] = serde_json::json!(142_857);
+    serde_json::from_value::<PlannedEffect>(limit).unwrap();
+    for field in ["id", "rest", "turn_ticks"] {
+        let mut missing = encoded.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<PlannedEffect>(missing).is_err());
+    }
+    let mut equal = encoded.clone();
+    equal["rest"] = equal["id"].clone();
+    assert!(serde_json::from_value::<PlannedEffect>(equal).is_err());
+    let mut changed = plan.clone();
+    let Plan::Drink { effects, .. } = &mut changed else {
+        unreachable!()
+    };
+    let PlannedEffect::HasteDose { id, rest, .. } = &mut effects[0] else {
+        unreachable!()
+    };
+    std::mem::swap(id, rest);
+    assert!(!changed.valid(&game.content.rules));
 }
