@@ -1066,6 +1066,11 @@ pub enum Effect {
     TeleportRandom,
     TeleportToRayOrigin,
     RoomLight,
+    DetectMonsters {
+        condition: ConditionId,
+    },
+    DetectFood,
+    DetectMagic,
     DrainLife,
     GainStrength,
     RaiseLevel,
@@ -1144,6 +1149,9 @@ impl Effect {
     pub fn recipient(&self) -> EffectRecipient {
         match self {
             Self::RoomLight
+            | Self::DetectMonsters { .. }
+            | Self::DetectFood
+            | Self::DetectMagic
             | Self::DrainLife
             | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises
@@ -1184,6 +1192,11 @@ impl<'de> Deserialize<'de> for Effect {
             TeleportRandom {},
             TeleportToRayOrigin {},
             RoomLight {},
+            DetectMonsters {
+                condition: ConditionId,
+            },
+            DetectFood {},
+            DetectMagic {},
             DrainLife {},
             GainStrength {},
             RaiseLevel {},
@@ -1282,6 +1295,9 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::TeleportRandom {} => Self::TeleportRandom,
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
             Fields::RoomLight {} => Self::RoomLight,
+            Fields::DetectMonsters { condition } => Self::DetectMonsters { condition },
+            Fields::DetectFood {} => Self::DetectFood,
+            Fields::DetectMagic {} => Self::DetectMagic,
             Fields::DrainLife {} => Self::DrainLife,
             Fields::GainStrength {} => Self::GainStrength,
             Fields::RaiseLevel {} => Self::RaiseLevel,
@@ -1346,6 +1362,8 @@ impl<'de> Deserialize<'de> for Effect {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConditionDef {
+    /// Pure, temporary current-floor monster-chart capability.
+    pub detecting_monsters: bool,
     /// Opt-in pure, target-wide temporary visual disorientation.
     pub hallucinating: bool,
     pub id: ConditionId,
@@ -1387,6 +1405,8 @@ impl<'de> Deserialize<'de> for ConditionDef {
         #[serde(deny_unknown_fields)]
         struct Fields {
             #[serde(default)]
+            detecting_monsters: bool,
+            #[serde(default)]
             hallucinating: bool,
             id: ConditionId,
             family: ConditionFamilyId,
@@ -1403,6 +1423,7 @@ impl<'de> Deserialize<'de> for ConditionDef {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            detecting_monsters: fields.detecting_monsters,
             hallucinating: fields.hallucinating,
             id: fields.id,
             family: fields.family,
@@ -1860,6 +1881,7 @@ impl Ruleset {
         let classes = catalog!(classes);
         let conditions = catalog!(conditions);
         hallucination::validate_hallucination_conditions(&document.conditions)?;
+        crate::detection_lifecycle::validate_conditions(&document.conditions)?;
         let condition_definitions = document.conditions.clone();
         let persistent_conditions = document
             .conditions
@@ -2173,6 +2195,35 @@ impl Ruleset {
         )?;
         for d in &mut document.abilities {
             bound(d.spatial_shape_valid(), "ability_spatial_shape")?;
+            let detects = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes
+                    .iter()
+                    .flat_map(|strike| {
+                        strike
+                            .on_success
+                            .iter()
+                            .chain(&strike.on_failure)
+                            .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                    })
+                    .any(crate::detection_lifecycle::is_effect),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|rider| &rider.effects)
+                    .any(crate::detection_lifecycle::is_effect),
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => false,
+            };
+            bound(
+                !detects
+                    || (d.invocation == crate::abilities::InvocationKind::ActorTarget
+                        && d.reach == Reach::SelfOnly
+                        && d.interaction == Interaction::NonHostile
+                        && matches!(&d.strikes, StrikeSource::Authored { strikes }
+                    if matches!(strikes.as_slice(), [StrikeDef { offset:0, unlock:None, check:None,
+                        on_success, on_failure, riders, .. }] if on_success.len() == 1
+                            && on_success.iter().all(crate::detection_lifecycle::is_effect)
+                            && on_failure.is_empty() && riders.is_empty()))),
+                "detection_self_only",
+            )?;
             let lights = match &d.strikes {
                 StrikeSource::Authored { strikes } => strikes.iter().any(|strike| {
                     strike
@@ -2906,6 +2957,16 @@ impl References<'_> {
                         field: "heal_per_hit_die".into(),
                     })?;
                 }
+                Effect::DetectMonsters { condition } => {
+                    reference(self.conditions, condition, "monster_detection_condition")?;
+                    bound(
+                        self.condition_definitions.iter().any(|definition| {
+                            &definition.id == condition && definition.detecting_monsters
+                        }),
+                        "monster_detection_condition",
+                    )?;
+                    condition.intern(pool);
+                }
                 Effect::HasteDose { condition, rest } => {
                     reference(self.conditions, condition, "haste_condition")?;
                     reference(self.conditions, rest, "rest_condition")?;
@@ -2998,6 +3059,8 @@ impl References<'_> {
                 | Effect::TeleportRandom
                 | Effect::TeleportToRayOrigin
                 | Effect::RoomLight
+                | Effect::DetectFood
+                | Effect::DetectMagic
                 | Effect::DrainLife
                 | Effect::GainStrength
                 | Effect::RaiseLevel
@@ -3474,6 +3537,7 @@ impl Ruleset {
         Ok(count)
     }
     pub fn validate_effects(&self, effects: &[Effect]) -> Result<(), RulesetError> {
+        crate::detection_lifecycle::validate_sole_effects(effects)?;
         bound(
             !effects
                 .iter()
@@ -3644,6 +3708,9 @@ impl Effect {
             | Self::TeleportRandom
             | Self::TeleportToRayOrigin
             | Self::RoomLight
+            | Self::DetectMonsters { .. }
+            | Self::DetectFood
+            | Self::DetectMagic
             | Self::DrainLife
             | Self::GainStrength
             | Self::RaiseLevel
@@ -3739,6 +3806,7 @@ mod tests {
     fn repeatable_restriction_document() -> RulesetDocument {
         let mut document = document();
         document.conditions.push(ConditionDef {
+            detecting_monsters: false,
             hallucinating: false,
             id: ConditionId::new("fixture_repeatable_lock").unwrap(),
             family: ConditionFamilyId::new("fixture_repeatable_lock").unwrap(),
@@ -3871,6 +3939,7 @@ mod tests {
             ],
         });
         doc.conditions.push(ConditionDef {
+            detecting_monsters: false,
             hallucinating: false,
             id: ConditionId::new("marked").unwrap(),
             family: crate::content_ids::ConditionFamilyId::new("marked").unwrap(),

@@ -342,8 +342,11 @@ impl DiskCheckpoint {
             || self.wizard_game && !archive.wizard_game
             || self.boundaries.is_empty()
             || self.boundaries.len() > MAX_RETAINED_BOUNDARIES
-            // Private queue transitions do not create additional world states.
-            || !self.shared.valid_world_count(REWIND_BOUNDARIES + 1)
+            // Includes acquisition Worlds retained only by reachable historical
+            // chart roots. Detached blobs validate their own independent pools.
+            || !self.shared.world_references_valid(
+                std::iter::once(&self.game).chain(self.boundaries.iter().map(|b| &b.game)),
+            )
             || !self.shared.explored_map_references_valid(
                 std::iter::once(&self.game).chain(self.boundaries.iter().map(|b| &b.game)),
             )
@@ -466,7 +469,15 @@ impl DiskCheckpoint {
             archive.scenario.seed,
         )
         .map_err(|_| invalid_archive())?;
+        let mut historical_audit = crate::scenario_package::HistoricalSourceAudit::new(
+            archive.scenario.package.as_deref(),
+            archive.scenario.seed,
+        )
+        .map_err(|_| invalid_archive())?;
         spatial_audit.check(&game)?;
+        for (world, registry, scope) in game.historical_chart_authorities() {
+            historical_audit.check_shared(world, registry, scope)?;
+        }
         let mut activations = super::floor_activation_audit::ActivationAudit::new(
             &archive.initial_activations,
             &archive.initial_retrievals,
@@ -541,6 +552,9 @@ impl DiskCheckpoint {
                 .restore(boundary.game)
                 .map_err(|error| Failure::new(ErrorCode::InvalidArchive, &error.to_string()))?;
             spatial_audit.check(&game)?;
+            for (world, registry, scope) in game.historical_chart_authorities() {
+                historical_audit.check_shared(world, registry, scope)?;
+            }
             if !valid_population(&game)
                 || !valid_retrieval(&game)
                 || !boundary.revisions.valid_for(&game)
@@ -643,6 +657,7 @@ impl DiskCheckpoint {
         }
         drop(restore);
         drop(spatial_audit);
+        drop(historical_audit);
         drop(activations);
         drop(population);
         drop(retrieval);

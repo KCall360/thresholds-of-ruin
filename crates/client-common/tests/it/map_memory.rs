@@ -13,7 +13,7 @@ fn snapshot(cells: &[(&str, i32, i32)], revision: u64) -> Snapshot {
                 "key":key,"position":{"x":x,"y":y,"z":0},"wall":false,
                 "trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
             })).collect::<Vec<_>>(),
-            "ground_items":[],"inventory":[],"linked_holds":[],"visible_actors":[],"ready":true
+            "ground_items":[],"inventory":[],"charts":[],"linked_holds":[],"visible_actors":[],"ready":true
         }}
     }))
     .unwrap()

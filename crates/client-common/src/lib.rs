@@ -2,6 +2,7 @@
 
 pub mod abilities;
 pub mod advancement;
+pub mod charts;
 mod connection;
 pub mod holds;
 pub mod inspection;

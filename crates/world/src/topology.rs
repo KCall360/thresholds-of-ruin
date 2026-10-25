@@ -371,6 +371,13 @@ impl World {
             .keys()
             .all(|(from, _)| !self.is_wall(*from))
     }
+    /// Full structural proof for an immutable historical World, which never
+    /// installs or advances the current Game's door allocator. Every invariant
+    /// of ordinary restoration remains, except its current next-ID comparison.
+    /// Door ID zero/MAX remain impossible; MAX cannot be allocated with a next ID.
+    pub fn historical_checkpoint_valid(&self) -> bool {
+        self.checkpoint_valid(u64::MAX)
+    }
     /// Structural validation for backend checkpoint restoration.
     pub fn checkpoint_valid(&self, next_door_id: u64) -> bool {
         let mut ids = BTreeSet::new();
@@ -1386,3 +1393,50 @@ mod gravity_sharing_tests {
 #[path = "concealed.rs"]
 mod concealed;
 pub use concealed::{ConcealedFeatureId, Concealment, Trap, TrapFamily, TrapKind};
+
+#[cfg(test)]
+mod historical_structure_tests {
+    use super::*;
+    fn fixture() -> World {
+        World::new(
+            vec![Region {
+                id: RegionId(1),
+                name: "history".into(),
+                bounds: Extent::new(3, 3, 2).unwrap(),
+            }],
+            vec![],
+        )
+        .unwrap()
+    }
+    fn at(x: i32) -> Location {
+        Location {
+            region: RegionId(1),
+            position: Position { x, y: 1, z: 0 },
+        }
+    }
+    #[test]
+    fn historical_structure_ignores_only_current_allocator_bound() {
+        let mut world = fixture();
+        world.place_door(at(1), 42, true, 1).unwrap();
+        assert!(!world.checkpoint_valid(1));
+        assert!(world.historical_checkpoint_valid());
+        world.doors.insert(
+            at(0),
+            Door {
+                id: 42,
+                open: true,
+                height: 1,
+            },
+        );
+        assert!(!world.historical_checkpoint_valid());
+    }
+    #[test]
+    fn lawful_terrain_and_gravity_edits_are_structural_not_initial_source_equality() {
+        let mut world = fixture();
+        world.set_wall(at(1), true).unwrap();
+        world.set_gravity(RegionId(1), [0, 0, 1]).unwrap();
+        assert!(world.historical_checkpoint_valid());
+        world.region_gravity.insert(RegionId(999), [0, 0, -1]);
+        assert!(!world.historical_checkpoint_valid());
+    }
+}

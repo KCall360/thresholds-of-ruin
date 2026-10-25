@@ -66,6 +66,7 @@ fn expiring_resource_sequence() -> (Game, crate::IntentionId) {
             mana.capacity.base = 0;
             mana.capacity.required_flag = None;
             rules.conditions.push(ConditionDef {
+                detecting_monsters: false,
                 hallucinating: false,
                 id: borrowed.clone(),
                 family: crate::content_ids::ConditionFamilyId::new(borrowed.as_str()).unwrap(),

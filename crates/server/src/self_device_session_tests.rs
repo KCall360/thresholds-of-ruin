@@ -3237,3 +3237,6 @@ mod growth_potions;
 
 #[path = "hallucination_session_tests.rs"]
 mod hallucination;
+
+#[path = "chart_paid_session_tests.rs"]
+mod charts;

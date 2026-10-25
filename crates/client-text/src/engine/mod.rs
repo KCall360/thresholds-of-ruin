@@ -614,7 +614,8 @@ impl Engine {
                 return Ok(Outcome::Passage(narrate::compose(&record)));
             }
         }
-        if let Some(input) = crate::advancement_input(&line)
+        if let Some(input) = crate::chart_input(&line)
+            .or_else(|| crate::advancement_input(&line))
             .or_else(|| crate::strike_input(&line))
             .or_else(|| {
                 if sentences(&line).len() == 1 {
@@ -1340,6 +1341,10 @@ impl Engine {
         input: Input,
     ) -> Result<Flow, Error> {
         let request = match input {
+            Input::Chart(input) => {
+                turn::chart(link, &mut self.chronicler, record, input).await?;
+                return Ok(Flow::Stop);
+            }
             Input::Projectile(ability) => {
                 self.pending = None;
                 self.confirmed_weapon = None;

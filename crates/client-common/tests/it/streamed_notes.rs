@@ -9,7 +9,7 @@ fn snapshot() -> Snapshot {
         "state":{"wizard_game":false,"revision":"0","observation":{
             "actor":"1","self_target":"a_0101010101010101010101010101010101010101010101010101010101010101","tick":"0","position":{"x":1,"y":1,"z":0},
 
-            "places":[],"visible_cells":[{"key":"here","trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"lit":true,"place_hint":false}],"ground_items":[],"inventory":[],"linked_holds":[],"visible_actors":[],"ready":true
+            "places":[],"visible_cells":[{"key":"here","trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"lit":true,"place_hint":false}],"ground_items":[],"inventory":[],"charts":[],"linked_holds":[],"visible_actors":[],"ready":true
         }}
     }"#).unwrap()
 }

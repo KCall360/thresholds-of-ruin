@@ -7,7 +7,7 @@ fn snapshot(hidden: bool) -> Snapshot {
     serde_json::from_value(serde_json::json!({
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":if hidden {"1"} else {"0"}},"actor":"1","branch":"map","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":if hidden {"1"} else {"0"},"observation":{"linked_holds":[],
+        "state":{"wizard_game":false,"revision":if hidden {"1"} else {"0"},"observation":{"charts":[],"linked_holds":[],
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":(0..if hidden {1} else {4}).map(|x|serde_json::json!({
                 "key":x.to_string(),"position":{"x":x,"y":0,"z":0},"wall":x==3,

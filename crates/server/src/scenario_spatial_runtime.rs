@@ -329,6 +329,18 @@ impl Package {
         source_entries: &mut u64,
         terrain: &mut u64,
     ) -> Result<Scope, Failure> {
+        self.authored_scope_geometry(id, seed, source_entries, terrain)
+            .map(|(scope, _)| scope)
+    }
+    // Both ordinary construction and historical audit use this source geometry.
+    // The World is temporary; no second topology authority is retained.
+    fn authored_scope_geometry(
+        &self,
+        id: &str,
+        seed: u64,
+        source_entries: &mut u64,
+        terrain: &mut u64,
+    ) -> Result<(Scope, World), Failure> {
         let definition = self
             .manifest
             .spatial_scopes
@@ -343,7 +355,8 @@ impl Package {
         let refs: Vec<_> = definitions.iter().map(|d| &**d).collect();
         let world = self.spatial_source_world(seed, &refs, terrain)?;
         let source = self.authored_spatial_source(id, definition, &refs, &world, source_entries)?;
-        spatial::compile(&world, &source, &budget()?, &work())
+        let scope = spatial::compile(&world, &source, &budget()?, &work())?;
+        Ok((scope, world))
     }
     pub(crate) fn canonical_generated_spatial(
         &self,
@@ -351,6 +364,15 @@ impl Package {
         seed: u64,
         generated: &crate::generation_recipe::GeneratedGroup,
     ) -> Result<Scope, Failure> {
+        self.generated_scope_geometry(id, seed, generated)
+            .map(|(scope, _)| scope)
+    }
+    fn generated_scope_geometry(
+        &self,
+        id: &str,
+        seed: u64,
+        generated: &crate::generation_recipe::GeneratedGroup,
+    ) -> Result<(Scope, World), Failure> {
         require(
             !self.manifest.spatial_scopes.contains_key(id),
             "Generated/authored spatial identity conflict",
@@ -360,7 +382,16 @@ impl Package {
         let source = spatial::source_from_generated(id, &group, generated, &budget, &work())?;
         let defs: Vec<_> = generated.regions.values().collect();
         let world = self.spatial_source_world(seed, &defs, &mut 0)?;
-        spatial::compile(&world, &source, &budget, &work())
+        let scope = spatial::compile(&world, &source, &budget, &work())?;
+        Ok((scope, world))
+    }
+    fn canonical_scope_geometry(&self, id: &str, seed: u64) -> Result<(Scope, World), Failure> {
+        if self.manifest.spatial_scopes.contains_key(id) {
+            self.authored_scope_geometry(id, seed, &mut 0, &mut 0)
+        } else {
+            let generated = self.generated_group(id, seed)?;
+            self.generated_scope_geometry(id, seed, &generated)
+        }
     }
     pub(crate) fn install_authored_spatial(&self, game: &mut Game) -> Result<(), Failure> {
         let realized: BTreeSet<_> = game
@@ -534,3 +565,10 @@ mod mapping_certificate_tests;
 #[cfg(test)]
 #[path = "scenario_mapping_runtime_tests.rs"]
 mod mapping_runtime_tests;
+
+#[path = "scenario_historical_source_audit.rs"]
+mod historical_source_audit;
+pub(crate) use historical_source_audit::HistoricalSourceAudit;
+#[cfg(test)]
+#[path = "scenario_historical_source_audit_tests.rs"]
+mod historical_source_audit_tests;

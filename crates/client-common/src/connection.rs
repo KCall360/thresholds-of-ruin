@@ -129,6 +129,7 @@ pub struct Connection {
     pub palette: Palette,
     pub inspection_pages: crate::inspection_pages::InspectionPages,
     pub advancement_pages: crate::advancement::AdvancementPages,
+    pub charts: crate::charts::ChartPages,
     external_advancement_presentation: bool,
     role: AccessRole,
     capabilities: ServerCapabilities,
@@ -145,6 +146,7 @@ pub struct Connection {
     pending_presentation: Option<ServerMessage>,
     palette_request: Option<PendingQuery>,
     map_request: Option<(PendingQuery, MapQuery)>,
+    chart_request: Option<(PendingQuery, tor_protocol::chart_pages::ChartQuery)>,
 }
 
 /// Whether a message shows the player a new moment of play. Only these are
@@ -246,6 +248,7 @@ impl Connection {
             palette: Palette::default(),
             inspection_pages: Default::default(),
             advancement_pages: Default::default(),
+            charts: Default::default(),
             external_advancement_presentation: false,
             role,
             capabilities,
@@ -260,6 +263,7 @@ impl Connection {
             pending_presentation: None,
             palette_request: None,
             map_request: None,
+            chart_request: None,
         })
     }
 
@@ -317,6 +321,8 @@ impl Connection {
         self.inspection_pages.clear();
         self.advancement_pages.clear();
         self.state.cancel_map_query();
+        self.charts.clear();
+        self.chart_request = None;
         self.map_request = None;
         if self.recovery.is_none() {
             self.recovery = Some(PendingQuery::new());
@@ -348,6 +354,83 @@ impl Connection {
                 )
                 .await?;
             self.palette_request = None;
+        }
+        Ok(())
+    }
+
+    /// Cancel only local read-only presentation work; no server action is sent.
+    pub fn cancel_charts(&mut self) {
+        let _ = self
+            .charts
+            .request(crate::charts::ChartInput::Cancel, &self.state);
+        self.chart_request = None;
+    }
+
+    fn expire_chart_request(&mut self) {
+        if self
+            .chart_request
+            .as_ref()
+            .is_some_and(|(pending, _)| tokio::time::Instant::now() >= pending.deadline)
+        {
+            if let Some((pending, _)) = self.chart_request.take() {
+                self.charts.reject(&pending.request_id);
+            }
+        }
+    }
+    fn start_chart_request(
+        &mut self,
+        query: tor_protocol::chart_pages::ChartQuery,
+    ) -> Result<(), ConnectionError> {
+        let mut pending = PendingQuery::new();
+        pending.request_id.insert_str(0, "chart-");
+        self.charts.bind(&query, &pending.request_id, &self.state)?;
+        let message = ClientMessage::Request {
+            request_id: pending.request_id.clone(),
+            request: Box::new(Request::Chart {
+                query: query.clone(),
+            }),
+        };
+        if let Err(error) =
+            encode_bounded_json(&message, self.capabilities.max_request_bytes as usize)
+        {
+            self.charts.reject(&pending.request_id);
+            return Err(error.into());
+        }
+        self.chart_request = Some((pending, query));
+        Ok(())
+    }
+    fn prepare_chart_request(&mut self) -> Result<(), ConnectionError> {
+        if !self.is_synchronized() {
+            return Ok(());
+        }
+        self.charts.observe(&self.state);
+        if self
+            .chart_request
+            .as_ref()
+            .is_some_and(|(pending, query)| !self.charts.pending(&pending.request_id, query))
+        {
+            self.chart_request = None;
+        }
+        self.expire_chart_request();
+        if self.chart_request.is_none() {
+            if let Some(query) = self.charts.next_query() {
+                self.start_chart_request(query)?;
+            }
+        }
+        Ok(())
+    }
+    async fn progress_chart_request(&mut self) -> Result<(), ConnectionError> {
+        if let Some((pending, query)) = &mut self.chart_request {
+            pending
+                .send(
+                    &mut self.socket,
+                    Request::Chart {
+                        query: query.clone(),
+                    },
+                    "Chart request timed out",
+                    self.capabilities.max_request_bytes as usize,
+                )
+                .await?;
         }
         Ok(())
     }
@@ -399,6 +482,7 @@ impl Connection {
         &mut self,
     ) -> Result<(ServerMessage, usize), ConnectionError> {
         poll_fn(|cx| {
+            self.expire_chart_request();
             if let Some((pending, _)) = &self.map_request {
                 if tokio::time::Instant::now() >= pending.deadline {
                     self.state.reject_map_query(&pending.request_id);
@@ -417,7 +501,27 @@ impl Connection {
                     return Poll::Ready(result);
                 }
             }
-            if let Some((pending, query)) = &mut self.map_request {
+            if let Some((pending, query)) = &mut self.chart_request {
+                let sent = {
+                    let mut send = std::pin::pin!(pending.send(
+                        &mut self.socket,
+                        Request::Chart {
+                            query: query.clone()
+                        },
+                        "Chart request timed out",
+                        self.capabilities.max_request_bytes as usize
+                    ));
+                    send.as_mut().poll(cx)
+                };
+                if let Poll::Ready(Err(error)) = sent {
+                    if error.is::<QueryExpired>() {
+                        self.charts.reject(&pending.request_id);
+                        self.chart_request = None;
+                    } else {
+                        return Poll::Ready(Err(error));
+                    }
+                }
+            } else if let Some((pending, query)) = &mut self.map_request {
                 let sent = {
                     let mut send = std::pin::pin!(pending.send(
                         &mut self.socket,
@@ -455,6 +559,18 @@ impl Connection {
         }
         self.progress_palette_request().await?;
         self.skipping = false;
+        if let Request::Chart { query } = &request {
+            self.start_chart_request(query.clone())?;
+            let id = self
+                .chart_request
+                .as_ref()
+                .expect("prepared chart request")
+                .0
+                .request_id
+                .clone();
+            self.progress_chart_request().await?;
+            return Ok(id);
+        }
         self.send_request(request).await
     }
 
@@ -521,6 +637,7 @@ impl Connection {
         loop {
             self.progress_recovery().await?;
             self.progress_palette_request().await?;
+            self.prepare_chart_request()?;
             self.prepare_map_request()?;
             if let Some(message) = self.pending_presentation.take() {
                 return Ok(message);
@@ -542,14 +659,26 @@ impl Connection {
                         let deadline = self
                             .map_request
                             .as_ref()
-                            .map(|(pending, _)| pending.deadline);
+                            .map(|(pending, _)| pending.deadline)
+                            .into_iter()
+                            .chain(
+                                self.chart_request
+                                    .as_ref()
+                                    .map(|(pending, _)| pending.deadline),
+                            )
+                            .min();
                         let received = self.receive_with_map_request();
                         if let Some(deadline) = deadline {
                             match tokio::time::timeout_at(deadline, received).await {
                                 Ok(result) => result?,
                                 Err(_) => {
-                                    if let Some((pending, _)) = self.map_request.take() {
-                                        self.state.reject_map_query(&pending.request_id);
+                                    self.expire_chart_request();
+                                    if self.map_request.as_ref().is_some_and(|(pending, _)| {
+                                        tokio::time::Instant::now() >= pending.deadline
+                                    }) {
+                                        if let Some((pending, _)) = self.map_request.take() {
+                                            self.state.reject_map_query(&pending.request_id);
+                                        }
                                     }
                                     continue;
                                 }
@@ -643,6 +772,27 @@ impl Connection {
             {
                 return Err("Private projectile choices sent without current control".into());
             }
+            if let ServerMessage::ChartPage {
+                context,
+                request_id,
+                page,
+            } = &message
+            {
+                if !self.is_synchronized()
+                    || page.base != self.state.observation_base()
+                    || page.branch != *self.state.branch()
+                    || page.context != *self.state.context()
+                    || !self.chart_request.as_ref().is_some_and(|(pending, query)| {
+                        pending.request_id == *request_id && self.charts.pending(request_id, query)
+                    })
+                {
+                    continue;
+                }
+                self.charts
+                    .accept(context, request_id, page, response_bytes, &self.state)?;
+                self.chart_request = None;
+                return Ok(message);
+            }
             if let ServerMessage::MapPage {
                 context,
                 request_id,
@@ -678,6 +828,22 @@ impl Connection {
                 ..
             } = &message
             {
+                if self.chart_request.as_ref().is_some_and(|(pending, query)| {
+                    pending.request_id == *id && self.charts.pending(id, query)
+                }) {
+                    let context = message
+                        .reply_context()
+                        .ok_or("Chart error has no attachment context")?;
+                    self.state
+                        .validate_reply_context(context)
+                        .map_err(|_| "Invalid chart error context")?;
+                    self.charts.reject(id);
+                    self.chart_request = None;
+                    return Ok(message);
+                }
+                if id.starts_with("chart-") {
+                    continue;
+                }
                 if self.map_request.as_ref().is_some_and(|(pending, query)| {
                     pending.request_id == *id && self.state.map_query_pending(id, query)
                 }) {
@@ -780,6 +946,7 @@ impl Connection {
                 }
                 _ => {}
             }
+            self.charts.observe(&self.state);
             match &message {
                 ServerMessage::AdvancementPage {
                     context,
@@ -948,6 +1115,14 @@ async fn receive_sized(
                 {
                     return Err(DecodeError::TooLarge {
                         limit: MAX_MAP_PAGE_BYTES,
+                    }
+                    .into());
+                }
+                if matches!(decoded, ServerMessage::ChartPage { .. })
+                    && text.len() > tor_protocol::chart_pages::MAX_CHART_PAGE_BYTES
+                {
+                    return Err(DecodeError::TooLarge {
+                        limit: tor_protocol::chart_pages::MAX_CHART_PAGE_BYTES,
                     }
                     .into());
                 }

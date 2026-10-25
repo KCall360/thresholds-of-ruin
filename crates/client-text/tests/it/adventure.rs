@@ -26,7 +26,7 @@ fn state() -> StateView {
         "ground_items":[
             {"presentation":null,"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
             {"presentation":null,"supply_reachable":false,"reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
-        ],"inventory":[],"linked_holds":[],"visible_actors":[]}})).unwrap()
+        ],"inventory":[],"charts":[],"linked_holds":[],"visible_actors":[]}})).unwrap()
 }
 
 #[test]
@@ -1027,7 +1027,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
         "wizard_game": false, "revision": "0", "observation": {
             "actor": "1", "self_target":super::actor_target(1),"tick": "0", "position": {"x": 0, "y": 0, "z": 0},
             "ready": true, "places": [], "visible_cells": cells,
-            "ground_items": items, "inventory": [], "linked_holds":[],"visible_actors": actors
+            "ground_items": items, "inventory": [], "charts":[],"linked_holds":[],"visible_actors": actors
         }
     }))
     .unwrap()

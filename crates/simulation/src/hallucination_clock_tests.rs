@@ -13,6 +13,7 @@ pub(crate) fn condition() -> crate::content_ids::ConditionId {
 pub(crate) fn fixture() -> Game {
     crate::perception::contract_fixtures::fixture_with(&[], &[], |document, _, _| {
         document.conditions.push(ConditionDef {
+            detecting_monsters: false,
             hallucinating: true,
             id: condition(),
             family: crate::content_ids::ConditionFamilyId::new("fixture_hallucination").unwrap(),

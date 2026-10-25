@@ -17,7 +17,7 @@ pub(super) fn snapshot(revision: u64) -> Snapshot {
             ],
             "ground_items":[{"presentation":null,"supply_reachable":false,"reachable":false,"position":{"x":1,"y":0,"z":0},"item":{"known_currency":null,"known_supply":null,"id":tor_protocol::ItemTarget::from_digest([8; 32]),"quantity":"1","name":"stone","class":"misc","appearance":"stone","identified":true}}],
             "inventory":[{"known_currency":null,"known_supply":null,"id":tor_protocol::ItemTarget::from_digest([7; 32]),"quantity":"1","name":"stone","class":"misc","appearance":"stone","identified":true}],
-            "linked_holds":[],"visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"position":{"x":1,"y":0,"z":0}}],
+            "charts":[],"linked_holds":[],"visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"position":{"x":1,"y":0,"z":0}}],
             "combat":{"public_plan":null,"hp":"10","max_hp":"10","sequence":null,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0","actors":[],"events":[],"objective":null,"victory":false,"dead":false,"terminal":false},
             "motion":{"velocity":["0","0","0"],"units_per_cell":65536,"displaced":false,"impacted":false},
             "ready":true

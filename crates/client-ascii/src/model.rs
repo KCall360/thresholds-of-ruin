@@ -9,6 +9,8 @@ use tor_protocol::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Key {
+    /// Open read-only detection charts.
+    Charts,
     Advancement,
     Attack,
     Abilities,
@@ -89,6 +91,8 @@ pub enum Input {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Effect {
+    /// Stop only chart hydration; never a gameplay request.
+    CancelCharts,
     None,
     Quit,
     Request(Box<Request>),
@@ -135,6 +139,10 @@ pub struct WeaponDraft {
 }
 
 pub struct App {
+    pub charts_open: bool,
+    pub charts: tor_client_common::charts::ChartPages,
+    pub chart_selected: usize,
+    pub chart_scroll: usize,
     /// Current connection palette, including stale state during recovery.
     pub palette: tor_client_common::Palette,
     pub advancement_open: bool,
@@ -212,6 +220,10 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         Self {
+            charts_open: false,
+            charts: Default::default(),
+            chart_selected: 0,
+            chart_scroll: 0,
             palette: Default::default(),
             advancement_open: false,
             advancement_command: String::new(),
@@ -293,6 +305,9 @@ impl App {
             .as_ref()
             .map(|s| (s.branch().clone(), s.state().revision));
         self.state = Some(state);
+        // A new transport owner has no matching local chart selection.
+        self.charts.clear();
+        self.chart_selected = 0;
         self.clear_magic_selection();
         self.hold_choices.clear();
         self.state_changed(old);
@@ -378,6 +393,11 @@ impl App {
         } else {
             self.state = Some(ClientState::from_snapshot(snapshot)?);
         }
+        // Recovery cancels the transport's chart request. Return to the catalog
+        // only after validation succeeds rather than leaving a loading selection
+        // that has no corresponding worker query.
+        self.charts.clear();
+        self.chart_selected = 0;
         self.hold_choices.clear();
         self.clear_magic_selection();
         self.inspection = None;
@@ -392,6 +412,10 @@ impl App {
     }
 
     fn state_changed(&mut self, old: Option<(BranchId, u64)>) {
+        if let Some(state) = &self.state {
+            self.charts.observe(state);
+        }
+        self.chart_scroll = 0;
         if self
             .projectile_selection
             .as_ref()
@@ -710,6 +734,8 @@ impl App {
     }
 
     pub fn disconnect(&mut self, message: String) {
+        self.charts.clear();
+        self.charts_open = false;
         self.projectile_selection = None;
         self.close_advancement();
         self.travel_cursor = None;
@@ -1714,7 +1740,120 @@ impl App {
         }
     }
 
+    /// A delayed local timeout cannot cancel another view or selected sample.
+    pub fn chart_cancelled(&mut self, query: &chart_pages::ChartQuery) {
+        let Some(state) = &self.state else {
+            return;
+        };
+        if query.context != *state.context()
+            || query.branch != *state.branch()
+            || query.base != state.observation_base()
+            || !state.state().observation.charts.iter().any(|summary| {
+                Some(summary.kind) == self.charts.selected()
+                    && summary.chart.as_ref() == Some(&query.chart)
+            })
+        {
+            return;
+        }
+        self.charts.clear();
+        self.chart_selected = 0;
+        self.chart_scroll = 0;
+        self.status = "Chart page timed out; select the chart again to retry.".into();
+    }
+
+    pub fn chart_lines(&self) -> Vec<String> {
+        let Some(state) = &self.state else {
+            return vec!["No chart view is attached.".into()];
+        };
+        let mut lines = Vec::new();
+        if self.charts.selected().is_none() {
+            for (index, summary) in state.state().observation.charts.iter().enumerate() {
+                lines.push(format!(
+                    "{} {}",
+                    if index == self.chart_selected {
+                        ">"
+                    } else {
+                        " "
+                    },
+                    tor_client_common::charts::kind_label(summary.kind)
+                ));
+            }
+        }
+        lines.extend(self.charts.lines(state));
+        lines
+            .into_iter()
+            .flat_map(|line| crate::wrap(&line, 96))
+            .collect()
+    }
+    fn chart_input(&mut self, input: Input) -> Effect {
+        use tor_client_common::charts::ChartInput as Chart;
+        let Input::Key { key } = input else {
+            return Effect::None;
+        };
+        if matches!(key, Key::Escape | Key::Charts) {
+            self.charts_open = false;
+            if let Some(state) = &self.state {
+                let _ = self.charts.request(Chart::Cancel, state);
+            }
+            return Effect::CancelCharts;
+        }
+        let Some(state) = &self.state else {
+            return Effect::None;
+        };
+        let command = match key {
+            Key::Tab => {
+                self.chart_scroll = 0;
+                Some(Chart::Overview)
+            }
+            Key::Up if self.charts.selected().is_none() => {
+                self.chart_selected = self.chart_selected.saturating_sub(1);
+                None
+            }
+            Key::Down if self.charts.selected().is_none() => {
+                self.chart_selected = (self.chart_selected + 1)
+                    .min(state.state().observation.charts.len().saturating_sub(1));
+                None
+            }
+            Key::Up => {
+                self.chart_scroll = self.chart_scroll.saturating_sub(1);
+                None
+            }
+            Key::Down => {
+                self.chart_scroll =
+                    (self.chart_scroll + 1).min(self.chart_lines().len().saturating_sub(24));
+                None
+            }
+            Key::OlderHistory => {
+                self.chart_scroll = 0;
+                Some(Chart::Previous)
+            }
+            Key::RecentHistory => {
+                self.chart_scroll = 0;
+                Some(Chart::Next)
+            }
+            Key::Enter if self.charts.selected().is_none() => state
+                .state()
+                .observation
+                .charts
+                .get(self.chart_selected)
+                .map(|s| Chart::Select(s.kind)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            match self.charts.request(command, state) {
+                Ok(Some(request)) => return Effect::Request(Box::new(request)),
+                Ok(None) => {}
+                Err(reason) => self.status = reason,
+            }
+        }
+        // Every unhandled key/click is swallowed here, never navigation or an action.
+        Effect::None
+    }
+
     pub fn input(&mut self, input: Input) -> Effect {
+        if self.charts_open {
+            return self.chart_input(input);
+        }
         if self.projectile_selection.is_some() {
             return self.projectile_input(input);
         }
@@ -2279,6 +2418,7 @@ impl App {
                     | Key::OlderHistory
                     | Key::RecentHistory
                     | Key::Look
+                    | Key::Charts
                     | Key::Inventory
                     | Key::Stats
                     | Key::Help
@@ -2553,6 +2693,17 @@ impl App {
                 if let Some(state) = &self.state {
                     self.look_cursor = Some(state.state().observation.position);
                     self.status = "Look at what? hjklyubn moves, . or ; picks, Esc cancels.".into();
+                }
+                Effect::None
+            }
+            Key::Charts => {
+                self.charts_open = true;
+                self.chart_selected = 0;
+                self.chart_scroll = 0;
+                if let Some(state) = &self.state {
+                    let _ = self
+                        .charts
+                        .request(tor_client_common::charts::ChartInput::Overview, state);
                 }
                 Effect::None
             }
@@ -4014,6 +4165,7 @@ pub const HELP: &[&str] = &[
     "z       ability, then target    @      creature stats",
     "Tab     choose weapon for an ability that permits it",
     ". space wait                    i      inventory",
+    "m       read-only detection charts",
     "g , d   pick up / drop          ^P     earlier messages",
     "w t q e equip/remove/drink/eat F2     game history",
     "o c     open / close a door     F5     remembered places",

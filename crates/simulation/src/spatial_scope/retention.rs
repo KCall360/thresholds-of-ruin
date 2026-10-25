@@ -29,6 +29,7 @@ pub(crate) enum PoolState {
     Captured {
         directories: Vec<Shared<Registry>>,
         references: Vec<usize>,
+        snapshot_references: usize,
     },
     Decoded {
         pool: codec::DeferredPool,
@@ -43,14 +44,32 @@ impl Default for PoolState {
         Self::Captured {
             directories: vec![],
             references: vec![],
+            snapshot_references: 0,
         }
     }
 }
 impl PoolState {
+    pub(crate) fn capture_snapshot(&mut self, root: &Shared<Registry>) -> usize {
+        let Self::Captured {
+            snapshot_references,
+            ..
+        } = self
+        else {
+            *self = Self::InvalidCapture;
+            return 0;
+        };
+        if *snapshot_references >= crate::checkpoint::MAX_CHECKPOINT_ROOTS {
+            *self = Self::InvalidCapture;
+            return 0;
+        }
+        *snapshot_references += 1;
+        self.capture(root)
+    }
     pub(crate) fn capture(&mut self, root: &Shared<Registry>) -> usize {
         let Self::Captured {
             directories,
             references,
+            ..
         } = self
         else {
             // Infallible capture cannot grant a complete archive from an
@@ -59,7 +78,7 @@ impl PoolState {
             *self = Self::InvalidCapture;
             return 0;
         };
-        if references.len() >= crate::checkpoint::MAX_CHECKPOINT_ROOTS {
+        if references.len() >= super::codec::MAX_ROOT_REFERENCES {
             *self = Self::InvalidCapture;
             return 0;
         }
@@ -108,6 +127,7 @@ impl Serialize for PoolState {
             Self::Captured {
                 directories,
                 references,
+                ..
             } => {
                 let validated = codec::capture_pool(directories, references.iter().copied())
                     .map_err(|_| serde::ser::Error::custom("invalid spatial capture pool"))?;

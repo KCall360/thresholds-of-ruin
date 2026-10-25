@@ -40,7 +40,7 @@ pub use population::{
 pub use retrieval::UniqueRetrieval;
 #[cfg(test)]
 pub(crate) use spatial_runtime::tests::package as spatial_audit_test_package;
-pub(crate) use spatial_runtime::SpatialAudit;
+pub(crate) use spatial_runtime::{HistoricalSourceAudit, SpatialAudit};
 #[path = "scenario_rules.rs"]
 mod rules_source;
 pub use artifact::export;

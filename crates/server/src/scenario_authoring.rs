@@ -652,6 +652,11 @@ pub enum Effect {
     GainStrength,
     RaiseLevel,
     RoomLight,
+    DetectMonsters {
+        condition: String,
+    },
+    DetectFood,
+    DetectMagic,
     DrainLife,
     CancelSpecials,
     StepSelfOneCell,
@@ -1191,6 +1196,11 @@ impl<'de> Deserialize<'de> for Effect {
             GainStrength {},
             RaiseLevel {},
             RoomLight {},
+            DetectMonsters {
+                condition: String,
+            },
+            DetectFood {},
+            DetectMagic {},
             DrainLife {},
             CancelSpecials {},
             StepSelfOneCell {},
@@ -1301,6 +1311,9 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::GainStrength {} => Self::GainStrength,
             Fields::RaiseLevel {} => Self::RaiseLevel,
             Fields::RoomLight {} => Self::RoomLight,
+            Fields::DetectMonsters { condition } => Self::DetectMonsters { condition },
+            Fields::DetectFood {} => Self::DetectFood,
+            Fields::DetectMagic {} => Self::DetectMagic,
             Fields::DrainLife {} => Self::DrainLife,
             Fields::CancelSpecials {} => Self::CancelSpecials,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
@@ -2351,5 +2364,64 @@ mod held_light_tests {
                 "{malformed}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod detection_item_bridge_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn ordinary_item_bridge_preserves_detection_operands_and_core_reference_constraints() {
+        let mut document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        document.conditions.push(
+            serde_json::from_value(json!({
+                "id":"fixture.detecting","family":"fixture.detecting","name":"Detecting",
+                "detecting_monsters":true,"hallucinating":false,"lifecycle":"timed",
+                "modifiers":[],"stacking":{"kind":"refresh"},"source_scoped":false,
+                "descriptors":[],"capacity":"reject","timing":{"kind":"actor_active",
+                "on_expiry":{"kind":"remove"}},"restrictions":[],"preparation":"preserve"
+            }))
+            .unwrap(),
+        );
+        let rules = tor_simulation::rules::Ruleset::validate(document).unwrap();
+        for value in [
+            json!({"kind":"detect_monsters","condition":"fixture.detecting"}),
+            json!({"kind":"detect_food"}),
+            json!({"kind":"detect_magic"}),
+        ] {
+            let source: ConsumableSpec = serde_json::from_value(json!({
+                "effects":[value.clone()],"discovery":"self_effect","descriptors":[]
+            }))
+            .unwrap();
+            let compiled = source.compile(&rules).unwrap();
+            assert_eq!(
+                serde_json::to_value(&compiled.effects).unwrap(),
+                json!([value])
+            );
+            assert_eq!(
+                compiled.discovery,
+                tor_simulation::ItemDiscovery::SelfEffect
+            );
+        }
+        for condition in ["missing", "braced"] {
+            let source: ConsumableSpec = serde_json::from_value(json!({"effects":[
+                {"kind":"detect_monsters","condition":condition}]}))
+            .unwrap();
+            assert!(
+                source.compile(&rules).is_err(),
+                "condition must exist and carry the detection marker"
+            );
+        }
+        let mixed: ConsumableSpec = serde_json::from_value(json!({"effects":[
+            {"kind":"detect_food"},{"kind":"heal","amount":{"kind":"fixed","amount":1}}
+        ]}))
+        .unwrap();
+        assert!(
+            mixed.compile(&rules).is_err(),
+            "sole chart payload rule belongs to the core validator"
+        );
     }
 }

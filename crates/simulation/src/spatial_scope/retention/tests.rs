@@ -335,3 +335,23 @@ fn canonical_serialization_reprepare_rejects_omitted_history_directory() {
         .unwrap();
     assert_eq!(serde_json::to_value(&decoded).unwrap(), canonical);
 }
+
+#[test]
+fn historical_authority_references_exceed_snapshot_count_without_relaxing_snapshot_limit() {
+    use super::PoolState;
+    use crate::spatial_scope::registry::Registry;
+    use tor_world::Shared;
+    let registry = Shared::new(Registry::default());
+    let mut pool = PoolState::default();
+    let references: Vec<_> = (0..300).map(|_| pool.capture(&registry)).collect();
+    assert!(pool.bind(references.clone().into_iter()).is_ok());
+    let encoded = serde_json::to_vec(&pool).unwrap();
+    let decoded: PoolState = serde_json::from_slice(&encoded).unwrap();
+    assert!(decoded.bind(references.into_iter()).is_ok());
+    assert!(decoded.bind(vec![usize::MAX; 300].into_iter()).is_err());
+    let mut snapshots = PoolState::default();
+    for _ in 0..=crate::checkpoint::MAX_CHECKPOINT_ROOTS {
+        snapshots.capture_snapshot(&registry);
+    }
+    assert!(serde_json::to_vec(&snapshots).is_err());
+}

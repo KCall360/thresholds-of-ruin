@@ -66,6 +66,16 @@ impl Candidate {
     pub fn unavailable(reason: Unavailable) -> Self {
         Self(CandidateValue::Unavailable(reason))
     }
+    /// Reuse an immutable constructor-validated payload; not delivery/learning authority.
+    pub fn from_shared_chart(chart: Arc<Chart>) -> Self {
+        Self(CandidateValue::Available(chart))
+    }
+    pub fn shared_chart(&self) -> Option<&Arc<Chart>> {
+        match &self.0 {
+            CandidateValue::Available(chart) => Some(chart),
+            _ => None,
+        }
+    }
     pub fn chart(&self) -> Option<&Chart> {
         match &self.0 {
             CandidateValue::Available(c) => Some(c),
@@ -106,28 +116,13 @@ impl Candidate {
                 | (crate::scope_projection::Alignment::Inconsistent, None) => {}
                 _ => return Err(Invalid::Position),
             }
-            let mark_bytes = match (&kind, &row.mark) {
-                (Kind::Monsters, Mark::Monster(a)) => {
-                    if !a.valid() {
-                        return Err(Invalid::Appearance);
-                    }
-                    add(
-                        96,
-                        add(
-                            escaped(&a.name)?,
-                            match &a.asset {
-                                Some(asset) => escaped(asset)?,
-                                None => 4,
-                            },
-                        )?,
-                    )?
-                }
-                (Kind::Food, Mark::Food) | (Kind::Magic, Mark::Magic) => 32,
+            match (&kind, &row.mark) {
+                (Kind::Monsters, Mark::Monster(_))
+                | (Kind::Food, Mark::Food)
+                | (Kind::Magic, Mark::Magic) => {}
                 _ => return Err(Invalid::Kind),
-            };
-            // Three signed i64 values at most 20 bytes each, component usize
-            // decimal, full keys/separators/null, and per-occurrence overhead.
-            size = add(size, add(256, mark_bytes)?)?;
+            }
+            size = add(size, delivery::row_encoded_size_bound(row)?)?;
         }
         if components.len() > budget.components
             || rows.len() > budget.rows

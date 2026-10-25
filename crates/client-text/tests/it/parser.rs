@@ -122,7 +122,7 @@ fn sample_state() -> StateView {
                     "identified": true
                 }
             ],
-            "linked_holds":[],"visible_actors": [
+            "charts":[],"linked_holds":[],"visible_actors": [
                 {
                     "id":super::actor_target(2),
                     "name": "goblin scout",

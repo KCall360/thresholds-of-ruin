@@ -70,6 +70,25 @@ When a turn's messages need more than three rows, the last row ends with
 message scrolls away unseen; Esc skips to the end. Spectators can't page, so
 they see the newest rows and are never held.
 
+### Detection charts
+
+Press **m** to view server-disclosed Monster, Food or Magic detection charts.
+The catalog distinguishes live, historical, empty, inactive and unavailable data.
+Capture time belongs to the retained sample; a later empty or unavailable attempt
+is shown separately and does not relabel an old positive sample as current.
+Charts appear only after the whole bounded transfer has been validated. A changed
+view withholds stale rows while a fresh sample loads.
+
+Use Up/Down and Enter to select a chart. Up/Down scrolls its text, Page Up/Page Down
+pages occurrences, Tab returns to the catalog, and Esc closes. Coordinates retain
+all three axes and belong to separate component panels; inconsistent joins show
+positions as unavailable. Identical occurrences remain repeated. Unnamed monster
+marks are simply “creature,” never inferred from a personal identity.
+
+The screen is read-only, including for spectators: clicks, attack, pickup and
+stair keys do not act on chart marks. Closing restores ordinary controls. Charts
+never add sight, ordinary map coverage, item/actor targets or navigation routes.
+
 ### The map
 
 Each column of cells is drawn as what stands at your own height there:
@@ -136,6 +155,7 @@ Automatic server launch and packaged builds are not available; see [status](../s
 | `w` / `t` / `q` / `e` | Equip / remove / drink / eat: always asks, by inventory letter |
 | `F6` / `F12` | Read a carried item / select a device then a direction |
 | `o` / `c`, then a direction | Open / close an adjacent door |
+| `m` | Read-only detection charts: choose with Up/Down and Enter; Tab returns to the catalog; Page Up/Page Down page occurrences; Esc closes |
 | `i` | Inventory: letters, what's worn or in hand, and known equipment numbers |
 | `@` (Shift + 2) | Personal creature stats: attributes, skills, defenses, resources, talents and granted abilities. Up/Down scroll, Page Up/Down page; Esc or `@` closes |
 | `;` | Look: move a cursor, then `.`, `;` or Enter describes the cell without taking time |

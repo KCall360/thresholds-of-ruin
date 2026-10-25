@@ -106,6 +106,12 @@ pub enum PlannedEffect {
     TeleportRandom,
     TeleportToRayOrigin,
     RoomLight,
+    DetectMonsters {
+        id: ConditionId,
+        turn_ticks: u64,
+    },
+    DetectFood,
+    DetectMagic,
     DrainLife,
     GainStrength,
     RaiseLevel,
@@ -183,6 +189,9 @@ impl PlannedEffect {
     pub(crate) fn recipient(&self) -> crate::rules::EffectRecipient {
         match self {
             Self::RoomLight
+            | Self::DetectMonsters { .. }
+            | Self::DetectFood
+            | Self::DetectMagic
             | Self::DrainLife
             | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises { .. }
@@ -935,6 +944,10 @@ fn read_hit_die_pools<'de, D: serde::Deserializer<'de>>(
 pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Ruleset) -> bool {
     effects.len() <= crate::limits::EFFECTS_PER_BRANCH
         && (effects.len() == 1
+            || !effects
+                .iter()
+                .any(|effect| crate::detection_lifecycle::planned_kind(effect).is_some()))
+        && (effects.len() == 1
             || !effects.iter().any(|effect| {
                 matches!(
                     effect,
@@ -965,11 +978,19 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             | PlannedEffect::TeleportRandom
             | PlannedEffect::TeleportToRayOrigin
             | PlannedEffect::RoomLight
+            | PlannedEffect::DetectFood
+            | PlannedEffect::DetectMagic
             | PlannedEffect::DrainLife
             | PlannedEffect::GainStrength
             | PlannedEffect::RaiseLevel
             | PlannedEffect::CancelSpecials
             | PlannedEffect::ArrestDescent => true,
+            PlannedEffect::DetectMonsters { id, turn_ticks } => {
+                crate::detection_lifecycle::duration(*turn_ticks).is_some()
+                    && rules
+                        .condition(id)
+                        .is_some_and(|condition| condition.detecting_monsters)
+            }
             PlannedEffect::HasteDose {
                 id,
                 rest,
@@ -1119,6 +1140,12 @@ pub(super) fn effects_match_definition_scoped(
                         && rest == actual_rest
                         && super::valid_haste_turn_ticks(*turn_ticks)
                 }
+                (
+                    Effect::DetectMonsters { condition },
+                    PlannedEffect::DetectMonsters { id, turn_ticks },
+                ) => condition == id && crate::detection_lifecycle::duration(*turn_ticks).is_some(),
+                (Effect::DetectFood, PlannedEffect::DetectFood)
+                | (Effect::DetectMagic, PlannedEffect::DetectMagic) => true,
                 (Effect::TeleportRandom, PlannedEffect::TeleportRandom)
                 | (Effect::TeleportToRayOrigin, PlannedEffect::TeleportToRayOrigin)
                 | (Effect::RoomLight, PlannedEffect::RoomLight)
@@ -1586,6 +1613,21 @@ impl Game {
                 Effect::TeleportRandom => Ok(PlannedEffect::TeleportRandom),
                 Effect::TeleportToRayOrigin => Ok(PlannedEffect::TeleportToRayOrigin),
                 Effect::RoomLight => Ok(PlannedEffect::RoomLight),
+                Effect::DetectMonsters { condition } => {
+                    let turn_ticks = self
+                        .actors
+                        .get(&actor)
+                        .ok_or_else(invalid)?
+                        .turn_ticks
+                        .get();
+                    crate::detection_lifecycle::duration(turn_ticks).ok_or_else(invalid)?;
+                    Ok(PlannedEffect::DetectMonsters {
+                        id: condition.clone(),
+                        turn_ticks,
+                    })
+                }
+                Effect::DetectFood => Ok(PlannedEffect::DetectFood),
+                Effect::DetectMagic => Ok(PlannedEffect::DetectMagic),
                 Effect::DrainLife => Ok(PlannedEffect::DrainLife),
                 Effect::GainStrength => Ok(PlannedEffect::GainStrength),
                 Effect::RaiseLevel => Ok(PlannedEffect::RaiseLevel),
@@ -1820,6 +1862,12 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             TeleportRandom {},
             TeleportToRayOrigin {},
             RoomLight {},
+            DetectMonsters {
+                id: ConditionId,
+                turn_ticks: u64,
+            },
+            DetectFood {},
+            DetectMagic {},
             DrainLife {},
             GainStrength {},
             RaiseLevel {},
@@ -1911,6 +1959,9 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::TeleportRandom {} => Self::TeleportRandom,
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
             Fields::RoomLight {} => Self::RoomLight,
+            Fields::DetectMonsters { id, turn_ticks } => Self::DetectMonsters { id, turn_ticks },
+            Fields::DetectFood {} => Self::DetectFood,
+            Fields::DetectMagic {} => Self::DetectMagic,
             Fields::DrainLife {} => Self::DrainLife,
             Fields::GainStrength {} => Self::GainStrength,
             Fields::RaiseLevel {} => Self::RaiseLevel,
@@ -1975,6 +2026,9 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             },
         };
         let valid = match &effect {
+            Self::DetectMonsters { turn_ticks, .. } => {
+                crate::detection_lifecycle::duration(*turn_ticks).is_some()
+            }
             Self::HasteDose {
                 id,
                 rest,

@@ -389,6 +389,17 @@ pub enum ResolvedEffect {
     RoomLight {
         changed: bool,
     },
+    DetectMonsters {
+        id: ConditionId,
+        duration: u64,
+        changed: bool,
+    },
+    DetectFood {
+        changed: bool,
+    },
+    DetectMagic {
+        changed: bool,
+    },
     DrainLife {
         changed: bool,
     },
@@ -496,6 +507,9 @@ impl ResolvedEffect {
     pub(crate) fn recipient(&self) -> EffectRecipient {
         match self {
             Self::RoomLight { .. }
+            | Self::DetectMonsters { .. }
+            | Self::DetectFood { .. }
+            | Self::DetectMagic { .. }
             | Self::DrainLife { .. }
             | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises { .. }
@@ -514,6 +528,9 @@ impl ResolvedEffect {
             Self::Theft { quantity, .. } => *quantity > 0,
             Self::Translate { result, .. } | Self::Relocate { result, .. } => result.changed(),
             Self::RoomLight { changed }
+            | Self::DetectMonsters { changed, .. }
+            | Self::DetectFood { changed }
+            | Self::DetectMagic { changed }
             | Self::DrainLife { changed }
             | Self::CancelSpecials { changed } => *changed,
             Self::GainStrength { change } => *change != super::StrengthGain::Unchanged,
@@ -559,7 +576,11 @@ impl ResolvedEffect {
             | Self::ApplyLinkedHold { .. }
             | Self::CorrodeArmor { .. }
             | Self::AlterEquipment { .. } => self.clone(),
-            Self::RoomLight { .. } | Self::DrainLife { .. } => self.clone(),
+            Self::RoomLight { .. }
+            | Self::DrainLife { .. }
+            | Self::DetectMonsters { .. }
+            | Self::DetectFood { .. }
+            | Self::DetectMagic { .. } => self.clone(),
             Self::CancelSpecials { .. } => Self::CancelSpecials {
                 changed: creature.cancel_specials()?,
             },
@@ -1386,6 +1407,14 @@ pub(super) fn resolve_batch<'a>(
                 ResolvedEffect::Relocate { mode, result }
             }
             PlannedEffect::RoomLight => ResolvedEffect::RoomLight { changed: false },
+            PlannedEffect::DetectMonsters { id, turn_ticks } => ResolvedEffect::DetectMonsters {
+                id: id.clone(),
+                duration: crate::detection_lifecycle::duration(*turn_ticks)
+                    .ok_or(crate::conditions::ConditionError::InvalidDuration)?,
+                changed: false,
+            },
+            PlannedEffect::DetectFood => ResolvedEffect::DetectFood { changed: false },
+            PlannedEffect::DetectMagic => ResolvedEffect::DetectMagic { changed: false },
             PlannedEffect::DrainLife => ResolvedEffect::DrainLife { changed: false },
             PlannedEffect::CancelSpecials => ResolvedEffect::CancelSpecials { changed: false },
             PlannedEffect::GainStrength => ResolvedEffect::GainStrength {
@@ -1724,6 +1753,17 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             RoomLight {
                 changed: bool,
             },
+            DetectMonsters {
+                id: ConditionId,
+                duration: u64,
+                changed: bool,
+            },
+            DetectFood {
+                changed: bool,
+            },
+            DetectMagic {
+                changed: bool,
+            },
             DrainLife {
                 changed: bool,
             },
@@ -1820,6 +1860,17 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Relocate { mode, result } => Self::Relocate { mode, result },
             Fields::RoomLight { changed } => Self::RoomLight { changed },
+            Fields::DetectMonsters {
+                id,
+                duration,
+                changed,
+            } => Self::DetectMonsters {
+                id,
+                duration,
+                changed,
+            },
+            Fields::DetectFood { changed } => Self::DetectFood { changed },
+            Fields::DetectMagic { changed } => Self::DetectMagic { changed },
             Fields::DrainLife { changed } => Self::DrainLife { changed },
             Fields::CancelSpecials { changed } => Self::CancelSpecials { changed },
             Fields::GainStrength { change } => Self::GainStrength { change },
@@ -1865,6 +1916,12 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 qualification,
             },
         };
+        if matches!(&effect, Self::DetectMonsters { duration, .. } if !crate::detection_lifecycle::valid_resolved_duration(*duration))
+        {
+            return Err(serde::de::Error::custom(
+                "invalid monster detection duration",
+            ));
+        }
         if matches!(&effect, Self::HasteDose { id, rest, outcome } if id == rest || !outcome.valid())
         {
             return Err(serde::de::Error::custom("invalid Haste dose operands"));

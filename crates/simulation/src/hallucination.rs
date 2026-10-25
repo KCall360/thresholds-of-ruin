@@ -164,4 +164,4 @@ impl Game {
 
 #[cfg(test)]
 #[path = "hallucination_view_tests.rs"]
-mod tests;
+pub(crate) mod tests;

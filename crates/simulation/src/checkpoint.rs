@@ -27,6 +27,7 @@ pub enum PersistError {
     },
     Navigation,
     ExploredMap,
+    ChartHistory,
     /// Includes missing catalog references and invalid mutable creature state.
     CreatureRecord {
         actor: ActorId,
@@ -78,6 +79,7 @@ pub struct Snapshot {
     world: usize,
     navigation: BTreeMap<ActorId, usize>,
     explored_maps: usize,
+    chart_history: usize,
     #[serde(with = "crate::spatial_scope::retention::root_index")]
     spatial: usize,
     seed: u64,
@@ -177,6 +179,7 @@ impl<'de> Deserialize<'de> for RetrievalSnapshot {
 #[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SharedState {
+    chart_history: crate::chart_history::StoredPool,
     spatial: crate::spatial_scope::retention::PoolState,
     #[serde(with = "tor_world::checkpoint_worlds")]
     worlds: Vec<World>,
@@ -275,11 +278,54 @@ impl SharedState {
         &mut self,
         snapshots: &[&Snapshot],
     ) -> Result<(), PersistError> {
+        if snapshots.len() > MAX_CHECKPOINT_ROOTS {
+            return Err(PersistError::Spatial);
+        }
+        let roots: Vec<_> = snapshots
+            .iter()
+            .map(|snapshot| snapshot.spatial)
+            .chain(self.chart_history.spatial_indices())
+            .collect();
         self.spatial
-            .prepare_serialization(snapshots.iter().map(|snapshot| snapshot.spatial))
+            .prepare_serialization(roots.into_iter())
             .map_err(|_| PersistError::Spatial)
     }
 
+    pub fn chart_history_references_valid<'a>(
+        &self,
+        snapshots: impl IntoIterator<Item = &'a Snapshot>,
+    ) -> bool {
+        let snapshots: Vec<_> = snapshots.into_iter().collect();
+        if snapshots.iter().any(|snapshot| {
+            let Some(actors) = self.actors.get(snapshot.actors) else {
+                return true;
+            };
+            self.chart_history
+                .owner_ids(snapshot.chart_history)
+                .is_none_or(|mut owners| owners.any(|id| !actors.contains_key(&id)))
+        }) {
+            return false;
+        }
+        self.chart_history
+            .references_valid(snapshots.iter().map(|s| (s.chart_history, s.tick)))
+    }
+    pub fn world_references_valid<'a>(
+        &self,
+        snapshots: impl IntoIterator<Item = &'a Snapshot>,
+    ) -> bool {
+        let snapshots: Vec<_> = snapshots.into_iter().collect();
+        if !self.chart_history_references_valid(snapshots.iter().copied()) {
+            return false;
+        }
+        let used: BTreeSet<_> = snapshots
+            .iter()
+            .map(|s| s.world)
+            .chain(self.chart_history.world_indices())
+            .collect();
+        used.len() == self.worlds.len()
+            && used.iter().all(|index| *index < self.worlds.len())
+            && !self.worlds.is_empty()
+    }
     pub fn valid_world_count(&self, maximum: usize) -> bool {
         !self.worlds.is_empty() && self.worlds.len() <= maximum
     }
@@ -333,6 +379,8 @@ pub struct RestoreContext<'a> {
     spatial_roots: BTreeMap<usize, Shared<crate::spatial_scope::registry::Registry>>,
     content: Arc<Content>,
     worlds: BTreeMap<usize, Shared<World>>,
+    chart_history: BTreeMap<usize, Shared<crate::chart_history::HistoricalChart>>,
+    validated_chart_worlds: BTreeSet<usize>,
     navigation: BTreeMap<usize, Shared<Navigation>>,
     /// Validation is reusable only for these immutable decoded pool entries.
     validated_navigation: BTreeSet<(usize, usize)>,
@@ -356,10 +404,21 @@ impl<'a> RestoreContext<'a> {
         if self.spatial.is_some() || snapshots.len() > MAX_CHECKPOINT_ROOTS {
             return Err(PersistError::Spatial);
         }
+        if !self
+            .shared
+            .chart_history_references_valid(snapshots.iter().copied())
+        {
+            return Err(PersistError::ChartHistory);
+        }
+        let roots: Vec<_> = snapshots
+            .iter()
+            .map(|s| s.spatial)
+            .chain(self.shared.chart_history.spatial_indices())
+            .collect();
         let pool = self
             .shared
             .spatial
-            .bind(snapshots.iter().map(|s| s.spatial))
+            .bind(roots.into_iter())
             .map_err(|_| PersistError::Spatial)?;
         self.spatial = Some(pool);
         Ok(())
@@ -388,6 +447,8 @@ impl<'a> RestoreContext<'a> {
             spatial_roots: BTreeMap::new(),
             content,
             worlds: BTreeMap::new(),
+            chart_history: BTreeMap::new(),
+            validated_chart_worlds: BTreeSet::new(),
             navigation: BTreeMap::new(),
             validated_navigation: BTreeSet::new(),
             validated_population_plans: BTreeSet::new(),
@@ -481,6 +542,40 @@ impl<'a> RestoreContext<'a> {
         Some(navigation)
     }
 
+    fn chart_history(
+        &mut self,
+        index: usize,
+        actors: usize,
+        tick: u64,
+    ) -> Result<Shared<BTreeMap<ActorId, crate::chart_history::Owner>>, PersistError> {
+        let shared = self.shared;
+        let actors = shared
+            .actors
+            .get(actors)
+            .ok_or(PersistError::ChartHistory)?;
+        let mut cache = std::mem::take(&mut self.chart_history);
+        let mut validated_worlds = std::mem::take(&mut self.validated_chart_worlds);
+        let result = shared.chart_history.restore(
+            index,
+            tick,
+            |id| actors.contains_key(&id),
+            &mut cache,
+            &mut validated_worlds,
+            |world, spatial| {
+                Ok(crate::chart_history::AcquisitionAuthority {
+                    world: self
+                        .world(world)
+                        .ok_or(crate::chart_history::Error::Reference)?,
+                    registry: self
+                        .spatial_root(spatial)
+                        .map_err(|_| crate::chart_history::Error::Reference)?,
+                })
+            },
+        );
+        self.chart_history = cache;
+        self.validated_chart_worlds = validated_worlds;
+        result.map_err(|_| PersistError::ChartHistory)
+    }
     fn explored_maps(
         &mut self,
         index: usize,
@@ -625,6 +720,11 @@ impl Game {
                 worlds.push((*self.world).clone());
                 worlds.len() - 1
             });
+        let chart_history = shared.chart_history.capture(
+            &self.chart_history,
+            &mut shared.worlds,
+            &mut shared.spatial,
+        );
         let actor_records: BTreeMap<_, _> = self
             .actors
             .iter()
@@ -646,7 +746,8 @@ impl Game {
             })
             .collect();
         Snapshot {
-            spatial: shared.spatial.capture(&self.spatial_registry),
+            spatial: shared.spatial.capture_snapshot(&self.spatial_registry),
+            chart_history,
             combat: self.combat.clone(),
             rules_rng: self.rules_rng,
             events: self.event_log.clone(),
@@ -787,6 +888,11 @@ impl Game {
                 snapshot.explored_maps,
                 snapshot.actors,
                 snapshot.world,
+            )?,
+            chart_history: context.chart_history(
+                snapshot.chart_history,
+                snapshot.actors,
+                snapshot.tick,
             )?,
             map_validation: Default::default(),
             spatial_registry: context.spatial_root(snapshot.spatial)?,

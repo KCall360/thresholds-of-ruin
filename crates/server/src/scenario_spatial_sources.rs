@@ -122,7 +122,14 @@ impl Sources<'_> {
     fn author_effects(&mut self, values: &[Effect]) {
         for value in values {
             match value {
-                Effect::RoomLight | Effect::DrainLife => self.light = true,
+                Effect::RoomLight
+                | Effect::DrainLife
+                | Effect::DetectFood
+                | Effect::DetectMagic => self.light = true,
+                Effect::DetectMonsters { condition } => {
+                    self.light = true;
+                    self.add(Source::Condition(condition.clone()));
+                }
                 Effect::CancelSpecials => self.cancellation = true,
                 Effect::HasteDose { condition, rest } => {
                     self.add(Source::Condition(condition.clone()));
@@ -141,7 +148,14 @@ impl Sources<'_> {
     fn effects(&mut self, values: &[r::Effect]) {
         for value in values {
             match value {
-                r::Effect::RoomLight | r::Effect::DrainLife => self.light = true,
+                r::Effect::RoomLight
+                | r::Effect::DrainLife
+                | r::Effect::DetectFood
+                | r::Effect::DetectMagic => self.light = true,
+                r::Effect::DetectMonsters { condition } => {
+                    self.light = true;
+                    self.add(Source::Condition(condition.to_string()));
+                }
                 r::Effect::CancelSpecials => self.cancellation = true,
                 r::Effect::HasteDose { condition, rest } => {
                     self.add(Source::Condition(condition.to_string()));
@@ -367,7 +381,12 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
                     .any(|effect| {
                         matches!(
                             effect,
-                            r::Effect::RoomLight | r::Effect::DrainLife | r::Effect::CancelSpecials
+                            r::Effect::RoomLight
+                                | r::Effect::DrainLife
+                                | r::Effect::CancelSpecials
+                                | r::Effect::DetectMonsters { .. }
+                                | r::Effect::DetectFood
+                                | r::Effect::DetectMagic
                         )
                     })
             }),
@@ -377,7 +396,12 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
                 .any(|effect| {
                     matches!(
                         effect,
-                        r::Effect::RoomLight | r::Effect::DrainLife | r::Effect::CancelSpecials
+                        r::Effect::RoomLight
+                            | r::Effect::DrainLife
+                            | r::Effect::CancelSpecials
+                            | r::Effect::DetectMonsters { .. }
+                            | r::Effect::DetectFood
+                            | r::Effect::DetectMagic
                     )
                 }),
             r::StrikeSource::SelectedMelee | r::StrikeSource::Projectile { .. } => false,
@@ -390,7 +414,12 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
             .any(|effect| {
                 matches!(
                     effect,
-                    Effect::RoomLight | Effect::DrainLife | Effect::CancelSpecials
+                    Effect::RoomLight
+                        | Effect::DrainLife
+                        | Effect::CancelSpecials
+                        | Effect::DetectMonsters { .. }
+                        | Effect::DetectFood
+                        | Effect::DetectMagic
                 )
             })
     });
@@ -404,7 +433,12 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
                 .any(|effect| {
                     matches!(
                         effect,
-                        Effect::RoomLight | Effect::DrainLife | Effect::CancelSpecials
+                        Effect::RoomLight
+                            | Effect::DrainLife
+                            | Effect::CancelSpecials
+                            | Effect::DetectMonsters { .. }
+                            | Effect::DetectFood
+                            | Effect::DetectMagic
                     )
                 })
         })
@@ -579,6 +613,99 @@ mod tests {
             .archetypes
             .insert("fixture.room_light".into(), item);
         package
+    }
+
+    #[test]
+    fn detection_imports_require_spatial_scope_only_when_reachable_and_follow_the_marker() {
+        for mut effect in [
+            serde_json::json!({"kind":"detect_monsters","condition":"fixture.detecting"}),
+            serde_json::json!({"kind":"detect_food"}),
+            serde_json::json!({"kind":"detect_magic"}),
+        ] {
+            let mut package = fixture();
+            let mut document = package.rules().unwrap().document().clone();
+            let marker: r::ConditionDef = serde_json::from_value(serde_json::json!({
+                "id":"fixture.detecting","family":"fixture.detecting","name":"Detecting",
+                "detecting_monsters":true,"hallucinating":false,"lifecycle":"timed",
+                "modifiers":[],"stacking":{"kind":"refresh"},"source_scoped":false,
+                "descriptors":[],"capacity":"reject","timing":{"kind":"actor_active",
+                "on_expiry":{"kind":"remove"}},"restrictions":[],"preparation":"preserve"
+            }))
+            .unwrap();
+            let condition_id =
+                if let Some(existing) = document.conditions.iter().find(|c| c.detecting_monsters) {
+                    existing.id.to_string()
+                } else {
+                    document.conditions.push(marker);
+                    "fixture.detecting".to_owned()
+                };
+            if effect["kind"] == "detect_monsters" {
+                effect["condition"] = serde_json::json!(condition_id);
+            }
+            let ability = document
+                .abilities
+                .iter_mut()
+                .find(|a| a.id.as_str() == "fixture.room_light")
+                .unwrap();
+            let r::StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                unreachable!()
+            };
+            strikes[0].on_success = vec![serde_json::from_value(effect.clone()).unwrap()];
+            r::Ruleset::validate(document.clone()).unwrap();
+            package.rules_document =
+                crate::storage::schema::scenario::encode_rules_document(&document).unwrap();
+            assert!(
+                !spatial_effect_enabled(&package).unwrap(),
+                "unused import is not a source root"
+            );
+            package.manifest.characters[0]
+                .loadout
+                .push(CharacterLoadout {
+                    archetype: "fixture.room_light".into(),
+                    quantity: 1,
+                    equipped_slot: None,
+                });
+            assert!(
+                spatial_effect_enabled(&package).unwrap(),
+                "reachable detection requires complete scope membership"
+            );
+            // Source closure tracks the condition, but does not invent Mapping
+            // certification as a prerequisite for Food/Monster/Magic census.
+            let rules = package.rules().unwrap();
+            let mut graph = Sources {
+                package: &package,
+                rules: rules.document(),
+                pending: vec![],
+                seen: BTreeSet::new(),
+                light: false,
+                cancellation: false,
+            };
+            let authored: Effect = serde_json::from_value(effect.clone()).unwrap();
+            graph.author_effects(&[authored]);
+            assert!(graph.light);
+            assert_eq!(
+                graph
+                    .seen
+                    .contains(&Source::Condition(condition_id.clone())),
+                effect["kind"] == "detect_monsters"
+            );
+            let mut graph = Sources {
+                package: &package,
+                rules: rules.document(),
+                pending: vec![],
+                seen: BTreeSet::new(),
+                light: false,
+                cancellation: false,
+            };
+            graph.effects(&[serde_json::from_value(effect.clone()).unwrap()]);
+            assert!(graph.light);
+            assert_eq!(
+                graph
+                    .seen
+                    .contains(&Source::Condition(condition_id.clone())),
+                effect["kind"] == "detect_monsters"
+            );
+        }
     }
 
     #[test]

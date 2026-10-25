@@ -782,7 +782,7 @@ impl Game {
     pub(crate) fn resolve_consumed_item(
         &mut self,
         preparation: &crate::combat::Preparation,
-    ) -> Result<Outcome, GameError> {
+    ) -> Result<crate::detection_lifecycle::ItemCompletion, GameError> {
         let plan = &preparation.plan;
         let intention = preparation.intention;
         if !matches!(
@@ -859,6 +859,6 @@ impl Game {
         )?;
         let outcome = self.published_resolution(receipt)?.clone();
         self.record_survival(plan.target(), &flow);
-        Ok(outcome)
+        crate::detection_lifecycle::ItemCompletion::new(outcome, receipt.chart_completion())
     }
 }

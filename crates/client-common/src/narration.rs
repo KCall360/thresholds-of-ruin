@@ -657,6 +657,7 @@ mod tests {
             visible_cells: Vec::new(),
             ground_items: Vec::new(),
             inventory: Vec::new(),
+            charts: Vec::new(),
             linked_holds: Vec::new(),
             visible_actors: Vec::new(),
             ready: true,

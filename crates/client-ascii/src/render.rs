@@ -22,7 +22,7 @@ const GOLD: u32 = 0xedc579;
 const DANGER: u32 = 0xef958c;
 
 /// The key hint under the status lines.
-const HINT: &str = "? help  hjklyubn move/run  < > stairs  _ travel  ; look  i inventory  @ stats  z abilities  g pick up  a attack  ^P messages";
+const HINT: &str = "? help  hjklyubn move/run  < > stairs  _ travel  ; look  i inventory  m charts  @ stats  z abilities  g pick up  a attack  ^P messages";
 
 /// The map as drawn: one tile per column, current and remembered.
 pub fn map_tiles(
@@ -288,6 +288,22 @@ impl Canvas {
     }
 
     fn draw_screens(&mut self, app: &App) {
+        if app.charts_open {
+            self.screen(
+                "DETECTION CHARTS — READ ONLY",
+                "UP/DOWN choose or scroll   ENTER load   TAB catalog   PgUp/PgDn rows   ESC closes",
+            );
+            for (i, line) in app
+                .chart_lines()
+                .iter()
+                .skip(app.chart_scroll)
+                .take(24)
+                .enumerate()
+            {
+                self.text(72, 156 + i * 22, line, TEXT, 1, 96);
+            }
+            return;
+        }
         if let Some(state) = &app.state {
             let combat = state.state().observation.combat.as_ref();
             if let Some(combat) = combat.filter(|c| c.terminal && !app.end_dismissed) {

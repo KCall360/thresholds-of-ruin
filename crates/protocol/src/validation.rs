@@ -12,6 +12,7 @@ pub enum InvalidState {
     DuplicatePlace,
     InvalidItem,
     InvalidPresentation,
+    InvalidChart,
     ConflictingItemLocation,
     InvalidCombat,
     InvalidMotion,
@@ -59,6 +60,9 @@ impl StateView {
     /// portal graph, or hidden state are needed to check these invariants.
     pub fn validate(&self) -> Result<(), InvalidState> {
         let o = &self.observation;
+        if crate::chart_pages::validate_summaries(&o.charts).is_err() {
+            return Err(InvalidState::InvalidChart);
+        }
         if o.linked_holds.len() > crate::MAX_LINKED_HOLDS
             || !unique(o.linked_holds.iter().map(|hold| hold.target))
             || o.linked_holds.iter().any(|hold| {

@@ -927,13 +927,17 @@ impl<'de> Visitor<'de> for LabelSeed<'_> {
 }
 
 use super::registry::Registry;
+/// Every actual root reference is charged 21 bytes by the existing codec meter.
+/// Historical acquisition roots join snapshot roots; this is archive-derived,
+/// not a second fixed history count limit.
+pub(crate) const MAX_ROOT_REFERENCES: usize = crate::checkpoint::ARCHIVE_BYTE_LIMIT / 21;
 
 pub(crate) fn capture_pool(
     directories: &[Shared<Registry>],
     references: impl ExactSizeIterator<Item = usize>,
 ) -> Result<ValidatedPool, PoolError> {
     use std::collections::BTreeMap;
-    let max = crate::checkpoint::MAX_CHECKPOINT_ROOTS;
+    let max = MAX_ROOT_REFERENCES;
     if directories.len() > max || references.len() > max {
         return Err(PoolError::Capacity);
     }
@@ -1057,7 +1061,7 @@ impl DeferredCandidate<'_> {
         self,
         roots: impl ExactSizeIterator<Item = usize>,
     ) -> Result<ValidatedPool, PoolError> {
-        if roots.len() > crate::checkpoint::MAX_CHECKPOINT_ROOTS {
+        if roots.len() > MAX_ROOT_REFERENCES {
             return Err(PoolError::Capacity);
         }
         let count = u32::try_from(roots.len()).map_err(|_| PoolError::Capacity)?;
@@ -1094,7 +1098,7 @@ impl<'de> DeserializeSeed<'de> for DeferredSeed {
         let limits = DecodeLimits {
             charge_bytes: crate::checkpoint::ARCHIVE_BYTE_LIMIT as u64,
             root_references: 0,
-            directories: crate::checkpoint::MAX_CHECKPOINT_ROOTS as u32,
+            directories: MAX_ROOT_REFERENCES as u32,
         };
         PoolSeed(limits)
             .deserialize(d)

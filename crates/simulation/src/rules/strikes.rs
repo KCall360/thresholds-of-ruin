@@ -251,6 +251,24 @@ pub fn validate_strike_shapes(strikes: &[StrikeDef]) -> Result<(), RulesetError>
         strikes[0].offset == 0 && strikes[0].unlock.is_none(),
         "first_strike",
     )?;
+    let detection = strikes
+        .iter()
+        .flat_map(|strike| {
+            strike
+                .on_success
+                .iter()
+                .chain(&strike.on_failure)
+                .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+        })
+        .any(crate::detection_lifecycle::is_effect);
+    bound(
+        !detection
+            || matches!(strikes, [StrikeDef { offset: 0, unlock: None, check: None,
+        on_success, on_failure, riders, .. }] if on_success.len() == 1
+            && on_success.iter().all(crate::detection_lifecycle::is_effect)
+            && on_failure.is_empty() && riders.is_empty()),
+        "detection_sole_checkless_strike",
+    )?;
     let mut previous = 0;
     let mut effects = 0usize;
     let mut descriptors = 0usize;

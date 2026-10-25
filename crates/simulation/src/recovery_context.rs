@@ -325,6 +325,7 @@ mod tests {
         let mut document = crate::test_creatures::ruleset().document().clone();
         let condition = ConditionId::new("borrowed_vitality").unwrap();
         document.conditions.push(ConditionDef {
+            detecting_monsters: false,
             hallucinating: false,
             id: condition.clone(),
             family: ConditionFamilyId::new("borrowed_vitality").unwrap(),

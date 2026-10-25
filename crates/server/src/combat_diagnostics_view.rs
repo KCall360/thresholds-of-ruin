@@ -123,7 +123,12 @@ fn record(
                 .filter_map(|effect| {
                     Some(match effect {
                         s::abilities::ResolvedEffect::Theft { .. }
-                        | s::abilities::ResolvedEffect::AlterEquipment { .. } => return None,
+                        | s::abilities::ResolvedEffect::AlterEquipment { .. }
+                        // Charts have their own owner-scoped publication. Generic combat
+                        // diagnostics must not create a second detection disclosure path.
+                        | s::abilities::ResolvedEffect::DetectMonsters { .. }
+                        | s::abilities::ResolvedEffect::DetectFood { .. }
+                        | s::abilities::ResolvedEffect::DetectMagic { .. } => return None,
                         s::abilities::ResolvedEffect::CorrodeArmor { amount, .. } => {
                             p::DiagnosticEffect::CorrodeArmor {
                                 target,
@@ -600,6 +605,29 @@ mod restorable_loss_diagnostic_tests {
                     {"type":"drain_life","target":"1","changed":amount != 0},
                     {"type":"direct_health_loss","target":"2","amount":amount.to_string()}
                 ])
+            );
+        }
+    }
+
+    #[test]
+    fn detection_results_do_not_add_a_second_combat_diagnostic_disclosure_path() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        for changed in [false, true] {
+            let source = diagnostic(vec![
+                s::abilities::ResolvedEffect::DetectMonsters {
+                    id: s::content_ids::ConditionId::new("fixture.detecting").unwrap(),
+                    duration: 2000,
+                    changed,
+                },
+                s::abilities::ResolvedEffect::DetectFood { changed },
+                s::abilities::ResolvedEffect::DetectMagic { changed },
+                s::abilities::ResolvedEffect::Damage { amount: 3 },
+            ]);
+            let view = record(&source, 1, &rules).unwrap();
+            assert_eq!(
+                serde_json::to_value(&view.outcome).unwrap()["effects"],
+                serde_json::json!([{"type":"damage","target":"2","amount":3}])
             );
         }
     }

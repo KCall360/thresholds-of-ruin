@@ -267,3 +267,12 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+pub(super) fn write_json_with_test_limit<T: Serialize, W: Write>(
+    value: &T,
+    output: W,
+    limit: usize,
+) -> io::Result<W> {
+    write_limited(value, output, limit)
+}

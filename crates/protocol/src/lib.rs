@@ -3,6 +3,8 @@
 mod advancement;
 pub use advancement::*;
 
+pub mod chart_pages;
+
 pub mod map_pages;
 pub use map_pages::*;
 

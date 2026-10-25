@@ -40,6 +40,9 @@ impl NaturalAttack {
                             || matches!(
                                 effect,
                                 Effect::RoomLight
+                                    | Effect::DetectMonsters { .. }
+                                    | Effect::DetectFood
+                                    | Effect::DetectMagic
                                     | Effect::DrainLife
                                     | Effect::CancelSpecials
                                     | Effect::HasteDose { .. }

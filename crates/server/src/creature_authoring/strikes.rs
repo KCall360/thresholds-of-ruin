@@ -429,6 +429,12 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 Effect::GainStrength => s::rules::Effect::GainStrength,
                 Effect::RaiseLevel => s::rules::Effect::RaiseLevel,
                 Effect::RoomLight => s::rules::Effect::RoomLight,
+                Effect::DetectMonsters { condition } => s::rules::Effect::DetectMonsters {
+                    condition: ConditionId::new(condition)
+                        .map_err(|_| invalid("Invalid condition ID"))?,
+                },
+                Effect::DetectFood => s::rules::Effect::DetectFood,
+                Effect::DetectMagic => s::rules::Effect::DetectMagic,
                 Effect::DrainLife => s::rules::Effect::DrainLife,
                 Effect::CancelSpecials => s::rules::Effect::CancelSpecials,
                 Effect::StepSelfOneCell => s::rules::Effect::StepSelfOneCell,
@@ -629,5 +635,32 @@ mod restorable_loss_tests {
             amount: AmountExpr::Fixed { amount: 1 },
         }];
         assert!(invalid.compile(&rules).is_err());
+    }
+}
+
+#[cfg(test)]
+mod detection_effect_adapter_tests {
+    use super::*;
+    #[test]
+    fn detection_adapter_preserves_exact_operands_and_validates_condition_identifier() {
+        let rules =
+            s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
+                .unwrap();
+        for value in [
+            serde_json::json!({"kind":"detect_monsters","condition":"braced"}),
+            serde_json::json!({"kind":"detect_food"}),
+            serde_json::json!({"kind":"detect_magic"}),
+        ] {
+            let source: Effect = serde_json::from_value(value.clone()).unwrap();
+            let compiled = effects(&[source], &rules).unwrap();
+            assert_eq!(
+                serde_json::to_value(&compiled).unwrap(),
+                serde_json::json!([value])
+            );
+        }
+        let bad: Effect = serde_json::from_value(serde_json::json!({
+            "kind":"detect_monsters","condition":""}))
+        .unwrap();
+        assert!(effects(&[bad], &rules).is_err());
     }
 }

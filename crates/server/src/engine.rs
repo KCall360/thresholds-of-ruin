@@ -1854,6 +1854,7 @@ impl Candidate {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RevisionView {
     observation: tor_simulation::Observation,
+    charts: Arc<crate::chart_view::PreparedCharts>,
     event_proof: tor_simulation::EventObservation,
     scene: Vec<tor_world::SightCell>,
     ready: bool,
@@ -1898,6 +1899,9 @@ fn revision_view(game: &Game, actor: ActorId) -> Result<RevisionView, Failure> {
         .observe_event_scene(SimActor(actor.0))
         .map_err(|_| invalid_archive())?;
     Ok(RevisionView {
+        charts: Arc::new(crate::chart_view::PreparedCharts::for_game(
+            game, actor, false,
+        )?),
         observation: view,
         event_proof,
         scene,
@@ -2390,6 +2394,28 @@ impl Engine {
                 return Err(invalid_archive());
             }
         }
+        {
+            let package = engine.archive.scenario.package.clone();
+            let mut audit = crate::scenario_package::HistoricalSourceAudit::new(
+                package.as_deref(),
+                engine.archive.scenario.seed,
+            )
+            .map_err(|_| invalid_archive())?;
+            let records: BTreeSet<_> = std::iter::once(&engine.game)
+                .chain(engine.boundaries.iter().map(|boundary| &boundary.game))
+                .flat_map(|game| game.detached_records().map(|(_, id)| id))
+                .collect();
+            if !records.is_empty() {
+                let regions = engine.regions.as_mut().ok_or_else(invalid_archive)?;
+                for id in records {
+                    let record = tor_simulation::RecordStore::get(regions, id)
+                        .ok_or_else(invalid_archive)?;
+                    for (world, registry, scope) in record.historical_chart_authorities() {
+                        audit.check_shared(world, registry, scope)?;
+                    }
+                }
+            }
+        }
         engine.wizard_enabled = false;
         Ok(engine)
     }
@@ -2587,6 +2613,12 @@ impl Engine {
             &terrain,
             &self.target_scope(actor),
         );
+        observation.charts = view.charts.summaries(
+            &self.archive.view_salt,
+            actor,
+            self.branch(),
+            self.revision(actor)?,
+        );
         observation.places = self
             .game
             .remembered_places(SimActor(actor.0))
@@ -2601,6 +2633,12 @@ impl Engine {
             })
             .collect();
         Ok(observation)
+    }
+    pub(crate) fn prepared_detection_charts(
+        &self,
+        actor: ActorId,
+    ) -> Result<Arc<crate::chart_view::PreparedCharts>, Failure> {
+        Ok(self.revision_view(actor)?.charts.clone())
     }
     pub fn explored_map(
         &self,
@@ -3222,6 +3260,14 @@ impl Engine {
             | Action::TouchApparentObject { .. }
             | Action::Drop { .. } => true,
         };
+        // A live whole-scope chart can change outside ordinary sight, even on
+        // a same-tick wait or condition expiry. The predicate reads only the
+        // active marker; the canonical census runs once in revision_view below.
+        let perception_changed = perception_changed
+            || self
+                .actors()
+                .into_iter()
+                .any(|observer| self.game.monster_detection_active(SimActor(observer.0)));
         let before: BTreeMap<_, _> = self
             .actors()
             .into_iter()
@@ -3969,7 +4015,8 @@ impl Engine {
                 None => Vec::new(),
             };
             copied = sources.iter().map(|(region, _)| *region).collect();
-            store.enqueue_regions(record, sources, &candidate.made, || {
+            let history_admission = candidate.game.chart_history_changed(&self.game);
+            store.enqueue_regions(record, sources, &candidate.made, history_admission, || {
                 let capture_started = Instant::now();
                 let mut checkpoint = Checkpoint::capture_candidate(
                     candidate,

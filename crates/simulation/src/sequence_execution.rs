@@ -284,7 +284,7 @@ impl Game {
                             consumed_identity,
                         )?;
                         if let Some(outcome) = self_outcome {
-                            self.finish_combat_diagnostic(diagnostic, outcome);
+                            self.finish_combat_diagnostic(diagnostic, outcome.outcome);
                         }
                     }
                     Work::Read { .. }
@@ -374,7 +374,7 @@ impl Game {
                                     discovery: crate::ItemDiscovery::OnUse,
                                     ..
                                 }
-                            ) || (outcome.result == crate::abilities::OutcomeStatus::Applied
+                            ) || (outcome.identifies()
                                 && !matches!(
                                     &resolved.plan,
                                     crate::abilities::Plan::Read {
@@ -387,7 +387,7 @@ impl Game {
                                 )),
                             consumed_identity,
                         )?;
-                        self.finish_combat_diagnostic(diagnostic, outcome);
+                        self.finish_combat_diagnostic(diagnostic, outcome.outcome);
                     }
                     Work::Equip { .. }
                     | Work::Unequip { .. }

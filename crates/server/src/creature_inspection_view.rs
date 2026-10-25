@@ -231,6 +231,12 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
         s::rules::Effect::GainStrength => ("gain_strength", vec![]),
         s::rules::Effect::RaiseLevel => ("raise_level", vec![]),
         s::rules::Effect::RoomLight => ("room_light", vec![]),
+        s::rules::Effect::DetectMonsters { condition: id } => (
+            "detect_monsters",
+            vec![content("condition", condition(id, rules))],
+        ),
+        s::rules::Effect::DetectFood => ("detect_food", vec![]),
+        s::rules::Effect::DetectMagic => ("detect_magic", vec![]),
         s::rules::Effect::DrainLife => ("drain_life", vec![]),
         s::rules::Effect::CancelSpecials => ("cancel_specials", vec![]),
         s::rules::Effect::StepSelfOneCell => ("step_self_one_cell", vec![]),

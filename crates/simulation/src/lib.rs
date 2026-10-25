@@ -11,13 +11,17 @@ mod actor_record;
 mod actor_store;
 pub mod appearance_catalog;
 pub mod appearance_state;
-pub mod chart;
 pub mod arena;
 mod awareness;
+pub mod chart;
+pub mod chart_history;
+pub mod detection;
+mod detection_magic;
 pub mod content_ids;
 pub mod control_scrolls;
 mod creature_melee;
 mod creature_time;
+mod detection_lifecycle;
 pub mod equipment_capacity;
 pub mod equipment_capture;
 pub mod expertise;
@@ -27,9 +31,9 @@ mod hazard_checks;
 mod lifecycle;
 pub mod linked_hold;
 pub mod projectile_profiles;
+pub mod scope_projection;
 mod search_clock;
 pub mod spatial_scope;
-pub mod scope_projection;
 mod traps;
 pub use traps::{trap_kind_valid, TrapRegionBoundary};
 pub mod weapon_profiles;
@@ -625,6 +629,7 @@ pub struct Game {
     physics: physics::Physics,
     navigation: BTreeMap<ActorId, Shared<travel::Navigation>>,
     explored_maps: BTreeMap<ActorId, Shared<explored_map::ExploredMap>>,
+    chart_history: Shared<BTreeMap<ActorId, chart_history::Owner>>,
     map_validation: explored_map::MapValidationCache,
     spatial_registry: Shared<spatial_scope::registry::Registry>,
     world: Shared<World>,
@@ -668,6 +673,7 @@ impl Clone for Game {
             physics: self.physics.clone(),
             navigation: self.navigation.clone(),
             explored_maps: self.explored_maps.clone(),
+            chart_history: self.chart_history.clone(),
             map_validation: self.map_validation.clone(),
             spatial_registry: self.spatial_registry.clone(),
             world: self.world.clone(),
@@ -843,6 +849,7 @@ impl Game {
             physics: physics::Physics::default(),
             navigation: BTreeMap::new(),
             explored_maps: BTreeMap::new(),
+            chart_history: Shared::new(BTreeMap::new()),
             map_validation: Default::default(),
             spatial_registry: Shared::new(Default::default()),
             world: Shared::new(world),

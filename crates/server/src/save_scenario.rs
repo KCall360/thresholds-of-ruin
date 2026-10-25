@@ -1419,6 +1419,11 @@ enum Effect {
     GainStrength,
     RaiseLevel,
     RoomLight,
+    DetectMonsters {
+        condition: String,
+    },
+    DetectFood,
+    DetectMagic,
     DrainLife,
     CancelSpecials,
     StepSelfOneCell,
@@ -2905,6 +2910,7 @@ enum NutritionConditionTrigger {
 #[serde(remote = "tor_simulation::rules::ConditionDef", deny_unknown_fields)]
 struct ConditionDefinition {
     hallucinating: bool,
+    detecting_monsters: bool,
     id: tor_simulation::content_ids::ConditionId,
     family: tor_simulation::content_ids::ConditionFamilyId,
     #[serde(with = "mapped")]
@@ -6816,6 +6822,11 @@ impl Effect {
             GainStrength {},
             RaiseLevel {},
             RoomLight {},
+            DetectMonsters {
+                condition: String,
+            },
+            DetectFood {},
+            DetectMagic {},
             DrainLife {},
             CancelSpecials {},
             StepSelfOneCell {},
@@ -6925,6 +6936,9 @@ impl Effect {
             Fields::GainStrength {} => source::Effect::GainStrength,
             Fields::RaiseLevel {} => source::Effect::RaiseLevel,
             Fields::RoomLight {} => source::Effect::RoomLight,
+            Fields::DetectMonsters { condition } => source::Effect::DetectMonsters { condition },
+            Fields::DetectFood {} => source::Effect::DetectFood,
+            Fields::DetectMagic {} => source::Effect::DetectMagic,
             Fields::DrainLife {} => source::Effect::DrainLife,
             Fields::CancelSpecials {} => source::Effect::CancelSpecials,
             Fields::StepSelfOneCell {} => source::Effect::StepSelfOneCell,
@@ -7253,6 +7267,7 @@ mod condition_boundary_tests {
         json!({
             "id": "test.held",
             "hallucinating": false,
+            "detecting_monsters": false,
             "family": "test.hold",
             "lifecycle": "timed",
             "name": "Held",
@@ -7336,6 +7351,9 @@ mod condition_boundary_tests {
     #[test]
     fn saved_condition_semantics_reject_unknown_values_and_surplus_unit_fields() {
         for (path, invalid) in [
+            ("/detecting_monsters", json!(null)),
+            ("/detecting_monsters", json!(1)),
+            ("/detecting_monsters", json!("true")),
             ("/hallucinating", json!(null)),
             ("/hallucinating", json!(1)),
             ("/hallucinating", json!("true")),
@@ -7507,6 +7525,50 @@ mod condition_boundary_tests {
     }
 
     #[test]
+    fn monster_detection_marker_is_author_optional_but_required_in_saved_rules() {
+        let mut author = condition();
+        author.as_object_mut().unwrap().remove("detecting_monsters");
+        let ordinary: ConditionDef = serde_json::from_value(author).unwrap();
+        assert_eq!(
+            serde_json::to_value(&ordinary).unwrap()["detecting_monsters"],
+            json!(false)
+        );
+        let mut marked = condition();
+        marked["detecting_monsters"] = json!(true);
+        marked["stacking"] = json!({"kind":"refresh"});
+        marked["timing"] = json!({"kind":"actor_active","on_expiry":{"kind":"remove"}});
+        marked["restrictions"] = json!([]);
+        marked["preparation"] = json!("preserve");
+        let authored: ConditionDef = serde_json::from_value(marked.clone()).unwrap();
+        let saved: Owned<ConditionDef> = serde_json::from_value(marked.clone()).unwrap();
+        assert_eq!(authored, saved.0);
+        assert_eq!(serde_json::to_value(Borrowed(&saved.0)).unwrap(), marked);
+        let mut document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        document.conditions.push(saved.0);
+        tor_simulation::rules::Ruleset::validate(document.clone()).unwrap();
+        let good = encode_rules_document(&document).unwrap();
+        assert_eq!(
+            encode_rules_document(&decode_rules_document(&good).unwrap()).unwrap(),
+            good
+        );
+        for replacement in [
+            "",
+            "\"detecting_monsters\":null,",
+            "\"detecting_monsters\":1,",
+            "\"detecting_monsters\":\"true\",",
+            "\"detecting_monsters\":true,\"detecting_monsters\":true,",
+        ] {
+            let malformed = good.replacen("\"detecting_monsters\":true,", replacement, 1);
+            assert_ne!(malformed, good);
+            assert!(
+                decode_rules_document(&malformed).is_err(),
+                "accepted {replacement:?}"
+            );
+        }
+    }
+
+    #[test]
     fn saved_rules_conditions_use_the_strict_bounded_independent_adapter() {
         let mut document: RulesetDocument =
             toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
@@ -7524,7 +7586,13 @@ mod condition_boundary_tests {
             encode_rules_document(&decode_rules_document(&encoded).unwrap()).unwrap(),
             encoded
         );
-        for field in ["timing", "restrictions", "preparation", "hallucinating"] {
+        for field in [
+            "timing",
+            "restrictions",
+            "preparation",
+            "hallucinating",
+            "detecting_monsters",
+        ] {
             let mut bad = good.clone();
             bad["conditions"][0].as_object_mut().unwrap().remove(field);
             assert!(serde_json::from_value::<Owned<RulesetDocument>>(bad).is_err());
@@ -9788,6 +9856,74 @@ mod awareness_schema_tests {
             let positional = json!(good.as_object().unwrap().values().collect::<Vec<_>>());
             assert!(
                 serde_json::from_value::<Owned<crate::creature_authoring::Perception>>(positional)
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod detection_effect_schema_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn detection_source_and_independent_save_accept_exact_named_operands() {
+        for good in [
+            json!({"kind":"detect_monsters","condition":"test.detecting"}),
+            json!({"kind":"detect_food"}),
+            json!({"kind":"detect_magic"}),
+        ] {
+            let raw = good.to_string();
+            let authored: source::Effect = serde_json::from_str(&raw)
+                .expect("authorized detection effect must decode at source boundary");
+            let saved: Owned<source::Effect> =
+                crate::storage::codec::strict(raw.as_bytes()).unwrap();
+            assert_eq!(saved.0, authored);
+            assert_eq!(serde_json::to_value(&authored).unwrap(), good);
+            assert_eq!(serde_json::to_value(Borrowed(&authored)).unwrap(), good);
+            let roundtrip: source::Effect =
+                toml::from_str(&toml::to_string(&authored).unwrap()).unwrap();
+            assert_eq!(roundtrip, authored);
+            let fields = good.as_object().unwrap();
+            for key in fields.keys() {
+                let mut missing = good.clone();
+                missing.as_object_mut().unwrap().remove(key);
+                assert!(serde_json::from_value::<source::Effect>(missing.clone()).is_err());
+                assert!(serde_json::from_value::<Owned<source::Effect>>(missing).is_err());
+            }
+            for key in ["changed", "duration", "turn_ticks", "room", "target"] {
+                let mut unknown = good.clone();
+                unknown[key] = json!(1);
+                assert!(serde_json::from_value::<source::Effect>(unknown.clone()).is_err());
+                assert!(serde_json::from_value::<Owned<source::Effect>>(unknown).is_err());
+            }
+            let positional = Value::Array(fields.values().cloned().collect());
+            assert!(serde_json::from_value::<source::Effect>(positional.clone()).is_err());
+            assert!(serde_json::from_value::<Owned<source::Effect>>(positional).is_err());
+            let kind = good["kind"].as_str().unwrap();
+            let duplicate = raw.replacen(
+                &format!("\"kind\":\"{kind}\""),
+                &format!("\"kind\":\"{kind}\",\"kind\":\"{kind}\""),
+                1,
+            );
+            assert_ne!(duplicate, raw);
+            assert!(serde_json::from_str::<source::Effect>(&duplicate).is_err());
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(duplicate.as_bytes())
+                    .is_err()
+            );
+        }
+        for malformed in [
+            r#"{"kind":"detect_monsters","condition":null}"#,
+            r#"{"kind":"detect_monsters","condition":17}"#,
+            r#"{"kind":"detect_monsters","condition":"test.detecting","condition":"test.other"}"#,
+            r#"{"kind":"detect_food","condition":"test.detecting"}"#,
+            r#"{"kind":"detect_magic","condition":"test.detecting"}"#,
+        ] {
+            assert!(serde_json::from_str::<source::Effect>(malformed).is_err());
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(malformed.as_bytes())
                     .is_err()
             );
         }

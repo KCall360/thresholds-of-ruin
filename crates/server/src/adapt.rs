@@ -850,6 +850,7 @@ pub fn observation(
         })
         .collect();
     p::Observation {
+        charts: vec![],
         self_appearance: Some(p::CreatureAppearance {
             seed: targets.appearance_seed(view.actor),
             asset: view.asset.clone(),

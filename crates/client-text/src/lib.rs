@@ -8,10 +8,11 @@ pub mod narrative;
 pub mod parser;
 pub mod projectiles;
 
-pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, expertises, intellect-expertises, intellect-expertise, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor> [with <equipped weapon>], <disclosed ability name> <actor> [with <equipped weapon>] [using <supplies>], places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nExplicit weapon and projectile choices preview exact cost, time to next strike and recovery, then require yes/no. For projectile abilities, enter the ability name, select a numbered server source (next/previous pages, cancel), ammunition if launching, then a direction. Other default choices act immediately.\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: charts, chart monsters|food|magic, chart next|previous|cancel, advancement (overview, ledger, balances, skills, talents, expertises, intellect-expertises, intellect-expertise, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor> [with <equipped weapon>], <disclosed ability name> <actor> [with <equipped weapon>] [using <supplies>], places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nExplicit weapon and projectile choices preview exact cost, time to next strike and recovery, then require yes/no. For projectile abilities, enter the ability name, select a numbered server source (next/previous pages, cancel), ammunition if launching, then a direction. Other default choices act immediately.\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
+    Chart(tor_client_common::charts::ChartInput),
     Projectile(String),
     Advancement(tor_client_common::advancement::AdvancementInput),
     Look,
@@ -31,6 +32,13 @@ pub enum Input {
     },
     Request(Request),
     Command(Command),
+}
+
+/// Charts are explicit read-only tools, never scenery nouns or actions.
+pub fn chart_input(line: &str) -> Option<Result<Input, String>> {
+    let (verb, rest) = word(line.trim());
+    matches!(verb.to_ascii_lowercase().as_str(), "chart" | "charts")
+        .then(|| tor_client_common::charts::parse(rest).map(Input::Chart))
 }
 
 /// Ordinary owner-only controls; these do not enter the wizard parser.
@@ -222,6 +230,9 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
 
 pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
     if let Some(input) = magic_input(line, state) {
+        return input;
+    }
+    if let Some(input) = chart_input(line) {
         return input;
     }
     if let Some(input) = advancement_input(line) {

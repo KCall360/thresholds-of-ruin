@@ -1739,3 +1739,32 @@ current-format bump and genuine certificate/save/wire refresh; existing artifact
 are not evidence for these new shapes. Two neutral primitive assertion-sensitivity
 runs rejected deliberately swapped rotation composition and duplicate-occurrence
 loss; those mutations were removed, and this is not a historical first-red claim.
+
+### Detection integration checkpoint (2026-10-25, compile-only)
+
+The three detection effects now have integrated paid completion, whole-scope
+census, immutable positive Food/Magic history, bounded private chart pages, and
+ordinary Text/ASCII consumers. Monster discovery uses the final complete delivery
+candidate only; failed page admission is not a positive prefix. Other living
+creature-backed actors are included regardless of faction; own inventory is
+excluded from Magic, other creatures' carried magic is independent of ground
+items, and Food means true ground Food. Empty/unavailable Food/Magic attempts
+preserve the previous positive historical acquisition.
+
+Historical roots retain captured World/scope authority and private source points,
+not entities or action handles. Historical-only Worlds receive the same structural
+validation as normal saved Worlds, without reusing the current allocator counter
+or banning lawful wizard topology edits. Host restore separately binds canonical
+source scope and region metadata across current, rewind, and detached roots.
+Changed historical state receives exact full-checkpoint capacity admission before
+publication; storage failure aborts the command atomically, distinct from paid
+presentation Unavailable. Unchanged Monster refreshes and pure reads bypass that
+new synchronous admission.
+
+Core/server/protocol/common/Text/ASCII all-target compilation passed for the
+integrated detection cohort. New native tests and actual-process acceptance are
+not yet executed. Mapping effect/producer and four-kind schema extension are
+staged separately; only its source certification foundation was previously
+compiled. Format identity bumps, genuine certificates/save/wire regeneration,
+full native regressions, process tests, and final repository gates remain pending.
+The separate unapplied 3D compatibility patch is not native coverage.

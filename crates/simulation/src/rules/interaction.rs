@@ -169,6 +169,9 @@ impl Ruleset {
                     PlannedEffect::AlterEquipment { .. }
                     | PlannedEffect::StepSelfOneCell
                     | PlannedEffect::RoomLight
+                    | PlannedEffect::DetectMonsters { .. }
+                    | PlannedEffect::DetectFood
+                    | PlannedEffect::DetectMagic
                     | PlannedEffect::DrainLife
                     | PlannedEffect::CancelSpecials
                     | PlannedEffect::GainStrength
@@ -247,6 +250,9 @@ impl Ruleset {
             Effect::AlterEquipment { .. }
             | Effect::StepSelfOneCell
             | Effect::RoomLight
+            | Effect::DetectMonsters { .. }
+            | Effect::DetectFood
+            | Effect::DetectMagic
             | Effect::DrainLife
             | Effect::CancelSpecials
             | Effect::GainStrength

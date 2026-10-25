@@ -80,6 +80,7 @@ impl AccessRole {
                     | Request::Snapshot
                     | Request::Palette
                     | Request::Map { .. }
+                    | Request::Chart { .. }
                     | Request::History { .. }
                     | Request::HistoryBranch { .. }
             )
@@ -695,6 +696,9 @@ pub struct MotionView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
+    /// Read-only chart catalog; never sight, ordinary map memory or action offers.
+    #[serde(deserialize_with = "crate::chart_pages::read_summaries")]
+    pub charts: Vec<crate::chart_pages::ChartSummary>,
     /// Own appearance is disclosed even when the body is outside the eye scene.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub self_appearance: Option<CreatureAppearance>,
@@ -1724,6 +1728,10 @@ pub enum Request {
     Map {
         query: crate::MapQuery,
     },
+    /// Read-only immutable chart pages owned by the attached view, never actions.
+    Chart {
+        query: crate::chart_pages::ChartQuery,
+    },
     /// The whole current palette, as after attaching.
     Palette,
     Command {
@@ -1923,6 +1931,12 @@ pub enum ServerMessage {
         request_id: String,
         page: Box<crate::MapPage>,
     },
+    #[serde(deserialize_with = "crate::chart_pages::read_page_reply")]
+    ChartPage {
+        context: ReplyContext,
+        request_id: String,
+        page: Box<crate::chart_pages::ChartPage>,
+    },
     #[serde(deserialize_with = "crate::creature_catalog::read_reply")]
     CreatureCatalog {
         context: ReplyContext,
@@ -2004,6 +2018,7 @@ impl ServerMessage {
             Self::ProjectileChoices { context, .. }
             | Self::AbilityWeaponPreview { context, .. }
             | Self::MapPage { context, .. }
+            | Self::ChartPage { context, .. }
             | Self::CreatureCatalog { context, .. }
             | Self::AdvancementPage { context, .. }
             | Self::Ack { context, .. }

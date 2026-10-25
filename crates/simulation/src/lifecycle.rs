@@ -36,11 +36,15 @@ impl DamageActivityGuard {
 /// fields are private so only successful lifecycle publication can create it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PublishedResolution {
+    chart_completion: Option<crate::detection_lifecycle::CompletionReceipt>,
     created_hold: Option<crate::linked_hold::HoldId>,
     event: usize,
     role: PublishedRole,
 }
 impl PublishedResolution {
+    pub(crate) fn chart_completion(self) -> Option<crate::detection_lifecycle::CompletionReceipt> {
+        self.chart_completion
+    }
     pub(crate) fn created_hold(self) -> Option<crate::linked_hold::HoldId> {
         self.created_hold
     }
@@ -628,6 +632,61 @@ impl Game {
             self.reveal_guise(outcome.target)?;
         }
 
+        // Detection is a sole self operation. Commit only its real actor
+        // mutation on this outer unpublished transaction candidate before the
+        // producer performs its one complete census/projection/delivery pass.
+        let mut chart_completion = None;
+        if let Some(kind) = outcome
+            .effects
+            .iter()
+            .find_map(crate::detection_lifecycle::resolved_kind)
+        {
+            if !crate::detection_lifecycle::resolved_shape_valid(&outcome)
+                || matches!(role, PublishedRole::Rider { .. })
+            {
+                return Err(GameError::Rule(RuleError::InvalidPlan));
+            }
+            let mut condition_changed = false;
+            if let ResolvedEffect::DetectMonsters { id, duration, .. } = &outcome.effects[0] {
+                if !crate::detection_lifecycle::valid_resolved_duration(*duration)
+                    || !self
+                        .content
+                        .rules()
+                        .condition(id)
+                        .is_some_and(|definition| definition.detecting_monsters)
+                {
+                    return Err(GameError::Rule(RuleError::InvalidPlan));
+                }
+                let mut activation = self.settled_actor_outcome(outcome.actor)?;
+                if !activation.state.alive() {
+                    return Err(GameError::UnknownActor);
+                }
+                let combat = activation
+                    .state
+                    .combat
+                    .as_mut()
+                    .ok_or(GameError::UnknownActor)?;
+                let before = combat.creature().conditions().clone();
+                combat.apply_condition(id, outcome.actor, *duration, None)?;
+                condition_changed = &before != combat.creature().conditions();
+                self.commit_actor_outcome(activation)?;
+            }
+            let completed = self.complete_detection_chart(outcome.actor, kind)?;
+            let receipt = crate::detection_lifecycle::CompletionReceipt::from_admitted(
+                kind,
+                &completed.candidate,
+            )?;
+            debug_assert_eq!(receipt.identifies(), completed.admitted_nonempty());
+            let changed = condition_changed || completed.history_changed;
+            match &mut outcome.effects[0] {
+                ResolvedEffect::DetectMonsters { changed: value, .. }
+                | ResolvedEffect::DetectFood { changed: value }
+                | ResolvedEffect::DetectMagic { changed: value } => *value = changed,
+                _ => unreachable!("closed detection kind"),
+            }
+            chart_completion = Some(receipt);
+        }
+
         if outcome
             .effects
             .iter()
@@ -682,7 +741,9 @@ impl Game {
         let mut created_hold = None;
         for index in 0..outcome.effects.len() {
             let effect = &outcome.effects[index];
-            if matches!(effect, ResolvedEffect::DrainLife { .. }) {
+            if matches!(effect, ResolvedEffect::DrainLife { .. })
+                || crate::detection_lifecycle::resolved_kind(effect).is_some()
+            {
                 outcome.effects[applied_count] = effect.clone();
                 applied_count += 1;
                 continue;
@@ -948,6 +1009,7 @@ impl Game {
             },
         );
         let receipt = PublishedResolution {
+            chart_completion,
             created_hold,
             event: self.event_log.len(),
             role,
@@ -1010,6 +1072,7 @@ impl Game {
         }
         let role = self.publication_role(&outcome, ResolutionPublication::Primary { strike })?;
         let receipt = PublishedResolution {
+            chart_completion: None,
             created_hold: None,
             event: self.event_log.len(),
             role,
@@ -1061,7 +1124,12 @@ impl Game {
                 strike.is_none() && outcome.ability.is_none() && !outcome.target_rider_participated
             }
         };
-        if valid_role && outcome.valid() {
+        if valid_role
+            && outcome.valid()
+            && receipt
+                .chart_completion
+                .is_none_or(|chart| chart.matches(outcome))
+        {
             Ok(outcome)
         } else {
             Err(GameError::Rule(RuleError::InvalidPlan))
@@ -1649,6 +1717,7 @@ mod tests {
         ability.cost = None;
         document.abilities.push(ability.clone());
         document.conditions.push(crate::rules::ConditionDef {
+            detecting_monsters: false,
             hallucinating: false,
             id: crate::content_ids::ConditionId::new("borrowed_grant").unwrap(),
             family: crate::content_ids::ConditionFamilyId::new("borrowed_grant").unwrap(),
@@ -2807,6 +2876,7 @@ mod growth_tests {
             rules.growth.minimum_reward = 100;
             rules.growth.maximum_reward = 100;
             rules.conditions.push(crate::rules::ConditionDef {
+                detecting_monsters: false,
                 hallucinating: false,
                 id: condition.clone(),
                 family: crate::content_ids::ConditionFamilyId::new("growth_health_buffer").unwrap(),

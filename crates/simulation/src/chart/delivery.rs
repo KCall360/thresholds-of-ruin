@@ -46,7 +46,7 @@ pub struct DeliverySummary {
 }
 
 /// Covers a flattened tagged wire Row, independent of serde and host metadata.
-/// This should replace the duplicate arithmetic in Chart::from_complete too.
+/// Shared by complete-candidate and page admission.
 pub fn row_encoded_size_bound(row: &Row) -> Result<usize, Invalid> {
     let mark = match &row.mark {
         Mark::Monster(a) => {

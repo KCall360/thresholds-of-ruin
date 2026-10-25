@@ -579,6 +579,14 @@ impl Game {
                 .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
             members.extend(trace.regions);
         }
+        if plan
+            .on_success()
+            .iter()
+            .any(|effect| crate::detection_lifecycle::planned_kind(effect).is_some())
+            && !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. })
+        {
+            members.extend(self.detection_required_regions(plan.actor())?);
+        }
         let room_light = plan
             .on_success()
             .iter()
@@ -696,11 +704,18 @@ impl Game {
         active: &BTreeSet<RegionId>,
         loaded: &mut BTreeSet<RegionId>,
     ) {
-        for actor in self
+        for (id, actor) in self
             .actors
-            .values()
-            .filter(|actor| active.contains(&actor.location.region))
+            .iter()
+            .filter(|(_, actor)| active.contains(&actor.location.region))
         {
+            // Supplemental scope members remain load-only. Never add them to
+            // live_regions, whose active owner would activate their residents.
+            if self.monster_detection_active(*id) {
+                if let Ok(members) = self.detection_required_regions(*id) {
+                    loaded.extend(members);
+                }
+            }
             if let Some(preparation) = actor
                 .pending
                 .as_ref()

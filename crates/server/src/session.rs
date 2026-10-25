@@ -5,6 +5,8 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tor_protocol::*;
 
+#[path = "chart_page_session.rs"]
+mod chart_pages;
 #[path = "map_page_session.rs"]
 mod map_pages;
 
@@ -143,6 +145,7 @@ enum ProcessedRequest {
     Reply(RequestReply),
     /// Map cursors advance only after their correlated page is admitted.
     Map(Box<map_pages::MapTransfer>),
+    Chart(Box<chart_pages::ChartTransfer>),
     /// Snapshot publication owns the stream reset; no additional reply is due.
     Published,
     /// Persistence owns completion; poll it at the common publication boundary.
@@ -166,6 +169,7 @@ struct StrikeInspectionHandle {
 struct Client {
     strike_inspection: Option<StrikeInspectionHandle>,
     map_transfer: Option<map_pages::MapTransfer>,
+    chart_transfer: Option<chart_pages::ChartTransfer>,
     role: AccessRole,
     user: String,
     frontend: String,
@@ -378,6 +382,7 @@ impl Service {
             Client {
                 strike_inspection: None,
                 map_transfer: None,
+                chart_transfer: None,
                 role: account.role,
                 user: account.user.clone(),
                 frontend,
@@ -436,6 +441,19 @@ impl Service {
             Ok(ProcessedRequest::Reply(reply)) => self.publish_reply(id, request_id, reply),
             Ok(ProcessedRequest::Map(transfer)) => {
                 if let Err(error) = self.publish_map_page(id, &request_id, *transfer) {
+                    self.send(
+                        id,
+                        ServerMessage::Error {
+                            scope: self.error_scope(id),
+                            request_id: Some(request_id),
+                            code: error.code,
+                            message: error.message,
+                        },
+                    );
+                }
+            }
+            Ok(ProcessedRequest::Chart(transfer)) => {
+                if let Err(error) = self.publish_chart_page(id, &request_id, *transfer) {
                     self.send(
                         id,
                         ServerMessage::Error {
@@ -531,6 +549,9 @@ impl Service {
         let user = client.user.clone();
         let frontend = client.frontend.clone();
         match request {
+            Request::Chart { query } => self
+                .prepare_chart_page(id, query)
+                .map(|transfer| ProcessedRequest::Chart(Box::new(transfer))),
             Request::Map { query } => self
                 .prepare_map_page(id, query)
                 .map(|transfer| ProcessedRequest::Map(Box::new(transfer))),
@@ -1880,6 +1901,7 @@ impl Service {
         client.context = Some(context);
         client.strike_inspection = None;
         client.map_transfer = None;
+        client.chart_transfer = None;
         client.readiness = Some(readiness);
         client.waiting = None;
         client.observation_tick = snapshot.state.observation.tick;
@@ -2099,6 +2121,7 @@ impl Service {
         };
         if let UpdateBody::Observation { state, .. } = update.body {
             client.map_transfer = None;
+            client.chart_transfer = None;
             client.last_observation = Some(DisclosedObservation {
                 branch,
                 base: ObservationBase {
@@ -2381,6 +2404,7 @@ mod tests {
         // insufficient: the retained cell holds most of the full payload.
         let o = &next.observation;
         let witness = StateDelta {
+            charts: o.charts.clone(),
             self_appearance: o.self_appearance.clone(),
             interactions: None,
             base_revision: base.revision,

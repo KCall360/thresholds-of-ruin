@@ -49,7 +49,11 @@ impl Species {
                     effect.spatial()
                         || matches!(
                             effect,
-                            crate::rules::Effect::RoomLight | crate::rules::Effect::DrainLife
+                            crate::rules::Effect::RoomLight
+                                | crate::rules::Effect::DrainLife
+                                | crate::rules::Effect::DetectMonsters { .. }
+                                | crate::rules::Effect::DetectFood
+                                | crate::rules::Effect::DetectMagic
                         )
                 })
         }) {

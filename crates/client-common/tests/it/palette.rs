@@ -24,7 +24,7 @@ fn observation(revision: u64, assets: &[&str]) -> StateView {
     serde_json::from_value(serde_json::json!({
         "wizard_game":false,"revision":revision.to_string(),"observation":{
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},"places":[],
-            "visible_cells":cells,"ground_items":[],"inventory":[],"linked_holds":[],"visible_actors":[],"ready":true
+            "visible_cells":cells,"ground_items":[],"inventory":[],"charts":[],"linked_holds":[],"visible_actors":[],"ready":true
         }
     }))
     .unwrap()

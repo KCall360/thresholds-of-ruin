@@ -267,7 +267,7 @@ fn cosmetic_memory_is_exact_and_strict_not_reselected_on_restore() {
     assert!(!appearance.valid_for_catalog(&empty));
 }
 
-fn named_fixture(subject_values: &[crate::perception::PerceptionValue]) -> Game {
+pub(crate) fn named_fixture(subject_values: &[crate::perception::PerceptionValue]) -> Game {
     named_fixture_with_awareness(subject_values, false)
 }
 fn named_fixture_with_awareness(

@@ -142,3 +142,5 @@ fn door_target(index: u64) -> tor_protocol::DoorTarget {
 mod strike_sequences;
 
 mod linked_holds;
+
+mod charts;
