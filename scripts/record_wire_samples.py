@@ -271,7 +271,7 @@ class Recorder(ProcessTestCase):
                             and row["target_kind"] == "directional_ray"
                             and not row["basic_attack"] and not row["weapon_selection"] for row in abilities))
         self.assertEqual(samples["effect"]["type"], "combat_diagnostics")
-        self.assertTrue(any(effect["kind"] == "cancel_specials" and effect["changed"]
+        self.assertTrue(any(effect.get("type") == "cancel_specials" and effect["changed"]
                             for record in samples["effect"]["report"]["records"]
                             for effect in record["outcome"]["effects"]))
         # Publish both only after cleanup and both source-positive validations.

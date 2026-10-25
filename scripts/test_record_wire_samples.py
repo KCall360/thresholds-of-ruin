@@ -766,11 +766,14 @@ class FirstContactRecordingContracts(unittest.TestCase):
             "reach": {"kind": "until_obstruction"}, "target_kind": "directional_ray",
             "basic_attack": False, "weapon_selection": False}]}}}}}},
             "effect": {"type": "combat_diagnostics", "report": {"records": [{"outcome": {
-                "effects": [{"kind": "cancel_specials", "target": "2", "changed": True}]}}]}}}
+                "effects": [{"type": "cancel_specials", "target": "2", "changed": True}]}}]}}}
         if malformed == "reach":
             source["reach"]["snapshot"]["state"]["observation"]["combat"]["own_stats"]["abilities"] = []
         elif malformed == "effect":
             source["effect"]["report"]["records"] = []
+        elif malformed == "discriminator":
+            effect = source["effect"]["report"]["records"][0]["outcome"]["effects"][0]
+            effect["kind"] = effect.pop("type")
         case, trace = recording_case(failure)
         original = type(case).runTest
         def record(subject):
@@ -795,7 +798,7 @@ class FirstContactRecordingContracts(unittest.TestCase):
         self.assertIsNot(samples["zz.first_contact_reach"], case.first_contact_samples["reach"])
 
     def test_failed_cleanup_or_missing_variants_never_publish_partial_samples(self):
-        for failure, malformed in (("cleanup", None), ("class_cleanup", None), (None, "reach"), (None, "effect")):
+        for failure, malformed in (("cleanup", None), ("class_cleanup", None), (None, "reach"), (None, "effect"), (None, "discriminator")):
             with self.subTest(failure=failure, malformed=malformed):
                 case, _, _ = self.case(failure, malformed)
                 samples = {"existing": {"type": "palette"}}

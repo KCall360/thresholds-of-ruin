@@ -947,7 +947,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertFalse(queried.get("error"), queried.get("error"))
         effect_sample = message(wizard, "combat_diagnostics")
         effects = [effect for record in effect_sample["report"]["records"]
-                   for effect in record["outcome"]["effects"] if effect["kind"] == "cancel_specials"]
+                   for effect in record["outcome"]["effects"] if effect["type"] == "cancel_specials"]
         self.assertEqual(len(effects), 1)
         self.assertTrue(effects[0]["changed"])
         self.assertEqual(str(effects[0]["target"]), "2")

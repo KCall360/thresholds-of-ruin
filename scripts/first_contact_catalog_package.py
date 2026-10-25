@@ -13,10 +13,15 @@ def prepare(test, *, missile, grant=False):
     manifest = tomllib.loads(path.read_text(encoding="utf-8"))
     manifest["id"] = "imported-first-contact"
     owner = manifest["creatures"]["species"]["figure"]
+    test.assertEqual(owner["attributes"]["intellect"], 0, "validated source base remains within its attribute cap")
     owner["modifiers"] = [{"scope": "always", "op": {
         "kind": "set", "stat": {"kind": "health"}, "value": 50}}]
     recipient = copy.deepcopy(owner)
-    owner["attributes"]["intellect"] = 100
+    # Species base attributes obey the source cap (5); synthetic accuracy is
+    # an ordinary derived modifier, as in the existing utility-wand fixture.
+    # Copy the recipient first so its own Agility/Intellect stay unchanged.
+    owner["modifiers"].append({"scope": "always", "op": {
+        "kind": "add", "stat": {"kind": "attribute", "attribute": "intellect"}, "value": 100}})
     if grant:
         test.assertFalse(missile)
         owner["modifiers"].append({"scope": "always", "op": {
