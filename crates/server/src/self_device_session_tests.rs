@@ -1297,7 +1297,7 @@ fn assert_real_stored_checkpoint(path: &Path, spatial: bool) {
     let database =
         rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .unwrap();
-    let (sequence, payload): (u64, Vec<u8>) = database
+    let (sequence, payload): (i64, Vec<u8>) = database
         .query_row(
             "SELECT sequence,payload FROM checkpoint WHERE slot=1",
             [],
