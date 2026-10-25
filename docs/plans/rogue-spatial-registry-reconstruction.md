@@ -612,3 +612,24 @@ not acceptable. A separate region-lifecycle reference comparison lacks expected
 spatial directories and is being diagnosed independently. The next combined
 correction includes actual compressed-checkpoint roundtrips and interval-one
 source-deleted reopen, not journal replay alone. No verification gate is claimed.
+
+
+The coherent checkpoint correction is now green. Decoding prepares only the
+actual bounded current/history spatial roots for canonical serialization; the
+original deferred pool still independently validates restoration. Unprepared
+serialization, poisoned recapture, invalid/omitted/excess roots and stale-root
+acceptance remain rejected. The incremental generation test now uses production
+group installation and retains complete Game/topology equality.
+
+The corrected frozen source passes 37 spatial controls plus eight Room Light
+tests from one core executable, all 1,067 server library tests, and strict
+workspace/all-target Clippy. Thus all 46 prior server failures are closed. The
+new server cases prove stored compressed checkpoints actually exist, rather
+than relying on journal replay. A fresh ordinary application build passes the
+production Rogue certificate check and both original imported Text tests,
+including paid room lighting, passage no-op, identification, repeat use and
+source-deleted interval-one checkpoint reopening. The first preflight caught
+and corrected an unsupported SQLite integer type in the new test helper; no
+production policy changed to address it. Formatting preceded these runtime
+receipts. These are feature-checkpoint results, not quick/push/full, native,
+release or hosted-CI qualification.
