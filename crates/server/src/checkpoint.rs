@@ -1237,3 +1237,14 @@ mod tests {
 #[cfg(test)]
 #[path = "wandering_checkpoint_tests.rs"]
 mod wandering_checkpoint_tests;
+
+#[cfg(test)]
+impl Engine {
+    /// Service fixtures pass an actual admitted checkpoint and independently
+    /// mutated copies through the production strict decoder and restore path.
+    /// No caller-provided source/catalog replaces the retained archive authority.
+    pub(crate) fn test_restore_checkpoint(&self, bytes: &[u8]) -> Result<(), Failure> {
+        let checkpoint: DiskCheckpoint = crate::storage::codec::strict(bytes)?;
+        checkpoint.restore(self.archive.clone()).map(drop)
+    }
+}

@@ -201,6 +201,15 @@ fn paid_cancellation_is_checkless_and_preserves_owned_progression() {
 fn repeated_cancellation_clears_fresh_independent_invisibility_without_global_veto() {
     let (mut game, item) = fixture(true);
     complete(&mut game, item);
+    assert!(game.creature(ActorId(2)).unwrap().cancelled());
+    assert!(
+        !game
+            .creature(ActorId(2))
+            .unwrap()
+            .derived()
+            .perception
+            .invisible
+    );
     let invisible = ConditionId::new("fixture_cancellable_invisibility").unwrap();
     game.apply_effects(
         ActorId(2),
@@ -499,5 +508,146 @@ fn cancellation_live_ai_healing_selection_preserves_unmarked_healing() {
             "original frozen source is unchanged"
         );
         assert_eq!(game.effective_safe_healing_plan(&plan), !tagged);
+    }
+}
+
+#[test]
+fn paid_missile_uses_shared_bonus_and_energy_reduction_once() {
+    let mut results = Vec::new();
+    for variant in 0..3 {
+        let (mut game, item) = fixture_with(false, |_, _, species| {
+            if variant == 1 {
+                let bonus = species
+                    .modifiers
+                    .iter_mut()
+                    .find(|modifier| {
+                        matches!(
+                            modifier.op,
+                            ModifierOp::Add {
+                                stat: Stat::AttackDamageRollBonus,
+                                value: 3
+                            }
+                        )
+                    })
+                    .unwrap();
+                bonus.op = ModifierOp::Add {
+                    stat: Stat::AttackDamageRollBonus,
+                    value: 0,
+                };
+            } else if variant == 2 {
+                species.modifiers.push(Modifier {
+                    cancellable: false,
+                    scope: Scope::Always,
+                    op: ModifierOp::Reduction {
+                        selector: Selector::Category {
+                            category: crate::combat::DamageType::Energy,
+                        },
+                        amount: 2,
+                    },
+                });
+            }
+        });
+        let before = game.health(ActorId(2)).unwrap().0;
+        complete(&mut game, item);
+        results.push((before - game.health(ActorId(2)).unwrap().0, game.rules_rng));
+    }
+    assert!((5..=8).contains(&results[0].0));
+    assert_eq!(results[0].0 - results[1].0, 3, "one universal bonus");
+    assert_eq!(
+        results[0].0 - results[2].0,
+        2,
+        "one ordinary Energy reduction"
+    );
+    assert_eq!(results[0].1, results[1].1);
+    assert_eq!(results[0].1, results[2].1);
+}
+
+#[test]
+fn contact_captured_policies_reject_cross_kind_and_source_mismatches() {
+    let plans: Vec<_> = [true, false]
+        .into_iter()
+        .map(|cancellation| {
+            let (game, item) = fixture(cancellation);
+            let plan = game
+                .plan_work(
+                    ActorId(1),
+                    crate::Work::Zap {
+                        item,
+                        aim: crate::DeviceAim::Direction {
+                            direction: StepDirection::East,
+                        },
+                    },
+                )
+                .unwrap();
+            let ray = plan.as_ray().unwrap().clone();
+            assert!(ray.valid(game.content.rules()));
+            let value = serde_json::to_value(&ray).unwrap();
+            assert_eq!(
+                serde_json::from_value::<RayPlan>(value.clone()).unwrap(),
+                ray
+            );
+            (game, ray, value)
+        })
+        .collect();
+    for (index, (game, ray, value)) in plans.iter().enumerate() {
+        for field in ["resolution", "traversal"] {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<RayPlan>(missing).is_err());
+        }
+        let mut wrong = ray.clone();
+        wrong.resolution = plans[1 - index].1.resolution.clone();
+        assert!(!wrong.valid(game.content.rules()));
+        wrong = ray.clone();
+        wrong.traversal = RayTraversal::Bounded { clear_visits: 6 };
+        assert!(!wrong.valid(game.content.rules()));
+        wrong = ray.clone();
+        wrong.delivery = RayDelivery::Bouncing;
+        assert!(!wrong.valid(game.content.rules()));
+        wrong = ray.clone();
+        wrong.ability = AbilityId::new("basic_melee").unwrap();
+        assert!(!wrong.valid(game.content.rules()));
+    }
+    for field in ["tokens", "incoming", "source_bonus", "target_skill"] {
+        let mut extra = plans[0].2.clone();
+        extra["resolution"][field] = serde_json::json!(null);
+        assert!(serde_json::from_value::<RayPlan>(extra).is_err());
+    }
+}
+
+#[test]
+fn contact_until_obstruction_is_not_a_bouncing_or_dummy_check_source() {
+    for cancellation in [false, true] {
+        let (game, _) = fixture(cancellation);
+        let original = game.content.rules().document().clone();
+        assert!(Ruleset::validate(original.clone()).is_ok());
+        for change in 0..3 {
+            let mut document = original.clone();
+            let ability = document
+                .abilities
+                .iter_mut()
+                .find(|ability| ability.id.as_str() == "fixture_ray")
+                .unwrap();
+            match change {
+                0 => ability.invocation = InvocationKind::DirectionalRay,
+                1 => ability.invocation = InvocationKind::ActorTarget,
+                _ => {
+                    let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                        unreachable!()
+                    };
+                    strikes[0].check = Some(CheckDef {
+                        actor: CheckActor::User,
+                        skill: SkillSelector::Named { skill: Skill::Lore },
+                        against: Against::Defense {
+                            defense: DefenseKind::Physical,
+                        },
+                    });
+                }
+            }
+            assert!(
+                Ruleset::validate(document).is_err(),
+                "cancellation {cancellation}, change {change}"
+            );
+        }
     }
 }

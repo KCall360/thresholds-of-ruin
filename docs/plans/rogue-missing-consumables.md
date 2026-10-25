@@ -697,3 +697,33 @@ actors through their exact retained region records, verify ordinary-resource
 payment and noncombat prerequisites, and complete pending-plan/reopen and actual
 process coverage. The current fixture drafts are not prerequisite-complete.
 Preserve all existing strict validation; these gaps are not reasons to relax it.
+
+The next grouped pre-compilation checkpoint completes the reviewed fixture
+prerequisites and adds real-process capture hooks; it still has no Rust
+compilation or gameplay-runtime qualification. Contact fixtures now distinguish
+an ordinary granted ability's resource ledger from item charge payment, use a
+lawful external noncombat interceptor, and read frozen actors through the exact
+retained region record and production decoder. Mutated pending checkpoints pass
+through the ordinary strict decoder and retained-source restore, with an actual
+paused checkpoint as their positive control. Physical rotation/cycle/frontier
+and shared Missile damage-reduction controls join the same cohort.
+
+The two ordinary imported-device process cases exercise the raw Text command
+parser and authoritative headless state, not adventure narration. A separate
+privileged diagnostic case supplies genuine examples of the new reach and
+cancellation-effect wire variants. Recorder publication remains conditional on
+successful process cleanup and both positive examples. These are executable
+acceptance candidates, not captured samples until run against fresh applications.
+Cancellation deliberately does not call generic attack-awareness/provocation:
+the pinned cancellation branch changes special flags and guise without the
+pursuit calls present in other wand branches. Keep exact sustaining-hold cleanup
+and pre-cleanup disclosure without introducing an awareness contest or wake-up.
+
+The planned reduced-build sequence is one affected-owner compilation preflight,
+one meaningful disabled-contact-resolver first-red and restored green, then one
+ordinary application build reused for certificate, genuine wire capture and
+actual-process acceptance. Link the server test owner once; its existing writer
+can regenerate the current saved-scenario fixture for subsequent tests using the
+same executable because that fixture is read at runtime. Preserve exact build
+and generated-fixture identities separately. None of these focused receipts
+substitutes for the final batch verification and hosted native requirements.

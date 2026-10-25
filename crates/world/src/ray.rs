@@ -602,4 +602,70 @@ mod tests {
             RayStep::Unavailable
         );
     }
+    #[test]
+    fn complete_probe_reports_missing_alternative_before_clear_can_be_final() {
+        let mut world = world();
+        let from = cell(1, 2, 0, 1);
+        for (direction, to) in [
+            (Direction::North, cell(2, 1, 1, 1)),
+            (Direction::East, cell(3, 1, 1, 1)),
+        ] {
+            world
+                .connect(
+                    Passage {
+                        from,
+                        direction,
+                        to,
+                    },
+                    0,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            world.ray_step(from, Direction::NorthEast),
+            RayStep::Ambiguous
+        );
+        let detached = world.detach_region(RegionId(3)).unwrap();
+        let before = world.clone();
+        let (step, dependencies) = world.ray_step_dependencies(from, Direction::NorthEast);
+        assert!(
+            matches!(step, RayStep::Clear { .. }),
+            "legacy local probe remains unchanged"
+        );
+        assert_eq!(step, world.ray_step(from, Direction::NorthEast));
+        assert_eq!(dependencies, [RegionId(1), RegionId(2), RegionId(3)].into());
+        assert!(world.region(RegionId(3)).is_none());
+        assert_eq!(world, before, "dependency discovery never loads");
+        world.attach_region(detached).unwrap();
+        assert_eq!(
+            world.ray_step_dependencies(from, Direction::NorthEast).0,
+            RayStep::Ambiguous
+        );
+    }
+
+    #[test]
+    fn complete_probe_retains_loaded_intermediate_regions_in_composed_routes() {
+        let mut world = world();
+        let from = cell(1, 2, 1, 1);
+        let side = cell(2, 2, 1, 1);
+        let to = cell(3, 1, 1, 1);
+        world.set_wall(cell(1, 2, 0, 1), true).unwrap();
+        for (from, to, rotation) in [(from, side, 1), (side, to, 23)] {
+            world
+                .connect(
+                    Passage {
+                        from,
+                        direction: Direction::East,
+                        to,
+                    },
+                    rotation,
+                )
+                .unwrap();
+        }
+        let (step, dependencies) = world.ray_step_dependencies(from, Direction::NorthEast);
+        assert_eq!(step, RayStep::Clear { to, rotation: 19 });
+        assert_eq!(dependencies, [RegionId(1), RegionId(2), RegionId(3)].into());
+        assert_ne!(side.region, from.region);
+        assert_ne!(side.region, to.region);
+    }
 }

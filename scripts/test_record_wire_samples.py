@@ -759,5 +759,51 @@ class DrainRefusalRecordingContracts(unittest.TestCase):
                 self.assertEqual(samples, {"existing": {"type": "palette"}})
 
 
+class FirstContactRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, malformed=None):
+        source = {"reach": {"type": "snapshot", "snapshot": {"state": {"observation": {
+            "combat": {"own_stats": {"abilities": [{"id": "rogue.wand_cancellation",
+            "reach": {"kind": "until_obstruction"}, "target_kind": "directional_ray",
+            "basic_attack": False, "weapon_selection": False}]}}}}}},
+            "effect": {"type": "combat_diagnostics", "report": {"records": [{"outcome": {
+                "effects": [{"kind": "cancel_specials", "target": "2", "changed": True}]}}]}}}
+        if malformed == "reach":
+            source["reach"]["snapshot"]["state"]["observation"]["combat"]["own_stats"]["abilities"] = []
+        elif malformed == "effect":
+            source["effect"]["report"]["records"] = []
+        case, trace = recording_case(failure)
+        original = type(case).runTest
+        def record(subject):
+            subject.first_contact_samples = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_non_graphical_actual_paid_capture_case(self):
+        case = record_wire_samples.first_contact_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_imported_cancellation_privileged_capture_records_actual_reach_and_effect")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_both_actual_artifacts_are_preserved_only_after_cleanup(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.first_contact_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_first_contact(samples)
+        self.assertEqual(samples, {"zz.first_contact_" + key: value for key, value in source.items()})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.first_contact_reach"], case.first_contact_samples["reach"])
+
+    def test_failed_cleanup_or_missing_variants_never_publish_partial_samples(self):
+        for failure, malformed in (("cleanup", None), ("class_cleanup", None), (None, "reach"), (None, "effect")):
+            with self.subTest(failure=failure, malformed=malformed):
+                case, _, _ = self.case(failure, malformed)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.first_contact_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_first_contact(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
 if __name__ == "__main__":
     unittest.main()

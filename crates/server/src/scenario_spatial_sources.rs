@@ -752,6 +752,8 @@ mod cancellation_source_tests {
             .clone();
         ability.id = AbilityId::new("fixture.cancellation").unwrap();
         ability.reach = r::Reach::UntilObstruction;
+        ability.interaction = r::Interaction::HostileToTarget;
+        ability.ai.hostile = true;
         let r::StrikeSource::Authored { strikes } = &mut ability.strikes else {
             panic!("authored ray prerequisite")
         };

@@ -11,12 +11,13 @@ import tomllib
 
 from arena_matrix import toml_source
 
-from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, non_graphical
+from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, non_graphical
 from status_condition_package import checkpoint, actor_creature
 from self_device_package import prepare as prepare_self_device
 from nothing_catalog_package import prepare as prepare_imported_nothing
 from light_catalog_package import prepare as prepare_imported_light
 from drain_catalog_package import prepare as prepare_imported_drain
+from first_contact_catalog_package import prepare as prepare_imported_first_contact
 
 
 def observation(frame):
@@ -804,6 +805,154 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(checkpoint(self, reopened), after)
         self.assertEqual(int(observation(restored)["combat"]["hp"]), 10)
         self.assertTrue(all(not item["identified"] for item in items(restored, "wand")))
+
+
+    def exercise_imported_first_contact(self, *, missile):
+        package = prepare_imported_first_contact(self, missile=missile)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        peer, _ = self.client(actor=2)
+        collector, initial = self.client()
+        self.collect(collector, initial, [peer])
+        collector.stop(save=False)
+        probe, _ = self.client(observe=True)
+        text, _ = self.text_client()
+        carried = self.advance(probe, [peer])
+        self.assertTrue(settled(carried))
+        target_before = self.snapshot(peer)
+        for frame in (carried, target_before):
+            self.assertEqual(int(observation(frame)["combat"]["hp"]), 50)
+            self.assertEqual(int(observation(frame)["combat"]["max_hp"]), 50)
+            self.assertEqual(observation(frame)["combat"]["own_stats"]["attributes"]["speed"], 0)
+            self.assertGreater(int(observation(frame)["combat"]["own_stats"]["health_recovery"]["period_ticks"]), 100)
+        owner_stats = observation(carried)["combat"]["own_stats"]
+        target_stats = observation(target_before)["combat"]["own_stats"]
+        before_names = [row["name"] for row in observation(carried)["visible_actors"]]
+        if missile:
+            self.assertIn("contact recipient", before_names)
+        else:
+            self.assertNotIn("contact recipient", before_names,
+                             "the actual physical recipient must begin visually invisible")
+        def rank(stats, skill):
+            return next(row["rank"] for row in stats["skills"] if row["skill"]["id"] == skill)
+        if missile:
+            # Every retained 3d6 Lore result beats every target Agility save.
+            # These are actual compiled public stats, not an ungranted CheckBonus.
+            self.assertGreater(owner_stats["attributes"]["intellect"] + rank(owner_stats, "lore") + 3,
+                               target_stats["attributes"]["speed"] + rank(target_stats, "agility") + 18)
+        wand, = items(carried, "wand")
+        scroll, = items(carried, "scroll")
+        self.assertFalse(wand["identified"])
+        self.assertNotIn("cancellation", wand["name"].lower())
+        self.assertNotIn("magic missile", wand["name"].lower())
+        offer = next(row for row in interactions(carried)["inventory"] if row["item"] == wand["id"])
+        self.assertEqual(offer["device_activation"], "direction")
+        self.assertIsNone(offer["charges"])
+        before = checkpoint(self, probe)
+        self.assertFalse(actor_creature(before, 2)["cancelled"])
+        self.assertEqual(actor_creature(before, 2)["injury"], 0)
+        self.assertEqual(before["actors"]["1"]["turn_ticks"], 100)
+        count = before["items"]["30"]["charges"]
+        self.assertTrue(3 <= count <= 7)
+        self.assertIn("direction", text.command("zap #" + wand["id"]).lower())
+        self.assertEqual(checkpoint(self, probe), before)
+        text.command("zap #" + wand["id"] + " east")
+        completed = self.advance(probe, [peer])
+        after = checkpoint(self, probe)
+        self.assertEqual(int(observation(completed)["tick"]), int(observation(carried)["tick"]) + 100)
+        self.assertEqual(after["items"]["30"]["charges"], count - 1)
+        self.assertEqual(int(observation(completed)["combat"]["hp"]), 50)
+        self.assertFalse(completed["state"]["wizard_game"])
+        self.assertIsNone(charges(completed, wand["id"]), "OnUse never grants paid instance charge knowledge")
+        self.assertEqual(items(completed, "wand")[0]["identified"], missile)
+        if missile:
+            loss = actor_creature(after, 2)["injury"]
+            self.assertIn(loss, (2, 3, 4, 5))
+            self.assertEqual(int(observation(self.snapshot(peer))["combat"]["hp"]), 50 - loss)
+            self.assertFalse(actor_creature(after, 2)["cancelled"])
+        else:
+            self.assertTrue(actor_creature(after, 2)["cancelled"])
+            self.assertIn("contact recipient", [row["name"] for row in observation(completed)["visible_actors"]],
+                          "cancellation removes the same body's authored invisibility")
+            self.assertEqual(actor_creature(after, 2)["injury"], 0)
+            self.assertEqual(after["rules_rng"], before["rules_rng"])
+        # Paid Identify, unlike OnUse, discloses exact remaining instance charges.
+        text.command("read #" + scroll["id"])
+        self.advance(probe, [peer])
+        self.assertIsNotNone(interactions(self.snapshot(probe))["identification"])
+        text.command("identify #" + wand["id"])
+        learned = self.advance(probe, [peer])
+        self.assertTrue(items(learned, "wand")[0]["identified"])
+        self.assertEqual(charges(learned, wand["id"]), count - 1)
+        self.assertEqual(next(row for row in interactions(learned)["inventory"]
+                              if row["item"] == wand["id"])["device_activation"], "direction")
+        known = checkpoint(self, probe)
+        self.assertIn("direction", text.command("zap #" + wand["id"]).lower())
+        self.assertEqual(checkpoint(self, probe), known, "identified contact devices still require direction")
+        text.stop(save=False)
+        probe.stop(save=False)
+        peer.stop(save=False)
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        reopened, restored = self.client(observe=True)
+        self.assertEqual(checkpoint(self, reopened), known)
+        self.assertTrue(items(restored, "wand")[0]["identified"])
+        self.assertEqual(charges(restored, wand["id"]), count - 1)
+
+    @non_graphical
+    def test_imported_cancellation_text_hits_invisible_body_and_reopens_without_sources(self):
+        self.exercise_imported_first_contact(missile=False)
+
+    @non_graphical
+    def test_imported_magic_missile_text_fails_one_save_and_reopens_without_sources(self):
+        self.exercise_imported_first_contact(missile=True)
+
+    @non_graphical
+    def test_imported_cancellation_privileged_capture_records_actual_reach_and_effect(self):
+        package = prepare_imported_first_contact(self, missile=False, grant=True)
+        self.server("--checkpoint-interval", 1, scenario=package, wizard=True)
+        peer, _ = self.client(actor=2)
+        owner, initial = self.client()
+        carried = self.collect(owner, initial, [peer])
+        self.assertTrue(settled(carried))
+        ability = next(row for row in observation(carried)["combat"]["own_stats"]["abilities"]
+                       if row["id"] == "rogue.wand_cancellation")
+        self.assertEqual(ability["reach"], {"kind": "until_obstruction"})
+        self.assertEqual(ability["target_kind"], "directional_ray")
+        self.assertFalse(ability["basic_attack"])
+        self.assertFalse(ability["weapon_selection"])
+        self.snapshot(owner)
+        def message(client, kind):
+            messages = [json.loads(line).get("message") for line in client.transcript if line.startswith("{")]
+            return next(row for row in reversed(messages) if row and row["type"] == kind)
+        reach_sample = message(owner, "snapshot")
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        enabled = self.command(wizard, {"type": "wizard", "command": "combat capture on"})
+        self.assertFalse(enabled.get("error"), enabled.get("error"))
+        self.assertTrue(message(wizard, "combat_diagnostics")["report"]["enabled"])
+        wand, = items(carried, "wand")
+        before = checkpoint(self, owner)
+        self.assertFalse(actor_creature(before, 2)["cancelled"])
+        self.assertNotIn("contact recipient", [row["name"] for row in observation(carried)["visible_actors"]])
+        accepted = self.act(owner, {"type": "zap", "item": wand["id"],
+                                    "aim": {"kind": "direction", "direction": "east"}})
+        self.assertIsNone(accepted["error"])
+        completed = self.advance(owner, [peer])
+        after = checkpoint(self, owner)
+        self.assertEqual(after["items"]["30"]["charges"], before["items"]["30"]["charges"] - 1)
+        self.assertTrue(actor_creature(after, 2)["cancelled"])
+        self.assertEqual(after["rules_rng"], before["rules_rng"])
+        self.assertFalse(items(completed, "wand")[0]["identified"])
+        queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
+        self.assertFalse(queried.get("error"), queried.get("error"))
+        effect_sample = message(wizard, "combat_diagnostics")
+        effects = [effect for record in effect_sample["report"]["records"]
+                   for effect in record["outcome"]["effects"] if effect["kind"] == "cancel_specials"]
+        self.assertEqual(len(effects), 1)
+        self.assertTrue(effects[0]["changed"])
+        self.assertEqual(str(effects[0]["target"]), "2")
+        self.assertNotIn('"type":"combat_diagnostics"', "".join(owner.transcript).replace(" ", ""))
+        self.first_contact_samples = {"reach": reach_sample, "effect": effect_sample}
 
 
 if __name__ == "__main__":

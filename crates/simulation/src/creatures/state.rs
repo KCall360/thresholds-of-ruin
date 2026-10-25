@@ -329,7 +329,8 @@ impl CreatureState {
     }
 
     /// Exact candidate refold; caller publishes this through normal lifecycle.
-    /// No ownership, HD, purchase, or active condition is deleted here.
+    /// Ownership, HD and purchases remain; only pure current invisibility
+    /// conditions are removed, without a veto on later independent applications.
     pub(crate) fn cancel_specials(&mut self) -> Result<bool, CreatureStateError> {
         let mut invisible = std::collections::BTreeSet::new();
         for entry in self.conditions.instances() {

@@ -77,6 +77,12 @@ def drain_refusal_recording_case():
     return MagicItemProcesses("test_imported_drain_weak_text_attempt_spends_time_not_charge_or_identity")
 
 
+def first_contact_recording_case():
+    """Reuse the actual paid device and privileged capture, not synthetic DTOs."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_imported_cancellation_privileged_capture_records_actual_reach_and_effect")
+
+
 def discovery_recording_case():
     """Reuse Text examination/opening and source-free checkpoint acceptance."""
     from test_discovery_process import DiscoveryProcesses
@@ -254,6 +260,22 @@ class Recorder(ProcessTestCase):
             self.assertEqual(refusal["reason"], "too_weak")
             self.assertEqual(refusal["action"]["type"], "zap")
         server_samples["zz.drain_refusal"] = sample
+
+    def record_first_contact(self, server_samples):
+        samples = run_recording_case(first_contact_recording_case(), "first_contact_samples")
+        self.assertEqual(set(samples), {"reach", "effect"})
+        self.assertEqual(samples["reach"]["type"], "snapshot")
+        abilities = samples["reach"]["snapshot"]["state"]["observation"]["combat"]["own_stats"]["abilities"]
+        self.assertTrue(any(row["id"] == "rogue.wand_cancellation"
+                            and row["reach"] == {"kind": "until_obstruction"}
+                            and row["target_kind"] == "directional_ray"
+                            and not row["basic_attack"] and not row["weapon_selection"] for row in abilities))
+        self.assertEqual(samples["effect"]["type"], "combat_diagnostics")
+        self.assertTrue(any(effect["kind"] == "cancel_specials" and effect["changed"]
+                            for record in samples["effect"]["report"]["records"]
+                            for effect in record["outcome"]["effects"]))
+        # Publish both only after cleanup and both source-positive validations.
+        server_samples.update({"zz.first_contact_" + key: value for key, value in samples.items()})
 
     def record_scare_crumble(self, server_samples):
         sample = run_recording_case(scare_pickup_recording_case(), "crumble_sample")
@@ -660,6 +682,7 @@ class Recorder(ProcessTestCase):
         self.record_magic_items(server_samples)
         self.record_self_device(server_samples)
         self.record_drain_refusal(server_samples)
+        self.record_first_contact(server_samples)
         self.record_personal_conditions(server_samples)
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)

@@ -2652,6 +2652,8 @@ fn first_contact_chain_source(root: &Path, noncombat: bool, ordinary: bool) -> c
         .unwrap();
     ability.invocation = tor_simulation::abilities::InvocationKind::DirectionalContactRay;
     ability.reach = tor_simulation::rules::Reach::UntilObstruction;
+    ability.interaction = tor_simulation::rules::Interaction::HostileToTarget;
+    ability.ai.hostile = true;
     let tor_simulation::rules::StrikeSource::Authored { strikes } = &mut ability.strikes else {
         panic!("authored source prerequisite")
     };
@@ -2660,8 +2662,9 @@ fn first_contact_chain_source(root: &Path, noncombat: bool, ordinary: bool) -> c
     let mut ordinary_ability = ability.clone();
     ordinary_ability.id =
         tor_simulation::content_ids::AbilityId::new("fixture.ordinary_cancellation").unwrap();
-    ordinary_ability.cost =
-        Some(serde_json::from_value(json!({"resource":"mana","start":0,"resolution":1})).unwrap());
+    ordinary_ability.cost = Some(
+        serde_json::from_value(json!({"resource":"stamina","start":0,"resolution":1})).unwrap(),
+    );
     document.abilities.push(ordinary_ability);
     tor_simulation::rules::Ruleset::validate(document.clone()).unwrap();
     let rules = toml::to_string(&document).unwrap();
@@ -2689,7 +2692,7 @@ fn first_contact_chain_source(root: &Path, noncombat: bool, ordinary: bool) -> c
         json!([{"at":[31,2,0],"direction":"east","to":"2/west","kind":"portal","height":2}]);
     local["actors"] =
         json!([{"id":2,"at":[5,3,0],"turn_ticks":100,"controller":"external","creature":creature}]);
-    local["items"] = json!([{"id":30,"at":[1,2,0],"archetype":"ember","carried_by":1}]);
+    local["items"] = json!([{"id":30,"at":[1,2,0],"archetype":"ember","carried_by":1}, {"id":20,"at":[1,2,0],"archetype":"identify","quantity":1,"carried_by":1}]);
     let mut regions = vec![serde_json::from_value(local).unwrap()];
     for region in 2..=5 {
         let mut portals = vec![
@@ -2703,7 +2706,8 @@ fn first_contact_chain_source(root: &Path, noncombat: bool, ordinary: bool) -> c
             value["actors"] = json!([{"id":3,"at":[20,2,0],"turn_ticks":100,"controller":"ai","creature":remote_creature}]);
         }
         if region == 3 && noncombat {
-            value["actors"] = json!([{"id":4,"at":[10,2,0],"turn_ticks":100,"controller":"ai"}]);
+            value["actors"] =
+                json!([{"id":4,"at":[10,2,0],"turn_ticks":100,"controller":"external"}]);
         }
         regions.push(serde_json::from_value(value).unwrap());
     }
@@ -2728,20 +2732,121 @@ fn first_contact_chain_source(root: &Path, noncombat: bool, ordinary: bool) -> c
     scenario
 }
 
-fn first_contact_remote_record(wire: &Wire, saved: &Value, actor: ActorId, region: u64) -> Value {
+fn first_contact_remote_record(
+    wire: &Wire,
+    saved: &Value,
+    path: &Path,
+    content: Arc<tor_simulation::creatures::Content>,
+    actor: ActorId,
+    region: u64,
+) -> Value {
+    let lifecycle = saved["game"]["lifecycle"].as_u64().unwrap() as usize;
     if !nothing_actor(saved, actor).is_null() {
+        assert_eq!(
+            saved["shared"]["lifecycles"][lifecycle]["stamps"][actor.0.to_string()],
+            0
+        );
+        assert!(saved["shared"]["lifecycles"][lifecycle]["frozen"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(region)));
         return nothing_actor(saved, actor).clone();
     }
-    crate::engine::Checkpoint::capture(&wire.service.engine)
-        .records
-        .values()
-        .map(|r| serde_json::to_value(tor_simulation::RegionRecordData::capture(r)).unwrap())
-        .find(|r| r["world"]["region"]["id"] == region)
-        .map(|r| {
-            assert_eq!(r["stamps"][actor.0.to_string()], 0);
-            r["actors"][actor.0.to_string()].clone()
-        })
-        .unwrap_or(Value::Null)
+    let id = tor_simulation::RecordId(
+        saved["shared"]["lifecycles"][lifecycle]["detached"][region.to_string()]
+            .as_u64()
+            .expect("current root owns exact detached record"),
+    );
+    let capture = crate::engine::Checkpoint::capture(&wire.service.engine);
+    let record = if let Some(record) = capture.records.get(&id) {
+        tor_simulation::RegionRecordData::capture(record)
+    } else {
+        let record = crate::storage::test_read_region_record(path, id, content)
+            .unwrap()
+            .expect("current interval-one detached record is durable");
+        tor_simulation::RegionRecordData::capture(&record)
+    };
+    let record = serde_json::to_value(record).unwrap();
+    assert_eq!(record["world"]["region"]["id"], region);
+    assert_eq!(record["stamps"][actor.0.to_string()], 0);
+    record["actors"][actor.0.to_string()].clone()
+}
+
+fn first_contact_stamina(wire: &mut Wire) -> ResourceView {
+    wire.snapshot(OWNER)
+        .state
+        .observation
+        .combat
+        .as_ref()
+        .unwrap()
+        .own_stats
+        .as_ref()
+        .unwrap()
+        .resources
+        .iter()
+        .find(|r| r.resource.id == "stamina")
+        .unwrap()
+        .clone()
+}
+
+fn first_contact_saved_plan_negatives(wire: &Wire, saved: &Value, ordinary: bool) {
+    let bytes = serde_json::to_vec(saved).unwrap();
+    wire.service.engine.test_restore_checkpoint(&bytes).unwrap();
+    let actors = saved["game"]["actors"].as_u64().unwrap();
+    let path = format!(
+        "/shared/actors/{actors}/1/pending/plan{}",
+        if ordinary { "" } else { "/delivery/plan" }
+    );
+    let baseline = saved.pointer(&path).unwrap();
+    assert_eq!(baseline["traversal"], json!({"kind":"first_body"}));
+    assert_eq!(baseline["resolution"], json!({"kind":"checkless"}));
+    let mutations = [
+        ("traversal", json!({"kind":"bounded","clear_visits":6})),
+        ("traversal", json!({"kind":"first_body","clear_visits":6})),
+        ("traversal", json!(["first_body"])),
+        ("resolution", json!({"kind":"checkless","tokens":[]})),
+        (
+            "resolution",
+            json!({"kind":"opposed","source_skill":"lore","target_skill":"agility","source_bonus":0,"source_edge":0,"effect_edge":0,"incoming":[],"tokens":[]}),
+        ),
+        ("resolution", Value::Null),
+        (
+            "ability",
+            json!(if ordinary {
+                "magic.ember_ray"
+            } else {
+                "fixture.ordinary_cancellation"
+            }),
+        ),
+        ("effects", json!([])),
+        ("actor", json!(OTHER.0)),
+    ];
+    for (field, value) in mutations {
+        let mut bad = saved.clone();
+        bad.pointer_mut(&path).unwrap()[field] = value;
+        assert!(
+            wire.service
+                .engine
+                .test_restore_checkpoint(&serde_json::to_vec(&bad).unwrap())
+                .is_err(),
+            "forged pending {field}"
+        );
+    }
+    for field in ["traversal", "resolution"] {
+        let mut bad = saved.clone();
+        bad.pointer_mut(&path)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(
+            wire.service
+                .engine
+                .test_restore_checkpoint(&serde_json::to_vec(&bad).unwrap())
+                .is_err(),
+            "missing pending {field}"
+        );
+    }
 }
 
 fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
@@ -2749,6 +2854,8 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
     let root = directory.path().join("source");
     let path = directory.path().join("first-contact.db");
     let scenario = first_contact_chain_source(&root, noncombat, ordinary);
+    // Decoder catalog only: never passed to the source-free Engine reopen.
+    let content = scenario.package.as_ref().unwrap().content().unwrap();
     let mut wire = Wire::for_actors(
         Engine::open_with_policy(
             &path,
@@ -2763,6 +2870,15 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
     );
     assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
     let initial = wire.checkpoint();
+    let before_stamina = first_contact_stamina(&mut wire);
+    assert_eq!(
+        (
+            before_stamina.balance,
+            before_stamina.maximum,
+            before_stamina.reserved
+        ),
+        (2, 2, 0)
+    );
     assert!(nothing_actor(&initial, ActorId(3)).is_null());
     for region in 3..=5 {
         assert_eq!(
@@ -2783,6 +2899,28 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
         .unwrap()
         .id;
     let physical = nothing_wand_id(&wire, wand);
+    let unknown = wire.snapshot(OWNER);
+    assert!(!nothing_identified(&unknown, wand));
+    assert_eq!(
+        nothing_affordance(&unknown, wand).device_activation,
+        Some(DeviceActivation::Direction)
+    );
+    let bad = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::SelfTarget {},
+        },
+    );
+    assert!(wire
+        .send(OWNER, "contact-self-is-not-licensed", bad)
+        .iter()
+        .any(|m| matches!(m, ServerMessage::Error { .. })));
+    assert_eq!(
+        wire.checkpoint(),
+        initial,
+        "unknown directional source refuses self aim without payment or preparation"
+    );
     assert_eq!(nothing_items(&initial)[&physical]["charges"], 3);
     let action = if ordinary {
         Action::UseAbility {
@@ -2822,6 +2960,9 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
         "{receipt:?}"
     );
     let paused = wire.checkpoint();
+    let held_stamina = first_contact_stamina(&mut wire);
+    assert_eq!(held_stamina.balance, before_stamina.balance);
+    assert_eq!(held_stamina.reserved, u32::from(ordinary));
     assert_eq!(paused["game"]["tick"], initial["game"]["tick"]);
     assert_eq!(paused["game"]["rules_rng"], initial["game"]["rules_rng"]);
     assert_eq!(nothing_items(&paused)[&physical]["charges"], 3);
@@ -2845,6 +2986,24 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
                 }
             );
         }
+        let mut physical = tor_world::Location {
+            region: tor_world::RegionId(1),
+            position: tor_world::Position { x: 1, y: 2, z: 0 },
+        };
+        for _ in 0..147 {
+            physical = world
+                .physics_neighbor(physical, tor_world::Direction::East)
+                .unwrap()
+                .0;
+        }
+        assert_eq!(
+            physical,
+            tor_world::Location {
+                region: tor_world::RegionId(5),
+                position: tor_world::Position { x: 20, y: 2, z: 0 }
+            },
+            "actual physical route crosses 147 cells, not a legacy sight/probe allowance"
+        );
         let remote = nothing_actor(&paused, ActorId(3));
         assert!(remote.is_object());
         assert_eq!(remote["combat"]["creature"]["cancelled"], false);
@@ -2859,11 +3018,23 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
     } else {
         assert!(nothing_actor(&paused, ActorId(4))["combat"].is_null());
         assert!(nothing_actor(&paused, ActorId(4)).is_object());
+        assert!(nothing_actor(&paused, ActorId(4))["body"].is_object());
+        assert_eq!(
+            nothing_actor(&paused, ActorId(4))["location"]["position"],
+            json!({"x":10,"y":2,"z":0})
+        );
+        let lifecycle = paused["game"]["lifecycle"].as_u64().unwrap() as usize;
+        assert_eq!(paused["shared"]["lifecycles"][lifecycle]["stamps"]["4"], 0);
+        assert!(paused["shared"]["lifecycles"][lifecycle]["frozen"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(3)));
         assert!(
             nothing_actor(&paused, ActorId(3)).is_null(),
             "first noncombat body stops before later frontier"
         );
     }
+    first_contact_saved_plan_negatives(&wire, &paused, ordinary);
     wire.service.engine.flush().unwrap();
     let serial = wire.serial;
     drop(wire);
@@ -2880,6 +3051,13 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
     );
     let terminal = wire.finish(OWNER, "physical-first-body", &request);
     let after = wire.checkpoint();
+    let after_stamina = first_contact_stamina(&mut wire);
+    assert_eq!(
+        after_stamina.balance,
+        before_stamina.balance - u32::from(ordinary)
+    );
+    assert_eq!(after_stamina.reserved, 0);
+    wire.service.engine.flush().unwrap();
     assert_eq!(
         after["game"]["rules_rng"], paused["game"]["rules_rng"],
         "cancellation has no opposed check or RNG claim"
@@ -2890,7 +3068,7 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
         if ordinary { 3 } else { 2 }
     );
     if !noncombat {
-        let remote = first_contact_remote_record(&wire, &after, ActorId(3), 5);
+        let remote = first_contact_remote_record(&wire, &after, &path, content, ActorId(3), 5);
         assert_eq!(remote["combat"]["creature"]["cancelled"], true);
         for field in [
             "ready_at",
@@ -2906,6 +3084,19 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
             );
         }
     }
+    let public = serde_json::to_string(&wire.snapshot(OWNER)).unwrap();
+    for private in [
+        "cancel_specials",
+        "cancelled",
+        "rules_rng",
+        "first_body",
+        "checkless",
+    ] {
+        assert!(
+            !public.contains(private),
+            "ordinary observation leaked {private}"
+        );
+    }
     assert!(after["game"]["floor_activation"].is_null());
     assert_eq!(
         ack(wire.send(OWNER, "physical-first-body", request)),
@@ -2916,6 +3107,49 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
         after,
         "durable retry cannot pay or apply twice"
     );
+    if !ordinary && !noncombat {
+        let scroll = wire
+            .snapshot(OWNER)
+            .state
+            .observation
+            .inventory
+            .iter()
+            .find(|i| i.class == ItemClass::Scroll)
+            .unwrap()
+            .id;
+        wire.act("contact-read-identify", Action::Read { item: scroll });
+        let paid = choice(&wire.snapshot(OWNER));
+        wire.act(
+            "contact-identify",
+            Action::Identify {
+                choice: paid.choice,
+                item: Some(wand),
+            },
+        );
+        let known = wire.snapshot(OWNER);
+        assert!(nothing_identified(&known, wand));
+        assert_eq!(
+            nothing_affordance(&known, wand).device_activation,
+            Some(DeviceActivation::Direction),
+            "known first-contact device never becomes self-target convenience"
+        );
+        let before_repeat = wire.checkpoint();
+        wire.act(
+            "known-contact-repeat",
+            Action::Zap {
+                item: wand,
+                aim: DeviceAim::Direction {
+                    direction: Direction::East,
+                },
+            },
+        );
+        let repeated = wire.checkpoint();
+        assert_eq!(nothing_items(&repeated)[&physical]["charges"], 1);
+        assert_eq!(
+            repeated["game"]["rules_rng"],
+            before_repeat["game"]["rules_rng"]
+        );
+    }
 }
 #[test]
 fn cancellation_first_body_closes_multiple_cold_frontiers_and_reopens_pending_without_sources() {

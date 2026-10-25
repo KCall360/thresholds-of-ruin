@@ -43,6 +43,10 @@ impl Game {
             RayResolution::Checkless => {
                 // A closed validated cancellation source is not an ordinary
                 // descriptor-resisted damage payload. No check/token/RNG seam.
+                // Pinned Rogue sticks.c WS_CANCEL only clears special state and
+                // disguise; unlike teleport/Drain it does not start pursuit.
+                // HostileToTarget authorizes targeting, not generic attack
+                // awareness/provocation (which can contest other stealth contacts).
                 if ray.effects != [PlannedEffect::CancelSpecials] {
                     return Err(invalid());
                 }

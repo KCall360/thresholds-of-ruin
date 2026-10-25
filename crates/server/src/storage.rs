@@ -246,6 +246,19 @@ fn read_region_row(
         .map(|bytes| decode_region(&bytes, id.0, content))
         .transpose()
 }
+/// Test witness for the exact current detached record; uses the production
+/// bounded framing/CRC/schema/content decoder, never an alternate JSON reader.
+#[cfg(test)]
+pub(crate) fn test_read_region_record(
+    path: &Path,
+    id: tor_simulation::RecordId,
+    content: Arc<tor_simulation::creatures::Content>,
+) -> Result<Option<tor_simulation::RegionRecord>, Failure> {
+    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(saved_row_failure)?;
+    read_region_row(&conn, id, content)
+}
+
 /// Authority for admitted authored inputs, shared without retaining the writer
 /// or its checkpoints. Pending bytes are the same Arcs charged to queue capacity
 /// and survive worker batch draining. A failed write leaves accepted live inputs
