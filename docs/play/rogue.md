@@ -238,6 +238,37 @@ with Health are eligible regardless of allegiance; bodies without Health and
 the caster are excluded. Frozen recipients do not receive turns. Hidden recipients and their count are not listed in ordinary output.
 Paid results and current Health persist through source-free checkpoint reopening.
 
+## Opt-in Cancellation and Magic Missile
+
+`rogue.wand_cancellation` and `rogue.wand_magic_missile` are also available for
+scenario selection, each with 3–7 charges. They do not change the existing
+eight-wand live floor pool or starting kits. Both use ordinary paid Zap and
+require a direction even after their type is identified.
+
+These two wands follow physical geometry until the first living body or an
+obstruction. They do not bounce or use sight as their range. A body without a
+combat sheet still intercepts the ray; it cannot be skipped to hit someone
+behind it. Loading distant geometry does not give frozen creatures turns.
+A bounded work guard rejects an over-budget traversal rather than silently
+turning it into a shorter hit or miss; this is not a gameplay range limit.
+
+Cancellation suppresses explicitly marked special abilities and contributions,
+clears current pure invisibility conditions and disguise, and never identifies
+its own type. Innate invisibility is suppressed only when its contributor is
+explicitly marked, as with the Rogue Phantom.
+It performs no save or random roll and does not provoke pursuit merely by
+cancelling the target. Ordinary attacks, owned advancement, defenses, anatomy,
+flight, erratic movement and regeneration are not blanket-disabled. It removes
+only holds whose sustaining special was lost, not unrelated paralysis.
+Later independent invisibility can work again; another Cancellation can clear
+that new application. There is no global veto on future invisibility.
+
+Magic Missile identifies on charged use, even if no creature is damaged. At the
+first combat recipient it makes exactly one Agility-versus-Lore opposed save,
+not an additional launch attack followed by a second save. A failed save takes
+1d4+1 Energy damage through the ordinary universal damage-bonus and reduction
+rules. A successful save stops the missile without damage to a later body.
+
 ## Flight and linked holds
 
 Bat and kestrel each own one animal racial HD, with 1d2 and 1d4 natural damage.

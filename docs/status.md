@@ -70,6 +70,17 @@ processes and genuine refusal recording pass. The final ten-case focused rerun
 closes the privacy fixture failure from the preceding 1,074-pass server run;
 this is not a new full-suite or gate result. Remaining consumables and final
 verification remain unfinished.
+The opt-in Cancellation and Magic Missile wands now use physical first-body
+contact with load-only frontier preparation and strict saved plans. Cancellation
+suppresses marked specials without a global future-invisibility veto; Missile
+uses one opposed save and ordinary damage adjustments. Fresh simulation/server
+libraries pass 1,850/1,084 tests, protocol integration 282 and client-common 145;
+the selected World ray owner passes 18. Three imported-device processes cover
+paid use and source-deleted interval-one reopening; a separate production-catalog
+process passes three Ice Monster, Phantom and Xeroc contrasts. Genuine recording
+contains 50 client/53 server samples, and all 44 live scenario certificates were
+regenerated. These are internal reconstruction results, not final quick/push/full,
+native, release or hosted verification. Live weighted stock and kits are unchanged.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the

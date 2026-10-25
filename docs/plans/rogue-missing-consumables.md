@@ -777,3 +777,29 @@ independence fixture now accounts for every member of the enlarged opt-in
 appearance pool. Protocol integration passes 282 cases and client-common passes
 145. The corrected core/server fixture cohort still requires its fresh rerun;
 these counts are not final verification gates.
+
+### Corrected first-contact acceptance checkpoint
+
+The corrected full simulation library passes 1,850 tests and the full server
+library passes 1,084, with no failures. The preceding metadata and Service
+fixture failures are resolved without weakening strict decoding, full pre-session
+restore equality or cold-frontier controls. Protocol integration passes 282,
+client-common 145, and the selected World ray tests 18. Three actual imported
+processes pass, including source-deleted interval-one checkpoint reopening;
+the genuine wire corpus contains 50 client and 53 server samples, and all 44 live
+scenario certificates are current.
+
+A separate actual-process test now passes three fresh production-catalog arms:
+Ice Monster loses its marked freezing ability while retaining ordinary melee;
+Phantom becomes visible; Xeroc loses its item guise. Actual imported definitions
+remain unchanged, with paid charge consumption, no Cancellation RNG or type
+discovery, retained Health, defenses, attributes and owned talents. A legitimate
+setup Wait establishes the checkpoint row before fresh baseline snapshots; Save
+alone does not force a new checkpoint. This is representative loaded-catalog
+acceptance, not a full monster matrix or a new public effective-flags interface.
+The existing five-arm production perception process also passes with the same
+verified applications, preserving the helper's default encounter behavior.
+
+The player and source guides now describe these opt-in devices. Live weighted
+stock and starting kits are unchanged. Final batch quick/push/full, independent
+native, release and hosted gates remain pending; no PR or merge is implied.

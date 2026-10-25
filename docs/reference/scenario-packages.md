@@ -826,13 +826,30 @@ Its exact value vocabulary is `normal`, `haste`, `slow`; other scopes and enum
 object/array spellings reject. [Source folding](creature-rules.md#derivation-and-sources)
 defines cancellation and rounding without modifying Speed.
 
-Abilities may select `invocation = "directional_contact_ray"` for bounded,
-non-bouncing first-creature delivery. It retains the directional ray's one
-target-owned opposed named-skill check and empty success branch, while permitting
-component damage and condition application/removal on failure. It stops even on
-a dodge or immunity. [Ray contracts](creature-rules.md#shared-ability-rules)
-define frozen source operands and live physical traversal. Device capabilities
-may reference either supported directional ray kind under their existing cost limits.
+Abilities may select `invocation = "directional_contact_ray"` for non-bouncing
+first-creature delivery. Existing bounded Sight rays retain one target-owned
+opposed named-skill check and empty success branch, permitting component damage
+and condition application/removal on failure. UntilObstruction reach instead
+follows physical geometry to the first body or obstruction; it supports the
+opposed Missile profile or the checkless Cancellation profile. A dodge or
+immunity still stops delivery. [Ray contracts](creature-rules.md#shared-ability-rules)
+define exact source restrictions, frozen operands and live physical traversal.
+Device capabilities retain their existing cost limits.
+
+Cancellation metadata is explicit and defaults false in authored source. The
+Rogue package marks its special ability definitions and individual special
+contributors; it does not modify the shared base rules or blanket-tag physical
+traits. Package-local theft ability overrides leave the independent
+`theft_vanish` contributor and owned talent intact.
+
+When Cancellation is reachable from enabled scenario sources, validation rejects
+reachable conditions that combine invisibility with unrelated behavior, including
+invisibility implied by flags. This lets cancellation remove a current pure
+invisibility condition without erasing an unrelated modifier or restriction.
+Unused imported definitions do not enable this policy, and Cancellation alone
+does not require room/passage spatial metadata. Existing current/future grants,
+items, creatures, traps and rider effects participate in the source closure;
+retained packages are revalidated on source-free restoration.
 
 Consumables use the same effect vocabulary as abilities. Fixed healing is
 `{ kind = "heal", amount = { kind = "fixed", amount = 5 } }`. Damage uses a

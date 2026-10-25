@@ -494,6 +494,15 @@ among healing, confusion, blindness, poison, see-invisible and extra healing for
 restore-strength retains its separate stage. These are provisional TOR availability
 weights, not the source distribution. Stage IDs, order and attempt bounds are unchanged.
 
+The opt-in Cancellation and Magic Missile wands use first-body
+UntilObstruction delivery, not the bounded Sight profile of the existing utility
+wands. Both start with 3–7 charges and remain directional when identified.
+Cancellation has no save or random roll and never discovers its own type;
+Magic Missile discovers on charged use and has one Agility/Lore save with
+1d4+1 Energy damage on failure through ordinary bonus/reduction rules. See
+[the player behavior](../play/rogue.md#opt-in-cancellation-and-magic-missile) and
+[the source contract](creature-rules.md#shared-ability-rules).
+
 Invisibility, haste-monster and slow-monster wands use a directional contact ray:
 the first physically encountered creature gets one Agility-versus-Lore dodge,
 and that contact ends the ray on either outcome. These rays never reflect and
